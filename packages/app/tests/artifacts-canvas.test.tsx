@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, jest, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import {
@@ -24,6 +24,7 @@ import {
   MAX_LIVE_BOARDS,
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
+import { type BoardGestures, glideView } from "../src/artifacts/renderers/canvas/gestures"
 import { FAR_BELOW_ZOOM, zoomMarks, zoomOf } from "../src/artifacts/renderers/canvas/items"
 import { approximateBox, canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import type { PageSize } from "../src/artifacts/renderers/canvas/page-size"
@@ -1443,5 +1444,331 @@ describe("a canvas board's zoom", () => {
     expect(zoomMarks(1)).toEqual({ nameScale: "1.000", far: false })
     expect(zoomMarks(FAR_BELOW_ZOOM).far).toBe(false)
     expect(zoomMarks(0.06)).toEqual({ nameScale: "2.000", far: true })
+  })
+})
+
+describe("a running board, read in place", () => {
+  /**
+   * Ports that tell the test once they handled a message: one arrives a task later, and the test
+   * waits for its own instead of for time to pass.
+   */
+  const handled: (() => void)[] = []
+  const NativeChannel = globalThis.MessageChannel
+  globalThis.MessageChannel = class extends NativeChannel {
+    constructor() {
+      super()
+      const port = this.port1
+      Object.defineProperty(port, "onmessage", {
+        set(handler: (message: MessageEvent) => void) {
+          port.addEventListener("message", (message) => {
+            handler(message)
+            handled.shift()?.()
+          })
+          port.start()
+        },
+      })
+    }
+  }
+  afterAll(() => {
+    globalThis.MessageChannel = NativeChannel
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  const version = {
+    artifactId: "art_0nb0ard1ng",
+    version: 1,
+    revision: 1,
+    title: "Onboarding",
+    entry: "canvas.json",
+    files: [],
+    outline: { kind: "canvas", items: [] },
+    references: [],
+    author: { type: "user", id: "user-1" },
+    createdAt: "2026-10-18T12:00:00.000Z",
+  } as unknown as GetArtifactVersionResponse
+  const linked = () => {
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    cache.setQueryData(frameLinkKey(version), {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    return cache
+  }
+
+  /**
+   * A board's frame as the app sees it: what the app asks of it, the port its `canvas` request
+   * hands over, and what it says, through the window as anything in the page can, or through
+   * the port as its runtime does.
+   */
+  function frameOf(iframe: HTMLIFrameElement | null | undefined) {
+    const frame = iframe?.contentWindow
+    if (!frame) throw new Error("Expected the board's frame.")
+    const asked: { method: string; params: Record<string, unknown> }[] = []
+    let port: MessagePort | null = null
+    frame.postMessage = ((
+      message: { method: string; params: Record<string, unknown> },
+      _origin: string,
+      transfer: readonly MessagePort[] = []
+    ) => {
+      asked.push(message)
+      if (message.method === "canvas" && transfer[0]) port = transfer[0]
+    }) as typeof frame.postMessage
+
+    const say = async (event: string, params: Record<string, unknown>) => {
+      await act(async () => {
+        browser.dispatchEvent(
+          new browser.MessageEvent("message", {
+            data: { protocol: FRAME_PROTOCOL, event, params },
+            source: frame as never,
+          })
+        )
+      })
+    }
+    const send = async (event: string, params: Record<string, unknown>) => {
+      await act(async () => {
+        if (!port) throw new Error("Expected the frame's port.")
+        const taken = new Promise<void>((done) => handled.push(done))
+        port.postMessage({ protocol: FRAME_PROTOCOL, event, params })
+        await taken
+      })
+    }
+    return { asked, say, send, port: () => port }
+  }
+
+  /** What the canvas's side of the gestures is told, and how it says the canvas pans. */
+  function recordedGestures() {
+    const received: { board: string; event: string; params: unknown }[] = []
+    const listeners = new Set<(moving: boolean) => void>()
+    const gestures: BoardGestures = {
+      moving: () => false,
+      onMoving: (listener) => {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      receive: (board, event) => {
+        received.push({ board, event: event.event, params: event.params })
+      },
+      glide: () => {},
+    }
+    const pan = (moving: boolean) => {
+      for (const listener of listeners) listener(moving)
+    }
+    return { gestures, received, pan }
+  }
+
+  const running = { has: () => true, subscribe: () => () => {} }
+
+  // Guard proof: drop `running &&` from LiveBoard's `usable`; the page takes clicks while it is
+  // still hidden under its picture. Drop `interactive`; editing the canvas, a click lands in the
+  // page instead of selecting the board. Set `inert` only when decorative again, in frame.tsx; the
+  // page that started as a picture never takes the focus.
+  test("takes the reader's clicks only once it runs, and only while the canvas is read", async () => {
+    const { gestures } = recordedGestures()
+    const board = (interactive: boolean) => (
+      <QueryClientProvider client={cache}>
+        <LiveBoardsProvider
+          value={{ version, live: running, previews: {}, mode: "light", interactive, gestures }}
+        >
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={null} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const cache = linked()
+    const view = render(board(true))
+    const iframe = view.container.querySelector("iframe")
+    const usable = () =>
+      iframe?.inert === false &&
+      iframe.style.pointerEvents === "" &&
+      view.container.querySelector("[data-interactive]") !== null
+    expect(iframe?.inert).toBe(true)
+    expect(usable()).toBe(false)
+
+    await frameOf(iframe).say("ready", {})
+    expect(usable()).toBe(true)
+
+    // Edited, or a comment placed, the same page is a picture again, loaded as it was.
+    view.rerender(board(false))
+    expect(view.container.querySelector("iframe")).toBe(iframe)
+    expect(iframe?.inert).toBe(true)
+    expect(iframe?.style.pointerEvents).toBe("none")
+    view.rerender(board(true))
+    expect(usable()).toBe(true)
+    view.unmount()
+  })
+
+  // Guard proof: take a press from the frame's window messages in LiveBoard too; the press a
+  // page's script posts glides the canvas. Drop the `onMoving` subscription in useCanvasPort; a
+  // page coming under the pointer as the canvas pans scrolls instead.
+  test("hands its frame a port, and takes through it alone what moves the canvas", async () => {
+    const { gestures, received, pan } = recordedGestures()
+    const view = render(
+      <QueryClientProvider client={linked()}>
+        <LiveBoardsProvider
+          value={{
+            version,
+            live: running,
+            previews: {},
+            mode: "light",
+            interactive: true,
+            gestures,
+          }}
+        >
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={null} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const frame = frameOf(view.container.querySelector("iframe"))
+    await frame.say("ready", {})
+    expect(frame.port()).not.toBeNull()
+    expect(
+      frame.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }])
+
+    await frame.say("press", { text: "Continue" })
+    await frame.send("press", { text: "Continue" })
+    await frame.send("pan", { x: 0, y: 40, by: "wheel" })
+    expect(received).toEqual([
+      { board: "home", event: "press", params: { text: "Continue" } },
+      { board: "home", event: "pan", params: { x: 0, y: 40, by: "wheel" } },
+    ])
+
+    pan(true)
+    pan(false)
+    expect(
+      frame.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }, { moving: true }, { moving: false }])
+    view.unmount()
+  })
+
+  /** A canvas of two boards, read or edited, with its boards running once they say so. */
+  async function mountCanvas(options: { readonly edit?: boolean } = {}) {
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const edit = { apply: () => {}, undo: () => {}, redo: () => {} }
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={linked()}>
+          <CanvasBoard
+            canvas={CANVAS}
+            version={version}
+            title="Checkout"
+            mode="light"
+            {...(options.edit ? { edit } : {})}
+          />
+        </QueryClientProvider>
+      )
+    })
+    if (!view) throw new Error("The board did not render.")
+    const shown = view
+    const frame = async (id: string) => {
+      const iframe = shown.container.querySelector<HTMLIFrameElement>(
+        `.react-flow__node[data-id="${id}"] iframe`
+      )
+      const board = frameOf(iframe)
+      await board.say("ready", {})
+      return { iframe, ...board }
+    }
+    /** Where the view is: React Flow's pan and zoom, as it draws them. */
+    const viewport = () => {
+      const transform =
+        shown.container.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? ""
+      const [x = 0, y = 0, zoom = 1] = (transform.match(/-?[\d.]+(e-?\d+)?/g) ?? []).map(Number)
+      return { x, y, zoom }
+    }
+    return { view: shown, frame, viewport }
+  }
+
+  // Guard proof: drop `follow.current` from the canvas's `onPress`; the press opens nothing and
+  // the view stays.
+  test("glides to the board an arrow leads to, when the reader presses its label", async () => {
+    const reduced = browser.matchMedia
+    browser.matchMedia = ((query: string) => ({
+      ...reduced.call(browser, query),
+      matches: query.includes("reduce"),
+    })) as typeof browser.matchMedia
+    try {
+      const { view, frame, viewport } = await mountCanvas()
+      const home = await frame("home")
+      const before = viewport()
+
+      await home.send("press", { text: "Save draft" })
+      expect(viewport()).toEqual(before)
+
+      // "Continue" leads from home to pay, 520 pixels to its right: the view keeps its zoom and
+      // centers it.
+      await home.send("press", { text: "continue" })
+      const pay = CANVAS.items.find((item) => item.id === "pay") as CanvasBoard
+      const glided = glideView(pay, VIEW, before.zoom, 0.12)
+      expect(viewport().zoom).toBeCloseTo(before.zoom)
+      expect(viewport().x).toBeCloseTo(glided.x)
+      expect(viewport().y).toBeCloseTo(glided.y)
+      view.unmount()
+    } finally {
+      browser.matchMedia = reduced
+    }
+  })
+
+  // Guard proof: drop `wheeled()` from the canvas's pan; a page under a still pointer never hears
+  // the canvas pans, and scrolls as it comes under it.
+  test("pans and zooms the canvas by what the page hands it, and tells the pages it pans", async () => {
+    const { view, frame, viewport } = await mountCanvas()
+    const home = await frame("home")
+    jest.useFakeTimers()
+    const before = viewport()
+
+    // A wheel's turn pans half as far, as React Flow pans by the wheel; a finger's drag as far.
+    await home.send("pan", { x: 0, y: 100, by: "wheel" })
+    expect(viewport().y).toBeCloseTo(before.y - 50)
+    await home.send("pan", { x: 30, y: 0, by: "touch" })
+    expect(viewport().x).toBeCloseTo(before.x - 30)
+    expect(
+      home.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }, { moving: true }])
+    act(() => {
+      jest.advanceTimersByTime(150)
+    })
+    expect(home.asked.at(-1)?.params).toEqual({ moving: false })
+
+    // Twice as close around a point of the page, which stays where it is on screen: happy-dom
+    // lays everything out at the origin, so the page's point is its pixels at the zoom.
+    const { x, y, zoom } = viewport()
+    await home.send("zoom", { factor: 2, at: { x: 100, y: 50 } })
+    const at = { x: 100 * zoom, y: 50 * zoom }
+    expect(viewport().zoom).toBeCloseTo(zoom * 2)
+    expect(viewport().x).toBeCloseTo(at.x - (at.x - x) * 2)
+    expect(viewport().y).toBeCloseTo(at.y - (at.y - y) * 2)
+    view.unmount()
+  })
+
+  test("keeps its boards' pages out of reach while the canvas is edited", async () => {
+    // Reproduce by making a running page usable whatever the mode: a click on a board while the
+    // canvas is edited lands in its page instead of selecting it.
+    const read = await mountCanvas()
+    expect((await read.frame("home")).iframe?.inert).toBe(false)
+    read.view.unmount()
+
+    const edited = await mountCanvas({ edit: true })
+    expect((await edited.frame("home")).iframe?.inert).toBe(true)
+    edited.view.unmount()
+  })
+
+  test("glides to a board at the reader's zoom, further only to fit it, never past where it runs", () => {
+    // Reproduce by fitting the board as React Flow's fitView does: a tall page lands at a fifth of
+    // its size, a picture again, and the flow stops there.
+    const view = { width: 1600, height: 1000 }
+    const board = (h: number) => ({ x: 1000, y: 0, w: 400, h })
+
+    // It fits at the reader's zoom: centered there.
+    expect(glideView(board(400), view, 1, 0.12)).toEqual({ x: -400, y: 300, zoom: 1 })
+    // It doesn't: as close as fits it.
+    expect(glideView(board(1200), view, 1, 0.12).zoom).toBeCloseTo(1000 / (1200 * 1.12))
+    // Fitting it would stop it running: at half its size, from the view's top.
+    expect(glideView(board(4000), view, 1, 0.12)).toEqual({ x: 200, y: 32, zoom: 0.5 })
+    // Unless the reader is further already.
+    expect(glideView(board(4000), view, 0.2, 0.12).zoom).toBe(0.2)
   })
 })

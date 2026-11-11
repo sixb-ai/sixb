@@ -308,11 +308,12 @@ export function ArtifactFrame({
   }, [artifactTheme, isReady, sendTheme])
 
   // A picture of the deck takes no focus, and neither does what it holds: `tabIndex` alone would
-  // leave its links in the page's tab order.
+  // leave its links in the page's tab order. A canvas's board becomes one, and stops being one,
+  // without loading again.
   const attach = useCallback(
     (element: HTMLIFrameElement | null) => {
       iframe.current = element
-      if (element && decorative) element.inert = true
+      if (element) element.inert = decorative
     },
     [decorative]
   )
