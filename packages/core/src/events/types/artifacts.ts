@@ -22,7 +22,8 @@ export interface ArtifactUpdatedEvent extends EventEnvelope {
 
 /**
  * A comment on an artifact was added, resolved, opened again, or deleted. Whoever reads the
- * artifact receives it, and reads the comments again.
+ * artifact receives it, and reads the comments again; a shared link's guest, only for a thread
+ * started by a guest of the same link.
  */
 export interface ArtifactCommentedEvent extends EventEnvelope {
   type: "artifact.commented"
@@ -33,6 +34,11 @@ export interface ArtifactCommentedEvent extends EventEnvelope {
     commentId: string
     /** The comment it replies to, for a reply. */
     parentId?: string
+    /**
+     * For a thread a guest started, the shared link they came through, by its grant: its guests
+     * receive the event too. Without it, the thread is the team's, and no guest receives it.
+     */
+    shareGrantId?: string
     action: "created" | "resolved" | "reopened" | "deleted"
   }
 }

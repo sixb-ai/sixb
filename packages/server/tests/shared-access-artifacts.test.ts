@@ -145,13 +145,20 @@ async function setup() {
   await meetings.upsert({ properties: { id: "m1", board: artifactRef(canvas.artifact.id) } })
   await meetings.upsert({ properties: { id: "m2", board: artifactRef(other.artifact.id) } })
 
-  /** A visitor of the link to `m1`: the session its secret opened, as a browser holds it. */
-  const visit = async () => {
-    const invitation = await marie.shares.issue(meetingShare, {
+  /** A link to `m1`, as Marie issues it. */
+  const link = () =>
+    marie.shares.issue(meetingShare, {
       target: objectRef(Meeting, "m1"),
       destinationPath: "/meetings/m1",
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
     })
+
+  /**
+   * A visitor of a link to `m1`, a new one unless they open `invitation` again: the session its
+   * secret opened, as a browser holds it.
+   */
+  const visit = async (invitation?: Awaited<ReturnType<typeof link>>) => {
+    invitation ??= await link()
     const grantId = invitation.grant.id
     const exchanged = await app.fetch(
       new Request(`http://api.localhost/api/shared-access/${grantId}/exchange`, {
@@ -194,7 +201,7 @@ async function setup() {
         headers: { cookie, "content-type": "application/json", "x-sixb-csrf": session.csrfToken },
         body: JSON.stringify({ name: value }),
       })
-    return { grantId, cookie, guestId: session.guestId, request, name, nameLive }
+    return { grantId, invitation, cookie, guestId: session.guestId, request, name, nameLive }
   }
 
   const asMarie = (method: string, path: string, body?: unknown) =>
@@ -455,11 +462,12 @@ describe("a shared link's guest", () => {
 
     const added = await guest.request("POST", path, { body: "Can we start at 9?" })
     expect(added.status).toBe(201)
-    expect(await added.json()).toMatchObject({
+    const comment = (await added.json()) as { id: string }
+    expect(comment).toMatchObject({
       author: { type: "guest", id: guest.guestId },
       authorName: "Ava Martin",
     })
-    await marie.artifacts.addComment(canvasId, { body: "Sure" })
+    await marie.artifacts.addComment(canvasId, { body: "Sure", parentId: comment.id })
 
     const authors = async (response: Response) =>
       ((await response.json()) as { comments: { authorName: string | null }[] }).comments.map(
@@ -467,6 +475,55 @@ describe("a shared link's guest", () => {
       )
     expect(await authors(await guest.request("GET", path))).toEqual(["Ava Martin", null])
     expect(await authors(await asMarie("GET", path))).toEqual(["Ava Martin", "marie@example.com"])
+  })
+
+  // Guard proofs: return every comment to a guest in core's `listComments`, and Ava reads the
+  // team's thread; drop the `reads(parent)` check in its `addComment`, and Owen replies in hers.
+  test("reads the threads its link's guests started with the team's replies, not the team's own", async () => {
+    const { visit, marie, asMarie, canvasId } = await setup()
+    const path = `/api/artifacts/${canvasId}/comments`
+    const post = async (response: Response | Promise<Response>) => {
+      const posted = await response
+      expect(posted.status).toBe(201)
+      return ((await posted.json()) as { id: string }).id
+    }
+    const listed = async (response: Response | Promise<Response>) =>
+      ((await (await response).json()) as { comments: { id: string }[] }).comments.map(
+        (comment) => comment.id
+      )
+
+    const ava = await visit()
+    await ava.name("Ava Martin")
+    const question = await post(ava.request("POST", path, { body: "Can we start at 9?" }))
+    const say = async (body: string, parentId?: string) =>
+      (await marie.artifacts.addComment(canvasId, { body, ...(parentId ? { parentId } : {}) })).id
+    const answer = await say("Yes.", question)
+    const internal = await say("Their budget is tight.")
+    const internalReply = await say("Hm.", internal)
+
+    expect(await listed(ava.request("GET", path))).toEqual([question, answer])
+    expect(await listed(asMarie("GET", path))).toEqual([question, answer, internal, internalReply])
+
+    // The team's thread is missing to her, not forbidden.
+    const hidden = await ava.request("POST", path, { body: "Hm", parentId: internal })
+    expect(hidden.status).toBe(404)
+    expect(await hidden.json()).toMatchObject({ code: "comment_not_found" })
+
+    // Back later, in a new session of the same link, the thread and the answer are still hers.
+    const later = await visit(ava.invitation)
+    expect(later.guestId).not.toBe(ava.guestId)
+    expect(await listed(later.request("GET", path))).toEqual([question, answer])
+    await later.name("Ava Martin")
+    const thanks = await post(later.request("POST", path, { body: "Thanks!", parentId: question }))
+    expect(await listed(ava.request("GET", path))).toEqual([question, answer, thanks])
+
+    // Another link to the same meeting reads none of it, and replies in none of it.
+    const owen = await visit()
+    await owen.name("Owen Reed")
+    expect(await listed(owen.request("GET", path))).toEqual([])
+    const elsewhere = await owen.request("POST", path, { body: "Me too", parentId: question })
+    expect(elsewhere.status).toBe(404)
+    expect(await elsewhere.json()).toMatchObject({ code: "comment_not_found" })
   })
 
   // Guard proof: drop the read from the timer in SharedSockets (routes/ws/shared-sockets.ts); the
@@ -574,6 +631,7 @@ describe("a shared link's guest", () => {
   test("follows the events of its artifacts, and no others", async () => {
     const { server, marie, visit, canvasId, otherId } = await setup()
     const guest = await visit()
+    await guest.name("Ava Martin")
     await server.start()
 
     const socket = openSocket(server, `/ws/events?shareGrant=${guest.grantId}`, guest.cookie)
@@ -582,12 +640,33 @@ describe("a shared link's guest", () => {
       socket.send({ type: "subscribe", topic: "artifacts" })
       expect(await socket.next()).toMatchObject({ type: "subscribed" })
 
-      // The other meeting's comment comes first: the first event delivered proves the filter.
+      // The other meeting's comment and the team's own thread come first: the first event
+      // delivered proves both filters.
       await marie.artifacts.addComment(otherId, { body: "Not for guests" })
-      await marie.artifacts.addComment(canvasId, { body: "Welcome aboard" })
+      await marie.artifacts.addComment(canvasId, { body: "Internal: keep it short" })
+      const added = await guest.request("POST", `/api/artifacts/${canvasId}/comments`, {
+        body: "Can we start at 9?",
+      })
+      const question = (await added.json()) as { id: string }
       expect(await socket.next()).toMatchObject({
         type: "event",
-        event: { type: "artifact.commented", payload: { artifactId: canvasId } },
+        event: {
+          type: "artifact.commented",
+          payload: { artifactId: canvasId, commentId: question.id, action: "created" },
+        },
+      })
+
+      // The team's reply in the guest's thread reaches them.
+      const reply = await marie.artifacts.addComment(canvasId, {
+        body: "Welcome aboard",
+        parentId: question.id,
+      })
+      expect(await socket.next()).toMatchObject({
+        type: "event",
+        event: {
+          type: "artifact.commented",
+          payload: { commentId: reply.id, parentId: question.id, shareGrantId: guest.grantId },
+        },
       })
     } finally {
       socket.close()

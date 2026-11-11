@@ -660,6 +660,9 @@ export function createArtifactsRuntime(
       author: commentAuthor,
       manager: requireCaller,
       reach,
+      ...(authority.type === "delegated"
+        ? { guest: { grantId: authority.delegation?.grantId } }
+        : {}),
     }),
 
     async create(input) {

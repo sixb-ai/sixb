@@ -1002,7 +1002,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "List an artifact's comments",
           description:
-            "Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.",
+            "Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them; a shared link's guest reads only the threads started by a guest of the same link, with every reply in them.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "listArtifactComments",
           security: accessTokenSecurityRequirement("listArtifactComments"),
@@ -1046,7 +1046,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Comment on an artifact",
           description:
-            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
+            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one), and replies only in a thread they read (404 comment_not_found otherwise). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers of the thread receive artifact.commented.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "addArtifactComment",
           security: accessTokenSecurityRequirement("addArtifactComment"),

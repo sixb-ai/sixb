@@ -72,9 +72,16 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       case "denied":
         return []
       case "delegated": {
-        // A shared link's session follows the artifacts its objects hold, and nothing else.
+        // A shared link's session follows the artifacts its objects hold, and nothing else: of
+        // their comments, only the threads its link's guests started.
         const readable = await readableArtifactEvents(runtime, events)
-        return events.filter((event) => readable.has(event))
+        const link = authority.delegation?.grantId
+        return events.filter(
+          (event) =>
+            readable.has(event) &&
+            (event.type !== "artifact.commented" ||
+              (link !== undefined && event.payload.shareGrantId === link))
+        )
       }
       case "unrestricted":
         return events
