@@ -126,6 +126,27 @@ function snapshot(status: string) {
   })
 }
 
+/** A record of the turn's stream, as the API relays each of its events. */
+function record(index: number, event: Record<string, unknown>) {
+  return JSON.stringify({
+    type: "record",
+    record: {
+      streamId: "s1",
+      cursor: String(index),
+      publishedAt: "2026-10-31T00:00:01.000Z",
+      payload: {
+        schemaVersion: 1,
+        projectId: "acme",
+        runId: RUN,
+        threadId: THREAD,
+        attempt: 1,
+        occurredAt: "2026-10-31T00:00:01.000Z",
+        ...event,
+      },
+    },
+  })
+}
+
 /** A thread that runs on a computer: `id` names this one when it has kept `computer.json`. */
 function computerThread(computer: { id: string; folder: string; online: boolean }) {
   return Response.json({
@@ -256,6 +277,54 @@ describe("sixb agent", () => {
     })
     expect(answered.exitCode).toBe(0)
     expect(posted.at(-1)?.text).toBe("production")
+  })
+
+  // Guard proof: in follow (src/commands/agent.ts), read the items in progress from the preview
+  // rows again, as `row.startsWith("◐")`; the second one, past the rows a long plan previews, is
+  // lost.
+  test("prints the plan's items in progress under its line, wherever they are in the plan", async () => {
+    const todos = [
+      { content: "Gather Northwind's open invoices", status: "completed" },
+      { content: "Check the March invoices", status: "in_progress" },
+      { content: "Check the April invoices", status: "pending" },
+      { content: "Check the May invoices", status: "pending" },
+      { content: "Check the June invoices", status: "pending" },
+      { content: "Compare usage with the contract", status: "in_progress" },
+      { content: "Draft the account review", status: "pending" },
+      { content: "Note what to raise with the customer", status: "pending" },
+    ]
+    const call = { toolCallId: "todo_1", toolName: "todo" }
+    const chunks = [
+      { type: "tool-input-start", ...call },
+      { type: "tool-input-available", ...call, input: { todos } },
+      {
+        type: "tool-output-available",
+        ...call,
+        output: {
+          total: 8,
+          completed: 1,
+          inProgress: ["Check the March invoices", "Compare usage with the contract"],
+        },
+      },
+    ]
+    const { env } = await fakeApi({
+      stream: (socket) => {
+        for (const [index, chunk] of chunks.entries()) {
+          socket.send(record(index, { type: "agent.ui.chunk", chunkIndex: index, chunk }))
+        }
+        socket.send(record(chunks.length, { type: "agent.run.finished", status: "succeeded" }))
+      },
+      run: { status: "succeeded", finishReason: "stop" },
+    })
+
+    const result = await runAgent(env)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain("plan  1/8 done")
+    expect(result.stderr).toContain("◐ Check the March invoices")
+    expect(result.stderr).toContain("◐ Compare usage with the contract")
+    // Only the items in progress: the rest of the plan stays in the conversation.
+    expect(result.stderr).not.toContain("Check the April invoices")
   })
 
   // Guard proof: in runAgent (src/commands/agent.ts), send `approvalMode: settings.approvalMode`

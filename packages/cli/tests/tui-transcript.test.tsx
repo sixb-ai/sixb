@@ -14,7 +14,7 @@ import {
   shownMessage,
 } from "../src/tui/parts"
 import { tuiColors } from "../src/tui/theme"
-import { Transcript } from "../src/tui/transcript"
+import { Transcript, Working } from "../src/tui/transcript"
 
 // A call `sixb` held for approval, then decided: the turn resumes from a message that says how the
 // call ended, and the call's own line says it from then on.
@@ -185,6 +185,30 @@ describe("a search's results", () => {
     expect(frame).toContain('grep  "invoice" in run/memory/user  1 match in 1 file')
     expect(frame).toContain("run/memory/user/billing.md:3 Invoices go out on the 1st")
     expect(frame).not.toContain("sixb-agent")
+  })
+})
+
+describe("the running indicator", () => {
+  // Guard proof: in Working (src/tui/transcript.tsx), render `label` uncut; the line then wraps,
+  // and "esc to stop" lands on another row.
+  test("cuts a long plan item to keep its line, and the way to stop, on one row", async () => {
+    const item =
+      "Compare each customer's usage over the last twelve months with the tier in their contract"
+    setup = await testRender(
+      <Working colors={tuiColors("dark")} since={Date.now()} label={item} width={70} />,
+      { width: 70, height: 4 }
+    )
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false })
+    await setup.renderOnce()
+    const rows = setup
+      .captureCharFrame()
+      .split("\n")
+      .filter((row) => row.trim())
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toContain("Compare each customer's usage")
+    expect(rows[0]).toContain("…")
+    expect(rows[0]).toContain("esc to stop")
   })
 })
 

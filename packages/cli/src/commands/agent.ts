@@ -17,7 +17,7 @@ import { type Connection, connect } from "../lib/connection"
 import { errorMessage } from "../lib/errors"
 import { thisComputer, thisComputerId } from "../runner/computer"
 import { LocalRunner } from "../runner/local-runner"
-import { askedInReply, pickedAnswer, toolLine } from "../tui/format"
+import { askedInReply, PLAN_MARKS, pickedAnswer, planItems, toolLine } from "../tui/format"
 import { liveRun, reduceLive, shownMessage } from "../tui/parts"
 import {
   APPROVAL_MODES,
@@ -294,9 +294,16 @@ async function follow(
             step(
               `${mark} ${tone.strong(line.verb)}  ${tone.muted(line.detail)}${line.note ? tone.faint(`  ${line.note}`) : ""}`
             )
-            // A question's choices are what the person answers with: they read under its line.
+            // A question's choices are what the person answers with: they read under its line. Of
+            // a plan, the items in progress, from the list itself: a long plan's rows may skip some.
             if (part.name === "ask") {
               for (const row of line.preview ?? []) step(tone.faint(`  ${row}`))
+            }
+            if (line.plan) {
+              for (const item of planItems(part.input)) {
+                if (item.status !== "in_progress") continue
+                step(tone.faint(`  ${PLAN_MARKS.in_progress} ${item.content}`))
+              }
             }
           }
         }

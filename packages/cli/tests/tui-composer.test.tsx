@@ -224,3 +224,23 @@ test("says why a queued turn isn't starting here", () => {
   expect(label({ continueFromWeb: false })).toBe("Waiting: messages from the web are off")
   expect(label({ continueFromWeb: false, runningHere: true })).toBe("Starting")
 })
+
+// Guard proof: return "Working" whatever `doing` says in activityLabel; the turn's plan item then
+// never reads beside the running indicator.
+test("says the item of its plan a running turn works on", () => {
+  const runs = [{ id: "run_1", status: "running" }] as unknown as Parameters<
+    typeof activityLabel
+  >[0]
+  const where = {
+    onComputer: false,
+    mine: true,
+    here: true,
+    continueFromWeb: true,
+    runningHere: false,
+  }
+
+  expect(activityLabel(runs, "run_1", where)).toBe("Working")
+  expect(activityLabel(runs, "run_1", { ...where, doing: "Check the March invoices" })).toBe(
+    "Check the March invoices"
+  )
+})

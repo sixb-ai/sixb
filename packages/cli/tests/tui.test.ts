@@ -10,6 +10,7 @@ import {
   fittedContextText,
   friendlyPath,
   pickedAnswer,
+  planNow,
   runFailureText,
   shortPath,
   toolLine,
@@ -22,6 +23,16 @@ import { pickSlash, slashMatches } from "../src/tui/slash"
 // call reads as one line, what a message is sent with, and which commands a slash names.
 
 const RUN = "agt_run_1"
+
+/** What the todo tool keeps of a list: its counts, which say the call is a plan. */
+function planOutput(todos: unknown) {
+  const items = Array.isArray(todos) ? (todos as { content?: string; status?: string }[]) : []
+  return {
+    total: items.length,
+    completed: items.filter((item) => item.status === "completed").length,
+    inProgress: items.flatMap((item) => (item.status === "in_progress" ? [item.content] : [])),
+  }
+}
 
 function event(payload: Record<string, unknown>): AgentRunStreamEvent {
   return { schemaVersion: 1, projectId: "p", runId: RUN, ...payload } as AgentRunStreamEvent
@@ -559,6 +570,117 @@ describe("a call as one line", () => {
       detail: "src/**/*.t",
     })
     expect(streaming("grep", '{"pat')).toEqual({ verb: "grep", detail: "" })
+  })
+
+  test("reads a plan as how far it is, with its items under it", () => {
+    const plan = (todos: unknown, state: "done" | "running" = "done") =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "todo",
+        state,
+        input: { todos },
+        ...(state === "done" ? { output: planOutput(todos) } : {}),
+      })
+    const item = (content: string, status: string) => ({ content, status })
+
+    expect(
+      plan([
+        item("Gather Northwind's open invoices", "completed"),
+        item("  Compare usage with the contract ", "in_progress"),
+        item(" ", "pending"),
+        item("Draft the account review", "blocked"),
+      ])
+    ).toEqual({
+      verb: "plan",
+      detail: "1/3 done",
+      preview: [
+        "☑ Gather Northwind's open invoices",
+        "◐ Compare usage with the contract",
+        "☐ Draft the account review",
+      ],
+      plan: true,
+    })
+    expect(plan([])).toEqual({ verb: "plan", detail: "cleared" })
+    expect(
+      toolLine({ kind: "tool", id: "c", name: "todo", state: "running", inputText: '{"todos":[' })
+    ).toEqual({ verb: "plan", detail: "" })
+  })
+
+  // Guard proof: in toolLine's todo case (src/tui/format.ts), drop the `isPlanCall` check; the
+  // project's call then reads "plan  cleared".
+  test("reads a project's own tool named todo, in an earlier thread, as any other tool", () => {
+    const line = toolLine({
+      kind: "tool",
+      id: "c",
+      name: "todo",
+      state: "done",
+      input: { title: "Buy milk" },
+      output: { id: "t1" },
+    })
+    expect(line).toEqual({ verb: "todo", detail: '{"title":"Buy milk"}', preview: ['{"id":"t1"}'] })
+  })
+
+  // Guard proof: in planPreview (src/tui/format.ts), start the rows at the first item; the item in
+  // progress then falls past the rows shown. Anchor them on the first item not done instead; the
+  // last example then shows B to E and never F.
+  test("shows a long plan's rows from where the work is", () => {
+    const preview = (statuses: readonly string[]) => {
+      const todos = statuses.map((status, index) => ({ content: `Step ${index + 1}`, status }))
+      const part = { kind: "tool", id: "c", name: "todo", state: "done", input: { todos } } as const
+      return toolLine({ ...part, output: planOutput(todos) }).preview
+    }
+    const [done, doing, todo] = ["completed", "in_progress", "pending"] as const
+
+    expect(preview([done, done, done, done, done, doing, todo, todo])).toEqual([
+      "☑ Step 5",
+      "◐ Step 6",
+      "☐ Step 7",
+      "☐ Step 8",
+      "… 4 more items",
+    ])
+    // The item in progress comes after items still to do.
+    expect(preview([done, todo, todo, todo, todo, doing])).toEqual([
+      "☐ Step 3",
+      "☐ Step 4",
+      "☐ Step 5",
+      "◐ Step 6",
+      "… 2 more items",
+    ])
+    // Between two items: from the last one done.
+    expect(preview([done, done, done, todo, todo, todo, todo])).toEqual([
+      "☑ Step 3",
+      "☐ Step 4",
+      "☐ Step 5",
+      "☐ Step 6",
+      "… 3 more items",
+    ])
+  })
+
+  // Guard proof: in planNow (src/tui/format.ts), drop the `record(part.input)` check; the call
+  // still being written, with no list yet, wins and the item in progress is lost.
+  test("says what the turn works on by its newest plan", () => {
+    const call = (id: string, todos: unknown, state: "done" | "running" = "done"): Part => ({
+      kind: "tool",
+      id,
+      name: "todo",
+      state,
+      ...(state === "done"
+        ? { input: { todos }, output: planOutput(todos) }
+        : { inputText: '{"todos":[' }),
+    })
+    const first = [{ content: "Check the March invoices", status: "in_progress" }]
+    const next = [
+      { content: "Check the March invoices", status: "completed" },
+      { content: "Draft the account review", status: "in_progress" },
+    ]
+
+    expect(planNow([call("a", first), call("b", next)])).toBe("Draft the account review")
+    // A list the model still writes is not the plan yet.
+    expect(planNow([call("a", first), call("b", null, "running")])).toBe("Check the March invoices")
+    expect(
+      planNow([call("a", [{ content: "Check the March invoices", status: "completed" }])])
+    ).toBe(null)
   })
 
   // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read

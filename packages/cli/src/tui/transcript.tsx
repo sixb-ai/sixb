@@ -387,7 +387,13 @@ function ToolRow({
       {line.preview?.map((row, index) => (
         <text key={`${index}-${row.slice(0, 12)}`}>
           <span fg={colors.faint}>{index === 0 ? "  ⎿ " : "    "}</span>
-          <span fg={line.diff ? diffColor(colors, row) : colors.faint}>{oneLine(row, room)}</span>
+          <span
+            fg={
+              line.diff ? diffColor(colors, row) : line.plan ? planColor(colors, row) : colors.faint
+            }
+          >
+            {oneLine(row, room)}
+          </span>
         </text>
       ))}
     </box>
@@ -459,6 +465,13 @@ const COMMAND_LINES = 3
 function diffColor(colors: TuiColors, row: string): string {
   if (row.startsWith("+")) return colors.green
   if (row.startsWith("-")) return colors.red
+  return colors.faint
+}
+
+/** A plan's item: the one in progress stands out, those to do read, those done step back. */
+function planColor(colors: TuiColors, row: string): string {
+  if (row.startsWith("◐")) return colors.blue
+  if (row.startsWith("☐")) return colors.muted
   return colors.faint
 }
 
@@ -587,25 +600,38 @@ export function Working({
   colors,
   since,
   label,
+  width,
   stopping = false,
 }: {
   readonly colors: TuiColors
   readonly since: number
   readonly label: string
+  /** The room the line has: a long label, as a plan's item, is cut to keep it one line. */
+  readonly width: number
   /** Waiting for a second esc: the hint is the label then. */
   readonly stopping?: boolean
 }) {
   const now = useNow(120)
+  const time = `  ${duration(Math.max(0, now - since))}`
+  const hint = stopping ? "" : "   esc to stop"
+  // What the wave, the time and the hint leave, with room for the time to grow a digit.
+  const room = Math.max(
+    12,
+    width - WORKING_INDENT.length - WAVE_TILES - 2 - time.length - hint.length - 1
+  )
+
   return (
     <text>
-      <span>{"   "}</span>
+      <span>{WORKING_INDENT}</span>
       <Wave colors={colors} at={now} />
-      <span fg={colors.text}>{`  ${label}`}</span>
-      <span fg={colors.faint}>{`  ${duration(Math.max(0, now - since))}`}</span>
-      {stopping ? null : <span fg={colors.faint}>{"   esc to stop"}</span>}
+      <span fg={colors.text}>{`  ${oneLine(label, room)}`}</span>
+      <span fg={colors.faint}>{time}</span>
+      {hint ? <span fg={colors.faint}>{hint}</span> : null}
     </text>
   )
 }
+
+const WORKING_INDENT = "   "
 
 /** A call's line with its paths as the person reads them. */
 function shownLine(line: ToolLine, folder?: string): ToolLine {

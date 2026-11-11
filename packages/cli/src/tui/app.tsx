@@ -42,6 +42,7 @@ import {
   elapsed,
   fittedContextText,
   pickedAnswer,
+  planNow,
   shortPath,
 } from "./format"
 import { Palette, type PaletteItem } from "./palette"
@@ -1113,6 +1114,8 @@ function ThreadView(
             <Working
               colors={colors}
               since={runningSince ? Date.parse(runningSince) : Date.now()}
+              // Inside the transcript's padding.
+              width={width - 4}
               stopping={stopArmed}
               label={
                 stopArmed
@@ -1127,6 +1130,7 @@ function ThreadView(
                         here,
                         continueFromWeb,
                         runningHere: activeRunId !== null && runner.runs(activeRunId),
+                        doing: planNow(live?.parts ?? []),
                       })
               }
             />
@@ -1257,6 +1261,8 @@ export function activityLabel(
     readonly here: boolean
     readonly continueFromWeb: boolean
     readonly runningHere: boolean
+    /** The item of its plan the turn works on, said in place of "Working". */
+    readonly doing?: string | null
   }
 ): string {
   const run = runs.find((entry) => entry.id === runId)
@@ -1271,7 +1277,7 @@ export function activityLabel(
   // Yours, running, and not here: another sixb runs it, or one that closed, whose turn ends
   // interrupted once its lease lapses.
   if (where.onComputer && where.mine && !where.runningHere) return "Working in another sixb"
-  return "Working"
+  return where.doing || "Working"
 }
 
 function ThreadsDialog({

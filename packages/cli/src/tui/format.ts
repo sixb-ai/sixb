@@ -19,6 +19,8 @@ export interface ToolLine {
   readonly diff?: boolean
   /** The preview rows start with paths, shown as the person reads them. */
   readonly paths?: boolean
+  /** The preview is plan items, `☑` done, `◐` in progress and `☐` to do, colored as such. */
+  readonly plan?: boolean
 }
 
 const PREVIEW_LINES = 4
@@ -313,15 +315,36 @@ export function toolLine(
         ...error,
       }
     }
-    default:
+    case "todo": {
+      // Earlier threads may hold a project's own tool of that name: it reads as any other.
+      if (!isPlanCall(part, input, output)) return otherLine(part, error)
+
+      if (part.state === "running") return { verb: "plan", detail: "" }
+      const items = planItems(input)
+      if (items.length === 0) return { verb: "plan", detail: failed ? "" : "cleared", ...error }
+      const done = items.filter((item) => item.status === "completed").length
       return {
-        verb: part.name,
-        detail: compact(part.input ?? part.inputText),
-        ...(part.state === "done" && part.output !== undefined
-          ? { preview: lines(compact(part.output)) }
-          : {}),
+        verb: "plan",
+        detail: `${done}/${items.length} done`,
+        preview: planPreview(items),
+        plan: true,
         ...error,
       }
+    }
+    default:
+      return otherLine(part, error)
+  }
+}
+
+/** A call the transcript has no line of its own for: its name, its input and what came back. */
+function otherLine(part: ToolPart, error: Pick<ToolLine, "note" | "failed">): ToolLine {
+  return {
+    verb: part.name,
+    detail: compact(part.input ?? part.inputText),
+    ...(part.state === "done" && part.output !== undefined
+      ? { preview: lines(compact(part.output)) }
+      : {}),
+    ...error,
   }
 }
 
@@ -569,6 +592,84 @@ export function pickedAnswer(
   const questions = askedInReply(messages.at(-1))
   if (questions.length !== 1) return text
   return questions[0]?.choices[Number(number) - 1] ?? text
+}
+
+export interface PlanItem {
+  readonly content: string
+  readonly status: "pending" | "in_progress" | "completed"
+}
+
+/** A `todo` call's items: trimmed, one without words left out, an unknown status still to do. */
+export function planItems(value: unknown): PlanItem[] {
+  const input = record(value)
+  if (!Array.isArray(input?.todos)) return []
+  return input.todos.flatMap((value): PlanItem[] => {
+    const item = record(value)
+    const content = typeof item?.content === "string" ? item.content.trim() : ""
+    if (!content) return []
+    const status =
+      item?.status === "in_progress" || item?.status === "completed" ? item.status : "pending"
+    return [{ content, status }]
+  })
+}
+
+/**
+ * A `todo` call that keeps the plan: its input sends a list, and its output counts it. A list
+ * still being written counts too.
+ */
+function isPlanCall(
+  part: ToolPart,
+  input: Record<string, unknown> | undefined,
+  output: Record<string, unknown> | undefined
+): boolean {
+  if (part.state === "running" && !input) return true
+  if (!Array.isArray(input?.todos)) return false
+  if (part.state !== "done") return true
+
+  return (
+    typeof output?.total === "number" &&
+    typeof output.completed === "number" &&
+    Array.isArray(output.inProgress)
+  )
+}
+
+export const PLAN_MARKS = { completed: "☑", in_progress: "◐", pending: "☐" } as const
+
+/**
+ * A plan's items as rows, a few of a long one: from the last one before the work in progress, so
+ * the rows follow the plan as it goes, wherever in the plan the work is.
+ */
+function planPreview(items: readonly PlanItem[]): string[] {
+  const rows = items.map((item) => `${PLAN_MARKS[item.status]} ${item.content}`)
+  // One more item takes the row its "… 1 more" would.
+  if (rows.length <= PREVIEW_LINES + 1) return rows
+
+  // The item in progress, else the first one still to do.
+  const doing = items.findIndex((item) => item.status === "in_progress")
+  const next = doing === -1 ? items.findIndex((item) => item.status !== "completed") : doing
+  const start = Math.max(
+    0,
+    Math.min((next === -1 ? rows.length : next) - 1, rows.length - PREVIEW_LINES)
+  )
+  return [
+    ...rows.slice(start, start + PREVIEW_LINES),
+    `… ${plural(rows.length - PREVIEW_LINES, "more item")}`,
+  ]
+}
+
+/** What the Agent does now, by its reply's newest plan: the first item in progress, if any. */
+export function planNow(parts: readonly Part[]): string | null {
+  const call = [...parts]
+    .reverse()
+    .find(
+      (part): part is ToolPart =>
+        part.kind === "tool" &&
+        part.name === "todo" &&
+        part.state !== "error" &&
+        !!record(part.input) &&
+        isPlanCall(part, record(part.input), record(part.output))
+    )
+  return planItems(call?.input).find((item) => item.status === "in_progress")?.content ?? null
 }
 
 /** At most a few rows, with how many more there were. */
