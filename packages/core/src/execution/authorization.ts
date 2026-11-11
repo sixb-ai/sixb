@@ -21,6 +21,7 @@ import type {
   SelectedObjectReadScope,
 } from "../storage/objects/types"
 import { kernelOperationFromId, kernelOperationId } from "./kernel-operation"
+import { assertScriptPath } from "./script"
 import {
   type AuthorizablePrincipal,
   type AuthorizationRef,
@@ -225,6 +226,23 @@ export function createKernelRuntimeAuthorization(input: {
   })
 }
 
+/**
+ * Register unrestricted authority for one script run. Whoever runs a script loads the project with
+ * its storage credentials, so this grants nothing that process does not already hold.
+ */
+export function createScriptRuntimeAuthorization(
+  execution: ExecutionContext
+): RuntimeAuthorization {
+  if (execution.executor.type !== "script") {
+    throw new Error("[Sixb] Script runtime authorization requires a script execution.")
+  }
+  return register(execution, {
+    type: "unrestricted",
+    projectId: execution.projectId,
+    ref: Object.freeze({ type: "script", runId: execution.executor.runId }),
+  })
+}
+
 export function resolveRuntimeAuthorization(authorization: unknown): ResolvedRuntimeAuthorization {
   if (!isRuntimeAuthorizationCapability(authorization)) {
     return { type: "denied" }
@@ -365,6 +383,10 @@ function assertResolvedAuthorizationMatchesExecution(
   resolved: RegisteredRuntimeAuthorization,
   execution: ExecutionContext
 ): void {
+  if (execution.source.type === "script" && execution.executor.type !== "script") {
+    throw invalidExecutionAuthority(execution.id, "only a script execution has a script source")
+  }
+
   switch (execution.executor.type) {
     case "request":
       if (
@@ -459,6 +481,21 @@ function assertResolvedAuthorizationMatchesExecution(
         )
       }
       return
+
+    case "script":
+      if (
+        resolved.type !== "unrestricted" ||
+        resolved.ref.type !== "script" ||
+        resolved.ref.runId !== execution.executor.runId ||
+        execution.requestedBy !== undefined ||
+        execution.source.type !== "script"
+      ) {
+        throw invalidExecutionAuthority(
+          execution.id,
+          "script authority does not match its executor"
+        )
+      }
+      return
   }
 }
 
@@ -546,6 +583,9 @@ function snapshotExecutionExecutor(
         type: "kernel",
         operation: snapshotKernelOperation(executor.operation),
       })
+    case "script":
+      assertNonEmpty(executor.runId, "Execution script run id")
+      return Object.freeze({ type: "script", runId: executor.runId })
   }
   throw new Error(
     `[Sixb] Unknown execution executor type '${String((executor as { type?: unknown }).type)}'.`
@@ -578,6 +618,9 @@ function snapshotExecutionSource(source: ExecutionContext["source"]): ExecutionC
     case "execution":
       assertNonEmpty(source.executionId, "Execution source execution id")
       return Object.freeze({ type: "execution", executionId: source.executionId })
+    case "script":
+      assertScriptPath(source.path)
+      return Object.freeze({ type: "script", path: source.path })
   }
   throw new Error(
     `[Sixb] Unknown execution source type '${String((source as { type?: unknown }).type)}'.`
@@ -879,6 +922,8 @@ function cloneAuthorizationRef(ref: AuthorizationRef): AuthorizationRef {
       return { type: "delegated", delegation: { ...ref.delegation } }
     case "kernel":
       return { type: "kernel", operation: { ...ref.operation } }
+    case "script":
+      return { type: "script", runId: ref.runId }
     case "disabled":
       return { type: "disabled" }
   }

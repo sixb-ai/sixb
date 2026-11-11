@@ -90,6 +90,7 @@ export const EventExecutorSchema = z.discriminatedUnion("type", [
       z.object({ type: z.literal("ontology.indexVectors"), indexingId: z.string() }),
     ]),
   }),
+  z.object({ type: z.literal("script"), runId: z.string(), path: z.string() }),
 ])
 
 const StoredAuthorableEventBaseSchema = StoredEventBaseSchema.extend({

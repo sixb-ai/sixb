@@ -114,6 +114,7 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
           ...trustedPrimitiveKinds.map((kind) => trustedPrimitive(`${kind}-execution`, {}, kind)),
           agentExecution("agent-execution"),
           kernelExecution("kernel-execution"),
+          scriptExecution("script-execution"),
         ] as const
 
         for (const input of records) {
@@ -215,6 +216,24 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
           {
             ...kernelExecution("requested-kernel"),
             requestedBy: { type: "user", id: "user-one" },
+          },
+          {
+            ...scriptExecution("requested-script"),
+            requestedBy: { type: "user", id: "user-one" },
+          },
+          {
+            ...scriptExecution("other-run-script"),
+            authorizationRef: { type: "script", runId: "script-another-run" },
+          },
+          {
+            ...scriptExecution("http-script"),
+            source: { type: "http", requestId: "request-http-script" },
+          },
+          { ...scriptExecution("escaping-script"), source: { type: "script", path: "../x.ts" } },
+          { ...scriptExecution("absolute-script"), source: { type: "script", path: "/x.ts" } },
+          {
+            ...trustedPrimitive("script-sourced-primitive"),
+            source: { type: "script", path: "scripts/fix.ts" },
           },
         ]
 
@@ -751,6 +770,18 @@ function agentExecution(id: string): CreateExecutionInput {
       type: "principal",
       principal: { type: "serviceAccount", id: "service-one" },
     },
+  }
+}
+
+function scriptExecution(id: string): CreateExecutionInput {
+  return {
+    id,
+    projectId,
+    executor: { type: "script", runId: `script-${id}` },
+    requesterGroupIds: [],
+    source: { type: "script", path: "scripts/fix-customers.ts" },
+    correlationId: `correlation-${id}`,
+    authorizationRef: { type: "script", runId: `script-${id}` },
   }
 }
 

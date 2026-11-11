@@ -219,6 +219,7 @@ const shippedMigrationIds = [
   "097-shared-link-guests",
   "098-connector-connection-owners",
   "099-user-suspension-source",
+  "100-script-executions",
 ]
 
 afterEach(async () => {
@@ -954,6 +955,63 @@ describe("SQLite storage migrations", () => {
       ])
       const columns = db.query("PRAGMA table_info(auth_sessions)").all() as { name: string }[]
       expect(columns.map((column) => column.name)).not.toContain("audience")
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proof: drop 100's INSERT and the request and its child are gone; drop the index
+  // statements and the activity timeline's indexes are missing.
+  test("rebuilds executions for scripts, keeping every row and index", async () => {
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "100-script-executions")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const insert = (values: string) =>
+        db.run(`INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          parent_execution_id, authority_kind, requested_by_user_id, created_at
+        ) VALUES ${values}`)
+      insert(`('p', 'exec_request', 'request', 'req_1', 'http', 'req_1', 'corr_1', NULL,
+        'disabled', NULL, '2026-01-01T00:00:00.000Z')`)
+      db.run(`INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          parent_execution_id, authority_kind, authority_kernel_operation, created_at
+        ) VALUES ('p', 'exec_child', 'kernel', 'rec_1', 'execution', 'exec_request', 'corr_1',
+          'exec_request', 'kernel', 'ontology.recover', '2026-01-01T00:00:01.000Z')`)
+
+      for (const step of steps.slice(index, index + 1)) await step.up(db)
+
+      expect(db.query("SELECT id FROM executions ORDER BY id").all()).toEqual([
+        { id: "exec_child" },
+        { id: "exec_request" },
+      ])
+      expect(
+        db
+          .query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'executions'")
+          .all()
+          .map((row) => (row as { name: string }).name)
+          .filter((name) => !name.startsWith("sqlite_"))
+          .sort()
+      ).toEqual([
+        "idx_executions_delegation_roots",
+        "idx_executions_parent",
+        "idx_executions_session_roots",
+      ])
+      insert(`('p', 'exec_script', 'script', 'script_1', 'script', 'scripts/fix.ts', 'corr_2', NULL,
+        'script', NULL, '2026-01-01T00:00:02.000Z')`)
+      // Requested by someone, or under another executor, a script is refused.
+      expect(() =>
+        insert(`('p', 'exec_bad', 'script', 'script_2', 'script', 'scripts/fix.ts', 'corr_3', NULL,
+          'script', 'usr_1', '2026-01-01T00:00:03.000Z')`)
+      ).toThrow()
+      expect(() =>
+        insert(`('p', 'exec_bad', 'request', 'req_2', 'script', 'scripts/fix.ts', 'corr_3', NULL,
+          'script', NULL, '2026-01-01T00:00:03.000Z')`)
+      ).toThrow()
+      db.run("PRAGMA foreign_keys = ON")
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
     } finally {
       db.close()
     }

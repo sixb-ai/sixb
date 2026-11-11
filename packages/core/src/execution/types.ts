@@ -41,6 +41,8 @@ export type ExecutionExecutor =
     }
   | { readonly type: "agent"; readonly actorId?: string; readonly runId: string }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
+  /** A script someone ran with `sixb run`. */
+  | { readonly type: "script"; readonly runId: string }
 
 /**
  * Occurrence that directly triggered an execution.
@@ -55,8 +57,10 @@ export type ExecutionSource =
   | { readonly type: "event"; readonly eventId: string }
   | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
+  /** The script file, relative to the project, that `sixb run` ran. */
+  | { readonly type: "script"; readonly path: string }
 
-/** Immutable provenance for one request, primitive run, agent run, or kernel operation. */
+/** Immutable provenance for one request, primitive run, agent run, kernel operation, or script. */
 export interface ExecutionContext {
   readonly id: string
   readonly projectId: string
@@ -78,6 +82,8 @@ export type AuthorizationRef =
   | { readonly type: "trustedPrimitive"; readonly primitive: TrustedPrimitiveRef }
   | { readonly type: "delegated"; readonly delegation: SharedAccessDelegationRef }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
+  /** Unrestricted: whoever runs a script already holds the project's storage credentials. */
+  | { readonly type: "script"; readonly runId: string }
   | { readonly type: "disabled" }
 
 class RuntimeAuthorizationCapability {

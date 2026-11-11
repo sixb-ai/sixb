@@ -36,4 +36,5 @@ export {
   shareOntologyMutationRuntime,
 } from "./ontology-mutations"
 export { setApiPublicOrigin } from "./public-origin"
+export { bindScript } from "./script"
 export type { SixbHostContext, SixbRuntimeContext } from "./types"

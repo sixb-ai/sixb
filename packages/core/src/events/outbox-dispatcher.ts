@@ -106,6 +106,7 @@ export class OntologyOutboxDispatcher {
   private stopping: Promise<void> | null = null
   private closing = false
   private stopRequested = false
+  private relinquished = false
   private readonly forcedStop = new AbortController()
 
   constructor(options: OntologyOutboxDispatcherOptions) {
@@ -167,7 +168,7 @@ export class OntologyOutboxDispatcher {
    * mutation.
    */
   drain(): Promise<void> {
-    if (this.closing || this.stopRequested) return Promise.resolve()
+    if (this.closing || this.stopRequested || this.relinquished) return Promise.resolve()
     if (!this.draining) return this.startDrainPass()
 
     this.pendingDrain ??= settled(this.draining).then(() => {
@@ -179,8 +180,17 @@ export class OntologyOutboxDispatcher {
 
   /** Starts a tracked, best-effort drain without extending mutation latency. */
   notify(): void {
-    if (this.closing || this.stopRequested) return
+    if (this.closing || this.stopRequested || this.relinquished) return
     void this.drain().catch((error) => this.reportError(error))
+  }
+
+  /**
+   * Never publish from this process again, not even the final drain on `stop()`: another process
+   * owns the broker's subscribers and publishes these rows. The claim is scoped by project only, so
+   * a drain here would also publish that process's rows into a broker nobody here listens to.
+   */
+  relinquish(): void {
+    this.relinquished = true
   }
 
   stop(): Promise<void> {

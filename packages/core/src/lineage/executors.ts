@@ -7,7 +7,7 @@ import type { LineageReader } from "./reader"
 
 /**
  * The key a run is counted under once hidden, for an executor that names one: a primitive's run or
- * an Agent run. A request or a kernel operation names none.
+ * an Agent run. A request, a kernel operation, or a script names none.
  */
 export function executorRunKey(executor: EventExecutor): string | undefined {
   switch (executor.type) {
@@ -17,6 +17,7 @@ export function executorRunKey(executor: EventExecutor): string | undefined {
       return `agent-run:${executor.runId}`
     case "request":
     case "kernel":
+    case "script":
       return undefined
   }
 }
@@ -56,6 +57,7 @@ async function canViewExecutorRun(
   switch (executor.type) {
     case "request":
     case "kernel":
+    case "script":
       return true
     case "agent":
       return canViewAgentRun(reader, executor.runId)
