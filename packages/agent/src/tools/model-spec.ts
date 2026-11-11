@@ -4,6 +4,8 @@ import { OPEN_ARTIFACT_TOOL_SPEC, PUBLISH_ARTIFACT_TOOL_SPEC } from "../artifact
 import { STOP_TOOL_SPEC, WAIT_TOOL_SPEC } from "./background"
 import { BASH_TOOL_SPEC } from "./bash"
 import { EDIT_TOOL_SPEC } from "./edit"
+import { GLOB_TOOL_SPEC } from "./glob"
+import { GREP_TOOL_SPEC } from "./grep"
 import { READ_TOOL_SPEC } from "./read"
 import { WEB_FETCH_TOOL_SPEC } from "./web-fetch/tool"
 import { WEB_SEARCH_TOOL_SPEC } from "./web-search"
@@ -28,6 +30,8 @@ export function agentModelToolSpecs(
     READ_TOOL_SPEC,
     EDIT_TOOL_SPEC,
     WRITE_TOOL_SPEC,
+    GLOB_TOOL_SPEC,
+    GREP_TOOL_SPEC,
     BASH_TOOL_SPEC,
     WAIT_TOOL_SPEC,
     STOP_TOOL_SPEC,

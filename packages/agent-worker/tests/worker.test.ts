@@ -5749,7 +5749,7 @@ describe("AgentWorker", () => {
     // half the limit as it is, and the turns after it compact again one after another.
     const requests: LanguageModelRequest[] = []
     const model = measuredConversationModel({
-      contextWindow: 20_000,
+      contextWindow: 21_000,
       maxOutputTokens: 2_048,
       answer: `Answered. ${"a".repeat(300)}`,
       // Each summary repeats the last one and adds to it, as a chained summary grew.
@@ -5782,7 +5782,7 @@ describe("AgentWorker", () => {
         compacted.push(names.includes("agent.compaction.completed"))
       }
 
-      // A 17,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
+      // A 18,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
       // more, so no turn compacts right after the one that did.
       expect(compacted.filter(Boolean)).toHaveLength(2)
       expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)
@@ -5793,7 +5793,7 @@ describe("AgentWorker", () => {
       })
       expect(checkpoints).toHaveLength(compacted.filter(Boolean).length)
       for (const checkpoint of checkpoints) {
-        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(17_952 * 0.6))
+        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(18_952 * 0.6))
         // Written anew within its allowance of 1,024 tokens, never grown from the last.
         expect(new TextEncoder().encode(checkpoint.summary).byteLength).toBeLessThanOrEqual(3_072)
       }
@@ -12580,9 +12580,9 @@ describe("AgentWorker", () => {
             actionsFor: () => [],
           }).index,
           budget: {
-            // The framework's prompt and tools take about 4,450 tokens; the index, 3,300 more.
-            windowTokens: 8_000,
-            inputBudgetTokens: 5_000,
+            // The framework's prompt and tools take about 4,950 tokens; the index, 3,300 more.
+            windowTokens: 8_500,
+            inputBudgetTokens: 5_500,
             reserveTokens: 2_000,
             keepRecentTokens: 1_000,
             source: "model",
