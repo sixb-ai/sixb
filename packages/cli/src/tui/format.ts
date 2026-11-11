@@ -17,16 +17,22 @@ export interface ToolLine {
   readonly command?: string
   /** The preview is diff lines, `+` added and `-` removed, colored as such. */
   readonly diff?: boolean
+  /** The preview rows start with paths, shown as the person reads them. */
+  readonly paths?: boolean
 }
 
 const PREVIEW_LINES = 4
 
 const NO_OUTCOMES: ReadonlyMap<string, ApprovalOutcome> = new Map()
 
-/** `outcomes` says how the held calls ended, by approval id: a decided call is no longer held. */
+/**
+ * `outcomes` says how the held calls ended, by approval id: a decided call is no longer held.
+ * `folder` is the one a computer's turns work in: a search names where it looked relative to it.
+ */
 export function toolLine(
   part: ToolPart,
-  outcomes: ReadonlyMap<string, ApprovalOutcome> = NO_OUTCOMES
+  outcomes: ReadonlyMap<string, ApprovalOutcome> = NO_OUTCOMES,
+  folder?: string
 ): ToolLine {
   const input = record(part.input) ?? partialInput(part.inputText)
   const output = record(part.output)
@@ -164,6 +170,71 @@ export function toolLine(
         verb: output?.created === false ? "rewrite" : "write",
         detail: text(input?.path),
         ...(linesWritten !== undefined ? { note: plural(linesWritten, "line") } : {}),
+        ...error,
+      }
+    }
+    case "glob": {
+      const files = Array.isArray(output?.files) ? output.files.map(text) : undefined
+      const found = files?.length ?? 0
+
+      return {
+        verb: "glob",
+        detail: searchDetail(input, text(input?.pattern), folder),
+        ...(files
+          ? {
+              note: searchNote(
+                output,
+                found === 0
+                  ? "no files"
+                  : output?.truncated === true
+                    ? `${found}+ files`
+                    : plural(found, "file")
+              ),
+              ...(found > 0 ? { preview: limitedRows(files, "file", "files"), paths: true } : {}),
+            }
+          : {}),
+        ...error,
+      }
+    }
+    case "grep": {
+      const matches = Array.isArray(output?.matches) ? output.matches.map(record) : undefined
+      const shown = matches?.length ?? 0
+      const counted = Object.values(record(output?.more) ?? {}).filter(
+        (count): count is number => typeof count === "number"
+      )
+      const total = counted.reduce((sum, count) => sum + count, shown)
+
+      const files = typeof output?.files === "number" ? output.files : 0
+      const found = `${total} ${total === 1 ? "match" : "matches"}`
+
+      return {
+        verb: "grep",
+        detail: searchDetail(input, input?.pattern ? `"${text(input.pattern)}"` : "", folder),
+        ...(matches
+          ? {
+              note: searchNote(
+                output,
+                total === 0
+                  ? "no matches"
+                  : output?.truncated === true
+                    ? `${total}+ matches`
+                    : `${found} in ${plural(files, "file")}`
+              ),
+              ...(shown > 0
+                ? {
+                    preview: limitedRows(
+                      matches.map(
+                        (match) => `${text(match?.path)}:${match?.line} ${text(match?.text).trim()}`
+                      ),
+                      "match",
+                      "matches",
+                      total
+                    ),
+                    paths: true,
+                  }
+                : {}),
+            }
+          : {}),
         ...error,
       }
     }
@@ -435,11 +506,16 @@ function partialInput(inputText: string | undefined): Record<string, unknown> | 
   try {
     return record(JSON.parse(inputText))
   } catch {
-    const command = /"(?:command|path|task|key|query|url)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(inputText)
-    const value = command?.[1]
-    return value !== undefined
-      ? { command: value, path: value, task: value, query: value, url: value }
-      : undefined
+    const found = /"(command|path|task|key|query|url|pattern)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(
+      inputText
+    )
+    const [, key, value] = found ?? []
+    if (value === undefined) return undefined
+
+    // A search's pattern is only its pattern: it is no path its line would say it looked in.
+    if (key === "pattern") return { pattern: value }
+
+    return { command: value, path: value, task: value, query: value, url: value }
   }
 }
 
@@ -511,6 +587,55 @@ function limited(rows: readonly string[]): string[] {
   return rows.length > PREVIEW_LINES
     ? [...rows.slice(0, PREVIEW_LINES), `… ${plural(rows.length - PREVIEW_LINES, "more line")}`]
     : [...rows]
+}
+
+/**
+ * The first rows, then the rest counted by what they are: `… 8 more files`. `total` counts what
+ * the rows stand for when some were never listed, as a file's matches past the ones grep shows.
+ */
+function limitedRows(
+  rows: readonly string[],
+  one: string,
+  many: string,
+  total = rows.length
+): string[] {
+  const shown = rows.slice(0, PREVIEW_LINES)
+  const left = total - shown.length
+  return left > 0 ? [...shown, `… ${left} more ${left === 1 ? one : many}`] : shown
+}
+
+/**
+ * A search as the call wrote it: its pattern, the files it was limited to, and where it looked, as
+ * the person reads it. The folder the agent works in goes unsaid, however the call named it.
+ */
+function searchDetail(
+  input: Record<string, unknown> | undefined,
+  pattern: string,
+  folder: string | undefined
+): string {
+  const path = givenText(input?.path)
+  const include = givenText(input?.include)
+  const place = path.replace(/(.)\/+$/, "$1")
+  const working =
+    place === "." ||
+    (folder !== undefined && [folder, folder.replace(/^\/private/, "")].includes(place))
+
+  return [
+    ...(pattern ? [pattern] : []),
+    ...(include ? [include] : []),
+    ...(path && !working ? [`in ${friendlyPath(path, folder)}`] : []),
+  ].join("  ")
+}
+
+/** What a search found, and that it stopped early when it did. */
+function searchNote(output: Record<string, unknown> | undefined, found: string): string {
+  return output?.incomplete === true ? `${found} · stopped early` : found
+}
+
+/** A string the call gave: models send `"null"` and `"undefined"` for nothing. */
+function givenText(value: unknown): string {
+  const given = text(value).trim()
+  return given === "null" || given === "undefined" ? "" : given
 }
 
 function lines(value: string): string[] {

@@ -455,6 +455,132 @@ describe("a call as one line", () => {
     expect(publish({ id: "null", kind: "document" })).toMatchObject({ verb: "publish" })
   })
 
+  test("reads a glob as its pattern, where it looked, and the files it found", () => {
+    const glob = (input: Record<string, unknown>, output?: Record<string, unknown>) =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "glob",
+        state: output ? "done" : "running",
+        input,
+        ...(output ? { output } : {}),
+      })
+    const files = [
+      "src/app.ts",
+      "src/config.ts",
+      "src/index.ts",
+      "src/queue/worker.ts",
+      "src/ui.tsx",
+    ]
+
+    expect(glob({ pattern: "src/**/*.ts" })).toEqual({ verb: "glob", detail: "src/**/*.ts" })
+    expect(glob({ pattern: "**/*.ts", path: "packages/app" }, { files, truncated: false })).toEqual(
+      {
+        verb: "glob",
+        detail: "**/*.ts  in packages/app",
+        note: "5 files",
+        preview: [...files.slice(0, 4), "… 1 more file"],
+        paths: true,
+      }
+    )
+    expect(glob({ pattern: "*.md", path: "null" }, { files: [], truncated: false })).toEqual({
+      verb: "glob",
+      detail: "*.md",
+      note: "no files",
+    })
+    expect(
+      glob({ pattern: "*.md" }, { files: ["a.md"], truncated: true, incomplete: true }).note
+    ).toBe("1+ files · stopped early")
+  })
+
+  test("reads a grep as its pattern, where it looked, and the lines that matched", () => {
+    const grep = (input: Record<string, unknown>, output?: Record<string, unknown>) =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "grep",
+        state: output ? "done" : "running",
+        input,
+        ...(output ? { output } : {}),
+      })
+    const matches = [
+      { path: "src/config.ts", line: 12, text: "const retries = 3" },
+      { path: "src/config.ts", line: 40, text: "    retries: 3," },
+      { path: "src/worker.ts", line: 7, text: "if (attempt > retries) fail()" },
+    ]
+
+    expect(grep({ pattern: "retries", path: "src" })).toEqual({
+      verb: "grep",
+      detail: '"retries"  in src',
+    })
+    // The matches past a file's shown lines count too, on the line and under the preview.
+    // Guard proof: in toolLine's grep case, call limitedRows without `total`; the preview then
+    // ends on the last match it lists.
+    expect(
+      grep(
+        { pattern: "retries", include: "*.ts" },
+        { matches, files: 2, more: { "src/config.ts": 5 }, truncated: false }
+      )
+    ).toEqual({
+      verb: "grep",
+      detail: '"retries"  *.ts',
+      note: "8 matches in 2 files",
+      preview: [
+        "src/config.ts:12 const retries = 3",
+        "src/config.ts:40 retries: 3,",
+        "src/worker.ts:7 if (attempt > retries) fail()",
+        "… 5 more matches",
+      ],
+      paths: true,
+    })
+    expect(grep({ pattern: "x" }, { matches: [], files: 0, truncated: false })).toEqual({
+      verb: "grep",
+      detail: '"x"',
+      note: "no matches",
+    })
+    expect(grep({ pattern: "x" }, { matches, files: 2, truncated: true }).note).toBe("3+ matches")
+  })
+
+  // Guard proof: in searchDetail (src/tui/format.ts), return `in ${path}` as the call wrote it;
+  // the line then names the whole folder the agent works in.
+  test("names where a search looked relative to the folder the agent works in", () => {
+    const folder = "/private/tmp/acme-api"
+    const grep = (path: string) =>
+      toolLine(
+        {
+          kind: "tool",
+          id: "c",
+          name: "grep",
+          state: "running",
+          input: { pattern: "retry", path },
+        },
+        undefined,
+        folder
+      ).detail
+
+    expect(grep(folder)).toBe('"retry"')
+    expect(grep("/tmp/acme-api/")).toBe('"retry"')
+    expect(grep(`${folder}/src/config`)).toBe('"retry"  in src/config')
+    expect(grep("/etc")).toBe('"retry"  in /etc')
+  })
+
+  // Guard proof: drop `pattern` from partialInput's keys; the lines then read `grep  ""` and a bare
+  // `glob` while the model writes the call.
+  test("reads a search's pattern while the model still writes it", () => {
+    const streaming = (name: string, inputText: string) =>
+      toolLine({ kind: "tool", id: "c", name, state: "running", inputText })
+
+    expect(streaming("grep", '{"pattern":"retries\\s*')).toEqual({
+      verb: "grep",
+      detail: '"retries\\s*"',
+    })
+    expect(streaming("glob", '{"pattern":"src/**/*.t')).toEqual({
+      verb: "glob",
+      detail: "src/**/*.t",
+    })
+    expect(streaming("grep", '{"pat')).toEqual({ verb: "grep", detail: "" })
+  })
+
   // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read
   // stderr whole; the line then says `exit 137`, or previews the sentence meant for the model.
   test("says how long a timed-out command had, not its exit code or the model's notice", () => {
