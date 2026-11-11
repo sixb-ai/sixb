@@ -329,7 +329,7 @@ export function BoardFocus({
 }
 
 /** ⌘ or Ctrl with +, − or 0 as a zoom step. */
-function zoomKey(event: KeyboardEvent): FrameZoomStep | null {
+export function zoomKey(event: KeyboardEvent): FrameZoomStep | null {
   if (event.altKey) return null
   if (event.key === "=" || event.key === "+") return "in"
   if (event.key === "-") return "out"

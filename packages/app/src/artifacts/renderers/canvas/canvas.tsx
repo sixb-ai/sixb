@@ -42,16 +42,18 @@ import { CanvasControls } from "./controls"
 import type { Box } from "./draft"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider, type CanvasItemEditing } from "./editing"
-import { BoardFocus } from "./focus"
+import { BoardFocus, followedArrow } from "./focus"
+import { useBoardGestures } from "./gestures"
 import { CANVAS_NODE_TYPES, NAME_SCALE, zoomMarks } from "./items"
 import { PresenceLayer } from "./presence"
 import { boardPreviewUrl, useBoardPreviews } from "./previews"
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
- * controls in a corner. Boards and embeds run live once the view shows them large enough;
- * double-click a board, press Enter on it, or press its Open to open it over the canvas. It opens
- * on the item an address named, else fitted to everything. Given an editor, its items are
+ * controls in a corner. Boards and embeds run live once the view shows them large enough, and a
+ * running board's page is the reader's to use in place while they read; double-click a board,
+ * press Enter on it, or press its Open to open it over the canvas. It opens on the item an
+ * address named, else fitted to everything. Given an editor, its items are
  * selected, moved, resized, connected, and typed into, with a toolbar to add more.
  */
 export default memo(function CanvasBoard({
@@ -159,16 +161,6 @@ function Board({
 
     void fitView({ nodes: [{ id }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 220 })
   }, [opened, fitView])
-  const live = useMemo(
-    () => ({
-      version: version ?? null,
-      live: running,
-      previews,
-      mode,
-      ...(version ? { open: setOpened } : {}),
-    }),
-    [version, running, previews, mode]
-  )
   // An opened board's picture, at its own size, under its page until the page is ready.
   const pictureOf = useCallback(
     (id: string) =>
@@ -276,6 +268,36 @@ function Board({
       void fitView({ nodes: [{ id: on }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 260 })
     },
     [commenting, boards, opened, fitView]
+  )
+
+  // Read, the running boards' pages are the reader's to use in place, and a button or a link in one
+  // that reads as the label of an arrow leaving it glides the canvas to the board it points to.
+  const reads = !board.editing && !commenting.commenting && opened === null
+  const follow = useRef<(from: string, text: string) => void>(() => {})
+  const gestures = useBoardGestures({
+    root: board.root,
+    pointed,
+    reading: reads,
+    opened: opened !== null,
+    padding: CANVAS_FIT_PADDING,
+    onPress: (from, text) => follow.current(from, text),
+  })
+  follow.current = (from, text) => {
+    const to = followedArrow(arrows, boards, from, text)
+    const target = boards.find((each) => each.id === to)
+    if (target) gestures.glide(target)
+  }
+  const live = useMemo(
+    () => ({
+      version: version ?? null,
+      live: running,
+      previews,
+      mode,
+      interactive: reads && version !== undefined,
+      gestures,
+      ...(version ? { open: setOpened } : {}),
+    }),
+    [version, running, previews, mode, reads, gestures]
   )
 
   // Read, the board's handlers stay the same from one draw to the next, so React Flow doesn't
