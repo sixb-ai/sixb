@@ -6,6 +6,8 @@ import { OPEN_ARTIFACT_TOOL_SPEC, PUBLISH_ARTIFACT_TOOL_SPEC } from "../src/arti
 import { STOP_TOOL_SPEC, WAIT_TOOL_SPEC } from "../src/tools/background"
 import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { EDIT_TOOL_SPEC } from "../src/tools/edit"
+import { GLOB_TOOL_SPEC } from "../src/tools/glob"
+import { GREP_TOOL_SPEC } from "../src/tools/grep"
 import { agentModelToolSpecs } from "../src/tools/model-spec"
 import { READ_TOOL_SPEC } from "../src/tools/read"
 import { WEB_FETCH_TOOL_SPEC } from "../src/tools/web-fetch/tool"
@@ -35,6 +37,8 @@ describe("agent model tool specifications", () => {
       READ_TOOL_SPEC,
       EDIT_TOOL_SPEC,
       WRITE_TOOL_SPEC,
+      GLOB_TOOL_SPEC,
+      GREP_TOOL_SPEC,
       BASH_TOOL_SPEC,
       WAIT_TOOL_SPEC,
       STOP_TOOL_SPEC,
@@ -57,6 +61,8 @@ describe("agent model tool specifications", () => {
       READ_TOOL_SPEC.name,
       EDIT_TOOL_SPEC.name,
       WRITE_TOOL_SPEC.name,
+      GLOB_TOOL_SPEC.name,
+      GREP_TOOL_SPEC.name,
       BASH_TOOL_SPEC.name,
       WAIT_TOOL_SPEC.name,
       STOP_TOOL_SPEC.name,

@@ -136,8 +136,9 @@ turn N's last request sent, on every storage:
   (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
   history's saved files back while the model starts: those the sandbox lacks, newest within a
   budget, read a few at a time and no further than their declared size, written oldest first.
-  `read` pages by itself and is never saved; a sandbox or store that cannot take the file leaves
-  the model the part's copy. A cleared preview points at the file.
+  `read` pages by itself, and `glob` and `grep` cap what they return: they are never saved; a
+  sandbox or store that cannot take the file leaves the model the part's copy. A cleared preview
+  points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
@@ -203,8 +204,11 @@ For a blank sandbox:
    and nothing else.
 2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
    sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
-3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
-   `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
+3. Each `read` call runs a fixed, bounded script with model input passed as command arguments.
+   `glob` and `grep` run the run's own `sixb search` with the request as one JSON argument
+   ([sandbox-search.ts](../src/tools/sandbox-search.ts)): one walker and one `.gitignore` matcher
+   in every sandbox, where `rg` or GNU tools may be missing. Each `bash` call becomes
+   `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 `bash` with `run_in_background` starts a command that outlives its call
