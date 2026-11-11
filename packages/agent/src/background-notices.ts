@@ -1,18 +1,10 @@
 import { type AgentMessage, stableJsonStringify } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import type { BackgroundCommandState, BackgroundCommands } from "./background-commands"
-import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "./tools/background"
-import { BASH_TOOL_SPEC } from "./tools/bash"
+import { reportedCommands } from "./tools/background"
 
 /** A command's displayed form in a notice: its first line, cut. */
 const NOTICE_COMMAND_CHARS = 80
-
-/** The tools whose results report a background command's state. */
-const STATE_TOOLS: ReadonlySet<string> = new Set([
-  BASH_TOOL_SPEC.name,
-  BASH_OUTPUT_TOOL_SPEC.name,
-  BASH_STOP_TOOL_SPEC.name,
-])
 
 /** A notice's line that tells a command ended, and its id. */
 const ENDED_LINE = /^Background command (\S+) \(`.*?`\) (?:exited with code|was stopped)/gm
@@ -113,9 +105,10 @@ export function backgroundCommandsLeftRunning(
     for (const part of message.parts) {
       if (part.type !== "tool-call" || part.state !== "output-available") continue
 
-      if (STATE_TOOLS.has(part.toolName) && isCommandState(part.output)) {
-        if (part.output.status === "running") running.set(part.output.id, part.output)
-        else running.delete(part.output.id)
+      for (const command of reportedCommands(part.toolName, part.output)) {
+        if (!isCommandState(command)) continue
+        if (command.status === "running") running.set(command.id, command)
+        else running.delete(command.id)
       }
       if (part.modelOutput?.type === "text") {
         for (const [, id] of part.modelOutput.value.matchAll(ENDED_LINE)) {

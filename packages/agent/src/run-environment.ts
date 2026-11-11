@@ -87,7 +87,7 @@ import {
 } from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import { createBashOutputTool, createBashStopTool } from "./tools/background"
+import { createStopTool, createWaitTool, type WaitableChildren } from "./tools/background"
 import { createBashTool } from "./tools/bash"
 import { createEditTool } from "./tools/edit"
 import { FileReadLedger } from "./tools/file-writes"
@@ -187,6 +187,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly history: AgentTurnHistory
   /** Framework-owned tools of the conversational Agent: delegation. */
   readonly frameworkTools?: readonly ModelTool[]
+  /** Its children, which `wait` and `stop` reach beside its background commands. */
+  readonly children?: WaitableChildren
 }
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -418,6 +420,7 @@ export async function createConversationAgentEnvironment(
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
+      ...(input.children ? { children: input.children } : {}),
       ...(memory ? { memory } : {}),
       ...(conversation === undefined ? {} : { conversation }),
       onDetachedTeardown: input.onDetachedTeardown,
@@ -817,6 +820,8 @@ interface AgentEnvironmentSetup
   readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
+  /** The Agent's children, which `wait` and `stop` reach beside its background commands. */
+  readonly children?: WaitableChildren
   /**
    * A conversation, or a child of one, publishes artifacts into its conversation, through its
    * session, and edits them from their installed copies; other runs return text.
@@ -925,8 +930,8 @@ async function startAgentEnvironment(
   appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
   appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
-  appendBuiltInTool(tools, createBashOutputTool(resolveSandbox, background))
-  appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))
+  appendBuiltInTool(tools, createWaitTool(resolveSandbox, background, input.children))
+  appendBuiltInTool(tools, createStopTool(resolveSandbox, background, input.children))
   if (plan.web?.search) {
     appendBuiltInTool(tools, createWebSearchTool({ search: input.webSearch, web: plan.web }))
   }

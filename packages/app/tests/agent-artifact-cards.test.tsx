@@ -172,6 +172,20 @@ describe("what a turn wrote to the current version", () => {
     // The current version changes until someone creates it: its number says nothing yet.
     expect(row).not.toContain("· v2")
   })
+
+  // Removal proof: read an update by its tool name alone in isUpdate; publish_artifact with an id
+  // then reads as a new artifact, "Published".
+  test("is an update when publish_artifact names the artifact by its id", () => {
+    const tool = {
+      ...(update("art_review0001", 3, "Q3 review") as { tool: NormalizedTool }).tool,
+      toolName: "publish_artifact",
+    }
+    expect(turnArtifacts([{ kind: "tool", tool }])[0]?.created).toBe(false)
+    expect(render(<PublishArtifactToolView tool={tool} />)).toContain("Updated Q3 review")
+    // "null" for no id is a new artifact.
+    const created = { ...tool, input: { id: "null", path: "work/review", title: "Q3 review" } }
+    expect(turnArtifacts([{ kind: "tool", tool: created }])[0]?.created).toBe(true)
+  })
 })
 
 describe("an artifact's cards across turns", () => {

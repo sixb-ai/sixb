@@ -337,6 +337,27 @@ describe("a background command", () => {
         )
       )
     ).toEqual({ verb: "stop", detail: "bg_1a2b3c  bun test", note: "stopped" })
+
+    // wait and stop, which took their place, list what they named.
+    expect(
+      toolLine(
+        call(
+          "wait",
+          { ids: ["bg_1a2b3c"] },
+          { commands: [{ ...read, status: "exited", exitCode: 1, output: "1 fail\n" }] }
+        )
+      )
+    ).toMatchObject({ verb: "wait", detail: "bg_1a2b3c  bun test", note: "exit 1", failed: true })
+    const stopped = { results: [{ runId: "terms", status: "cancelled" }], files: [] }
+    expect(
+      toolLine(
+        call(
+          "stop",
+          { id: "terms" },
+          { kind: "agentToolResult", content: [{ type: "text", text: JSON.stringify(stopped) }] }
+        )
+      )
+    ).toEqual({ verb: "stop", detail: "terms", note: "stopped" })
   })
 
   test("ticks by the second while it runs", () => {
@@ -417,6 +438,21 @@ describe("a call as one line", () => {
       note: "exit 2",
       preview: ["unknown option"],
     })
+  })
+
+  test("reads publish_artifact with an artifact's id as an update", () => {
+    const publish = (input: Record<string, unknown>) =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "publish_artifact",
+        state: "done",
+        input: { path: "work/review", title: "Q3 review", ...input },
+        output: { artifactId: "art_k3m9q2x7tp" },
+      })
+    expect(publish({ kind: "document" })).toMatchObject({ verb: "publish", detail: "Q3 review" })
+    expect(publish({ id: "art_k3m9q2x7tp" })).toMatchObject({ verb: "update" })
+    expect(publish({ id: "null", kind: "document" })).toMatchObject({ verb: "publish" })
   })
 
   // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read

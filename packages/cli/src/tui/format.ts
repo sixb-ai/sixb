@@ -72,6 +72,31 @@ export function toolLine(
         ...error,
       }
     }
+    case "wait":
+    case "stop": {
+      // Background commands by their id, sub-agents by their key; with a sub-agent, the result is
+      // rich, its JSON in its text.
+      const ids = Array.isArray(input?.ids) ? input.ids.map(text) : [text(input?.id)]
+      const value = record(richValue(output))
+      const commands = Array.isArray(value?.commands) ? value.commands.map(record) : []
+      const results = Array.isArray(value?.results) ? value.results.map(record) : []
+      const [command] = commands
+      const one = commands.length + results.length === 1
+      const written = one ? text(command?.output) : ""
+      const childStatus = one && !command ? text(results[0]?.status) : ""
+      return {
+        verb: part.name,
+        // One command reads as bash_output's did: its id, then what it runs.
+        detail: [...ids, one && command ? firstLine(text(command.command)) : ""]
+          .filter(Boolean)
+          .join("  "),
+        ...(written.trim() ? { preview: lines(written) } : {}),
+        ...(one && command ? backgroundNote(text(command.status), command.exitCode) : {}),
+        ...(childStatus ? childNote(childStatus) : {}),
+        ...error,
+      }
+    }
+    // What `wait` and `stop` were called for a background command: earlier threads hold them.
     case "bash_output":
     case "bash_stop": {
       const output_ = text(output?.output)
@@ -162,11 +187,14 @@ export function toolLine(
         ...(failed ? fetchFailure(part.error) : {}),
       }
     case "publish_artifact":
+    // What `publish_artifact` with an id was called: earlier threads hold calls to them.
     case "update_artifact":
-    // What `update_artifact` was called: earlier threads hold calls to it.
     case "publish_artifact_version":
       return {
-        verb: part.name === "publish_artifact" ? "publish" : "update",
+        verb:
+          part.name === "publish_artifact" && !text(input?.id).startsWith("art_")
+            ? "publish"
+            : "update",
         detail: text(input?.title) || text(input?.path) || text(input?.artifactId),
         ...(output?.artifactId ? { note: `artifact:${text(output.artifactId)}` } : {}),
         ...error,
@@ -184,6 +212,7 @@ export function toolLine(
         detail: [text(input?.key), firstLine(text(input?.task))].filter(Boolean).join("  "),
         ...error,
       }
+    // What `wait` was called for sub-agents: earlier threads hold calls to it.
     case "wait_agent": {
       const runIds = Array.isArray(input?.runIds) ? input.runIds.length : 0
       return {
@@ -332,6 +361,14 @@ function backgroundNote(status: string, exitCode: unknown): Pick<ToolLine, "note
   return exitCode === 0 ? { note: "exit 0" } : { note: `exit ${exitCode}`, failed: true }
 }
 
+/** How a sub-agent a `wait` or a `stop` named stands, beside its line. */
+function childNote(status: string): Pick<ToolLine, "note" | "failed"> {
+  if (status === "succeeded") return { note: "done" }
+  if (status === "cancelled") return { note: "stopped" }
+  if (status === "failed") return { note: "failed", failed: true }
+  return { note: status.replaceAll("_", " ") }
+}
+
 /** How decided calls ended, as the web chat's approval card names it. */
 function decidedLine(outcomes: readonly ApprovalOutcome[]): Pick<ToolLine, "note" | "failed"> {
   const ended = outcomes.map(outcomeNote)
@@ -368,6 +405,19 @@ function outcomeNote(outcome: ApprovalOutcome): { readonly note: string; readonl
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
+/** A rich result's value, its JSON text parsed; any other output as it is. */
+function richValue(output: Record<string, unknown> | undefined): unknown {
+  if (output?.kind !== "agentToolResult" || !Array.isArray(output.content)) return output
+  const [first] = output.content
+  const textPart = record(first)
+  if (typeof textPart?.text !== "string") return undefined
+  try {
+    return JSON.parse(textPart.text)
   } catch {
     return undefined
   }

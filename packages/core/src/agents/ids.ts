@@ -22,9 +22,12 @@ export function createAgentRunId(): string {
   return `agt_run_${randomUUID()}`
 }
 
+/** How every child's first run id starts: told apart from the key the Agent spawned it under. */
+export const SUBAGENT_RUN_ID_PREFIX = "agt_run_child_"
+
 /** One stable child identity per parent-selected spawn key. */
 export function createSubagentRunId(parentRunId: string, spawnKey: string): string {
-  return `agt_run_child_${spawnDigest(parentRunId, spawnKey)}`
+  return `${SUBAGENT_RUN_ID_PREFIX}${spawnDigest(parentRunId, spawnKey)}`
 }
 
 /**

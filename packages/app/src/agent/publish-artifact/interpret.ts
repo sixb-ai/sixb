@@ -3,8 +3,9 @@ import type { ArtifactKindName } from "../../artifacts/kind-icon"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 
 /**
- * Creating an artifact, and changing one: `update_artifact` writes its current version, and
- * `publish_artifact_version`, in threads from before, published the next version.
+ * Creating an artifact, and changing one: `publish_artifact` with an id writes its current version.
+ * Threads from before hold `update_artifact`, which did that, and `publish_artifact_version`,
+ * which published the next version.
  */
 const PUBLISH_TOOLS = new Set(["publish_artifact", "update_artifact", "publish_artifact_version"])
 
@@ -13,8 +14,16 @@ export function isPublishTool(toolName: string): boolean {
 }
 
 /** Whether a publish call changed an artifact that was there before, rather than created one. */
-export function isUpdateTool(toolName: string): boolean {
-  return toolName === "update_artifact" || toolName === "publish_artifact_version"
+export function isUpdate(tool: Pick<NormalizedTool, "toolName" | "input">): boolean {
+  if (tool.toolName !== "publish_artifact") return isPublishTool(tool.toolName)
+  const input = tool.input
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "id" in input &&
+    typeof input.id === "string" &&
+    input.id.trim().startsWith("art_")
+  )
 }
 
 /** What one publish call published, read from its result. */
@@ -86,7 +95,7 @@ export function turnArtifacts(parts: readonly NormalizedPart[]): TurnArtifact[] 
     const published = publishedArtifact(part.tool)
     if (!published) continue
     const earlier = byId.get(published.artifactId)
-    const created = earlier?.created === true || part.tool.toolName === "publish_artifact"
+    const created = earlier?.created === true || !isUpdate(part.tool)
     if (!earlier || writtenAfter(published, earlier)) {
       byId.set(published.artifactId, { ...published, created })
     } else if (created !== earlier.created) {

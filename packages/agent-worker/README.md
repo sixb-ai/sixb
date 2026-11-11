@@ -69,30 +69,31 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   admission. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
-- Conversations get `spawn_agent`, `wait_agent` and `message_agent`. `spawn_agent` takes a tier or one of the exact
+- Conversations get `spawn_agent` and `message_agent`; `wait` and `stop` take a child's key
+  beside a background command's id. `spawn_agent` takes a tier or one of the exact
   `{ provider, modelId }` pairs of the project catalog, for example
   `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. Its guide
   lists each model from its configured definition: name, description, context limits and
   capabilities, never a price, which is not known. The schema restricts selection to configured
   pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
   Each child works in a thread of its own, which holds its task and then its work.
-  `wait_agent` returns each child's final answer, the text it wrote after its last local tool call
+  `wait` returns each child's final answer, the text it wrote after its last local tool call
   (else its last text). A child whose call waits for approval pauses, its work in its thread, and comes
   back `awaiting_approval`; the turn pauses once no other child is at work, and the turn that
   resumes it continues the child first (see
   [paused children](../agent/docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
   paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
-  back as files of `wait_agent`'s result, under `.sixb/agent/children/<key>/` for the turn and in
+  back as files of `wait`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is
   installed in the parent's `$SIXB_ARTIFACTS` (see
   [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns once they have all
   ended, or one asks a question.
   `message_agent` sends a queued or running child a message, by its key, through the turn's
   mailbox in the runner; the child reads it
-  before its next step, or answers again when it came as it answered, and `wait_agent` lists in
+  before its next step, or answers again when it came as it answered, and `wait` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
   [messages to a child](../agent/docs/runtime-design.md#messages-to-a-child)). Children get
-  `ask`, which waits for the parent's answer: `wait_agent` returns as soon as a child of
+  `ask`, which waits for the parent's answer: `wait` returns as soon as a child of
   the turn asks, with its question in `questions`, and `message_agent` to that child is the
   answer. Before a turn records its end, each child still waiting pauses `awaiting_answer`, the
   next turn reads which children wait, and its `message_agent` to the key continues it with the
@@ -146,12 +147,11 @@ Earlier files in the retained conversation are discoverable through the sandbox'
 `$SIXB_ATTACHMENTS` manifest and readable with `read` when materialized. Current user
 attachments and file-producing tool results retain their model-input projections.
 
-`publish_artifact` creates an artifact and `update_artifact` writes its latest version
-(`../agent/src/artifacts/publish-tool.ts`): the open version's content is replaced, or the next
-version opens after one the user created; only people create versions. They are two tools so that
-every argument of each is required: a mode carried by an optional or null argument is where models
-differ, and with every property required each model adapter sends both schemas strict. Offered only
-to conversations whose storage holds artifacts, each reads a file or directory from the sandbox,
+`publish_artifact` creates an artifact by its `kind`, or writes the latest version of one by its
+`id` (`../agent/src/artifacts/publish-tool.ts`): the open version's content is replaced, or the
+next version opens after one the user created; only people create versions. An empty id, or
+"null", is no id, which a model sends for nothing. Offered only
+to conversations whose storage holds artifacts, it reads a file or directory from the sandbox,
 stores its bytes against the run's file budget, which counts identical content once, and publishes
 it with the thread and run as its origin, authored by whoever asked for the turn: a new artifact
 for the thread's owner, or an update of one the requester owns or this conversation already
@@ -174,7 +174,7 @@ artifact the thread shares under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `
 newest first within a byte budget; an artifact whose files cannot be read is listed without them.
 Each entry names the revision its copy holds, which the next update is based on, and a pinned
 address only for a version the user created. Each publish replaces its artifact's copy and entry,
-so both stay at the latest revision during the run; after `wait_agent`, what the turn's children
+so both stay at the latest revision during the run; after `wait`, what the turn's children
 wrote is installed the same way.
 The built-in `sixb-artifacts` skill (`../agent/src/skills/`) describes the formats the publisher accepts; its
 examples are published in the tests.

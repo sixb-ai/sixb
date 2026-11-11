@@ -2,12 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { defineAgentTool } from "@sixb/core"
 import { type AgentRunWebPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import {
-  OPEN_ARTIFACT_TOOL_SPEC,
-  PUBLISH_ARTIFACT_TOOL_SPEC,
-  UPDATE_ARTIFACT_TOOL_SPEC,
-} from "../src/artifacts/publish-tool"
-import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "../src/tools/background"
+import { OPEN_ARTIFACT_TOOL_SPEC, PUBLISH_ARTIFACT_TOOL_SPEC } from "../src/artifacts/publish-tool"
+import { STOP_TOOL_SPEC, WAIT_TOOL_SPEC } from "../src/tools/background"
 import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { EDIT_TOOL_SPEC } from "../src/tools/edit"
 import { agentModelToolSpecs } from "../src/tools/model-spec"
@@ -40,10 +36,9 @@ describe("agent model tool specifications", () => {
       EDIT_TOOL_SPEC,
       WRITE_TOOL_SPEC,
       BASH_TOOL_SPEC,
-      BASH_OUTPUT_TOOL_SPEC,
-      BASH_STOP_TOOL_SPEC,
+      WAIT_TOOL_SPEC,
+      STOP_TOOL_SPEC,
       PUBLISH_ARTIFACT_TOOL_SPEC,
-      UPDATE_ARTIFACT_TOOL_SPEC,
       OPEN_ARTIFACT_TOOL_SPEC,
     ])
   })
@@ -63,8 +58,8 @@ describe("agent model tool specifications", () => {
       EDIT_TOOL_SPEC.name,
       WRITE_TOOL_SPEC.name,
       BASH_TOOL_SPEC.name,
-      BASH_OUTPUT_TOOL_SPEC.name,
-      BASH_STOP_TOOL_SPEC.name,
+      WAIT_TOOL_SPEC.name,
+      STOP_TOOL_SPEC.name,
       WEB_SEARCH_TOOL_SPEC.name,
       WEB_FETCH_TOOL_SPEC.name,
     ])

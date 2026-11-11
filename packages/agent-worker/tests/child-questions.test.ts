@@ -32,7 +32,7 @@ import { SubagentInbox } from "../../agent/src/subagent-inbox"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 
-// A child asks its parent with ask: the parent's wait_agent returns the question at once,
+// A child asks its parent with ask: the parent's wait returns the question at once,
 // and message_agent answers it while the child waits. When the parent's turn ends first, the child
 // pauses on its question, and the next turn's message_agent continues it with the answer.
 
@@ -320,7 +320,7 @@ function realLoopTurn(): Promise<void> {
   })
 }
 
-/** Drive fake time, `wait_agent`'s polling included, until `check` holds. */
+/** Drive fake time, `wait`'s polling included, until `check` holds. */
 async function underFakeTime<T>(
   check: () => T | null | undefined | false | Promise<T | null | undefined | false>,
   label: string
@@ -435,24 +435,24 @@ function westAsked(): Promise<void> {
 /** A parent that spawns West, waits for its question and answers the user with it. */
 function asksTheUser(request: LanguageModelRequest, call: number) {
   if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-  if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+  if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
   return answer(`West asks: ${QUESTION}`)
 }
 
 describe("a child's question", () => {
   // Removal proof: drop `this.#questions.listen()` from SubagentCoordinator.admit; nothing wakes
-  // wait_agent, which waits for the deadline margin and the turn never gets to answer.
+  // wait, which waits for the deadline margin and the turn never gets to answer.
   test("returns the parent's wait at once, and its answer reaches the child in the same run", async () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
         }
         if (call === 4) {
           const westId = westRunId(harness.parentRequests[1])
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+          return toolCalls(["wait-again", "wait", { ids: [westId] }])
         }
         return answer(RESULT)
       },
@@ -502,13 +502,13 @@ describe("a child's question", () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: "2026, west only" }])
         }
         if (call === 4) {
           const westId = westRunId(harness.parentRequests[1])
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+          return toolCalls(["wait-again", "wait", { ids: [westId] }])
         }
         return answer(RESULT)
       },
@@ -543,13 +543,13 @@ describe("a child's question", () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
         }
         if (call === 4) {
           const westId = westRunId(harness.parentRequests[1])
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+          return toolCalls(["wait-again", "wait", { ids: [westId] }])
         }
         return answer(RESULT)
       },
@@ -598,16 +598,16 @@ describe("a question its parent's turn ends on", () => {
       parent: (request, call) => {
         // The first turn cannot answer: it asks the user and ends.
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) return answer(`West asks: ${QUESTION}`)
 
         // The next one relays the user's answer.
         const westId = westRunId(harness.parentRequests[1])
-        if (call === 4) return toolCalls(["paused", "wait_agent", { runIds: [westId] }])
+        if (call === 4) return toolCalls(["paused", "wait", { ids: [westId] }])
         if (call === 5) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
         }
-        if (call === 6) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+        if (call === 6) return toolCalls(["wait-again", "wait", { ids: [westId] }])
         return answer(RESULT)
       },
       west: (_request, call) => {
@@ -708,7 +708,7 @@ describe("a question its parent's turn ends on", () => {
     const harness = setup({
       parent: async (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
 
         // The user stops the turn while West waits on its question.
         const { parentRunId } = await child(harness.agents, westRunId(harness.parentRequests[1]))
@@ -743,7 +743,7 @@ describe("a turn that ends while a child waits on its question", () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         return toolCalls(["held", "bash", { command: HELD_COMMAND }])
       },
       west: () => toolCalls(["ask", "ask", { questions: [{ question: QUESTION }] }]),
@@ -830,11 +830,11 @@ describe("a turn that ends while a child waits on its question", () => {
           return toolCalls(["steer", "message_agent", { key: WEST.key, text: STEER }])
         }
         const westId = westRunId(harness.parentRequests[1])
-        if (call === 3) return toolCalls(["wait", "wait_agent", { runIds: [westId] }])
+        if (call === 3) return toolCalls(["wait", "wait", { ids: [westId] }])
         if (call === 4) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
         }
-        if (call === 5) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+        if (call === 5) return toolCalls(["wait-again", "wait", { ids: [westId] }])
         return answer(RESULT)
       },
       west: (_request, call) =>
@@ -864,7 +864,7 @@ describe("a turn that ends while a child waits on its question", () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) {
           return toolCalls(
             ["answer", "message_agent", { key: WEST.key, text: ANSWER }],
@@ -872,7 +872,7 @@ describe("a turn that ends while a child waits on its question", () => {
           )
         }
         const westId = westRunId(harness.parentRequests[1])
-        if (call === 4) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+        if (call === 4) return toolCalls(["wait-again", "wait", { ids: [westId] }])
         return answer(RESULT)
       },
       west: (_request, call) =>
@@ -902,7 +902,7 @@ describe("a turn that ends while a child waits on its question", () => {
       parent: (request, call) => {
         if (call <= 3) return asksTheUser(request, call)
         const westId = westRunId(harness.parentRequests[1])
-        if (call === 4) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+        if (call === 4) return toolCalls(["wait-again", "wait", { ids: [westId] }])
         return answer(RESULT)
       },
       west: (_request, call) =>
@@ -962,7 +962,7 @@ describe("a child paused on its question, in a later turn", () => {
         }
         const westId = westRunId(harness.parentRequests[1])
         if (call === 5 || call === 8) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+          return toolCalls(["wait-again", "wait", { ids: [westId] }])
         }
         return answer(RESULT)
       },
@@ -1010,7 +1010,7 @@ describe("a child paused on its question, in a later turn", () => {
         }
         const westId = westRunId(harness.parentRequests[1])
         if (call === 5 + LATER_TURNS) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+          return toolCalls(["wait-again", "wait", { ids: [westId] }])
         }
         return answer(RESULT)
       },
@@ -1053,7 +1053,7 @@ describe("a child paused on its question, in a later turn", () => {
           )
         }
         const westId = westRunId(harness.parentRequests[1])
-        if (call === 5) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
+        if (call === 5) return toolCalls(["wait-again", "wait", { ids: [westId] }])
         return answer(RESULT)
       },
       west: (_request, call) =>
@@ -1072,7 +1072,7 @@ describe("a child paused on its question, in a later turn", () => {
 
       expect(replies).toContainEqual(expect.objectContaining({ delivery: "answer" }))
       expect(replies).toContainEqual(
-        "[SixbAgent] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent."
+        "[SixbAgent] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait."
       )
     } finally {
       await settle(harness.worker.stop(), "worker stop")

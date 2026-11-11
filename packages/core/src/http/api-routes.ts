@@ -459,7 +459,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   // A sub-agent's files are for people reading its conversation; its parent got them from
-  // `wait_agent`.
+  // `wait`.
   {
     operationId: "getAgentChildFileContent",
     method: "GET",
