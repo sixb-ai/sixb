@@ -31,3 +31,11 @@ export type {
 export { createInstanceApiClient, runInstanceCli } from "./run"
 export type { SandboxCliAssets } from "./sandbox-cli"
 export { loadSandboxCliAssets } from "./sandbox-cli"
+export type {
+  GlobSearchRequest,
+  GlobSearchResult,
+  GrepMatch,
+  GrepSearchRequest,
+  GrepSearchResult,
+  SearchErrorCode,
+} from "./search/search"

@@ -2644,6 +2644,722 @@ function parseManifest(value) {
   return { repos: parsed };
 }
 
+// src/search/search.ts
+import { Buffer as Buffer3 } from "node:buffer";
+import { lstatSync as lstatSync2, readFileSync as readFileSync2, realpathSync, statSync as statSync2 } from "node:fs";
+import { basename as basename2, dirname as dirname4, relative, resolve } from "node:path";
+
+// src/search/pattern.ts
+var MAX_ALTERNATIVES = 256;
+
+class PatternError extends Error {
+}
+function pathPatternSource(pattern) {
+  const segments = pattern.split("/");
+  let source = "";
+  segments.forEach((segment, index) => {
+    const last = index === segments.length - 1;
+    if (segment === "**") {
+      source += last ? ".*" : "(?:[^/]*/)*";
+      return;
+    }
+    source += segmentSource(segment);
+    if (!last)
+      source += "/";
+  });
+  return source;
+}
+function segmentSource(segment) {
+  let source = "";
+  for (let index = 0;index < segment.length; index += 1) {
+    const char = segment[index];
+    if (char === "\\") {
+      index += 1;
+      source += escapeRegExp(segment[index] ?? "\\");
+    } else if (char === "*") {
+      while (segment[index + 1] === "*")
+        index += 1;
+      source += "[^/]*";
+    } else if (char === "?") {
+      source += "[^/]";
+    } else if (char === "[") {
+      const parsed = characterClass(segment, index);
+      if (parsed) {
+        source += parsed.source;
+        index = parsed.end;
+      } else {
+        source += "\\[";
+      }
+    } else {
+      source += escapeRegExp(char);
+    }
+  }
+  return source;
+}
+function characterClass(segment, start) {
+  let index = start + 1;
+  const negated = segment[index] === "!" || segment[index] === "^";
+  if (negated)
+    index += 1;
+  let body = "";
+  if (segment[index] === "]") {
+    body += "\\]";
+    index += 1;
+  }
+  for (;index < segment.length; index += 1) {
+    const char = segment[index];
+    if (char === "]") {
+      return { source: negated ? `[^/${body}]` : `[${body}]`, end: index };
+    }
+    if (char === "\\" && index + 1 < segment.length) {
+      index += 1;
+      body += escapeClassChar(segment[index]);
+    } else {
+      body += char === "-" ? "-" : escapeClassChar(char);
+    }
+  }
+  return;
+}
+function expandBraces(pattern) {
+  const expanded = [];
+  expandInto(pattern, expanded);
+  return expanded;
+}
+function expandInto(pattern, into) {
+  for (let index = 0;index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "\\") {
+      index += 1;
+      continue;
+    }
+    if (char !== "{")
+      continue;
+    const group = braceGroup(pattern, index);
+    if (!group)
+      continue;
+    const prefix = pattern.slice(0, index);
+    const suffix = pattern.slice(group.end + 1);
+    for (const option of group.options)
+      expandInto(`${prefix}${option}${suffix}`, into);
+    return;
+  }
+  if (into.length >= MAX_ALTERNATIVES) {
+    throw new PatternError(`it names more than ${MAX_ALTERNATIVES} alternatives with {…}`);
+  }
+  into.push(pattern);
+}
+function braceGroup(pattern, start) {
+  const options = [];
+  let depth = 0;
+  let optionStart = start + 1;
+  for (let index = start + 1;index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "\\") {
+      index += 1;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}" && depth > 0) {
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      options.push(pattern.slice(optionStart, index));
+      optionStart = index + 1;
+    } else if (char === "}") {
+      if (options.length === 0)
+        return;
+      options.push(pattern.slice(optionStart, index));
+      return { options, end: index };
+    }
+  }
+  return;
+}
+function compilePattern(source, flags = "") {
+  try {
+    return new RegExp(`^${source}$`, flags);
+  } catch (error) {
+    throw new PatternError(error instanceof Error ? error.message : String(error));
+  }
+}
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+function escapeClassChar(char) {
+  return /[\\\]^[-]/.test(char) ? `\\${char}` : char;
+}
+
+// src/search/glob.ts
+function compileGlob(pattern) {
+  const alternatives = expandBraces(pattern).map(compileAlternative);
+  const segments = alternatives.flatMap((alternative) => alternative.segments);
+  const folderSegments = new Map;
+  const segmentMatches = (patternSegment, name) => {
+    let regex = folderSegments.get(patternSegment);
+    if (!regex) {
+      regex = compilePattern(segmentSource(patternSegment));
+      folderSegments.set(patternSegment, regex);
+    }
+    return regex.test(name);
+  };
+  return {
+    matches(relativePath) {
+      const name = relativePath.slice(relativePath.lastIndexOf("/") + 1);
+      return alternatives.some((alternative) => alternative.regex.test(alternative.anyDepth ? name : relativePath));
+    },
+    mayContain(relativeFolder) {
+      const names = relativeFolder.split("/");
+      return alternatives.some((alternative) => {
+        if (alternative.anyDepth)
+          return true;
+        for (const [index, name] of names.entries()) {
+          const segment = alternative.segments[index];
+          if (segment === undefined)
+            return false;
+          if (segment === "**")
+            return true;
+          if (!segmentMatches(segment, name))
+            return false;
+        }
+        return alternative.segments.length > names.length;
+      });
+    },
+    namesHidden: segments.some((segment) => segment.startsWith(".")),
+    namesNodeModules: segments.some((segment) => segment.includes("node_modules"))
+  };
+}
+function compileAlternative(pattern) {
+  let relative = pattern;
+  while (relative.startsWith("./"))
+    relative = relative.slice(2);
+  const anchored = relative.startsWith("/");
+  if (anchored)
+    relative = relative.replace(/^\/+/, "");
+  if (!relative)
+    throw new PatternError("it names no file");
+  const anyDepth = !anchored && !relative.includes("/");
+  const segments = relative.split("/");
+  return {
+    anyDepth,
+    regex: compilePattern(anyDepth ? segmentSource(relative) : pathPatternSource(relative)),
+    segments
+  };
+}
+
+// src/search/walk.ts
+import { Buffer as Buffer2 } from "node:buffer";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+
+// src/search/gitignore.ts
+function parseGitignore(text) {
+  const rules = [];
+  const body = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  for (const rawLine of body.split(`
+`)) {
+    const rule = parseLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
+    if (rule)
+      rules.push(rule);
+  }
+  return rules;
+}
+function parseLine(rawLine) {
+  if (rawLine === "" || rawLine.startsWith("#"))
+    return;
+  let line = withoutTrailingSpaces(rawLine);
+  const negated = line.startsWith("!");
+  if (negated)
+    line = line.slice(1);
+  const folderOnly = line.endsWith("/");
+  line = line.replace(/\/+$/, "");
+  const anyDepth = !line.includes("/");
+  line = line.replace(/^\//, "");
+  if (!line)
+    return;
+  try {
+    const regex = compilePattern(anyDepth ? segmentSource(line) : pathPatternSource(line));
+    return { negated, folderOnly, anyDepth, regex };
+  } catch (error) {
+    if (error instanceof PatternError)
+      return;
+    throw error;
+  }
+}
+function withoutTrailingSpaces(line) {
+  let end = line.length;
+  while (end > 0 && line[end - 1] === " ") {
+    let backslashes = 0;
+    while (line[end - 2 - backslashes] === "\\")
+      backslashes += 1;
+    if (backslashes % 2 === 1)
+      break;
+    end -= 1;
+  }
+  return line.slice(0, end);
+}
+function isIgnored(files, path, isFolder) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  let ignored = false;
+  for (const file of files) {
+    const prefix = file.folder.endsWith("/") ? file.folder : `${file.folder}/`;
+    if (!path.startsWith(prefix))
+      continue;
+    const relative = path.slice(prefix.length);
+    for (const rule of file.rules) {
+      if (rule.folderOnly && !isFolder)
+        continue;
+      if (rule.negated !== ignored)
+        continue;
+      if (rule.regex.test(rule.anyDepth ? name : relative))
+        ignored = !rule.negated;
+    }
+  }
+  return ignored;
+}
+
+// src/search/walk.ts
+class FileWalk {
+  options;
+  #incomplete = false;
+  constructor(options) {
+    this.options = options;
+  }
+  get incomplete() {
+    return this.#incomplete;
+  }
+  *files() {
+    yield* this.#folder(this.options.root, "", this.options.ignoreFiles);
+  }
+  *#folder(folder, relativeFolder, ignoreFiles) {
+    if (this.#pastDeadline())
+      return;
+    let entries;
+    try {
+      entries = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const own = entries.some((entry) => entry.name === ".gitignore") ? readIgnoreFile(folder) : undefined;
+    const applying = own ? [...ignoreFiles, own] : ignoreFiles;
+    for (const entry of sortedEntries(entries)) {
+      if (this.#incomplete)
+        return;
+      const { name } = entry;
+      if (name === ".git")
+        continue;
+      if (!this.options.hidden && name.startsWith("."))
+        continue;
+      const path = childPath(folder, name);
+      const relative = relativeFolder ? `${relativeFolder}/${name}` : name;
+      if (entry.isDirectory()) {
+        if (name === "node_modules" && !this.options.nodeModules)
+          continue;
+        if (this.options.skipFolders.has(path))
+          continue;
+        if (isIgnored(applying, path, true))
+          continue;
+        if (this.options.mayContain && !this.options.mayContain(relative))
+          continue;
+        yield* this.#folder(path, relative, applying);
+        continue;
+      }
+      const symlink = entry.isSymbolicLink();
+      if (!entry.isFile() && !(symlink && isLinkToFile(path)))
+        continue;
+      if (isIgnored(applying, path, false))
+        continue;
+      if (this.#pastDeadline())
+        return;
+      yield { path, relative, symlink };
+    }
+  }
+  #pastDeadline() {
+    if (Date.now() >= this.options.deadline)
+      this.#incomplete = true;
+    return this.#incomplete;
+  }
+}
+var IGNORE_FILE_BYTES = 1024 * 1024;
+function readIgnoreFile(folder, name = ".gitignore") {
+  try {
+    const path = childPath(folder, name);
+    const stats = lstatSync(path);
+    if (!stats.isFile() || stats.size > IGNORE_FILE_BYTES)
+      return;
+    return { folder, rules: parseGitignore(readFileSync(path, "utf8")) };
+  } catch {
+    return;
+  }
+}
+function sortedEntries(entries) {
+  return entries.map((entry) => ({
+    entry,
+    key: Buffer2.from(entry.isDirectory() ? `${entry.name}/` : entry.name)
+  })).sort((left, right) => Buffer2.compare(left.key, right.key)).map(({ entry }) => entry);
+}
+function childPath(folder, name) {
+  return folder.endsWith("/") ? `${folder}${name}` : `${folder}/${name}`;
+}
+function isLinkToFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// src/search/search.ts
+var SEARCH_LIMITS = {
+  files: 100,
+  lines: 100,
+  linesPerFile: 20,
+  lineCharacters: 500,
+  matchLead: 40,
+  matchCharacters: 4000,
+  textBytes: 24 * 1024,
+  fileBytes: 10 * 1024 * 1024,
+  binaryProbeBytes: 8 * 1024
+};
+
+class SearchError extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "SearchError";
+  }
+}
+function globFiles(request, workingDirectory) {
+  const scope = resolveScope(request, workingDirectory);
+  const matcher = compileGlobOrFail(request.pattern, "invalid_pattern");
+  if (scope.file)
+    throw new SearchError("path_is_file", "The path is a file.");
+  const walk = scope.walk(matcher, matcher.namesHidden);
+  const files = [];
+  let truncated = false;
+  for (const file of walk.files()) {
+    if (!matcher.matches(file.relative))
+      continue;
+    if (files.length === SEARCH_LIMITS.files) {
+      truncated = true;
+      break;
+    }
+    files.push(scope.display(file.path));
+  }
+  return { files, truncated, ...walk.incomplete ? { incomplete: true } : {} };
+}
+function grepFiles(request, workingDirectory) {
+  const scope = resolveScope(request, workingDirectory);
+  const matchLine = lineMatcher(request.pattern, request.literal === true);
+  const include = request.include === undefined ? undefined : compileGlobOrFail(request.include, "invalid_include");
+  const walk = scope.file ? undefined : scope.walk(include, true);
+  const candidates = walk ? walk.files() : [{ path: scope.target, relative: basename2(scope.target), symlink: false }];
+  const matches = [];
+  const more = {};
+  let files = 0;
+  let textBytes = 0;
+  let textFull = false;
+  let truncated = false;
+  let stopped = false;
+  for (const file of candidates) {
+    if (include && walk && !include.matches(file.relative))
+      continue;
+    if (file.symlink && !scope.holds(file.path))
+      continue;
+    const read = readText2(file.path, walk === undefined);
+    if (!("text" in read)) {
+      if (walk === undefined && read.skipped !== "unreadable")
+        throw unsearchedError(read.skipped);
+      continue;
+    }
+    const path = scope.display(file.path);
+    let shown = 0;
+    let counted = 0;
+    for (const [index, line] of lines(read.text).entries()) {
+      if (Date.now() >= scope.deadline) {
+        stopped = true;
+        break;
+      }
+      const match = matchLine(line);
+      if (match === undefined)
+        continue;
+      const text = cutLine(line, match);
+      const bytes = Buffer3.byteLength(`  ${index + 1}: ${text}
+`) + (shown === 0 ? Buffer3.byteLength(`${path}
+
+`) : 0);
+      if (textBytes + bytes > SEARCH_LIMITS.textBytes)
+        textFull = true;
+      const full = textFull || matches.length === SEARCH_LIMITS.lines;
+      if (shown === 0 && full) {
+        truncated = true;
+        break;
+      }
+      if (shown > 0 && (shown === SEARCH_LIMITS.linesPerFile || full)) {
+        counted += 1;
+        continue;
+      }
+      matches.push({ path, line: index + 1, text });
+      textBytes += bytes;
+      shown += 1;
+    }
+    if (shown > 0)
+      files += 1;
+    if (counted > 0)
+      more[path] = counted;
+    if (truncated || stopped)
+      break;
+  }
+  return {
+    matches,
+    files,
+    ...Object.keys(more).length > 0 ? { more } : {},
+    truncated,
+    ...walk?.incomplete || stopped ? { incomplete: true } : {}
+  };
+}
+function resolveScope(request, workingDirectory) {
+  const deadline = Date.now() + request.timeoutMs;
+  const working = realpathSync(workingDirectory);
+  const context = request.contextDirectory === undefined ? undefined : realPath(resolve(working, request.contextDirectory));
+  const target = realPath(resolve(working, request.path ?? "."));
+  if (target === undefined)
+    throw new SearchError("path_missing", "The path does not exist.");
+  const root = context !== undefined && isWithin(target, context) ? context : isWithin(target, working) ? working : undefined;
+  if (root === undefined) {
+    throw new SearchError("path_outside", "The path is outside the run's folders.");
+  }
+  const stats = statSync2(target);
+  if (!stats.isFile() && !stats.isDirectory()) {
+    throw new SearchError("path_not_searchable", "The path is not a file or a folder.");
+  }
+  const holds = (path) => {
+    const real = realPath(path);
+    return real !== undefined && (isWithin(real, working) || context !== undefined && isWithin(real, context));
+  };
+  const display = (path) => isWithin(path, working) ? relative(working, path) || "." : path;
+  const walk = (matcher, hidden) => {
+    const namesNodeModules = relative(root, target).split("/").includes("node_modules");
+    return new FileWalk({
+      root: target,
+      ignoreFiles: [...repositoryIgnoreFiles(root), ...ancestorIgnoreFiles(root, target)],
+      hidden,
+      nodeModules: namesNodeModules || matcher?.namesNodeModules === true,
+      skipFolders: new Set(context !== undefined && !isWithin(target, context) ? [context] : []),
+      ...matcher ? { mayContain: (folder) => matcher.mayContain(folder) } : {},
+      deadline
+    });
+  };
+  return { target, file: stats.isFile(), deadline, holds, display, walk };
+}
+var REPOSITORY_LEVELS = 20;
+function repositoryIgnoreFiles(root) {
+  const above = [];
+  let folder = root;
+  for (let level = 0;level <= REPOSITORY_LEVELS; level += 1) {
+    if (holdsGit(folder)) {
+      const exclude = readIgnoreFile(folder, ".git/info/exclude");
+      return [
+        ...exclude ? [exclude] : [],
+        ...above.flatMap((parent) => readIgnoreFile(parent) ?? [])
+      ];
+    }
+    const parent = dirname4(folder);
+    if (parent === folder)
+      return [];
+    folder = parent;
+    above.unshift(folder);
+  }
+  return [];
+}
+function holdsGit(folder) {
+  try {
+    lstatSync2(childPath(folder, ".git"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function ancestorIgnoreFiles(root, target) {
+  if (target === root)
+    return [];
+  const folders = [];
+  for (let folder = dirname4(target);isWithin(folder, root); folder = dirname4(folder)) {
+    folders.unshift(folder);
+    if (folder === root)
+      break;
+  }
+  return folders.flatMap((folder) => readIgnoreFile(folder) ?? []);
+}
+function lineMatcher(pattern, literal) {
+  if (literal) {
+    const ignoreCase = !/\p{Lu}/u.test(pattern);
+    const needle = ignoreCase ? pattern.toLowerCase() : pattern;
+    return (line) => {
+      const matched = linePrefix(line, SEARCH_LIMITS.matchCharacters);
+      const index = (ignoreCase ? matched.toLowerCase() : matched).indexOf(needle);
+      return index < 0 ? undefined : { index: Math.min(index, line.length), length: needle.length };
+    };
+  }
+  const regex = lineRegex(pattern);
+  return (line) => {
+    const found = regex.exec(linePrefix(line, SEARCH_LIMITS.matchCharacters));
+    return found ? { index: found.index, length: found[0].length } : undefined;
+  };
+}
+function lineRegex(pattern) {
+  const written = pattern.replace(/\\(?:[pP]\{[^}]*\}|.)/g, "");
+  const flags = /\p{Lu}/u.test(written) ? "" : "i";
+  try {
+    return new RegExp(pattern, `${flags}u`);
+  } catch {}
+  try {
+    return new RegExp(pattern, flags);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new SearchError("invalid_pattern", message.replace(/^Invalid regular expression: (?:\/.*\/[a-z]*: )?/, ""));
+  }
+}
+function compileGlobOrFail(pattern, code) {
+  try {
+    return compileGlob(pattern);
+  } catch (error) {
+    if (error instanceof PatternError)
+      throw new SearchError(code, error.message);
+    throw error;
+  }
+}
+function readText2(path, strict) {
+  try {
+    if (statSync2(path).size > SEARCH_LIMITS.fileBytes)
+      return { skipped: "too_large" };
+    const bytes = readFileSync2(path);
+    if (bytes.subarray(0, SEARCH_LIMITS.binaryProbeBytes).includes(0))
+      return { skipped: "binary" };
+    if (!strict)
+      return { text: bytes.toString("utf8") };
+    try {
+      return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) };
+    } catch {
+      return { skipped: "binary" };
+    }
+  } catch {
+    return { skipped: "unreadable" };
+  }
+}
+function unsearchedError(reason) {
+  return reason === "binary" ? new SearchError("file_binary", "The file is binary, or not UTF-8 text.") : new SearchError("file_too_large", "The file is over 10 MiB.");
+}
+function lines(text) {
+  const split = text.split(`
+`);
+  if (split.at(-1) === "")
+    split.pop();
+  return split.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
+}
+function cutLine(line, match) {
+  const budget = SEARCH_LIMITS.lineCharacters;
+  if (line.length <= budget)
+    return line;
+  const room = budget - 1;
+  const start = match.index + match.length <= budget ? 0 : Math.max(0, Math.min(match.index - SEARCH_LIMITS.matchLead, line.length - room));
+  if (start === 0)
+    return `${linePrefix(line, budget)}…`;
+  const from = isLowSurrogate(line.charCodeAt(start)) ? start + 1 : start;
+  const window = linePrefix(line.slice(from, from + room + 1), room);
+  return `…${window}${from + window.length < line.length ? "…" : ""}`;
+}
+function isLowSurrogate(code) {
+  return code >= 56320 && code <= 57343;
+}
+function linePrefix(line, length) {
+  if (line.length <= length)
+    return line;
+  const code = line.charCodeAt(length - 1);
+  return line.slice(0, code >= 55296 && code <= 56319 ? length - 1 : length);
+}
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return;
+  }
+}
+function isWithin(path, root) {
+  return path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+}
+
+// src/commands/search.ts
+var USAGE = "Usage: sixb search <request JSON>";
+var KEYS = {
+  glob: ["tool", "pattern", "path", "contextDirectory", "timeoutMs"],
+  grep: ["tool", "pattern", "path", "include", "literal", "contextDirectory", "timeoutMs"]
+};
+function search(args) {
+  if (isHelp(args[0])) {
+    writeText(USAGE);
+    return;
+  }
+  if (args.length !== 1)
+    fail(USAGE);
+  const request = parseRequest(args[0]);
+  try {
+    writeJson(request.tool === "glob" ? globFiles(request, process.cwd()) : grepFiles(request, process.cwd()));
+  } catch (error) {
+    if (error instanceof SearchError)
+      fail(error.message, error.code);
+    throw error;
+  }
+}
+function parseRequest(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    fail("The search request is not valid JSON.");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    fail("The search request must be a JSON object.");
+  }
+  const input = value;
+  const tool = input.tool;
+  if (tool !== "glob" && tool !== "grep")
+    fail("tool must be 'glob' or 'grep'.");
+  for (const key of Object.keys(input)) {
+    if (!KEYS[tool].includes(key))
+      fail(`The ${tool} request has an unknown property '${key}'.`);
+  }
+  const pattern = nonEmptyString(input.pattern, "pattern");
+  const timeoutMs = input.timeoutMs;
+  if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+    fail("timeoutMs must be a non-negative integer.");
+  }
+  const path = optionalString(input.path, "path");
+  const contextDirectory = optionalString(input.contextDirectory, "contextDirectory");
+  const scope = {
+    timeoutMs,
+    ...path === undefined ? {} : { path },
+    ...contextDirectory === undefined ? {} : { contextDirectory }
+  };
+  if (tool === "glob")
+    return { tool, pattern, ...scope };
+  if (input.literal !== undefined && typeof input.literal !== "boolean") {
+    fail("literal must be true or false.");
+  }
+  const include = optionalString(input.include, "include");
+  return {
+    tool,
+    pattern,
+    ...scope,
+    ...include === undefined ? {} : { include },
+    ...input.literal === undefined ? {} : { literal: input.literal }
+  };
+}
+function nonEmptyString(value, field) {
+  if (typeof value !== "string" || value === "")
+    fail(`${field} must be a non-empty string.`);
+  return value;
+}
+function optionalString(value, field) {
+  return value === undefined ? undefined : nonEmptyString(value, field);
+}
+
 // src/commands/system.ts
 import { readFile as readFile4 } from "node:fs/promises";
 var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
@@ -2710,6 +3426,8 @@ async function main(args) {
     return memory(rest, sandboxMode());
   if (command === "history")
     return history(createInstanceApiClient(sandboxMode()), rest);
+  if (command === "search")
+    return search(rest);
   if (!isInstanceCommand(command))
     fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   await runInstanceCli({ args, mode: sandboxMode() });
