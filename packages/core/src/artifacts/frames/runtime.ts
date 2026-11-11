@@ -35,7 +35,9 @@
  * a script rewrote, is reported as scripted and takes nothing. What others change arrives as
  * patches, element by element; the one the reader is typing in takes its own once they leave it,
  * so their caret stays. What editing reports goes through the port the app hands over with its
- * first `edit` request, taken before the page's scripts run: they cannot post on it.
+ * first `edit` request, taken before the page's scripts run: they cannot post on it. Once it holds
+ * that port, the frame also sends the reader's pinches, ⌘-wheel turns and ⌘ +, − and 0 through
+ * it, for the app to zoom the opened board instead of the browser zooming everything.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -441,6 +443,105 @@ export function frameRuntime(): void {
   document.addEventListener("focusout", (event) => {
     if (typing && event.target === typing) stopTyping()
   })
+
+  // ── Zooming an opened board ─────────────────────────────────────────
+
+  // A canvas's opened board is zoomed by the app around it, never by the browser: once the app has
+  // handed the port over, a pinch, the wheel with ⌘ or Ctrl, and ⌘ or Ctrl with +, − or 0 go to
+  // the app through it, the reader's own alone. Without a port, as a document's or a deck's frame
+  // is, they stay the browser's.
+  const mac = /Mac|iPhone|iPad/.test(window.navigator?.platform ?? "")
+  const zoom = (params: Record<string, unknown>) => postEdit({ event: "zoom", params })
+  const zooming = (event: Event) => editPort !== null && event.isTrusted
+
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!zooming(event) || !(event.ctrlKey || event.metaKey)) return
+      event.preventDefault()
+
+      // As the canvas zooms by the wheel: a trackpad's pinch is the wheel with Ctrl, in small steps.
+      const unit = event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002
+      const factor = 2 ** (-event.deltaY * unit * (event.ctrlKey && mac ? 10 : 1))
+      zoom({ factor, at: { x: event.clientX, y: event.clientY } })
+    },
+    { passive: false }
+  )
+
+  // Two fingers pinch on a touch screen, measured on the screen: the frame grows as the zoom
+  // follows them, so in its own pixels they would seem to close. Safari also tells of a pinch as a
+  // gesture of its own, which is only stopped here; on a Mac's trackpad, where no finger touches
+  // the page, the gesture is it.
+  let spread = 0
+  const spreadOf = (touches: TouchList) => {
+    const [one, two] = [touches[0], touches[1]]
+    return one && two ? Math.hypot(one.screenX - two.screenX, one.screenY - two.screenY) : 0
+  }
+  window.addEventListener(
+    "touchstart",
+    (event) => {
+      spread = zooming(event) && event.touches.length === 2 ? spreadOf(event.touches) : 0
+    },
+    { passive: true }
+  )
+  window.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!zooming(event) || event.touches.length !== 2 || spread === 0) return
+      event.preventDefault()
+
+      const [one, two] = [event.touches[0], event.touches[1]]
+      const next = spreadOf(event.touches)
+      if (!one || !two || next === 0) return
+      zoom({
+        factor: next / spread,
+        at: { x: (one.clientX + two.clientX) / 2, y: (one.clientY + two.clientY) / 2 },
+      })
+      spread = next
+    },
+    { passive: false }
+  )
+  window.addEventListener("touchend", (event) => {
+    if (event.touches.length < 2) spread = 0
+  })
+
+  let gestured = 1
+  const onGesture = (event: Event) => {
+    if (!zooming(event)) return
+    event.preventDefault()
+
+    const gesture = event as Event & { scale?: number; clientX?: number; clientY?: number }
+    const scale = gesture.scale ?? 1
+    if (event.type === "gesturestart" || spread > 0 || scale <= 0) {
+      gestured = scale > 0 ? scale : 1
+      return
+    }
+    zoom({ factor: scale / gestured, at: { x: gesture.clientX ?? 0, y: gesture.clientY ?? 0 } })
+    gestured = scale
+  }
+  window.addEventListener("gesturestart", onGesture, { passive: false })
+  window.addEventListener("gesturechange", onGesture, { passive: false })
+
+  // Before the page's own keys, and while the reader types in a text.
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!zooming(event) || !(event.metaKey || event.ctrlKey) || event.altKey) return
+      const step =
+        event.key === "=" || event.key === "+"
+          ? "in"
+          : event.key === "-"
+            ? "out"
+            : event.key === "0"
+              ? "actual"
+              : null
+      if (!step) return
+
+      event.preventDefault()
+      zoom({ step })
+    },
+    true
+  )
 
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
