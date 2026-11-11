@@ -15,6 +15,13 @@ export interface ReadOutput {
   readonly nextOffset?: number
 }
 
+/** A folder `read` listed: its entries, folders ending in `/`. */
+export interface ReadDirectory {
+  readonly path: string
+  readonly entries: readonly string[]
+  readonly truncated: boolean
+}
+
 export interface ReadDescription {
   readonly path: string
   readonly title: string
@@ -55,12 +62,38 @@ export function coerceReadOutput(value: unknown): ReadOutput | null {
   }
 }
 
+export function coerceReadDirectory(value: unknown): ReadDirectory | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== "string" ||
+    !Array.isArray(value.entries) ||
+    !value.entries.every((entry) => typeof entry === "string")
+  ) {
+    return null
+  }
+  return { path: value.path, entries: value.entries, truncated: value.truncated === true }
+}
+
 export function describeRead(
   input: ReadInput | null,
   output: ReadOutput | null,
-  messages: AgentMessages = en
+  messages: AgentMessages = en,
+  directory: ReadDirectory | null = null
 ): ReadDescription {
   const m = messages.read
+  if (directory) {
+    const name = fileName(directory.path)
+    const entries = m.entries(directory.entries.length)
+    return {
+      path: directory.path,
+      title: m.directory.title(name),
+      runningTitle: m.directory.running(name),
+      failedTitle: m.directory.failed(name),
+      detail: directory.truncated ? m.moreAvailable(entries) : entries,
+      skill: false,
+      memory: false,
+    }
+  }
   const path = output?.path ?? input?.path ?? ""
   const memory = memoryFile(path)
   if (memory !== null) {

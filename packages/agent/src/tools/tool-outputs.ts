@@ -24,7 +24,7 @@ import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
 import { BASH_TOOL_SPEC, keptCommandOutput } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
 import { AgentFileBudget } from "./tool-files"
-import { VIEW_FILE_TOOL_SPEC } from "./view-file"
+import { LEGACY_VIEW_FILE_TOOL } from "./view-file"
 import { WEB_FETCH_TOOL_SPEC } from "./web-fetch/tool"
 
 /**
@@ -70,7 +70,7 @@ const LIST_TIMEOUT_MS = 30_000
  */
 const UNSAVED_TOOLS: ReadonlySet<string> = new Set([
   READ_TOOL_SPEC.name,
-  VIEW_FILE_TOOL_SPEC.name,
+  LEGACY_VIEW_FILE_TOOL,
   WEB_FETCH_TOOL_SPEC.name,
 ])
 

@@ -7,7 +7,7 @@ both to the harness.
 ```text
 runner (the cloud worker today)          harness (@sixb/agent)
 claims the run → AgentRunSession         builds the prompt and tools, runs the loop, finishes
-opens its environment → openSandbox      bash · bash_output · bash_stop · read · view_file ·
+opens its environment → openSandbox      read · edit · write · bash · bash_output · bash_stop ·
                                          publish_artifact · children
 ```
 

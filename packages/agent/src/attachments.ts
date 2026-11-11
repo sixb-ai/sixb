@@ -385,7 +385,7 @@ async function prepareOneAttachment(input: {
       mayInlineContent &&
       remainingTextBytes > 0 &&
       shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
-    // A tool can return a file the sandbox holds already, such as an attachment view_file showed:
+    // A tool can return a file the sandbox holds already, such as an attachment read showed:
     // its output named that path, and the file stays there once.
     const alreadyAt =
       item.origin === "tool-result-file" ? input.materialized.get(fileRefKey(fileRef)) : undefined
@@ -466,7 +466,7 @@ async function prepareOneAttachment(input: {
     }
 
     metadataNote = !item.inlineContent
-      ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
+      ? "[Historical file kept as metadata: use read with the sandbox path when its contents are needed.]"
       : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
         ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
         : "[File not inlined: available through the sandbox path or content URL.]"

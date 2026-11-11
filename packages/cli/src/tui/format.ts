@@ -15,6 +15,8 @@ export interface ToolLine {
   readonly held?: boolean
   /** A shell command, shown whole as the call's panel. */
   readonly command?: string
+  /** The preview is diff lines, `+` added and `-` removed, colored as such. */
+  readonly diff?: boolean
 }
 
 const PREVIEW_LINES = 4
@@ -83,6 +85,19 @@ export function toolLine(
       }
     }
     case "read": {
+      // A file shown as itself, an image or a PDF, reads as view_file did.
+      if (output?.kind === "agentToolResult") {
+        return { verb: "view", detail: text(input?.path), ...error }
+      }
+      if (Array.isArray(output?.entries)) {
+        const entries = `${output.entries.length} ${output.entries.length === 1 ? "entry" : "entries"}`
+        return {
+          verb: "list",
+          detail: text(input?.path),
+          note: output.truncated === true ? `${entries}+` : entries,
+          ...error,
+        }
+      }
       const lineCount = typeof output?.endLine === "number" && typeof output.startLine === "number"
       return {
         verb: "read",
@@ -93,6 +108,41 @@ export function toolLine(
         ...error,
       }
     }
+    case "edit": {
+      const changed = text(output?.diff)
+        .split("\n")
+        .filter((line) => /^[+-]/.test(line))
+
+      // The diff is cut on a large edit, so the edit counts its lines; an output stored before it
+      // did carries only the diff.
+      const added =
+        typeof output?.added === "number"
+          ? output.added
+          : changed.filter((line) => line.startsWith("+")).length
+      const removed =
+        typeof output?.removed === "number"
+          ? output.removed
+          : changed.filter((line) => line.startsWith("-")).length
+
+      return {
+        verb: "edit",
+        detail: text(input?.path),
+        ...(output?.diff !== undefined
+          ? { note: `+${added} −${removed}`, diff: true, preview: limited(changed) }
+          : {}),
+        ...error,
+      }
+    }
+    case "write": {
+      const linesWritten = typeof output?.lines === "number" ? output.lines : undefined
+      return {
+        verb: output?.created === false ? "rewrite" : "write",
+        detail: text(input?.path),
+        ...(linesWritten !== undefined ? { note: plural(linesWritten, "line") } : {}),
+        ...error,
+      }
+    }
+    // Earlier threads hold calls to it.
     case "view_file":
       return { verb: "view", detail: text(input?.path), ...error }
     case "web_search": {
@@ -333,6 +383,13 @@ function text(value: unknown): string {
 
 function firstLine(value: string): string {
   return value.trim().split("\n")[0]?.trim() ?? ""
+}
+
+/** At most a few rows, with how many more there were. */
+function limited(rows: readonly string[]): string[] {
+  return rows.length > PREVIEW_LINES
+    ? [...rows.slice(0, PREVIEW_LINES), `… ${plural(rows.length - PREVIEW_LINES, "more line")}`]
+    : [...rows]
 }
 
 function lines(value: string): string[] {

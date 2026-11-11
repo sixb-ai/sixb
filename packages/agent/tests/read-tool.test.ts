@@ -174,7 +174,9 @@ describe("read tool", () => {
     const encoded = Buffer.from("one\ntwo")
       .toString("base64")
       .replace(/(.{4})/g, "$1\n")
-    const { read } = await createHarness(undefined, commandResult({ stdout: ` \t${encoded}\r\n` }))
+    // The fingerprint and the real path come first, one line each.
+    const stdout = `123:7\n/root/file.txt\n \t${encoded}\r\n`
+    const { read } = await createHarness(undefined, commandResult({ stdout }))
 
     await expect(read({ path: "file.txt" })).resolves.toEqual({
       path: "file.txt",
@@ -237,7 +239,6 @@ describe("read tool", () => {
 
     expect((await read({ path })).content).toBe("safe")
     expect(sandbox.commands.at(-1)?.args.slice(3, 4)).toEqual([path])
-    await expect(read({ path: "notes" })).rejects.toThrow("is a directory, not a file")
     await expect(read({ path: "missing.txt" })).rejects.toThrow("does not exist")
     await expect(read({ path: "safe", offset: 0 })).rejects.toThrow(
       "offset must be a positive integer"
@@ -245,6 +246,29 @@ describe("read tool", () => {
     await expect(read({ path: "safe", limit: 1.5 })).rejects.toThrow(
       "limit must be a positive integer"
     )
+  })
+
+  test("lists a directory's entries, folders ending in /, hidden ones too, up to 500", async () => {
+    const { root, read } = await createHarness()
+    await mkdir(join(root, "src/lib"), { recursive: true })
+    await writeFile(join(root, "src/index.ts"), "")
+    await writeFile(join(root, "src/.env.example"), "")
+
+    expect((await read({ path: "src" })) as unknown).toEqual({
+      path: "src",
+      entries: [".env.example", "index.ts", "lib/"],
+    })
+
+    await mkdir(join(root, "many"))
+    await Promise.all(
+      Array.from({ length: 501 }, (_, index) => writeFile(join(root, `many/f${index}`), ""))
+    )
+    const many = (await read({ path: "many" })) as unknown as {
+      entries: string[]
+      truncated?: true
+    }
+    expect(many.entries).toHaveLength(500)
+    expect(many.truncated).toBe(true)
   })
 
   test("reports missing files when realpath accepts a missing final component", async () => {

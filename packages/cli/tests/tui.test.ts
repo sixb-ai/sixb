@@ -175,6 +175,78 @@ describe("a live run", () => {
   })
 })
 
+describe("a file the agent read or changed", () => {
+  const call = (
+    name: string,
+    input: Record<string, unknown>,
+    output: Record<string, unknown>
+  ): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "c",
+    name,
+    state: "done",
+    input,
+    output,
+  })
+
+  // Removal proof: drop the edit case from toolLine; the line then shows the call's JSON.
+  test("an edit shows what it added and removed, its changed lines colored", () => {
+    expect(
+      toolLine(
+        call(
+          "edit",
+          { path: "src/app.ts", old_string: "3", new_string: "5" },
+          { path: "src/app.ts", replaced: 1, diff: "@@ -1,2 +1,2 @@\n-x = 3\n+x = 5\n \n" }
+        )
+      )
+    ).toEqual({
+      verb: "edit",
+      detail: "src/app.ts",
+      note: "+1 −1",
+      diff: true,
+      preview: ["-x = 3", "+x = 5"],
+    })
+  })
+
+  // Reproduce: count added and removed from the diff alone in toolLine; the line then shows +1 −1.
+  test("a large edit counts all the lines it changed, though its diff was cut", () => {
+    const edit = (counts: Record<string, number>) =>
+      toolLine(
+        call(
+          "edit",
+          { path: "src/app.ts", old_string: "a", new_string: "b", replace_all: true },
+          {
+            path: "src/app.ts",
+            replaced: 40,
+            diff: "@@ -1 +1 @@\n-a\n+b\n… 39 more hunks\n",
+            ...counts,
+          }
+        )
+      )
+    expect(edit({ added: 40, removed: 40 })).toMatchObject({ note: "+40 −40" })
+    // Stored before an edit counted its lines, as an old thread replays it: the diff is counted.
+    expect(edit({})).toMatchObject({ note: "+1 −1" })
+  })
+
+  test("a write says whether it created or rewrote the file, and how long it is", () => {
+    const write = (created: boolean) =>
+      toolLine(call("write", { path: "a.md" }, { path: "a.md", created, lines: 3, bytes: 9 }))
+    expect(write(true)).toEqual({ verb: "write", detail: "a.md", note: "3 lines" })
+    expect(write(false)).toMatchObject({ verb: "rewrite" })
+  })
+
+  test("a read of a folder lists, and of an image views", () => {
+    expect(toolLine(call("read", { path: "src" }, { path: "src", entries: ["a", "b/"] }))).toEqual({
+      verb: "list",
+      detail: "src",
+      note: "2 entries",
+    })
+    expect(
+      toolLine(call("read", { path: "out/chart.png" }, { kind: "agentToolResult", content: [] }))
+    ).toEqual({ verb: "view", detail: "out/chart.png" })
+  })
+})
+
 describe("a background command", () => {
   const started = "2026-11-04T10:00:00.000Z"
   const at = (seconds: number) => Date.parse(started) + seconds * 1_000

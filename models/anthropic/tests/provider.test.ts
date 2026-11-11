@@ -14,13 +14,25 @@ import {
 import { MODELS_DEV_URL } from "@sixb/model-protocols/models-dev"
 import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { READ_TOOL_SPEC } from "../../../packages/agent/src/tools/read"
-import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent/src/tools/view-file"
 import {
   type AnthropicOptions,
   anthropic,
   createAnthropic as createAnthropicProvider,
 } from "../src"
 import { anthropicOutputSchema } from "../src/structured-output"
+
+/** A strict tool whose only property is required and bounded: what a viewer of one file takes. */
+const VIEW_FILE_TOOL_SPEC = {
+  name: "view_file",
+  strict: true,
+  description: "Inspect a file in the run sandbox.",
+  inputSchema: {
+    type: "object",
+    properties: { path: { type: "string", minLength: 1 } },
+    required: ["path"],
+    additionalProperties: false,
+  } satisfies JsonObject,
+} as const
 
 const modelsDev = {
   anthropic: {

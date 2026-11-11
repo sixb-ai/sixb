@@ -378,7 +378,7 @@ function renderRuntimeContext(
   const fileContext =
     mode === "conversation" || mode === "subagent"
       ? [
-          "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. User attachments are provided directly in their message until the conversation is compacted. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use view_file with a listed sandbox path; if no path is available, download the listed content URL with `sixb files download url <content URL> --output <file>`.",
+          "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. User attachments are provided directly in their message until the conversation is compacted. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use read with a listed sandbox path; if no path is available, download the listed content URL with `sixb files download url <content URL> --output <file>`.",
           "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies.",
           mode === "conversation"
             ? "Deliver a report, table of data, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. To show a published chart or range in a reply, write ![caption](address), copying from $SIXB_ARTIFACTS its pinned address when it lists one, for a version the user created, and its address otherwise, or the address a child agent reported. Never describe a deliverable that was not published as ready."
@@ -409,7 +409,7 @@ const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
 
 const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string>> = {
   image:
-    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with view_file before you use it. An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options. Images for an artifact: write them into the artifact\'s folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it.',
+    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with read before you use it. An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options. Images for an artifact: write them into the artifact\'s folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it.',
   speech: 'Make speech: `sixb models speech "<text>" --model <id> --output out/speech.mp3`.',
   transcription: "Transcribe audio: `sixb models transcribe <audio-file> --model <id>`.",
 }

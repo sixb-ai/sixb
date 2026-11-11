@@ -13,6 +13,8 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "bash_output",
   "bash_stop",
   "read",
+  "edit",
+  "write",
   "view_file",
   "spawn_agent",
   "wait_agent",

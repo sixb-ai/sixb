@@ -113,7 +113,7 @@ turn N's last request sent, on every storage:
   stored objects back in its own key order. Tool outputs, synthesized call arguments and Anthropic
   `tool_use` inputs; opaque provider items replay as stored, since the provider parses them.
 - **A projected tool output replays as the model read it.** When a tool's `toModelOutput` differs
-  from its output (`view_file`, `publish_artifact`, `wait_agent`, project tools returning files), the
+  from its output (`read` showing a file, `publish_artifact`, `wait_agent`, project tools returning files), the
   tool-call part keeps it as `modelOutput`, and `toModelMessages` sends it verbatim. The HTTP API
   leaves it out. Its files are materialized again where that output named them: `tool-files/` of
   the call that stored one, `children/<key>/` for `wait_agent`, or the path a file it showed already
@@ -136,8 +136,8 @@ turn N's last request sent, on every storage:
   (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
   history's saved files back while the model starts: those the sandbox lacks, newest within a
   budget, read a few at a time and no further than their declared size, written oldest first.
-  `read` and `view_file` page by themselves and are never saved; a sandbox or store that cannot
-  take the file leaves the model the part's copy. A cleared preview points at the file.
+  `read` pages by itself and is never saved; a sandbox or store that cannot take the file leaves
+  the model the part's copy. A cleared preview points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the

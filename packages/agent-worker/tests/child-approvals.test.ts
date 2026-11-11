@@ -47,6 +47,11 @@ const projectId = "agent-child-approvals"
 const alice = { type: "user", id: "usr_alice" } as const
 const HELD_COMMAND = "sixb actions request mark-paid --subject invoice:INV-2041"
 const WRITE_SUMMARY = "write-summary"
+const DRAW_CHART = "draw-chart"
+const CHART_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "base64"
+)
 /** Breaks the sandbox's listing, so the files a child leaves in out/ cannot be stored. */
 const BREAK_LISTING = "break-listing"
 /** A command that returns only once `blocking` lets it, whatever stops the run meanwhile. */
@@ -187,6 +192,10 @@ class GatewaySandbox implements Sandbox {
       await this.writeFiles([
         { path: "out/summary.md", contents: "# Invoices\n\nINV-2041 open.\n" },
       ])
+      return ok("")
+    }
+    if (script === DRAW_CHART) {
+      await this.writeFiles([{ path: "scratch/chart.png", contents: CHART_PNG }])
       return ok("")
     }
     if (script === BLOCK) {
@@ -1152,7 +1161,7 @@ describe("a paused child, once its requester decides", () => {
     }
   })
 
-  // Removal proofs: drop the stored modelOutput from the replay, and the file view_file showed the
+  // Removal proofs: drop the stored modelOutput from the replay, and the image read showed the
   // paused child comes back as metadata instead of what it read; leave the history out of
   // createSubagentEnvironment, or materialize it at its attachment path, and the continuation's
   // sandbox lacks the file at the path the output names.
@@ -1165,8 +1174,8 @@ describe("a paused child, once its requester decides", () => {
       ),
       children: {
         pay: (_request, call) => {
-          if (call === 1) return toolCalls(["summary", "bash", { command: WRITE_SUMMARY }])
-          if (call === 2) return toolCalls(["view", "view_file", { path: "out/summary.md" }])
+          if (call === 1) return toolCalls(["chart", "bash", { command: DRAW_CHART }])
+          if (call === 2) return toolCalls(["view", "read", { path: "scratch/chart.png" }])
           return toolCalls(["held", "bash", { command: HELD_COMMAND }])
         },
         "pay'": () => answer("I marked INV-2041 paid."),
@@ -1186,7 +1195,7 @@ describe("a paused child, once its requester decides", () => {
       // As a later turn reads a file it viewed: as the paused child read it, and in the
       // continuation's sandbox at the path it named.
       expect(viewed).toBe(String(toolOutput(paused, "view")))
-      expect(viewed).toContain('<tool_file name="summary.md"')
+      expect(viewed).toContain('<tool_file name="chart.png"')
       expect(sandboxPath).toStartWith(".sixb/agent/tool-files/")
       // The paused child's sandbox held it there, and the continuation's holds it there again.
       expect(harness.sandboxes.filter((sandbox) => sandbox.has(sandboxPath))).toHaveLength(2)

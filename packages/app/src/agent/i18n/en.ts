@@ -466,6 +466,20 @@ export const en = {
     failed: (name: string) => `Couldn't view ${name || "a file"}`,
     open: (name: string) => `Open ${name}`,
   },
+  /** The edit tool, for a change to part of a file (`name` may be empty). */
+  edit: {
+    title: (name: string) => `Edited ${name || "a file"}`,
+    running: (name: string) => `Editing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't edit ${name || "a file"}`,
+  },
+  /** The write tool, for a file created or replaced whole (`name` may be empty). */
+  write: {
+    created: (name: string) => `Created ${name || "a file"}`,
+    replaced: (name: string) => `Rewrote ${name || "a file"}`,
+    running: (name: string) => `Writing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't write ${name || "a file"}`,
+    lines: (lines: number) => count(lines, "line"),
+  },
   /** The read tool, for a file (`name` may be empty), a skill reference, or a skill guide. */
   read: {
     file: {
@@ -484,6 +498,13 @@ export const en = {
       failed: (name: string) => `Couldn't read the ${name} guide`,
     },
     /** A file of the user's memory, or of the project's when `project`. */
+    /** A folder the agent listed. */
+    directory: {
+      title: (name: string) => `Listed ${name || "a folder"}`,
+      running: (name: string) => `Listing ${name || "a folder"}`,
+      failed: (name: string) => `Couldn't list ${name || "a folder"}`,
+    },
+    entries: (entries: number) => count(entries, "entry", "entries"),
     memory: {
       title: (project: boolean): string => (project ? "Read project memory" : "Read memory"),
       running: (project: boolean): string =>
