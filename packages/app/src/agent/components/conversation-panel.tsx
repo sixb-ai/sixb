@@ -4,6 +4,7 @@ import { Plus } from "lucide-react"
 import type { ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
+import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
 import { ThreadsButton } from "./threads-button"
@@ -19,6 +20,8 @@ export interface ConversationPanelProps {
   readonly transcript: TranscriptProps
   /** The conversation's composer, and the page's choices for a conversation not created yet. */
   readonly composer: ConversationComposerProps & Pick<ComposerProps, "newThreadControls">
+  /** The Agent's question, which takes the composer's place while set. */
+  readonly question?: QuestionComposerProps | null
   readonly messagesLoading: boolean
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */
@@ -42,6 +45,7 @@ export function ConversationPanel({
   agent,
   transcript,
   composer,
+  question = null,
   messagesLoading,
   messagesError,
   currentThread,
@@ -66,18 +70,33 @@ export function ConversationPanel({
     transcript.messages.some((message) => message.id === null)
   const showWelcome =
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
+  // A reader who cannot write here cannot answer: the reply shows the question as waiting.
+  const asking = readOnly ? null : question
   const renderComposer = (wideClassName?: string) =>
     readOnly ? (
       // Where the composer would end, so the notice keeps its place at the foot of the pane.
       <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
     ) : (
-      <Composer
-        {...composer}
-        placeholder={composerPlaceholder}
-        className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-        ambientContext={ambientContext}
-        compact={compact}
-      />
+      <>
+        {asking ? (
+          <QuestionComposer
+            // The question is the conversation's last message: a new one starts over.
+            key={transcript.messages.at(-1)?.key}
+            {...asking}
+            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+          />
+        ) : null}
+        {/* Kept while the question asks, so a draft written before it is still there after. */}
+        <div className={asking ? "hidden" : "contents"}>
+          <Composer
+            {...composer}
+            placeholder={composerPlaceholder}
+            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+            ambientContext={ambientContext}
+            compact={compact}
+          />
+        </div>
+      </>
     )
 
   const threadsButton = onOpenThreads ? (
@@ -141,7 +160,7 @@ export function ConversationPanel({
                 <p className="max-w-md text-sm text-destructive">{messagesError}</p>
               </div>
             ) : (
-              <Transcript onNewThread={onNewChat} {...transcript} />
+              <Transcript onNewThread={onNewChat} {...transcript} onAnswer={asking?.onAnswer} />
             )}
           </div>
 

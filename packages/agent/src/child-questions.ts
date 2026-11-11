@@ -1,6 +1,6 @@
 /**
  * A question a child asked: the id of its mail and what it asks. A child paused on it keeps both in
- * its thread, the text as its `ask_parent` call's input and the id in that call's output.
+ * its thread, the questions as its `ask` call's input and the id in that call's output.
  */
 export interface QuestionRef {
   readonly id: string

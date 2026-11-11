@@ -198,12 +198,32 @@ export function toolLine(
         detail: [text(input?.key), firstLine(text(input?.text))].filter(Boolean).join("  "),
         ...error,
       }
-    case "ask_parent":
+    case "ask":
+    // What `ask` was called for a sub-agent: earlier threads hold calls to it.
+    case "ask_parent": {
+      const questions = askedQuestions(input)
+      // One question reads on the line; several, each with its choices numbered, under it. A row's
+      // runs of spaces collapse to one, so the choices are kept apart by a dot.
+      const [first] = questions
       return {
         verb: "ask",
-        detail: firstLine(text(input?.question) || text(input?.text)),
+        detail:
+          questions.length === 1 && first ? first.question : plural(questions.length, "question"),
+        ...(questions.length > 1 || first?.choices.length
+          ? {
+              preview: questions.map((question) =>
+                [
+                  ...(questions.length > 1 ? [question.question] : []),
+                  question.choices.map((choice, index) => `${index + 1}. ${choice}`).join(" · "),
+                ]
+                  .filter(Boolean)
+                  .join("  ")
+              ),
+            }
+          : {}),
         ...error,
       }
+    }
     default:
       return {
         verb: part.name,
@@ -383,6 +403,57 @@ function text(value: unknown): string {
 
 function firstLine(value: string): string {
   return value.trim().split("\n")[0]?.trim() ?? ""
+}
+
+export interface AskedQuestion {
+  readonly question: string
+  readonly choices: readonly string[]
+  readonly multiple: boolean
+}
+
+/** The questions of an `ask` call, or of an earlier `ask_parent` call's one question. */
+function askedQuestions(input: Record<string, unknown> | undefined): AskedQuestion[] {
+  if (typeof input?.question === "string") {
+    return [{ question: input.question.trim(), choices: [], multiple: false }]
+  }
+  if (!Array.isArray(input?.questions)) return []
+  return input.questions.flatMap((value) => {
+    const question = record(value)
+    if (typeof question?.question !== "string") return []
+    const choices = Array.isArray(question.choices)
+      ? question.choices.filter((choice): choice is string => typeof choice === "string")
+      : []
+    return [{ question: question.question.trim(), choices, multiple: question.multiple === true }]
+  })
+}
+
+/** What a reply asked the user with its last `ask`: its questions, or none. */
+export function askedInReply(
+  message: { readonly role: string; readonly parts: readonly Part[] } | null | undefined
+): readonly AskedQuestion[] {
+  if (message?.role !== "assistant") return []
+  const asked = [...message.parts]
+    .reverse()
+    .find(
+      (part): part is ToolPart =>
+        part.kind === "tool" && part.name === "ask" && part.state === "done"
+    )
+  return askedQuestions(record(asked?.input))
+}
+
+/**
+ * A reply of a number to the Agent's question, its last reply's one question with choices, is the
+ * choice under that number: "2" answers "2026". Anything else is sent as typed.
+ */
+export function pickedAnswer(
+  messages: readonly { readonly role: string; readonly parts: readonly Part[] }[],
+  text: string
+): string {
+  const number = text.trim()
+  if (!/^\d+$/.test(number)) return text
+  const questions = askedInReply(messages.at(-1))
+  if (questions.length !== 1) return text
+  return questions[0]?.choices[Number(number) - 1] ?? text
 }
 
 /** At most a few rows, with how many more there were. */

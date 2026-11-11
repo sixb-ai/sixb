@@ -16752,12 +16752,12 @@ describe("context of a child and of a workflow step", () => {
         if (text.includes(ANSWERS[0]!)) {
           return chapterResults(request).length === 0
             ? [toolCallEvent("chapter_extra", "chapter", { number: "extra" })]
-            : [toolCallEvent("ask_again", "ask_parent", { question: "Which language?" })]
+            : [toolCallEvent("ask_again", "ask", { questions: [{ question: "Which language?" }] })]
         }
         // The first run reads nine chapters, then asks, its notes before the question.
         return readChapters(9, () => [
           ...textEvents(`Notes so far: ${"n".repeat(30_000)}`),
-          toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+          toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
         ])(request)
       },
     })
@@ -16877,7 +16877,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes("The second edition.")
           ? textEvents("Read the second edition.")
           : readChapters(2, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     // The parent relays the long answer: its own window holds it.
@@ -16948,7 +16948,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes(ANSWER)
           ? textEvents("Read the second edition.")
           : readChapters(9, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
@@ -17018,7 +17018,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes(ANSWER)
           ? textEvents("Read the second edition.")
           : readChapters(6, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
@@ -17146,7 +17146,7 @@ describe("context of a child and of a workflow step", () => {
             : [toolCallEvent("again", "bash", { command: "echo again" })]
         }
         return ran("child_report")
-          ? [toolCallEvent("ask", "ask_parent", { question: "Which edition?" })]
+          ? [toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] })]
           : [toolCallEvent("child_report", "bash", { command: "print-report" })]
       },
     })

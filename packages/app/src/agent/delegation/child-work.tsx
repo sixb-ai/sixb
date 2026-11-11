@@ -7,6 +7,7 @@ import { useAgentMessages } from "../i18n"
 import type { LiveRunState } from "../live-run"
 import { normalizeDurableParts } from "../parts"
 import type { AgentMessage } from "../types"
+import { AgentNote } from "./agent-exchange"
 import type { AgentChild, WaitedChild } from "./interpret"
 import { type ChildrenSource, useChildMessages } from "./use-children"
 
@@ -107,7 +108,11 @@ export function ChildWork({
       {view.runs.map((run, index) => {
         const atWork = run.status === "queued" || run.status === "running"
         const own = byRun.get(run.id) ?? []
-        const work = own.filter((message) => message.role === "assistant")
+        // Its work, and what the Agent sent it along the way; its task heads the panel already.
+        const work = own.filter(
+          (message) =>
+            message.role === "assistant" || message.parts.some((part) => part.type === "mail")
+        )
 
         let body: ReactNode
         if (work.length > 0) {
@@ -166,7 +171,7 @@ function continuedAfterAnswer(
   return previous?.finishReason === "awaiting_answer"
 }
 
-/** One run's work, as its thread keeps it: its assistant messages, read once each. */
+/** One run's work, as its thread keeps it: its steps, and what the Agent sent it between them. */
 const RunWork = memo(function RunWork({
   messages,
   threadId,
@@ -190,9 +195,18 @@ const RunWork = memo(function RunWork({
 
   return (
     <>
-      {bodies.map((parts, position) => (
-        <AssistantBody key={messages[position]?.id ?? position} parts={parts} nested />
-      ))}
+      {bodies.map((parts, position) => {
+        const message = messages[position]
+        // What the Agent sent it, an answer or a message, reads on the Agent's side.
+        if (message?.role === "user") {
+          return message.parts.flatMap((part, index) =>
+            part.type === "mail"
+              ? [<AgentNote key={`${message.id}:${index}`} text={part.text} />]
+              : []
+          )
+        }
+        return <AssistantBody key={message?.id ?? position} parts={parts} nested />
+      })}
     </>
   )
 })

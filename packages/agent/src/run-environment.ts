@@ -201,7 +201,7 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly requestedBy?: Principal
   /** Its thread's messages, whose files are projected again, and the paused run it continues. */
   readonly history: SubagentHistory
-  /** Framework-owned tools of a child: `ask_parent`. */
+  /** Framework-owned tools of a child: `ask`, to its parent. */
   readonly frameworkTools?: readonly ModelTool[]
   /** Weigh the thread before the first call, and compact it on the child's thread when needed. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }

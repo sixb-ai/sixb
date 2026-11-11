@@ -351,10 +351,8 @@ export const en = {
       timeout: "Ran out of time",
       unknown: "Delegated",
     },
-    fromAgent: "Agent said",
-    asks: "Asked",
-    answer: "Agent answered",
-    answerHint: "Your next message answers it.",
+    /** A sub-agent's question its turn ended on while it held a call: the decision continued it. */
+    noAnswer: "It went on without an answer, once the approval was decided.",
     close: "Close",
     viewRequest: "See its request below",
     stepsLater: "At work. Its steps show here once it finishes.",
@@ -465,6 +463,26 @@ export const en = {
     running: (name: string) => `Viewing ${name || "a file"}`,
     failed: (name: string) => `Couldn't view ${name || "a file"}`,
     open: (name: string) => `Open ${name}`,
+  },
+  /** The Agent's questions to the user, from its `ask` tool. */
+  questions: {
+    card: (count: number): string =>
+      count === 1 ? "The agent's question" : "The agent's questions",
+    asked: "Asked you",
+    /** For someone who reads the conversation but cannot answer in it. */
+    waiting: "Waiting for an answer",
+    running: "Asking you",
+    send: "Send answer",
+    sending: "Sending…",
+    pickAny: "Pick any",
+    typeAnswer: "Type an answer",
+    typeOther: "Or type another answer",
+    somethingElse: "Something else…",
+    next: "Next question",
+    back: "Previous question",
+    step: (step: number, total: number): string => `Question ${step} of ${total}`,
+    /** Close the question, to reply in the composer instead. */
+    dismiss: "Reply in chat",
   },
   /** The edit tool, for a change to part of a file (`name` may be empty). */
   edit: {

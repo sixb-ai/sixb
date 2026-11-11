@@ -380,16 +380,27 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
   earlier turns (spawn it again), a child that ended, and a paused one are refused, each with what
   to do.
 
+## Questions to the user
+
+The conversational Agent asks the user with the same `ask`. The tool returns at once
+(`{ status: "asked" }`), and the turn ends after the step that asked (`stepAskedUser` in
+`runAgentTurn`'s `pauseAfterStep`), finishing `stop`: nothing waits for a decision, so no record
+holds it. The app and the TUI show the questions of a thread's last turn with their choices; the
+user's answer is their next message, which the next turn reads right after the call. A call refused
+for its input asks nothing and the turn goes on. A held call in the same step still pauses the turn
+`awaiting_approval`.
+
 ## Questions to the parent
 
-A child asks with `ask_parent({ question })` and waits for the answer within its step. The
-question and its replies go through the turn's mailbox, as messages do (`src/subagent-inbox.ts`,
-`src/family-mailbox.ts`, `src/subagent-tools.ts`):
+A child asks with `ask({ questions })`, one to four of them, and waits for the answer within its
+step. Its questions reach the parent as one text (`agentQuestionsText`: each with its choices,
+numbered when there are several), and they and their replies go through the turn's mailbox, as
+messages do (`src/ask-tool.ts`, `src/subagent-inbox.ts`, `src/family-mailbox.ts`,
+`src/subagent-tools.ts`). Earlier threads hold `ask_parent({ question })` calls, read the same way:
 
 - **Asking.** The child puts its question, id `<childRunId>:<modelCallId>:<toolCallId>`, in the
   turn's mailbox and waits for the reply to it (`inReplyTo` the question), bounded by its signal:
-  its cancel, or its parent's. One question at a time: a second `ask_parent` while one waits is
-  refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
+  its cancel, or its parent's. One call at a time: a second `ask` while one waits is refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
 - **The parent's wait wakes.** A question wakes the parent's waits at once (see
   [the parent's waits](#the-parents-waits)). `wait_agent` returns as soon as a question comes, from any child
   of the turn, not only those it waits for, since a child blocked on its question never finishes.
@@ -397,8 +408,7 @@ question and its replies go through the turn's mailbox, as messages do (`src/sub
   own. `questions` (`key`, `runId`, `id`, `text`) lists the questions it returns first and those
   of the children it waits for, and each is on its child's result.
 - **Answering.** While the child waits on a question the model has read, the parent's next
-  `message_agent` to its key is the answer: an `answer` mail, which `ask_parent` returns as
-  `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
+  `message_agent` to its key is the answer: an `answer` mail, which `ask` returns as `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
   the second is a message. A message sent before the model read the question stays a message. The
   answer's id is the call's, so a replay is the same answer, sent once.
 - **A question the model has not read.** When the model answers without tools, a question it has
@@ -406,12 +416,12 @@ question and its replies go through the turn's mailbox, as messages do (`src/sub
   answer that ignores it.
 - **The turn's end.** Before the turn records its end, while it still runs, it writes a `deferred`
   reply to each child still waiting on its question, and waits for each to pause: `succeeded`, `finishReason: "awaiting_answer"`, its work in its thread, the
-  `ask_parent` call and its `deferred` output, which names the question's id, included, and its
+  `ask` call and its `deferred` output, which names the question's id, included, and its
   `out/` in its result. Only then does it wait for its other children when it pauses, and record its end, which
   cancels those still at work. The repair pass leaves a running turn's children alone, so a child
   that pauses is never cancelled under it. A cancelled turn or one that fails or times out stops
   its children, waiting or not, and their own signal ends the wait. A child that held a call in
-  the same step pauses `awaiting_approval`: only a decision continues it, its `ask_parent` output
+  the same step pauses `awaiting_approval`: only a decision continues it, its `ask` output
   then says it goes on without an answer, and it can ask again.
 - **The next turn continues it.** A turn reads, after its conversation, a
   `<sixb_waiting_children>` block of the conversation's children still paused on a question. It

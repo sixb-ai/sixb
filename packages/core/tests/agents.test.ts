@@ -198,6 +198,7 @@ describe("defineAgentTool", () => {
       "spawn_agent",
       "wait_agent",
       "message_agent",
+      "ask",
       "ask_parent",
     ]) {
       expect(() => validateName(name)).toThrow("reserved by the framework")

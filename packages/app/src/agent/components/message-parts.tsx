@@ -13,6 +13,7 @@ import { useArtifactPanel } from "../artifact-panel"
 import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
+import { ChildAsked } from "../delegation/agent-exchange"
 import { ChildCards } from "../delegation/child-cards"
 import { describeDelegationTool, spawnedChildren } from "../delegation/interpret"
 import { useAgentMessages } from "../i18n"
@@ -24,6 +25,8 @@ import {
   toolResultValue,
 } from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
+import { isAskTool } from "../questions/interpret"
+import { QuestionCards } from "../questions/question-card"
 import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
@@ -89,7 +92,8 @@ export function AssistantBody({
           part.kind === "tool" &&
           ((DELEGATION_ROW_TOOLS.has(part.tool.toolName) &&
             childQuestions(part.tool).length === 0) ||
-            (!nested && heldCallsInParts([part]).length > 0))
+            (!nested && heldCallsInParts([part]).length > 0) ||
+            (!nested && part.tool.toolName === "ask"))
         )
     )
     if (shown.some((part) => part.kind !== "step-start")) {
@@ -101,6 +105,11 @@ export function AssistantBody({
 
     const held = heldCallsInParts(work)
     if (held.length > 0) blocks.push(<ApprovalCards key={`approvals-${key++}`} calls={held} />)
+    // The Agent's questions to the user are the reply's last word, each a card to answer.
+    const asked = work.flatMap((part) =>
+      part.kind === "tool" && part.tool.toolName === "ask" ? [part.tool] : []
+    )
+    if (asked.length > 0) blocks.push(<QuestionCards key={`questions-${key++}`} tools={asked} />)
     const spawned = spawnedChildren(work)
     if (spawned.length > 0) blocks.push(<ChildCards key={`children-${key++}`} spawned={spawned} />)
   }
@@ -118,6 +127,13 @@ export function AssistantBody({
       flushText()
       flushWork(false)
       blocks.push(<FileBlock key={`block-${key++}`} part={part} />)
+      return
+    }
+    // In a sub-agent's panel, its question to the Agent is part of the conversation, not the work.
+    if (nested && part.kind === "tool" && isAskTool(part.tool.toolName)) {
+      flushText()
+      flushWork(false)
+      blocks.push(<ChildAsked key={`block-${key++}`} tool={part.tool} />)
       return
     }
     // reasoning | tool | step-start — buffered together into one work run.
@@ -425,7 +441,7 @@ export function BuiltInToolRow({
             className={cn(
               "min-w-0 font-medium",
               // A sub-agent's question reads in full.
-              tool.toolName === "ask_parent" ? "text-left break-words" : "truncate"
+              isAskTool(tool.toolName) ? "text-left break-words" : "truncate"
             )}
           >
             {title}

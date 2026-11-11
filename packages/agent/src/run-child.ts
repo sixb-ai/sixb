@@ -14,7 +14,7 @@ import type {
   ExecutionRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import { createAskParentTool } from "./ask-parent-tool"
+import { createAskParentTool } from "./ask-tool"
 import { prepareAgentModel } from "./context-budget"
 import { isLostExecution } from "./errors"
 import { resolveRunPlan } from "./execution-plan"
