@@ -333,6 +333,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("099-user-suspension-source", userSuspensionSourceSql),
     sqliteSql("100-script-executions", scriptExecutionsSql),
     sqliteSql("101-artifact-pdfs", artifactPdfsSql),
+    sqliteSql("102-guest-comment-links", guestCommentLinksSql),
   ],
 })
 
@@ -771,3 +772,4 @@ import userSuspensionSourceSql from "./migrations/099-user-suspension-source.sql
 }
 import scriptExecutionsSql from "./migrations/100-script-executions.sql" with { type: "text" }
 import artifactPdfsSql from "./migrations/101-artifact-pdfs.sql" with { type: "text" }
+import guestCommentLinksSql from "./migrations/102-guest-comment-links.sql" with { type: "text" }
