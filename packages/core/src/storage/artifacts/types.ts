@@ -439,6 +439,11 @@ export interface ArtifactGuest {
   /** The shared link's session they comment from: each session is one guest. */
   readonly id: string
   readonly name: string
+  /**
+   * The shared link they came through, by its grant: whoever opens it, in any session, reads the
+   * threads its guests start, and no other.
+   */
+  readonly grantId: string
 }
 
 /** Who wrote a comment: someone who signed in, the project's code, or a shared link's guest. */
