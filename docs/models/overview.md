@@ -69,6 +69,23 @@ export const sixb = createSixb({
 | [Sub-agent](#it-delegates) (`subagentMaxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
 | [Workflow AI task](../workflows/overview.md#add-an-ai-task) (its own `maxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
 
+### Work with files
+
+The agent finds, reads and changes files with tools of its own, the same in every sandbox and on
+[your computer](../cli/overview.md#work-with-the-agent). Conversations, sub-agents and AI workflow steps all get them.
+
+| Tool | What it does |
+| --- | --- |
+| `glob` | Finds files by name, such as `*.md` or `src/**/*.ts`. |
+| `grep` | Finds the lines that match a text or a regular expression. |
+| `read` | Reads a file, an image or a PDF, or lists a folder. |
+| `edit`, `write` | Change part of a file, or write a whole one. |
+
+- Searches skip `.git`, `node_modules` and what `.gitignore` files exclude. `glob` also skips
+  hidden files unless the pattern names them, such as `.github/**`.
+- A search returns at most 100 files or 100 matching lines, and the agent narrows it from there.
+- `grep` matches the first 4,000 characters of each line, so a minified file cannot stall it.
+
 ### Search the web
 
 The agent has a `web_search` tool whenever your project has a
