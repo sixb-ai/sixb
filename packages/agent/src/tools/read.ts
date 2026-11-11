@@ -12,6 +12,7 @@ const READ_TIMEOUT_MS = 30_000
 
 export const READ_TOOL_SPEC = {
   name: "read",
+  strict: true,
   description:
     "Read a UTF-8 text file relative to the sandbox working directory. Returns at most 2,000 lines or 50 KiB and includes nextOffset when more content remains. Prefer this over bash for reading files.",
   inputSchema: {

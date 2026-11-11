@@ -11,6 +11,7 @@ const DEFAULT_MAX_OUTPUT_CHARS = 20_000
 
 export const BASH_TOOL_SPEC = {
   name: "bash",
+  strict: true,
   description:
     `Run a Bash command in the agent run sandbox. A command is stopped after ${durationText(DEFAULT_COMMAND_TIMEOUT_MS)} ` +
     `(${DEFAULT_COMMAND_TIMEOUT_MS} ms); pass timeoutMs to give it up to ${durationText(MAX_COMMAND_TIMEOUT_MS)} ` +

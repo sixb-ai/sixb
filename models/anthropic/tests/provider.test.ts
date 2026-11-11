@@ -1,6 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
-import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
+import type {
+  JsonObject,
+  LanguageModelRequest,
+  LanguageModelStreamEvent,
+  ModelOutput,
+} from "@sixb/core/models"
 import {
   ModelCatalogUnavailableError,
   ModelProviderError,
@@ -147,7 +152,7 @@ describe("Anthropic provider", () => {
     })
     await provider("claude-sonnet-5", { capabilities: { nativeStructuredOutput: true } }).stream(
       request({
-        tools: [{ name: "answer", description: "Answer", inputSchema: schema }],
+        tools: [{ name: "answer", description: "Answer", inputSchema: schema, strict: true }],
         responseFormat: { type: "json", name: "answer", schema },
       })
     )
@@ -287,14 +292,109 @@ describe("Anthropic provider", () => {
             properties: { path: { type: "string", description: "min length: 1." } },
           },
         },
-        { name: "metadata", strict: false, input_schema: openSchema },
+        { name: "metadata", input_schema: openSchema },
       ],
     })
+    expect((body as { tools: object[] }).tools[2]).not.toHaveProperty("strict")
     const encoded = JSON.stringify(body)
     expect(encoded).not.toContain('"minimum"')
     expect(encoded).not.toContain('"minLength"')
     expect(READ_TOOL_SPEC.inputSchema.properties.offset.minimum).toBe(1)
     expect(VIEW_FILE_TOOL_SPEC.inputSchema.properties.path.minLength).toBe(1)
+  })
+
+  test("sends strict only the tools that ask, in order, within Anthropic's limits", async () => {
+    // Regression proof: send every tool whose schema sanitizes as strict, or drop the
+    // messagesStrictTools budget; the request then asks for 21 strict tools and is refused.
+    let body: { tools: { name: string; strict?: boolean }[] } | undefined
+    const provider = createAnthropic({
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse([])
+      },
+    })
+    const closed = (properties: JsonObject, required: string[]): JsonObject => ({
+      type: "object",
+      properties,
+      required,
+      additionalProperties: false,
+    })
+    const one = closed({ q: { type: "string" } }, ["q"])
+    const tools = [
+      { name: "unasked", description: "No strict.", inputSchema: one },
+      {
+        name: "wide",
+        description: "25 optional properties.",
+        inputSchema: closed(
+          Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`p${index}`, {}])),
+          []
+        ),
+        strict: true,
+      },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        name: `budget_${index}`,
+        description: "Strict.",
+        inputSchema: one,
+        strict: true,
+      })),
+    ]
+
+    await provider("claude-sonnet-5", { capabilities: { nativeStructuredOutput: true } }).stream(
+      request({ tools })
+    )
+
+    const strict = body?.tools.filter((tool) => tool.strict).map((tool) => tool.name)
+    expect(strict).toEqual(Array.from({ length: 20 }, (_, index) => `budget_${index}`))
+    expect(body?.tools.find((tool) => tool.name === "unasked")).not.toHaveProperty("strict")
+  })
+
+  test("sends tools unconstrained once Anthropic refuses them, and at once after that", async () => {
+    // Regression proof: drop the isStrictToolLimitError retry in stream(), or the
+    // strictToolRefusals check in requestTools.
+    const bodies: { tools: { strict?: boolean }[] }[] = []
+    const provider = createAnthropic({
+      maxRetries: 0,
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init?.body))
+        bodies.push(body)
+        if (body.tools.some((tool: { strict?: boolean }) => tool.strict)) {
+          return Response.json(
+            {
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                message: "The compiled grammar is too large, which would cause performance issues.",
+              },
+            },
+            { status: 400 }
+          )
+        }
+        return sseResponse([])
+      },
+    })
+    const model = provider("claude-sonnet-5", { capabilities: { nativeStructuredOutput: true } })
+    const tools = [
+      {
+        name: "refused_grammar",
+        description: "Strict.",
+        inputSchema: {
+          type: "object",
+          properties: { q: { type: "string" } },
+          required: ["q"],
+          additionalProperties: false,
+        },
+        strict: true,
+      },
+    ]
+
+    await model.stream(request({ tools }))
+    await model.stream(request({ tools }))
+
+    expect(bodies.map((body) => body.tools.some((tool) => tool.strict))).toEqual([
+      true,
+      false,
+      false,
+    ])
   })
 
   test.each([
@@ -745,7 +845,10 @@ describe("Anthropic provider", () => {
       ],
       tools: [
         { type: "web_search_20260209", name: "web_search" },
-        { name: "echo", strict: false },
+        {
+          name: "echo",
+          input_schema: { type: "object", properties: { value: { type: "string" } } },
+        },
       ],
       tool_choice: { type: "auto" },
       output_config: {

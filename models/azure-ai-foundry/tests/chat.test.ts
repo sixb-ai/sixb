@@ -237,7 +237,7 @@ test("uses deployment protocol eligibility and keeps resolved models pinned", as
   expect((await original.resolve({ offline: true })).definition.maxOutputTokens).toBeUndefined()
 })
 
-test("requires explicit capabilities and preserves strict schemas without enabling parallel strict tools", async () => {
+test("requires explicit capabilities, preserves strict schemas, and keeps parallel calls with strict tools", async () => {
   const bodies: JsonObject[] = []
   const provider = createAzureAIFoundry({
     endpoint,
@@ -248,7 +248,7 @@ test("requires explicit capabilities and preserves strict schemas without enabli
     },
   })
   const model = provider.chat("deployment", { definition })
-  const tools = [{ name: "answer", description: "Answer", inputSchema: schema }]
+  const tools = [{ name: "answer", description: "Answer", inputSchema: schema, strict: true }]
   await collect(
     (
       await model.stream(
@@ -277,7 +277,13 @@ test("requires explicit capabilities and preserves strict schemas without enabli
     tools: [{ function: { parameters: loose, strict: false } }],
   })
   await collect((await model.stream(request({ tools, reasoning: "none" }))).events)
-  expect(bodies[2]).toMatchObject({ reasoning_effort: "none" })
+  // Strict tools keep parallel calls; structured output alone turns them off. Reproduce by turning
+  // parallel_tool_calls off when a tool is strict in foundryChatRequest.
+  expect(bodies[2]).toMatchObject({
+    reasoning_effort: "none",
+    parallel_tool_calls: true,
+    tools: [{ function: { strict: true } }],
+  })
   for (const override of [
     { tools },
     { reasoning: "high" as const },

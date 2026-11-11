@@ -5,7 +5,12 @@ import {
   modelReasoningSupportIssue,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { messagesInput } from "@sixb/model-protocols/messages"
+import {
+  messagesInput,
+  messagesStrictTools,
+  StrictToolRefusals,
+  strictToolsKey,
+} from "@sixb/model-protocols/messages"
 import { messagesOutputSchema } from "./messages-schema"
 import { prepareRequest } from "./request"
 import { object, PREFIX, positiveInteger } from "./util"
@@ -16,6 +21,15 @@ export interface MessagesRequestOptions {
   readonly request?: JsonObject
   /** Explicitly restrict thinking serialization to adaptive or manual mode. */
   readonly thinkingMode?: "adaptive" | "manual"
+}
+
+/** Strict tool sets Claude on Foundry refused: sent unconstrained from the start next time. */
+export const strictToolRefusals = new StrictToolRefusals()
+
+export interface FoundryMessagesRequest {
+  readonly body: JsonObject
+  /** The key of the strict tools it sends, if any, for {@link strictToolRefusals}. */
+  readonly strictTools?: string
 }
 
 const RESERVED = new Set([
@@ -58,12 +72,18 @@ export function validateMessagesOptions(options: MessagesRequestOptions): void {
   }
 }
 
+/**
+ * `unconstrained`: no strict tools, as after Claude refused this request's. Otherwise a tool is
+ * strict when it asks, the deployment declares native structured output, and it fits Anthropic's
+ * limits, in order (`messagesStrictTools`).
+ */
 export function foundryMessagesRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: MessagesRequestOptions,
-  scope: string
-): JsonObject {
+  scope: string,
+  unconstrained = false
+): FoundryMessagesRequest {
   const max = prepareRequest(request, definition, options, scope, true)
   let conversation = false
   for (const message of request.messages) {
@@ -101,7 +121,19 @@ export function foundryMessagesRequest(
     ...(thinking.effort === undefined ? {} : { effort: thinking.effort }),
     ...(schema ? { format: { type: "json_schema", schema } } : {}),
   }
-  return {
+  const candidates = request.tools.map((tool) => ({
+    strict: tool.strict === true && caps.nativeStructuredOutput === true,
+    schema: messagesOutputSchema(tool.inputSchema),
+  }))
+  const chosen = messagesStrictTools(candidates, schema)
+  const constrained = request.tools.flatMap((tool, index) =>
+    chosen[index] ? [{ name: tool.name, input_schema: tool.inputSchema }] : []
+  )
+  const key = constrained.length === 0 ? undefined : strictToolsKey(constrained)
+  const refused = unconstrained || (key !== undefined && strictToolRefusals.has(key))
+  const strict = chosen.map((choice) => choice && !refused)
+  const strictTools = refused ? undefined : key
+  const body: JsonObject = {
     ...options.request,
     model: definition.modelId,
     messages: mapped.messages,
@@ -112,18 +144,17 @@ export function foundryMessagesRequest(
     ...(Object.keys(output).length ? { output_config: output } : {}),
     ...(request.tools.length
       ? {
-          tools: request.tools.map((tool) => ({
+          tools: request.tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
             input_schema: tool.inputSchema,
-            ...(caps.nativeStructuredOutput === true && messagesOutputSchema(tool.inputSchema)
-              ? { strict: true }
-              : {}),
+            ...(strict[index] ? { strict: true } : {}),
           })),
           tool_choice: { type: "auto", disable_parallel_tool_use: caps.parallelToolCalls !== true },
         }
       : {}),
   }
+  return { body, ...(strictTools === undefined ? {} : { strictTools }) }
 }
 
 function reasoningRequest(

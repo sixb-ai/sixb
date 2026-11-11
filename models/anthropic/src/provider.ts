@@ -28,7 +28,14 @@ import {
   rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
+import {
+  isStrictToolLimitError,
+  messagesEvents,
+  messagesInput,
+  messagesStrictTools,
+  StrictToolRefusals,
+  strictToolsKey,
+} from "@sixb/model-protocols/messages"
 import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
 import { contextWindowRejection } from "@sixb/model-protocols/responses"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
@@ -45,6 +52,9 @@ const PRICES_RETRY_MS = 60_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
 const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
+
+/** Strict tool sets Anthropic refused: sent unconstrained from the start next time. */
+const strictToolRefusals = new StrictToolRefusals()
 
 export interface AnthropicOptions {
   readonly baseUrl?: string
@@ -459,18 +469,23 @@ class AnthropicLanguageModel implements LanguageModel {
 
   async stream(request: LanguageModelRequest) {
     const url = `${this.transport.baseUrl}/messages`
-    const prepared = await this.prepareRequest(request)
-    const init: RequestInit = {
-      method: "POST",
-      headers: anthropicHeaders(this.transport, "text/event-stream", true),
-      body: JSON.stringify(prepared.body),
-      signal: request.signal,
-    }
+    let prepared = await this.prepareRequest(request)
     let response: Response
     for (let attempt = 0; ; attempt += 1) {
-      response = await (this.transport.fetch ?? fetch)(url, init)
+      response = await (this.transport.fetch ?? fetch)(url, {
+        method: "POST",
+        headers: anthropicHeaders(this.transport, "text/event-stream", true),
+        body: JSON.stringify(prepared.body),
+        signal: request.signal,
+      })
       if (response.ok) break
       const error = await providerHttpError(response, this.providerId, this.modelId)
+      // A limit no count predicts, such as the grammar's compiled size: once more, unconstrained.
+      if (prepared.strictTools !== undefined && isStrictToolLimitError(error)) {
+        strictToolRefusals.add(prepared.strictTools)
+        prepared = await this.prepareRequest(request, { unconstrained: true })
+        continue
+      }
       if (!error.retryable || attempt >= (this.transport.maxRetries ?? DEFAULT_MAX_RETRIES)) {
         throw error
       }
@@ -498,8 +513,13 @@ class AnthropicLanguageModel implements LanguageModel {
     }
   }
 
-  private async prepareRequest(request: LanguageModelRequest): Promise<{
+  private async prepareRequest(
+    request: LanguageModelRequest,
+    options: { readonly unconstrained?: boolean } = {}
+  ): Promise<{
     readonly body: JsonObject
+    /** The key of the strict tools it sends, if any, for {@link strictToolRefusals}. */
+    readonly strictTools?: string
   }> {
     const extra = this.options.request ?? {}
     for (const reserved of [
@@ -529,18 +549,12 @@ class AnthropicLanguageModel implements LanguageModel {
         `[SixbAnthropic] Structured output requires native support for model '${this.modelId}' and the supplied schema. Choose a supported model and schema; JSON-tool fallback is not supported.`
       )
     }
-    const tools: JsonObject[] = [
-      ...(this.options.providerTools ?? []),
-      ...request.tools.map((tool) => {
-        const schema = anthropicOutputSchema(tool.inputSchema)
-        return {
-          name: tool.name,
-          description: tool.description,
-          input_schema: schema ?? tool.inputSchema,
-          strict: schema !== undefined,
-        }
-      }),
-    ]
+    const { tools: requestTools, strictTools } = await this.requestTools(
+      request,
+      nativeOutputSchema,
+      options.unconstrained === true
+    )
+    const tools: JsonObject[] = [...(this.options.providerTools ?? []), ...requestTools]
     const existingOutputConfig = object(extra.output_config)
     if (extra.output_config !== undefined && !existingOutputConfig) {
       throw new TypeError("[SixbAnthropic] Model request option 'output_config' must be an object.")
@@ -600,6 +614,53 @@ class AnthropicLanguageModel implements LanguageModel {
         request.caching,
         request.tools.length
       ),
+      ...(strictTools === undefined ? {} : { strictTools }),
+    }
+  }
+
+  /**
+   * The request's tools, strict where the tool asked, the model takes strict tools, and the request
+   * stays within Anthropic's limits: in order, so the same tools always make the same request. A
+   * set Anthropic refused before goes unconstrained.
+   */
+  private async requestTools(
+    request: LanguageModelRequest,
+    outputSchema: JsonObject | undefined,
+    unconstrained: boolean
+  ): Promise<{ readonly tools: JsonObject[]; readonly strictTools?: string }> {
+    const native = request.tools.some((tool) => tool.strict) && (await this.takesStrictTools())
+    const schemas = request.tools.map((tool) =>
+      native && tool.strict ? anthropicOutputSchema(tool.inputSchema) : undefined
+    )
+    const strict = messagesStrictTools(
+      request.tools.map((tool, index) => ({ strict: tool.strict, schema: schemas[index] })),
+      outputSchema
+    )
+    const constrained = request.tools.flatMap((tool, index) =>
+      strict[index] ? [{ name: tool.name, input_schema: schemas[index] ?? null }] : []
+    )
+    const key = constrained.length === 0 ? undefined : strictToolsKey(constrained)
+    const refused = unconstrained || (key !== undefined && strictToolRefusals.has(key))
+    const tools = request.tools.map((tool, index) => {
+      const schema = strict[index] && !refused ? schemas[index] : undefined
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: schema ?? tool.inputSchema,
+        ...(schema === undefined ? {} : { strict: true }),
+      }
+    })
+    return { tools, ...(key === undefined || refused ? {} : { strictTools: key }) }
+  }
+
+  /** Unless the model is known not to: the catalog can be out of reach, and strict is a request. */
+  private async takesStrictTools(): Promise<boolean> {
+    const declared = this.definition.capabilities.nativeStructuredOutput
+    if (declared !== undefined || this.metadataResolved) return declared !== false
+    try {
+      return (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput !== false
+    } catch {
+      return true
     }
   }
 

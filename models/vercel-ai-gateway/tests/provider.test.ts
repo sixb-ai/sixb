@@ -10,7 +10,6 @@ import type {
 } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
-import { BASH_TOOL_SPEC } from "../../../packages/agent/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent/src/tools/view-file"
 import { createVercelGateway, vercelGateway } from "../src"
@@ -58,26 +57,66 @@ test("distinguishes unavailable Gateway catalogs from malformed metadata", async
   ).rejects.toBeInstanceOf(SyntaxError)
 })
 
-// Regression proof: force strict:true for every tool; read/bash have optional non-nullable inputs.
-test("preserves built-in tool schemas and only enables compatible strict decoding", async () => {
-  let body: unknown
+// Regression proof: send a strict tool's own schema (optional properties under strict mode, which
+// models fill with ""), mark a tool strict that did not ask, or drop the anthropic/ exception.
+test("sends the tools that ask strict as strict mode takes them, the rest as they are", async () => {
+  let body: { tools: JsonObject[] } | undefined
   const provider = createVercelGateway({
     fetch: async (_url, init) => {
       body = JSON.parse(String(init?.body))
       return sseResponse([{ type: "response.completed", response: { status: "completed" } }])
     },
   })
-  const tools = [READ_TOOL_SPEC, BASH_TOOL_SPEC, VIEW_FILE_TOOL_SPEC]
-  const response = await provider("openai/test").stream(request({ tools }))
-  await collect(response.events)
-  expect(body).toMatchObject({
-    tools: tools.map((tool, index) => ({
+  const unasked = {
+    name: "lookup",
+    description: "Look up one record.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  }
+  const tools = [READ_TOOL_SPEC, VIEW_FILE_TOOL_SPEC, unasked]
+
+  await collect((await provider("openai/test").stream(request({ tools }))).events)
+  expect(body?.tools).toEqual([
+    {
       type: "function",
-      name: tool.name,
-      parameters: tool.inputSchema,
-      strict: index === 2,
-    })),
-  })
+      name: "read",
+      description: READ_TOOL_SPEC.description,
+      parameters: {
+        ...READ_TOOL_SPEC.inputSchema,
+        properties: {
+          path: READ_TOOL_SPEC.inputSchema.properties.path,
+          offset: { ...READ_TOOL_SPEC.inputSchema.properties.offset, type: ["integer", "null"] },
+          limit: { ...READ_TOOL_SPEC.inputSchema.properties.limit, type: ["integer", "null"] },
+        },
+        required: ["path", "offset", "limit"],
+      },
+      strict: true,
+    },
+    {
+      type: "function",
+      name: "view_file",
+      description: VIEW_FILE_TOOL_SPEC.description,
+      parameters: VIEW_FILE_TOOL_SPEC.inputSchema,
+      strict: true,
+    },
+    {
+      type: "function",
+      name: "lookup",
+      description: unasked.description,
+      parameters: unasked.inputSchema,
+      strict: false,
+    },
+  ])
+  expect(READ_TOOL_SPEC.inputSchema.required).toEqual(["path"])
+
+  await collect((await provider("anthropic/test").stream(request({ tools }))).events)
+  expect(body?.tools.map(({ name, parameters, strict }) => ({ name, parameters, strict }))).toEqual(
+    tools.map((tool) => ({ name: tool.name, parameters: tool.inputSchema, strict: false }))
+  )
 })
 
 function sseResponse(events: readonly unknown[], chunkSize = 17): Response {

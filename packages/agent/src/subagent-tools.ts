@@ -371,6 +371,7 @@ export class SubagentCoordinator {
   async createTools(): Promise<readonly ModelTool[]> {
     const spawn: ModelTool<SpawnSubagentInput> = {
       name: "spawn_agent",
+      strict: true,
       description: [
         "Start an isolated child agent and return immediately.",
         "Use a short, stable key for the same logical delegation so retries cannot duplicate work.",
@@ -392,6 +393,7 @@ export class SubagentCoordinator {
     }
     const wait: ModelTool<WaitForSubagentsInput> = {
       name: "wait_agent",
+      strict: true,
       description: [
         "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
@@ -426,6 +428,7 @@ export class SubagentCoordinator {
     }
     const message: ModelTool<MessageSubagentInput> = {
       name: "message_agent",
+      strict: true,
       description: [
         "Send a message to a child agent still at work, by the key you spawned it with. It reads the message before its next step, or before its first while it is queued, and its answer accounts for it.",
         "Use it to correct its course, add information it needs, or narrow its task, instead of waiting for an answer you would discard. Then collect its answer with wait_agent as usual.",

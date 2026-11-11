@@ -31,6 +31,7 @@ import {
   type ModelReportedCost,
   type ModelResponseFormat,
   type ModelTokenPrice,
+  type ModelToolSpecification,
   type ModelUsage,
   modelReasoningSupportIssue,
   type RerankingModel,
@@ -43,6 +44,7 @@ import {
 } from "@sixb/core/models"
 import {
   contextWindowRejection,
+  requiredNullableSchema,
   responsesEvents,
   responsesInput,
   responsesUsage,
@@ -1326,13 +1328,16 @@ class VercelGatewayLanguageModel implements LanguageModel {
     if (responseFormat) await this.validateResponseFormat(responseFormat)
     const tools: JsonObject[] = [
       ...(this.options.providerTools ?? []),
-      ...request.tools.map((tool) => ({
-        type: "function",
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-        strict: isStrictGatewaySchema(tool.inputSchema),
-      })),
+      ...request.tools.map((tool) => {
+        const schema = this.strictToolSchema(tool)
+        return {
+          type: "function",
+          name: tool.name,
+          description: tool.description,
+          parameters: schema ?? tool.inputSchema,
+          strict: schema !== undefined,
+        }
+      }),
     ]
     const headers = this.headers()
     const {
@@ -1387,6 +1392,17 @@ class VercelGatewayLanguageModel implements LanguageModel {
             }),
       },
     }
+  }
+
+  /**
+   * A tool that asked for strict arguments, in the form strict mode takes: every property required,
+   * an optional one nullable. Claude ignores `strict` through the gateway (measured November 2026:
+   * a required property left out, no limit applied), so it gets the tool's own schema.
+   */
+  private strictToolSchema(tool: ModelToolSpecification): JsonObject | undefined {
+    if (!tool.strict || this.modelId.startsWith("anthropic/")) return undefined
+    const schema = requiredNullableSchema(tool.inputSchema)
+    return isStrictGatewaySchema(schema) ? schema : undefined
   }
 
   async validateResponseFormat(format: ModelResponseFormat): Promise<void> {

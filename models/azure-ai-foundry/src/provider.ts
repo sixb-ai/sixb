@@ -17,7 +17,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatEvents } from "@sixb/model-protocols/chat"
-import { messagesEvents } from "@sixb/model-protocols/messages"
+import { isStrictToolLimitError, messagesEvents } from "@sixb/model-protocols/messages"
 import { responsesEvents } from "@sixb/model-protocols/responses"
 import { foundryEstimator, foundryUsage, type PricedEstimator } from "./accounting"
 import {
@@ -44,6 +44,7 @@ import { foundryMessagesEstimator, foundryMessagesUsage } from "./messages-accou
 import {
   foundryMessagesRequest,
   type MessagesRequestOptions,
+  strictToolRefusals,
   validateMessagesOptions,
 } from "./messages-request"
 import { type RequestOptions, responsesRequest, validateOptions } from "./request"
@@ -379,25 +380,26 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       const model = await abortable(() => this.#pendingExecution!, request.signal)
       return model.stream(request)
     }
-    const body =
+    const response =
       this.protocol === "messages"
-        ? foundryMessagesRequest(request, this.definition, this.options, this.scope)
-        : this.protocol === "chat"
-          ? foundryChatRequest(request, this.definition, this.options, this.scope)
-          : responsesRequest(
-              request,
-              this.definition,
-              this.options,
-              this.scope,
-              this.resolution?.deployment
-            )
-    const response = await this.transport.post(
-      JSON.stringify(body),
-      request.signal,
-      this.providerId,
-      this.modelId,
-      this.protocol
-    )
+        ? await this.postMessages(request)
+        : await this.transport.post(
+            JSON.stringify(
+              this.protocol === "chat"
+                ? foundryChatRequest(request, this.definition, this.options, this.scope)
+                : responsesRequest(
+                    request,
+                    this.definition,
+                    this.options,
+                    this.scope,
+                    this.resolution?.deployment
+                  )
+            ),
+            request.signal,
+            this.providerId,
+            this.modelId,
+            this.protocol
+          )
     const id = this.transport.redactText(response, requestId(response))
     if (!response.body)
       throw new ModelProviderError(
@@ -446,6 +448,33 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
               }),
         response
       ),
+    }
+  }
+
+  /** A limit no count predicts, such as the grammar's compiled size: once more, unconstrained. */
+  private async postMessages(request: LanguageModelRequest): Promise<Response> {
+    const prepared = foundryMessagesRequest(request, this.definition, this.options, this.scope)
+    const post = (body: JsonObject) =>
+      this.transport.post(
+        JSON.stringify(body),
+        request.signal,
+        this.providerId,
+        this.modelId,
+        "messages"
+      )
+    try {
+      return await post(prepared.body)
+    } catch (error) {
+      if (
+        prepared.strictTools === undefined ||
+        !(error instanceof ModelProviderError) ||
+        !isStrictToolLimitError(error)
+      )
+        throw error
+      strictToolRefusals.add(prepared.strictTools)
+      return post(
+        foundryMessagesRequest(request, this.definition, this.options, this.scope, true).body
+      )
     }
   }
 

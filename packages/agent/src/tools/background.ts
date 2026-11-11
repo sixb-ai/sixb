@@ -9,6 +9,7 @@ const MAX_WAIT_MS = 600_000
 
 export const BASH_OUTPUT_TOOL_SPEC = {
   name: "bash_output",
+  strict: true,
   description:
     "A background command's status (running, exited with its code, or stopped) and its output since your last read: the newest 20,000 bytes, the rest in its file. wait blocks until it ends, at most that many ms. You are told when one ends: do not poll.",
   inputSchema: {
@@ -27,6 +28,7 @@ export const BASH_OUTPUT_TOOL_SPEC = {
 
 export const BASH_STOP_TOOL_SPEC = {
   name: "bash_stop",
+  strict: true,
   description:
     "Stop a background command and all it started: SIGTERM, then SIGKILL after 3 s. Returns its final status and output since your last read.",
   inputSchema: {
