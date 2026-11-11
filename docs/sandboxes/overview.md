@@ -46,14 +46,15 @@ behavior before using it in production.
 
 Every provider here adds the agent's credentials where its commands can't read them: they reach
 the Sixb API as the run without ever holding its token. Vercel and the local provider keep the token
-outside the sandbox. smolvm, Apple Container and Azure keep it inside the VM, in a file only root
-reads, while the agent's commands run as an unprivileged user. A custom provider must keep it out of
-the commands' reach too, by setting `supportsRequestCredentials`; `createSixb` fails at startup
-otherwise.
+outside the sandbox. smolvm, Apple Container, Azure and boxd keep it inside the VM, in a file only
+root reads, while the agent's commands run as an unprivileged user. A custom provider must keep it
+out of the commands' reach too, by setting `supportsRequestCredentials`; `createSixb` fails at
+startup otherwise.
 
 ## Configure the environment
 
-Use a persistence-capable provider such as Vercel for conversations that keep files between runs.
+Use a persistence-capable provider such as Vercel or boxd for conversations that keep files between
+runs.
 A static recipe takes `source` and optional `setup`; use `params` and `resolve` for a per-thread recipe:
 
 ```ts
