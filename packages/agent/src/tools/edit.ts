@@ -48,6 +48,9 @@ export interface EditToolOutput {
   readonly replaced: number
   /** Unified diff of the change, with line numbers; cut past a few thousand characters. */
   readonly diff: string
+  /** Lines the change adds and removes, all of them, however short the diff was cut. */
+  readonly added: number
+  readonly removed: number
 }
 
 export function createEditTool(
@@ -90,6 +93,8 @@ export function createEditTool(
         path: input.path,
         replaced: edited.replaced,
         diff: edited.diff,
+        added: edited.added,
+        removed: edited.removed,
       } satisfies EditToolOutput
     },
     errorText: agentToolErrorText,

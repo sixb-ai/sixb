@@ -112,12 +112,23 @@ export function toolLine(
       const changed = text(output?.diff)
         .split("\n")
         .filter((line) => /^[+-]/.test(line))
-      const added = changed.filter((line) => line.startsWith("+")).length
+
+      // The diff is cut on a large edit, so the edit counts its lines; an output stored before it
+      // did carries only the diff.
+      const added =
+        typeof output?.added === "number"
+          ? output.added
+          : changed.filter((line) => line.startsWith("+")).length
+      const removed =
+        typeof output?.removed === "number"
+          ? output.removed
+          : changed.filter((line) => line.startsWith("-")).length
+
       return {
         verb: "edit",
         detail: text(input?.path),
         ...(output?.diff !== undefined
-          ? { note: `+${added} −${changed.length - added}`, diff: true, preview: limited(changed) }
+          ? { note: `+${added} −${removed}`, diff: true, preview: limited(changed) }
           : {}),
         ...error,
       }

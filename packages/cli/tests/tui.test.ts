@@ -208,6 +208,26 @@ describe("a file the agent read or changed", () => {
     })
   })
 
+  // Reproduce: count added and removed from the diff alone in toolLine; the line then shows +1 −1.
+  test("a large edit counts all the lines it changed, though its diff was cut", () => {
+    const edit = (counts: Record<string, number>) =>
+      toolLine(
+        call(
+          "edit",
+          { path: "src/app.ts", old_string: "a", new_string: "b", replace_all: true },
+          {
+            path: "src/app.ts",
+            replaced: 40,
+            diff: "@@ -1 +1 @@\n-a\n+b\n… 39 more hunks\n",
+            ...counts,
+          }
+        )
+      )
+    expect(edit({ added: 40, removed: 40 })).toMatchObject({ note: "+40 −40" })
+    // Stored before an edit counted its lines, as an old thread replays it: the diff is counted.
+    expect(edit({})).toMatchObject({ note: "+1 −1" })
+  })
+
   test("a write says whether it created or rewrote the file, and how long it is", () => {
     const write = (created: boolean) =>
       toolLine(call("write", { path: "a.md" }, { path: "a.md", created, lines: 3, bytes: 9 }))

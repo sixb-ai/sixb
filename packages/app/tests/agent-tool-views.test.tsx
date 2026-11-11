@@ -363,6 +363,34 @@ describe("a file the agent changed", () => {
     }
   })
 
+  // Reproduce: count added and removed from the diff alone in describeEdit; the row then
+  // shows +1 −1.
+  test("a large edit shows all the lines it changed, though its diff was cut", () => {
+    const view = mount(
+      <EditToolView
+        tool={{
+          toolName: "edit",
+          state: "output-available",
+          input: { path: "src/app.ts", old_string: "a", new_string: "b", replace_all: true },
+          output: {
+            path: "src/app.ts",
+            replaced: 40,
+            diff: "@@ -1,1 +1,1 @@\n-a\n+b\n… 39 more hunks\n",
+            added: 40,
+            removed: 40,
+          },
+        }}
+      />
+    )
+    try {
+      const line = view.getByRole("button", { name: /Edited app\.ts/ })
+      expect(line.textContent).toContain("+40")
+      expect(line.textContent).toContain("−40")
+    } finally {
+      view.unmount()
+    }
+  })
+
   test("a write says whether it created or rewrote the file, and opens to what it wrote", () => {
     const write = (created: boolean) =>
       mount(

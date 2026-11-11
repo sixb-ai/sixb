@@ -13,6 +13,7 @@ describe("file edits in the chat", () => {
   })
 
   test("an edit counts what it added and removed; one still streaming names its file", () => {
+    // Stored before an edit counted its lines, as an old thread replays it: the diff is counted.
     expect(
       describeEdit({
         input: { path: "a/b.ts" },
@@ -23,6 +24,23 @@ describe("file edits in the chat", () => {
       runningTitle: "Editing b.ts",
       lines: [],
     })
+  })
+
+  // Reproduce: count added and removed from the diff alone in describeEdit; the cut diff then
+  // shows +1 −1.
+  test("an edit whose diff was cut counts all its changed lines", () => {
+    expect(
+      describeEdit({
+        input: { path: "a/b.ts" },
+        output: {
+          path: "a/b.ts",
+          replaced: 40,
+          diff: "@@ -1 +1 @@\n-x\n+y\n… 39 more hunks\n",
+          added: 40,
+          removed: 40,
+        },
+      })
+    ).toMatchObject({ detail: "+40 −40", added: 40, removed: 40 })
   })
 
   test("a write shows what it wrote as added lines", () => {

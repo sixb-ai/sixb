@@ -30,8 +30,14 @@ export function describeEdit(
   const name = fileName(path)
   const diff = stringField(tool.output, "diff")
   const lines = diff === undefined ? [] : parseDiff(diff)
-  const added = lines.filter((line) => line.kind === "added").length
-  const removed = lines.filter((line) => line.kind === "removed").length
+
+  // The diff is cut on a large edit, so the edit counts its lines; an output stored before it
+  // did carries only the diff.
+  const added =
+    numberField(tool.output, "added") ?? lines.filter((line) => line.kind === "added").length
+  const removed =
+    numberField(tool.output, "removed") ?? lines.filter((line) => line.kind === "removed").length
+
   return {
     path,
     title: m.title(name),

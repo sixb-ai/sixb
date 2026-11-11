@@ -13,6 +13,9 @@ export type EditTextResult =
       readonly text: string
       readonly replaced: number
       readonly diff: string
+      /** Lines the change adds and removes, all of them: the diff may be cut. */
+      readonly added: number
+      readonly removed: number
     }
   | { readonly ok: false; readonly reason: string }
 
@@ -55,7 +58,7 @@ export function editText(
     ok: true,
     text: result,
     replaced: starts.length,
-    diff: unifiedDiff(text, result, starts, old.length, replacement.length),
+    ...unifiedDiff(text, result, starts, old.length, replacement.length),
   }
 }
 
@@ -129,14 +132,17 @@ function textLines(text: string): readonly string[] {
   return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n")
 }
 
-/** The replacements as unified-diff hunks, nearby ones merged, cut past a few thousand characters. */
+/**
+ * The replacements as unified-diff hunks, nearby ones merged, cut past a few thousand characters,
+ * and the lines they add and remove, counted before the cut.
+ */
 function unifiedDiff(
   before: string,
   after: string,
   starts: readonly number[],
   oldLength: number,
   newLength: number
-): string {
+): { readonly diff: string; readonly added: number; readonly removed: number } {
   // A file's final newline ends its last line: it starts no empty one.
   const oldLines = textLines(before)
   const newLines = textLines(after)
@@ -166,8 +172,28 @@ function unifiedDiff(
       oldStart += 1
       newStart += 1
     }
-    ranges.push({ oldStart, oldEnd, newStart, newEnd })
+
+    // Two matches on one line change it once: their ranges merge, so the line shows once.
+    const previous = ranges.at(-1)
+    if (previous && (oldStart < previous.oldEnd || newStart < previous.newEnd)) {
+      ranges[ranges.length - 1] = {
+        oldStart: Math.min(previous.oldStart, oldStart),
+        oldEnd: Math.max(previous.oldEnd, oldEnd),
+        newStart: Math.min(previous.newStart, newStart),
+        newEnd: Math.max(previous.newEnd, newEnd),
+      }
+    } else {
+      ranges.push({ oldStart, oldEnd, newStart, newEnd })
+    }
     shift += newLength - oldLength
+  }
+
+  // Counted before the diff is cut, so they hold the whole change.
+  let added = 0
+  let removed = 0
+  for (const range of ranges) {
+    removed += range.oldEnd - range.oldStart
+    added += range.newEnd - range.newStart
   }
 
   const hunks: ChangedRange[][] = []
@@ -207,9 +233,9 @@ function unifiedDiff(
     const hunk = `@@ -${oldFrom + 1},${oldTo - oldFrom} +${newFrom + 1},${newTo - newFrom} @@\n${body.join("\n")}\n`
     if (diff.length + hunk.length > MAX_DIFF_CHARACTERS) {
       const left = hunks.length - index
-      return `${diff}… ${left} more ${left === 1 ? "hunk" : "hunks"}\n`
+      return { diff: `${diff}… ${left} more ${left === 1 ? "hunk" : "hunks"}\n`, added, removed }
     }
     diff += hunk
   }
-  return diff
+  return { diff, added, removed }
 }

@@ -11,6 +11,8 @@ describe("editText", () => {
     expect(result).toEqual({
       ok: true,
       replaced: 1,
+      added: 1,
+      removed: 1,
       text: file.replace("a + 1", "a + 2"),
       // The final newline ends the last line: no empty line after it.
       diff: [
@@ -97,5 +99,32 @@ describe("editText", () => {
     expect(result).toMatchObject({ ok: true, replaced: 40 })
     expect(result.ok && result.diff.length).toBeLessThan(4_100)
     expect(result.ok && result.diff).toMatch(/… \d+ more hunks\n$/)
+  })
+
+  // Reproduce: count added and removed from the diff unifiedDiff returns; past the cut, they
+  // then fall short of the 40 lines changed.
+  test("counts every line it changed, though the diff is cut", () => {
+    const text = Array.from({ length: 400 }, (_, index) => `line ${index} target ${"x".repeat(40)}`)
+      .map((line, index) => (index % 10 === 0 ? line : line.replace("target", "keep")))
+      .join("\n")
+    const result = editText(text, { old: "target", new: "changed", all: true })
+    expect(result).toMatchObject({ ok: true, added: 40, removed: 40 })
+
+    const shown = result.ok ? result.diff.split("\n").filter((line) => line.startsWith("+")) : []
+    expect(shown.length).toBeLessThan(40)
+  })
+
+  // Reproduce: push every range in unifiedDiff without merging it into the one before; the line
+  // then shows, and counts, once for each match on it.
+  test("shows and counts a line two matches changed once", () => {
+    const result = editText("x\na a\ny\n", { old: "a", new: "b", all: true })
+    expect(result).toEqual({
+      ok: true,
+      text: "x\nb b\ny\n",
+      replaced: 2,
+      diff: "@@ -1,3 +1,3 @@\n x\n-a a\n+b b\n y\n",
+      added: 1,
+      removed: 1,
+    })
   })
 })

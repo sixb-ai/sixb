@@ -39,6 +39,8 @@ describe("edit", () => {
       path: "app.ts",
       replaced: 1,
       diff: "@@ -1,1 +1,1 @@\n-const retries = 4\n+const retries = 5\n",
+      added: 1,
+      removed: 1,
     })
     // Its own write counts as read: the next edit needs no read in between.
     await edit({ path: "app.ts", old_string: "retries", new_string: "attempts" })
