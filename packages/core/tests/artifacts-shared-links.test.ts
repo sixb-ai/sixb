@@ -207,7 +207,12 @@ describe("a shared link's guest", () => {
 
     await protocol.setGuestName(session, "Ava Martin")
     const comment = await guest.artifacts.addComment(kickoff, { body: "Can we start at 9?" })
-    expect(comment.author).toEqual({ type: "guest", id: session.sessionId, name: "Ava Martin" })
+    expect(comment.author).toEqual({
+      type: "guest",
+      id: session.sessionId,
+      name: "Ava Martin",
+      grantId: session.grantId,
+    })
     expect(await guest.artifacts.listComments(kickoff)).toHaveLength(1)
 
     // Not even their own: resolving and deleting are for members who may change the artifact.
