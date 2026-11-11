@@ -6,14 +6,14 @@ Each artifact has a page in your app where its owner reads it.
 
 ## Kinds
 
-| Kind       | What it holds                                                          |
-| ---------- | ---------------------------------------------------------------------- |
-| `document` | A Markdown report in `document.md`, with its images beside it          |
-| `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
-| `slides`   | A deck: `index.html` with one `<section class="slide">` per slide      |
-| `page`     | A web page: `index.html` and its scripts, styles, images, and data     |
-| `canvas`   | An endless board of boards, sections, notes, shapes, and arrows        |
-| `file`     | One file, shown as its type allows or offered for download             |
+| Kind       | What it holds                                                           |
+| ---------- | ----------------------------------------------------------------------- |
+| `document` | A Markdown report in `document.md`, or designed HTML in `document.html` |
+| `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts  |
+| `slides`   | A deck: `index.html` with one `<section class="slide">` per slide       |
+| `page`     | A web page: `index.html` and its scripts, styles, images, and data      |
+| `canvas`   | An endless board of boards, sections, notes, shapes, and arrows         |
+| `file`     | One file, shown as its type allows or offered for download              |
 
 ## Publish an artifact
 
@@ -246,6 +246,33 @@ A document is Markdown with tables, footnotes, and task lists. A few conventions
 - An image with a title alone in its paragraph becomes a figure, and the title becomes its
   caption: `![Revenue by region](figures/revenue.png "Revenue by region, Q3")`.
 - Table columns of figures align right.
+
+### Design a document
+
+When a document should look like your business's own, such as a proposal, a contract, or a letter,
+write it as HTML in `document.html` with its own stylesheets, fonts, and images beside it. It
+renders exactly as they say, on white paper. An `@page` rule with a size gives it pages:
+
+```text
+proposal/
+├── document.html
+├── design.css        @page { size: letter; margin: 0.75in 0.85in; }
+├── fonts/brand.woff2
+└── images/logo.svg
+```
+
+- It shows as the pages it prints on. On a phone, where those would be too small to read, it is one
+  sheet whose text wraps to the screen, with a gap where each page breaks.
+- Pages break where its CSS says: `break-before: page` starts a new page, and `break-inside: avoid`
+  keeps a block whole.
+- It may hold any markup that lays out text, tables, figures, and pictures, styled by any CSS.
+  Nothing in it runs: publishing refuses scripts, `on…` handlers, `<iframe>`, `<form>`, and
+  `<base>`.
+- Its images are files in the artifact or another artifact's, and its stylesheets are files in the
+  artifact or on a CDN such as Google Fonts.
+- Its headings form its outline and the sections an address names, as a Markdown document's do.
+- A version holds everything it shows: to share a design between documents, keep it in a
+  [skill](../models/tools-and-authorization.md#add-a-skill) and copy its files into each one.
 
 ## Write a sheet
 
