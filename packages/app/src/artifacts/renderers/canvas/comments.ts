@@ -199,14 +199,17 @@ export interface CommentAuthor {
 /**
  * Who wrote a comment: the reader themselves, else the name the API gives its author, and the
  * Agent for them when its run wrote it. A shared link's guest is marked as one, for everyone, and
- * is "you" to themselves. Null for an author the project cannot name.
+ * is "you" to themselves. A guest never learns a member's email: one without a profile name is a
+ * team member to them, as on the canvas's presence. Null for an author the project cannot name.
  */
 export function useCommentAuthors(): (
   comment: Pick<ArtifactComment, "author" | "authorName" | "origin">
 ) => CommentAuthor | null {
   const user = useCurrentUser()
   const guest = useSharedGuest()
-  const messages = useArtifactMessages().canvas.comments
+  const all = useArtifactMessages()
+  const messages = all.canvas.comments
+  const unnamed = guest ? all.live.teamMember : null
 
   return ({ author, authorName, origin }) => {
     if (author.type === "guest") {
@@ -216,10 +219,11 @@ export function useCommentAuthors(): (
 
     const own = author.type === "user" && author.id === user?.id
     if (origin) {
-      const name = own ? messages.you.toLowerCase() : (authorName ?? messages.someone)
+      const name = own ? messages.you.toLowerCase() : (authorName ?? unnamed ?? messages.someone)
       return { name: messages.agentFor(name), you: false, agent: true }
     }
     if (own) return { name: user.displayName ?? user.email ?? authorName ?? "", you: true }
-    return authorName ? { name: authorName, you: false } : null
+    const name = authorName ?? unnamed
+    return name ? { name, you: false } : null
   }
 }

@@ -18,6 +18,8 @@ import { cn } from "@sixb/ui/lib/utils"
 import {
   Check,
   CornerDownRight,
+  Eye,
+  Lock,
   MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
@@ -34,6 +36,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useSharedGuest } from "../../../shared-session"
 import { GuestBadge } from "../../guest-badge"
 import { useArtifactMessages } from "../../messages"
 import { PersonAvatar } from "../../person-avatar"
@@ -49,6 +52,10 @@ import {
 // who wrote it and its replies, resolved, reopened, replied to or deleted in place. The reader
 // picks some to send to the Agent, which puts them, quoted with where they are, in the message
 // they are writing. Beside the canvas while it is wide, a sheet over its foot on a phone.
+//
+// A member is told who reads what: a reply in a guest's thread reaches the guest, and once guests
+// comment on the canvas, the team's own threads are marked internal. A guest reads only their
+// link's threads, as the API lists them, and is told nothing of the others.
 
 export type CommentFilter = "open" | "resolved"
 
@@ -101,6 +108,11 @@ export function CommentsPanel({
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
   const [sent, setSent] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+
+  // Guests reach the canvas once one has commented: the team's own threads then say so. A guest
+  // is listed no thread of the team's.
+  const member = useSharedGuest() === null
+  const guestsHere = threads.some((thread) => thread.comment.author.type === "guest")
 
   // What is chosen stays among the threads shown.
   useEffect(() => {
@@ -254,6 +266,12 @@ export function CommentsPanel({
                 choosing={choosing}
                 chosen={chosen.has(thread.comment.id)}
                 nameOf={nameOf}
+                guest={
+                  member && thread.comment.author.type === "guest"
+                    ? (nameOf(thread.comment)?.name ?? messages.guest)
+                    : null
+                }
+                internal={guestsHere && thread.comment.author.type !== "guest"}
                 manages={canManage(thread.comment)}
                 onChoose={(next) =>
                   setChosen((current) => {
@@ -315,6 +333,8 @@ function ThreadCard({
   choosing,
   chosen,
   nameOf,
+  guest,
+  internal,
   manages,
   onChoose,
   onActivate,
@@ -328,6 +348,10 @@ function ThreadCard({
   readonly choosing: boolean
   readonly chosen: boolean
   readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
+  /** The guest who started the thread, who reads its replies, as a member is told. */
+  readonly guest: string | null
+  /** The team's own thread, on a canvas guests comment on. */
+  readonly internal: boolean
   readonly manages: boolean
   readonly onChoose: (chosen: boolean) => void
   readonly onActivate: () => void
@@ -419,7 +443,11 @@ function ThreadCard({
             ) : null}
           </div>
 
-          <Message comment={comment} nameOf={nameOf} />
+          <Message
+            comment={comment}
+            nameOf={nameOf}
+            {...(internal ? { badge: <InternalBadge /> } : {})}
+          />
           {replies.map((reply) => (
             <div key={reply.id} className="mt-2.5 border-l-2 border-border/70 pl-2.5">
               <Message comment={reply} nameOf={nameOf} />
@@ -431,6 +459,17 @@ function ThreadCard({
               compact
               autoFocus={replying}
               placeholder={messages.replyPlaceholder}
+              notice={
+                guest ? (
+                  <p
+                    title={messages.guestSeesHint}
+                    className="m-0 flex items-center gap-1 text-[11px] leading-4 text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0"
+                  >
+                    <Eye aria-hidden="true" />
+                    <span className="min-w-0 truncate">{messages.guestSees(guest)}</span>
+                  </p>
+                ) : undefined
+              }
               onSubmit={async (body) => {
                 await onReply(body)
                 setReplying(false)
@@ -469,6 +508,20 @@ function ThreadCard({
   )
 }
 
+/** Beside a thread only the team reads, on a canvas guests comment on. */
+function InternalBadge() {
+  const messages = useArtifactMessages().canvas.comments
+  return (
+    <span
+      title={messages.internalHint}
+      className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[10.5px] leading-none font-medium tracking-[0.01em] text-muted-foreground ring-1 ring-border/70 ring-inset [&_svg]:size-2.5"
+    >
+      <Lock aria-hidden="true" />
+      {messages.internal}
+    </span>
+  )
+}
+
 /** Where a thread is: its board, and its element by its first words, or that it is gone. */
 function Where({ place }: { readonly place: ThreadPlace }) {
   const messages = useArtifactMessages().canvas.comments
@@ -497,9 +550,12 @@ function Where({ place }: { readonly place: ThreadPlace }) {
 function Message({
   comment,
   nameOf,
+  badge,
 }: {
   readonly comment: ArtifactComment
   readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
+  /** At the end of its author's line: what the thread is, such as internal. */
+  readonly badge?: ReactNode
 }) {
   const messages = useArtifactMessages().canvas.comments
   const when = useWhen()
@@ -520,6 +576,7 @@ function Message({
         <time dateTime={comment.createdAt} className="shrink-0 text-muted-foreground">
           {when(comment.createdAt)}
         </time>
+        {badge ? <span className="ml-auto flex shrink-0 pl-1">{badge}</span> : null}
       </div>
       <p className="m-0 mt-1 text-sm leading-5 break-words whitespace-pre-wrap text-foreground">
         {comment.body}

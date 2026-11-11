@@ -119,6 +119,7 @@ export function CommentComposer({
   onCancel,
   autoFocus = true,
   compact = false,
+  notice,
   className,
 }: {
   readonly placeholder: string
@@ -127,6 +128,8 @@ export function CommentComposer({
   readonly autoFocus?: boolean
   /** A reply's: one line until it grows. */
   readonly compact?: boolean
+  /** Under the words, before they are posted: who else will read them. */
+  readonly notice?: ReactNode
   readonly className?: string
 }) {
   const messages = useArtifactMessages().canvas.comments
@@ -218,6 +221,8 @@ export function CommentComposer({
         <p role="alert" className="m-0 px-1 text-xs text-destructive">
           {messages.failures[failure]}
         </p>
+      ) : notice ? (
+        <div className="px-1">{notice}</div>
       ) : null}
     </div>
   )
