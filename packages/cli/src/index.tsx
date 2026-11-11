@@ -358,6 +358,20 @@ async function main(): Promise<void> {
       break
     }
 
+    case "run": {
+      const { runScriptCommand } = await import("./commands/run")
+      const [script = "", ...scriptArgs] = positionals
+      const exitCode = await runScriptCommand({
+        script,
+        args: scriptArgs,
+        entry: getFlag("entry"),
+        deployed: hasFlag("deployed"),
+        yes: hasFlag("yes"),
+      })
+      // Whatever the script left running, such as a timer or a socket, must not keep it alive.
+      return process.exit(exitCode)
+    }
+
     case "db:prepare": {
       const { runDbPrepare } = await import("./commands/db-prepare")
       await runDbPrepare({ entry: getFlag("entry") })

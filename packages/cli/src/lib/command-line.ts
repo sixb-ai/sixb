@@ -126,7 +126,12 @@ export const CLI_OPTION_DEFINITIONS = {
   },
   yes: {
     syntax: "--yes",
-    summary: "Allow the folders named without asking",
+    summary: "Go ahead without asking: allow the folders named, or run on the deployment",
+    kind: "boolean",
+  },
+  deployed: {
+    syntax: "--deployed",
+    summary: "Run on the deployment sixb.deploy.ts describes",
     kind: "boolean",
   },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
@@ -232,6 +237,7 @@ export type LocalCommandId =
   | "worker"
   | "worker-group"
   | "check"
+  | "run"
   | "typegen"
   | "build"
   | "desktop:build"
@@ -274,6 +280,8 @@ interface CommandNode {
     readonly positional: number
   }[]
   readonly rootHelpLabel?: string
+  /** Everything after the first positional is a positional too, passed on untouched. */
+  readonly passthrough?: boolean
 }
 
 const CONNECTION_OPTIONS = ["api-url", "token", "profile"] as const
@@ -535,6 +543,14 @@ const commandTree: readonly CommandNode[] = [
     rootHelpLabel: "worker-group [types...]",
   }),
   command("check", "Validate project configuration and health", { options: ["entry"] }),
+  command("run", "Run a script against the project, here or in production", {
+    usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
+    options: ["entry", "deployed", "yes"],
+    minimumPositionals: 1,
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    passthrough: true,
+    rootHelpLabel: "run <script>",
+  }),
   command("typegen", "Generate ontology types for typed queries", { options: ["entry"] }),
   command("build", "Build the runtime and the app for production", {
     options: ["entry", "outdir"],
@@ -751,7 +767,7 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   readonly compact?: boolean
 }[] = [
   { title: "Agent", names: ["agent", "connect"] },
-  { title: "Develop", names: ["init", "dev", "env", "check", "typegen", "build"] },
+  { title: "Develop", names: ["init", "dev", "env", "check", "run", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
     title: "Run in production",
@@ -865,6 +881,7 @@ function command(
       readonly positional: number
     }[]
     readonly rootHelpLabel?: string
+    readonly passthrough?: boolean
   } = {}
 ): CommandNode {
   const path = input.path ?? [id]
@@ -879,6 +896,7 @@ function command(
     maximumPositionals: input.maximumPositionals ?? 0,
     requiredInputs: input.requiredInputs,
     rootHelpLabel: input.rootHelpLabel ?? (path.length === 1 ? path[0] : undefined),
+    ...(input.passthrough ? { passthrough: true } : {}),
   }
 }
 
@@ -923,11 +941,22 @@ function parseLocalCommand(root: CommandNode, args: readonly string[]): ParsedCl
 
   if (!node.id) throw new Error(`[SixbCLI] Command '${path.join(" ")}' has no handler.`)
   const remaining = args.slice(index)
-  if (requestsHelp(remaining)) {
+  if (requestsHelp(node.passthrough ? remaining.slice(0, firstPositional(remaining)) : remaining)) {
     return { kind: "help", help: helpFor(node, path) }
   }
   const { options, positionals } = parseOptions(node, path, remaining)
   return { kind: "command", id: node.id, path, positionals, options }
+}
+
+/** Where the first positional is, past options and the values they take. */
+function firstPositional(args: readonly string[]): number {
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index] ?? ""
+    if (argument === "--" || !argument.startsWith("-")) return index
+    const definition = CLI_OPTION_DEFINITIONS[argument.slice(2) as CliOptionName]
+    if (definition?.kind === "string") index++
+  }
+  return args.length
 }
 
 function requestsHelp(args: readonly string[]): boolean {
@@ -950,12 +979,14 @@ function parseOptions(
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]
     if (argument === undefined) continue
-    if (argument === "--") {
+    // A script's own `--` is one of its arguments.
+    if (argument === "--" && !(node.passthrough && positionalOnly)) {
       positionalOnly = true
       continue
     }
     if (positionalOnly || !argument.startsWith("-")) {
       positionals.push(argument)
+      if (node.passthrough) positionalOnly = true
       continue
     }
     if (!argument.startsWith("--")) {
