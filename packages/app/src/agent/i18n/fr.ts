@@ -459,6 +459,19 @@ export const fr: Translation<AgentMessages> = {
     step: (step, total) => `Question ${step} sur ${total}`,
     dismiss: "Répondre dans la conversation",
   },
+  plan: {
+    label: "Plan",
+    progress: (done, total) =>
+      `${number(done)} sur ${number(total)} ${plural("fr", done, { one: "terminée", other: "terminées" })}`,
+    updated: "Plan mis à jour",
+    updating: "Mise à jour du plan",
+    following: "Poursuite du plan",
+    cleared: "Plan effacé",
+    failed: "Impossible de mettre à jour le plan",
+    completed: "Terminée",
+    inProgress: "En cours",
+    pending: "À faire",
+  },
   edit: {
     title: (name) => (name ? `${name} modifié` : "Fichier modifié"),
     running: (name) => (name ? `Modification de ${name}` : "Modification d’un fichier"),

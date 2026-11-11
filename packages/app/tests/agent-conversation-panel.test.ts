@@ -8,6 +8,7 @@ import {
 } from "../src/agent/components/conversation-panel"
 import type { TranscriptProps } from "../src/agent/components/transcript"
 import {
+  type AgentConversationMessage,
   type ConversationMessagesInput,
   conversationMessages,
   conversationTurn,
@@ -223,6 +224,49 @@ test("offers Continue on the newest answer that stopped short, not on older ones
   )
   expect(pending).toContain("Continuing…")
   expect(pending).toMatch(/<button[^>]*disabled=""[^>]*>.*Continuing…/)
+})
+
+test("the plan of the turn at work sits over the composer, for a reader who follows too", () => {
+  // Removal proof: drop `{plan}` from the composer slot in ConversationPanel; no plan shows.
+  const reply: AgentConversationMessage = {
+    key: "reply",
+    id: null,
+    role: "assistant",
+    status: "streaming",
+    runId: "run",
+    parts: [
+      {
+        type: "tool",
+        toolName: "todo",
+        state: "output-available",
+        input: {
+          todos: [
+            { content: "Read the incident timeline", status: "completed" },
+            { content: "Summarize the customer impact", status: "in_progress" },
+          ],
+        },
+        output: { total: 2, completed: 1, inProgress: ["Summarize the customer impact"] },
+      },
+    ],
+    context: [],
+    diagnostics: [],
+  }
+  const responding = conversationTurn({
+    ...READ_ONLY_TURN,
+    presentation: { kind: "responding", queuedRun: null },
+    activeRunId: "run",
+  })
+  const transcript = { threadId: "thread", messages: [reply], turn: responding }
+
+  expect(responding.kind).toBe("responding")
+  for (const html of [renderPanel({}, transcript), renderPanel({ readOnly: true }, transcript)]) {
+    expect(html).toContain('aria-label="Plan"')
+    expect(html).toContain("Summarize the customer impact")
+    expect(html).toContain("1 of 2 done")
+  }
+  expect(renderPanel({}, { ...transcript, turn: conversation({}).turn })).not.toContain(
+    'aria-label="Plan"'
+  )
 })
 
 const noop = () => {}

@@ -81,6 +81,7 @@ export {
   type UseAgentConversationInput,
   useAgentConversation,
 } from "./agent/hooks/use-agent-conversation"
+export { AgentPlan, type AgentPlanProps } from "./agent/plan/plan-strip"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
 export {
   type AgentToolView,

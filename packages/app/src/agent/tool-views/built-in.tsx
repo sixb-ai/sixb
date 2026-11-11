@@ -7,6 +7,8 @@ import { WebFetchToolView } from "../components/web-fetch-tool-view"
 import { WebSearchToolView } from "../components/web-search-tool-view"
 import { EditToolView, WriteToolView } from "../file-edits/file-edit-tool-view"
 import type { NormalizedTool } from "../parts"
+import { isPlanCall } from "../plan/interpret"
+import { PlanToolView } from "../plan/plan-tool-view"
 import { OpenArtifactToolView } from "../publish-artifact/open-artifact-tool-view"
 import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
 import { ReadToolView } from "../read/read-tool-view"
@@ -73,6 +75,7 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
         <GrepToolView tool={tool} />
       ) : null,
   ],
+  ["todo", (tool) => (isPlanCall(tool) ? <PlanToolView tool={tool} /> : null)],
   // Earlier threads hold calls to it.
   ["view_file", (tool) => <ViewFileToolView tool={tool} />],
   ["publish_artifact", publishArtifact],

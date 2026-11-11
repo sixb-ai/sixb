@@ -4,6 +4,7 @@ import { Plus } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
+import { AgentPlan } from "../plan/plan-strip"
 import { openQuestion } from "../questions/interpret"
 import { QuestionComposer } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
@@ -72,12 +73,25 @@ export function ConversationPanel({
   const asked = transcript.onAnswer ? openQuestion(transcript.messages, transcript.turn) : null
   const [setAside, setSetAside] = useState<string | null>(null)
   const asking = asked !== null && setAside !== asked.messageKey ? asked : null
+  // The plan of the turn at work sits over the composer, and stays while the turn waits for an
+  // approval. A question waits for the turn to end, so the two never share the slot.
+  const plan = (
+    <AgentPlan
+      messages={transcript.messages}
+      turn={transcript.turn}
+      approvals={transcript.approvals}
+    />
+  )
   const renderComposer = (wideClassName?: string) =>
     readOnly ? (
-      // Where the composer would end, so the notice keeps its place at the foot of the pane.
-      <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
+      <>
+        {plan}
+        {/* Where the composer would end, so the notice keeps its place at the foot of the pane. */}
+        <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
+      </>
     ) : (
       <>
+        {plan}
         {asking && transcript.onAnswer ? (
           <QuestionComposer
             key={asking.messageKey}

@@ -21,7 +21,8 @@ workflow. A request such as "assign this to me" resolves to that member's
 [user reference](../ontology/properties.md#reference-a-user).
 
 For a request of several steps, the agent keeps a plan as it works, in the language of the
-conversation: the chat shows its steps, the one in progress and those done.
+conversation: while it works, and while it waits for your approval, the chat shows the step in
+progress over the composer, which opens to every step and those done.
 
 The same agent can work across your application as its domain grows. Add
 [tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
@@ -488,6 +489,7 @@ File: `app/_components/assistant.tsx`
 
 ```tsx
 import {
+  AgentPlan,
   ArtifactPanelRoot,
   Composer,
   SandboxRecovery,
@@ -509,6 +511,7 @@ export function Assistant() {
         {conversation.sandboxRecoveryProps && (
           <SandboxRecovery {...conversation.sandboxRecoveryProps} />
         )}
+        <AgentPlan {...conversation.transcriptProps} />
         <Composer
           {...conversation.composerProps}
           ambientContext={pageContext}
@@ -534,6 +537,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
+| `AgentPlan` | The agent's plan while a turn works on it or waits for an approval: the step in progress and how many are done, opening to every step. It takes `messages`, `turn` and `approvals`, and shows nothing otherwise |
 | `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, the [dictation](#dictation) microphone, and the context meter: how much of the model's limit the conversation uses (`contextMeter`, which `useAgentConversation` fills) |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |

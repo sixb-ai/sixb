@@ -661,6 +661,42 @@ describe("an approval card", () => {
     expect(view.queryByRole("button", { name: "Approve" })).toBeNull()
   })
 
+  // Guard proof: in livePlan (src/agent/plan/interpret.ts), return null whenever the turn is not
+  // responding, as before, or drop `approvals` from ConversationPanel's AgentPlan; the plan then
+  // leaves the moment the turn pauses on the call.
+  test("the plan stays over the composer while the turn waits, and leaves once it is stopped", async () => {
+    const [asked, paused] = conversation()
+    const planned = {
+      ...paused,
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_0",
+          toolName: "todo",
+          state: "output-available",
+          input: {
+            todos: [
+              { content: "Check the invoice against the contract", status: "completed" },
+              { content: "Pay the invoice", status: "in_progress" },
+              { content: "Note the payment on the account", status: "pending" },
+            ],
+          },
+          output: { total: 3, completed: 1, inProgress: ["Pay the invoice"] },
+        },
+        ...(paused?.parts ?? []),
+      ],
+    }
+    const { view } = renderChat("dana", { messages: [asked ?? {}, planned] })
+
+    const plan = await view.findByRole("region", { name: "Plan" })
+    expect(plan.textContent).toContain("Pay the invoice")
+    expect(plan.textContent).toContain("1 of 3 done")
+
+    fireEvent.click(within(await card(view)).getByRole("button", { name: "Stop waiting" }))
+    expect(await view.findByText("Stopped")).toBeDefined()
+    await waitFor(() => expect(view.queryByRole("region", { name: "Plan" })).toBeNull())
+  })
+
   test("the thread's owner may stop someone else's paused turn, and no one else may", async () => {
     const shared = thread({
       participants: [

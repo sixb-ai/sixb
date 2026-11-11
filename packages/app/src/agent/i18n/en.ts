@@ -487,6 +487,20 @@ export const en = {
     /** Close the question, to reply in the composer instead. */
     dismiss: "Reply in chat",
   },
+  /** The plan the Agent keeps while it works, with its `todo` tool: its items are its own words. */
+  plan: {
+    label: "Plan",
+    progress: (done: number, total: number) => `${number(done)} of ${number(total)} done`,
+    updated: "Updated the plan",
+    updating: "Updating the plan",
+    /** The live work line once the plan is set, while the Agent goes on with it. */
+    following: "Following the plan",
+    cleared: "Cleared the plan",
+    failed: "Couldn't update the plan",
+    completed: "Done",
+    inProgress: "In progress",
+    pending: "To do",
+  },
   /** The edit tool, for a change to part of a file (`name` may be empty). */
   edit: {
     title: (name: string) => `Edited ${name || "a file"}`,

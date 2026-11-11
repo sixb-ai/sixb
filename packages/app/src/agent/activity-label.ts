@@ -12,6 +12,7 @@ import { describeEdit, describeWrite } from "./file-edits/interpret"
 import { type AgentMessages, en } from "./i18n/en"
 import { childQuestions, describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
+import { isPlanCall } from "./plan/interpret"
 import { isPublishTool, publishTitle } from "./publish-artifact/interpret"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
 import { describeGlob, describeGrep } from "./search/interpret"
@@ -78,6 +79,12 @@ function toolProgressLabel(
   if (tool.toolName === "write") return describeWrite(tool, messages).runningTitle
   if (tool.toolName === "glob") return describeGlob(tool, messages).runningTitle
   if (tool.toolName === "grep") return describeGrep(tool, messages).runningTitle
+  if (tool.toolName === "todo" && isPlanCall(tool)) {
+    if (tool.state === "output-error") return messages.plan.failed
+    // The plan is set: the Agent goes on with it, which a "Still …" can follow.
+    if (tool.state === "output-available") return messages.plan.following
+    return messages.plan.updating
+  }
 
   if (tool.toolName === "view_file") return messages.viewFile.running(describeViewFile(tool).target)
   if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages).running
