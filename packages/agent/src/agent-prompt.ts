@@ -401,6 +401,7 @@ function renderRuntimeContext(
     ...renderModelCommands(sandboxModels),
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",
+    "Find files with glob and text with grep before you read them. Read a file before you change it, and change files with edit and write rather than shell commands; a memory save stays one bash command that edits and saves.",
   ]
   return { base, skills: skillCatalog, ontology: ontologyCatalog }
 }

@@ -476,6 +476,26 @@ describe("agent system prompt", () => {
     expect(child).not.toContain("Hand a child")
   })
 
+  // Removal proof: drop the memory exception from the file rule in renderRuntimeContext; a model
+  // following it edits MEMORY.md with edit, and nothing is remembered unless it then saves.
+  test("tells every mode how to work with files, and leaves memory saves their one command", () => {
+    const rule =
+      "Find files with glob and text with grep before you read them. Read a file before you change it, and change files with edit and write rather than shell commands; a memory save stays one bash command that edits and saves."
+    for (const mode of ["conversation", "subagent", "workflow-task"] as const) {
+      expect(renderPrompt({ mode, skills: [] })).toContain(rule)
+    }
+
+    const withMemory = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      memory: { repos: [{ repo: "user", entry: "# Memory\n" }] },
+    })
+    expect(withMemory).toContain(rule)
+    expect(withMemory).toContain(
+      "Each save is one bash command that edits the file and then saves it"
+    )
+  })
+
   test("does not advertise a skill catalog when no skills are installed", () => {
     const prompt = renderPrompt({
       mode: "conversation",
