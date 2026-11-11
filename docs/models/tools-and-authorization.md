@@ -24,11 +24,11 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
   })
 ```
 
-Names of the agent's own tools, such as `bash`, `read`, `edit`, `write`, `glob`, `grep`,
+Names of the agent's own tools, such as `bash`, `read`, `edit`, `write`, `glob`, `grep`, `todo`,
 `web_search` and `web_fetch`, are reserved. To search with another provider, set it as a
 [web search model](./configuration.md#web-search-models) instead of defining a tool.
 
-> A project tool named `glob` or `grep` now fails at definition: rename it.
+> A project tool named `glob`, `grep` or `todo` now fails at definition: rename it.
 
 The input schema validates arguments from the model. Return JSON-compatible data, and pass
 `signal` to requests that support cancellation. Resolving a [connector](../connectors/overview.md)

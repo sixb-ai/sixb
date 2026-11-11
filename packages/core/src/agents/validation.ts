@@ -28,6 +28,7 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "ask",
   // What `ask` was called for a sub-agent: earlier threads hold calls to it.
   "ask_parent",
+  "todo",
   "publish_artifact",
   "open_artifact",
   // What `publish_artifact` with an id was called: earlier threads hold calls to them.

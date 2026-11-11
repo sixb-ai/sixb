@@ -204,6 +204,7 @@ describe("defineAgentTool", () => {
       "message_agent",
       "ask",
       "ask_parent",
+      "todo",
     ]) {
       expect(() => validateName(name)).toThrow("reserved by the framework")
     }
