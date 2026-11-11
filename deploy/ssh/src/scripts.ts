@@ -122,10 +122,10 @@ function renderTakeLock(layout: DeploymentLayout): string {
   return [
     `exec 9>${shellQuote(layout.lock)}`,
     "if ! flock -n 9; then",
-    '  echo "Waiting for another deploy of this project to finish…"',
+    '  echo "Waiting for another deploy or script run of this project to finish…"',
     "fi",
     "if ! flock -w 600 9; then",
-    '  echo "Another deploy of this project has held its lock for 10 minutes." >&2',
+    '  echo "Another deploy or script run of this project has held its lock for 10 minutes." >&2',
     "  exit 1",
     "fi",
   ].join("\n")

@@ -26,6 +26,7 @@ export type {
   DeployReleaseProcess,
   DeployReleaseService,
   DeployScalableProcessOptions,
+  DeployScript,
   DeployServiceName,
   DeployServicesConfig,
   DeploySetupContext,

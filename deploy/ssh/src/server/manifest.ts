@@ -12,6 +12,11 @@ export interface ProcessManifest {
   readonly logDir: string
   /** Written by the deploy; read back by `status`. */
   readonly releasePath: string
+  /**
+   * The environment every service starts from, before its own additions: what `ctl run` gives a
+   * script. Absent from deployments made before scripts could run.
+   */
+  readonly env?: Readonly<Record<string, string>>
   readonly services: readonly ProcessServiceManifest[]
 }
 
@@ -57,6 +62,7 @@ export function parseProcessManifest(value: unknown, source = "process manifest"
     runDir: string(manifest.runDir, `${source}.runDir`),
     logDir: string(manifest.logDir, `${source}.logDir`),
     releasePath: string(manifest.releasePath, `${source}.releasePath`),
+    ...(manifest.env === undefined ? {} : { env: environment(manifest.env, `${source}.env`) }),
     services: manifest.services.map((service, index) =>
       parseService(service, `${source}.services[${index}]`)
     ),
@@ -68,19 +74,14 @@ function parseService(value: unknown, source: string): ProcessServiceManifest {
   if (!Array.isArray(service.args) || service.args.some((arg) => typeof arg !== "string")) {
     throw new Error(`[SshTarget] ${source}.args must be an array of strings`)
   }
-  const env = record(service.env, `${source}.env`)
-  for (const [key, variable] of Object.entries(env)) {
-    if (typeof variable !== "string") {
-      throw new Error(`[SshTarget] ${source}.env.${key} must be a string`)
-    }
-  }
+  const env = environment(service.env, `${source}.env`)
 
   return {
     name: string(service.name, `${source}.name`),
     processName: string(service.processName, `${source}.processName`),
     command: string(service.command, `${source}.command`),
     args: service.args,
-    env: env as Record<string, string>,
+    env,
     instances: positiveInteger(service.instances, `${source}.instances`),
     killTimeoutMs: positiveInteger(service.killTimeoutMs, `${source}.killTimeoutMs`),
     restartDelayMs: positiveInteger(service.restartDelayMs, `${source}.restartDelayMs`),
@@ -88,6 +89,15 @@ function parseService(value: unknown, source: string): ProcessServiceManifest {
       ? {}
       : { maxMemory: string(service.maxMemory, `${source}.maxMemory`) }),
   }
+}
+
+function environment(value: unknown, source: string): Record<string, string> {
+  const env = record(value, source)
+  for (const [key, variable] of Object.entries(env)) {
+    if (typeof variable !== "string")
+      throw new Error(`[SshTarget] ${source}.${key} must be a string`)
+  }
+  return env as Record<string, string>
 }
 
 function record(value: unknown, source: string): Record<string, unknown> {
