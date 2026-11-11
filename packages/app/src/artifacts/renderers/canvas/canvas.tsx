@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useStartEditing } from "../../edit-session"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
@@ -38,8 +39,9 @@ import { CanvasCommentPins } from "./comment-pins"
 import { CommentModeHint, CommentTools, useCanvasCommenting } from "./commenting"
 import { CommentsPanel } from "./comments-panel"
 import { CanvasControls } from "./controls"
+import type { Box } from "./draft"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
-import { CanvasEditingProvider } from "./editing"
+import { CanvasEditingProvider, type CanvasItemEditing } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES, NAME_SCALE, zoomMarks } from "./items"
 import { PresenceLayer } from "./presence"
@@ -175,6 +177,7 @@ function Board({
   )
 
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
+  const resizeBoard = useResizeBoard(board.editing ? board.items : null)
   // What edits a board's elements in place: the live canvas, while the reader edits it.
   const editBoard = edit?.live?.editBoard
   const stopCapturing = edit?.live?.stopCapturing
@@ -416,6 +419,8 @@ function Board({
             live={liveArtifact ?? null}
             canvas={boardEditor}
             mode={commenting.commenting ? "comment" : boardEditor ? "edit" : "read"}
+            // Keep this size resizes the board as its handles on the canvas do.
+            {...(resizeBoard ? { onResizeBoard: resizeBoard } : {})}
             {...(commenting.enabled
               ? {
                   pins: commenting.pins,
@@ -466,6 +471,30 @@ function Board({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Keep this size: a board resized as its handles on the canvas resize it, while the canvas is
+ * edited. Outside editing, for whoever may change the canvas, it starts editing and resizes the
+ * board once editing is on, as if they had resized it there: the header's Undo takes it back.
+ * Null for whoever may not change the canvas.
+ */
+function useResizeBoard(items: CanvasItemEditing | null): ((id: string, box: Box) => void) | null {
+  const start = useStartEditing()
+  const [waiting, setWaiting] = useState<{ readonly id: string; readonly box: Box } | null>(null)
+
+  useEffect(() => {
+    if (!waiting || !items) return
+    items.resize(waiting.id, waiting.box)
+    setWaiting(null)
+  }, [waiting, items])
+
+  if (items) return items.resize
+  if (!start) return null
+  return (id, box) => {
+    setWaiting({ id, box })
+    start()
+  }
 }
 
 /** What belongs to the comments: their panel, their pins, and a board's element tools. */
