@@ -120,7 +120,7 @@ describe("what a page keeps", () => {
 
 describe("a page's frame", () => {
   test("serves its entry in the page layout, with the page's kit", () => {
-    expect(frameLayout("page")).toBe("page")
+    expect(frameLayout({ outline: { kind: "page" } })).toBe("page")
     expect(frameEntries({ entry: "index.html", outline: { kind: "page" } })).toEqual(["index.html"])
     expect(injectFrameAssets("<html><head></head><body></body></html>", "page")).toContain(
       '<link rel="stylesheet" href="__sixb/page.css"><script src="__sixb/runtime.js" data-sixb-layout="page">'

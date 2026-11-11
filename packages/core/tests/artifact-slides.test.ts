@@ -583,13 +583,15 @@ describe("the frame runtime", () => {
 
 describe("frames", () => {
   test("open the kinds with a layout, serving their entry as a page", () => {
-    expect(frameLayout("slides")).toBe("deck")
-    expect(["document", "sheet", "file"].map((kind) => frameLayout(kind as "file"))).toEqual([
-      null,
-      null,
-      null,
-    ])
     const outline = { kind: "slides" as const, slides: [] }
+    expect(frameLayout({ outline })).toBe("deck")
+    expect(
+      [
+        { kind: "document" as const, headings: [] },
+        { kind: "sheet" as const, sheets: [], charts: [] },
+        { kind: "file" as const, mediaType: "application/pdf" },
+      ].map((each) => frameLayout({ outline: each }))
+    ).toEqual([null, null, null])
     expect(frameEntries({ entry: "index.html", outline })).toEqual(["index.html"])
     expect(
       frameEntries({ entry: "document.md", outline: { kind: "document", headings: [] } })
