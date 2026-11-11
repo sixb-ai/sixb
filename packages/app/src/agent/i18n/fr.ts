@@ -509,6 +509,59 @@ export const fr: Translation<AgentMessages> = {
     lines: (start, end) => `lignes ${number(start)} à ${number(end)}`,
     moreAvailable: (range) => `${range} · suite disponible`,
   },
+  search: {
+    found: (files) =>
+      files === 0 ? "Aucun fichier trouvé" : count(files, "fichier trouvé", "fichiers trouvés"),
+    foundMore: (files) => `Plus de ${number(files)} fichiers trouvés`,
+    looked: "Fichiers recherchés",
+    looking: "Recherche de fichiers",
+    lookFailed: "Impossible de rechercher des fichiers",
+    searchedFor: (term) => `Recherche de ${quoted(term)}`,
+    searched: "Fichiers parcourus",
+    searching: "Recherche dans les fichiers",
+    searchFailed: (term) =>
+      term ? `Impossible de rechercher ${quoted(term)}` : "Impossible de parcourir les fichiers",
+    memory: {
+      title: (project) => (project ? "Mémoire du projet parcourue" : "Mémoire parcourue"),
+      running: (project) =>
+        project ? "Recherche dans la mémoire du projet" : "Recherche dans la mémoire",
+      failed: (project) =>
+        project
+          ? "Impossible de parcourir la mémoire du projet"
+          : "Impossible de parcourir la mémoire",
+    },
+    guide: {
+      title: (name) => (name ? `Guide ${quoted(name)} parcouru` : "Guides parcourus"),
+      running: (name) =>
+        name ? `Recherche dans le guide ${quoted(name)}` : "Recherche dans les guides",
+      failed: (name) =>
+        name
+          ? `Impossible de parcourir le guide ${quoted(name)}`
+          : "Impossible de parcourir les guides",
+    },
+    ontology: {
+      title: "Ontologie parcourue",
+      running: "Recherche dans l’ontologie",
+      failed: "Impossible de parcourir l’ontologie",
+    },
+    term: (term) => quoted(term),
+    files: (files) => (files === 0 ? "aucun fichier" : count(files, "fichier")),
+    moreFiles: (files) => `plus de ${number(files)} fichiers`,
+    matches: (matches, files) => `${count(matches, "occurrence")} dans ${count(files, "fichier")}`,
+    moreMatches: (matches) => `plus de ${number(matches)} occurrences`,
+    noMatches: "aucune occurrence",
+    moreInFile: (matches) =>
+      `${count(matches, "autre occurrence", "autres occurrences")} dans ce fichier`,
+    noFiles: "Aucun fichier ne correspond à cette recherche.",
+    noLines: "Aucune ligne ne correspond à cette recherche.",
+    truncatedFiles: (files) => `Seuls les ${number(files)} premiers fichiers sont listés.`,
+    truncatedMatches: (lines) =>
+      `Seules les ${number(lines)} premières lignes trouvées sont affichées. D’autres fichiers correspondent.`,
+    incomplete:
+      "La recherche s’est arrêtée avant d’avoir tout parcouru : certains résultats peuvent manquer.",
+    error: "La recherche n’a pas pu s’exécuter.",
+    in: (path) => `dans ${path}`,
+  },
   bash: {
     preparing: "Préparation d’une commande",
     timedOut: (duration) => `délai de ${duration} dépassé`,

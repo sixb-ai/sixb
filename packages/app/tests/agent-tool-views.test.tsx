@@ -9,6 +9,7 @@ import { AssistantBody } from "../src/agent/components/message-parts"
 import { EditToolView, WriteToolView } from "../src/agent/file-edits/file-edit-tool-view"
 import type { NormalizedPart, NormalizedTool } from "../src/agent/parts"
 import { ReadToolView } from "../src/agent/read/read-tool-view"
+import { GlobToolView, GrepToolView } from "../src/agent/search/search-tool-view"
 import { agentToolViews } from "../src/agent/tool-views/define"
 import { AgentToolViewsProvider } from "../src/agent/tool-views/registry"
 import { installDom } from "./helpers/dom"
@@ -408,6 +409,126 @@ describe("a file the agent changed", () => {
       expect(line.textContent).toContain("2 entries")
       fireEvent.click(line)
       expect(view.container.textContent).toContain("index.ts\nlib/")
+    } finally {
+      view.unmount()
+    }
+  })
+})
+
+describe("a search the agent ran", () => {
+  const glob: NormalizedTool = {
+    toolName: "glob",
+    state: "output-available",
+    input: { pattern: "**/*.md", path: "docs" },
+    output: {
+      pattern: "**/*.md",
+      path: "docs",
+      files: ["docs/guides/billing.md", "docs/index.md"],
+      truncated: false,
+    },
+  }
+  const grep: NormalizedTool = {
+    toolName: "grep",
+    state: "output-available",
+    input: { pattern: "retries", path: "src" },
+    output: {
+      pattern: "retries",
+      path: "src",
+      matches: [
+        { path: "src/config.ts", line: 9, text: "const retries = 3" },
+        { path: "src/config.ts", line: 40, text: "  maxRetries: retries," },
+        { path: "src/queue/worker.ts", line: 112, text: "if (attempt > retries) fail()" },
+      ],
+      files: 2,
+      more: { "src/config.ts": 4 },
+      truncated: false,
+    },
+  }
+
+  // Removal proof: drop "glob" or "grep" from BUILT_IN_TOOL_VIEWS; the generic row then names the
+  // tool and shows its JSON.
+  test("glob and grep keep their own rows in the work", async () => {
+    const view = renderBody([tool(glob), tool(grep)])
+    await openWork(view)
+
+    expect(workText(view)).toContain("Found 2 files")
+    expect(workText(view)).toContain("Searched for “retries”")
+    expect(workText(view)).not.toContain("grep")
+  })
+
+  // Removal proof: in BUILT_IN_TOOL_VIEWS, render the search rows whatever their output; the row
+  // then claims "No files found" for a result it cannot read.
+  test("an output they cannot read goes to the generic row", async () => {
+    const view = renderBody([tool({ ...glob, output: { files: "docs/index.md" } })])
+    await openWork(view)
+
+    expect(workText(view)).toContain("glob")
+    expect(workText(view)).not.toContain("No files found")
+  })
+
+  test("a glob says how many files it found, and opens to them", () => {
+    const view = mount(<GlobToolView tool={glob} />)
+    try {
+      const line = view.getByRole("button", { name: /Found 2 files/ })
+      fireEvent.click(line)
+
+      expect(view.getByText("**/*.md · in docs")).toBeDefined()
+      expect(view.getByText("billing.md")).toBeDefined()
+      expect(view.getByText("guides/")).toBeDefined()
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("a grep says what it found, and opens to the lines, by file, the matches marked", () => {
+    const view = mount(<GrepToolView tool={grep} />)
+    try {
+      const line = view.getByRole("button", { name: /Searched for “retries”/ })
+      expect(line.textContent).toContain("7 matches in 2 files")
+      fireEvent.click(line)
+
+      expect(view.getByText("retries · in src")).toBeDefined()
+      expect(view.getByText("config.ts")).toBeDefined()
+      expect(view.getByText("worker.ts")).toBeDefined()
+      expect(view.getByText("112")).toBeDefined()
+      expect(view.getByText("4 more matches in this file")).toBeDefined()
+      // Each line's first match: "maxRetries" holds the word too, as the search ignored case.
+      expect([...view.container.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual([
+        "retries",
+        "Retries",
+        "retries",
+      ])
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("a search that ran into a problem says so, and opens to why", () => {
+    const view = mount(
+      <GrepToolView
+        tool={{
+          toolName: "grep",
+          state: "output-error",
+          input: { pattern: "retries", path: "lib" },
+          errorText: "lib does not exist",
+        }}
+      />
+    )
+    try {
+      fireEvent.click(view.getByRole("button", { name: /Couldn't search for “retries”/ }))
+      expect(view.getByText("lib does not exist")).toBeDefined()
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("a running search reads as plain progress", () => {
+    const view = mount(
+      <GlobToolView tool={{ ...glob, state: "input-available", output: undefined }} />
+    )
+    try {
+      expect(view.container.textContent).toBe("Looking for files…")
+      expect(view.queryByRole("button")).toBeNull()
     } finally {
       view.unmount()
     }
