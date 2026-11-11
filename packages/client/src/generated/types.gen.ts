@@ -18494,6 +18494,23 @@ export type CreateArtifactResponses = {
               text: string
               slug: string
             }>
+            /**
+             * html for a designed document, document.html with its own stylesheets
+             */
+            format?: "html"
+            /**
+             * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+             */
+            paper?: {
+              width: number
+              height: number
+              margin: {
+                top: number
+                right: number
+                bottom: number
+                left: number
+              }
+            }
           }
         | {
             kind: "sheet"
@@ -19729,6 +19746,23 @@ export type UpdateArtifactResponses = {
               text: string
               slug: string
             }>
+            /**
+             * html for a designed document, document.html with its own stylesheets
+             */
+            format?: "html"
+            /**
+             * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+             */
+            paper?: {
+              width: number
+              height: number
+              margin: {
+                top: number
+                right: number
+                bottom: number
+                left: number
+              }
+            }
           }
         | {
             kind: "sheet"
@@ -20047,6 +20081,23 @@ export type FreezeArtifactVersionResponses = {
               text: string
               slug: string
             }>
+            /**
+             * html for a designed document, document.html with its own stylesheets
+             */
+            format?: "html"
+            /**
+             * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+             */
+            paper?: {
+              width: number
+              height: number
+              margin: {
+                top: number
+                right: number
+                bottom: number
+                left: number
+              }
+            }
           }
         | {
             kind: "sheet"
@@ -21188,6 +21239,23 @@ export type GetArtifactRestorePointResponses = {
             text: string
             slug: string
           }>
+          /**
+           * html for a designed document, document.html with its own stylesheets
+           */
+          format?: "html"
+          /**
+           * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+           */
+          paper?: {
+            width: number
+            height: number
+            margin: {
+              top: number
+              right: number
+              bottom: number
+              left: number
+            }
+          }
         }
       | {
           kind: "sheet"
@@ -21521,6 +21589,23 @@ export type RestoreArtifactResponses = {
               text: string
               slug: string
             }>
+            /**
+             * html for a designed document, document.html with its own stylesheets
+             */
+            format?: "html"
+            /**
+             * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+             */
+            paper?: {
+              width: number
+              height: number
+              margin: {
+                top: number
+                right: number
+                bottom: number
+                left: number
+              }
+            }
           }
         | {
             kind: "sheet"
@@ -21898,6 +21983,23 @@ export type GetArtifactVersionResponses = {
             text: string
             slug: string
           }>
+          /**
+           * html for a designed document, document.html with its own stylesheets
+           */
+          format?: "html"
+          /**
+           * The sheet a designed document's @page rule sets, in CSS pixels: its size and margins
+           */
+          paper?: {
+            width: number
+            height: number
+            margin: {
+              top: number
+              right: number
+              bottom: number
+              left: number
+            }
+          }
         }
       | {
           kind: "sheet"
