@@ -221,7 +221,7 @@ function AgentParts({
               <ToolRow
                 key={key}
                 colors={colors}
-                line={shownLine(toolLine(part, outcomes), folder)}
+                line={shownLine(toolLine(part, outcomes, folder), folder)}
                 state={part.state}
                 width={width}
               />
@@ -613,6 +613,9 @@ function shownLine(line: ToolLine, folder?: string): ToolLine {
     ...line,
     detail: friendlyPath(line.detail, folder),
     ...(line.command === undefined ? {} : { command: friendlyPath(line.command, folder) }),
+    ...(line.paths && line.preview
+      ? { preview: line.preview.map((row) => friendlyPath(row, folder)) }
+      : {}),
   }
 }
 
