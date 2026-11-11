@@ -134,6 +134,60 @@ describe("a held call", () => {
   })
 })
 
+describe("a search's results", () => {
+  // Guard proof: in shownLine (src/tui/transcript.tsx), drop the `paths` branch; the row then
+  // shows the sandbox's folder in full.
+  test("show their paths as the person reads them", async () => {
+    const run = "/private/var/folders/x1/T/sixb-agent/thr_1/.sixb/agent"
+    const message = {
+      ...heldReply(),
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "c1",
+          toolName: "grep",
+          state: "output-available",
+          input: { pattern: "invoice", path: `${run}/memory/user` },
+          output: {
+            matches: [
+              {
+                path: `${run}/memory/user/billing.md`,
+                line: 3,
+                text: "Invoices go out on the 1st",
+              },
+            ],
+            files: 1,
+            truncated: false,
+          },
+        },
+      ],
+    } as unknown as StoredMessage
+    setup = await testRender(
+      <Transcript
+        colors={tuiColors("dark")}
+        // Only an answer's text uses it, and this message has none.
+        syntax={{} as SyntaxStyle}
+        messages={shown(message)}
+        runs={[]}
+        live={null}
+        approvals={[]}
+        modelNames={new Map()}
+        computerRuns={false}
+        width={100}
+        approvalChoice={0}
+      />,
+      { width: 100, height: 10 }
+    )
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain('grep  "invoice" in run/memory/user  1 match in 1 file')
+    expect(frame).toContain("run/memory/user/billing.md:3 Invoices go out on the 1st")
+    expect(frame).not.toContain("sixb-agent")
+  })
+})
+
 // An answer that streams in: each block's markdown, an emphasis, a link and a code span cut off
 // mid-way, a table and a code block.
 const ANSWER = `## Your latest emails

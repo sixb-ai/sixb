@@ -142,7 +142,14 @@ export async function runAgent(options: {
       stop.signal.addEventListener("abort", stopWatching, { once: true })
       const nobody =
         onComputer && runnerUntilHeld(connection, thread.id, runId, runner, watching.signal)
-      followed = await follow(connection, runId, options.json, stop.signal, nobody || undefined)
+      followed = await follow(
+        connection,
+        runId,
+        options.json,
+        stop.signal,
+        nobody || undefined,
+        onComputer ? place?.folder : undefined
+      )
       stopWatching()
       stop.signal.removeEventListener("abort", stopWatching)
       if (followed === "offline") {
@@ -236,14 +243,16 @@ function printSent(threadId: string, runId: string, json: boolean): void {
 
 /**
  * Show a turn's steps as they finish, until it ends, the stream fails, the person stops waiting,
- * or `nobody` says nothing will run it. Rejects when `nobody` does.
+ * or `nobody` says nothing will run it. Rejects when `nobody` does. `folder` is the one a
+ * computer's turns work in.
  */
 async function follow(
   connection: Connection,
   runId: string,
   json: boolean,
   signal: AbortSignal,
-  nobody?: Promise<"unclaimed" | "offline" | null>
+  nobody?: Promise<"unclaimed" | "offline" | null>,
+  folder?: string
 ): Promise<"finished" | "stopped" | "failed" | "unclaimed" | "offline"> {
   let live = liveRun(runId)
   const shown = new Set<string>()
@@ -276,7 +285,7 @@ async function follow(
           for (const part of live.parts) {
             if (part.kind !== "tool" || part.state === "running" || shown.has(part.id)) continue
             shown.add(part.id)
-            const line = toolLine(part)
+            const line = toolLine(part, undefined, folder)
             const mark = line.held
               ? tone.warn(glyph.live)
               : line.failed || part.state === "error"
