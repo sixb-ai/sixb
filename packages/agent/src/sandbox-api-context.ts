@@ -18,6 +18,7 @@ import type {
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+import { SEARCH_SCRIPT_SOURCE } from "./search-script"
 import { TOOL_OUTPUTS_DIRECTORY } from "./tools/tool-outputs"
 
 /**
@@ -125,6 +126,8 @@ export async function prepareAgentSandboxApiContext(
     ...installFiles(ontologyDir, input.ontologyFiles),
     { path: join(binDir, "sixb"), contents: cli.launcher, mode: 0o755 },
     { path: join(libDir, "sixb.mjs"), contents: cli.artifact, mode: 0o644 },
+    // What `glob` and `grep` run.
+    { path: join(libDir, "search.mjs"), contents: SEARCH_SCRIPT_SOURCE, mode: 0o644 },
     { path: runContextPath, contents: runContext },
     { path: runtimeProbePath, contents: "first\nsixb-runtime-probe\nthird\n", mode: 0o644 },
     {

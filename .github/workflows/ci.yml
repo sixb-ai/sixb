@@ -105,6 +105,9 @@ jobs:
       - name: Generate sandbox CLI
         run: bun run generate:sandbox-cli
 
+      - name: Generate search script
+        run: bun run generate:search-script
+
       - name: Verify generated artifacts are committed
         run: git diff --exit-code
 

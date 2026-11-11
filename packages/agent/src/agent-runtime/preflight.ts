@@ -269,6 +269,7 @@ const LOCAL_BEHAVIOR_PROBE = `set -u
 [ "$(command -v sixb)" = "$SIXB_BIN_DIR/sixb" ] || exit 21
 [ -x "$SIXB_BIN_DIR/sixb" ] || exit 22
 [ -r "$SIXB_CONTEXT_DIR/lib/sixb.mjs" ] || exit 22
+[ -r "$SIXB_CONTEXT_DIR/lib/search.mjs" ] || exit 22
 realpath_bin="$(command -v realpath)" || exit 23
 tail_bin="$(command -v tail)" || exit 23
 head_bin="$(command -v head)" || exit 23

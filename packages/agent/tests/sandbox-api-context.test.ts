@@ -127,6 +127,7 @@ describe("the run's context directory", () => {
       "ontology/billing/invoice.md",
       "bin/sixb",
       "lib/sixb.mjs",
+      "lib/search.mjs",
       "context/run.json",
       "context/attachments.json",
       "context/artifacts.json",
