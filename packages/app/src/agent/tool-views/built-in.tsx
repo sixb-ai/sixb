@@ -10,6 +10,8 @@ import type { NormalizedTool } from "../parts"
 import { OpenArtifactToolView } from "../publish-artifact/open-artifact-tool-view"
 import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
 import { ReadToolView } from "../read/read-tool-view"
+import { coerceGlobOutput, coerceGrepOutput } from "../search/interpret"
+import { GlobToolView, GrepToolView } from "../search/search-tool-view"
 import { coerceWebFetchOutput } from "../utils/web-fetch"
 import { coerceWebSearchOutput } from "../utils/web-search"
 import { describeViewFile } from "../view-file/interpret"
@@ -57,6 +59,20 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
   ],
   ["edit", (tool) => <EditToolView tool={tool} />],
   ["write", (tool) => <WriteToolView tool={tool} />],
+  [
+    "glob",
+    (tool) =>
+      tool.state !== "output-available" || coerceGlobOutput(tool.output) !== null ? (
+        <GlobToolView tool={tool} />
+      ) : null,
+  ],
+  [
+    "grep",
+    (tool) =>
+      tool.state !== "output-available" || coerceGrepOutput(tool.output) !== null ? (
+        <GrepToolView tool={tool} />
+      ) : null,
+  ],
   // Earlier threads hold calls to it.
   ["view_file", (tool) => <ViewFileToolView tool={tool} />],
   ["publish_artifact", publishArtifact],
