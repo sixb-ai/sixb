@@ -15,8 +15,8 @@ export class CtmConfigurationError extends Error {
  * A non-2xx response from the CTM API.
  *
  * CTM documents no error format. Its routes answer with a string, `{ "error": "..." }`,
- * `{ "message": "..." }` or `{ "errors": [...] }`, so the message is read from whichever is there
- * and the body is kept as it came.
+ * `{ "message": "..." }`, `{ "errors": [...] }` or flags such as `{ "authentication": "failed" }`,
+ * so the message is read from whichever is there and the body is kept as it came.
  */
 export class CtmApiError extends Error {
   readonly name = "CtmApiError"
@@ -58,7 +58,14 @@ function extractMessage(value: unknown): string | null {
     }
   }
 
-  return formatErrors(value.errors)
+  return formatErrors(value.errors) ?? formatFlags(value)
+}
+
+/** CTM answers a rejected key with `{ "authentication": "failed" }`: read it as `authentication: failed`. */
+function formatFlags(value: Record<string, unknown>): string | null {
+  const flags = Object.entries(value).filter(([, detail]) => typeof detail === "string" && detail)
+
+  return flags.map(([field, detail]) => `${field}: ${detail}`).join("; ") || null
 }
 
 function formatErrors(errors: unknown): string | null {

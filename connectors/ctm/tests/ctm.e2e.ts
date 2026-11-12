@@ -86,7 +86,15 @@ function describeShape(result: unknown): string {
 }
 
 console.log("\naccount")
-const account = await client.accounts.get(accountId)
+const account = await client.accounts.get(accountId).catch((error: unknown) => {
+  if (error instanceof CtmApiError && error.status === 401) {
+    console.log(`  ✗ CTM rejected the key: ${error.message}`)
+    console.log("    Check that API access is on for this account, and the access and secret keys.")
+    process.exit(1)
+  }
+
+  throw error
+})
 check("accounts.get reads the key's account", String(account.id) === accountId, account.id)
 await optional("agency.get", () => client.agency.get())
 

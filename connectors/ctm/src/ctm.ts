@@ -182,5 +182,6 @@ async function resolveCredential(
     throw new CtmConfigurationError(`[SixbCtm] ${field} must not be empty.`)
   }
 
-  return value
+  // A key copied with a trailing space or newline is another key to CTM, which answers 401.
+  return value.trim()
 }
