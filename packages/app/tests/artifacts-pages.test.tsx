@@ -106,14 +106,18 @@ function frameOf(frame: HTMLIFrameElement | null) {
 }
 
 describe("a page", () => {
+  // Reproduce by keeping `fallback` mounted in ArtifactFrame once it shows: the loading notice
+  // stays beneath the transparent frame, and shows through where its page bounces past an end.
   test("opens its entry in a sandboxed frame named for it, shown once it is ready and themed", async () => {
-    const { frame, posted, post } = mount()
+    const { frame, posted, post, ui } = mount()
     expect(frame.getAttribute("src")).toEndWith("/api/artifact-frames/token/index.html")
     expect(frame.getAttribute("title")).toBe("Page Fleet planner")
     // A page reads rows as its reader: its frame opens no window to take them elsewhere.
     // Reproduce by putting `allow-popups` back on ArtifactFrame's sandbox.
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-modals")
     expect(frame.className).toContain("opacity-0")
+    const loading = () => ui.container.querySelector("[aria-busy=true]")
+    expect(loading()).not.toBeNull()
 
     // A page's ready names no slides.
     await post({ event: "ready", params: {} })
@@ -121,6 +125,7 @@ describe("a page", () => {
     expect(theme).toBeDefined()
     await post({ id: theme?.id })
     expect(frame.className).toContain("opacity-100")
+    expect(loading()).toBeNull()
   })
 
   test("opens only the artifacts it linked to when it was published", async () => {
