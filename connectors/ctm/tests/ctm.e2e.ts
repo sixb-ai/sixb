@@ -6,7 +6,9 @@
  *     CTM_ACCESS_KEY="…" CTM_SECRET_KEY="…" CTM_ACCOUNT_ID="…" bun connectors/ctm/tests/ctm.e2e.ts
  *
  * Reads only. Nothing here creates, updates, or deletes anything; the write surface is covered by
- * the unit tests against mocks. CTM documents no response example for many routes, so this is
+ * the unit tests against mocks. `fetch` is wrapped to refuse, before it leaves, any request that is
+ * not a GET or the call search (a POST CTM documents as a search), so a change to this script cannot
+ * write to the account by mistake. CTM documents no response example for many routes, so this is
  * also where the shapes the types describe meet the real ones.
  *
  * The output names fields and counts records, and never prints a value, so it can be shared without
@@ -22,6 +24,20 @@ if (!accessKey || !secretKey || !accountId) {
   console.log("[ctm e2e] Skipped: set CTM_ACCESS_KEY, CTM_SECRET_KEY and CTM_ACCOUNT_ID to run.")
   process.exit(0)
 }
+
+const realFetch = globalThis.fetch
+
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
+  const url = new URL(input instanceof Request ? input.url : String(input))
+  const isSearch = method === "POST" && url.pathname.endsWith("/calls/search.json")
+
+  if (method !== "GET" && !isSearch) {
+    throw new Error(`[ctm e2e] Refused ${method} ${url.pathname}: this check only reads.`)
+  }
+
+  return realFetch(input, init)
+}) as typeof fetch
 
 const client = await ctm({ accessKey, secretKey, accountId, timeoutMs: 60_000 }).connect({
   projectId: "e2e",
