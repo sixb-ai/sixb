@@ -15,7 +15,7 @@ import type {
   CtmSaleInput,
   CtmTranscript,
 } from "../types"
-import { assertNonEmpty, assertPositiveInteger, pathId } from "../validation"
+import { assertNonEmpty, assertPositiveInteger, isRecord, pathId } from "../validation"
 import type { CtmAccountPath } from "./shared"
 
 /**
@@ -33,8 +33,11 @@ export interface CallsResource {
   searchAll(options?: CtmCallSearchOptions): AsyncIterable<CtmCall>
   /** `GET /calls/{id}` — the full activity, with `caller`. */
   get(callId: CtmId): Promise<CtmCall>
-  /** `GET /calls/{id}/transcription` — the transcript of the call's recording. */
-  transcript(callId: CtmId): Promise<CtmTranscript>
+  /**
+   * `GET /calls/{id}/transcription` — the transcript of the call's recording, or `null` when the
+   * call has none yet: CTM then answers with a status instead of a transcript.
+   */
+  transcript(callId: CtmId): Promise<CtmTranscript | null>
   /**
    * `GET /calls/{sid}/recording` — the recording, as the response that carries it. Read it with
    * `.arrayBuffer()` or stream `.body` to storage; `content-type` names the audio format.
@@ -42,8 +45,6 @@ export interface CallsResource {
    * Takes the call's `sid` (`CA…`), as its `audio` URL does.
    */
   recording(callSid: string): Promise<Response>
-  /** `GET /calls/mapping` — the fields an activity record can carry, by kind of activity. */
-  mapping(): Promise<CtmObject>
 
   /** `POST /calls/{id}/modify` — change the caller's details or the call's custom fields. */
   update(callId: CtmId, input: CtmCallUpdateInput): Promise<CtmCall>
@@ -113,17 +114,15 @@ export function callsResource(http: CtmHttp, at: CtmAccountPath): CallsResource 
     },
 
     async transcript(callId) {
-      return http.get<CtmTranscript>(call(callId, "/transcription.json"))
+      const body = await http.get<CtmTranscript | CtmObject>(call(callId, "/transcription.json"))
+
+      return isTranscript(body) ? body : null
     },
 
     async recording(callSid) {
       assertNonEmpty(callSid, "callSid")
 
       return http.download(at(`calls/${pathId(callSid, "callSid")}/recording`))
-    },
-
-    async mapping() {
-      return http.get<CtmObject>(at("calls/mapping"))
     },
 
     async update(callId, input) {
@@ -234,4 +233,8 @@ function withTag(path: string, tag: string): string {
 /** CTM reads the sale's conversion flag as `1` or `0`. */
 function toFlag(value: boolean | undefined): 0 | 1 | undefined {
   return value === undefined ? undefined : value ? 1 : 0
+}
+
+function isTranscript(body: CtmTranscript | CtmObject): body is CtmTranscript {
+  return isRecord(body) && Array.isArray(body.outline)
 }
