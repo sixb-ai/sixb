@@ -7,7 +7,7 @@ export { BOARD_PREVIEW_JOB } from "../canvas-display"
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS } from "../limits"
-export { artifactQueryName } from "../queries"
+export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {
   DOCUMENT_PDF_JOB,
