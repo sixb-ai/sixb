@@ -13,6 +13,7 @@ export type ArtifactRequestErrorCode =
   | "state_full"
   | "not_allowed"
   | "not_shared"
+  | "pdf_unavailable"
   | "query_invalid"
   | "query_not_found"
   | "read_only"

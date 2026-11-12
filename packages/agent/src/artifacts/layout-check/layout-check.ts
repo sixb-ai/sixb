@@ -628,7 +628,7 @@ function describeProblem(problem: CheckedProblem, texts: readonly string[], plac
       return `${what} runs into the footer ${where}; keep content above the source line`
     case "wide":
       if (place === "document" && problem.view === "phone") {
-        return `${what} runs past the screen's right edge ${where}, so the document scrolls sideways; let it wrap, or stack it in an @media (max-width: 600px) rule`
+        return `${what} runs past the screen's right edge ${where}, so the document scrolls sideways; let it wrap, or stack it in an @media screen and (max-width: 600px) rule`
       }
       if (place === "document") {
         return `${what} runs past the sheet's right edge ${where}, past where it can print; let it wrap or shrink`

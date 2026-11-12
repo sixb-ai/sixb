@@ -664,4 +664,11 @@ export const FRAME_DOCUMENT_CSS = kit(`  :root {
     height: auto !important;
     overflow: hidden !important;
   }
+
+  /* Printed, the sheet is the paper: its @page rule gives the margins, and nothing is the stage. */
+  @media print {
+    html { background: none; }
+    body { width: auto; max-width: none; min-height: 0; margin: 0; padding: 0; background: none; box-shadow: none; }
+    .sixb-page-break { display: none; }
+  }
 `)
