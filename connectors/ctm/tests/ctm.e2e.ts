@@ -11,8 +11,8 @@
  * write to the account by mistake. CTM documents no response example for many routes, so this is
  * also where the shapes the types describe meet the real ones.
  *
- * The output names fields and counts records, and never prints a value, so it can be shared without
- * exposing callers or credentials.
+ * The output names fields, counts records and lists the IDs of the accounts the key reaches, and
+ * prints no other value, so it can be shared without exposing callers or credentials.
  */
 import { CtmApiError, ctm } from "../src"
 
@@ -73,6 +73,22 @@ async function optional(label: string, read: () => Promise<unknown>) {
   }
 }
 
+/** Ends the run on an API error a later check could not get past, saying what to look at. */
+function stop(label: string, error: unknown): never {
+  if (!(error instanceof CtmApiError)) {
+    throw error
+  }
+
+  console.log(`  ✗ ${label}: ${error.message}`)
+  if (error.status === 401) {
+    console.log(
+      "    CTM rejected the key: check that API access is on, and the access and secret keys."
+    )
+  }
+
+  process.exit(1)
+}
+
 /** The envelope's record count and the first record's fields, to compare against the types. */
 function describeShape(result: unknown): string {
   if (typeof result !== "object" || result === null) {
@@ -86,15 +102,26 @@ function describeShape(result: unknown): string {
 }
 
 console.log("\naccount")
-const account = await client.accounts.get(accountId).catch((error: unknown) => {
-  if (error instanceof CtmApiError && error.status === 401) {
-    console.log(`  ✗ CTM rejected the key: ${error.message}`)
-    console.log("    Check that API access is on for this account, and the access and secret keys.")
-    process.exit(1)
-  }
 
-  throw error
-})
+const reachableIds: string[] = []
+try {
+  for await (const reachable of client.accounts.listAll()) {
+    reachableIds.push(String(reachable.id))
+  }
+} catch (error) {
+  stop("accounts.listAll", error)
+}
+
+console.log(`  ✓ the key reaches ${reachableIds.length} account(s): ${reachableIds.join(", ")}`)
+
+if (!reachableIds.includes(accountId)) {
+  console.log(`  ✗ CTM_ACCOUNT_ID ${accountId} is not one of them: set it to one of the IDs above.`)
+  process.exit(1)
+}
+
+const account = await client.accounts
+  .get(accountId)
+  .catch((error: unknown) => stop("accounts.get", error))
 check("accounts.get reads the key's account", String(account.id) === accountId, account.id)
 await optional("agency.get", () => client.agency.get())
 
