@@ -57,6 +57,12 @@ export class DuckLakeConnectionManager {
     if (!Number.isSafeInteger(this.maxStreamingReads) || this.maxStreamingReads < 1) {
       throw new LakeStorageError("[SixbDuckLake] maxStreamingReads must be a positive integer.")
     }
+    const idleMs = options.duckdb?.releaseMemoryAfterIdleMs
+    if (idleMs !== undefined && idleMs !== false && !(Number.isFinite(idleMs) && idleMs >= 0)) {
+      throw new LakeStorageError(
+        "[SixbDuckLake] duckdb.releaseMemoryAfterIdleMs must be a non-negative number or false."
+      )
+    }
   }
 
   async acquireRead(signal?: AbortSignal): Promise<{

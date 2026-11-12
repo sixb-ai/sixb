@@ -65,6 +65,45 @@ const lakeStorage = new DuckLakeStorage({
 Use `close()` during service shutdown so DuckDB can close its runtime and release
 catalog connections cleanly.
 
+### Memory
+
+Every process that uses the lake runs its own DuckDB. DuckDB is built to own its machine: it caches
+remote Parquet it read, up to `memory_limit`, and the memory it frees stays in the process. On a
+server running several Sixb processes, each one would keep its largest burst of work. The
+provider therefore:
+
+- **Returns freed memory as it goes.** `allocator_background_threads` is `true` (DuckDB's default
+  is `false`), so DuckDB hands what its queries freed back to the system within seconds of a
+  burst, and `allocator_bulk_deallocation_flush_threshold` is `32MB` (DuckDB's default is 512 MB),
+  which keeps one query's freed memory from piling under the next.
+- **Drops the file cache when idle.** After a minute without DuckDB work and with no read open, it
+  drops DuckDB's cache of remote files. Work less than a minute apart still reads cached files;
+  the first read after a release fetches them again, which is several times slower. Lower
+  `releaseMemoryAfterIdleMs` on a host short of memory, and raise it where reads are spread out.
+
+```ts
+new DuckLakeStorage({
+  catalog,
+  duckdb: {
+    releaseMemoryAfterIdleMs: 10_000, // default 60_000; false never drops the cache
+    config: {
+      allocator_background_threads: "false", // back to DuckDB's default
+      allocator_bulk_deallocation_flush_threshold: "512MB", // back to DuckDB's default
+      enable_external_file_cache: "false", // never cache remote files
+      memory_limit: "1GB",
+      threads: "2",
+    },
+  },
+})
+```
+
+`memory_limit` and `threads` stay DuckDB's defaults: 80% of the memory and every core the process
+can use, from the container's cgroup limits when there are any. Each DuckDB has its own limit, so
+several processes on one host can together go past it at once. `memory_limit` covers what DuckDB
+keeps in its buffer pool, not every allocation: a process's memory can peak well past it. Past the limit
+DuckDB spills to `temp_directory` where an operator can, and otherwise fails the query. On a small
+server shared by several processes or projects, set `memory_limit` so their peaks fit together.
+
 ### Extensions
 
 On first use, the provider installs DuckLake and the extensions its catalog,
