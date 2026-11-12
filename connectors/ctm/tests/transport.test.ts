@@ -51,6 +51,20 @@ describe("requests", () => {
     )
   })
 
+  test("trim keys copied with a trailing newline or space", async () => {
+    const calls = recorder([callPage([])])
+    const client = await createTestClient({
+      accessKey: " key\n",
+      secretKey: async () => "secret \n",
+    })
+
+    await client.calls.list()
+
+    expect(calls[0]?.headers.get("authorization")).toBe(
+      `Basic ${Buffer.from("key:secret").toString("base64")}`
+    )
+  })
+
   test("reject empty credentials and account IDs before any request", () => {
     expect(() => ctm({ accessKey: " ", secretKey: "secret" })).toThrow(CtmConfigurationError)
     expect(() => ctm({ accessKey: "key", secretKey: "" })).toThrow("secretKey")
@@ -144,6 +158,11 @@ describe("error bodies", () => {
     ["an errors array", () => json({ errors: ["a", "b"] }, { status: 422 }), "422: a; b"],
     ["field errors", () => json({ errors: { name: ["blank"] } }, { status: 422 }), "name: blank"],
     ["a plain string", () => new Response("Forbidden", { status: 403 }), "403: Forbidden"],
+    [
+      "a rejected key",
+      () => json({ authentication: "failed" }, { status: 401 }),
+      "401: authentication: failed",
+    ],
     ["an empty body", () => empty(403), "failed with 403."],
   ])("surface %s", async (_name, response, message) => {
     mockFetch(async () => response())
