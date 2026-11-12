@@ -111,14 +111,6 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   "artifacts.publish": (session, [input]) =>
     session.artifacts.publish(input as Parameters<AgentRunSession["artifacts"]["publish"]>[0]),
   "artifacts.turnWrites": (session) => session.artifacts.turnWrites(),
-  "artifacts.storePreviews": (session, [input]) =>
-    session.artifacts.storePreviews(
-      input as Parameters<AgentRunSession["artifacts"]["storePreviews"]>[0]
-    ),
-  "artifacts.missingPreviews": (session, [input]) =>
-    session.artifacts.missingPreviews(
-      input as Parameters<AgentRunSession["artifacts"]["missingPreviews"]>[0]
-    ),
   callTool: (session, [call, options], signal) =>
     session.callTool(call as Parameters<AgentRunSession["callTool"]>[0], {
       ...((options ?? {}) as { maxFileBytes?: number; contextDirectory?: string }),

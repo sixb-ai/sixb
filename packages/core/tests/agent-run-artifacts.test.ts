@@ -282,125 +282,35 @@ describe("a run's artifacts", () => {
     expect((await storage.artifacts.list({ projectId })).total).toBe(0)
   })
 
-  // Guard proof: drop the origin check from storePreviews; Alice's version, which shows what she
-  // can see, takes the pictures Bob's turn took with his rights. Drop the content check, and the
-  // pictures of what Bob's turn first wrote are kept under the boards of what it wrote next.
-  // Compare revisions instead, and the pictures taken while Alice created the version are refused.
-  test("keeps the pictures of what it wrote, while the version holds it", async () => {
-    const { storage, artifacts, as, canvas, png } = await setup()
-    const previews = [
-      { board: "welcome", theme: "light" as const, size: "full" as const, file: await png() },
-    ]
-    const store = (at: { artifactId: string; version: number; updatedAt: Date }) =>
-      artifacts.storePreviews({ ...at, previews }).catch((error: unknown) => error)
-
-    jest.setSystemTime(new Date("2026-11-08T10:00:00.000Z"))
-    try {
-      const first = await artifacts.publish({
-        kind: "canvas",
-        title: "Onboarding",
-        files: await canvas(),
-        rendersPreviews: true,
-      })
-      const { id } = first.artifact
-      const writtenFirst = { artifactId: id, version: 1, updatedAt: first.version.updatedAt }
-
-      // The turn writes the open version again: what it pictured first is no longer there.
-      jest.setSystemTime(new Date("2026-11-08T10:01:00.000Z"))
-      const second = await artifacts.publish({
-        artifactId: id,
-        title: "Onboarding",
-        files: await canvas({ "welcome.html": "<main><h1>Welcome aboard</h1></main>" }),
-        rendersPreviews: true,
-      })
-      const written = { artifactId: id, version: 1, updatedAt: second.version.updatedAt }
-      expect(await store(writtenFirst)).toMatchObject({ code: "not_allowed" })
-      expect(await store(written)).toEqual([])
-      const outline = second.version.outline
-      const renderKey =
-        outline.kind === "canvas" && outline.items[0]?.type === "board"
-          ? outline.items[0].renderKey
-          : undefined
-      expect(
-        await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
-      ).toMatchObject([{ theme: "light", size: "full", file: previews[0]?.file }])
-
-      // Alice creates the version while the check pictures it: it still holds what the turn
-      // wrote, so the pictures are still kept.
-      await as(alice).artifacts.freeze(id, { baseRevision: second.version.revision })
-      expect(await store(written)).toEqual([])
-
-      // Alice, the conversation's owner, writes it in the app: her version 2 is hers to picture.
-      jest.setSystemTime(new Date("2026-11-08T10:02:00.000Z"))
-      const edited = await as(alice).artifacts.update(id, {
-        kind: "canvas",
-        title: "Onboarding",
-        files: await canvas(),
-      })
-      const atEdited = { artifactId: id, version: 2, updatedAt: edited.version.updatedAt }
-      for (const at of [{ ...written, version: 2 }, atEdited]) {
-        expect(await store(at)).toMatchObject({ code: "not_allowed" })
-      }
-    } finally {
-      jest.setSystemTime()
-    }
-  })
-
-  // Guard proof: answer the queries of every run's publish, or of none. A publisher that renders
-  // its own previews then runs each query twice, or a command in the sandbox leaves its live
-  // boards without a preview.
-  test("answers its queries for previews only when it does not render them itself", async () => {
+  // Guard proof: leave the answers out of the run's request for previews: its live boards are
+  // never pictured, and keep their outlines.
+  test("asks the render worker for its previews, with its queries answered as its requester", async () => {
     const { deps, runSdk, artifacts, canvas } = await setup()
     const query = spyOn(runSdk.artifacts, "query")
-    const files = () =>
-      canvas({ "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }) })
-    const claim = async () =>
-      (
-        await deps.queues.agents.claim({
-          projectId,
-          workerId: "test",
-          limit: 10,
-          leaseMs: 3_600_000,
-        })
-      )[0]?.job
-
-    // The publish tool, whose layout check reads the answers and pictures the boards.
-    const checked = await artifacts.publish({
+    const published = await artifacts.publish({
       kind: "canvas",
       title: "Tasks",
-      files: await files(),
-      rendersPreviews: true,
-    })
-    expect(query).not.toHaveBeenCalled()
-
-    // A command in the sandbox, which publishes through the API with the run's token.
-    const commanded = await artifacts.publish({
-      kind: "canvas",
-      title: "Tasks",
-      files: await files(),
+      files: await canvas({
+        "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }),
+      }),
     })
     expect(query).toHaveBeenCalledTimes(1)
+
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
-    const job = await claim()
-    expect(job).toMatchObject({
-      type: "agent.artifact-previews.requested",
+    const [claimed] = await deps.queues.renders.claim({
+      projectId,
+      workerId: "test",
+      limit: 10,
+      leaseMs: 3_600_000,
+    })
+    expect(claimed?.job).toMatchObject({
+      type: "artifact.previews.requested",
       payload: {
-        artifactId: commanded.artifact.id,
+        artifactId: published.artifact.id,
         version: 1,
-        updatedAt: commanded.version.updatedAt.toISOString(),
+        updatedAt: published.version.updatedAt.toISOString(),
         queries: { blobId: expect.any(String) },
       },
-    })
-
-    // The publish tool's job waits out the check's grace, and carries no answers.
-    expect(await claim()).toBeUndefined()
-    jest.useFakeTimers()
-    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
-    const waited = await claim()
-    expect(waited?.payload).toEqual({
-      artifactId: checked.artifact.id,
-      version: 1,
-      updatedAt: checked.version.updatedAt.toISOString(),
     })
   })
 

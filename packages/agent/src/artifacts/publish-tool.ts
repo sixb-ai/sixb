@@ -20,7 +20,6 @@ import {
   AgentExecutionLostError,
   type AgentRunArtifacts,
   type AgentRunFileStore,
-  type AgentRunMissingPreview,
 } from "@sixb/core/internal/agents"
 import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
@@ -29,7 +28,6 @@ import {
   DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
-  type RefusedBoardPreview,
 } from "@sixb/core/internal/artifacts/publish"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
@@ -43,9 +41,7 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
-import { storeCheckedPreviews } from "./board-previews"
 import {
-  type CheckedPreview,
   type CheckedQuery,
   checkLayout,
   type LayoutCheck,
@@ -280,8 +276,6 @@ async function publish(
         : { kind }),
       title: request.title,
       files,
-      // The layout check pictures a canvas's boards as it checks them.
-      rendersPreviews: kind === "canvas",
     })
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
@@ -354,10 +348,6 @@ async function publish(
   const themeFile = checked?.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
-  // A reader sees a canvas's boards as pictures until they open one: the check takes those its
-  // boards miss, in every mode. A board kept as it was keeps the pictures it had.
-  const missing = outline.kind === "canvas" ? await missingPreviews(input.artifacts, published) : []
-  const pictured = new Set(missing.map(({ board }) => board))
   // What the check opens: a canvas's boards, each at its own size, or the entry.
   const pages =
     outline.kind === "canvas"
@@ -373,7 +363,6 @@ async function publish(
                     w: item.w,
                     h: item.h,
                     html,
-                    pictured: pictured.has(item.id),
                   },
                 ]
               : []
@@ -415,10 +404,6 @@ async function publish(
       check = { status: "skipped", reason: "the check failed in the sandbox" }
     }
   }
-  const previewWarnings =
-    check?.status === "checked" && missing.length > 0
-      ? await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
-      : []
   return {
     artifactId: artifact.id,
     // A new artifact, or a revision of one: what its summary and its row say.
@@ -437,7 +422,6 @@ async function publish(
       ...published.warnings,
       ...queries.warnings,
       ...(check?.status === "checked" ? check.warnings : []),
-      ...previewWarnings,
     ].map(({ code, message, part }) => ({
       code,
       message,
@@ -477,80 +461,6 @@ async function mergedFiles(
     )
     return undefined
   }
-}
-
-/**
- * The boards of the revision just written that miss a picture. A preview never costs a publish:
- * when they cannot be read, the check pictures none and the worker renders what is missing.
- */
-async function missingPreviews(
-  artifacts: Pick<AgentRunArtifacts, "missingPreviews">,
-  published: PublishedArtifact
-): Promise<readonly AgentRunMissingPreview[]> {
-  try {
-    return await artifacts.missingPreviews(writtenAt(published))
-  } catch (error) {
-    console.warn(
-      `[SixbAgent] Could not read which boards of '${published.artifact.id}' miss a preview:`,
-      error
-    )
-    return []
-  }
-}
-
-/**
- * Hands the pictures the check took over as the revision's previews, and warns of each board one
- * of whose pictures was not kept: it shows its outline in that size and mode. The write exists by
- * now, so a failure is only logged: the worker renders what is still missing, and an update
- * written since gets its own.
- */
-async function storePreviews(context: {
-  readonly input: PublishToolsInput
-  readonly handle: AgentSandboxHandle
-  readonly published: PublishedArtifact
-  readonly missing: readonly AgentRunMissingPreview[]
-  readonly checked: readonly CheckedPreview[]
-  readonly signal: AbortSignal
-}): Promise<LayoutWarning[]> {
-  const { input, published, signal } = context
-  try {
-    const { previews, dropped } = await storeCheckedPreviews({
-      handle: context.handle,
-      checked: context.checked,
-      missing: context.missing,
-      blobStorage: input.blobStorage,
-      signal,
-    })
-    const refused = await input.artifacts.storePreviews({ ...writtenAt(published), previews })
-    return unkeptPreviewWarnings([...dropped, ...refused])
-  } catch (error) {
-    if (signal.aborted) throw error
-    console.warn(
-      `[SixbAgent] Could not keep the previews of revision ${published.version.revision} of '${published.artifact.id}':`,
-      error
-    )
-    return []
-  }
-}
-
-/** The version a publish wrote, as it left its content. */
-function writtenAt({ artifact, version }: PublishedArtifact) {
-  return { artifactId: artifact.id, version: version.version, updatedAt: version.updatedAt }
-}
-
-/** One warning per board whose pictures were not all kept, naming each and why. */
-function unkeptPreviewWarnings(unkept: readonly RefusedBoardPreview[]): LayoutWarning[] {
-  const boards = [...new Set(unkept.map(({ board }) => board))]
-  return boards.map((board) => {
-    const pictures = unkept
-      .filter((picture) => picture.board === board)
-      .map(({ theme, size, reason }) => `the ${size} one in ${theme} mode (${reason})`)
-    return {
-      code: "preview_not_kept",
-      part: board,
-      message: `Board '${board}' has no preview for ${pictures.join(", ")}: readers see its outline there until they open it.`,
-    }
-  })
 }
 
 /** A canvas's items, for the check's picture of it as it opens; none when it cannot be read. */

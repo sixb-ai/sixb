@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import { readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   type ArtifactFile,
@@ -16,24 +16,28 @@ import {
 import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
 import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
+import type { ArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
-import { renderArtifactPreviews } from "../src/artifact-previews"
-import { AgentWorker } from "../src/worker"
+import { renderBoardPreviews } from "../src/board-previews"
+import { RenderWorker } from "../src/worker"
 
 const projectId = "previews"
 const alice = { type: "user", id: "alice" } as const
 
 /**
- * The project's sandboxes, real bash on this host, whose layout check is the browser's report: each
- * board it is asked to picture is pictured in every theme, each picture holding its board and mode.
+ * The project's sandboxes, real bash on this host, whose browser is the picture script's report:
+ * each board it is asked to picture is pictured in every theme, each picture holding its board and
+ * mode. What each picture served the boards' queries with is kept.
  */
 class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequestCredentials"> {
   readonly supportsRequestCredentials = true
   readonly created: CreateSandboxOptions[] = []
-  /** What each check served the boards' queries with: each status, and each answer by name. */
+  /** What each picture served the boards' queries with: each status, and each answer by name. */
   readonly served: Record<string, unknown>[] = []
+  /** The board pages each picture opened, by path, as the frame serves them. */
+  readonly opened: Record<string, string>[] = []
   destroyed = 0
   /** Resolves each time a sandbox is destroyed, which ends a job's render. */
   private onDestroy: (() => void) | undefined
@@ -52,15 +56,13 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
 
     return Object.assign(sandbox, {
       runCommand: async (...[command, args, runOptions]: Parameters<Sandbox["runCommand"]>) => {
-        const output = runOptions?.env?.SIXB_CHECK_OUT
-        return output === undefined
-          ? run(command, args, runOptions)
-          : {
-              exitCode: 0,
-              stdout: `${JSON.stringify(check(output, this.served))}\n`,
-              stderr: "",
-              durationMs: 0,
-            }
+        if (!(args?.at(-1) ?? "").includes("picture.cjs")) return run(command, args, runOptions)
+        const report = picture(
+          join(sandbox.workingDirectory, "canvas"),
+          join(sandbox.workingDirectory, "pictures"),
+          this
+        )
+        return { exitCode: 0, stdout: `${JSON.stringify(report)}\n`, stderr: "", durationMs: 0 }
       },
       destroy: async () => {
         await destroy()
@@ -71,50 +73,57 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
   }
 }
 
-function check(output: string, served: Record<string, unknown>[]) {
-  const statuses = JSON.parse(readFileSync(join(output, "queries.json"), "utf8")) as Record<
+function picture(site: string, out: string, sandboxes: PicturingSandboxes) {
+  const statuses = JSON.parse(readFileSync(join(site, "__sixb/queries.json"), "utf8")) as Record<
     string,
     number
   >
-  served.push({
+  sandboxes.served.push({
     statuses,
     ...Object.fromEntries(
       Object.keys(statuses).map((name) => [
         name,
-        JSON.parse(readFileSync(join(output, "queries", `${name}.json`), "utf8")),
+        JSON.parse(readFileSync(join(site, "__sixb/queries", `${name}.json`), "utf8")),
       ])
     ),
   })
 
-  const boards = JSON.parse(readFileSync(join(output, "boards.json"), "utf8")) as {
+  const boards = JSON.parse(readFileSync(join(out, "boards.json"), "utf8")) as {
     readonly id: string
-    readonly pictured: boolean
+    readonly file: string
   }[]
-  const themes = Object.keys(JSON.parse(readFileSync(join(output, "themes.json"), "utf8")))
-  const previews = boards
-    .filter((board) => board.pictured)
-    .flatMap((board) =>
-      themes.flatMap((theme) =>
-        (["full", "small"] as const).map((size) => {
-          const path = join(output, `${board.id}.${theme}.${size === "full" ? "png" : "webp"}`)
-          writeFileSync(path, `${board.id} ${theme}${size === "small" ? " small" : ""}`)
-          return { board: board.id, theme, size, path }
-        })
-      )
+  sandboxes.opened.push(
+    Object.fromEntries(boards.map(({ file }) => [file, readFileSync(join(site, file), "utf8")]))
+  )
+  const themes = Object.keys(JSON.parse(readFileSync(join(out, "themes.json"), "utf8")))
+  mkdirSync(join(out, "boards"), { recursive: true })
+  const pictures = boards.flatMap((board) =>
+    themes.flatMap((theme) =>
+      (["full", "small"] as const).map((size) => {
+        const path = join(out, "boards", `${board.id}.${theme}.${size === "full" ? "png" : "webp"}`)
+        writeFileSync(path, `${board.id} ${theme}${size === "small" ? " small" : ""}`)
+        return { board: board.id, theme, size, path }
+      })
     )
-  return { layout: "canvas", problems: [], errors: [], screenshots: [], previews }
+  )
+  return { pictures, unpictured: [], stalls: [] }
 }
+
+const workers: RenderWorker[] = []
+afterEach(async () => {
+  jest.setSystemTime()
+  await Promise.all(workers.splice(0).map((worker) => worker.stop()))
+})
 
 function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
-  const queues = new InMemoryQueues()
   const host = new SixbHost({
     id: projectId,
     ontology: [],
     storage,
     blobStorage,
-    queues,
+    queues: new InMemoryQueues(),
     broker: new InMemoryBroker(),
     lakeStorage: new InMemoryLakeStorage(),
     ...(options.sandboxes ? { sandboxes: options.sandboxes } : {}),
@@ -129,7 +138,7 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
     )
 
   /** Alice's canvas of two boards, as she saves it in the app. */
-  const canvas = async (extra: Record<string, string> = {}) =>
+  const canvas = async () =>
     createTestSixb(host, {
       authorization: { principal: alice, groupIds: [], roleIds: [], grants: emptyGrantIndex() },
     }).artifacts.create({
@@ -149,7 +158,6 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
         }),
         "boards/welcome.html": "<main><h1>Welcome</h1></main>",
         "boards/region.html": "<main><h1>Regions</h1></main>",
-        ...extra,
       }),
     })
 
@@ -181,7 +189,7 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
     createdAt: new Date().toISOString(),
     availableAt: new Date().toISOString(),
     attempt: 1,
-    type: "agent.artifact-previews.requested" as const,
+    type: "artifact.previews.requested" as const,
     payload: {
       artifactId: version.artifactId,
       version: version.version,
@@ -189,28 +197,31 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
     },
   })
 
-  return { host, storage, blobStorage, queues, canvas, pictures, job }
+  /** Renders a job in the project's sandboxes, or in `sandboxes`. */
+  const render = (job: ArtifactPreviewsRequestedQueueJob, sandboxes?: PicturingSandboxes) =>
+    renderBoardPreviews({
+      host: {
+        id: projectId,
+        storage: host.storage,
+        blobStorage: host.blobStorage,
+        ...(sandboxes ? { sandboxes } : {}),
+      },
+      job,
+      signal: new AbortController().signal,
+    })
+
+  return { host, storage, blobStorage, canvas, pictures, job, render }
 }
 
 describe("a canvas version's previews", () => {
-  afterEach(() => {
-    jest.setSystemTime()
-  })
-
-  test("are rendered in a blank sandbox with no network, which is destroyed after", async () => {
-    // Reproduce by rendering in the run's ephemeral sandbox: the job has no run credential to
-    // give it, and the API on its network serves nothing a board needs.
+  // Reproduce by writing the boards' own HTML in picture(): the pages open without the frame's kit
+  // and runtime, unthemed, unlike what a reader sees.
+  test("are rendered in a blank sandbox that reaches only the frame's CDNs, as the frame serves each board", async () => {
     const sandboxes = new PicturingSandboxes()
-    const { host, canvas, pictures, job } = setup()
+    const { canvas, pictures, job, render } = setup()
     const { version } = await canvas()
-    const render = () =>
-      renderArtifactPreviews({
-        host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-        job: job(version),
-        signal: new AbortController().signal,
-      })
 
-    await render()
+    await render(job(version), sandboxes)
 
     expect(await pictures(version)).toEqual([
       "region dark: region dark",
@@ -222,8 +233,9 @@ describe("a canvas version's previews", () => {
       "welcome light: welcome light",
       "welcome light: welcome light small",
     ])
-    // Reachable: the CDNs a frame loads libraries and fonts from, and nothing else. Reproduce with
-    // no network: a board styled from a CDN is pictured unstyled, and its picture stays.
+    expect(sandboxes.opened[0]?.["boards/welcome.html"]).toContain(
+      '<link rel="stylesheet" href="../__sixb/page.css"><script src="../__sixb/runtime.js" data-sixb-layout="page">'
+    )
     expect(sandboxes.created).toMatchObject([
       {
         environment: {},
@@ -233,19 +245,18 @@ describe("a canvas version's previews", () => {
         },
       },
     ])
-    expect(FRAME_CDN_ALLOWLIST).toContain("https://fonts.gstatic.com")
     expect(sandboxes.destroyed).toBe(1)
 
     // A second delivery finds nothing missing, and opens no sandbox.
-    await render()
+    await render(job(version), sandboxes)
     expect(sandboxes.created).toHaveLength(1)
   })
 
   test("are left to the job of the version's next content once it is written again", async () => {
-    // Reproduce by dropping the content check in `renderArtifactPreviews`: the job then pictures
-    // what the version holds now, with the query answers of the content it was asked for.
+    // Reproduce by dropping the content check in renderBoardPreviews: the job then pictures what
+    // the version holds now, with the query answers of the content it was asked for.
     const sandboxes = new PicturingSandboxes()
-    const { host, canvas, pictures, job } = setup()
+    const { host, canvas, pictures, job, render } = setup()
     const { version } = await canvas()
     const asked = job(version)
 
@@ -259,21 +270,17 @@ describe("a canvas version's previews", () => {
         updatedAt: new Date(version.updatedAt.getTime() + 60_000),
       },
     })
-    await renderArtifactPreviews({
-      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-      job: asked,
-      signal: new AbortController().signal,
-    })
+    await render(asked, sandboxes)
 
     expect(sandboxes.created).toEqual([])
     expect(await pictures(version)).toEqual([])
   })
 
   test("are still rendered once someone created the version, which keeps its content", async () => {
-    // Reproduce by comparing the job's revision with the version's in `renderArtifactPreviews`:
+    // Reproduce by comparing the job's revision with the version's in renderBoardPreviews:
     // creating the version moves its revision, and the job asked for its content renders nothing.
     const sandboxes = new PicturingSandboxes()
-    const { host, canvas, pictures, job } = setup()
+    const { host, canvas, pictures, job, render } = setup()
     const { version } = await canvas()
     const asked = job(version)
 
@@ -284,34 +291,26 @@ describe("a canvas version's previews", () => {
       frozenBy: alice,
     })
     expect(frozen?.version.revision).toBe(version.revision + 1)
-    await renderArtifactPreviews({
-      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-      job: asked,
-      signal: new AbortController().signal,
-    })
+    await render(asked, sandboxes)
 
     expect(sandboxes.created).toHaveLength(1)
     expect(await pictures(version)).toHaveLength(8)
   })
 
   test("are left to the outlines in a project without sandboxes", async () => {
-    const { host, canvas, pictures, job } = setup()
+    const { canvas, pictures, job, render } = setup()
     const { version } = await canvas()
 
-    await renderArtifactPreviews({
-      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage },
-      job: job(version),
-      signal: new AbortController().signal,
-    })
+    await render(job(version))
 
     expect(await pictures(version)).toEqual([])
   })
 
-  test("serve its boards the query answers the job carries, as the check serves them", async () => {
+  test("serve its boards the query answers the job carries, as the agent's check serves them", async () => {
     // Reproduce by leaving the job's answers unread: the boards are opened with every query
     // rejecting, as a reader the query fails for sees them.
     const sandboxes = new PicturingSandboxes()
-    const { host, canvas, job } = setup()
+    const { host, canvas, job, render } = setup()
     const { version } = await canvas()
 
     // A version whose boards read a query, and its answer as its publisher read it.
@@ -330,11 +329,10 @@ describe("a canvas version's previews", () => {
     const body = new TextEncoder().encode(JSON.stringify(answers))
     const queries = await host.blobStorage.put({ body, mediaType: "application/json" })
 
-    await renderArtifactPreviews({
-      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-      job: { ...job(live.version), payload: { ...job(live.version).payload, queries } },
-      signal: new AbortController().signal,
-    })
+    await render(
+      { ...job(live.version), payload: { ...job(live.version).payload, queries } },
+      sandboxes
+    )
 
     expect(sandboxes.served).toEqual([
       {
@@ -349,10 +347,9 @@ describe("a canvas version's previews", () => {
     // Reproduce by picturing every board without answers: Regions is pictured with its query
     // rejecting, a page no reader ever sees.
     const sandboxes = new PicturingSandboxes()
-    const { host, blobStorage, canvas, pictures, job } = setup()
+    const { host, blobStorage, canvas, pictures, job, render } = setup()
     const { version } = await canvas()
 
-    // An Agent's version whose check missed its boards: Regions reads a query, Welcome none.
     const [query, region, script] = await Promise.all(
       [
         ["queries/open.json", '{"kind":"start","objectTypeId":"Invoice"}'],
@@ -363,11 +360,6 @@ describe("a canvas version's previews", () => {
         file: await blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
       }))
     )
-    const files = [
-      ...version.files.filter((file) => file.path !== "boards/region.html"),
-      query,
-      region,
-    ] as ArtifactFile[]
     const publish = async (files: readonly ArtifactFile[]) => {
       const published = await host.storage.artifacts?.publish({
         projectId,
@@ -378,50 +370,42 @@ describe("a canvas version's previews", () => {
       if (!published) throw new Error("Expected artifact storage.")
       return published.version
     }
-    const render = (live: ArtifactVersionRecord) =>
-      renderArtifactPreviews({
-        host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-        job: job(live),
-        signal: new AbortController().signal,
-      })
-
-    const live = await publish(files)
-    await render(live)
-    expect(await pictures(live)).toEqual([
+    const welcomeOnly = [
       "welcome dark: welcome dark",
       "welcome dark: welcome dark small",
       "welcome light: welcome light",
       "welcome light: welcome light small",
-    ])
+    ]
+
+    const live = await publish([
+      ...version.files.filter((file) => file.path !== "boards/region.html"),
+      query,
+      region,
+    ] as ArtifactFile[])
+    await render(job(live), sandboxes)
+    expect(await pictures(live)).toEqual(welcomeOnly)
 
     // A script beside the boards may be what any of them reads its query with: Regions, whose
     // own HTML names none, keeps its outline too.
     const scripted = await publish([...version.files, query, script] as ArtifactFile[])
-    await render(scripted)
-    expect(await pictures(scripted)).toEqual([
-      "welcome dark: welcome dark",
-      "welcome dark: welcome dark small",
-      "welcome light: welcome light",
-      "welcome light: welcome light small",
-    ])
-    expect(sandboxes.served).toHaveLength(1)
+    await render(job(scripted), sandboxes)
+    expect(await pictures(scripted)).toEqual(welcomeOnly)
   })
 
-  test("are rendered by the agent worker for a version a person saved in the app", async () => {
+  // Reproduce by enqueueing the job on the agents' lane in requestBoardPreviews: the render worker
+  // never claims it, and the boards keep their outlines.
+  test("are rendered by the render worker for a version saved in the app, from the renders lane", async () => {
     const sandboxes = new PicturingSandboxes()
     const { host, canvas, pictures } = setup({ sandboxes })
-    const worker = new AgentWorker(host, {})
+    const worker = new RenderWorker(host)
+    workers.push(worker)
 
     const rendered = sandboxes.destroyedOnce()
     const { version } = await canvas()
     // The job waits for the canvas to rest.
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
     await worker.start()
-    try {
-      await rendered
-    } finally {
-      await worker.stop()
-    }
+    await rendered
 
     expect(await pictures(version)).toHaveLength(8)
   })

@@ -1,18 +1,6 @@
 import { posix } from "node:path"
-import type {
-  BlobStorage,
-  FileRef,
-  Sandbox,
-  SandboxFactory,
-  SandboxNetworkPolicy,
-  Storage,
-} from "@sixb/core"
-import {
-  FRAME_ASSETS,
-  FRAME_CDN_ALLOWLIST,
-  injectFrameAssets,
-  rewriteFrameReferences,
-} from "@sixb/core/internal/artifacts/frames"
+import type { FileRef, Sandbox } from "@sixb/core"
+import { injectFrameAssets, rewriteFrameReferences } from "@sixb/core/internal/artifacts/frames"
 import {
   DOCUMENT_PDF_JOB,
   documentPdfKey,
@@ -20,19 +8,15 @@ import {
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactPdfRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
+import type { RenderHost } from "./host"
 import printScript from "./print.cjs" with { type: "text" }
+import { kitFile, RENDER_NETWORK, readBlob, runScript } from "./sandbox"
 
 // A designed document's PDF, which someone asked for: the worker opens a blank sandbox of the
 // project, which reaches only the CDNs a frame may load from, writes the version there as its frame
 // serves it, prints it with the image's browser, keeps the PDF under the version's render key, and
 // destroys the sandbox. When it cannot be printed, why is kept there instead, so whoever is
 // waiting for it hears so at once.
-
-/** What a document may reach while it prints: the fonts and stylesheets a frame may load. */
-const PRINT_NETWORK: SandboxNetworkPolicy = {
-  mode: "restricted",
-  allow: FRAME_CDN_ALLOWLIST.map((origin) => ({ name: new URL(origin).hostname, origin })),
-}
 
 /** Where the version is written in the sandbox, beside the script that prints it. */
 const SITE = "document"
@@ -41,13 +25,6 @@ const SCRIPT = "print.cjs"
 /** The frame's own files, which the entry loads from `__sixb/`. */
 const KIT = ["__sixb/document.css", "__sixb/runtime.js"]
 
-export interface DocumentPdfHost {
-  readonly id: string
-  readonly storage: Pick<Storage, "artifacts">
-  readonly blobStorage: Pick<BlobStorage, "put" | "open">
-  readonly sandboxes?: Pick<SandboxFactory, "create">
-}
-
 /**
  * Prints a designed document's version to PDF and keeps it, or why it could not be printed.
  * Repeating it prints nothing more: what an earlier delivery kept is found. A project without
@@ -55,7 +32,7 @@ export interface DocumentPdfHost {
  * was asked for: asking again asks for what it holds now.
  */
 export async function printDocumentPdf(input: {
-  readonly host: DocumentPdfHost
+  readonly host: RenderHost
   readonly job: ArtifactPdfRequestedQueueJob
   readonly signal: AbortSignal
 }): Promise<void> {
@@ -69,7 +46,7 @@ export async function printDocumentPdf(input: {
   if (await artifacts.getPdf({ projectId: host.id, renderKey })) return
 
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(DOCUMENT_PDF_JOB.timeoutMs)])
-  const sandbox = await host.sandboxes.create({ environment: {}, network: PRINT_NETWORK, signal })
+  const sandbox = await host.sandboxes.create({ environment: {}, network: RENDER_NETWORK, signal })
   try {
     const printed = await print(sandbox, version, document, host.blobStorage, signal)
     await artifacts.putPdf({ projectId: host.id, renderKey, ...printed, createdAt: new Date() })
@@ -89,7 +66,7 @@ export async function printDocumentPdf(input: {
  * is printed anew when asked.
  */
 export async function failDocumentPdf(input: {
-  readonly host: Pick<DocumentPdfHost, "id" | "storage">
+  readonly host: Pick<RenderHost, "id" | "storage">
   readonly job: ArtifactPdfRequestedQueueJob
 }): Promise<void> {
   await input.host.storage.artifacts?.putPdf({
@@ -109,7 +86,7 @@ async function print(
   sandbox: Sandbox,
   version: ArtifactVersionRecord,
   document: FileRef | undefined,
-  blobStorage: DocumentPdfHost["blobStorage"],
+  blobStorage: RenderHost["blobStorage"],
   signal: AbortSignal
 ): Promise<{ readonly file: FileRef; readonly pages: number } | { readonly failure: string }> {
   const { outline } = version
@@ -119,13 +96,14 @@ async function print(
 
   const site = posix.resolve(sandbox.workingDirectory, SITE)
   const script = posix.resolve(sandbox.workingDirectory, SCRIPT)
-  const read = async (blobId: string) =>
-    new Uint8Array(await new Response(await blobStorage.open(blobId)).arrayBuffer())
   const files = await Promise.all(
     version.files.map(async (file) => {
       const entry = file.path === version.entry
       // The markup with the values written in, which it prints instead of its own.
-      const bytes = await read(entry && document ? document.blobId : file.file.blobId)
+      const bytes = await readBlob(
+        blobStorage,
+        entry && document ? document.blobId : file.file.blobId
+      )
       // The entry as its frame serves it: with the kit, the runtime, and its paper.
       const contents = entry
         ? injectFrameAssets(
@@ -146,24 +124,21 @@ async function print(
 
   // Half its time to print, so it reports why it stopped before the command is killed.
   const deadlineMs = Math.floor(DOCUMENT_PDF_JOB.timeoutMs / 2)
-  const result = await sandbox.runCommand(
-    "bash",
-    loginShell(
-      `command -v node >/dev/null 2>&1 || { echo '{"skipped":"no_node"}'; exit 0; }; exec node "${script}" "${site}" ${deadlineMs} ${MAX_DOCUMENT_PDF_BYTES}`
-    ),
-    { timeout: DOCUMENT_PDF_JOB.timeoutMs, signal }
+  const { report, stderr } = await runScript(
+    sandbox,
+    script,
+    [site, deadlineMs, MAX_DOCUMENT_PDF_BYTES],
+    { timeoutMs: DOCUMENT_PDF_JOB.timeoutMs, signal }
   )
-  signal.throwIfAborted()
-
-  const report = parseReport(result.stdout)
   if (report?.skipped) {
     const why = report.skipped === "no_node" ? "Node.js" : "headless browser"
     return {
       failure: `This project's sandboxes have no ${why} to print with (the agent image has one).`,
     }
   }
-  if (!report?.pdf || !report.pages) {
-    const detail = report?.failed ?? (result.stderr.trim() || "the browser wrote no PDF")
+  const pages = typeof report?.pages === "number" ? report.pages : 0
+  if (typeof report?.pdf !== "string" || pages < 1) {
+    const detail = String(report?.failed ?? (stderr || "the browser wrote no PDF"))
     console.warn(
       `[SixbRenderWorker] Version ${version.version} of '${version.artifactId}' was not printed: ${detail.slice(0, 500)}`
     )
@@ -178,40 +153,7 @@ async function print(
     fileName: `${pdfName(version.title)}.pdf`,
     mediaType: "application/pdf",
   })
-  return { file, pages: report.pages }
-}
-
-/**
- * `bash` arguments that run `script` once a login shell has loaded the image's profile, which puts
- * Node on the path and points Playwright at its browsers, as the agent's sandbox commands do: the
- * login shell is replaced, so its logout script never runs.
- */
-function loginShell(script: string): string[] {
-  return ["-lc", 'exec "$BASH" -c "$1" bash', "bash", script]
-}
-
-function kitFile(path: string): string {
-  const file = FRAME_ASSETS[path]
-  if (!file) throw new Error(`[SixbRenderWorker] The frame has no '${path}'.`)
-  return file.body
-}
-
-interface PrintReport {
-  readonly pages?: number
-  readonly pdf?: string
-  readonly skipped?: string
-  readonly failed?: string
-}
-
-function parseReport(stdout: string): PrintReport | null {
-  const line = stdout.trim().split("\n").at(-1)
-  if (!line) return null
-  try {
-    const value: unknown = JSON.parse(line)
-    return typeof value === "object" && value !== null ? (value as PrintReport) : null
-  } catch {
-    return null
-  }
+  return { file, pages }
 }
 
 /** A title as a file name: what one may not hold, and each run of spaces, one space. */
