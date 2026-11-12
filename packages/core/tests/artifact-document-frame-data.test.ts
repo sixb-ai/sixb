@@ -57,7 +57,10 @@ function frame(url: string, answers: Record<string, unknown>) {
   const fetch = async (address: URL) => {
     const name = address.pathname.match(/^\/__sixb\/queries\/(.+)\.json$/)?.[1] ?? ""
     fetched.push(name)
-    return name in answers ? Response.json(answers[name]) : new Response(null, { status: 404 })
+    // An answer may be one still on its way.
+    return name in answers
+      ? Response.json(await answers[name])
+      : new Response(null, { status: 404 })
   }
 
   new Function(
@@ -128,6 +131,26 @@ describe("a designed document's fields in the frame", () => {
     await settle()
     expect(texts("li")).toEqual(["Phase C"])
     expect(texts("h1")).toEqual(["Harbor Co"])
+  })
+
+  // Reproduce by dropping the `showing` check from the runtime's showData: the first read, which
+  // answers last, shows the rows from before the change.
+  test("show the latest read of the data, though an earlier one answers after it", async () => {
+    let answerFirst: (value: unknown) => void = () => {}
+    const answers: Record<string, unknown> = {
+      past: new Promise((resolve) => {
+        answerFirst = resolve
+      }),
+    }
+    const { window, texts } = frame("https://frame.test/document.html", answers)
+    await settle()
+
+    answers.past = rows("Phase C")
+    window.dispatchEvent(new window.CustomEvent("sixb:query", { detail: { name: "past" } }))
+    await settle()
+    answerFirst(rows("Phase A"))
+    await settle()
+    expect(texts("li")).toEqual(["Phase C"])
   })
 
   test("keep their written text where nothing is read, and while it is served for editing", async () => {

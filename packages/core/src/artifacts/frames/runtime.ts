@@ -1,4 +1,9 @@
-import type { DocumentData, DocumentQueryResult, DocumentTree } from "./document-data"
+import type {
+  DocumentData,
+  DocumentQueryResult,
+  DocumentReads,
+  DocumentTree,
+} from "./document-data"
 
 /**
  * The runtime the frame injects before anything else in an entry's `<head>`. It is served as this
@@ -1286,36 +1291,30 @@ export function frameRuntime(data?: () => DocumentData): void {
   }
   /** The body as published, which each read of the data is shown in, and what it reads. */
   let published: Node | null = null
-  let reads: { readonly holder: boolean; readonly queries: readonly string[] } | null = null
+  let reads: DocumentReads | null = null
+  /** Which read of the data is the latest: an earlier one that answers later shows nothing. */
+  let showing = 0
 
   /** Reads the data the fields show and shows it, from the body as published. */
   const showData = async (): Promise<boolean> => {
     const body = document.body
     if (!live || !body) return false
-    if (!reads) {
-      const queries = new Set<string>()
-      let holder = false
-      for (const mark of live.marks(body, tree)) {
-        // What the outermost path that names a query reads; the holder when none does.
-        const named = [...mark.within, mark.path].map(live.parse).find((path) => path?.query)
-        if (named?.query) queries.add(named.query)
-        else holder = true
-      }
-      reads = { holder, queries: [...queries] }
-    }
+    reads ??= live.reads(live.marks(body, tree))
     if (!reads.holder && reads.queries.length === 0) return false
     published ??= body.cloneNode(true)
+    const read = ++showing
 
     // What the reader may not read keeps its written text.
-    const read = (name: string) =>
+    const answer = (name: string) =>
       query(name).then(
         (result) => result as DocumentQueryResult,
         () => undefined
       )
     const [holder, ...results] = await Promise.all([
-      reads.holder ? read("holder") : undefined,
-      ...reads.queries.map(read),
+      reads.holder ? answer("holder") : undefined,
+      ...reads.queries.map(answer),
     ])
+    if (read !== showing) return false
     const queries: Record<string, DocumentQueryResult> = {}
     reads.queries.forEach((name, index) => {
       const result = results[index]
@@ -1334,10 +1333,16 @@ export function frameRuntime(data?: () => DocumentData): void {
       const name = (event as CustomEvent<{ name?: unknown }>).detail?.name
       const shows = name === "holder" ? reads?.holder : reads?.queries.includes(String(name))
       if (!shows) return
-      showData().then((shown) => {
+      showData().then(async (shown) => {
         if (!shown) return
-        if (paged) paginate()
-        else markBreaks()
+        if (paged) {
+          // Not yet cut, it is cut once it first settles; cut, it is cut anew once this has.
+          if (!root.hasAttribute("data-sixb-pages")) return
+          await settled()
+          paginate()
+        } else {
+          markBreaks()
+        }
         reportSize()
         reportEmbeds()
       })

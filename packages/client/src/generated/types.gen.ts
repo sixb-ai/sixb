@@ -18634,9 +18634,9 @@ export type CreateArtifactResponses = {
         [key: string]: "ready" | "pending" | "none"
       }
       /**
-       * A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes
+       * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
-      pdf?: "ready" | "printable" | "failed"
+      printable?: boolean
     }
     warnings: Array<{
       code: string
@@ -19900,9 +19900,9 @@ export type UpdateArtifactResponses = {
         [key: string]: "ready" | "pending" | "none"
       }
       /**
-       * A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes
+       * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
-      pdf?: "ready" | "printable" | "failed"
+      printable?: boolean
     }
     warnings: Array<{
       code: string
@@ -20249,9 +20249,9 @@ export type FreezeArtifactVersionResponses = {
         [key: string]: "ready" | "pending" | "none"
       }
       /**
-       * A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes
+       * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
-      pdf?: "ready" | "printable" | "failed"
+      printable?: boolean
     }
   }
 }
@@ -21781,9 +21781,9 @@ export type RestoreArtifactResponses = {
         [key: string]: "ready" | "pending" | "none"
       }
       /**
-       * A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes
+       * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
-      pdf?: "ready" | "printable" | "failed"
+      printable?: boolean
     }
   }
 }
@@ -22189,9 +22189,9 @@ export type GetArtifactVersionResponses = {
       [key: string]: "ready" | "pending" | "none"
     }
     /**
-     * A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes
+     * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
      */
-    pdf?: "ready" | "printable" | "failed"
+    printable?: boolean
   }
 }
 
@@ -22207,7 +22207,12 @@ export type GetArtifactPdfData = {
      */
     version: string
   }
-  query?: never
+  query?: {
+    /**
+     * The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then
+     */
+    key?: string
+  }
   url: "/api/artifacts/{artifactId}/versions/{version}/pdf"
 }
 
@@ -22247,6 +22252,10 @@ export type PrintArtifactPdfData = {
      * true asks again for a PDF that could not be printed, instead of hearing why
      */
     retry?: "true" | "false"
+    /**
+     * The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then
+     */
+    key?: string
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/pdf"
 }
@@ -22367,9 +22376,17 @@ export type PrintArtifactPdfResponses = {
          * How many pages it printed on
          */
         pages: number
+        /**
+         * The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then
+         */
+        key?: string
       }
     | {
         status: "printing"
+        /**
+         * The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then
+         */
+        key?: string
       }
     | {
         status: "failed"
@@ -22377,6 +22394,10 @@ export type PrintArtifactPdfResponses = {
          * Why it could not be printed
          */
         reason: string
+        /**
+         * The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then
+         */
+        key?: string
       }
 }
 

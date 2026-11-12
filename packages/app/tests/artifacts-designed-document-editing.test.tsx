@@ -273,7 +273,7 @@ describe("a designed document's downloads", () => {
     await act(async () => {
       queries.setQueryData(
         getArtifactVersionQueryKey({ path: { artifactId: ARTIFACT_ID, version: "1" } }),
-        { ...VERSION, pdf: "printable" }
+        { ...VERSION, printable: true }
       )
       await settle()
     })

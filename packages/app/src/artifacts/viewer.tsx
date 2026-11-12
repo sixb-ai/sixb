@@ -1148,7 +1148,7 @@ function EntryDownloadMenu({
     <DownloadMenu
       options={
         // A designed document prints to PDF, in a project that can print it.
-        version.pdf
+        version.printable
           ? [
               {
                 key: "pdf",

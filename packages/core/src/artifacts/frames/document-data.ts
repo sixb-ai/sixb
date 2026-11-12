@@ -77,7 +77,7 @@ export function documentData(): DocumentData {
       const [first, second] = path.steps
       if (first?.key === "total" && path.steps.length === 1) return result.total
       if (first?.key === "facets" && second && path.steps.length === 2) {
-        return result.facets?.find((facet) => facet.propertyId === second.key)?.values ?? undefined
+        return result.facets?.find((facet) => facet.propertyId === second.key)?.buckets
       }
       if (path.steps.length === 0) return result.objects ?? []
       value = result.objects
@@ -96,14 +96,24 @@ export function documentData(): DocumentData {
 
   const format = (value: unknown, as: string | null, currency: string | null, lang: string) => {
     if (value === null || value === undefined) return ""
-    const number = typeof value === "number" ? value : Number(value)
+    // A number, or a string that holds one: never what Number() makes 0 of, such as "" or true.
+    const number =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && value.trim() !== ""
+          ? Number(value)
+          : Number.NaN
     try {
       if (as === "money" && Number.isFinite(number)) {
         // A whole amount reads without cents, as a price on a proposal does.
         const cents = Number.isInteger(number) ? { minimumFractionDigits: 0 } : {}
         return currency
           ? new Intl.NumberFormat(lang, { style: "currency", currency, ...cents }).format(number)
-          : new Intl.NumberFormat(lang, { minimumFractionDigits: 2, ...cents }).format(number)
+          : new Intl.NumberFormat(lang, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+              ...cents,
+            }).format(number)
       }
       if (as === "number" && Number.isFinite(number)) {
         return new Intl.NumberFormat(lang).format(number)
@@ -140,7 +150,11 @@ export function documentData(): DocumentData {
         if (each !== null) {
           const path = parse(each)
           const items = path ? read(path, scope) : UNREAD
-          if (items === UNREAD || items === HIDDEN) continue
+          if (items === UNREAD || items === HIDDEN) {
+            // Its written text stays: plain, as written, never to be filled again.
+            if (options.plain) unmark(child)
+            continue
+          }
           const list = Array.isArray(items) ? items : items == null ? [] : [items]
           tree.replace(
             child,
@@ -161,8 +175,8 @@ export function documentData(): DocumentData {
         }
         const path = parse(field)
         const value = path ? read(path, scope) : UNREAD
+        if (options.plain) unmark(child)
         if (value === UNREAD) continue
-        if (options.plain) tree.removeAttribute(child, FIELD)
         if (value === HIDDEN) {
           tree.setText(child, "•••")
           if (!options.plain) tree.setAttribute(child, LOCKED, "")
@@ -181,6 +195,11 @@ export function documentData(): DocumentData {
           )
         )
       }
+    }
+    /** No longer marked, nor anything in it, as a frozen version keeps it. */
+    const unmark = (node: TNode) => {
+      for (const name of [FIELD, EACH, CURRENCY_FIELD]) tree.removeAttribute(node, name)
+      for (const child of tree.children(node)) unmark(child)
     }
     visit(root, { sources: options.sources })
   }
@@ -203,7 +222,19 @@ export function documentData(): DocumentData {
     return found
   }
 
-  return { parse, fill, marks }
+  /** What marks read: the holder, and the queries named by the outermost path naming one. */
+  const reads = (found: readonly DocumentMark[]): DocumentReads => {
+    const queries = new Set<string>()
+    let holder = false
+    for (const mark of found) {
+      const named = [...mark.within, mark.path].map(parse).find((path) => path?.query)
+      if (named?.query) queries.add(named.query)
+      else holder = true
+    }
+    return { holder, queries: [...queries] }
+  }
+
+  return { parse, fill, marks, reads }
 }
 
 /** Where a path reads: the sources, and the item of the repeated element it is in. */
@@ -238,7 +269,7 @@ export interface DocumentQueryResult {
   readonly total?: number
   readonly facets?: readonly {
     readonly propertyId: string
-    readonly values: readonly { readonly value: unknown; readonly count: number }[]
+    readonly buckets: readonly { readonly value: unknown; readonly count: number }[]
   }[]
 }
 
@@ -278,10 +309,17 @@ export interface DocumentTree<TNode> {
   replace(node: TNode, nodes: readonly TNode[]): void
 }
 
+/** What a document's fields read. */
+export interface DocumentReads {
+  readonly holder: boolean
+  readonly queries: readonly string[]
+}
+
 export interface DocumentData {
   /** A path, or null when it is not one. */
   parse(path: string): DocumentPath | null
   /** Shows the values the sources hold in the fields and repeated elements under `root`. */
   fill<TNode>(root: TNode, tree: DocumentTree<TNode>, options: DocumentFill): void
   marks<TNode>(root: TNode, tree: DocumentTree<TNode>): DocumentMark[]
+  reads(marks: readonly DocumentMark[]): DocumentReads
 }

@@ -33,6 +33,9 @@ const REFUSED_ELEMENTS = [
   "meta[http-equiv]",
 ]
 
+/** Elements whose text is not markup, which may show no live data. */
+const RAW_TEXT_ELEMENTS = ["style", "title", "textarea", "xmp", "noembed", "noframes", "noscript"]
+
 /** Attributes that hold an address, which may not run script. */
 const ADDRESS_ATTRIBUTES = ["href", "src", "xlink:href", "poster", "action", "formaction"]
 
@@ -103,6 +106,17 @@ export async function validateHtmlDocument(
         }
       },
     })
+    // Their text is never markup: a value written into one could end it and start a script.
+    .on(
+      RAW_TEXT_ELEMENTS.map((tag) => `${tag}[data-sixb-field], ${tag}[data-sixb-each]`).join(", "),
+      {
+        element(element) {
+          refuse(
+            `${DOCUMENT_HTML_ENTRY} shows live data in <${element.tagName}>, whose text is not markup. Put the field in an element that shows text, such as <span>.`
+          )
+        },
+      }
+    )
     .on("h1, h2, h3, h4, h5, h6", {
       element(element) {
         const current = { depth: Number(element.tagName.slice(1)), text: "" }

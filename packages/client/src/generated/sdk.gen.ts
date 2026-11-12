@@ -4252,7 +4252,7 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
 /**
  * Get a designed document's PDF
  *
- * The version printed to PDF, as a download named after the title it printed with. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.
+ * The version printed to PDF, with the values its fields read as the caller reads them, as a download named after the title it printed with: for a document that shows live data, those its POST's key names. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.
  */
 export const getArtifactPdf = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactPdfData, ThrowOnError>
@@ -4270,7 +4270,7 @@ export const getArtifactPdf = <ThrowOnError extends boolean = false>(
 /**
  * Print a designed document to PDF
  *
- * Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.
+ * Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. A document that shows live data answers with a key: ask again and get it with that key, which names the values the first ask printed. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.
  */
 export const printArtifactPdf = <ThrowOnError extends boolean = false>(
   options: Options<PrintArtifactPdfData, ThrowOnError>

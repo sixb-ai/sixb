@@ -79,7 +79,7 @@ describe("a designed document's PDF", () => {
     expect(await sixb.artifacts.pdf(artifact.id)).toEqual({ status: "printing" })
     expect(await claimable()).toEqual([
       {
-        id: `art_pdf_${artifact.id}`,
+        id: `art_pdf_${renderKey}`,
         type: "artifact.pdf.requested",
         payload: { artifactId: artifact.id, version: 1, renderKey },
       },

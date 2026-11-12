@@ -101,7 +101,7 @@ async function proposal(fixture: ReturnType<typeof createApp>) {
   expect(response.status).toBe(201)
   const published = (await response.json()) as {
     readonly artifact: { readonly id: string }
-    readonly version: { readonly pdf?: string }
+    readonly version: { readonly printable?: boolean }
   }
   return { alice, artifactId: published.artifact.id, published }
 }
@@ -111,7 +111,7 @@ describe("a designed document's PDF over the API", () => {
   test("is asked for, said to be printing, then downloaded once printed", async () => {
     const fixture = createApp()
     const { alice, artifactId, published } = await proposal(fixture)
-    expect(published.version.pdf).toBe("printable")
+    expect(published.version.printable).toBe(true)
     const pdfPath = `/api/artifacts/${artifactId}/versions/1/pdf`
 
     const ask = () =>
@@ -152,11 +152,6 @@ describe("a designed document's PDF over the API", () => {
     expect(downloaded.headers.get("content-disposition")).toContain("attachment")
     expect(downloaded.headers.get("content-disposition")).toContain("Harbor proposal.pdf")
     expect(await downloaded.text()).toBe("%PDF-1.7 proposal")
-
-    const read = await fixture.app.fetch(
-      new Request(url(`/api/artifacts/${artifactId}/versions/1`), { headers: alice.headers })
-    )
-    expect(await read.json()).toMatchObject({ pdf: "ready" })
   })
 
   // Reproduce by dropping `retry` from the POST route: asking again hears the failure, and prints
@@ -176,12 +171,6 @@ describe("a designed document's PDF over the API", () => {
       createdAt: new Date("2026-11-11T10:00:00.000Z"),
     })
     const pdfPath = `/api/artifacts/${artifactId}/versions/1/pdf`
-    const read = async () =>
-      (await (
-        await fixture.app.fetch(
-          new Request(url(`/api/artifacts/${artifactId}/versions/1`), { headers: alice.headers })
-        )
-      ).json()) as { readonly pdf?: string }
     const ask = async (query = "") =>
       (
         await fixture.app.fetch(
@@ -189,10 +178,8 @@ describe("a designed document's PDF over the API", () => {
         )
       ).json()
 
-    expect((await read()).pdf).toBe("failed")
     expect(await ask()).toEqual({ status: "failed", reason: "It could not be printed." })
     expect(await ask("?retry=true")).toEqual({ status: "printing" })
-    expect((await read()).pdf).toBe("printable")
   })
 
   test("is unavailable without sandboxes, and refused for someone who cannot read it", async () => {
