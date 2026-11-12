@@ -611,7 +611,9 @@ describe("an artifact edited live", () => {
     ])
   })
 
-  test("refuses whoever may not read the artifact, and an artifact that is not a canvas", async () => {
+  // Reproduce by refusing every kind but a canvas in LiveRoom.open: the designed document is
+  // left as not_live too.
+  test("refuses whoever may not read the artifact, and one not edited live, but opens a designed document", async () => {
     const context = await setup()
     const rooms = context.rooms()
     const stranger = new Client(rooms, context.olivia, "art_0000000000", "x-1")
@@ -630,6 +632,18 @@ describe("an artifact edited live", () => {
     expect(document.messages).toEqual([
       { type: "left", artifactId: artifact.id, reason: "not_live" },
     ])
+
+    const designed = await context.marie.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({
+        "document.html": "<!doctype html><html><body><h1>Proposal</h1></body></html>",
+      }),
+    })
+    const proposal = new Client(rooms, context.marie, designed.artifact.id, "marie-3")
+    await proposal.join()
+    await proposal.settle()
+    expect(proposal.messages[0]).toMatchObject({ type: "joined", access: "edit" })
   })
 
   // Guard proof: drop `written` from LiveRooms' events feed; the Agent's heading never reaches

@@ -13,4 +13,4 @@ export {
   artifactPresenceStream,
   parseArtifactLiveRecord,
 } from "./presence"
-export { loadArtifactDocument, readDocumentState } from "./state"
+export { keepsDocument, loadArtifactDocument, readDocumentState } from "./state"
