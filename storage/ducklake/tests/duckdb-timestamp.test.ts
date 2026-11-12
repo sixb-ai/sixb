@@ -21,10 +21,21 @@ describe("normalizeDuckDbTimestampValue", () => {
     )
   })
 
-  test("preserves UTC timestamp strings with Z", () => {
-    expect(normalizeDuckDbTimestampValue("2017-01-02T17:51:02Z")).toBe("2017-01-02T17:51:02.000Z")
+  test("preserves UTC timestamp strings with Z without modifying them", () => {
+    expect(normalizeDuckDbTimestampValue("2017-01-02T17:51:02Z")).toBe("2017-01-02T17:51:02Z")
     expect(normalizeDuckDbTimestampValue("2017-01-02T17:51:02.123Z")).toBe(
       "2017-01-02T17:51:02.123Z"
+    )
+  })
+
+  test("does not normalize strings with invalid calendar days so DuckDB can refuse them", () => {
+    // Feb 29 on non-leap year 2026
+    expect(normalizeDuckDbTimestampValue("2026-02-29T10:00:00-08:00")).toBe(
+      "2026-02-29T10:00:00-08:00"
+    )
+    // Non-existent day
+    expect(normalizeDuckDbTimestampValue("2026-02-30T10:00:00+02:00")).toBe(
+      "2026-02-30T10:00:00+02:00"
     )
   })
 
@@ -33,7 +44,8 @@ describe("normalizeDuckDbTimestampValue", () => {
     expect(normalizeDuckDbTimestampValue(date)).toBe("2017-01-02T17:51:02.000Z")
   })
 
-  test("returns original string if value cannot be parsed as a Date", () => {
+  test("returns original string if value does not have a timezone offset", () => {
     expect(normalizeDuckDbTimestampValue("not-a-timestamp")).toBe("not-a-timestamp")
+    expect(normalizeDuckDbTimestampValue("9/9/2026")).toBe("9/9/2026")
   })
 })
