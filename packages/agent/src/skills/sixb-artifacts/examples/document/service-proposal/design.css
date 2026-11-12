@@ -105,7 +105,7 @@ tfoot td { font-weight: 700; }
 .signatures .dated span { display: block; padding-top: 22px; border-bottom: 1px solid #a1a1aa; color: var(--muted); font-size: 6.5pt; letter-spacing: 0.1em; text-transform: uppercase; }
 
 /* On a phone the document is one sheet at the screen's width: the grids stack. */
-@media (max-width: 600px) {
+@media screen and (max-width: 600px) {
   .cover { min-height: 0; }
   .columns, .facts, .signatures { grid-template-columns: 1fr; }
   .cover header { flex-direction: column; gap: 12px; }
