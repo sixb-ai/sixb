@@ -1,0 +1,193 @@
+/* Northline Mechanical's proposal design: US Letter, three-quarter-inch margins. */
+@page { size: letter; margin: 0.75in; }
+
+:root {
+  --navy: #132a33;
+  --teal: #2f7280;
+  --copper: #b45a2b;
+  --ink: #1b2a30;
+  --muted: #61737a;
+  --rule: #dfe5e7;
+  --wash: #eef5f6;
+  --steel: #eceff2;
+}
+
+body {
+  color: var(--ink);
+  font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.6;
+  font-feature-settings: "cv11", "ss01";
+}
+
+h1, h2, h3 { margin: 0; color: var(--navy); letter-spacing: -0.02em; break-after: avoid; }
+h2 { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; font-size: 16pt; line-height: 1.2; }
+h2 .number { color: var(--copper); font-size: 10pt; font-weight: 700; letter-spacing: 0.08em; }
+h3 { margin: 22px 0 6px; font-size: 10.5pt; }
+p { margin: 0 0 10px; }
+ul, ol { margin: 0 0 12px; padding-left: 18px; }
+li + li { margin-top: 4px; }
+strong { font-weight: 650; color: var(--navy); }
+figure { margin: 18px 0; break-inside: avoid; }
+figcaption { margin-top: 8px; color: var(--muted); font-size: 7.5pt; }
+
+.page { break-before: page; }
+.lede { font-size: 11pt; line-height: 1.55; color: #33464d; }
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 6.5pt;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* The running header each section opens with. */
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 26px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.brand { display: flex; align-items: center; gap: 8px; color: var(--navy); font-size: 8pt; font-weight: 700; letter-spacing: 0.02em; }
+
+/* The cover: a dark panel with the unit, then the facts at its foot. */
+.cover { display: flex; flex-direction: column; min-height: 9.4in; }
+.hero {
+  display: grid;
+  grid-template-columns: 1fr 210px;
+  gap: 20px;
+  align-items: end;
+  margin-top: 8px;
+  padding: 34px 30px 30px;
+  border-radius: 6px;
+  background: var(--navy);
+  color: #dbe7ea;
+}
+.hero .eyebrow { color: #78b8c2; }
+.hero h1 { margin-top: 14px; color: #ffffff; font-size: 27pt; line-height: 1.08; letter-spacing: -0.03em; }
+.hero .for { margin: 14px 0 0; color: #b5c7cc; }
+.hero .for strong { color: #ffffff; }
+.unit { border-radius: 4px; background: var(--steel); }
+.unit img { display: block; width: 100%; height: auto; }
+
+.price {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+  align-items: center;
+  margin-top: 22px;
+  padding: 18px 22px;
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--copper);
+  border-radius: 4px;
+}
+.price .sum { color: var(--navy); font-size: 26pt; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+.price p { margin: 0; color: #33464d; }
+
+.summary { margin-top: 26px; }
+.summary .eyebrow { margin-bottom: 8px; color: var(--navy); }
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px 24px;
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 2px solid var(--navy);
+}
+.facts p:not(.eyebrow) { margin: 4px 0 0; font-size: 8.5pt; line-height: 1.4; }
+
+/* Readings off the unit, as tiles. */
+.readings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0; }
+.reading { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 4px; break-inside: avoid; }
+.reading .value { margin: 4px 0 2px; color: var(--navy); font-size: 17pt; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.reading .value small { margin-left: 2px; color: var(--muted); font-size: 9pt; font-weight: 600; }
+.reading .note { margin: 0; color: var(--muted); font-size: 7.5pt; line-height: 1.4; }
+.reading.alert { border-color: #efc9b1; background: #fdf5f0; }
+.reading.alert .value { color: var(--copper); }
+
+.equipment { display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: center; margin-top: 18px; padding: 14px; border-radius: 4px; background: var(--steel); break-inside: avoid; }
+.equipment img { display: block; width: 100%; height: auto; }
+.equipment dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 8.5pt; }
+.equipment dt { color: #4f6066; }
+.equipment dd { margin: 0; color: var(--navy); font-weight: 600; }
+
+/* Coverage, side by side. */
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.coverage { padding: 16px 18px; border-radius: 4px; break-inside: avoid; }
+.coverage h3 { margin-top: 0; }
+.coverage ul { margin: 0; padding: 0; list-style: none; }
+.coverage li { position: relative; padding-left: 18px; }
+.coverage li::before { position: absolute; left: 0; font-weight: 700; }
+.coverage.included { background: var(--wash); }
+.coverage.included li::before { content: "✓"; color: var(--teal); }
+.coverage.excluded { border: 1px solid #efc9b1; background: #fdf8f4; }
+.coverage.excluded li::before { content: "!"; left: 4px; color: var(--copper); }
+
+.callout { margin: 18px 0; padding: 14px 18px; border-left: 3px solid var(--teal); background: var(--wash); break-inside: avoid; }
+.callout p:last-child { margin-bottom: 0; }
+
+table { width: 100%; margin: 14px 0 18px; border-collapse: collapse; }
+thead { display: table-header-group; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-size: 6.5pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1.5px solid var(--navy); }
+td:first-child { color: var(--navy); font-weight: 600; }
+tr { break-inside: avoid; }
+.amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.included-row td { color: var(--teal); }
+tfoot td { padding-top: 12px; border-bottom: none; color: var(--navy); font-size: 11pt; font-weight: 700; }
+
+/* What happens after a signature: steps down the page. */
+.steps { margin: 16px 0; padding: 0; list-style: none; counter-reset: step; }
+.steps li { position: relative; margin: 0; padding: 0 0 16px 44px; counter-increment: step; break-inside: avoid; }
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #ffffff;
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+.steps li:not(:last-child)::after { content: ""; position: absolute; left: 12px; top: 28px; bottom: 2px; border-left: 1px solid var(--rule); }
+.steps .when { display: block; color: var(--copper); font-size: 7pt; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.steps p { margin: 2px 0 0; color: #33464d; }
+
+.terms { margin-top: 14px; color: var(--muted); font-size: 7.5pt; }
+.terms li + li { margin-top: 2px; }
+
+.signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; margin-top: 30px; break-inside: avoid; }
+.signature-line { height: 46px; border-bottom: 1px solid #8a9ca2; }
+.signatures .name { margin: 8px 0 0; color: var(--navy); font-weight: 650; }
+.signatures .organization { margin: 0; color: var(--muted); font-size: 8pt; }
+.signatures .dated { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+.signatures .dated span { display: block; padding-top: 22px; border-bottom: 1px solid #8a9ca2; color: var(--muted); font-size: 6.5pt; letter-spacing: 0.12em; text-transform: uppercase; }
+
+/* A section that follows on the same page, set apart by space and a rule. */
+.follows { margin-top: 36px; padding-top: 26px; border-top: 1px solid var(--rule); }
+
+/* On a phone the document is one sheet at the screen's width: the grids stack. */
+@media screen and (max-width: 600px) {
+  .cover { min-height: 0; }
+  .hero { grid-template-columns: 1fr; padding: 26px 22px 22px; }
+  .hero h1 { font-size: 22pt; }
+  .unit { max-width: 240px; }
+  .price { grid-template-columns: 1fr; gap: 10px; }
+  .facts, .readings, .columns, .signatures { grid-template-columns: 1fr; }
+  .equipment { grid-template-columns: 1fr; }
+  .equipment img { max-width: 200px; }
+  figure img { width: 100%; height: auto; }
+}
+
+/* One case a line, read from the site's service cases. */
+.case { display: block; }

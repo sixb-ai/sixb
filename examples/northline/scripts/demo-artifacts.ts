@@ -5,6 +5,7 @@ import {
   onboardingPlanFiles,
   onboardingPlanTitle,
 } from "./onboarding-plan"
+import { quoteProposalFiles, quoteProposalQuoteId, quoteProposalTitle } from "./quote-proposal"
 
 // Publishes artifacts that exercise the viewer: documents with every element the document page
 // shapes, a second version, artifact themes, sheets with charts and a long one to scroll, and one
@@ -709,6 +710,33 @@ if (!isRecord(attached) || attached.status !== "succeeded") {
   throw new Error("[Northline] Attaching the onboarding plan to its contract did not succeed.")
 }
 
+// --- Quote proposal --------------------------------------------------------------------------
+
+// The designed proposal for Q-881, attached to the quote by its action: its fields show the quote's
+// figures, live.
+const quoteProposalUploads: Record<string, FileRef> = {}
+for (const file of await quoteProposalFiles()) {
+  quoteProposalUploads[file.path] = await upload(file.path, file.body, file.mediaType)
+}
+
+const quoteProposal = await publish({
+  kind: "document",
+  title: quoteProposalTitle,
+  files: quoteProposalUploads,
+})
+
+const attachedProposal = await apiRequest("/actions/attach-proposal", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    subject: { kind: "object", objectTypeId: "Quote", primaryId: quoteProposalQuoteId },
+    params: { proposal: { type: "artifact", id: quoteProposal.id } },
+  }),
+})
+if (!isRecord(attachedProposal) || attachedProposal.status !== "succeeded") {
+  throw new Error("[Northline] Attaching the proposal to its quote did not succeed.")
+}
+
 // --- Report ----------------------------------------------------------------------------------
 
 const page = (id: string, query = "") => `${appUrl}/artifacts/${id}${query}`
@@ -734,6 +762,7 @@ const rows: (readonly [string, string])[] = [
   ["Q3 visit log (sheet, 5,000 rows)", page(visits.id)],
   ["Camden onboarding plan (canvas, on its contract)", page(onboardingPlan.id)],
   ["  on the contract's page", `${appUrl}/contracts/${onboardingPlanContractId}`],
+  ["Q-881 proposal (designed, live from its quote)", page(quoteProposal.id)],
   ...files.map(([label, artifact]) => [label, page(artifact.id)] as const),
   [
     "Beside a conversation",
@@ -743,5 +772,5 @@ const rows: (readonly [string, string])[] = [
   ],
 ]
 const width = Math.max(...rows.map(([label]) => label.length))
-console.log(`[Northline] Published ${8 + files.length} artifacts:\n`)
+console.log(`[Northline] Published ${9 + files.length} artifacts:\n`)
 for (const [label, url] of rows) console.log(`  ${label.padEnd(width)}  ${url}`)

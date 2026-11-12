@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Northline Mechanical">
+  <path d="M9 38V10l30 28V10" fill="none" stroke="#132A33" stroke-width="6" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M16 38V24l16 14V10" fill="none" stroke="#2F7280" stroke-width="3" stroke-linecap="square"/>
+  <path d="M36 10h5v5" fill="none" stroke="#C86F3D" stroke-width="3"/>
+</svg>
