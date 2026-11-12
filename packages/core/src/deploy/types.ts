@@ -36,7 +36,14 @@ export type DeploySingletonServiceName = "orchestrator" | "rules"
 
 export type DeployServiceName = DeployHttpServiceName | DeploySingletonServiceName | "workers"
 
-export type DeployWorkerType = "sync" | "agent" | "pipeline" | "projection" | "workflow" | "lake"
+export type DeployWorkerType =
+  | "sync"
+  | "agent"
+  | "pipeline"
+  | "projection"
+  | "workflow"
+  | "lake"
+  | "render"
 
 export interface DeployServicesConfig {
   readonly api?: boolean | DeployHttpServiceConfig

@@ -149,6 +149,9 @@
       "path": "packages/orchestrator/tsconfig.build.json"
     },
     {
+      "path": "packages/render-worker/tsconfig.build.json"
+    },
+    {
       "path": "packages/pipeline-worker/tsconfig.build.json"
     },
     {

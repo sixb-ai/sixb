@@ -8,6 +8,7 @@ const ENVIRONMENT_VARIABLES = {
   projection: "SIXB_PROJECTION_WORKER_CONCURRENCY",
   workflow: "SIXB_WORKFLOW_WORKER_CONCURRENCY",
   lake: "SIXB_LAKE_WORKER_CONCURRENCY",
+  render: "SIXB_RENDER_WORKER_CONCURRENCY",
 } as const satisfies Record<WorkerType, string>
 
 /** Resolve the scalar concurrency accepted by `sixb worker <type>`. */
