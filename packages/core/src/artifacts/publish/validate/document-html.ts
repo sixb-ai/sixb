@@ -1,7 +1,9 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress } from "../../address"
+import { documentMarks } from "../../document-fill"
 import { FRAME_CDN_ALLOWLIST } from "../../frames/assets"
+import type { DocumentMark } from "../../frames/document-data"
 import { decodeHtmlEntities } from "../../html"
 import { ARTIFACT_LIMITS } from "../../limits"
 import { createHeadingSlugger, type DocumentHeading, type DocumentOutline } from "../../outline"
@@ -40,7 +42,9 @@ const ADDRESS_ATTRIBUTES = ["href", "src", "xlink:href", "poster", "action", "fo
  * nothing that runs: no scripts, no handlers, no frames or forms. Its images are files in the
  * version or another artifact's, and its stylesheets are files in the version or on a CDN the
  * frame loads from. Its headings become the outline, as a Markdown document's do, and the
- * `@page` rule of its stylesheets becomes its paper.
+ * `@page` rule of its stylesheets becomes its paper. `<meta name="sixb:object-type">` names the
+ * type of the object it shows live data of, and its fields and repeated elements are returned for
+ * publishing to check against what that object and its queries hold.
  */
 export async function validateHtmlDocument(
   blobStorage: ArtifactBlobStorage,
@@ -49,6 +53,7 @@ export async function validateHtmlDocument(
   readonly entry: string
   readonly outline: DocumentOutline
   readonly references: readonly FoundReference[]
+  readonly marks: readonly DocumentMark[]
 }> {
   const entry = files.find((file) => file.path === DOCUMENT_HTML_ENTRY)
   if (!entry) throw invalidArtifact(`A designed document needs '${DOCUMENT_HTML_ENTRY}'.`)
@@ -69,6 +74,7 @@ export async function validateHtmlDocument(
   // text of a `<style>` element.
   const styles: ({ readonly path: string } | { readonly css: string })[] = []
   let style: { css: string } | null = null
+  let objectTypeId: string | undefined
 
   const rewriter = new HTMLRewriter()
     .on(REFUSED_ELEMENTS.join(", "), {
@@ -140,6 +146,12 @@ export async function validateHtmlDocument(
         styles.push({ path: posix.normalize(safeDecodeUri(href.split(/[?#]/)[0] ?? "")) })
       },
     })
+    .on('meta[name="sixb:object-type"]', {
+      element(element) {
+        const content = decodeHtmlEntities(element.getAttribute("content") ?? "").trim()
+        if (content) objectTypeId ??= content
+      },
+    })
     .on("style", {
       element(element) {
         const current = { css: "" }
@@ -190,8 +202,10 @@ export async function validateHtmlDocument(
       format: "html",
       headings: outlined,
       ...(paper ? { paper } : {}),
+      ...(objectTypeId ? { holder: { objectTypeId, links: [] } } : {}),
     },
     references,
+    marks: documentMarks(html),
   }
 }
 
