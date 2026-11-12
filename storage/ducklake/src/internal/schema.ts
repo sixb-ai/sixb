@@ -2,6 +2,7 @@ import type { DatasetColumnDefinition, DatasetColumnType, DatasetSchema, FileRef
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DUCKDB_COLUMN_TYPES, findDatasetColumnTypeForDuckDbSql } from "./duckdb-column-types"
 import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
+import { normalizeDuckDbTimestampValue } from "./duckdb-timestamp"
 import { quoteIdentifier } from "./sql"
 
 /**
@@ -91,7 +92,7 @@ export function normalizeReadValue(value: unknown, column: DatasetColumnDefiniti
     case "date":
       return value instanceof Date ? value.toISOString().slice(0, 10) : String(value)
     case "timestamp":
-      return value instanceof Date ? value.toISOString() : String(value)
+      return normalizeDuckDbTimestampValue(value)
     case "json":
       return typeof value === "string" ? JSON.parse(value) : value
     case "fileRef":

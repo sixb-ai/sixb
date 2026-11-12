@@ -509,6 +509,28 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await overflowWrite.abort()
   })
 
+  test("preserves the UTC instant of timestamp strings with timezone offsets", async () => {
+    const eventsDataset = defineDataset("raw.events.timestamps", {
+      schema: [col("id", "string"), col("createdAt", "timestamp")],
+    })
+    await storage.createDataset(eventsDataset)
+
+    const write = await storage.beginWrite({ dataset: eventsDataset, mode: "snapshot" })
+    await write.writeRows([
+      { id: "e1", createdAt: "2017-01-02T09:51:02-08:00" },
+      { id: "e2", createdAt: "2017-01-02T17:51:02Z" },
+      { id: "e3", createdAt: new Date("2017-01-02T17:51:02.000Z") },
+    ])
+    await write.commit()
+
+    const rows = await collectRows(storage.readRows({ datasetId: eventsDataset.id }))
+    expect(rows).toEqual([
+      { id: "e1", createdAt: "2017-01-02T17:51:02.000Z" },
+      { id: "e2", createdAt: "2017-01-02T17:51:02.000Z" },
+      { id: "e3", createdAt: "2017-01-02T17:51:02.000Z" },
+    ])
+  })
+
   test("skips snapshot commits when source content is unchanged", async () => {
     const seedRows = [
       { orderId: "ord_1", customerName: "Ada", orderCount: 1 },
