@@ -20,6 +20,9 @@
       "path": "connectors/companycam/tsconfig.build.json"
     },
     {
+      "path": "connectors/ctm/tsconfig.build.json"
+    },
+    {
       "path": "connectors/exa/tsconfig.build.json"
     },
     {

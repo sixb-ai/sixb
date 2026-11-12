@@ -30,6 +30,7 @@
       "create-sixb/scaffold": ["./packages/create-sixb/src/scaffold.ts"],
       "@sixb/connector-ace-iot": ["./connectors/ace-iot/src/index.ts"],
       "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],
+      "@sixb/connector-ctm": ["./connectors/ctm/src/index.ts"],
       "@sixb/connector-exa": ["./connectors/exa/src/index.ts"],
       "@sixb/connector-fleetio": ["./connectors/fleetio/src/index.ts"],
       "@sixb/connector-fullenrich": ["./connectors/fullenrich/src/index.ts"],

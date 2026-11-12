@@ -18,6 +18,7 @@ The following assets were retrieved from icons linked by the services' official 
   sit on a white tile in both themes, where that style made the mark invisible
 - `unipile.png`: https://www.unipile.com/wp-content/uploads/2020/12/cropped-favicon-150x150.png
 - `companycam.png`: https://cdn.companycam.com/dist/img/site/favicon-96x96-2021.png
+- `ctm.png`: https://www.ctm.com/wp-content/uploads/2026/01/ctm-favicon-2026-150x150.png
 - `ace-iot.ico`: https://aceiotsolutions.com/favicon.ico
 - `exa.png`: https://exa.ai/images/favicon-32x32.png
 - `fleetio.ico`: https://developer.fleetio.com/img/favicon.ico

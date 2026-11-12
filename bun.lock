@@ -120,6 +120,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/ctm": {
+      "name": "@sixb/connector-ctm",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/exa": {
       "name": "@sixb/connector-exa",
       "version": "0.2.1",
@@ -1766,6 +1781,8 @@
     "@sixb/connector-ace-iot": ["@sixb/connector-ace-iot@workspace:connectors/ace-iot"],
 
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
+
+    "@sixb/connector-ctm": ["@sixb/connector-ctm@workspace:connectors/ctm"],
 
     "@sixb/connector-exa": ["@sixb/connector-exa@workspace:connectors/exa"],
 

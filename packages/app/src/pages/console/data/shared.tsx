@@ -8,6 +8,7 @@ import { useDataMessages } from "./messages"
 const connectorIconFiles: Readonly<Record<string, string>> = {
   "ace-iot": "ace-iot.ico",
   companycam: "companycam.png",
+  ctm: "ctm.png",
   exa: "exa.png",
   fleetio: "fleetio.ico",
   github: "github.svg",
