@@ -347,6 +347,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
     switch (error.code) {
       case "artifact_not_found":
       case "comment_not_found":
+      case "holder_not_found":
       case "query_not_found":
       case "restore_point_not_found":
         set.status = 404
@@ -1503,7 +1504,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Run an artifact's query",
           description:
-            'Runs the version\'s queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.',
+            'Runs the version\'s queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid. A designed document\'s "holder" is the object that holds it, of the type it names, with the links its fields read through: 404 holder_not_found when no one such object the caller reads holds it.',
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactQuery",
           security: accessTokenSecurityRequirement("getArtifactQuery"),

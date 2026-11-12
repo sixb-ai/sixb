@@ -24,6 +24,7 @@ import {
   parseArtifactTheme,
 } from "../theme"
 import type { ArtifactWarning } from "../warnings"
+import { checkDocumentFields } from "./fields"
 import {
   type ArtifactBlobStorage,
   checkArtifactFiles,
@@ -154,14 +155,36 @@ export async function prepareArtifactVersion(
   const theme =
     input.kind === "file" ? undefined : await readTheme(context.blobStorage, input.files)
 
-  // The queries first: a live sheet's columns are checked against what its query returns.
+  // The queries first: a live sheet's columns are checked against what its query returns. A
+  // document is read first instead: the type it names is where its queries may start, and its
+  // fields are checked against what the queries return.
+  const document =
+    input.kind === "document" ? await validateDocument(context.blobStorage, input.files) : null
   const queries = await checkArtifactQueries(
     context.blobStorage,
     input.kind,
     input.files,
-    input.checkQuery
+    input.checkQuery,
+    document?.outline.holder ? { holder: document.outline.holder.objectTypeId } : {}
   )
-  const validated = await validateKind(context.blobStorage, input.kind, input.files, queries)
+  const fields = document?.marks
+    ? await checkDocumentFields({
+        marks: document.marks,
+        ...(document.outline.holder ? { holder: document.outline.holder.objectTypeId } : {}),
+        queries,
+        ...(input.checkQuery ? { checker: input.checkQuery } : {}),
+      })
+    : null
+  const validated = document
+    ? {
+        ...document,
+        outline: {
+          ...document.outline,
+          ...(fields?.holder ? { holder: fields.holder } : {}),
+        },
+        warnings: fields?.warnings ?? [],
+      }
+    : await validateKind(context.blobStorage, input.kind, input.files, queries)
 
   const readable = input.readable ?? ownArtifacts(input.author)
   const references = await resolveReferences(

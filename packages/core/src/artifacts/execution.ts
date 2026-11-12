@@ -36,6 +36,7 @@ import { type ArtifactHolding, readableHoldings } from "./holders"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { firstArtifactDocument, keepsDocument } from "./live/state"
+import type { DocumentHolder } from "./outline"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
 import { documentPdf, documentPdfKey, requestDocumentPdf } from "./publish/pdf"
@@ -58,6 +59,7 @@ import {
   ARTIFACT_QUERY_KINDS,
   type ArtifactQueryResult,
   artifactQueryPath,
+  DOCUMENT_HOLDER_QUERY,
   isArtifactQueryName,
   parseArtifactQuery,
 } from "./queries"
@@ -503,6 +505,35 @@ export function createArtifactsRuntime(
 
   const rule = (): ArtifactAccessRule => createRuntimeArtifactAccessRule(runtime)
   const checkQuery = createArtifactQueryChecker(runtime)
+
+  /**
+   * The one object of the type a designed document names that holds it, as the caller reads it.
+   * Throws `holder_not_found` when none does, or several do: its fields keep their written text.
+   */
+  const requireHolder = async (
+    artifactId: string,
+    holder: DocumentHolder
+  ): Promise<{ readonly objectTypeId: string; readonly primaryId: string }> => {
+    const found = new Set<string>()
+    const holdings = readableHoldings({
+      runtime,
+      reader: runtime.objectReader,
+      objects: runtime.storage.objects,
+      artifactId,
+    })
+    for await (const holding of holdings) {
+      if (holding.objectTypeId === holder.objectTypeId) found.add(holding.primaryId)
+      if (found.size > 1) break
+    }
+    const [primaryId] = found
+    if (found.size !== 1 || primaryId === undefined) {
+      throw new ArtifactRequestError(
+        "holder_not_found",
+        `[Sixb] No one ${holder.objectTypeId} you read holds artifact '${artifactId}', so its fields show what is written in them.`
+      )
+    }
+    return { objectTypeId: holder.objectTypeId, primaryId }
+  }
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
     if (!options.rendersInSandboxes || !storage) return
@@ -874,6 +905,22 @@ export function createArtifactsRuntime(
 
       // A file artifact is delivered as it is: its one file is never run.
       const { artifact, version } = read
+      const holder = version.outline.kind === "document" ? version.outline.holder : undefined
+
+      // What a designed document's fields read of the object that holds it: that object, with
+      // the objects each link they read through reaches.
+      if (holder && name === DOCUMENT_HOLDER_QUERY) {
+        const refs: ObjectQuery = { kind: "refs", refs: [await requireHolder(artifactId, holder)] }
+        const expansions = holder.links.map((linkId) => ({
+          linkId,
+          direction: "outgoing" as const,
+        }))
+        return runArtifactQuery(runtime, name, {
+          kind: "objects",
+          query: expansions.length > 0 ? { kind: "expand", input: refs, expansions } : refs,
+        })
+      }
+
       const file =
         ARTIFACT_QUERY_KINDS.includes(artifact.kind) && isArtifactQueryName(name)
           ? version.files.find((candidate) => candidate.path === artifactQueryPath(name))
@@ -886,7 +933,13 @@ export function createArtifactsRuntime(
       }
 
       const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
-      const parsed = parseArtifactQuery(file.path, text)
+      const parse = (start?: ObjectQuery) =>
+        parseArtifactQuery(file.path, text, start ? { holder: start } : {})
+      let parsed = parse(holder ? { kind: "refs", refs: [] } : undefined)
+      // A query that starts from the holder is read again from the one the caller reads.
+      if (holder && "usesHolder" in parsed && parsed.usesHolder) {
+        parsed = parse({ kind: "refs", refs: [await requireHolder(artifactId, holder)] })
+      }
       if ("error" in parsed) {
         throw new ArtifactRequestError("query_invalid", `[Sixb] ${parsed.error}`)
       }
