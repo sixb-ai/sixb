@@ -1,0 +1,12 @@
+{
+  "kind": "traverse",
+  "linkId": "facility",
+  "direction": "incoming",
+  "sourceObjectTypeId": "ServiceCase",
+  "input": {
+    "kind": "traverse",
+    "linkId": "facility",
+    "direction": "outgoing",
+    "input": { "kind": "holder" }
+  }
+}
