@@ -53965,10 +53965,9 @@
                           },
                           "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         },
-                        "pdf": {
-                          "type": "string",
-                          "enum": ["ready", "printable", "failed"],
-                          "description": "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+                        "printable": {
+                          "type": "boolean",
+                          "description": "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
                         }
                       },
                       "required": [
@@ -57227,10 +57226,9 @@
                           },
                           "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         },
-                        "pdf": {
-                          "type": "string",
-                          "enum": ["ready", "printable", "failed"],
-                          "description": "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+                        "printable": {
+                          "type": "boolean",
+                          "description": "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
                         }
                       },
                       "required": [
@@ -58170,10 +58168,9 @@
                           },
                           "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         },
-                        "pdf": {
-                          "type": "string",
-                          "enum": ["ready", "printable", "failed"],
-                          "description": "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+                        "printable": {
+                          "type": "boolean",
+                          "description": "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
                         }
                       },
                       "required": [
@@ -62036,10 +62033,9 @@
                           },
                           "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         },
-                        "pdf": {
-                          "type": "string",
-                          "enum": ["ready", "printable", "failed"],
-                          "description": "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+                        "printable": {
+                          "type": "boolean",
+                          "description": "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
                         }
                       },
                       "required": [
@@ -63182,10 +63178,9 @@
                       },
                       "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                     },
-                    "pdf": {
-                      "type": "string",
-                      "enum": ["ready", "printable", "failed"],
-                      "description": "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+                    "printable": {
+                      "type": "boolean",
+                      "description": "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
                     }
                   },
                   "required": [
@@ -63408,7 +63403,7 @@
     "/api/artifacts/{artifactId}/versions/{version}/pdf": {
       "post": {
         "summary": "Print a designed document to PDF",
-        "description": "Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.",
+        "description": "Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. A document that shows live data answers with a key: ask again and get it with that key, which names the values the first ask printed. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.",
         "tags": ["Artifacts"],
         "operationId": "printArtifactPdf",
         "security": [
@@ -63455,6 +63450,16 @@
               "enum": ["true", "false"],
               "description": "true asks again for a PDF that could not be printed, instead of hearing why"
             }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
+            }
           }
         ],
         "responses": {
@@ -63475,6 +63480,11 @@
                           "type": "integer",
                           "minimum": 1,
                           "description": "How many pages it printed on"
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "description": "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
                         }
                       },
                       "required": ["status", "pages"],
@@ -63486,6 +63496,11 @@
                         "status": {
                           "type": "string",
                           "enum": ["printing"]
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "description": "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
                         }
                       },
                       "required": ["status"],
@@ -63501,6 +63516,11 @@
                         "reason": {
                           "type": "string",
                           "description": "Why it could not be printed"
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "description": "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
                         }
                       },
                       "required": ["status", "reason"],
@@ -63775,7 +63795,7 @@
       },
       "get": {
         "summary": "Get a designed document's PDF",
-        "description": "The version printed to PDF, as a download named after the title it printed with. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.",
+        "description": "The version printed to PDF, with the values its fields read as the caller reads them, as a download named after the title it printed with: for a document that shows live data, those its POST's key names. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.",
         "tags": ["Artifacts"],
         "operationId": "getArtifactPdf",
         "security": [
@@ -63843,6 +63863,16 @@
               "type": "string",
               "pattern": "^(?:latest|[1-9]\\d*)$",
               "description": "A version number, or \"latest\""
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
             }
           }
         ]

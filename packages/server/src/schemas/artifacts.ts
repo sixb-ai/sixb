@@ -173,23 +173,32 @@ export const ArtifactVersionSchema = z.object({
     .describe(
       "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
     ),
-  pdf: z
-    .enum(["ready", "printable", "failed"])
+  printable: z
+    .boolean()
     .optional()
     .describe(
-      "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+      "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
     ),
 })
+
+const ArtifactPdfKeySchema = z
+  .string()
+  .regex(/^sha256:[0-9a-f]{64}$/)
+  .describe(
+    "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
+  )
 
 export const ArtifactPdfResponseSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ready"),
     pages: z.number().int().min(1).describe("How many pages it printed on"),
+    key: ArtifactPdfKeySchema.optional(),
   }),
-  z.object({ status: z.literal("printing") }),
+  z.object({ status: z.literal("printing"), key: ArtifactPdfKeySchema.optional() }),
   z.object({
     status: z.literal("failed"),
     reason: z.string().describe("Why it could not be printed"),
+    key: ArtifactPdfKeySchema.optional(),
   }),
 ])
 
@@ -198,7 +207,10 @@ export const ArtifactPdfQuerySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .describe("true asks again for a PDF that could not be printed, instead of hearing why"),
+  key: ArtifactPdfKeySchema.optional(),
 })
+
+export const ArtifactPdfDownloadQuerySchema = z.object({ key: ArtifactPdfKeySchema.optional() })
 
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   version: true,

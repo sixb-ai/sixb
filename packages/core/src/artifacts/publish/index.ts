@@ -11,7 +11,6 @@ export { artifactQueryName } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {
   DOCUMENT_PDF_JOB,
-  documentPdf,
   documentPdfKey,
   MAX_DOCUMENT_PDF_BYTES,
 } from "./pdf"
