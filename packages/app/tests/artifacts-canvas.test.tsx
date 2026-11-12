@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, jest, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import {
@@ -13,6 +13,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, renderHook } from "@testing-library/react"
 import { ReactFlowProvider } from "@xyflow/react"
 import { AppWindow } from "lucide-react"
+import { useState } from "react"
+import { EditSessionProvider } from "../src/artifacts/edit-session"
 import { frameLinkKey } from "../src/artifacts/frame"
 import {
   ItemTile,
@@ -22,14 +24,17 @@ import {
   MAX_LIVE_BOARDS,
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
+import { type BoardGestures, glideView } from "../src/artifacts/renderers/canvas/gestures"
 import { FAR_BELOW_ZOOM, zoomMarks, zoomOf } from "../src/artifacts/renderers/canvas/items"
 import { approximateBox, canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
+import type { PageSize } from "../src/artifacts/renderers/canvas/page-size"
 import {
   boardPreviewSize,
   boardPreviewsQuery,
   boardPreviewUrl,
   nextPreviewCheck,
 } from "../src/artifacts/renderers/canvas/previews"
+import { useShownSize } from "../src/artifacts/renderers/canvas/shown-size"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
 
@@ -943,9 +948,10 @@ describe("a board opened over its canvas", () => {
     new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
 
   test("opens a board at its own size, scaled to fit, over its picture until its page is ready", async () => {
-    // As the canvas and its picture show it: a page laid out at 390 by 400, here 1.75 times as
-    // large to fit 700 pixels of height. Reproduce by laying the page out at the viewer's height
-    // again: the board opens as a page as tall as the viewer, blank until it is ready.
+    // As the canvas and its picture show it: a page laid out at 390 by 400, here 1.63 times as
+    // large to fit the 652 pixels of height a 700 pixels high view leaves inside its margin.
+    // Reproduce by laying the page out at the viewer's height again: the board opens as a page as
+    // tall as the viewer, blank until it is ready.
     const view = render(
       <QueryClientProvider client={client()}>
         <BoardFocus
@@ -964,10 +970,10 @@ describe("a board opened over its canvas", () => {
     const page = view.container.querySelector<HTMLElement>('[style*="scale("]')
     expect(page?.style.width).toBe("390px")
     expect(page?.style.height).toBe("400px")
-    expect(page?.style.transform).toBe("scale(1.75)")
+    expect(page?.style.transform).toBe("scale(1.63)")
     const box = page?.closest<HTMLElement>(".sixb-canvas-surface")
-    expect(box?.style.width).toBe("682.5px")
-    expect(box?.style.height).toBe("700px")
+    expect(box?.style.width).toBe("635.7px")
+    expect(box?.style.height).toBe("652px")
     expect(page?.querySelector("img")?.getAttribute("src")).toBe("/previews/home.png")
     view.unmount()
   })
@@ -1134,6 +1140,263 @@ describe("a board opened over its canvas", () => {
     expect(view?.queryByRole("dialog")).toBeNull()
     view?.unmount()
   })
+
+  /** The opened board's box on screen, and the size its page is laid out at. */
+  const shown = (view: ReturnType<typeof render>) => {
+    const page = view.container.querySelector<HTMLElement>('[style*="scale("]')
+    const box = page?.closest<HTMLElement>(".sixb-canvas-surface")
+    return {
+      width: Number.parseFloat(box?.style.width ?? ""),
+      page: `${page?.style.width} × ${page?.style.height}`,
+    }
+  }
+
+  const focus = (props: Partial<Parameters<typeof BoardFocus>[0]> = {}) =>
+    render(
+      <QueryClientProvider client={client()}>
+        <BoardFocus
+          version={version}
+          boards={boards}
+          arrows={arrows}
+          id="home"
+          onOpen={() => {}}
+          onClose={() => {}}
+          {...props}
+        />
+      </QueryClientProvider>
+    )
+
+  test("zooms with ⌘ +, − and 0, the zoom bar, and a double-click beside the page, never the browser", async () => {
+    // Fitted, the 390 pixels wide page is 635.7 on screen. Reproduce by dropping the key
+    // handler's `preventDefault`: the browser zooms the whole app as well.
+    const view = focus()
+    await act(async () => {})
+    expect(shown(view).width).toBeCloseTo(635.7)
+
+    expect(fireEvent.keyDown(window, { key: "=", metaKey: true })).toBe(false)
+    expect(shown(view).width).toBeCloseTo(635.7 * 1.2)
+    expect(fireEvent.keyDown(window, { key: "-", ctrlKey: true })).toBe(false)
+    expect(shown(view).width).toBeCloseTo(635.7)
+    expect(fireEvent.keyDown(window, { key: "0", metaKey: true })).toBe(false)
+    expect(shown(view).width).toBe(390)
+
+    fireEvent.click(view.getByRole("button", { name: "Fit the whole page" }))
+    expect(shown(view).width).toBeCloseTo(635.7)
+
+    // A double-click beside the page shows it at its own size, and again, whole.
+    const stage = view.container.querySelector("[data-board-stage]")
+    if (!stage) throw new Error("Expected the stage.")
+    fireEvent.doubleClick(stage)
+    expect(shown(view).width).toBe(390)
+    fireEvent.doubleClick(stage)
+    expect(shown(view).width).toBeCloseTo(635.7)
+    // The page itself is never resized by zooming.
+    expect(shown(view).page).toBe("390px × 400px")
+  })
+
+  test("resizes the page for the reader alone, laid out again at that size, until they go back to the board's", async () => {
+    // Reproduce by offering Keep this size whatever `onKeep` is: a reader of the canvas sees it.
+    // Drop both the handle's `stopPropagation` and the focus's `[data-page-resizer]` check: the
+    // arrows step to the next board as well.
+    const opened: string[] = []
+    const view = focus({ onOpen: (id) => opened.push(id) })
+    await act(async () => {})
+
+    const width = view.getByRole("separator", { name: "Page width" })
+    fireEvent.keyDown(width, { key: "ArrowRight" })
+    fireEvent.keyDown(width, { key: "ArrowRight", shiftKey: true })
+    expect(shown(view).page).toBe("462px × 400px")
+    expect(width.getAttribute("aria-valuetext")).toBe("462 × 400")
+    // The arrows resized the page: they stepped to no other board.
+    expect(opened).toEqual([])
+    expect(view.queryByText("Keep this size")).toBeNull()
+
+    fireEvent.click(view.getByRole("button", { name: "Back to board size" }))
+    expect(shown(view).page).toBe("390px × 400px")
+    expect(view.queryByRole("button", { name: "Back to board size" })).toBeNull()
+  })
+
+  test("keeps the size shown as the board's, as resizing it on the canvas does, for whoever edits it", async () => {
+    // Reproduce by dropping `onResizeBoard` from the canvas's BoardFocus: Keep this size is never
+    // offered. Each change is the canvas's own `resizeItem`, made to the canvas as it is then.
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const applied: ((canvas: Canvas) => Canvas)[] = []
+    const edit = {
+      apply: (change: (canvas: Canvas) => Canvas) => applied.push(change),
+      undo() {},
+      redo() {},
+    }
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={client()}>
+          <CanvasBoard
+            canvas={CANVAS}
+            version={version}
+            title="Checkout"
+            mode="light"
+            focus="home"
+            edit={edit}
+          />
+        </QueryClientProvider>
+      )
+    })
+    if (!view) throw new Error("Expected the canvas.")
+
+    fireEvent.keyDown(view.getByRole("separator", { name: "Page height" }), {
+      key: "ArrowDown",
+      shiftKey: true,
+    })
+    fireEvent.click(view.getByRole("button", { name: "Keep this size" }))
+    expect(applied).toHaveLength(1)
+
+    const kept = applied[0]?.(CANVAS).items.find((item) => item.id === "home")
+    expect(kept).toMatchObject({ x: 0, y: 0, w: 390, h: 464 })
+    // The size shown is the board's again, said for a moment.
+    expect(view.getByRole("status").textContent).toContain("Board is now 390 × 464")
+    view.unmount()
+  })
+
+  test("offers Keep this size to whoever may change the canvas, and starts editing to make it", async () => {
+    // As if they had resized the board in Edit: editing starts, then the canvas's own resize is
+    // made, so the header's Undo takes it back. Reproduce by dropping the waiting resize's
+    // effect: editing starts and the board keeps its size. Drop `if (!start) return null`: a
+    // reader is offered Keep this size.
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const applied: ((canvas: Canvas) => Canvas)[] = []
+    const edit = {
+      apply: (change: (canvas: Canvas) => Canvas) => applied.push(change),
+      undo() {},
+      redo() {},
+    }
+    let started = 0
+    function Viewer({ mayChange }: { readonly mayChange: boolean }) {
+      const [editing, setEditing] = useState(false)
+      const start =
+        mayChange && !editing
+          ? () => {
+              started += 1
+              setEditing(true)
+            }
+          : undefined
+      return (
+        <EditSessionProvider editing={editing} report={() => {}} start={start}>
+          <QueryClientProvider client={client()}>
+            <CanvasBoard
+              canvas={CANVAS}
+              version={version}
+              title="Checkout"
+              mode="light"
+              focus="home"
+              {...(editing ? { edit } : {})}
+            />
+          </QueryClientProvider>
+        </EditSessionProvider>
+      )
+    }
+
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(<Viewer mayChange={false} />)
+    })
+    if (!view) throw new Error("Expected the canvas.")
+    fireEvent.keyDown(view.getByRole("separator", { name: "Page width" }), { key: "ArrowRight" })
+    expect(view.queryByRole("button", { name: "Keep this size" })).toBeNull()
+    view.unmount()
+
+    await act(async () => {
+      view = render(<Viewer mayChange />)
+    })
+    fireEvent.keyDown(view.getByRole("separator", { name: "Page width" }), { key: "ArrowRight" })
+    await act(async () => {
+      fireEvent.click(view?.getByRole("button", { name: "Keep this size" }) as HTMLElement)
+    })
+    expect(started).toBe(1)
+    expect(applied).toHaveLength(1)
+    const kept = applied[0]?.(CANVAS).items.find((item) => item.id === "home")
+    expect(kept).toMatchObject({ x: 0, y: 0, w: 398, h: 400 })
+    view.unmount()
+  })
+})
+
+describe("an opened board's size, from board to board", () => {
+  const BOARDS: Readonly<Record<string, PageSize>> = {
+    report: { w: 1200, h: 800 },
+    dash: { w: 1440, h: 900 },
+    end: { w: 1000, h: 700 },
+  }
+  const PHONE = { w: 390, h: 844 }
+  const at = (size: PageSize) => `${size.w} × ${size.h}`
+
+  /** The size shown as the reader steps through the boards, one at a time. */
+  function walk() {
+    const hook = renderHook(({ id }) => useShownSize(id, BOARDS[id] as PageSize), {
+      initialProps: { id: "report" },
+    })
+    return {
+      hook,
+      shown: () => at(hook.result.current.shown),
+      open: (id: string) => hook.rerender({ id }),
+      act: (change: (size: ReturnType<typeof useShownSize>) => void) =>
+        act(() => change(hook.result.current)),
+    }
+  }
+
+  test("carries a screen's width to the boards stepped to, each at its own height, until back to board size", () => {
+    // Reproduce by keeping a screen's width on the board it was chosen on, as a free resize is:
+    // the next board opens at its own 1440 pixels. Make Back to board size clear this board's
+    // alone: the first board still shows the phone's.
+    const flow = walk()
+    flow.act((size) => size.pick(PHONE, "phone"))
+    expect(flow.shown()).toBe("390 × 844")
+    flow.open("dash")
+    expect(flow.shown()).toBe("390 × 900")
+
+    // A free resize stays on its board.
+    flow.act((size) => size.settle({ size: { w: 398, h: 900 }, w: null, h: null }))
+    flow.open("end")
+    expect(flow.shown()).toBe("390 × 700")
+    flow.open("dash")
+    expect(flow.shown()).toBe("398 × 900")
+
+    // So does Back to board size, which puts every board back.
+    flow.act((size) => size.reset())
+    expect(flow.shown()).toBe("1440 × 900")
+    flow.open("report")
+    expect(flow.shown()).toBe("1200 × 800")
+  })
+
+  test("carries a width snapped to as a drag ends, and the full page once chosen, each board's own", () => {
+    // Reproduce by dropping `full` from the carried screen: each board shows its board's height.
+    const flow = walk()
+    flow.act((size) =>
+      size.settle({ size: { w: 768, h: 800 }, w: { name: "tablet", w: 768, h: 1024 }, h: null })
+    )
+    flow.act((size) => size.onContentHeight(2140))
+    flow.act((size) => size.pick({ w: 768, h: 2140 }, "full"))
+    expect(flow.shown()).toBe("768 × 2140")
+
+    flow.open("dash")
+    // Its page has not said its height yet: its board's until it does.
+    expect(flow.shown()).toBe("768 × 900")
+    flow.act((size) => size.onContentHeight(1640))
+    expect(flow.shown()).toBe("768 × 1640")
+  })
+
+  test("lets go of a size kept as the board's once the board has it, so Undo shows the board as it is", () => {
+    // Reproduce by never letting go: after Undo, the page still shows the size kept.
+    const sizes: Record<string, PageSize> = { report: { w: 1200, h: 800 } }
+    const hook = renderHook(({ own }) => useShownSize("report", own), {
+      initialProps: { own: sizes.report as PageSize },
+    })
+    act(() => hook.result.current.resize({ w: 768, h: 800 }))
+    act(() => hook.result.current.keep())
+    hook.rerender({ own: { w: 768, h: 800 } })
+    expect(at(hook.result.current.shown)).toBe("768 × 800")
+    hook.rerender({ own: { w: 1200, h: 800 } })
+    expect(at(hook.result.current.shown)).toBe("1200 × 800")
+    expect(hook.result.current.resized).toBe(false)
+  })
 })
 
 describe("a canvas board's zoom", () => {
@@ -1181,5 +1444,331 @@ describe("a canvas board's zoom", () => {
     expect(zoomMarks(1)).toEqual({ nameScale: "1.000", far: false })
     expect(zoomMarks(FAR_BELOW_ZOOM).far).toBe(false)
     expect(zoomMarks(0.06)).toEqual({ nameScale: "2.000", far: true })
+  })
+})
+
+describe("a running board, read in place", () => {
+  /**
+   * Ports that tell the test once they handled a message: one arrives a task later, and the test
+   * waits for its own instead of for time to pass.
+   */
+  const handled: (() => void)[] = []
+  const NativeChannel = globalThis.MessageChannel
+  globalThis.MessageChannel = class extends NativeChannel {
+    constructor() {
+      super()
+      const port = this.port1
+      Object.defineProperty(port, "onmessage", {
+        set(handler: (message: MessageEvent) => void) {
+          port.addEventListener("message", (message) => {
+            handler(message)
+            handled.shift()?.()
+          })
+          port.start()
+        },
+      })
+    }
+  }
+  afterAll(() => {
+    globalThis.MessageChannel = NativeChannel
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  const version = {
+    artifactId: "art_0nb0ard1ng",
+    version: 1,
+    revision: 1,
+    title: "Onboarding",
+    entry: "canvas.json",
+    files: [],
+    outline: { kind: "canvas", items: [] },
+    references: [],
+    author: { type: "user", id: "user-1" },
+    createdAt: "2026-10-18T12:00:00.000Z",
+  } as unknown as GetArtifactVersionResponse
+  const linked = () => {
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    cache.setQueryData(frameLinkKey(version), {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    return cache
+  }
+
+  /**
+   * A board's frame as the app sees it: what the app asks of it, the port its `canvas` request
+   * hands over, and what it says, through the window as anything in the page can, or through
+   * the port as its runtime does.
+   */
+  function frameOf(iframe: HTMLIFrameElement | null | undefined) {
+    const frame = iframe?.contentWindow
+    if (!frame) throw new Error("Expected the board's frame.")
+    const asked: { method: string; params: Record<string, unknown> }[] = []
+    let port: MessagePort | null = null
+    frame.postMessage = ((
+      message: { method: string; params: Record<string, unknown> },
+      _origin: string,
+      transfer: readonly MessagePort[] = []
+    ) => {
+      asked.push(message)
+      if (message.method === "canvas" && transfer[0]) port = transfer[0]
+    }) as typeof frame.postMessage
+
+    const say = async (event: string, params: Record<string, unknown>) => {
+      await act(async () => {
+        browser.dispatchEvent(
+          new browser.MessageEvent("message", {
+            data: { protocol: FRAME_PROTOCOL, event, params },
+            source: frame as never,
+          })
+        )
+      })
+    }
+    const send = async (event: string, params: Record<string, unknown>) => {
+      await act(async () => {
+        if (!port) throw new Error("Expected the frame's port.")
+        const taken = new Promise<void>((done) => handled.push(done))
+        port.postMessage({ protocol: FRAME_PROTOCOL, event, params })
+        await taken
+      })
+    }
+    return { asked, say, send, port: () => port }
+  }
+
+  /** What the canvas's side of the gestures is told, and how it says the canvas pans. */
+  function recordedGestures() {
+    const received: { board: string; event: string; params: unknown }[] = []
+    const listeners = new Set<(moving: boolean) => void>()
+    const gestures: BoardGestures = {
+      moving: () => false,
+      onMoving: (listener) => {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      receive: (board, event) => {
+        received.push({ board, event: event.event, params: event.params })
+      },
+      glide: () => {},
+    }
+    const pan = (moving: boolean) => {
+      for (const listener of listeners) listener(moving)
+    }
+    return { gestures, received, pan }
+  }
+
+  const running = { has: () => true, subscribe: () => () => {} }
+
+  // Guard proof: drop `running &&` from LiveBoard's `usable`; the page takes clicks while it is
+  // still hidden under its picture. Drop `interactive`; editing the canvas, a click lands in the
+  // page instead of selecting the board. Set `inert` only when decorative again, in frame.tsx; the
+  // page that started as a picture never takes the focus.
+  test("takes the reader's clicks only once it runs, and only while the canvas is read", async () => {
+    const { gestures } = recordedGestures()
+    const board = (interactive: boolean) => (
+      <QueryClientProvider client={cache}>
+        <LiveBoardsProvider
+          value={{ version, live: running, previews: {}, mode: "light", interactive, gestures }}
+        >
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={null} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const cache = linked()
+    const view = render(board(true))
+    const iframe = view.container.querySelector("iframe")
+    const usable = () =>
+      iframe?.inert === false &&
+      iframe.style.pointerEvents === "" &&
+      view.container.querySelector("[data-interactive]") !== null
+    expect(iframe?.inert).toBe(true)
+    expect(usable()).toBe(false)
+
+    await frameOf(iframe).say("ready", {})
+    expect(usable()).toBe(true)
+
+    // Edited, or a comment placed, the same page is a picture again, loaded as it was.
+    view.rerender(board(false))
+    expect(view.container.querySelector("iframe")).toBe(iframe)
+    expect(iframe?.inert).toBe(true)
+    expect(iframe?.style.pointerEvents).toBe("none")
+    view.rerender(board(true))
+    expect(usable()).toBe(true)
+    view.unmount()
+  })
+
+  // Guard proof: take a press from the frame's window messages in LiveBoard too; the press a
+  // page's script posts glides the canvas. Drop the `onMoving` subscription in useCanvasPort; a
+  // page coming under the pointer as the canvas pans scrolls instead.
+  test("hands its frame a port, and takes through it alone what moves the canvas", async () => {
+    const { gestures, received, pan } = recordedGestures()
+    const view = render(
+      <QueryClientProvider client={linked()}>
+        <LiveBoardsProvider
+          value={{
+            version,
+            live: running,
+            previews: {},
+            mode: "light",
+            interactive: true,
+            gestures,
+          }}
+        >
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={null} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const frame = frameOf(view.container.querySelector("iframe"))
+    await frame.say("ready", {})
+    expect(frame.port()).not.toBeNull()
+    expect(
+      frame.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }])
+
+    await frame.say("press", { text: "Continue" })
+    await frame.send("press", { text: "Continue" })
+    await frame.send("pan", { x: 0, y: 40, by: "wheel" })
+    expect(received).toEqual([
+      { board: "home", event: "press", params: { text: "Continue" } },
+      { board: "home", event: "pan", params: { x: 0, y: 40, by: "wheel" } },
+    ])
+
+    pan(true)
+    pan(false)
+    expect(
+      frame.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }, { moving: true }, { moving: false }])
+    view.unmount()
+  })
+
+  /** A canvas of two boards, read or edited, with its boards running once they say so. */
+  async function mountCanvas(options: { readonly edit?: boolean } = {}) {
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const edit = { apply: () => {}, undo: () => {}, redo: () => {} }
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={linked()}>
+          <CanvasBoard
+            canvas={CANVAS}
+            version={version}
+            title="Checkout"
+            mode="light"
+            {...(options.edit ? { edit } : {})}
+          />
+        </QueryClientProvider>
+      )
+    })
+    if (!view) throw new Error("The board did not render.")
+    const shown = view
+    const frame = async (id: string) => {
+      const iframe = shown.container.querySelector<HTMLIFrameElement>(
+        `.react-flow__node[data-id="${id}"] iframe`
+      )
+      const board = frameOf(iframe)
+      await board.say("ready", {})
+      return { iframe, ...board }
+    }
+    /** Where the view is: React Flow's pan and zoom, as it draws them. */
+    const viewport = () => {
+      const transform =
+        shown.container.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? ""
+      const [x = 0, y = 0, zoom = 1] = (transform.match(/-?[\d.]+(e-?\d+)?/g) ?? []).map(Number)
+      return { x, y, zoom }
+    }
+    return { view: shown, frame, viewport }
+  }
+
+  // Guard proof: drop `follow.current` from the canvas's `onPress`; the press opens nothing and
+  // the view stays.
+  test("glides to the board an arrow leads to, when the reader presses its label", async () => {
+    const reduced = browser.matchMedia
+    browser.matchMedia = ((query: string) => ({
+      ...reduced.call(browser, query),
+      matches: query.includes("reduce"),
+    })) as typeof browser.matchMedia
+    try {
+      const { view, frame, viewport } = await mountCanvas()
+      const home = await frame("home")
+      const before = viewport()
+
+      await home.send("press", { text: "Save draft" })
+      expect(viewport()).toEqual(before)
+
+      // "Continue" leads from home to pay, 520 pixels to its right: the view keeps its zoom and
+      // centers it.
+      await home.send("press", { text: "continue" })
+      const pay = CANVAS.items.find((item) => item.id === "pay") as CanvasBoard
+      const glided = glideView(pay, VIEW, before.zoom, 0.12)
+      expect(viewport().zoom).toBeCloseTo(before.zoom)
+      expect(viewport().x).toBeCloseTo(glided.x)
+      expect(viewport().y).toBeCloseTo(glided.y)
+      view.unmount()
+    } finally {
+      browser.matchMedia = reduced
+    }
+  })
+
+  // Guard proof: drop `wheeled()` from the canvas's pan; a page under a still pointer never hears
+  // the canvas pans, and scrolls as it comes under it.
+  test("pans and zooms the canvas by what the page hands it, and tells the pages it pans", async () => {
+    const { view, frame, viewport } = await mountCanvas()
+    const home = await frame("home")
+    jest.useFakeTimers()
+    const before = viewport()
+
+    // A wheel's turn pans half as far, as React Flow pans by the wheel; a finger's drag as far.
+    await home.send("pan", { x: 0, y: 100, by: "wheel" })
+    expect(viewport().y).toBeCloseTo(before.y - 50)
+    await home.send("pan", { x: 30, y: 0, by: "touch" })
+    expect(viewport().x).toBeCloseTo(before.x - 30)
+    expect(
+      home.asked.filter((asked) => asked.method === "canvas").map((asked) => asked.params)
+    ).toEqual([{ moving: false }, { moving: true }])
+    act(() => {
+      jest.advanceTimersByTime(150)
+    })
+    expect(home.asked.at(-1)?.params).toEqual({ moving: false })
+
+    // Twice as close around a point of the page, which stays where it is on screen: happy-dom
+    // lays everything out at the origin, so the page's point is its pixels at the zoom.
+    const { x, y, zoom } = viewport()
+    await home.send("zoom", { factor: 2, at: { x: 100, y: 50 } })
+    const at = { x: 100 * zoom, y: 50 * zoom }
+    expect(viewport().zoom).toBeCloseTo(zoom * 2)
+    expect(viewport().x).toBeCloseTo(at.x - (at.x - x) * 2)
+    expect(viewport().y).toBeCloseTo(at.y - (at.y - y) * 2)
+    view.unmount()
+  })
+
+  test("keeps its boards' pages out of reach while the canvas is edited", async () => {
+    // Reproduce by making a running page usable whatever the mode: a click on a board while the
+    // canvas is edited lands in its page instead of selecting it.
+    const read = await mountCanvas()
+    expect((await read.frame("home")).iframe?.inert).toBe(false)
+    read.view.unmount()
+
+    const edited = await mountCanvas({ edit: true })
+    expect((await edited.frame("home")).iframe?.inert).toBe(true)
+    edited.view.unmount()
+  })
+
+  test("glides to a board at the reader's zoom, further only to fit it, never past where it runs", () => {
+    // Reproduce by fitting the board as React Flow's fitView does: a tall page lands at a fifth of
+    // its size, a picture again, and the flow stops there.
+    const view = { width: 1600, height: 1000 }
+    const board = (h: number) => ({ x: 1000, y: 0, w: 400, h })
+
+    // It fits at the reader's zoom: centered there.
+    expect(glideView(board(400), view, 1, 0.12)).toEqual({ x: -400, y: 300, zoom: 1 })
+    // It doesn't: as close as fits it.
+    expect(glideView(board(1200), view, 1, 0.12).zoom).toBeCloseTo(1000 / (1200 * 1.12))
+    // Fitting it would stop it running: at half its size, from the view's top.
+    expect(glideView(board(4000), view, 1, 0.12)).toEqual({ x: 200, y: 32, zoom: 0.5 })
+    // Unless the reader is further already.
+    expect(glideView(board(4000), view, 0.2, 0.12).zoom).toBe(0.2)
   })
 })

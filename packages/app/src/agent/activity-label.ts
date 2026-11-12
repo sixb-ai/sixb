@@ -8,6 +8,7 @@ import {
   humanize,
 } from "./bash/interpret"
 import { describeDelegationTool } from "./delegation/interpret"
+import { describeEdit, describeWrite } from "./file-edits/interpret"
 import { type AgentMessages, en } from "./i18n/en"
 import { childQuestions, describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
@@ -15,6 +16,7 @@ import { isPublishTool, publishTitle } from "./publish-artifact/interpret"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
 import { webFetchQuestion, webFetchUrl } from "./utils/web-fetch"
 import { describeViewFile } from "./view-file/interpret"
+import { waitsForCommandsOnly } from "./waits"
 
 /** A short, present-tense label for the newest visible step in a live work group. */
 export function latestWorkLabel(
@@ -47,7 +49,7 @@ function toolProgressLabel(
     if (tool.state === "output-available") return messages.web.reviewingResults
     return messages.web.searching
   }
-  if (tool.toolName === "bash_output" || tool.toolName === "bash_stop" || isBackgroundStart(tool)) {
+  if (waitsForCommandsOnly(tool) || isBackgroundStart(tool)) {
     return backgroundRowLabel(tool, messages)
   }
   if (tool.toolName === "bash") {
@@ -70,6 +72,9 @@ function toolProgressLabel(
     )
     return description.runningTitle
   }
+
+  if (tool.toolName === "edit") return describeEdit(tool, messages).runningTitle
+  if (tool.toolName === "write") return describeWrite(tool, messages).runningTitle
 
   if (tool.toolName === "view_file") return messages.viewFile.running(describeViewFile(tool).target)
   if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages).running

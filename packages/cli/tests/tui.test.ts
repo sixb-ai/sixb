@@ -9,6 +9,7 @@ import {
   elapsed,
   fittedContextText,
   friendlyPath,
+  pickedAnswer,
   runFailureText,
   shortPath,
   toolLine,
@@ -175,6 +176,115 @@ describe("a live run", () => {
   })
 })
 
+describe("a file the agent read or changed", () => {
+  const call = (
+    name: string,
+    input: Record<string, unknown>,
+    output: Record<string, unknown>
+  ): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "c",
+    name,
+    state: "done",
+    input,
+    output,
+  })
+
+  // Removal proof: drop the edit case from toolLine; the line then shows the call's JSON.
+  test("an edit shows what it added and removed, its changed lines colored", () => {
+    expect(
+      toolLine(
+        call(
+          "edit",
+          { path: "src/app.ts", old_string: "3", new_string: "5" },
+          { path: "src/app.ts", replaced: 1, diff: "@@ -1,2 +1,2 @@\n-x = 3\n+x = 5\n \n" }
+        )
+      )
+    ).toEqual({
+      verb: "edit",
+      detail: "src/app.ts",
+      note: "+1 −1",
+      diff: true,
+      preview: ["-x = 3", "+x = 5"],
+    })
+  })
+
+  // Reproduce: count added and removed from the diff alone in toolLine; the line then shows +1 −1.
+  test("a large edit counts all the lines it changed, though its diff was cut", () => {
+    const edit = (counts: Record<string, number>) =>
+      toolLine(
+        call(
+          "edit",
+          { path: "src/app.ts", old_string: "a", new_string: "b", replace_all: true },
+          {
+            path: "src/app.ts",
+            replaced: 40,
+            diff: "@@ -1 +1 @@\n-a\n+b\n… 39 more hunks\n",
+            ...counts,
+          }
+        )
+      )
+    expect(edit({ added: 40, removed: 40 })).toMatchObject({ note: "+40 −40" })
+    // Stored before an edit counted its lines, as an old thread replays it: the diff is counted.
+    expect(edit({})).toMatchObject({ note: "+1 −1" })
+  })
+
+  test("a write says whether it created or rewrote the file, and how long it is", () => {
+    const write = (created: boolean) =>
+      toolLine(call("write", { path: "a.md" }, { path: "a.md", created, lines: 3, bytes: 9 }))
+    expect(write(true)).toEqual({ verb: "write", detail: "a.md", note: "3 lines" })
+    expect(write(false)).toMatchObject({ verb: "rewrite" })
+  })
+
+  test("a read of a folder lists, and of an image views", () => {
+    expect(toolLine(call("read", { path: "src" }, { path: "src", entries: ["a", "b/"] }))).toEqual({
+      verb: "list",
+      detail: "src",
+      note: "2 entries",
+    })
+    expect(
+      toolLine(call("read", { path: "out/chart.png" }, { kind: "agentToolResult", content: [] }))
+    ).toEqual({ verb: "view", detail: "out/chart.png" })
+  })
+})
+
+describe("the Agent's question", () => {
+  const asked = (questions: unknown[]): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "c",
+    name: "ask",
+    state: "done",
+    input: { questions },
+    output: { status: "asked" },
+  })
+  const year = { question: "Which year?", choices: ["2025", "2026"] }
+
+  test("reads on its line, its choices numbered under it", () => {
+    expect(toolLine(asked([year]))).toEqual({
+      verb: "ask",
+      detail: "Which year?",
+      preview: ["1. 2025 · 2. 2026"],
+    })
+    expect(toolLine(asked([year, { question: "Which regions?" }]))).toEqual({
+      verb: "ask",
+      detail: "2 questions",
+      preview: ["Which year?  1. 2025 · 2. 2026", "Which regions?"],
+    })
+  })
+
+  // Removal proof: return `text` at once from pickedAnswer; "2" then reaches the model alone.
+  test("a number answers with the choice under it, only for one question with choices", () => {
+    const reply = (questions: unknown[]) => [
+      { role: "assistant", parts: [asked(questions)] as readonly Part[] },
+    ]
+    expect(pickedAnswer(reply([year]), " 2 ")).toBe("2026")
+    expect(pickedAnswer(reply([year]), "3")).toBe("3")
+    expect(pickedAnswer(reply([year]), "2026 please")).toBe("2026 please")
+    expect(pickedAnswer(reply([year, year]), "1")).toBe("1")
+    expect(pickedAnswer([{ role: "user", parts: [] }], "1")).toBe("1")
+  })
+})
+
 describe("a background command", () => {
   const started = "2026-11-04T10:00:00.000Z"
   const at = (seconds: number) => Date.parse(started) + seconds * 1_000
@@ -227,6 +337,27 @@ describe("a background command", () => {
         )
       )
     ).toEqual({ verb: "stop", detail: "bg_1a2b3c  bun test", note: "stopped" })
+
+    // wait and stop, which took their place, list what they named.
+    expect(
+      toolLine(
+        call(
+          "wait",
+          { ids: ["bg_1a2b3c"] },
+          { commands: [{ ...read, status: "exited", exitCode: 1, output: "1 fail\n" }] }
+        )
+      )
+    ).toMatchObject({ verb: "wait", detail: "bg_1a2b3c  bun test", note: "exit 1", failed: true })
+    const stopped = { results: [{ runId: "terms", status: "cancelled" }], files: [] }
+    expect(
+      toolLine(
+        call(
+          "stop",
+          { id: "terms" },
+          { kind: "agentToolResult", content: [{ type: "text", text: JSON.stringify(stopped) }] }
+        )
+      )
+    ).toEqual({ verb: "stop", detail: "terms", note: "stopped" })
   })
 
   test("ticks by the second while it runs", () => {
@@ -307,6 +438,21 @@ describe("a call as one line", () => {
       note: "exit 2",
       preview: ["unknown option"],
     })
+  })
+
+  test("reads publish_artifact with an artifact's id as an update", () => {
+    const publish = (input: Record<string, unknown>) =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "publish_artifact",
+        state: "done",
+        input: { path: "work/review", title: "Q3 review", ...input },
+        output: { artifactId: "art_k3m9q2x7tp" },
+      })
+    expect(publish({ kind: "document" })).toMatchObject({ verb: "publish", detail: "Q3 review" })
+    expect(publish({ id: "art_k3m9q2x7tp" })).toMatchObject({ verb: "update" })
+    expect(publish({ id: "null", kind: "document" })).toMatchObject({ verb: "publish" })
   })
 
   // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read

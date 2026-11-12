@@ -387,7 +387,7 @@ function ToolRow({
       {line.preview?.map((row, index) => (
         <text key={`${index}-${row.slice(0, 12)}`}>
           <span fg={colors.faint}>{index === 0 ? "  ⎿ " : "    "}</span>
-          <span fg={colors.faint}>{oneLine(row, room)}</span>
+          <span fg={line.diff ? diffColor(colors, row) : colors.faint}>{oneLine(row, room)}</span>
         </text>
       ))}
     </box>
@@ -454,6 +454,13 @@ function CommandPanel({
 }
 
 const COMMAND_LINES = 3
+
+/** A diff row's color: added green, removed red, anything else faint. */
+function diffColor(colors: TuiColors, row: string): string {
+  if (row.startsWith("+")) return colors.green
+  if (row.startsWith("-")) return colors.red
+  return colors.faint
+}
 
 /** Under a turn's answer: where it ran, on which model, and how long it took. */
 function RunMeta({

@@ -188,7 +188,8 @@ into it, as when the reader picks what to comment on.
 
 - Transfer a `MessagePort` with the first `edit` request after the frame loads. The frame reports
   `edit.hover`, `edit.select` (with where the reader clicked) and `edit.text` through that port
-  alone.
+  alone, and `zoom`: a pinch, ⌘-scroll, or ⌘ +, − and 0 over the page, which the browser then
+  doesn't zoom. A frame with no port leaves zooming to the browser.
 - The board's scripts can't post on the port: the frame takes it before they run, and they never
   see the request that hands it over. The frame reports only the reader's own clicks and keys.
 - They can still rewrite what an element holds, so take `edit.text` only for the element the
@@ -531,11 +532,33 @@ brainstorm or a retro, a diagram, a mood board.
 Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
 press the zoom to go to 100%. Boards and embeds run live once the view shows them at half their
 size, or 360 pixels wide while a board has no preview yet, up to 8 at once, and keep running as
-the reader zooms out; on the canvas they're pictures, so dragging over one pans. Double-click a
-board, press Enter on it, or press the button by its name to open it: it opens at its own size,
-scaled to fit the viewer, and answers like a page, ← and → step through the boards in order, and
-Esc goes back to the canvas. In an opened board, a button or a `#` link whose words are the label
-of an arrow leaving it opens the board the arrow points to.
+the reader zooms out. Double-click a board, press Enter on it, or press the button by its name to
+open it: it opens at its own size and answers like a page, ← and → step through the boards in
+order, and Esc goes back to the canvas. In an opened board, a button or a `#` link whose words are
+the label of an arrow leaving it opens the board the arrow points to.
+
+A running board is a page the reader uses in place, without opening it:
+
+- Clicks, typing, and selecting text reach the page. The wheel pans the canvas unless the page
+  scrolls under the pointer; on a touch screen a tap reaches the page and a drag pans. Pinches,
+  ⌘-scroll, and ⌘ +, − and 0 zoom the canvas, and Space held drags it from anywhere.
+- A button or a `#` link whose words are the label of an arrow leaving the board glides the canvas
+  to the board the arrow points to.
+- While the canvas is edited or a comment placed, boards take no clicks: dragging over one pans.
+
+An opened board zooms as the canvas does, and its page takes the size the reader wants:
+
+- It opens whole; a page taller than wide opens fitted to its width and scrolls, like a document.
+- The zoom bar, a pinch or ⌘-scroll over the page, ⌘ +, − and 0, and a double-click beside it
+  zoom the board, never the browser.
+- Its right edge, bottom edge, and corner resize the page for the reader alone: it is laid out
+  again at that size, a responsive mockup reflowing at a phone's width. Edges snap to the board's
+  size, the full page, and common screens; Alt drags freely. The **Size** menu offers the same.
+- A common screen's width carries to the boards the reader steps to, each at its own height or
+  full page, so a flow is walked at a phone's width. **Back to board size** ends it.
+- Nothing is saved. Whoever may change the canvas can press **Keep this size**: it starts
+  editing if needed, the board takes that size on the canvas as resizing it there does, and Undo
+  puts it back.
 
 Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent

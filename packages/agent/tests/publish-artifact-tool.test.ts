@@ -352,7 +352,7 @@ const canvasCheck: Check = (output) => {
 }
 
 function tools(options: ToolOptions = {}) {
-  const [create, version, open] = createPublishArtifactTools({
+  const [create, open] = createPublishArtifactTools({
     artifacts: runArtifactsFor({ ...options, user: options.author ?? owner }),
     threadId: (options.run ?? run).threadId,
     owner,
@@ -364,7 +364,8 @@ function tools(options: ToolOptions = {}) {
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
-  return { create, version, open }
+  // One tool: `version` is it, called with an id.
+  return { create, version: create, open }
 }
 
 /** `open_artifact`: installs one the conversation does not list. */
@@ -379,7 +380,7 @@ async function publish(input: Record<string, unknown>, options?: ToolOptions): P
   return create.execute(create.parseInput(input), context)
 }
 
-/** `update_artifact`: one's latest version. */
+/** `publish_artifact` with an id: one's latest version. */
 async function publishVersion(
   input: Record<string, unknown>,
   options?: ToolOptions
@@ -476,7 +477,7 @@ describe("publish_artifact", () => {
     expect(version?.author).toEqual(owner)
     expect(tools().create.toModelOutput?.(output, context)).toEqual({
       type: "text",
-      value: `Published "Q3 review" as artifact ${id}, version 1 at revision 1.\nThe version is open: each update replaces it until the user creates a version. To change it, call update_artifact with this id.`,
+      value: `Published "Q3 review" as artifact ${id}, version 1 at revision 1.\nThe version is open: each update replaces it until the user creates a version. To change it, call publish_artifact with this id.`,
     })
   })
 
@@ -507,9 +508,9 @@ describe("publish_artifact", () => {
       type: "text",
       value: [
         'Updated "Fleet planner": artifact art_fl33tpl4n0, version 2 at revision 5.',
-        "The version is open: each update replaces it until the user creates a version. To change it, call update_artifact with this id.",
+        "The version is open: each update replaces it until the user creates a version. To change it, call publish_artifact with this id.",
         "Warning (phone): On a phone (390px): table “Region” runs past the screen's right edge.",
-        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-r5/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.",
+        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-r5/phone.png at 390px, each its top 4000px. Open them with read, fix what the warnings name, and update the artifact.",
       ].join("\n"),
     })
   })
@@ -777,15 +778,24 @@ describe("publish_artifact", () => {
   test("refuses ids that are not an artifact of the owner's, and says how to create one", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const shape =
-      "[SixbAgent] update_artifact refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
-    // What a model sends when it means "no artifact yet".
-    for (const id of [" ", "", "new", "null", "0", ".sixb-new"]) {
+      "[SixbAgent] publish_artifact refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, leave out id and pass its kind."
+    for (const id of ["new", "0", ".sixb-new"]) {
       expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(shape)
+    }
+    // An id that is not text is refused, never read as no id: a new artifact would be created.
+    expect(await refusal({ id: 123, kind: "page", path: "work/review", title: "Q3" })).toBe(
+      "[SixbAgent] publish_artifact refused: id must be an artifact id such as art_k3m9q2x7tp."
+    )
+    // What a model sends when it means "no artifact yet" is no id: without a kind, nothing.
+    for (const id of [" ", "", "null", null]) {
+      expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(
+        "[SixbAgent] publish_artifact refused: pass kind to publish a new artifact, or the id of one to update it."
+      )
     }
     expect(
       await refusal({ id: "art_0000000000", path: "work/review", title: "Q3" }, "version")
     ).toBe(
-      "[SixbAgent] update_artifact refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
+      "[SixbAgent] publish_artifact refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, leave out id and pass its kind."
     )
   })
 
@@ -814,7 +824,7 @@ describe("publish_artifact", () => {
       { author: bob, run: bobsThread }
     ).catch((error: unknown) => error)
     expect(tools().version.errorText(elsewhere)).toBe(
-      `[SixbAgent] update_artifact refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
+      `[SixbAgent] publish_artifact refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, leave out id and pass its kind.`
     )
     expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
       run.threadId,
@@ -866,7 +876,7 @@ describe("publish_artifact", () => {
       { installed }
     ).catch((error: unknown) => tools().version.errorText(error))
     expect(blind).toBe(
-      `[SixbAgent] update_artifact refused: artifact '${artifactId}' is not open in this conversation, so nothing was published: call open_artifact with its id, then revise its copy and update it.`
+      `[SixbAgent] publish_artifact refused: artifact '${artifactId}' is not open in this conversation, so nothing was published: call open_artifact with its id, then revise its copy and publish it with its id.`
     )
 
     expect(await openArtifact(artifactId, { installed })).toMatchObject({
@@ -958,7 +968,7 @@ describe("publish_artifact", () => {
       { installed, grants: reader }
     ).catch((error: unknown) => tools().version.errorText(error))
     expect(refused).toBe(
-      `[SixbAgent] update_artifact refused: you can read artifact '${artifact.id}' but not change it, so nothing was published.`
+      `[SixbAgent] publish_artifact refused: you can read artifact '${artifact.id}' but not change it, so nothing was published.`
     )
     expect(await storage.artifacts.listThreadIds({ projectId, id: artifact.id })).toEqual([])
 
@@ -983,7 +993,7 @@ describe("publish_artifact", () => {
     })) as { artifactId: string }
 
     const observes = { "observe:agentThreads": true }
-    const [, version] = createPublishArtifactTools({
+    const [version] = createPublishArtifactTools({
       artifacts: runArtifactsFor({ user: olivia, grants: observes }),
       threadId: run.threadId,
       owner,
@@ -1552,7 +1562,7 @@ describe("publish_artifact", () => {
 
     expect(error).toBeInstanceOf(AgentToolPublicError)
     expect(version.errorText(error)).toBe(
-      `[SixbAgent] update_artifact refused: artifact '${artifactId}' changed since revision 1, which you started from: it is at revision 2, whose version 1 was last written by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists revision 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and update it.`
+      `[SixbAgent] publish_artifact refused: artifact '${artifactId}' changed since revision 1, which you started from: it is at revision 2, whose version 1 was last written by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists revision 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish it with its id.`
     )
     expect((await storage.artifacts.get({ projectId, id: artifactId }))?.revision).toBe(2)
 
@@ -1612,16 +1622,32 @@ describe("publish_artifact", () => {
   })
 
   test("refuses input outside its schema", () => {
-    const { create, version } = tools()
+    const { create } = tools()
     expect(() => create.parseInput({ path: "a", kind: "map", title: "A" })).toThrow(
       "kind must be one of document, sheet, slides, page, canvas, file"
     )
-    expect(() =>
-      create.parseInput({ path: "a", kind: "file", title: "A", id: "art_0000000000" })
-    ).toThrow("unknown property 'id'")
-    expect(() =>
-      version.parseInput({ id: "art_0000000000", path: "a", kind: "file", title: "A" })
-    ).toThrow("unknown property 'kind'")
+    expect(() => create.parseInput({ path: "a", kind: "file", title: "A", version: 2 })).toThrow(
+      "unknown property 'version'"
+    )
+  })
+
+  // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;
+  // a model that fills every field, as strict mode has it, guesses a kind and is refused.
+  test("with an id, ignores a kind: the update keeps the artifact's", async () => {
+    write("work/review/document.md", "# Q3 review\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/review",
+      kind: "document",
+      title: "Q3 review",
+    })) as { artifactId: string }
+
+    expect(
+      await publishVersion({ id: artifactId, kind: "sheet", path: "work/review", title: "Q3" })
+    ).toMatchObject({ artifactId, created: false, kind: "document", revision: 2 })
+    // "null" for no id, beside a kind: a new artifact.
+    expect(
+      await publish({ id: "null", kind: "document", path: "work/review", title: "Q3 copy" })
+    ).toMatchObject({ created: true, revision: 1 })
   })
 })
 

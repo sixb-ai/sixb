@@ -191,6 +191,7 @@ function stage(
       <BoardStage
         version={VERSION}
         board={BOARD}
+        size={{ w: BOARD.w, h: BOARD.h }}
         title="Home"
         scale={1}
         live={live}

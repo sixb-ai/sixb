@@ -216,7 +216,11 @@ function ArtifactView({
       ) : null}
       {edit.savedShared ? <SavedSharedNotice /> : null}
       {liveView?.notice ? <LiveNotice reason={liveView.notice} /> : null}
-      <EditSessionProvider editing={edit.editing || !!liveView?.editing} report={edit.report}>
+      <EditSessionProvider
+        editing={edit.editing || !!liveView?.editing}
+        report={edit.report}
+        start={startEditing(edit, liveView)}
+      >
         <LiveArtifactProvider artifact={liveView?.live ?? null}>
           <ArtifactViewProvider
             value={{
@@ -1350,4 +1354,14 @@ function CopyLinkButton({ link }: { readonly link: () => string }) {
       {copied ? <Check /> : <Link2 />}
     </HeaderButton>
   )
+}
+
+/**
+ * What starts editing from within the artifact: the header's Edit, live or as a draft, while the
+ * reader may change it and is not editing it already.
+ */
+function startEditing(edit: ArtifactEdit, liveView: LiveView | null): (() => void) | undefined {
+  if (edit.editing || liveView?.editing) return undefined
+  if (liveView && !liveView.state.left) return liveView.editable ? liveView.start : undefined
+  return edit.available ? edit.start : undefined
 }

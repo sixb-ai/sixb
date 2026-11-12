@@ -193,10 +193,10 @@ width, the element as CSS names it, and where it is on the page. The result name
 queries run as the user who asked, so the screenshots show their rows; a query that fails for them
 is a warning, and the page is checked with `sixb.query` rejecting.
 
-1. Open both screenshots with `view_file` and look at them as the reader will: does the page read
+1. Open both screenshots with `read` and look at them as the reader will: does the page read
    well, and do its numbers make sense?
 2. Fix what the warnings name and what you see, in the page's files.
-3. Update the artifact with `update_artifact`, and check again.
+3. Update the artifact with `publish_artifact` and its `id`, and check again.
 
 A script error means the page may show nothing at all: fix it first.
 

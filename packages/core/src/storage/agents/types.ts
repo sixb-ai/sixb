@@ -477,7 +477,7 @@ export interface SubagentRunFile {
   readonly fileRef: FileRef
 }
 
-/** Durable child output returned to its parent by `wait_agent`. */
+/** Durable child output returned to its parent by `wait`. */
 export interface SubagentRunResult {
   /** Empty only for a child that paused on its held calls before it answered. */
   readonly text: string

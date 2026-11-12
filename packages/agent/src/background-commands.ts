@@ -8,7 +8,7 @@ import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 // A background command runs in the call that starts it, held open until it ends: a provider that
 // kills what a call left behind once it returns (a cgroup, a PID namespace) leaves it alone, and
 // it needs nothing of a provider but `runCommand`. It runs in a process group of its own, which
-// `bash_stop` signals from inside the sandbox; the held call's abort is the fallback where another
+// `stop` signals from inside the sandbox; the held call's abort is the fallback where another
 // call cannot reach it. Its output goes to a file in the run's context directory, which the agent
 // reads with `read` as any other file.
 
@@ -37,7 +37,7 @@ export type BackgroundCommandStatus = "running" | "exited" | "stopped"
 
 /** A background command as its tools report it, and as a chat can show it. */
 export interface BackgroundCommandState {
-  /** `bg_<hex>`: the id `bash_output` and `bash_stop` take, never the same in two runs. */
+  /** `bg_<hex>`: the id `wait` and `stop` take, never the same in two runs. */
   readonly id: string
   readonly command: string
   readonly status: BackgroundCommandStatus
@@ -53,7 +53,7 @@ export interface BackgroundCommandState {
   readonly outputPath: string
 }
 
-/** What `bash_output` and `bash_stop` return: its state, and what it wrote since the last read. */
+/** What `wait` and `stop` return of it: its state, and what it wrote since the last read. */
 export interface BackgroundCommandOutput extends BackgroundCommandState {
   /** What it wrote since the last read: its newest 20,000 bytes at most. */
   readonly output: string
@@ -128,7 +128,7 @@ export class BackgroundCommands {
     const running = [...this.#commands.values()].filter((entry) => entry.status === "running")
     if (running.length >= MAX_RUNNING) {
       throw new AgentToolPublicError(
-        `[SixbAgent] ${MAX_RUNNING} background commands are running already: stop one with bash_stop first.`
+        `[SixbAgent] ${MAX_RUNNING} background commands are running already: stop one with stop first.`
       )
     }
 
@@ -460,7 +460,7 @@ async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): P
 /**
  * Stop the commands a `sixb` that ended without stopping them left running: one killed, or that
  * crashed. Their pid files are all that is left of them. Each group still running its command
- * gets SIGTERM, then SIGKILL after the grace period `bash_stop` gives, in one call.
+ * gets SIGTERM, then SIGKILL after the grace period `stop` gives, in one call.
  */
 export async function stopLeftRunning(
   sandbox: Sandbox,

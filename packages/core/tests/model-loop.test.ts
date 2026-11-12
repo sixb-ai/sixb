@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { runModelLoop } from "../src/agents/model-loop"
 import type {
+  LanguageModelRequest,
   LanguageModelStreamEvent,
   ModelAssistantPart,
   ModelCallEndEvent,
@@ -737,6 +738,69 @@ describe("runModelLoop", () => {
         { role: "tool", content: [{ type: "tool-result", toolCallId: "tool-1" }] },
       ],
     })
+  })
+
+  // Removal proof: send `tool.inputSchema` alone in runModelLoop's tool specifications, or pass
+  // `part.input` to parseInput without coerceToolInput.
+  test("asks for strict tools, and parses the arguments as the schema reads them", async () => {
+    const requests: LanguageModelRequest["tools"][] = []
+    const parsed: unknown[] = []
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        requests.push(request.tools)
+        return requests.length === 1
+          ? streamFromArray([
+              { type: "stream-start" },
+              {
+                type: "tool-call",
+                toolCallId: "tool-1",
+                toolName: "echo",
+                input: '{"value":"hi","times":"2","note":null}',
+              },
+              finish("tool-calls"),
+            ])
+          : streamFromArray([{ type: "stream-start" }, finish()])
+      },
+    })
+    const tool: ModelTool<{ value: string }> = {
+      ...echo,
+      strict: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          value: { type: "string" },
+          times: { type: "integer" },
+          note: { type: "string" },
+        },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      parseInput(value) {
+        parsed.push(value)
+        return echo.parseInput(value)
+      },
+    }
+
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [tool],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+    })
+
+    expect(result.status).toBe("completed")
+    expect(requests[0]?.map(({ name, strict }) => ({ name, strict }))).toEqual([
+      { name: "echo", strict: true },
+    ])
+    expect(parsed).toEqual([{ value: "hi", times: 2 }])
+    // The stored call keeps what the model sent, so history replays as it was.
+    expect(result.steps[0]?.content).toContainEqual(
+      expect.objectContaining({
+        type: "tool-call",
+        input: { value: "hi", times: "2", note: null },
+      })
+    )
   })
 
   // Regression proof: append continuations to the original messages instead of requestMessages.

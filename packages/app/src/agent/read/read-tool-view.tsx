@@ -1,18 +1,32 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
-import { Bookmark, BookOpen, ChevronRight, FileText, type LucideIcon } from "lucide-react"
+import {
+  Bookmark,
+  BookOpen,
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  type LucideIcon,
+} from "lucide-react"
 import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
-import { coerceReadInput, coerceReadOutput, describeRead } from "./interpret"
+import { coerceReadDirectory, coerceReadInput, coerceReadOutput, describeRead } from "./interpret"
 
 export function ReadToolView({ tool }: { tool: NormalizedTool }) {
   const messages = useAgentMessages()
   const input = coerceReadInput(tool.input)
   const output = coerceReadOutput(tool.output)
-  const description = describeRead(input, output, messages)
+  const directory = coerceReadDirectory(tool.output)
+  const description = describeRead(input, output, messages, directory)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const error = tool.state === "output-error"
-  const Icon = description.memory ? Bookmark : description.skill ? BookOpen : FileText
+  const Icon = directory
+    ? FolderOpen
+    : description.memory
+      ? Bookmark
+      : description.skill
+        ? BookOpen
+        : FileText
   const label = error
     ? description.failedTitle
     : running
@@ -44,6 +58,8 @@ export function ReadToolView({ tool }: { tool: NormalizedTool }) {
           ) : null}
           {error ? (
             <ReadBlock value={tool.errorText?.trim() || messages.read.error} />
+          ) : directory ? (
+            <ReadBlock value={directory.entries.join("\n")} />
           ) : output?.content ? (
             <ReadBlock value={output.content} />
           ) : output ? (

@@ -17,7 +17,7 @@ import { type Connection, connect } from "../lib/connection"
 import { errorMessage } from "../lib/errors"
 import { thisComputer, thisComputerId } from "../runner/computer"
 import { LocalRunner } from "../runner/local-runner"
-import { toolLine } from "../tui/format"
+import { askedInReply, pickedAnswer, toolLine } from "../tui/format"
 import { liveRun, reduceLive, shownMessage } from "../tui/parts"
 import {
   APPROVAL_MODES,
@@ -108,6 +108,10 @@ export async function runAgent(options: {
     )
   }
 
+  // In a conversation that asked a question with choices, a number answers with that choice.
+  const last = options.thread ? await lastMessage(connection, threadId) : null
+  const sent = last ? pickedAnswer([last], text) : text
+
   const stop = new AbortController()
   process.once("SIGINT", () => stop.abort())
   try {
@@ -115,7 +119,7 @@ export async function runAgent(options: {
       client,
       path: { threadId: thread.id },
       body: {
-        text,
+        text: sent,
         ...(approvalMode ? { approvalMode } : {}),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         locale: Intl.DateTimeFormat().resolvedOptions().locale,
@@ -281,6 +285,10 @@ async function follow(
             step(
               `${mark} ${tone.strong(line.verb)}  ${tone.muted(line.detail)}${line.note ? tone.faint(`  ${line.note}`) : ""}`
             )
+            // A question's choices are what the person answers with: they read under its line.
+            if (part.name === "ask") {
+              for (const row of line.preview ?? []) step(tone.faint(`  ${row}`))
+            }
           }
         }
         if (event.type === "agent.run.finished") settle("finished")
@@ -356,15 +364,28 @@ async function afterTurn(
   return null
 }
 
-/** The turn's answer: its last message's text, or as JSON. */
+/** The thread's last message, as the TUI shows it. */
+async function lastMessage(connection: Connection, threadId: string) {
+  const { data } = await listAgentThreadMessages({
+    client: connection.client,
+    path: { threadId },
+    query: { order: "desc", limit: "1" },
+  })
+  const last = data?.messages[0]
+  return last ? shownMessage(last) : null
+}
+
+/**
+ * The turn's answer: its last message's text, or as JSON. A turn that ended on a question gives
+ * the questions, each with its choices, and how to answer.
+ */
 async function printAnswer(connection: Connection, threadId: string, json: boolean) {
   const { client } = connection
-  const [{ data: messages }, { data: runs }] = await Promise.all([
-    listAgentThreadMessages({ client, path: { threadId }, query: { order: "desc", limit: "1" } }),
+  const [shown, { data: runs }] = await Promise.all([
+    lastMessage(connection, threadId),
     listAgentThreadRuns({ client, path: { threadId }, query: { order: "desc", limit: "1" } }),
   ])
-  const last = messages?.messages[0]
-  const shown = last ? shownMessage(last) : null
+  const questions = askedInReply(shown)
   const answer =
     shown?.role === "assistant"
       ? shown.parts.flatMap((part) => (part.kind === "text" ? [part.text.trim()] : [])).join("\n\n")
@@ -376,13 +397,38 @@ async function printAnswer(connection: Connection, threadId: string, json: boole
 
   if (json) {
     process.stdout.write(
-      `${JSON.stringify({ threadId, runId: run?.id, status: run?.status, finishReason: run?.finishReason, text: answer })}\n`
+      `${JSON.stringify({ threadId, runId: run?.id, status: run?.status, finishReason: run?.finishReason, text: answer, ...(questions.length > 0 ? { questions } : {}) })}\n`
     )
     return
   }
   if (answer) process.stdout.write(`\n${process.stdout.isTTY ? styled(answer) : answer}\n`)
+  if (questions.length > 0) {
+    process.stdout.write(`\n${questionsText(questions)}\n`)
+    const byNumber = questions.length === 1 && (questions[0]?.choices.length ?? 0) > 0
+    step(
+      tone.faint(
+        `Answer with: sixb agent --thread ${threadId} "<answer>"${byNumber ? ", or a choice's number" : ""}`
+      )
+    )
+  }
   if (run?.status === "failed") step(tone.fail(run.error?.message ?? "The turn failed."))
   if (run?.status === "cancelled") step(tone.fail("The turn was stopped."))
+}
+
+/** The questions a turn ended on, each with its choices numbered, as plain text. */
+export function questionsText(
+  questions: readonly { readonly question: string; readonly choices: readonly string[] }[]
+): string {
+  return questions
+    .map((question, index) =>
+      [
+        questions.length > 1 ? `${index + 1}. ${question.question}` : question.question,
+        ...question.choices.map(
+          (choice, at) => `${questions.length > 1 ? "     " : "  "}${at + 1}. ${choice}`
+        ),
+      ].join("\n")
+    )
+    .join("\n\n")
 }
 
 function parseApprovalMode(value: string | undefined): ApprovalMode | undefined {

@@ -34,6 +34,7 @@ import type {
 } from "../models/messages"
 import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
+import { coerceToolInput } from "./tool-input-coercion"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
 interface ModelLoopOptions {
@@ -177,6 +178,7 @@ export async function runModelLoop(
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
+    ...(tool.strict ? { strict: true } : {}),
   }))
   let messages: readonly ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
@@ -643,7 +645,7 @@ async function executeToolCall(
 
   let parsed: unknown
   try {
-    parsed = tool.parseInput(part.input)
+    parsed = tool.parseInput(coerceToolInput(tool.inputSchema, part.input))
   } catch (error) {
     const errorText = error instanceof Error ? error.message : "Tool input validation failed."
     await onEvent?.({

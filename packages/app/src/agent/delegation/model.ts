@@ -224,7 +224,7 @@ function shortName(name: string): string {
   return `${(word > LINE_NAME_LENGTH / 2 ? cut.slice(0, word) : cut).replace(/[\s,.:;-]+$/, "")}…`
 }
 
-/** What `wait_agent` last said of any of the child's runs. */
+/** What `wait`, or a `stop`, last said of any of the child's runs. */
 function waitedFor(
   waited: ReadonlyMap<string, WaitedChild>,
   child: SpawnedChild,

@@ -572,8 +572,8 @@ function delegatingParentModel(input: {
           {
             type: "tool-call",
             toolCallId: "wait-child",
-            toolName: "wait_agent",
-            input: JSON.stringify({ runIds: [input.childRunId()] }),
+            toolName: "wait",
+            input: JSON.stringify({ ids: [input.childRunId()] }),
           },
           finish("tool-calls"),
         ])
@@ -1187,7 +1187,7 @@ function toolFileThenAnswerModel(
           {
             type: "tool-call",
             toolCallId: "view-image-call-1",
-            toolName: "view_file",
+            toolName: "read",
             input: JSON.stringify({ path: sandboxPath }),
           },
           finish("tool-calls"),
@@ -1230,7 +1230,7 @@ function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): Worke
           {
             type: "tool-call",
             toolCallId: "view-bash-image-call-1",
-            toolName: "view_file",
+            toolName: "read",
             input: JSON.stringify({ path: "scratch/bash-image.png" }),
           },
           finish("tool-calls"),
@@ -4249,7 +4249,16 @@ describe("AgentWorker", () => {
     try {
       await completion.wait()
       expect(toolNames).toEqual(
-        expect.arrayContaining(["echo", "read", "view_file", "bash", "spawn_agent", "wait_agent"])
+        expect.arrayContaining([
+          "echo",
+          "read",
+          "edit",
+          "write",
+          "bash",
+          "spawn_agent",
+          "wait",
+          "stop",
+        ])
       )
       expect(
         await agentStorageOf(sixb).runs.getById({
@@ -4558,7 +4567,7 @@ describe("AgentWorker", () => {
               model: { provider: "gateway", modelId: "child-model" },
             })
           case 3:
-            return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+            return toolCallStream("wait", "wait", { ids: [childRunId] })
           default:
             return answerStream("Done.")
         }
@@ -4600,7 +4609,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions())
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -8866,7 +8875,7 @@ describe("AgentWorker", () => {
       ).toBe(true)
 
       const viewedPromptJson = JSON.stringify(viewedPrompt)
-      expect(viewedPromptJson).toContain("view_file")
+      expect(viewedPromptJson).toContain('"toolName":"read"')
       if (typeof Bun.Image === "function") {
         expect(viewedPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
       }
@@ -8874,12 +8883,10 @@ describe("AgentWorker", () => {
       const replayAssistant = replayMessages.find(
         (message) =>
           message.runId === followup.run.id &&
-          message.parts.some((part) => part.type === "tool-call" && part.toolName === "view_file")
+          message.parts.some((part) => part.type === "tool-call" && part.toolName === "read")
       )
       expect(
-        replayAssistant?.parts.find(
-          (part) => part.type === "tool-call" && part.toolName === "view_file"
-        )
+        replayAssistant?.parts.find((part) => part.type === "tool-call" && part.toolName === "read")
       ).toMatchObject({
         state: "output-available",
         output: {
@@ -9108,7 +9115,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -9182,9 +9189,11 @@ describe("AgentWorker", () => {
       expect(childCalls).toHaveLength(1)
       expect(childCalls[0]?.reasoning).toBe("high")
       const childToolNames = childCalls[0]?.tools?.map((entry) => entry.name) ?? []
-      expect(childToolNames).toEqual(expect.arrayContaining(["echo", "view_file", "read", "bash"]))
+      expect(childToolNames).toEqual(
+        expect.arrayContaining(["echo", "read", "edit", "write", "bash"])
+      )
       expect(childToolNames).not.toContain("spawn_agent")
-      expect(childToolNames).not.toContain("wait_agent")
+      expect(childToolNames).not.toContain("message_agent")
       const childPrompt = JSON.stringify(childCalls[0]?.messages)
       expect(childPrompt).toContain("headless child agent")
       expect(childPrompt).toContain("Research the exact delegated fact.")
@@ -9366,7 +9375,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -9548,7 +9557,7 @@ describe("AgentWorker", () => {
           })
         }
         if (parentCalls.length === 2) {
-          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          return toolCallStream("wait", "wait", { ids: [childRunId] })
         }
         if (parentCalls.length === 3) {
           throw createSixbError("agent.execution_failed", "[test] The provider failed mid-turn.")
@@ -9566,7 +9575,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "q3-review")
     const worker = new AgentWorker(sixb, workerOptions())
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -9602,7 +9611,7 @@ describe("AgentWorker", () => {
       expect(waited).toContain("The Q3 review is published.")
       expect(waited).not.toContain("Let me draft the review first.")
 
-      // Once wait_agent returns, the parent's sandbox holds the child's artifact like its own.
+      // Once wait returns, the parent's sandbox holds the child's artifact like its own.
       const parentSandbox = sandboxes.sandboxes[0]
       if (!parentSandbox) throw new Error("Expected the parent's sandbox.")
       const inParent = (path: string) =>
@@ -9635,8 +9644,8 @@ describe("AgentWorker", () => {
   test("hands a child files at their paths and gets back what it writes to out/", async () => {
     // Removal proofs: leave `files` out of the child's spec in SubagentCoordinator.admit, and the
     // child's sandbox lacks reports/acme.csv; drop storeChildOutputs from runSubagent, and
-    // wait_agent lists nothing, the parent's sandbox holds no chart and the next turn's
-    // $SIXB_ATTACHMENTS lists none; return the result as plain JSON from wait_agent's execute,
+    // wait lists nothing, the parent's sandbox holds no chart and the next turn's
+    // $SIXB_ATTACHMENTS lists none; return the result as plain JSON from the wait tool's execute,
     // and the next turn lists none either; skip nothing in
     // storeChildOutputs, and the logo the parent handed over comes back to it; skip by size
     // instead of digest there, and the brief the child rewrote stays behind.
@@ -9671,7 +9680,7 @@ describe("AgentWorker", () => {
           })
         }
         if (parentCalls.length === 3) {
-          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          return toolCallStream("wait", "wait", { ids: [childRunId] })
         }
         return answerStream("Acme's margin fell to 12%.")
       },
@@ -9685,7 +9694,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "acme-review")
     const worker = new AgentWorker(sixb, workerOptions())
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -9749,10 +9758,10 @@ describe("AgentWorker", () => {
         (message) => message.role === "assistant"
       )
       const waitPart = answer?.parts.find(
-        (part) => part.type === "tool-call" && part.toolName === "wait_agent"
+        (part) => part.type === "tool-call" && part.toolName === "wait"
       )
       if (waitPart?.type !== "tool-call" || waitPart.state !== "output-available") {
-        throw new Error("Expected the wait_agent result.")
+        throw new Error("Expected the wait result.")
       }
       // Each file names its child and its path, so no turn pairs them by their order.
       expect(waitPart.output).toMatchObject({
@@ -10010,7 +10019,58 @@ describe("AgentWorker", () => {
     return { sandbox, runFiles }
   }
 
-  test("wait_agent holds each child's files once, a result's worth, and says what it could not", async () => {
+  // Removal proof: drop the isPausedSubagentRun refusal from SubagentCoordinator.stop; stop returns
+  // the child as awaiting_approval, as though it stopped, and it continues once the user decides.
+  test("stop refuses a child paused on its held calls, which only the user's decision ends", async () => {
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { children: spawned, coordinator } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Pay INV-2041." },
+      { keys: ["pay"] }
+    )
+    const [pay] = spawned
+    if (!pay) throw new Error("Expected the spawned child.")
+    const execution = freshTestExecution()
+    const started = await storage.runs.start({ projectId: PROJECT_ID, id: pay.runId, execution })
+    if (started?.kind !== "subagent") throw new Error("Expected the child's run.")
+    // Its call waits for approval, so it finishes paused on it.
+    await storage.approvals.request({
+      id: "apr-pay",
+      projectId: PROJECT_ID,
+      runId: started.parentRunId,
+      callerRunId: pay.runId,
+      executionToken: execution.token,
+      requestedBy: { type: "user", id: "usr_alice" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "mark-paid",
+        subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-2041" },
+        params: {},
+        actionRunId: "act-pay",
+        effect: "ontology",
+      },
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    await storage.runs.finish({
+      projectId: PROJECT_ID,
+      id: pay.runId,
+      executionToken: execution.token,
+      status: "succeeded",
+      finishReason: "awaiting_approval",
+      result: { text: "" },
+    })
+
+    const refused = await coordinator
+      .stop("pay", new AbortController().signal)
+      .catch((error: unknown) => error)
+    expect(String(refused)).toContain(
+      "stop cannot end 'pay': it is paused on calls that wait for the user's approval"
+    )
+  })
+
+  test("wait holds each child's files once, a result's worth, and says what it could not", async () => {
     // Removal proofs: attach a child's installed files on every wait in deliverFiles, and the
     // second result holds a's chart again; drop its `fits` check, and d's 30 files join b's 30;
     // drop its catch, and c's missing blob costs every answer; warn instead of reporting the
@@ -10356,7 +10416,7 @@ describe("AgentWorker", () => {
           })
         }
         if (parentCall === 2) {
-          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          return toolCallStream("wait", "wait", { ids: [childRunId] })
         }
         return untilAborted(options)
       },
@@ -12051,14 +12111,14 @@ describe("AgentWorker", () => {
         (message) => message.role === "assistant"
       )
       const viewCall = assistant?.parts.find(
-        (part) => part.type === "tool-call" && part.toolName === "view_file"
+        (part) => part.type === "tool-call" && part.toolName === "read"
       )
       const viewed =
         viewCall?.type === "tool-call" && viewCall.state === "output-available"
           ? viewCall.output
           : undefined
       if (!isAgentToolResult(viewed) || viewed.content[1]?.type !== "file") {
-        throw new Error("Expected the viewed image in the view_file result.")
+        throw new Error("Expected the viewed image in the read result.")
       }
       expect(
         new Uint8Array(
@@ -12115,14 +12175,14 @@ describe("AgentWorker", () => {
         call += 1
         if (call === 1) return toolCallStream("bob-1", "bash", { command: "write-q3-review" })
         if (call === 2) {
-          return toolCallStream("bob-2", "update_artifact", {
+          return toolCallStream("bob-2", "publish_artifact", {
             id: ids.notes,
             path: "work/q3-review",
             title: "Taken over",
           })
         }
         if (call === 3) {
-          return toolCallStream("bob-3", "update_artifact", {
+          return toolCallStream("bob-3", "publish_artifact", {
             id: ids.shared,
             path: "work/q3-review",
             title: "Q3 review, Bob's",
@@ -12281,7 +12341,7 @@ describe("AgentWorker", () => {
         if (call === 4) {
           // The next turn starts from what was published, installed in its sandbox.
           const artifact = await onlyArtifact(host.sixb)
-          return toolCallStream("publish-4", "update_artifact", {
+          return toolCallStream("publish-4", "publish_artifact", {
             id: artifact.id,
             path: `.sixb/agent/artifacts/${artifact.id}`,
             title: "Q3 review, final",
@@ -12520,9 +12580,9 @@ describe("AgentWorker", () => {
             actionsFor: () => [],
           }).index,
           budget: {
-            // The framework's prompt and tools take about 4,000 tokens; the index, 3,300 more.
+            // The framework's prompt and tools take about 4,450 tokens; the index, 3,300 more.
             windowTokens: 8_000,
-            inputBudgetTokens: 4_500,
+            inputBudgetTokens: 5_000,
             reserveTokens: 2_000,
             keepRecentTokens: 1_000,
             source: "model",
@@ -14966,7 +15026,7 @@ describe("agent tools act as the requester", () => {
       },
     })
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       const ran = runner.runTurn(request.run.id, new AbortController().signal)
@@ -15326,7 +15386,8 @@ class ReadingSandboxFactory extends RecordingSandboxFactory {
       command === "bash" && args.includes("sixb-read")
         ? {
             exitCode: 0,
-            stdout: Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64"),
+            // The fingerprint and the real path, then the page as base64.
+            stdout: `1:24\n/workspace/file\n${Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64")}`,
             stderr: "",
             durationMs: 1,
           }
@@ -15352,8 +15413,8 @@ describe("a later turn's request", () => {
   // How each guard is proven, by removing it and watching this test fail:
   // - serialize tool JSON with JSON.stringify in models/protocols (responses, messages): the bash
   //   and read outputs, reordered by the jsonb double, print other bytes;
-  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: view_file,
-  //   create_image, publish_artifact and wait_agent replay another text;
+  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: read showing an
+  //   image, create_image, publish_artifact and wait replay another text;
   // - return no images from replayToolFiles: the images after a step vanish;
   // - inline only the newest user message's files in fileWorkItems: the attachments turn into
   //   metadata on the next turn.
@@ -15383,8 +15444,7 @@ describe("a later turn's request", () => {
             ])
           case 2:
             return toolCallsStream([
-              ["view-doc", "view_file", { path: "work/q3-review/document.md" }],
-              ["view-image", "view_file", { path: "scratch/bash-image.png" }],
+              ["view-image", "read", { path: "scratch/bash-image.png" }],
               ["create", "create_image", {}],
             ])
           case 3:
@@ -15400,7 +15460,7 @@ describe("a later turn's request", () => {
               model: { provider: childModel.providerId, modelId: childModel.modelId },
             })
           case 5:
-            return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+            return toolCallStream("wait", "wait", { ids: [childRunId] })
           case 7:
             return toolCallStream("again", "bash", { command: "echo again" })
           default:
@@ -15445,7 +15505,7 @@ describe("a later turn's request", () => {
       workerOptions()
     )
 
-    // wait_agent polls the child every 250ms: drive that with fake time.
+    // wait polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -15475,7 +15535,7 @@ describe("a later turn's request", () => {
       for (const text of [
         "quarter,revenue,margin",
         '"startLine":1',
-        '<tool_file name=\\"document.md\\"',
+        '<tool_file name=\\"bash-image.png\\"',
         "<sixb_tool_files",
         "Created an image.",
         'Published \\"Q3 review\\"',
@@ -15735,13 +15795,14 @@ describe("context within a turn", () => {
         chapterResults(sent).some((output) => output.value === cleared.value)
       )
       expect(first).toBeGreaterThan(0)
-      // Oldest first; the three most recent it read stay, and so does the one it has not read.
+      // Oldest first; the most recent it read stay (two, beside the built-in tools' definitions),
+      // and so does the one it has not read.
       const results = chapterResults(requests[first]!)
       const kept = results.findIndex((output) => output.type === "json")
       expect(kept).toBeGreaterThan(0)
       expect(results.slice(0, kept)).toEqual(Array(kept).fill(cleared))
       expect(results.slice(kept).every((output) => output.type === "json")).toBe(true)
-      expect(results.length - kept).toBeGreaterThanOrEqual(4)
+      expect(results.length - kept).toBeGreaterThanOrEqual(3)
       // The call after a clearing reads its request through: only the step it adds is new.
       // Reproduce: aim the clearing at the limit instead of 60 % of it in ContextGuard.reduce; the
       // call after the clearing then clears one more result, and rewrites the cache from it.
@@ -16513,7 +16574,7 @@ describe("context of a child and of a workflow step", () => {
         calls.push(request)
         if (calls.length === 1) return toolCallStream("spawn", "spawn_agent", spawnReader)
         if (calls.length === 2) {
-          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(request)] })
+          return toolCallStream("wait", "wait", { ids: [spawnedRunId(request)] })
         }
         return answerStream("The reader is done.")
       },
@@ -16551,7 +16612,7 @@ describe("context of a child and of a workflow step", () => {
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
 
-    // wait_agent polls the child: drive that with fake time.
+    // wait polls the child: drive that with fake time.
     jest.useFakeTimers()
     try {
       await worker.start()
@@ -16694,7 +16755,7 @@ describe("context of a child and of a workflow step", () => {
           })
         }
         if (call % 3 === 2) {
-          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(calls[1])] })
+          return toolCallStream("wait", "wait", { ids: [spawnedRunId(calls[1])] })
         }
         return answerStream("The reader asks something.")
       },
@@ -16743,12 +16804,12 @@ describe("context of a child and of a workflow step", () => {
         if (text.includes(ANSWERS[0]!)) {
           return chapterResults(request).length === 0
             ? [toolCallEvent("chapter_extra", "chapter", { number: "extra" })]
-            : [toolCallEvent("ask_again", "ask_parent", { question: "Which language?" })]
+            : [toolCallEvent("ask_again", "ask", { questions: [{ question: "Which language?" }] })]
         }
         // The first run reads nine chapters, then asks, its notes before the question.
         return readChapters(9, () => [
           ...textEvents(`Notes so far: ${"n".repeat(30_000)}`),
-          toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+          toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
         ])(request)
       },
     })
@@ -16868,7 +16929,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes("The second edition.")
           ? textEvents("Read the second edition.")
           : readChapters(2, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     // The parent relays the long answer: its own window holds it.
@@ -16939,7 +17000,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes(ANSWER)
           ? textEvents("Read the second edition.")
           : readChapters(9, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
@@ -17009,7 +17070,7 @@ describe("context of a child and of a workflow step", () => {
         JSON.stringify(request.messages).includes(ANSWER)
           ? textEvents("Read the second edition.")
           : readChapters(6, () => [
-              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+              toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] }),
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
@@ -17137,7 +17198,7 @@ describe("context of a child and of a workflow step", () => {
             : [toolCallEvent("again", "bash", { command: "echo again" })]
         }
         return ran("child_report")
-          ? [toolCallEvent("ask", "ask_parent", { question: "Which edition?" })]
+          ? [toolCallEvent("ask", "ask", { questions: [{ question: "Which edition?" }] })]
           : [toolCallEvent("child_report", "bash", { command: "print-report" })]
       },
     })

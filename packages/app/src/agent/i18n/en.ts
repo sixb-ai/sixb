@@ -351,10 +351,8 @@ export const en = {
       timeout: "Ran out of time",
       unknown: "Delegated",
     },
-    fromAgent: "Agent said",
-    asks: "Asked",
-    answer: "Agent answered",
-    answerHint: "Your next message answers it.",
+    /** A sub-agent's question its turn ended on while it held a call: the decision continued it. */
+    noAnswer: "It went on without an answer, once the approval was decided.",
     close: "Close",
     viewRequest: "See its request below",
     stepsLater: "At work. Its steps show here once it finishes.",
@@ -386,6 +384,9 @@ export const en = {
     heardFrom: (key: string) => `Heard back from ${key}`,
     heardFromCount: (agents: number) => `Heard back from ${count(agents, "sub-agent")}`,
     waitFailed: "Couldn't wait for the sub-agents",
+    stoppingAgent: (key: string) => `Stopping ${key}`,
+    stoppedAgent: (key: string) => `Stopped ${key}`,
+    stopAgentFailed: (key: string) => `Couldn't stop ${key}`,
     askedAgent: (question: string) => `Asked the agent: ${question}`,
     /** The reply's line: the sub-agents by name, and how they stand. */
     line: {
@@ -466,6 +467,40 @@ export const en = {
     failed: (name: string) => `Couldn't view ${name || "a file"}`,
     open: (name: string) => `Open ${name}`,
   },
+  /** The Agent's questions to the user, from its `ask` tool. */
+  questions: {
+    card: (count: number): string =>
+      count === 1 ? "The agent's question" : "The agent's questions",
+    asked: "Asked you",
+    /** For someone who reads the conversation but cannot answer in it. */
+    waiting: "Waiting for an answer",
+    running: "Asking you",
+    send: "Send answer",
+    sending: "Sending…",
+    pickAny: "Pick any",
+    typeAnswer: "Type an answer",
+    typeOther: "Or type another answer",
+    somethingElse: "Something else…",
+    next: "Next question",
+    back: "Previous question",
+    step: (step: number, total: number): string => `Question ${step} of ${total}`,
+    /** Close the question, to reply in the composer instead. */
+    dismiss: "Reply in chat",
+  },
+  /** The edit tool, for a change to part of a file (`name` may be empty). */
+  edit: {
+    title: (name: string) => `Edited ${name || "a file"}`,
+    running: (name: string) => `Editing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't edit ${name || "a file"}`,
+  },
+  /** The write tool, for a file created or replaced whole (`name` may be empty). */
+  write: {
+    created: (name: string) => `Created ${name || "a file"}`,
+    replaced: (name: string) => `Rewrote ${name || "a file"}`,
+    running: (name: string) => `Writing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't write ${name || "a file"}`,
+    lines: (lines: number) => count(lines, "line"),
+  },
   /** The read tool, for a file (`name` may be empty), a skill reference, or a skill guide. */
   read: {
     file: {
@@ -484,6 +519,13 @@ export const en = {
       failed: (name: string) => `Couldn't read the ${name} guide`,
     },
     /** A file of the user's memory, or of the project's when `project`. */
+    /** A folder the agent listed. */
+    directory: {
+      title: (name: string) => `Listed ${name || "a folder"}`,
+      running: (name: string) => `Listing ${name || "a folder"}`,
+      failed: (name: string) => `Couldn't list ${name || "a folder"}`,
+    },
+    entries: (entries: number) => count(entries, "entry", "entries"),
     memory: {
       title: (project: boolean): string => (project ? "Read project memory" : "Read memory"),
       running: (project: boolean): string =>
@@ -776,7 +818,7 @@ export const en = {
     publishing: (title: string) => `Publishing ${title || "an artifact"}`,
     published: (title: string) => `Published ${title || "an artifact"}`,
     publishFailed: (title: string) => `Couldn't publish ${title || "an artifact"}`,
-    /** An `update_artifact` call, which changes an artifact's current version. */
+    /** A `publish_artifact` call with an id, which changes an artifact's current version. */
     updating: (title: string) => `Updating ${title || "an artifact"}`,
     updated: (title: string) => `Updated ${title || "an artifact"}`,
     updateFailed: (title: string) => `Couldn't update ${title || "an artifact"}`,

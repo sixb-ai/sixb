@@ -10,18 +10,26 @@ import { AGENT_WEB_TOOL_NAMES } from "./web"
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
 export const AGENT_RESERVED_TOOL_NAMES = [
   "bash",
+  "wait",
+  "stop",
+  // What `wait` and `stop` were called for a background command: earlier threads hold calls to them.
   "bash_output",
   "bash_stop",
   "read",
+  "edit",
+  "write",
   "view_file",
   "spawn_agent",
-  "wait_agent",
   "message_agent",
+  // What `wait` was called for sub-agents: earlier threads hold calls to it.
+  "wait_agent",
+  "ask",
+  // What `ask` was called for a sub-agent: earlier threads hold calls to it.
   "ask_parent",
   "publish_artifact",
-  "update_artifact",
   "open_artifact",
-  // What `update_artifact` was called: earlier threads hold calls to it.
+  // What `publish_artifact` with an id was called: earlier threads hold calls to them.
+  "update_artifact",
   "publish_artifact_version",
   ...AGENT_WEB_TOOL_NAMES,
 ] as const

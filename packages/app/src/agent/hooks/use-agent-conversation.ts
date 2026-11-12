@@ -62,6 +62,8 @@ import {
   preferenceWithReasoning,
   resolveModelSelection,
 } from "../model-selection"
+import { openQuestion } from "../questions/interpret"
+import type { QuestionComposerProps } from "../questions/question-composer"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
 import {
   CONTEXT_LIMIT_EXCEEDED,
@@ -1098,6 +1100,19 @@ export function useAgentConversation({
     }
   }, [computer, backgroundCommands, runsOnComputer, threadId])
 
+  // The Agent's open question takes the composer's place until it is answered or set aside, to
+  // reply in words of one's own.
+  const [questionSetAside, setQuestionSetAside] = useState<string | null>(null)
+  const asked = threadId !== null ? openQuestion(messages, turn) : null
+  const asking = asked !== null && questionSetAside !== asked.messageKey ? asked : null
+  const questionProps: QuestionComposerProps | null = asking
+    ? {
+        questions: asking.questions,
+        onAnswer: (text) => void send(text, [], []),
+        onDismiss: () => setQuestionSetAside(asking.messageKey),
+      }
+    : null
+
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
@@ -1261,6 +1276,11 @@ export function useAgentConversation({
     transcriptProps,
     /** Spread into `<Composer>`, then add the page's own props such as `placeholder`. */
     composerProps,
+    /**
+     * Spread into `<QuestionComposer>` while set, in the composer's place: the Agent's question,
+     * until the reader answers it or sets it aside.
+     */
+    questionProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
     /** Where the reader's own conversation runs on their computer, for its badge. */

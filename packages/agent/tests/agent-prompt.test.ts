@@ -348,7 +348,7 @@ describe("agent system prompt", () => {
     // A child publishes only what its task asks for, and names it for the parent to show.
     expect(prompt).toContain("Return your result as text")
     expect(prompt).toContain(
-      "Publish with publish_artifact or update_artifact only when the task asks for a deliverable"
+      "Publish with publish_artifact only when the task asks for a deliverable"
     )
     expect(prompt).toContain(
       "Name each one you wrote in your result by its address, artifact:<id>."
@@ -412,7 +412,7 @@ describe("agent system prompt", () => {
     // Only a conversation's rules name workflows it may start: the child is told it may not.
     expect(child).not.toContain("declared actions or workflows")
     expect(parent).toContain(
-      "A child's call that wait_agent lists in `awaitingApproval` waits for the user's approval like one of yours"
+      "A child's call that wait lists in `awaitingApproval` waits for the user's approval like one of yours"
     )
     expect(parent).toContain("Wait for your other children before you end your turn.")
     expect(parent).toContain("or the address a child agent reported")
@@ -435,23 +435,21 @@ describe("agent system prompt", () => {
   })
 
   test("tells a child when to ask its parent, and the Agent how to answer it", () => {
-    // Removal proof: drop the ask_parent rule from SUBAGENT_RULES, or the question rule from
+    // Removal proof: drop the ask rule from SUBAGENT_RULES, or the question rule from
     // CONVERSATION_RULES; its line fails.
     const child = renderPrompt({ mode: "subagent", skills: [] })
     const parent = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(child).toContain(
-      "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask_parent"
+      "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask"
     )
     expect(child).toContain("otherwise make a reasonable assumption, say it in your result")
     expect(child).toContain("continue later with its answer as a <sixb_parent_answer> block")
     expect(parent).toContain(
       "Answer it with message_agent and its key from what you know, the conversation and the project's data"
     )
-    expect(parent).toContain(
-      "Only when the answer is the user's to give, ask the user in your answer and end your turn"
-    )
-    expect(parent).not.toContain("ask_parent")
+    expect(parent).toContain("Only when the answer is the user's to give, ask the user with ask")
+    expect(parent).not.toContain("ask your parent")
   })
 
   test("tells the Agent when to delegate and when one generation is enough", () => {
@@ -459,7 +457,7 @@ describe("agent system prompt", () => {
     const prompt = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(prompt).toContain(
-      "Delegate with spawn_agent only independent, heavier investigations that can run in parallel, then collect their answers with wait_agent. Never delegate a simple lookup or a quick generation."
+      "Delegate with spawn_agent only independent, heavier investigations that can run in parallel, then collect their answers with wait and their keys. Never delegate a simple lookup or a quick generation."
     )
   })
 
@@ -469,7 +467,7 @@ describe("agent system prompt", () => {
     const child = renderPrompt({ mode: "subagent", skills: [] })
 
     expect(parent).toContain(
-      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait_agent's result, which lists where each file is: under .sixb/agent/children/<key>/, where later turns find it too while $SIXB_ATTACHMENTS lists it: it keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes or updates is in $SIXB_ARTIFACTS once wait_agent returns, unless it says otherwise."
+      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait's result, which lists where each file is: under .sixb/agent/children/<key>/, where later turns find it too while $SIXB_ATTACHMENTS lists it: it keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes or updates is in $SIXB_ARTIFACTS once wait returns, unless it says otherwise."
     )
     expect(child).toContain(
       "The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most 50 files of 25.0MB, 100.0MB in all; past that, none does."

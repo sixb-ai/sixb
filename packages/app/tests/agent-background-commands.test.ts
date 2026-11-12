@@ -104,6 +104,43 @@ describe("a background command's calls", () => {
     expect(waiting.commands.get(KEY)?.pending).toBe("waiting")
   })
 
+  // Removal proof: read only `tool.output` in readThreadBackground, as bash_output's was; wait's
+  // list of commands reads as no command, and the card keeps it running.
+  test("read wait and stop, which list their commands, beside a sub-agent's results", () => {
+    const ended = {
+      ...STATE,
+      status: "exited",
+      exitCode: 0,
+      endedAt: "2026-11-04T10:02:00.000Z",
+      output: "built\n",
+    }
+    const thread = readThreadBackground([
+      reply("run_1", [
+        start,
+        tool("wait", { ids: [ID], timeoutMs: 0 }, { commands: [{ ...STATE, output: "ready\n" }] }),
+        // With a sub-agent, its JSON text in a rich result.
+        tool(
+          "wait",
+          { ids: [ID, "terms"] },
+          {
+            kind: "agentToolResult",
+            content: [{ type: "text", text: JSON.stringify({ commands: [ended], results: [] }) }],
+          }
+        ),
+      ]),
+    ])
+    expect(thread.commands.get(KEY)).toMatchObject({
+      status: "exited",
+      exitCode: 0,
+      output: "ready\nbuilt\n",
+    })
+
+    const on = (part: Part) => readThreadBackground([reply("run_1", [start, part])]).commands
+    expect(on(tool("stop", { id: ID })).get(KEY)?.pending).toBe("stopping")
+    expect(on(tool("wait", { ids: [ID] })).get(KEY)?.pending).toBe("waiting")
+    expect(on(tool("wait", { ids: [ID], timeoutMs: 0 })).get(KEY)?.pending).toBe("reading")
+  })
+
   test("stand for the command its start started, not for a start that failed", () => {
     const bash = (tool: Partial<NormalizedTool>): NormalizedTool => ({
       toolName: "bash",

@@ -1,5 +1,6 @@
 import type { AgentMessages } from "../i18n/en"
 import { type NormalizedTool, toolResultValue } from "../parts"
+import { waitsForChildren } from "../waits"
 
 export interface MessageAgentDescription {
   /** The row's title: what the Agent told which child, or that it could not. */
@@ -8,7 +9,7 @@ export interface MessageAgentDescription {
   readonly running: string
 }
 
-/** A question a child waits on, as `wait_agent` returned it. */
+/** A question a child waits on, as `wait` returned it. */
 export interface ChildQuestion {
   readonly key: string
   readonly text: string
@@ -42,9 +43,9 @@ export function describeMessageAgent(
   return { title: messaging, running: messaging }
 }
 
-/** The questions a `wait_agent` call returned: the children that wait on the Agent's answer. */
+/** The questions a `wait` call returned: the children that wait on the Agent's answer. */
 export function childQuestions(tool: NormalizedTool): readonly ChildQuestion[] {
-  if (tool.toolName !== "wait_agent" || tool.state !== "output-available") return []
+  if (!waitsForChildren(tool) || tool.state !== "output-available") return []
 
   const output = toolResultValue(tool.output)
   if (!isRecord(output) || !Array.isArray(output.questions)) return []

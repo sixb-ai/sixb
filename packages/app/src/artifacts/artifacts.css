@@ -206,6 +206,42 @@
   display: none;
 }
 
+/*
+ * A board the reader uses in place, running while they read the canvas (renderers/canvas/board.tsx):
+ * a soft ring while the pointer is over it, the page's own cursor inside. Holding Space, a drag
+ * across its page pans, as anywhere on the canvas.
+ */
+.sixb-artboard .react-flow__node-board .sixb-canvas-surface {
+  transition: box-shadow 160ms ease-out;
+}
+
+.sixb-artboard .sixb-canvas-surface:has(> [data-interactive]:hover) {
+  box-shadow:
+    0 0 0 calc(1.5px * var(--sixb-name-scale, 1)) color-mix(in oklab, var(--primary) 24%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 20px 44px -28px rgb(0 0 0 / 0.35);
+}
+
+/* A pan dragged across a page keeps going: the page under the pointer takes none of it. */
+.sixb-artboard[data-panning] [data-interactive] iframe,
+.sixb-artboard:has(.react-flow__pane.dragging) [data-interactive] iframe {
+  pointer-events: none;
+}
+
+.sixb-artboard[data-panning] :is(.react-flow__pane, .react-flow__node) {
+  cursor: grab;
+}
+
+.sixb-artboard[data-panning] :is(.react-flow__pane, .react-flow__node):active {
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-artboard .react-flow__node-board .sixb-canvas-surface {
+    transition: none;
+  }
+}
+
 /* A board takes focus from the keyboard, to open it; the ring shows where focus is. */
 .sixb-artboard .react-flow__node:focus-visible {
   outline: 2px solid var(--ring);

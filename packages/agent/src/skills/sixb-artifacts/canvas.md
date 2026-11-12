@@ -170,12 +170,12 @@ The result names each board's screenshot, `<id>.png`, and `overview.png`, the wh
 opens, under `$SIXB_CONTEXT_DIR/checks/`. The check also takes each board's preview, the picture
 readers see until they open it, so a board that looks wrong there looks wrong on the canvas too.
 
-1. Open the screenshots with `view_file` and look at each board as the reader will. Open
+1. Open the screenshots with `read` and look at each board as the reader will. Open
    `overview.png` to see whether the canvas reads at the zoom it opens at, and judge it as a
    designer would: one composition on one grid, words at three levels, nothing that looks like a
    default or a draft.
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.
-3. Update the artifact with `update_artifact`, and check again.
+3. Update the artifact with `publish_artifact` and its `id`, and check again.
 
 ## Comments
 

@@ -11,7 +11,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import type { Sandbox } from "@sixb/core"
+import type { AgentToolResult, Sandbox } from "@sixb/core"
 import type { AgentMessage } from "@sixb/core/internal/agents"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type {
@@ -31,7 +31,7 @@ import { ComputerRunner, emptyDirectory } from "../src/computer-runner"
 import { agentTraceFromModelSteps } from "../src/model-adapters"
 import type { OpenRunSandbox } from "../src/run-environment"
 import type { AgentSandboxHandle } from "../src/sandbox-handle"
-import { createBashOutputTool, createBashStopTool } from "../src/tools/background"
+import { createStopTool, createWaitTool, reportedCommands } from "../src/tools/background"
 import { createBashTool } from "../src/tools/bash"
 import { waitFor } from "./helpers"
 import { WorkerTestModel } from "./worker-model-fixture"
@@ -254,10 +254,10 @@ describe("background commands", () => {
 })
 
 describe("background tools", () => {
-  test("bash starts one, bash_output waits for it, bash_stop reports one already ended", async () => {
+  test("bash starts one, wait waits for it, stop reports one already ended", async () => {
     const bash = createBashTool(async () => handle, commands)
-    const output = createBashOutputTool(async () => handle, commands)
-    const stop = createBashStopTool(async () => handle, commands)
+    const wait = createWaitTool(async () => handle, commands)
+    const stop = createStopTool(async () => handle, commands)
     const context = { signal, callId: "call", toolCallId: "tool" }
 
     const started = (await bash.execute(
@@ -267,20 +267,91 @@ describe("background tools", () => {
     expect(started).toMatchObject({ status: "running" })
     const { id } = started
 
-    const read = (await output.execute(
-      output.parseInput({ id, wait: 900_000 }),
-      context
-    )) as unknown as BackgroundCommandOutput
-    expect(read).toMatchObject({ status: "exited", exitCode: 0, output: "done\n" })
+    const waited = (await wait.execute(wait.parseInput({ ids: [id] }), context)) as unknown as {
+      readonly commands: readonly BackgroundCommandOutput[]
+    }
+    expect(waited.commands).toMatchObject([{ status: "exited", exitCode: 0, output: "done\n" }])
 
     expect(await stop.execute(stop.parseInput({ id }), context)).toMatchObject({
-      status: "exited",
-      output: "",
+      commands: [{ status: "exited", output: "" }],
     })
-    expect(() => output.parseInput({ id, tail: 3 })).toThrow("unknown property 'tail'")
+    expect(() => wait.parseInput({ ids: [id], tail: 3 })).toThrow("unknown property 'tail'")
+    // Without children, an id that names no command is refused as one.
     expect(
-      String(await output.execute({ id: "bg_000000" }, context).catch((error) => error))
-    ).toContain(`No background command 'bg_000000': the known ones are ${id}`)
+      String(await wait.execute({ ids: ["bg_000000"] }, context).catch((error) => error))
+    ).toContain("has no background command 'bg_000000'")
+  })
+
+  // Removal proof: drop `.finally(stopWaiting)` from wait's children call; the wait then holds
+  // for the command's timeout after the child answered.
+  test("wait returns once the children answer, reading a command still running as it is", async () => {
+    const wait = createWaitTool(async () => handle, commands, {
+      wait: async () => ({
+        results: [{ runId: "west", status: "succeeded", text: "Net 30." }],
+        files: [],
+      }),
+      stop: async () => ({ results: [], files: [] }),
+    })
+    const running = await commands.start({ handle, command: "sleep 30" })
+
+    const waited = (await wait.execute(
+      wait.parseInput({ ids: [running.id, "west"], timeoutMs: 20_000 }),
+      { signal, callId: "call", toolCallId: "tool" }
+    )) as unknown as AgentToolResult
+    const text = waited.content.find((part) => part.type === "text")
+    expect(JSON.parse(text?.type === "text" ? text.text : "{}")).toMatchObject({
+      commands: [{ id: running.id, status: "running" }],
+      results: [{ runId: "west", text: "Net 30." }],
+    })
+    await commands.stop(running.id)
+  })
+
+  // Removal proof: await the children's wait before the commands' in wait's execute, as it did;
+  // the turn's stop rejects both, nothing handles the commands' rejection, and it goes unhandled.
+  test("wait, stopped with the turn, rejects once and leaves no rejection unhandled", async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", onUnhandled)
+    const turn = new AbortController()
+    const wait = createWaitTool(async () => handle, commands, {
+      // A child at work: its wait ends only with the turn.
+      wait: (_ids, waitSignal) =>
+        new Promise((_resolve, reject) =>
+          waitSignal.addEventListener("abort", () => reject(waitSignal.reason), { once: true })
+        ),
+      stop: async () => ({ results: [], files: [] }),
+    })
+    const running = await commands.start({ handle, command: "sleep 30" })
+    try {
+      const waiting = wait.execute(wait.parseInput({ ids: [running.id, "west"] }), {
+        signal: turn.signal,
+        callId: "call",
+        toolCallId: "tool",
+      })
+      turn.abort(new Error("stopped"))
+      expect(String(await waiting.catch((error: unknown) => error))).toContain("stopped")
+      // Rejections are reported once the loop turns.
+      await new Promise((resolve) => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+      await commands.stop(running.id)
+    }
+  })
+
+  test("wait and stop report a command's state to the notices, as bash and the old tools did", () => {
+    const state = { id: "bg_aaaaaa", command: "serve", status: "running" }
+    expect(reportedCommands("bash", state)).toEqual([state])
+    expect(reportedCommands("bash_output", state)).toEqual([state])
+    expect(reportedCommands("wait", { commands: [state] })).toEqual([state])
+    expect(
+      reportedCommands("stop", {
+        kind: "agentToolResult",
+        content: [{ type: "text", text: JSON.stringify({ commands: [state], results: [] }) }],
+      })
+    ).toEqual([state])
+    expect(reportedCommands("read", state)).toEqual([])
   })
 })
 
@@ -423,7 +494,9 @@ describe("background notices", () => {
       parts: [
         call("bash", command("bg_aaaaaa", "running")),
         call("bash", command("bg_bbbbbb", "running")),
-        call("bash_output", { ...command("bg_bbbbbb", "exited"), exitCode: 0, output: "" }),
+        call("wait", {
+          commands: [{ ...command("bg_bbbbbb", "exited"), exitCode: 0, output: "" }],
+        }),
       ],
     }
     const leftRunning = backgroundCommandsLeftRunning([paused])
@@ -440,7 +513,7 @@ describe("background notices", () => {
   })
 
   // Removal proof: drop the line of BackgroundCommands' read that marks an end reported; the
-  // notice then repeats what bash_output said.
+  // notice then repeats what wait said.
   test("say nothing of a command whose end a tool reported already", async () => {
     const started = await commands.start({ handle, command: "sleep 0.1" })
     await commands.wait(started.id, 10_000, signal)

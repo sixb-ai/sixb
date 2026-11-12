@@ -88,7 +88,7 @@ export async function requestAgentRunCancel(
  * attached its cancel subscription yet.
  */
 export async function cancelQueuedRun(
-  runtime: SixbRuntimeContext,
+  runtime: Pick<SixbRuntimeContext, "projectId" | "broker">,
   storage: AgentStorage,
   run: AgentRunRecord
 ): Promise<
@@ -113,7 +113,7 @@ export async function cancelQueuedRun(
 
 /** The run is cancelled once stored; its stream learns it best-effort. */
 async function publishQueuedRunCancellation(
-  runtime: SixbRuntimeContext,
+  runtime: Pick<SixbRuntimeContext, "broker">,
   run: AgentRunRecord
 ): Promise<void> {
   try {

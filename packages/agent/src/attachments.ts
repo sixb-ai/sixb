@@ -28,10 +28,11 @@ const MAX_ASSISTANT_ATTACHMENTS = 50
 
 /**
  * Where a parent finds what its children wrote to `out/`, a directory per spawn key, in the context
- * directory: `wait_agent` copies them there, and later turns materialize them there again.
+ * directory: `wait` and `stop` copy them there, and later turns materialize them there again.
  */
 export const CHILD_FILES_DIRECTORY = "children"
-const WAIT_AGENT_TOOL = "wait_agent"
+/** The tools whose results hold a child's files: `wait_agent` is what earlier threads hold. */
+const CHILD_FILE_TOOLS: ReadonlySet<string> = new Set(["wait", "stop", "wait_agent"])
 
 /**
  * How many files, and bytes, a sandbox receives of a run's attachments: also what a parent Agent
@@ -385,7 +386,7 @@ async function prepareOneAttachment(input: {
       mayInlineContent &&
       remainingTextBytes > 0 &&
       shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
-    // A tool can return a file the sandbox holds already, such as an attachment view_file showed:
+    // A tool can return a file the sandbox holds already, such as an attachment read showed:
     // its output named that path, and the file stays there once.
     const alreadyAt =
       item.origin === "tool-result-file" ? input.materialized.get(fileRefKey(fileRef)) : undefined
@@ -466,7 +467,7 @@ async function prepareOneAttachment(input: {
     }
 
     metadataNote = !item.inlineContent
-      ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
+      ? "[Historical file kept as metadata: use read with the sandbox path when its contents are needed.]"
       : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
         ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
         : "[File not inlined: available through the sandbox path or content URL.]"
@@ -912,7 +913,7 @@ function sandboxAttachmentPath(
 /**
  * Where the call that returned a tool file put it in the sandbox, as its output showed: a later
  * turn materializes it there again, so the replayed output still names a file that exists.
- * `wait_agent` copies a child's file under `children/<key>/`, its `logicalPath`; a tool that
+ * `wait` copies a child's file under `children/<key>/`, its `logicalPath`; a tool that
  * stored a file put it at its call's tool-file path.
  */
 function toolResultSandboxPath(
@@ -922,7 +923,7 @@ function toolResultSandboxPath(
   const { toolCall, fileRef } = item
   if (!toolCall) return undefined
 
-  if (toolCall.toolName === WAIT_AGENT_TOOL) {
+  if (CHILD_FILE_TOOLS.has(toolCall.toolName)) {
     const path =
       fileRef.logicalPath === undefined ? undefined : posix.normalize(fileRef.logicalPath)
     if (!path || path.startsWith("/") || path === ".." || path.startsWith("../")) return undefined

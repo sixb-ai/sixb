@@ -1100,11 +1100,14 @@ function summaryReasoning(
  * the provider cached. The instruction asks for text alone; a call the model makes anyway never
  * runs.
  */
-function summaryTool(tool: Pick<ModelTool, "name" | "description" | "inputSchema">): ModelTool {
+function summaryTool(
+  tool: Pick<ModelTool, "name" | "description" | "inputSchema" | "strict">
+): ModelTool {
   return {
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
+    ...(tool.strict ? { strict: true } : {}),
     parseInput: (value) => value,
     execute: async () => {
       throw new Error("[SixbAgent] A context summary runs no tools.")

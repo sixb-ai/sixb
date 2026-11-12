@@ -54,6 +54,12 @@ export interface ModelToolSpecification {
   readonly name: string
   readonly description: string
   readonly inputSchema: JsonObject
+  /**
+   * Ask the provider to hold the model's arguments to `inputSchema`. A provider that cannot, for this
+   * schema or within its request's limits, receives the tool unconstrained: `parseInput` still
+   * validates every call.
+   */
+  readonly strict?: boolean
 }
 
 export interface ModelResponseFormat {

@@ -323,7 +323,7 @@ function realLoopTurn(): Promise<void> {
   })
 }
 
-/** Drive fake time, `wait_agent`'s polling included, until `check` holds. */
+/** Drive fake time, `wait`'s polling included, until `check` holds. */
 async function underFakeTime<T>(
   check: () => T | null | undefined | false | Promise<T | null | undefined | false>,
   label: string
@@ -387,7 +387,7 @@ function toolOutput(request: LanguageModelRequest | undefined, toolCallId: strin
   return undefined
 }
 
-/** What wait_agent answered in a turn, as the thread keeps it. */
+/** What wait answered in a turn, as the thread keeps it. */
 async function storedWait(agents: AgentStorage, threadId: string, toolCallId: string) {
   const { messages } = await agents.messages.list({ projectId, threadId })
   for (const message of messages) {
@@ -482,7 +482,7 @@ function steeredMidWork(input: {
         const childRunId = spawnedRunId(harness.parentRequests[1] ?? request)
         await input.afterSent?.(harness, childRunId)
         sent.reached()
-        return toolCalls(["wait", "wait_agent", { runIds: [childRunId] }])
+        return toolCalls(["wait", "wait", { ids: [childRunId] }])
       }
       return answer("Payment terms compared.")
     },
@@ -535,7 +535,7 @@ describe("a message to a child at work", () => {
   })
 
   // Removal proofs: drop `beforeComplete` from runSubagent; the child ends on its first answer,
-  // which wait_agent returns with the message as unread. Drop `afterAnswer` from the inbox's take;
+  // which wait returns with the message as unread. Drop `afterAnswer` from the inbox's take;
   // the child is not told to answer again in full.
   test("adds a step when it arrives as the child answers, which writes its result again", async () => {
     const harness = steeredMidWork({ firstStep: () => answer("Globex is cheapest.") })
@@ -563,7 +563,7 @@ describe("a message to a child at work", () => {
     }
   })
 
-  // Removal proof: drop `answerBeforeLateMessage` from wait_agent; the parent gets the addendum
+  // Removal proof: drop `answerBeforeLateMessage` from wait; the parent gets the addendum
   // alone, and the comparison it amends is gone.
   test("never loses the answer it amends: an addendum comes with the answer before it", async () => {
     const full = "Acme: 30 days, 2% early. Globex: 60 days. Recommend Acme."
@@ -682,7 +682,7 @@ describe("a message to a child at work", () => {
         if (call === 4) {
           sent.reached()
           const compare = spawnedRunId(harness.parentRequests[1] ?? request)
-          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+          return toolCalls(["wait", "wait", { ids: [compare] }])
         }
         return answer("Payment terms compared.")
       },
@@ -717,7 +717,7 @@ describe("message_agent", () => {
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
         if (call === 2) {
-          return toolCalls(["wait", "wait_agent", { runIds: [spawnedRunId(request)] }])
+          return toolCalls(["wait", "wait", { ids: [spawnedRunId(request)] }])
         }
         if (call === 3) {
           return toolCalls(
@@ -746,8 +746,8 @@ describe("message_agent", () => {
   })
 
   // Removal proofs: drop the paused check from SubagentCoordinator.message; the refusal says
-  // Compare ended. Drop `unreadBy` from wait_agent; its result lists no unread message.
-  test("refuses a child paused for an approval, and wait_agent lists what it left unread", async () => {
+  // Compare ended. Drop `unreadBy` from wait; its result lists no unread message.
+  test("refuses a child paused for an approval, and wait lists what it left unread", async () => {
     const compareAtWork = moment()
     const sent = moment()
     const collectReleased = moment()
@@ -767,7 +767,7 @@ describe("message_agent", () => {
         if (call === 3) {
           sent.reached()
           const compare = spawnedRunId(harness.parentRequests[1] ?? request)
-          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+          return toolCalls(["wait", "wait", { ids: [compare] }])
         }
         if (call === 4) {
           return toolCalls(["paused", "message_agent", { key: COMPARE.key, text: STEER }])
@@ -777,7 +777,7 @@ describe("message_agent", () => {
           const collect = toolOutput(harness.parentRequests[1], "spawn-collect") as {
             readonly runId: string
           }
-          return toolCalls(["wait-collect", "wait_agent", { runIds: [collect.runId] }])
+          return toolCalls(["wait-collect", "wait", { ids: [collect.runId] }])
         }
         return answer("INV-2041 waits for your approval; three invoices are open.")
       },
@@ -837,7 +837,7 @@ describe("message_agent", () => {
         if (call === 3) {
           refused.reached()
           const compare = spawnedRunId(harness.parentRequests[1] ?? request)
-          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+          return toolCalls(["wait", "wait", { ids: [compare] }])
         }
         return answer("INV-2041 waits for your approval.")
       },
@@ -868,7 +868,7 @@ describe("message_agent", () => {
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
         if (call === 2) {
-          return toolCalls(["wait", "wait_agent", { runIds: [spawnedRunId(request)] }])
+          return toolCalls(["wait", "wait", { ids: [spawnedRunId(request)] }])
         }
         if (call === 3) return answer("Globex is cheapest.")
         if (call === 4) {
@@ -910,11 +910,11 @@ describe("a message a child paused before reading", () => {
         if (call === 3) {
           sent.reached()
           const compare = spawnedRunId(harness.parentRequests[1] ?? request)
-          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+          return toolCalls(["wait", "wait", { ids: [compare] }])
         }
         if (call === 4) {
           const compare = spawnedRunId(harness.parentRequests[1] ?? request)
-          return toolCalls(["wait-again", "wait_agent", { runIds: [compare] }])
+          return toolCalls(["wait-again", "wait", { ids: [compare] }])
         }
         return answer("Payment terms compared; INV-2041 is paid.")
       },
@@ -957,6 +957,104 @@ describe("a message a child paused before reading", () => {
       ])
       expect(toolOutput(harness.parentRequests[4], "wait-again")).toMatchObject({
         results: [{ status: "succeeded", text: "Compared payment terms, without Globex." }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("stopping a child", () => {
+  // Removal proof: drop the cancel from SubagentCoordinator.stop; the child never hears it, and
+  // stop waits on it until the turn's deadline.
+  test("by its key: it ends cancelled, and stop returns how it ended", async () => {
+    const childAtWork = moment()
+    const harness = setup({
+      parent: async (_request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) {
+          await childAtWork.promise
+          return toolCalls(["stop", "stop", { id: COMPARE.key }])
+        }
+        return answer("Stopped the comparison.")
+      },
+      children: {
+        // At work until it is stopped.
+        [COMPARE.key]: (request) => {
+          childAtWork.reached()
+          return new Promise((_resolve, reject) => {
+            request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+              once: true,
+            })
+          })
+        },
+      },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+      const compare = await child(harness.agents, createSubagentRunId(run.id, COMPARE.key))
+
+      expect(compare.status).toBe("cancelled")
+      expect(toolOutput(harness.parentRequests[2], "stop")).toMatchObject({
+        results: [{ runId: COMPARE.key, status: "cancelled" }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("waiting in the step that spawns", () => {
+  // Removal proof: drop the spawn wait from resolveChildren (SubagentCoordinator); the wait runs before the spawn
+  // is admitted, and is refused: "wait has no background command or child agent 'compare'".
+  test("waits for the child that step spawns, by its key", async () => {
+    const harness = setup({
+      parent: async (_request, call) => {
+        if (call === 1) {
+          return toolCalls(
+            ["spawn", "spawn_agent", spawn(COMPARE)],
+            ["wait", "wait", { ids: [COMPARE.key] }]
+          )
+        }
+        return answer("Payment terms compared.")
+      },
+      children: { [COMPARE.key]: async () => answer("Compared payment terms.") },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      await requestTurn(harness)
+      expect(toolOutput(harness.parentRequests[1], "wait")).toMatchObject({
+        results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("waiting by key for a child of an earlier turn", () => {
+  // Removal proof: drop the latestChildUnder fallback from resolveChildren; the key names this
+  // turn's child, which does not exist, and the wait is refused after its rechecks.
+  test("finds the conversation's latest child under the key, as message_agent does", async () => {
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [spawnedRunId(request)] }])
+        if (call === 4) return toolCalls(["wait-earlier", "wait", { ids: [COMPARE.key] }])
+        return answer("Payment terms compared.")
+      },
+      children: { [COMPARE.key]: async () => answer("Compared payment terms.") },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+      await requestTurn(harness, run.threadId)
+      expect(toolOutput(harness.parentRequests[4], "wait-earlier")).toMatchObject({
+        results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
       })
     } finally {
       await settle(harness.worker.stop(), "worker stop")

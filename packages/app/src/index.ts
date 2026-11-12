@@ -81,6 +81,8 @@ export {
   type UseAgentConversationInput,
   useAgentConversation,
 } from "./agent/hooks/use-agent-conversation"
+export type { AskedQuestion } from "./agent/questions/interpret"
+export { QuestionComposer, type QuestionComposerProps } from "./agent/questions/question-composer"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
 export {
   type AgentToolView,

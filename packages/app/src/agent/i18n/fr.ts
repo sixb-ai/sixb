@@ -334,10 +334,7 @@ export const fr: Translation<AgentMessages> = {
       timeout: "Temps écoulé",
       unknown: "Délégué",
     },
-    fromAgent: "L’agent a dit",
-    asks: "A demandé",
-    answer: "L’agent a répondu",
-    answerHint: "Votre prochain message lui répond.",
+    noAnswer: "Il a continué sans réponse, une fois l’approbation décidée.",
     close: "Fermer",
     viewRequest: "Voir sa demande plus bas",
     stepsLater: "En cours. Ses étapes s’afficheront ici une fois terminé.",
@@ -369,6 +366,9 @@ export const fr: Translation<AgentMessages> = {
     heardFrom: (key) => `Réponse de ${key}`,
     heardFromCount: (agents) => `Réponses de ${count(agents, "sous-agent")}`,
     waitFailed: "Impossible d’attendre les sous-agents",
+    stoppingAgent: (key) => `Arrêt de ${key}`,
+    stoppedAgent: (key) => `${key} arrêté`,
+    stopAgentFailed: (key) => `Impossible d’arrêter ${key}`,
     line: {
       names: (names) =>
         names.length <= 1
@@ -443,6 +443,35 @@ export const fr: Translation<AgentMessages> = {
       name ? `Impossible de consulter ${name}` : "Impossible de consulter le fichier",
     open: (name) => `Ouvrir ${name}`,
   },
+  questions: {
+    card: (count) => (count === 1 ? "La question de l’agent" : "Les questions de l’agent"),
+    asked: "Vous a demandé",
+    waiting: "En attente d’une réponse",
+    running: "Vous pose une question",
+    send: "Envoyer la réponse",
+    sending: "Envoi…",
+    pickAny: "Plusieurs choix possibles",
+    typeAnswer: "Saisir une réponse",
+    typeOther: "Ou saisir une autre réponse",
+    somethingElse: "Autre chose…",
+    next: "Question suivante",
+    back: "Question précédente",
+    step: (step, total) => `Question ${step} sur ${total}`,
+    dismiss: "Répondre dans la conversation",
+  },
+  edit: {
+    title: (name) => (name ? `${name} modifié` : "Fichier modifié"),
+    running: (name) => (name ? `Modification de ${name}` : "Modification d’un fichier"),
+    failed: (name) =>
+      name ? `Impossible de modifier ${name}` : "Impossible de modifier le fichier",
+  },
+  write: {
+    created: (name) => (name ? `${name} créé` : "Fichier créé"),
+    replaced: (name) => (name ? `${name} réécrit` : "Fichier réécrit"),
+    running: (name) => (name ? `Écriture de ${name}` : "Écriture d’un fichier"),
+    failed: (name) => (name ? `Impossible d’écrire ${name}` : "Impossible d’écrire le fichier"),
+    lines: (lines) => count(lines, "ligne"),
+  },
   read: {
     file: {
       title: (name) => (name ? `${name} lu` : "Fichier lu"),
@@ -459,6 +488,12 @@ export const fr: Translation<AgentMessages> = {
       running: (name) => `Consultation du guide ${quoted(name)}`,
       failed: (name) => `Impossible de lire le guide ${quoted(name)}`,
     },
+    directory: {
+      title: (name) => (name ? `Contenu de ${name} listé` : "Dossier listé"),
+      running: (name) => (name ? `Liste du contenu de ${name}` : "Liste d’un dossier"),
+      failed: (name) => (name ? `Impossible de lister ${name}` : "Impossible de lister le dossier"),
+    },
+    entries: (entries) => count(entries, "élément"),
     memory: {
       title: (project) => (project ? "Mémoire du projet consultée" : "Mémoire consultée"),
       running: (project) =>
