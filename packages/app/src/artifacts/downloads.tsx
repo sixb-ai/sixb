@@ -42,6 +42,8 @@ export function DownloadMenu({
 }) {
   const messages = useArtifactMessages().viewer
   const [state, setState] = useState<"idle" | "working" | "failed">("idle")
+  // Why the last download failed, in the words of what failed, which a hover shows.
+  const [failure, setFailure] = useState<string>()
   if (options.length === 0) return null
 
   const choose = async (option: DownloadOption) => {
@@ -52,6 +54,7 @@ export function DownloadMenu({
       setState("idle")
     } catch (error) {
       console.warn(`[SixbApp] Could not build ${option.title}:`, error)
+      setFailure(error instanceof Error ? error.message.replace(/^\[\w+\]\s*/, "") : undefined)
       setState("failed")
     }
   }
@@ -59,7 +62,7 @@ export function DownloadMenu({
   return (
     <span className={cn("flex shrink-0 items-center gap-2", className)}>
       {state === "failed" ? (
-        <span role="status" className="hidden text-xs text-destructive @lg:inline">
+        <span role="status" title={failure} className="hidden text-xs text-destructive @lg:inline">
           {messages.downloadFailed}
         </span>
       ) : null}

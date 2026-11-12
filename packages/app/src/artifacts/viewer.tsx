@@ -58,6 +58,7 @@ import { LiveArtifactProvider } from "./live/hooks"
 import { type LiveView, useLiveView } from "./live/view"
 import { useArtifactMessages } from "./messages"
 import { resetPageState, usePageStateCount } from "./page-state"
+import { downloadDocumentPdf } from "./pdf"
 import { useArtifactPeople } from "./people"
 import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
 import {
@@ -1126,7 +1127,8 @@ function DeleteDialog({
 
 /**
  * A document or a file downloads as its entry. A deck's or a page's entry is only its markup, no
- * file the reader wants on its own without the files beside it.
+ * file the reader wants on its own without the files beside it, and neither is a designed
+ * document's: it downloads as its PDF alone.
  */
 function EntryDownloadMenu({
   version,
@@ -1144,16 +1146,31 @@ function EntryDownloadMenu({
   if (!source) return null
   return (
     <DownloadMenu
-      options={[
-        {
-          key: "entry",
-          type: fileTypeOf(source.name),
-          title: source.name,
-          detail: formatFileSize(source.fileRef.sizeBytes, locale, messages.files),
-          href: source.downloadUrl,
-          fileName: source.name,
-        },
-      ]}
+      options={
+        // A designed document prints to PDF, in a project that can print it.
+        version.pdf
+          ? [
+              {
+                key: "pdf",
+                type: "pdf",
+                title: messages.document.pdf,
+                detail: messages.document.pdfDetail,
+                run: () => downloadDocumentPdf(version),
+              },
+            ]
+          : isDesignedDocument(version)
+            ? []
+            : [
+                {
+                  key: "entry",
+                  type: fileTypeOf(source.name),
+                  title: source.name,
+                  detail: formatFileSize(source.fileRef.sizeBytes, locale, messages.files),
+                  href: source.downloadUrl,
+                  fileName: source.name,
+                },
+              ]
+      }
     />
   )
 }
