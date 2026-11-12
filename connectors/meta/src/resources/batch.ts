@@ -167,8 +167,7 @@ async function sendSeparately(
       : undefined
   )
   const rawBody = response.status === 204 ? "" : await response.text()
-  const headers: MetaHeader[] = []
-  response.headers.forEach((value, name) => headers.push({ name, value }))
+  const headers: MetaHeader[] = [...response.headers].map(([name, value]) => ({ name, value }))
   return readBatchResult({ code: response.status, body: rawBody, headers })
 }
 
