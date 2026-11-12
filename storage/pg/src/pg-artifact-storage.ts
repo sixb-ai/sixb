@@ -9,6 +9,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
@@ -22,6 +23,8 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
   ArtifactRestorePointRecord,
@@ -113,6 +116,11 @@ const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "upd
 
 const BOARD_PREVIEW_COLUMNS = `
   project_id AS "projectId", render_key AS "renderKey", theme, size, file,
+  created_at AS "createdAt"
+`
+
+const PDF_COLUMNS = `
+  project_id AS "projectId", render_key AS "renderKey", file, pages, failure,
   created_at AS "createdAt"
 `
 
@@ -707,6 +715,38 @@ export class PgArtifactStorage implements ArtifactStorage {
         `
       }
     })
+  }
+
+  async getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(PDF_COLUMNS)} FROM artifact_pdfs
+      WHERE project_id = ${input.projectId} AND render_key = ${input.renderKey}
+    `
+    return row ? parseArtifactPdfRow(row) : null
+  }
+
+  async putPdf(input: ArtifactPdfRecord): Promise<void> {
+    const printed = "failure" in input ? null : input
+    await this.sql`
+      INSERT INTO artifact_pdfs (project_id, render_key, file, pages, failure, created_at)
+      VALUES (
+        ${input.projectId}, ${input.renderKey},
+        ${printed ? JSON.stringify(printed.file) : null}::text::jsonb, ${printed?.pages ?? null},
+        ${"failure" in input ? input.failure : null}, ${input.createdAt}
+      )
+      ON CONFLICT (project_id, render_key) DO UPDATE SET
+        file = excluded.file, pages = excluded.pages, failure = NULL,
+        created_at = excluded.created_at
+      WHERE artifact_pdfs.failure IS NOT NULL AND excluded.failure IS NULL
+    `
+  }
+
+  async clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void> {
+    await this.sql`
+      DELETE FROM artifact_pdfs
+      WHERE project_id = ${input.projectId} AND render_key = ${input.renderKey}
+        AND failure IS NOT NULL
+    `
   }
 
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {

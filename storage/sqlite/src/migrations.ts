@@ -332,6 +332,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("098-connector-connection-owners", connectorConnectionOwnersSql),
     sqliteSql("099-user-suspension-source", userSuspensionSourceSql),
     sqliteSql("100-script-executions", scriptExecutionsSql),
+    sqliteSql("101-artifact-pdfs", artifactPdfsSql),
   ],
 })
 
@@ -769,3 +770,4 @@ import userSuspensionSourceSql from "./migrations/099-user-suspension-source.sql
   type: "text",
 }
 import scriptExecutionsSql from "./migrations/100-script-executions.sql" with { type: "text" }
+import artifactPdfsSql from "./migrations/101-artifact-pdfs.sql" with { type: "text" }

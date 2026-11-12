@@ -16,6 +16,8 @@ export type {
   ArtifactKind,
   ArtifactOrigin,
   ArtifactOutline,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactReference,
   ArtifactRestorePointReason,

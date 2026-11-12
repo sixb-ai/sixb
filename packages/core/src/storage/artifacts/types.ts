@@ -413,6 +413,28 @@ export interface PutArtifactBoardPreviewsInput {
 }
 
 /**
+ * A designed document printed to PDF, kept under its render key: a hash of what it prints, which
+ * its version names. Versions that print the same share it. When it could not be printed, why is
+ * kept in its place, until it prints or someone asks for it again.
+ */
+export type ArtifactPdfRecord = ArtifactPdfKeyInput & { readonly createdAt: Date } & (
+    | {
+        readonly file: FileRef
+        /** How many pages it printed on. */
+        readonly pages: number
+      }
+    | {
+        /** Why it could not be printed, as whoever asked for it hears it. */
+        readonly failure: string
+      }
+  )
+
+export interface ArtifactPdfKeyInput {
+  readonly projectId: string
+  readonly renderKey: string
+}
+
+/**
  * What a comment is about: a canvas's board, an element of it by its address, as
  * `boardElements` writes one, or the artifact itself, at the revision the author saw.
  */
@@ -574,6 +596,16 @@ export interface ArtifactStorage {
    * what the board shows, so both are pictures of the same page. Deleting an artifact keeps them.
    */
   putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void>
+  /** The PDF kept under a render key, or why it could not be printed; null when neither is. */
+  getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null>
+  /**
+   * Keeps a PDF, or why it could not be printed, under its render key. A PDF replaces a failure;
+   * anything else already kept there stays: the key names what it prints. Deleting an artifact
+   * keeps them.
+   */
+  putPdf(input: ArtifactPdfRecord): Promise<void>
+  /** Forgets why the PDF under a render key could not be printed. A PDF kept there stays. */
+  clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void>
   /**
    * Adds a comment, or a reply to one. Throws `artifact_not_found`; `comment_not_found` when
    * `parentId` names no comment of the artifact, or a reply; and `artifact_comments_full` past

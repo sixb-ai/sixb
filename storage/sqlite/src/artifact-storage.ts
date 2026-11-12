@@ -10,6 +10,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
@@ -22,6 +23,8 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
   ArtifactRestorePointRecord,
@@ -106,6 +109,9 @@ const COMMENT_COLUMNS = `
 
 const BOARD_PREVIEW_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, theme, size, file, created_at AS createdAt"
+
+const PDF_COLUMNS =
+  "project_id AS projectId, render_key AS renderKey, file, pages, failure, created_at AS createdAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -712,6 +718,42 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         )
       }
     })
+  }
+
+  async getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null> {
+    const row = this.db
+      .query(`SELECT ${PDF_COLUMNS} FROM artifact_pdfs WHERE project_id = ? AND render_key = ?`)
+      .get(input.projectId, input.renderKey) as Row | null
+    return row ? parseArtifactPdfRow(row) : null
+  }
+
+  async putPdf(input: ArtifactPdfRecord): Promise<void> {
+    const printed = "failure" in input ? null : input
+    this.db
+      .query(
+        `INSERT INTO artifact_pdfs (project_id, render_key, file, pages, failure, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, render_key) DO UPDATE SET
+           file = excluded.file, pages = excluded.pages, failure = NULL,
+           created_at = excluded.created_at
+         WHERE artifact_pdfs.failure IS NOT NULL AND excluded.failure IS NULL`
+      )
+      .run(
+        input.projectId,
+        input.renderKey,
+        printed ? JSON.stringify(printed.file) : null,
+        printed ? printed.pages : null,
+        "failure" in input ? input.failure : null,
+        input.createdAt.toISOString()
+      )
+  }
+
+  async clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void> {
+    this.db
+      .query(
+        "DELETE FROM artifact_pdfs WHERE project_id = ? AND render_key = ? AND failure IS NOT NULL"
+      )
+      .run(input.projectId, input.renderKey)
   }
 
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
