@@ -284,6 +284,49 @@ proposal/
 - A version holds everything it shows: to share a design between documents, keep it in a
   [skill](../models/tools-and-authorization.md#add-a-skill) and copy its files into each one.
 
+### Show live data in a document
+
+A designed document an object [holds](#hold-an-artifact-in-an-object), such as a contract's
+proposal, shows that object's values and its [queries'](#declare-a-query) rows as each reader reads
+them. Name the object's type, then mark each value, with the text it shows until it is read:
+
+```html
+<head><meta name="sixb:object-type" content="Contract"></head>
+<h1 data-sixb-field="client.name">Example Landscaping</h1>
+<span data-sixb-field="fee" data-format="money" data-currency-field="currency">$4,000</span>
+<tr data-sixb-each="query:past-work">
+  <td data-sixb-field="title">Phase 1</td>
+  <td data-sixb-field="signedAt" data-format="date">March 2, 2026</td>
+</tr>
+```
+
+| Markup | Shows |
+| --- | --- |
+| `data-sixb-field="number"` | A property of the object that holds it |
+| `data-sixb-field="client.name"` | A property of what one of its links reaches |
+| `data-sixb-field="scope.services[job-flow].amount"` | A list's item, by its `id` |
+| `data-sixb-each="milestones"` | The element once per item of a list or a link; fields inside read the item |
+| `data-sixb-each="query:past-work"` | The element once per row of `queries/past-work.json` |
+| `data-sixb-field="query:past-work.total"` | How many rows the query matched |
+| `data-sixb-each="query:by-status.facets.status"` | The element once per facet value; fields `value` and `count` |
+| `data-format="money"`, `number`, `percent`, `date` | Formatted for `<html lang>`; `money` takes `data-currency="USD"` or `data-currency-field` |
+
+- The object is the one of that type that holds the document, as the reader reads it. When none
+  does, as with a template, or several do, its fields keep their written text, and so does
+  anything the reader can't read. A value they are not cleared for shows `•••`.
+- A query can start from that object: `{ "kind": "traverse", "input": { "kind": "holder" }, … }`.
+- Values update as the objects change. While its words are edited in place, it shows the written
+  text, and fields take no typing.
+- Publishing warns `field_unknown` for a field that reads nothing the type holds, and refuses a
+  document whose author can't read the type.
+- [Creating a version](#versions-and-restore-points) writes the values in, as whoever creates it
+  reads them, and leaves plain HTML: everyone who reads that version sees those values, including
+  ones they could not read live. Its PDF shows the values whoever asks reads.
+- Fields can't go on `<style>`, `<title>`, `<textarea>` and other elements whose text isn't markup.
+- `sixb.artifacts.query(id, "holder")` reads the object, with what the links its fields read
+  through reach.
+- A document computes nothing: a total or an instalment is a property the object keeps.
+
 ### Print a document to PDF
 
 A designed document downloads as a PDF: **Download** › **PDF** in the app. It prints in Chromium,
@@ -655,10 +698,10 @@ preview when it changed, and the viewer shows the new one as soon as it is ready
 
 ## Declare a query
 
-A sheet, a page, a deck, or a canvas can hold queries over your objects rather than a copy of
-them. Each is a file `queries/<name>.json` holding what `sixb objects query --file` runs, and each
-reader runs it with their own rights: they get the objects they can view, without the marked
-properties they are not cleared for.
+A sheet, a page, a deck, a canvas, or a designed document can hold queries over your objects
+rather than a copy of them. Each is a file `queries/<name>.json` holding what `sixb objects query
+--file` runs, and each reader runs it with their own rights: they get the objects they can view,
+without the marked properties they are not cleared for.
 
 File: `queries/overdue.json`
 
@@ -678,7 +721,8 @@ File: `queries/overdue.json`
   "limit": 10 }] }` to count rows by value, as `sixb objects facets --file` takes it.
 - Publishing runs each query once as its author and refuses one they could not run, naming the
   file and where in it. `page`, `vector`, and `rerank` are refused: Sixb pages the result, and a
-  search would bill every reader who opens the artifact. A document holds no queries.
+  search would bill every reader who opens the artifact. A Markdown document holds no queries; a
+  [designed one](#show-live-data-in-a-document) does.
 - A query returns only what its author can read: one that would return a marked property they
   are not cleared for, on its rows or on an object an `expand` attaches, or member profiles they
   may not view, is refused. Use a `project` node to leave those properties out.
