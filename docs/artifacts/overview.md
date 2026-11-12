@@ -284,6 +284,34 @@ proposal/
 - A version holds everything it shows: to share a design between documents, keep it in a
   [skill](../models/tools-and-authorization.md#add-a-skill) and copy its files into each one.
 
+### Print a document to PDF
+
+A designed document downloads as a PDF: **Download** › **PDF** in the app. It prints in Chromium,
+on the paper its `@page` rule sets, with its backgrounds, once its fonts and images have loaded.
+Its `document.html` is not offered: without its stylesheets and pictures, it would not look like
+the document.
+
+```ts
+const pdf = await sixb.artifacts.pdf(artifactId) // { status: "printing" }, then:
+// { status: "ready", file: FileRef, pages: 6 }
+```
+
+- The first ask prints it, which takes a few seconds: ask again until it is `ready`. Over HTTP,
+  `POST /api/artifacts/{id}/versions/{version}/pdf` answers the same, and `GET` on the same path
+  downloads it.
+- The [`render` worker](../cli/overview.md) prints it in a sandbox of the project, whose image needs
+  Node.js and Playwright's Chromium, as the Sixb agent image has. `sixb dev` and
+  `sixb worker-group` start the worker when the project has a sandbox provider. A sandbox without a
+  browser is a failure that says so.
+- A PDF is kept for what the version prints: a version restored or frozen as it was finds it, and
+  a change to any of its files prints it anew.
+- When it could not be printed, asking answers `{ status: "failed", reason }` until you ask with
+  `{ retry: true }` (`?retry=true` over HTTP), which prints it again.
+- A project without a [sandbox provider](../sandboxes/overview.md) prints nothing: asking fails
+  with `pdf_unavailable`, and the app offers no download.
+- Write the rules a phone lays it out by as `@media screen and (max-width: …)`: paper as narrow as A5
+  would match a rule without `screen` when printed.
+
 ## Write a sheet
 
 A sheet is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds raw values; the
