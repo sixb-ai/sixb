@@ -196,7 +196,11 @@ export function annotateBoard(source: string): string {
  * the inline tags around the rest stay: typing in a bold word keeps it bold.
  */
 export function setBoardText(source: string, address: string, text: string): BoardEdit {
-  const { node } = elementAt(source, address, ["text"])
+  return setText(source, elementAt(source, address, ["text"]).node, text)
+}
+
+/** The edit that makes an element's text `text`, its markup kept. */
+function setText(source: string, node: Element, text: string): BoardEdit {
   const nodes = textNodes(node)
   const before = nodes.map((each) => each.value).join("")
   if (before === text) return []
@@ -269,6 +273,12 @@ export function setBoardText(source: string, address: string, text: string): Boa
  * they saw them: what others changed in it since is kept, merged as the live document merges
  * concurrent edits. Throws when the address names no text any more: the board changed, and the
  * editor reloads it.
+ *
+ * The frame collapses an element's whitespace as CSS showed it before the reader types, so `base`
+ * may be the source's words with each run of whitespace one space, and a space they type shows
+ * twice until the next word. When the source's words, so collapsed, are the reader's, their
+ * change is made where it falls in the source, whose line breaks and indents stay; a space that
+ * would never show is not written.
  */
 export function mergeBoardText(
   source: string,
@@ -278,7 +288,61 @@ export function mergeBoardText(
 ): BoardEdit {
   const { node } = elementAt(source, address, ["text"])
   const live = textOf(node)
-  return setBoardText(source, address, live === base ? typed : mergeText(base, typed, live))
+  if (live === base) return setText(source, node, typed)
+
+  // Merged as the words show, then made where they fall in the source: whatever else changed
+  // since, the reader's words never land in an indent.
+  const collapsed = collapsedWords(live)
+  const shown = collapsedWords(base).text
+  const words = collapsedWords(typed).text
+  const merged = collapsed.text === shown ? words : mergeText(shown, words, collapsed.text)
+  return setText(source, node, changeThrough(live, collapsed.at, collapsed.text, merged))
+}
+
+/** Whitespace as CSS collapses it: none at either end, and each run between words one space. */
+const WHITESPACE = /[ \t\n\r\f]/
+
+/**
+ * Words with their whitespace collapsed, and where each position in them is in the words: the
+ * position of each character, the first of a run for a collapsed space, and one past the end.
+ */
+function collapsedWords(words: string): { readonly text: string; readonly at: readonly number[] } {
+  let text = ""
+  const at: number[] = []
+  let space = -1
+  for (let index = 0; index < words.length; index += 1) {
+    const char = words[index] as string
+    if (WHITESPACE.test(char)) {
+      if (space < 0 && text.length > 0) space = index
+      continue
+    }
+    if (space >= 0) {
+      text += " "
+      at.push(space)
+      space = -1
+    }
+    text += char
+    at.push(index)
+  }
+  at.push(text.length === 0 ? 0 : (at.at(-1) as number) + 1)
+  return { text, at }
+}
+
+/** `words` with the change from `base` to `typed` made where it falls, through `at`. */
+function changeThrough(words: string, at: readonly number[], base: string, typed: string): string {
+  let prefix = 0
+  const most = Math.min(base.length, typed.length)
+  while (prefix < most && base[prefix] === typed[prefix]) prefix += 1
+  let suffix = 0
+  while (
+    suffix < most - prefix &&
+    base[base.length - 1 - suffix] === typed[typed.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+  const from = at[prefix] as number
+  const to = at[base.length - suffix] as number
+  return words.slice(0, from) + typed.slice(prefix, typed.length - suffix) + words.slice(to)
 }
 
 /** Replaces an image's picture, its description, or both. */

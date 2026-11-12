@@ -178,6 +178,54 @@ describe("a board's frame, editing", () => {
     expect(heading.hasAttribute("contenteditable")).toBe(false)
   })
 
+  // Guard proof: drop `collapseSpaces` from the runtime's click handler; the paragraph keeps its
+  // source's line break and indent, which a browser shows once the paragraph takes typing.
+  test("collapses the whitespace of what the reader types into, as it showed", () => {
+    const { request, events, at, fire } = frame(`<!doctype html><html><head></head><body>
+<main>
+  <p>
+    Our technician found a failed
+    fan motor, <b>covered</b> in full.
+  </p>
+</main>
+</body></html>`)
+    request("edit", { on: true })
+
+    const paragraph = at("body>main:0>p:0")
+    fire(paragraph, "click")
+    // Each run is replaced on its own, which a browser's caret follows; happy-dom's does not.
+    expect(paragraph.textContent).toBe("Our technician found a failed fan motor, covered in full.")
+    expect(paragraph.querySelector("b")?.textContent).toBe("covered")
+
+    paragraph.textContent = "Our technician found a failed fan motor, covered in full today."
+    fire(paragraph, "input", { kind: "input" })
+    expect(events("edit.text").at(-1)?.params).toMatchObject({
+      base: "Our technician found a failed fan motor, covered in full.",
+    })
+  })
+
+  // Reproduce by leaving data-sixb-text as it was after collapseSpaces: the paragraph, clicked again
+  // untouched, no longer matches its words and is reported as scripted.
+  test("still lets the reader type into a paragraph they clicked and left untouched", () => {
+    const { request, events, at, fire } = frame(`<!doctype html><html><head></head><body>
+<main>
+  <p>
+    Our technician found a failed
+    fan motor.
+  </p>
+  <h1>Elsewhere</h1>
+</main>
+</body></html>`)
+    request("edit", { on: true })
+
+    const paragraph = at("body>main:0>p:0")
+    fire(paragraph, "click")
+    fire(at("body>main:0>h1:0"), "click")
+    fire(paragraph, "click")
+    expect(events("edit.select").at(-1)?.params).toMatchObject({ target: { kind: "text" } })
+    expect(paragraph.getAttribute("contenteditable")).toBe("plaintext-only")
+  })
+
   // Guard proof: drop `typable` from the runtime's click handler; the heading picked to comment on
   // takes the reader's typing.
   test("picks without typing when the app asks so, and says where the reader clicked", () => {
