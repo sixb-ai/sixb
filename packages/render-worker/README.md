@@ -1,12 +1,29 @@
 # @sixb/render-worker
 
-Queue worker for what Sixb renders in a browser: a designed document's PDF. It consumes the
-`renders` queue, so a render never waits behind an agent's run or takes its slot.
+Queue worker for what Sixb renders in a browser: the pictures of a canvas's boards, and a designed
+document's PDF. It consumes the `renders` queue, so a render never waits behind an agent's run or
+takes its slot.
 
 You normally do not import it. `sixb worker render` and `sixb worker-group` construct it for you,
 and `sixb dev` starts it when the project has a sandbox provider.
 
 ## What it runs
+
+`artifact.previews.requested`: the pictures a canvas version's boards miss, which a reader sees
+until they open a board, whoever published it. Each write that asks replaces the artifact's job
+still waiting, and it runs once the canvas has rested 15 seconds. One render:
+
+- Does nothing when nothing is missing, or the version holds other content since it was asked
+  for: the write that changed it asks for its own.
+- Opens a blank sandbox of the project, which reaches only the CDNs a frame may load from, and
+  writes the version there with each board as its frame serves it, and what its queries return as
+  its publisher read them.
+- Pictures each missing board with the image's Chromium, through Playwright, at its own size, in
+  each mode the reader sees: full as PNG, and at most 480 pixels wide as WebP. A board whose page
+  did not load whole is not pictured: a broken picture would stay. Without query answers, a board
+  that reads a query is not pictured either.
+- Keeps the pictures as the boards' previews, then destroys the sandbox. After three attempts the
+  boards keep their outlines.
 
 `artifact.pdf.requested`: a designed document's version printed to PDF, which
 `sixb.artifacts.pdf()` asks for. One print:
