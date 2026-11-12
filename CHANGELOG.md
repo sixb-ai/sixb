@@ -2,6 +2,16 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+- Connect an Instagram professional account with its own credentials, without a Page or a
+  business portfolio, with `@sixb/connector-meta`'s `meta({ appId, appSecret, accounts:
+  "instagram", login: "instagram" })` (Instagram API with Instagram Login, the Instagram app's ID
+  and secret). The connection reads and publishes on `graph.instagram.com`, and its 60-day token
+  is refreshed at the first use after 30 days. `reauthenticate: true` asks for credentials on
+  every sign-in, and `batch.execute` sends each read on its own there, since that host has no
+  batch endpoint.
+
 ## 2026-11-10 — Sixb 0.2.3
 
 0.2.3 makes the data plane run on its own: the lake is retained and compacted, webhook changes are

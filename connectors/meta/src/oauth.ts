@@ -33,11 +33,14 @@ export type OAuthOperation =
   | "permissions read"
   | "Pages read"
   | "Instagram accounts read"
+  | "token refresh"
   | "revoke"
 
 export interface MetaOAuthEndpoints {
   readonly graphBaseUrl: string
   readonly graphVersion: string
+  /** Named in errors. Defaults to Facebook. */
+  readonly service?: "Facebook" | "Instagram"
 }
 
 export function createMetaAuthentication(
@@ -326,6 +329,8 @@ export async function graphRequest(
   operation: OAuthOperation,
   request: GraphRequest
 ): Promise<Record<string, unknown>> {
+  const service = endpoints.service ?? "Facebook"
+  // A path may be a full URL, for endpoints outside the Graph host (Instagram's code exchange).
   const url = new URL(request.path, endpoints.graphBaseUrl)
   for (const [name, value] of Object.entries(request.query ?? {})) {
     url.searchParams.set(name, value)
@@ -352,7 +357,7 @@ export async function graphRequest(
   } catch (error) {
     throw new MetaOAuthRequestError(
       "ambiguous",
-      `[SixbMeta] Facebook ${operation} ended without a readable response.`,
+      `[SixbMeta] ${service} ${operation} ended without a readable response.`,
       undefined,
       { cause: error }
     )
@@ -363,17 +368,21 @@ export async function graphRequest(
     const graphError = parseMetaGraphError(body)
     const retryable =
       response.status === 429 || response.status >= 500 || isThrottlingError(graphError)
-    const detail = graphError?.message ? `: ${graphError.message}` : ""
+    // Instagram's code exchange answers `{ error_message }` instead of a Graph error.
+    const message =
+      graphError?.message ??
+      (isRecord(body) && nonEmptyString(body.error_message) ? body.error_message : undefined)
+    const detail = message ? `: ${message}` : ""
     throw new MetaOAuthRequestError(
       retryable ? "retryable" : "terminal",
-      `[SixbMeta] Facebook rejected the ${operation} (${response.status})${detail}.`,
+      `[SixbMeta] ${service} rejected the ${operation} (${response.status})${detail}.`,
       graphError?.code
     )
   }
   if (!isRecord(body)) {
     throw new MetaOAuthRequestError(
       "ambiguous",
-      `[SixbMeta] Facebook returned an invalid ${operation} response.`
+      `[SixbMeta] ${service} returned an invalid ${operation} response.`
     )
   }
   return body

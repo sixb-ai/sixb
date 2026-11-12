@@ -16,6 +16,8 @@ import type {
 import type { MetaHeader, MetaRetryContext } from "../types/common"
 
 const MAX_BATCH_SIZE = 50
+// Requests of a batch sent one by one at most this many at a time.
+const SEPARATE_CONCURRENCY = 5
 
 export function createBatchApi(context: MetaHttpContext): MetaBatchApi {
   return {
@@ -39,6 +41,9 @@ async function executeBatch<const TRequests extends readonly MetaBatchGetRequest
   requests: TRequests
 ): Promise<MetaBatchResults<TRequests>> {
   assertBatchSize(requests.length)
+  if (context.batchRequests === "separate") {
+    return executeSeparately(context, requests) as Promise<MetaBatchResults<TRequests>>
+  }
   const prepared = requests.map((request, index) => ({
     index,
     request,
@@ -125,6 +130,45 @@ async function sendBatch(
     throw new Error("[SixbMeta] Graph batch response must be an array.")
   }
   return parsed as readonly RawBatchResult[]
+}
+
+/**
+ * The same results as a batch, from one request each: the HTTP client retries each on its own,
+ * and a request Meta refuses is a failed result, as in a batch.
+ */
+async function executeSeparately(
+  context: MetaHttpContext,
+  requests: readonly MetaBatchGetRequest[]
+): Promise<readonly MetaBatchResult[]> {
+  const results: MetaBatchResult[] = new Array(requests.length)
+  let next = 0
+  async function work(): Promise<void> {
+    while (next < requests.length) {
+      const index = next++
+      const request = requests[index]!
+      results[index] = await sendSeparately(context, request)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(SEPARATE_CONCURRENCY, requests.length) }, () => work())
+  )
+  return results
+}
+
+async function sendSeparately(
+  context: MetaHttpContext,
+  request: MetaBatchGetRequest
+): Promise<MetaBatchResult> {
+  const relativeUrl = prepareRelativeUrl({ relativeUrl: request.relativeUrl })
+  const response = await context.http.get(
+    relativeUrl,
+    request.accessToken
+      ? { headers: { authorization: `Bearer ${request.accessToken}` } }
+      : undefined
+  )
+  const rawBody = response.status === 204 ? "" : await response.text()
+  const headers: MetaHeader[] = [...response.headers].map(([name, value]) => ({ name, value }))
+  return readBatchResult({ code: response.status, body: rawBody, headers })
 }
 
 function readBatchResult(raw: RawBatchResult): MetaBatchResult {

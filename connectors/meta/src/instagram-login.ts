@@ -16,6 +16,11 @@ import {
 } from "./oauth"
 import type { MetaInstagramOAuthConnectorOptions } from "./types/options"
 
+type UnifiedLoginOptions = Extract<
+  MetaInstagramOAuthConnectorOptions,
+  { readonly configId: string }
+>
+
 const FACEBOOK_DIALOG_HOST = "https://www.facebook.com"
 const ACCOUNT_LIMIT = 100
 // 100 pages of 100 accounts is far beyond any real portfolio and stops a cursor that never ends.
@@ -33,7 +38,7 @@ type InstagramGrantAccount = { readonly username?: string }
  * app from their portfolio, and reconnecting is the only way back.
  */
 export function createMetaInstagramAuthentication(
-  options: MetaInstagramOAuthConnectorOptions,
+  options: UnifiedLoginOptions,
   endpoints: MetaOAuthEndpoints
 ): ConnectorOAuth2Authentication {
   assertNonEmpty(options.appId, "appId")
@@ -121,7 +126,7 @@ export function discoverMetaInstagramAccounts(
  */
 async function readSystemUser(
   context: ConnectorContext,
-  options: MetaInstagramOAuthConnectorOptions,
+  options: UnifiedLoginOptions,
   endpoints: MetaOAuthEndpoints,
   accessToken: string
 ): Promise<Record<string, unknown>> {
@@ -142,7 +147,7 @@ async function readSystemUser(
 
 async function readAssignedAccounts(
   context: ConnectorContext,
-  options: MetaInstagramOAuthConnectorOptions,
+  options: UnifiedLoginOptions,
   endpoints: MetaOAuthEndpoints,
   accessToken: string
 ): Promise<Record<string, InstagramGrantAccount>> {

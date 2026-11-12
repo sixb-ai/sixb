@@ -149,6 +149,40 @@ connection then carries so Sixb asks to reconnect in time. It stops working when
 removes the app from their portfolio (Business settings → Integrations → Connected apps) or moves
 the account to another portfolio: connect again. Meta documents no API to revoke it.
 
+### Instagram Login
+
+Instagram Login connects an Instagram professional account with its own credentials, on
+instagram.com, without a Page or a business portfolio. Pass the Instagram app's ID and secret
+(App Dashboard → Instagram use case → **API setup with Instagram login**) and `login: "instagram"`:
+
+```ts
+export const metaInstagram = defineConnector(
+  "meta-instagram",
+  meta({
+    appId: process.env.META_INSTAGRAM_APP_ID!,
+    appSecret: process.env.META_INSTAGRAM_APP_SECRET!,
+    accounts: "instagram",
+    login: "instagram",
+  })
+)
+```
+
+It asks for `instagram_business_basic`, `instagram_business_content_publish` and
+`instagram_business_manage_insights`; pass `scopes` to change them. Each sign-in connects the
+account that signed in. Pass `reauthenticate: true` to ask for the account's credentials every
+time, even when the browser is signed in to Instagram, so several accounts connect in turn.
+
+Until App Review grants Advanced Access, only Instagram testers who accepted the invitation
+(Instagram → Settings → Apps and websites → Tester invites) can connect; others are refused on
+every read. `graph.instagram.com` has no batch endpoint, so `batch.execute` sends each read on
+its own there, with the same results. The client is the same as above, on `graph.instagram.com`: Instagram
+Login reads media, insights and publishes with `video_url`/`image_url`, but has no resumable
+uploads, hashtag search, product tags or ads.
+
+**Token lifetime.** The 60-day token is refreshed by the connector at the first use after 30
+days. A connection unused for 60 days, or removed by the account (Instagram → Settings → Apps and
+websites), has to connect again.
+
 ## Client API
 
 ```ts

@@ -33,6 +33,11 @@ export interface MetaHttpContext {
   readonly retry: MetaRetryController
   readonly observe: MetaResponseObserver
   readonly signal: AbortSignal
+  /**
+   * `separate` sends a batch's requests one by one: `graph.instagram.com` (Instagram Login) has
+   * no batch endpoint. Defaults to one Graph batch request.
+   */
+  readonly batchRequests?: "graph" | "separate"
 }
 
 /** A rejected or invalid Meta response. The HTTP status and raw body are preserved. */
