@@ -20,7 +20,10 @@ import type {
   MetaUsage,
 } from "./types/common"
 
-const THROTTLING_ERROR_CODES = new Set([4, 17, 32, 613])
+// 80000–80014: Marketing API business-use-case limits (Ads Insights, Ads Management, catalogs…).
+const THROTTLING_ERROR_CODES = new Set([
+  4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004, 80005, 80006, 80008, 80009, 80014,
+])
 // Graph reports an expired, revoked or otherwise invalid token as 190 (102 on older paths), usually
 // with HTTP 400 rather than 401. These subcodes, or none, mean the whole sign-in is gone: app
 // removed, checkpoint, password changed, expired, unconfirmed user, invalid token. Others, such as

@@ -101,7 +101,7 @@ function metaOAuth(options: MetaOAuthConnectorOptions): MetaOAuthConnector {
     discoverAccounts: (_context, credentials) => discoverMetaPages(credentials),
     async connect(context) {
       const http = await transport.connect(context, context.tokenSource)
-      const { pages: _pages, ...client } = createMetaClient(http)
+      const { ads: _ads, pages: _pages, ...client } = createMetaClient(http)
       return {
         ...client,
         account: await readConnectedPage(http, context.account.id, context.account.label),
@@ -145,6 +145,7 @@ function instagramAccountConnector(
     async connect(context) {
       const http = await transport.connect(context, context.tokenSource)
       const {
+        ads: _ads,
         pages: _pages,
         facebook: _facebook,
         facebookVideo: _video,

@@ -2,6 +2,22 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
+  portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
+  ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
+  `results` and `cost_per_result`. Marketing API limits (codes 80000–80014) are retried like
+  Graph throttling.
+
+### Upgrade notes
+
+- `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
+  omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
+  `"ads"` too.
+
 ## 2026-11-12 — Sixb 0.2.4
 
 0.2.4 gives the Agent tools to edit files, ask questions and wait on its background work, sends

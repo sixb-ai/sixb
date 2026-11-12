@@ -7,6 +7,8 @@ Business/Creator accounts — one method per node/edge, nothing more.
 - **Pages** — list Facebook Pages and their linked Instagram accounts (`/me/accounts`)
 - **Instagram** — read the user profile, list media and stories, read account- and media-level insights
 - **Facebook** — read the Page profile, list published Page posts, read Page-level insights
+- **Ads** — list a business portfolio's ad accounts, read campaigns, ad sets, ads and creatives,
+  and Ads Insights (read-only Marketing API)
 - **Batch** — combine up to 50 independent Graph reads, with an optional token per sub-request
 - **Publishing** — Instagram images, Reels and carousels; Facebook photos, multi-photo posts,
   videos and Reels, with explicit upload and status operations
@@ -293,6 +295,71 @@ if (media.ok) {
 Absolute URLs, empty batches, and batches above Meta's 50-request limit are rejected locally.
 Batching reduces network round trips, but every sub-request still counts separately toward Meta's
 usage limits. Throttled sub-requests are retried without replaying successful siblings.
+
+## Ads (Marketing API)
+
+`client.ads` reads ad accounts and their delivery, read-only. The token needs `ads_read` (or
+`ads_management`) on each account. A system user of the agency's business portfolio reads the
+accounts the portfolio owns and those clients share with it as a partner, without any sign-in:
+
+```ts
+const business = client.ads.business(process.env.META_BUSINESS_ID!)
+
+for await (const account of business.clientAdAccounts.listAll()) {
+  // account.id is act_<id>; account.business is the portfolio that owns it
+}
+
+const account = client.ads.account("act_644781573361808")
+
+for await (const campaign of account.campaigns.listAll({
+  effectiveStatus: ["ACTIVE", "PAUSED", "ARCHIVED"],
+  updatedSince: lastRun,
+})) {
+  // …
+}
+
+for await (const row of account.insights.listAll({
+  level: "ad",
+  timeRange: { since: "2026-10-01", until: "2026-10-31" },
+  timeIncrement: 1,
+})) {
+  // row.spend, row.impressions, row.results, row.cost_per_result, …
+}
+```
+
+| Method | Graph edge |
+| --- | --- |
+| `ads.adAccounts` | `GET /me/adaccounts` |
+| `ads.business(id).ownedAdAccounts` | `GET /{business-id}/owned_ad_accounts` |
+| `ads.business(id).clientAdAccounts` | `GET /{business-id}/client_ad_accounts` |
+| `ads.business(id).pendingClientAdAccounts` | `GET /{business-id}/pending_client_ad_accounts` |
+| `ads.account(id).get()` | `GET /act_{id}` |
+| `ads.account(id).campaigns` / `adSets` / `ads` / `adCreatives` | `GET /act_{id}/campaigns` … |
+| `ads.account(id).insights` | `GET /act_{id}/insights` |
+
+Each edge has `list` (one page, `after` cursor) and `listAll` (every page). Objects come back as
+Meta sends them, so any field passed in `fields` stays readable; the `DEFAULT_AD_*` field lists
+are exported to extend.
+
+- `account(id)` takes `act_<id>` or the bare id.
+- Campaign, ad set and ad lists omit archived objects unless `effectiveStatus` names them, and
+  refuse `DELETED`. `updatedSince` keeps objects changed after an instant.
+- Insights dates are inclusive and in the ad account's time zone. `results` and
+  `cost_per_result` match Ads Manager's Results column: what they count depends on each
+  campaign's objective, so results of different campaigns are not added together.
+- Ads Manager's attribution setting applies; Meta no longer returns the 7-day and 28-day view
+  windows, and keeps 37 months of history (13 for reach, frequency and unique counts).
+- Thumbnail and image URLs are signed and expire: copy an image that must outlive the request.
+  The default `thumbnail_url` is 64 px. Ask for a larger one with
+  `adCreatives.list({ thumbnailSize: { width, height } })`, or on ads with the field
+  `creative.thumbnail_width(480).thumbnail_height(480){thumbnail_url}`.
+- Insights are read synchronously. Very large reports (many ads, long daily ranges) are read in
+  shorter date windows rather than as one asynchronous report job.
+- Page clients (`MetaPageClient`) and Instagram clients have no `ads`: their tokens read no ad
+  account.
+- Marketing API limits (codes 80000–80014) are retried like Graph throttling. An app in Meta's
+  development access tier is heavily limited; request the Marketing API Access Tier's full access
+  before reading many accounts.
 
 ## Insights & metric deprecations
 
