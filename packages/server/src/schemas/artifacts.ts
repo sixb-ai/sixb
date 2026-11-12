@@ -164,6 +164,31 @@ export const ArtifactVersionSchema = z.object({
     .describe(
       "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
     ),
+  pdf: z
+    .enum(["ready", "printable", "failed"])
+    .optional()
+    .describe(
+      "A designed document's PDF: ready once printed, printable when asking for it prints it, failed when it could not be printed. Absent when the version cannot print: not a designed document, or a project without sandboxes"
+    ),
+})
+
+export const ArtifactPdfResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    pages: z.number().int().min(1).describe("How many pages it printed on"),
+  }),
+  z.object({ status: z.literal("printing") }),
+  z.object({
+    status: z.literal("failed"),
+    reason: z.string().describe("Why it could not be printed"),
+  }),
+])
+
+export const ArtifactPdfQuerySchema = z.object({
+  retry: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("true asks again for a PDF that could not be printed, instead of hearing why"),
 })
 
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
@@ -410,7 +435,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({
