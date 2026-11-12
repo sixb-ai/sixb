@@ -661,6 +661,22 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     sharedSession: true,
   },
   {
+    operationId: "printArtifactPdf",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/versions/:version/pdf",
+    accessToken: true,
+    agentApi: false,
+    sharedSession: true,
+  },
+  {
+    operationId: "getArtifactPdf",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/versions/:version/pdf",
+    accessToken: true,
+    agentApi: false,
+    sharedSession: true,
+  },
+  {
     operationId: "getArtifactBoardPreview",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",

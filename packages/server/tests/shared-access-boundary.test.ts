@@ -326,6 +326,8 @@ describe("shared-access request boundary", () => {
       "GET /api/artifacts/:artifactId/comments",
       "POST /api/artifacts/:artifactId/comments",
       "GET /api/artifacts/:artifactId/versions/:version",
+      "POST /api/artifacts/:artifactId/versions/:version/pdf",
+      "GET /api/artifacts/:artifactId/versions/:version/pdf",
       "GET /api/artifacts/:artifactId/versions/:version/boards/:board/preview",
       "GET /api/artifacts/:artifactId/versions/:version/queries/:name",
       "POST /api/artifacts/:artifactId/versions/:version/frame",
