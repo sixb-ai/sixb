@@ -1,7 +1,6 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import type { ArtifactTheme, ArtifactThemeMode, Canvas, DocumentPaper } from "@sixb/core/artifacts"
-import { SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
+import type { ArtifactTheme, Canvas, DocumentPaper } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -12,7 +11,6 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
-import type { ArtifactBoardPreviewSize } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
@@ -38,8 +36,6 @@ export type LayoutCheck =
       readonly screenshots: readonly string[]
       /** How many pages a designed document with paper was cut into. */
       readonly pages?: number
-      /** Each `pictured` board in each mode the reader sees it in, at its path in the sandbox. */
-      readonly previews: readonly CheckedPreview[]
       /** A canvas as it opens in the app, as the agent names it, when the check took it. */
       readonly overview?: string
     }
@@ -63,20 +59,6 @@ export interface CheckedBoard {
   readonly w: number
   readonly h: number
   readonly html: Uint8Array
-  /** Screenshot in every mode, not only the first: it needs its pictures for readers. */
-  readonly pictured?: boolean
-}
-
-/** A board's picture in one mode and size, which the check took. */
-export interface CheckedPreview {
-  readonly board: string
-  readonly theme: ArtifactThemeMode
-  /** `full`, a PNG of the board; `small`, a WebP at most 480 pixels wide. */
-  readonly size: ArtifactBoardPreviewSize
-  /** Absolute, in the sandbox. */
-  readonly path: string
-  /** How large the check wrote it. */
-  readonly bytes?: number
 }
 
 interface CheckReport {
@@ -87,11 +69,8 @@ interface CheckReport {
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
-  readonly previews?: readonly CheckedPreview[]
   /** A canvas's boards whose page draws larger than the board's `w` by `h`. */
   readonly oversized?: readonly OversizedBoard[]
-  /** A canvas's boards not pictured: something on their page did not load. */
-  readonly unpictured?: readonly { readonly board: string; readonly reason: string }[]
   /** A canvas's boards that stopped answering, which the check went on without. */
   readonly stalls?: readonly { readonly board: string; readonly message: string }[]
   readonly overview?: string
@@ -207,14 +186,7 @@ export async function checkLayout(
           {
             path: posix.join(output, "boards.json"),
             contents: JSON.stringify(
-              input.boards.map(({ id, file, w, h, pictured }) => ({
-                id,
-                file,
-                w,
-                h,
-                pictured: pictured === true,
-                ...(pictured ? { smallWidth: SMALL_BOARD_PREVIEW_WIDTH } : {}),
-              }))
+              input.boards.map(({ id, file, w, h }) => ({ id, file, w, h }))
             ),
           },
           ...overviewFiles(output, input.canvas, input.theme),
@@ -278,13 +250,6 @@ export async function checkLayout(
     status: "checked",
     screenshots,
     ...(report.pages ? { pages: report.pages } : {}),
-    // Only pictures of the boards asked for, where the check writes them.
-    previews: (report.previews ?? []).filter(
-      ({ board, path }) =>
-        input.layout === "canvas" &&
-        input.boards.some((each) => each.id === board && each.pictured) &&
-        path.startsWith(`${output}/`)
-    ),
     ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(
@@ -292,11 +257,6 @@ export async function checkLayout(
         input.layout === "document" ? "document" : undefined
       ),
       ...oversizedWarnings(report.oversized ?? []),
-      ...(report.unpictured ?? []).map(({ board, reason }) => ({
-        code: "preview_not_taken",
-        part: board,
-        message: `Board '${board}' has no preview: ${reason.slice(0, 200)}, and a picture of it would show it broken to every reader. It shows its outline until a version loads whole.`,
-      })),
       ...(report.stalls ?? []).map(({ board, message }) => ({
         code: "layout_incomplete",
         part: board,

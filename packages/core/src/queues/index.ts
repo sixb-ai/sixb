@@ -16,12 +16,12 @@ export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
   AgentAiUsageRecordRequestedQueueJob,
-  AgentArtifactPreviewsRequestedQueueJob,
   AgentQueueJob,
   AgentQueueJobFailureCode,
   AgentRunRequestedQueueJob,
   AgentWorkflowNodeRequestedQueueJob,
   ArtifactPdfRequestedQueueJob,
+  ArtifactPreviewsRequestedQueueJob,
   ClaimedQueueJob,
   DatasetIngestFlushRequestedQueueJob,
   LakeQueueJob,

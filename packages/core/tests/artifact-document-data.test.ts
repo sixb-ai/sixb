@@ -86,7 +86,7 @@ function setup() {
     for (const { job, leaseId } of claims) {
       await deps.queues.renders.complete({ projectId, jobId: job.id, leaseId })
     }
-    return claims.map(({ job }) => job)
+    return claims.flatMap(({ job }) => (job.type === "artifact.pdf.requested" ? [job] : []))
   }
   return { ...deps, host, as, proposal, text, printJobs, system: createTestSixb(host) }
 }

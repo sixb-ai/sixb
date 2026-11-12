@@ -14,7 +14,6 @@ import {
   boardRenderKey,
   MAX_BOARD_PREVIEW_BYTES,
   missingBoardPreviews,
-  requestBoardPreviews,
   storeBoardPreviews,
 } from "../src/artifacts/publish/previews"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -93,13 +92,13 @@ function setup(options: { readonly sandboxes?: boolean } = {}) {
 
   /** The jobs the agent worker would claim now, each done once claimed. */
   const claimable = async () => {
-    const claims = await deps.queues.agents.claim({
+    const claims = await deps.queues.renders.claim({
       projectId: "previews",
       workerId: "test",
       limit: 10,
     })
     for (const { job, leaseId } of claims) {
-      await deps.queues.agents.complete({ projectId: "previews", jobId: job.id, leaseId })
+      await deps.queues.renders.complete({ projectId: "previews", jobId: job.id, leaseId })
     }
     return claims.map(({ job }) => ({ id: job.id, type: job.type, payload: job.payload }))
   }
@@ -112,18 +111,6 @@ const BOARDS = {
   "boards/welcome.html": "<main><h1>Welcome</h1></main>",
   "boards/region.html": "<main><h1>Regions</h1></main>",
   "boards/shared.css": "h1 { letter-spacing: -0.02em }",
-}
-
-/** What asks for a static canvas's previews: it has no query to answer. */
-function requester(deps: ReturnType<typeof setup>["deps"]) {
-  return {
-    storage: deps.storage.artifacts,
-    queue: deps.queues.agents,
-    blobStorage: deps.blobStorage,
-    query: async (): Promise<never> => {
-      throw new Error("A static canvas has no query.")
-    },
-  }
 }
 
 function keys(version: ArtifactVersionRecord): Record<string, string | undefined> {
@@ -258,7 +245,7 @@ describe("publishing a canvas", () => {
 
     const job = ({ updatedAt }: { updatedAt: Date }) => ({
       id: `art_previews_${first.artifact.id}`,
-      type: "agent.artifact-previews.requested" as const,
+      type: "artifact.previews.requested" as const,
       payload: { artifactId: first.artifact.id, version: 1, updatedAt: updatedAt.toISOString() },
     })
     pass()
@@ -355,25 +342,6 @@ describe("publishing a canvas", () => {
     })
 
     expect(await claimable()).toEqual([])
-  })
-
-  test("asks after the grace a publisher that renders its own pictures takes", async () => {
-    settling()
-    // Without sandboxes publishing asks for nothing, so only the request below is queued.
-    const { deps, as, put, claimable } = setup({ sandboxes: false })
-    const { version } = await as(alice).artifacts.create({
-      kind: "canvas",
-      title: "Onboarding",
-      files: await put({ "canvas.json": CANVAS, ...BOARDS }),
-    })
-
-    await requestBoardPreviews(requester(deps), version, { delayMs: BOARD_PREVIEW_JOB.graceMs })
-    expect(await claimable()).toEqual([])
-
-    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
-    expect((await claimable()).map((job) => job.payload)).toEqual([
-      { artifactId: version.artifactId, version: 1, updatedAt: version.updatedAt.toISOString() },
-    ])
   })
 })
 
@@ -486,11 +454,11 @@ describe("a board's pictures", () => {
 
     expect(await statuses(true, version.createdAt)).toEqual({ welcome: "ready", region: "pending" })
 
-    // Still pending while the worker's last attempt may run: its grace, each attempt to its
+    // Still pending while the worker's last attempt may run: its settling, each attempt to its
     // timeout, and the backoffs between. Reproduce with a wait of 15 minutes: the viewer stops
-    // asking five minutes before the last attempt can end.
-    const { graceMs, attempts, timeoutMs, backoffMs } = BOARD_PREVIEW_JOB
-    const lastAttemptEnds = graceMs + attempts * timeoutMs + (attempts - 1) * backoffMs
+    // asking before the last attempt can end.
+    const { settleMs, attempts, timeoutMs, backoffMs } = BOARD_PREVIEW_JOB
+    const lastAttemptEnds = settleMs + attempts * timeoutMs + (attempts - 1) * backoffMs
     const during = new Date(version.createdAt.getTime() + lastAttemptEnds - 1)
     expect(await statuses(true, during)).toEqual({ welcome: "ready", region: "pending" })
 

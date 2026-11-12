@@ -3,7 +3,7 @@ import type { Principal } from "../../auth"
 import { statFileRef } from "../../blob-storage/file-content"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import { isValidFileRef } from "../../blob-storage/validation"
-import type { AgentQueueJob, Queue } from "../../queues"
+import type { Queue, RenderQueueJob } from "../../queues"
 import type {
   ArtifactBoardPreviewRecord,
   ArtifactBoardPreviewSize,
@@ -65,12 +65,6 @@ export type BoardPreviewRequester = (
 ) => Promise<void>
 
 export interface BoardPreviewRequestOptions {
-  /**
-   * How long the worker waits before it renders: by default `BOARD_PREVIEW_JOB.settleMs`, so a
-   * canvas being edited is rendered once it rests. Longer when the publisher renders the pictures
-   * itself, as the Agent's layout check does.
-   */
-  readonly delayMs?: number
   /**
    * Leaves the version's queries unanswered: the worker then pictures only the boards that read
    * none, and a board that reads one keeps its outline.
@@ -396,8 +390,8 @@ export function boardPreviewsJobId(artifactId: string): string {
 }
 
 /**
- * Asks the agent worker to render what a stored version's boards still miss, `delayMs` from now,
- * in the artifact's one job: it takes the place of any asked for an earlier revision. Nothing is
+ * Asks the render worker to render what a stored version's boards still miss, once the canvas
+ * rests, `BOARD_PREVIEW_JOB.settleMs` from now, in the artifact's one job: it takes the place of any asked for an earlier revision. Nothing is
  * asked when nothing is missing.
  *
  * Boards that read queries show their author's data, so the version's queries are answered now,
@@ -411,7 +405,7 @@ export function boardPreviewsJobId(artifactId: string): string {
 export async function requestBoardPreviews(
   input: {
     readonly storage: Pick<ArtifactStorage, "listBoardPreviews">
-    readonly queue: Pick<Queue<AgentQueueJob>, "enqueue">
+    readonly queue: Pick<Queue<RenderQueueJob>, "enqueue">
     readonly blobStorage: Pick<BlobStorage, "put">
     /** Runs one of the version's queries as its publisher. */
     readonly query: (name: string) => Promise<ArtifactQueryResult | null>
@@ -429,21 +423,20 @@ export async function requestBoardPreviews(
         ? await storeQueryAnswers(input, version)
         : undefined
 
-    const delayMs = options.delayMs ?? BOARD_PREVIEW_JOB.settleMs
     await input.queue.enqueue({
       projectId: version.projectId,
       jobs: [
         {
           id: boardPreviewsJobId(version.artifactId),
           replace: true,
-          type: "agent.artifact-previews.requested",
+          type: "artifact.previews.requested",
           payload: {
             artifactId: version.artifactId,
             version: version.version,
             updatedAt: version.updatedAt.toISOString(),
             ...(queries ? { queries } : {}),
           },
-          availableAt: new Date(Date.now() + delayMs).toISOString(),
+          availableAt: new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs).toISOString(),
         },
       ],
     })

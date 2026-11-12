@@ -146,17 +146,6 @@ async function browsers(root: string): Promise<Set<string>> {
   }
 }
 
-/** A WebP's width and height, from its first chunk: lossy, lossless, or extended. */
-function webpSize(bytes: Buffer): [number, number] {
-  const chunk = bytes.subarray(12, 16).toString("latin1")
-  if (chunk === "VP8 ") return [bytes.readUInt16LE(26) & 0x3fff, bytes.readUInt16LE(28) & 0x3fff]
-  if (chunk === "VP8L") {
-    const bits = bytes.readUInt32LE(21)
-    return [(bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1]
-  }
-  return [bytes.readUIntLE(24, 3) + 1, bytes.readUIntLE(27, 3) + 1]
-}
-
 describe.skipIf(!playwright)("the layout check in a browser", () => {
   let root: string
   beforeAll(() => {
@@ -436,123 +425,10 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
-    "pictures no board whose page did not load whole, and says so",
-    async () => {
-      // Reproduce by picturing every board that was checked: Pricing's picture, unstyled for its
-      // missing stylesheet, is kept under its key and shown to every reader.
-      mkdirSync(join(root, "partial"), { recursive: true })
-      const page = (head: string) =>
-        `<!doctype html><html><head>${head}</head><body><main><h1>Plans</h1></main></body></html>`
-      const whole = page("")
-      const partial = page('<link rel="stylesheet" href="missing.css">')
-      writeFileSync(join(root, "partial", "plans.html"), whole)
-      writeFileSync(join(root, "partial", "pricing.html"), partial)
-
-      const result = await checkLayout({
-        layout: "canvas",
-        boards: [
-          {
-            id: "plans",
-            file: "plans.html",
-            w: 390,
-            h: 844,
-            html: new TextEncoder().encode(whole),
-            pictured: true,
-          },
-          {
-            id: "pricing",
-            file: "pricing.html",
-            w: 390,
-            h: 844,
-            html: new TextEncoder().encode(partial),
-            pictured: true,
-          },
-        ],
-        handle: {
-          sandbox: new LocalBashSandbox(root),
-          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-          env: env(),
-        },
-        directory: join(root, "partial"),
-        files: ["plans.html", "pricing.html"],
-        name: "partial",
-        signal: AbortSignal.timeout(90_000),
-      })
-      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
-
-      expect(new Set(result.previews.map((picture) => picture.board))).toEqual(new Set(["plans"]))
-      expect(result.screenshots).toHaveLength(2)
-      const untaken = result.warnings.find((warning) => warning.code === "preview_not_taken")
-      expect(untaken).toMatchObject({ part: "pricing" })
-      expect(untaken?.message).toContain("missing.css did not load (404)")
-    },
-    { timeout: 120_000 }
-  )
-
-  test(
-    "checks each of a canvas's boards at its own size, naming the board",
-    async () => {
-      // A phone board that reads well, and one whose fixed-width box is wider than the board.
-      // Reproduce by opening every board at 1280px: the narrow board's box fits, and no
-      // warning names it.
-      mkdirSync(join(root, "canvas/boards"), { recursive: true })
-      const board = (body: string) =>
-        `<!doctype html><html><head><link rel="stylesheet" href="shared.css"></head><body><main>${body}</main></body></html>`
-      const fine = board('<h1>Welcome</h1><p class="lede">Every job, one tap away.</p>')
-      const broken = board(
-        '<h1>Regions</h1><div style="width: 560px">North, Harbor, Keystone</div>'
-      )
-      writeFileSync(join(root, "canvas/boards/welcome.html"), fine)
-      writeFileSync(join(root, "canvas/boards/region.html"), broken)
-      writeFileSync(join(root, "canvas/boards/shared.css"), "h1 { letter-spacing: -0.02em }")
-      const result = await checkLayout({
-        layout: "canvas",
-        boards: [
-          {
-            id: "welcome",
-            file: "boards/welcome.html",
-            w: 390,
-            h: 844,
-            html: new TextEncoder().encode(fine),
-          },
-          {
-            id: "region",
-            file: "boards/region.html",
-            w: 390,
-            h: 844,
-            html: new TextEncoder().encode(broken),
-          },
-        ],
-        handle: {
-          sandbox: new LocalBashSandbox(root),
-          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-          env: env(),
-        },
-        directory: join(root, "canvas"),
-        files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
-        name: "canvas",
-        signal: AbortSignal.timeout(90_000),
-      })
-      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
-      expect(result.screenshots).toEqual([
-        ".sixb/agent/checks/canvas/boards/welcome.png",
-        ".sixb/agent/checks/canvas/boards/region.png",
-      ])
-      const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
-      expect(wide.map((warning) => warning.part)).toEqual(["region"])
-      expect(wide[0]?.message).toStartWith("Board 'region': div “North, Harbor, Keystone”")
-      // The boards found the kit and their shared stylesheet: nothing failed to load.
-      expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
-    },
-    { timeout: 120_000 }
-  )
-
-  test(
-    "pictures many boards at once in both themes, goes on past one that hangs, and draws the canvas",
+    "checks many boards at once, goes on past one that hangs, and draws the canvas",
     async () => {
       // Reproduce the hang by opening every board in one page, as the check did: the frozen board
-      // stops the check, and no board after it is pictured. Reproduce the pictures by taking the
-      // first theme only: there is no dark picture of any board.
+      // stops the check, and no board after it is screenshot.
       const before = await browsers(root)
       mkdirSync(join(root, "many"), { recursive: true })
       const ids = Array.from({ length: 12 }, (_, index) => `board-${index + 1}`)
@@ -569,11 +445,10 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         ...ids.slice(4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
       ].map((board, index) => ({
         ...board,
-        // A laptop's screen first, which its small picture shrinks to 480 pixels wide.
+        // A laptop's screen first, the others a phone's.
         w: index === 0 ? 1280 : 390,
         h: index === 0 ? 800 : 844,
         html: new TextEncoder().encode(board.html),
-        pictured: true,
         x: index === 0 ? -1400 : (index % 5) * 480,
         y: Math.floor(index / 5) * 1000,
       }))
@@ -615,25 +490,6 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       expect(result.warnings.map((warning) => `${warning.part} ${warning.code}`)).toContain(
         "hangs layout_incomplete"
       )
-
-      // Every other board in both themes and both sizes, the dark picture apart from the light
-      // one, and the small one a WebP no wider than 480 pixels, its aspect kept.
-      expect(result.previews).toHaveLength(48)
-      const picture = (id: string, theme: string, size: string) => {
-        const found = result.previews.find(
-          (each) => each.board === id && each.theme === theme && each.size === size
-        )
-        if (!found) throw new Error(`Board '${id}' was not pictured ${size} in ${theme} mode.`)
-        return readFileSync(found.path)
-      }
-      for (const id of ids) {
-        expect(picture(id, "light", "full").equals(picture(id, "dark", "full"))).toBe(false)
-        for (const theme of ["light", "dark"]) {
-          const small = picture(id, theme, "small")
-          expect(small.subarray(8, 12).toString("latin1")).toBe("WEBP")
-          expect(webpSize(small)).toEqual(id === ids[0] ? [480, 300] : [390, 844])
-        }
-      }
 
       expect(result.overview).toBe(".sixb/agent/checks/many/overview.png")
       const overview = readFileSync(join(root, ".sixb/agent/checks/many/overview.png"))
