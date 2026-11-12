@@ -1,6 +1,6 @@
 {
   "name": "@sixb/vercel-ai-gateway",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "description": "Vercel AI Gateway model provider for Sixb",
   "keywords": [
     "sixb",
