@@ -678,11 +678,11 @@ pins, shown in place of the board until it runs, in the reader's mode. Each come
 while the board is drawn small. While it is rendered, the board shows its outline, or its last
 preview when it changed, and the viewer shows the new one as soon as it is ready.
 
-- The Agent's check takes them as it publishes. A version published otherwise, such as one whose
-  boards were resized in the app, is pictured by the agent worker in a blank sandbox of the
-  project, which reaches only the CDNs a board may load from; without sandboxes, boards have no
-  preview. The worker waits until the canvas has not been written for 15 seconds, so a canvas
-  edited live is pictured once, as it is when people pause.
+- The [`render` worker](../cli/overview.md) pictures them in a blank sandbox of the project, which
+  reaches only the CDNs a board may load from, however the version was published: by the Agent,
+  in the app, or over the API. Without sandboxes, boards have no preview. The worker waits until
+  the canvas has not been written for 15 seconds, so a canvas edited live is pictured once, as it
+  is when people pause.
 - A preview is named by what the board shows: its HTML, the files it can load, and its size, in
   its canvas. Moving a board keeps its preview, whoever saves the canvas; resizing it or changing
   what it loads renders a new one. A board kept as it was keeps the picture it was first given.

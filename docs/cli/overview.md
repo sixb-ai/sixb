@@ -158,7 +158,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | `sixb worker <type>` | Execute one kind of background job. |
 | `sixb worker-group [types...]` | Run several worker types in one process. |
 
-Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, `lake`, and `render`, which [prints designed documents to PDF](../artifacts/overview.md#print-a-document-to-pdf) in the project's sandboxes. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work, `render` among it when the project has a sandbox provider.
+Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, `lake`, and `render`, which pictures canvas boards and [prints designed documents to PDF](../artifacts/overview.md#print-a-document-to-pdf) in the project's sandboxes. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work, `render` among it when the project has a sandbox provider.
 
 Public-origin flags have matching environment variables:
 
