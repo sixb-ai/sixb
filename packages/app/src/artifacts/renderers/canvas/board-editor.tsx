@@ -5,11 +5,9 @@ import {
   type FrameEditTarget,
   type FrameEvent,
   type FrameZoom,
-  parseFrameEvent,
 } from "@sixb/core/artifacts"
 import {
   boardFilePath,
-  boardFramePatches,
   mergeBoardText,
   setBoardImage,
   setBoardStyle,
@@ -31,19 +29,15 @@ import {
   useState,
 } from "react"
 import { formatFileSize } from "../../file-size"
-import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
-import { useLiveBoardSource, useLiveStoredFiles } from "../../live/boards"
+import { ArtifactFrame } from "../../frame"
+import { useLiveStoredFiles } from "../../live/boards"
 import type { LiveCanvas } from "../../live/canvas"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
-import { type ArtifactVersion, useFileText, versionFileSource } from "../../queries"
+import { type ArtifactVersion, versionFileSource } from "../../queries"
+import { useFrameEditing, useLiveFrame } from "../live-frame"
 import { type CanvasImage, ImagePanel, type StyleChange, StylePanel } from "./board-properties"
-import {
-  boardAttribute,
-  boardInlineStyle,
-  boardReferencePath,
-  showablePatches,
-} from "./board-source"
+import { boardAttribute, boardInlineStyle, boardReferencePath } from "./board-source"
 import {
   CommentPin,
   cardPlace,
@@ -55,13 +49,8 @@ import {
 import type { PageSize } from "./page-size"
 
 // A board opened over the canvas, as its page runs in its frame, and what the reader does on it:
-// read it, edit what it shows, or pick what to comment on.
-//
-// The frame serves the board as a stored version holds it, marked for editing; the live document
-// holds it as everyone is changing it now. The frame is kept at the version it loaded and told,
-// element by element, what changed since (`edit.patch`), so typing goes on under the caret while
-// others change other elements. It loads a newer version only when the elements themselves
-// changed, or a picture it does not hold yet is shown, and then once the stored version holds it.
+// read it, edit what it shows, or pick what to comment on. The frame follows the live document as
+// ../live-frame.ts describes.
 //
 //   frame ── edit.select ──▶ the element picked, its toolbar        (the reader's own click)
 //         ── edit.text ───▶ mergeBoardText → the board's Y.Text     (only for the element picked)
@@ -79,95 +68,6 @@ export type CommentPick = Omit<DraftPlace, "board">
 
 /** The image file types a board shows, by extension. */
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|svg)$/i
-
-/**
- * Follows a board's frame and the live document together: the version it shows, kept until it
- * must move, what it showed last, and the patches that bring it to what the document holds.
- */
-function useBoardFrame({
-  version,
-  board,
-  live,
-}: {
-  readonly version: ArtifactVersion
-  readonly board: CanvasBoard
-  readonly live: LiveArtifact | null
-}) {
-  const source = useLiveBoardSource(live, board.file)
-  const patching = source !== null
-  const [pinned, setPinned] = useState(version)
-  const shows = patching ? pinned : version
-  const stored = useFileText(patching ? versionFileSource(pinned, board.file) : null).text
-
-  const handle = useRef<ArtifactFrameHandle | null>(null)
-  /** Each load the frame said it is ready, for what follows to start over. */
-  const [loads, setLoads] = useState(0)
-  /** What the frame shows now, once patched past its version's page. */
-  const shown = useRef<string | null>(null)
-  /** Pictures the reader just uploaded, shown from their bytes until a version holds them. */
-  const previews = useRef(new Map<string, string>())
-  /** The frame must load a newer version: the elements changed, or a picture is missing. */
-  const [stale, setStale] = useState(false)
-  /**
-   * The elements themselves changed: the frame's addresses name other elements than the
-   * document's, so nothing is edited through it until it loads a version that has them.
-   */
-  const [moved, setMoved] = useState(false)
-  const [holding, setHolding] = useState(false)
-
-  const ready = useCallback(() => {
-    shown.current = null
-    setLoads((count) => count + 1)
-  }, [])
-
-  // What the document holds now, as patches to what the frame shows.
-  useEffect(() => {
-    if (loads === 0 || stored === undefined || source === null) return
-
-    const patches = boardFramePatches(shown.current ?? stored, source)
-    if (patches === null) {
-      setStale(true)
-      setMoved(true)
-      return
-    }
-    setMoved(false)
-
-    const holds = (path: string) => shows.files.some((file) => file.path === path)
-    const showable = showablePatches(patches, board.file, holds, previews.current)
-    if (showable.waiting) setStale(true)
-    shown.current = source
-    if (showable.patches.length === 0) return
-
-    handle.current?.send("edit.patch", { patches: showable.patches }).catch(() => {})
-  }, [loads, stored, source, shows, board.file])
-
-  // A stale frame loads the version the viewer has now once it is past the one it shows, and
-  // while the reader is not typing in it, unless what they type in is no longer where it was.
-  useEffect(() => {
-    if (!stale || (holding && !moved) || version.revision <= pinned.revision) return
-    setStale(false)
-    setPinned(version)
-  }, [stale, holding, moved, version, pinned.revision])
-
-  /** Loads the frame's page again, as what it shows can no longer be patched. */
-  const resync = useCallback(() => {
-    shown.current = null
-    handle.current?.send("reload", {}).catch(() => {})
-  }, [])
-
-  return {
-    shows,
-    source,
-    handle,
-    loads,
-    ready,
-    resync,
-    stale,
-    moved,
-    previews: previews.current,
-    hold: setHolding,
-  }
-}
 
 /**
  * An opened board at its size on screen: its page in its frame, laid out at `size`, the picture
@@ -222,7 +122,7 @@ export function BoardStage({
   readonly onZoom?: (zoom: FrameZoom) => void
 }) {
   const messages = useArtifactMessages().canvas
-  const frame = useBoardFrame({ version, board, live })
+  const frame = useLiveFrame({ version, file: board.file, live })
   const editing = mode === "edit" && canvas !== null
   const [selected, setSelected] = useState<FrameEditTarget | null>(null)
   /** What the pointer is over while the reader picks what to comment on. */
@@ -259,41 +159,6 @@ export function BoardStage({
     if (!draft) setHovered(null)
   }, [draft])
 
-  // Each load of the frame, a port of its own, handed over with its first `edit` request: what
-  // editing reports comes through it alone, never through the window, where the board's scripts
-  // post too.
-  const port = useRef<{ readonly mine: MessagePort; handed: MessagePort | null } | null>(null)
-  const onEditRef = useRef<(event: FrameEvent) => void>(() => {})
-  const onZoomRef = useRef(onZoom)
-  onZoomRef.current = onZoom
-  useEffect(() => {
-    if (frame.loads === 0) return
-    const channel = new MessageChannel()
-    channel.port1.onmessage = (message: MessageEvent) => {
-      const event = parseFrameEvent(message.data)
-      if (event?.event === "zoom") onZoomRef.current?.(event.params)
-      else if (event?.event.startsWith("edit.")) onEditRef.current(event)
-    }
-    port.current = { mine: channel.port1, handed: channel.port2 }
-    return () => channel.port1.close()
-  }, [frame.loads])
-
-  // The frame picks and types as the mode says, each time it loads; while its elements are not
-  // the document's, it does neither.
-  const send = frame.handle
-  useEffect(() => {
-    if (frame.loads === 0) return
-    const handed = port.current?.handed
-    if (port.current) port.current.handed = null
-    send.current
-      ?.send(
-        "edit",
-        { on: mode !== "read" && !frame.moved, typing: editing },
-        handed ? [handed] : []
-      )
-      .catch(() => {})
-  }, [frame.loads, frame.moved, mode, editing, send])
-
   const point = useCallback(
     (at: { readonly x: number; readonly y: number } | undefined, rect: FrameEditTarget["rect"]) => {
       const x = at?.x ?? rect.x + rect.width
@@ -323,7 +188,7 @@ export function BoardStage({
     [frame, onPress, onContentHeight]
   )
 
-  onEditRef.current = (event: FrameEvent) => {
+  const onEdit = (event: FrameEvent) => {
     if (moved.current) return
 
     switch (event.event) {
@@ -372,6 +237,8 @@ export function BoardStage({
         return
     }
   }
+  // The frame picks and types as the mode says, each time it loads.
+  useFrameEditing({ frame, on: mode !== "read", typing: editing, onEdit, onZoom })
 
   return (
     <div className="relative size-full">

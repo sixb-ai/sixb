@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { liveCanvasOf } from "./canvas"
+import { liveDocumentOf } from "./document"
 import type { LiveNoticeReason } from "./header"
 import { useLiveArtifact, useLiveArtifactState } from "./hooks"
 import type { LiveArtifact, LiveArtifactState } from "./session"
@@ -29,10 +30,14 @@ const noSubscription = () => () => {}
 
 /**
  * Holds the artifact live while its latest version is shown: null for an older version, and for
- * a kind that is not edited live. The document draws the canvas once it holds it; until then, and
- * if the server never holds it live, the version does, and editing it is a draft.
+ * an artifact that is not edited live. A canvas is drawn from the document once it holds it;
+ * until then, and if the server never holds it live, the version does, and editing it is a draft.
+ * A designed document is typed into through its frame, and its undo is the document's.
  */
-export function useLiveView(artifactId: string | null): LiveView | null {
+export function useLiveView(
+  artifactId: string | null,
+  kind: "canvas" | "document" = "canvas"
+): LiveView | null {
   const live = useLiveArtifact(artifactId)
   const state = useLiveArtifactState(live)
   const [editing, setEditing] = useState(false)
@@ -58,10 +63,11 @@ export function useLiveView(artifactId: string | null): LiveView | null {
     return () => window.clearTimeout(timer)
   }, [notice])
 
-  const canvas = live && state.synced ? liveCanvasOf(live) : null
+  const editor =
+    live && state.synced ? (kind === "canvas" ? liveCanvasOf(live) : liveDocumentOf(live)) : null
   const history = useSyncExternalStore(
-    canvas?.subscribe ?? noSubscription,
-    canvas?.getHistory ?? (() => NO_HISTORY),
+    editor?.subscribe ?? noSubscription,
+    editor?.getHistory ?? (() => NO_HISTORY),
     () => NO_HISTORY
   )
 
@@ -74,8 +80,8 @@ export function useLiveView(artifactId: string | null): LiveView | null {
     start: () => setEditing(true),
     stop: () => setEditing(false),
     history: editing ? history : NO_HISTORY,
-    undo: () => canvas?.undo(),
-    redo: () => canvas?.redo(),
+    undo: () => editor?.undo(),
+    redo: () => editor?.redo(),
     notice,
   }
 }
