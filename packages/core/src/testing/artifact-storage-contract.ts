@@ -1721,6 +1721,65 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps a PDF by render key, the first one kept staying", async () => {
+      await withStorage(async (artifacts) => {
+        const renderKey = "c".repeat(64)
+        const pdf = (seed: string, pages: number, createdAt = t0) => ({
+          projectId,
+          renderKey,
+          file: fileRef(seed, "application/pdf"),
+          pages,
+          createdAt,
+        })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toBeNull()
+
+        await artifacts.putPdf(pdf("1", 6))
+        // A key names what the document prints: a second PDF of it prints the same.
+        await artifacts.putPdf(pdf("2", 6, at(1)))
+
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(pdf("1", 6))
+        expect(await artifacts.getPdf({ projectId: otherProjectId, renderKey })).toBeNull()
+        expect(await artifacts.getPdf({ projectId, renderKey: "d".repeat(64) })).toBeNull()
+
+        // A PDF kept stays: neither a failure nor clearing one replaces it.
+        await artifacts.putPdf({ projectId, renderKey, failure: "No browser.", createdAt: at(2) })
+        await artifacts.clearPdfFailure({ projectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(pdf("1", 6))
+      })
+    })
+
+    test("keeps why a PDF could not be printed, until one prints or it is cleared", async () => {
+      await withStorage(async (artifacts) => {
+        const renderKey = "e".repeat(64)
+        const failure = (reason: string, createdAt = t0) => ({
+          projectId,
+          renderKey,
+          failure: reason,
+          createdAt,
+        })
+        await artifacts.putPdf(failure("No browser."))
+        await artifacts.putPdf(failure("Timed out.", at(1)))
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(failure("No browser."))
+        await artifacts.clearPdfFailure({ projectId: otherProjectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(failure("No browser."))
+
+        await artifacts.clearPdfFailure({ projectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toBeNull()
+
+        // A PDF printed after all replaces the failure.
+        await artifacts.putPdf(failure("No browser."))
+        const printed = {
+          projectId,
+          renderKey,
+          file: fileRef("1", "application/pdf"),
+          pages: 2,
+          createdAt: at(2),
+        }
+        await artifacts.putPdf(printed)
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(printed)
+      })
+    })
+
     test("keeps a board's pictures when an artifact that showed it is deleted", async () => {
       await withStorage(async (artifacts) => {
         // Another version, of this artifact or a copy, may show the same board.
