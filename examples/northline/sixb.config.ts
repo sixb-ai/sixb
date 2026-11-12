@@ -58,7 +58,13 @@ export const sixb = createSixb({
           image: process.env.SIXB_AGENT_IMAGE ?? "/opt/sixb/agent.tar",
           timeout: 30_000,
         })
-      : new LocalSandboxFactory({ timeout: 30_000 }),
+      : new LocalSandboxFactory({
+          timeout: 30_000,
+          // The headless browser that checks artifact layouts and prints documents to PDF.
+          ...(process.env.SIXB_PLAYWRIGHT
+            ? { env: { SIXB_PLAYWRIGHT: process.env.SIXB_PLAYWRIGHT } }
+            : {}),
+        }),
   onError(error, context) {
     let failure: string
     if (context.type === "run.failed") {
