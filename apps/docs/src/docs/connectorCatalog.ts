@@ -49,6 +49,14 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
     icon: "tiktok.svg",
   },
   {
+    id: "ctm",
+    name: "CallTrackingMetrics",
+    description: "Calls, texts, forms, transcripts, and attribution",
+    category: "Marketing",
+    package: "ctm",
+    icon: "ctm.png",
+  },
+  {
     id: "google",
     name: "Google",
     description: "Drive, Calendar, Gmail, Sheets, Meet, and Analytics",
