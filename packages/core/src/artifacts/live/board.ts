@@ -608,13 +608,29 @@ function located(source: string): Located[] {
 
 function kindOf(node: Element): BoardElementKind {
   if (node.tagName === "img") return "image"
-  if (WHOLE.has(node.tagName) || node.namespaceURI !== "http://www.w3.org/1999/xhtml") {
+  // A designed document's field shows live data, and a repeated element is copied for it: neither
+  // takes typing, and neither does the text around a field, whose words are the field's too.
+  if (
+    WHOLE.has(node.tagName) ||
+    node.namespaceURI !== "http://www.w3.org/1999/xhtml" ||
+    isLive(node)
+  ) {
     return "whole"
   }
-  if (!holdsOnlyWords(node)) return "box"
+  if (!holdsOnlyWords(node) || holdsField(node)) return "box"
   return textOf(node).trim() !== "" || TEXT_BLOCKS.has(node.tagName) || INLINE.has(node.tagName)
     ? "text"
     : "box"
+}
+
+function isLive(node: Element): boolean {
+  return node.attrs.some(
+    (attribute) => attribute.name === "data-sixb-field" || attribute.name === "data-sixb-each"
+  )
+}
+
+function holdsField(node: Element): boolean {
+  return node.childNodes.some((child) => isElement(child) && (isLive(child) || holdsField(child)))
 }
 
 /** Whether an element holds only words and the inline tags that format them. */
