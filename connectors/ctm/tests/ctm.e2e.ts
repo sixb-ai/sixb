@@ -8,6 +8,9 @@
  * Reads only. Nothing here creates, updates, or deletes anything; the write surface is covered by
  * the unit tests against mocks. CTM documents no response example for many routes, so this is
  * also where the shapes the types describe meet the real ones.
+ *
+ * The output names fields and counts records, and never prints a value, so it can be shared without
+ * exposing callers or credentials.
  */
 import { CtmApiError, ctm } from "../src"
 
@@ -73,7 +76,7 @@ await optional("agency.get", () => client.agency.get())
 
 console.log("\ncall log")
 const page = await client.calls.list({ timeDuration: "last7days", pageSize: 3 })
-check("calls.list reads the cursor envelope", Array.isArray(page.records), page)
+check("calls.list reads the cursor envelope", Array.isArray(page.records), Object.keys(page))
 check("calls.list reports a total", page.totalEntries !== null, page.totalEntries)
 
 const call = page.records[0]
