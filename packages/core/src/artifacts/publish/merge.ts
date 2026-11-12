@@ -9,11 +9,11 @@ import { documentFiles, type LiveFiles, mergeIntoDocument } from "../live/docume
 import { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "../live/files"
 import { keepsDocument, loadArtifactDocument, storeArtifactDocument } from "../live/state"
 
-// A canvas is edited by many at once, and keeps its content as a Yjs document (see
-// ../live/state.ts). Every write to one is made into that document: a live editor's as the Yjs
-// update it holds, any other as the changes from the files it was made from to its own. A write
-// made from an earlier revision is so merged, not refused, and whatever was written meanwhile
-// stays. Any other kind keeps the conflict check.
+// A canvas, or a designed document, is edited by many at once, and keeps its content as a Yjs
+// document (see ../live/state.ts). Every write to one is made into that document: a live editor's
+// as the Yjs update it holds, any other as the changes from the files it was made from to its own.
+// A write made from an earlier revision is so merged, not refused, and whatever was written
+// meanwhile stays. Anything else keeps the conflict check.
 
 /** How many times a merged write starts over when another lands between its merge and its store. */
 const MERGE_ATTEMPTS = 3
@@ -49,10 +49,10 @@ export interface MergedArtifactWrite {
 }
 
 /**
- * The write to store. One to a canvas is made into the artifact's document, which is stored with
- * it, and is based on the latest revision; one that moved past its base is merged into what the
- * latest version holds now. A write whose base files are not known is left as it is, for the
- * conflict check to refuse.
+ * The write to store. One to an artifact that keeps a document is made into that document, which
+ * is stored with it, and is based on the latest revision; one that moved past its base is merged
+ * into what the latest version holds now. A write whose base files are not known is left as it is,
+ * for the conflict check to refuse.
  */
 export async function mergeArtifactWrite(
   context: {
@@ -67,7 +67,7 @@ export async function mergeArtifactWrite(
     ...(write.baseRevision === undefined ? {} : { baseRevision: write.baseRevision }),
     merged: false,
   }
-  if (!keepsDocument(write.kind)) return unmerged
+  if (!keepsDocument(write.kind, write.files)) return unmerged
 
   const { projectId, storage, blobStorage } = context
   const artifact = await storage.get({ projectId, id: write.artifactId })
@@ -141,7 +141,13 @@ export async function withMergedWrite<T>(
     try {
       return await store(merged)
     } catch (error) {
-      if (!isMoved(error) || !keepsDocument(write.kind) || attempt === MERGE_ATTEMPTS) throw error
+      if (
+        !isMoved(error) ||
+        !keepsDocument(write.kind, write.files) ||
+        attempt === MERGE_ATTEMPTS
+      ) {
+        throw error
+      }
     }
   }
 }
@@ -160,7 +166,7 @@ export async function documentHolding(
 ): Promise<{ readonly document: FileRef; readonly baseRevision: number } | null> {
   const { projectId, storage, blobStorage } = context
   const artifact = await storage.get({ projectId, id: artifactId })
-  if (!artifact || !keepsDocument(artifact.kind)) return null
+  if (!artifact || !keepsDocument(artifact.kind, files)) return null
   const latest = await storage.getVersion({
     projectId,
     artifactId,
@@ -210,7 +216,7 @@ export async function withDocumentHolding<T>(
 }
 
 /**
- * The documents of the canvases a retry of a turn puts back, by id: each one the undo will put
+ * The documents of the artifacts a retry of a turn puts back, by id: each one the undo will put
  * back, as the turn's restore point holds it. Made before the undo, at the revision it requires,
  * so the undo can store them: one written meanwhile is not undone, and its document goes unused.
  */
@@ -224,7 +230,8 @@ export async function undoneTurnDocuments(
   for (const write of await storage.listTurnWrites({ projectId, turnRunId })) {
     if (write.created) continue
     const artifact = await storage.get({ projectId, id: write.artifactId })
-    if (!artifact || !keepsDocument(artifact.kind)) continue
+    // Only a canvas's or a document's files are held in a live document.
+    if (!artifact || (artifact.kind !== "canvas" && artifact.kind !== "document")) continue
 
     // Undone by the rule the undo applies, at the revision it will find.
     const points = await storage.listRestorePoints({ projectId, id: artifact.id })
@@ -238,7 +245,7 @@ export async function undoneTurnDocuments(
       ...(point ? { point } : {}),
       ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
     })
-    if (!point || !undoable) continue
+    if (!point || !undoable || !keepsDocument(artifact.kind, point.files)) continue
 
     const held = await documentHolding(context, artifact.id, point.files)
     if (held?.baseRevision === artifact.revision) documents[artifact.id] = held.document

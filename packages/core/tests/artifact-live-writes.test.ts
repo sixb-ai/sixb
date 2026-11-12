@@ -367,6 +367,52 @@ describe("a write to another kind made from an earlier revision", () => {
   })
 })
 
+describe("a designed document", () => {
+  const html = (heading: string, fee: string) =>
+    `<!doctype html><html><head><title>Plan</title></head><body><h1>${heading}</h1><p>A fixed fee of ${fee}.</p></body></html>`
+
+  // Reproduce by making keepsDocument answer for a canvas alone: the designed document keeps no
+  // document to edit live, and the stale save is refused with artifact_moved.
+  test("keeps a document, and merges a write made from an earlier revision, as a canvas does", async () => {
+    const context = setup()
+    const files = await context.put({ "document.html": html("Service proposal", "$4,000") })
+    const { artifact } = await context.sixb.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files,
+    })
+    expect((await context.latest(artifact.id)).artifact.document).toBeDefined()
+
+    await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({ "document.html": html("Service proposal", "$4,500") }),
+    })
+    const written = await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({ "document.html": html("Repair proposal", "$4,000") }),
+      baseRevision: 1,
+      baseFiles: files,
+    })
+
+    expect(written).toMatchObject({ merged: true, version: { revision: 3 } })
+    expect(await context.read(written.version.files, "document.html")).toBe(
+      html("Repair proposal", "$4,500")
+    )
+  })
+
+  test("in Markdown keeps none", async () => {
+    const context = setup()
+    const { artifact } = await context.sixb.artifacts.create({
+      kind: "document",
+      title: "Plan",
+      files: await context.put({ "document.md": "# Plan\n" }),
+    })
+    expect((await context.latest(artifact.id)).artifact.document).toBeUndefined()
+  })
+})
+
 describe("a canvas's document", () => {
   // Guard proof: in mergeArtifactWrite, merge a live editor's files as a diff instead of applying
   // its update; the second write-back, made from a revision nothing kept, is then refused.
