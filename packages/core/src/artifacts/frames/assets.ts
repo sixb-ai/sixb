@@ -4,6 +4,7 @@ import { decodeHtmlEntities } from "../html"
 import type { DocumentHeading } from "../outline"
 import type { DocumentPaper } from "../paper"
 import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
+import { documentData } from "./document-data"
 import type { FrameLayout } from "./entries"
 import { FRAME_DECK_CSS, FRAME_DOCUMENT_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
@@ -36,7 +37,7 @@ export const FRAME_ASSETS: Readonly<
     type: "text/css; charset=utf-8",
   },
   [`${FRAME_ASSET_PREFIX}runtime.js`]: {
-    body: `(${frameRuntime.toString()})()\n`,
+    body: `(${frameRuntime.toString()})(${documentData.toString()})\n`,
     type: "text/javascript; charset=utf-8",
   },
 }

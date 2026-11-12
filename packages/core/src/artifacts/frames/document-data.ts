@@ -99,9 +99,11 @@ export function documentData(): DocumentData {
     const number = typeof value === "number" ? value : Number(value)
     try {
       if (as === "money" && Number.isFinite(number)) {
+        // A whole amount reads without cents, as a price on a proposal does.
+        const cents = Number.isInteger(number) ? { minimumFractionDigits: 0 } : {}
         return currency
-          ? new Intl.NumberFormat(lang, { style: "currency", currency }).format(number)
-          : new Intl.NumberFormat(lang, { minimumFractionDigits: 2 }).format(number)
+          ? new Intl.NumberFormat(lang, { style: "currency", currency, ...cents }).format(number)
+          : new Intl.NumberFormat(lang, { minimumFractionDigits: 2, ...cents }).format(number)
       }
       if (as === "number" && Number.isFinite(number)) {
         return new Intl.NumberFormat(lang).format(number)
