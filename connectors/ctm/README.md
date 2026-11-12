@@ -61,7 +61,7 @@ for await (const call of ctm.calls.listAll({
   pageSize: 100,
 })) {
   const detail = await ctm.calls.get(call.id) // adds `caller`, the contact behind the call
-  const transcript = await ctm.calls.transcript(call.id)
+  const transcript = await ctm.calls.transcript(call.id) // null until CTM has transcribed it
   const audio = await ctm.calls.recording(call.sid) // a Response: stream `.body` to storage
 }
 ```
@@ -73,7 +73,6 @@ for await (const call of ctm.calls.listAll({
 | `calls.get(id)`                                     | `GET /calls/{id}`                         |
 | `calls.transcript(id)`                              | `GET /calls/{id}/transcription.json`      |
 | `calls.recording(sid)`                              | `GET /calls/{sid}/recording`              |
-| `calls.mapping()`                                   | `GET /calls/mapping`                      |
 | `calls.update(id, input)`                           | `POST /calls/{id}/modify`                 |
 | `calls.getSale(id)`, `saveSale`, `deleteSale`       | `/calls/{id}/sale`                        |
 | `calls.addComment`, `updateComment`, `deleteComment` | `/calls/{id}/{add,update,delete}_comment` |

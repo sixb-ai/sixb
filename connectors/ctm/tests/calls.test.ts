@@ -116,32 +116,35 @@ describe("calls.search", () => {
 })
 
 describe("one call", () => {
-  test("reads the detail, the transcript, the mapping and the recording", async () => {
+  test("reads the detail, the transcript and the recording", async () => {
     const calls = recorder([
       json(callRecord(7, { caller: { id: "12345.12512862740", name: "Ada" } })),
       json({ callid: 7, text: "Hello", sentiment: 2, outline: [], versions: [1] }),
-      json({ call: { fields: [] } }),
       new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "audio/mpeg" } }),
     ])
     const client = await createTestClient()
 
     const call = await client.calls.get(7)
     const transcript = await client.calls.transcript(7)
-    const mapping = await client.calls.mapping()
     const recording = await client.calls.recording("CA7")
 
     expect(call.caller?.name).toBe("Ada")
-    expect(transcript.text).toBe("Hello")
-    expect(mapping).toEqual({ call: { fields: [] } })
+    expect(transcript?.text).toBe("Hello")
     expect(recording.headers.get("content-type")).toBe("audio/mpeg")
     expect(new Uint8Array(await recording.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
-    expect(calls[3]?.headers.get("accept")).toBe("*/*")
+    expect(calls[2]?.headers.get("accept")).toBe("*/*")
     expect(calls.map(route)).toEqual([
       `GET ${CALLS}/7`,
       `GET ${CALLS}/7/transcription.json`,
-      `GET ${CALLS}/mapping`,
       `GET ${CALLS}/CA7/recording`,
     ])
+  })
+
+  test("a call without a transcript reads as null, since CTM answers with a status", async () => {
+    recorder([json({ status: "not found" })])
+    const client = await createTestClient()
+
+    expect(await client.calls.transcript(7)).toBeNull()
   })
 
   test("a missing recording is an API error, not an empty file", async () => {

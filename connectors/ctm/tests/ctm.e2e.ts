@@ -11,8 +11,9 @@
  * write to the account by mistake. CTM documents no response example for many routes, so this is
  * also where the shapes the types describe meet the real ones.
  *
- * The output names fields, counts records and lists the IDs of the accounts the key reaches, and
- * prints no other value, so it can be shared without exposing callers or credentials.
+ * The output names fields and their kinds (string, number, …), counts records and lists the IDs of
+ * the accounts the key reaches. It prints no other value, so it can be shared without exposing
+ * callers or credentials.
  */
 import { CtmApiError, ctm } from "../src"
 
@@ -91,14 +92,28 @@ function stop(label: string, error: unknown): never {
 
 /** The envelope's record count and the first record's fields, to compare against the types. */
 function describeShape(result: unknown): string {
-  if (typeof result !== "object" || result === null) {
+  if (result === null) {
+    return " (null)"
+  }
+
+  if (typeof result !== "object") {
     return ""
   }
 
   const records = "records" in result && Array.isArray(result.records) ? result.records : null
-  const first = records?.[0] ?? result
+  const first: object = records?.[0] ?? result
+  const fields = Object.entries(first).map(([field, value]) => `${field}:${typeName(value)}`)
 
-  return ` (${records ? `${records.length} records, ` : ""}fields: ${Object.keys(first).slice(0, 12).join(", ")})`
+  return ` (${records ? `${records.length} records, ` : ""}fields: ${fields.join(", ")})`
+}
+
+/** A value's kind, never the value: `string`, `number`, `boolean`, `null`, `array` or `object`. */
+function typeName(value: unknown): string {
+  if (value === null) {
+    return "null"
+  }
+
+  return Array.isArray(value) ? "array" : typeof value
 }
 
 console.log("\naccount")
@@ -135,6 +150,8 @@ if (call) {
   const detail = await client.calls.get(call.id)
   check("calls.get returns the same call", detail.id === call.id)
   check("calls.get includes the caller", detail.caller !== undefined, Object.keys(detail))
+  console.log(`  · call${describeShape(detail)}`)
+  console.log(`  · caller${describeShape(detail.caller ?? null)}`)
 
   if (page.after) {
     const next = await client.calls.list({
@@ -160,7 +177,6 @@ if (call) {
 await optional("calls.search", () =>
   client.calls.search({ timeDuration: "last7days", pageSize: 1 })
 )
-await optional("calls.mapping", () => client.calls.mapping())
 
 console.log("\nreferences")
 await optional("trackingNumbers.list", () => client.trackingNumbers.list({ pageSize: 2 }))
