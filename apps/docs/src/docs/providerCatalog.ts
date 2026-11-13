@@ -79,5 +79,13 @@ export const providerCatalog: Record<"models" | "sandboxes", readonly ProviderEn
       icon: "azure.svg",
       environment: "Hosted · Preview",
     },
+    {
+      name: "boxd",
+      description: "Run tools in hosted microVMs that hibernate and resume between runs.",
+      package: "@sixb/sandboxes-boxd",
+      href: "https://github.com/sixb-ai/sixb/tree/main/sandboxes/boxd#readme",
+      icon: "boxd.svg",
+      environment: "Hosted",
+    },
   ],
 }
