@@ -14,6 +14,8 @@ import { DomainEventService } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
 import { evaluateEventSchedule, validateSchedulesAtStartup } from "../src/schedules"
 
+const Outlook = { kind: "connector", id: "outlook" } as const
+
 const Payment = defineObjectType({
   id: "Payment",
   name: "Payment",
@@ -118,6 +120,50 @@ describe("evaluateEventSchedule", () => {
       invitationId: "inv_ava",
     })
     expect(evaluateEventSchedule(schedule, suspended!)).toBeNull()
+  })
+
+  test("builds a connection's occurrence context, for its own connector only", async () => {
+    const schedule = defineSchedule("outlook-connected").on(events.connector(Outlook).connected())
+    const runtime = new DomainEventService({ projectId: "test", broker: new InMemoryBroker() })
+    const connection = (connectorId: string) => ({
+      id: `ccn_${connectorId}`,
+      connectorId,
+      owner: { type: "user", id: "usr_ada" } as const,
+      slot: "default",
+      account: { id: "account-a", label: "ada@example.com" },
+    })
+    const [connected, otherConnector, disconnected] = await runtime.append({
+      events: [
+        {
+          type: "connector.connection.connected",
+          payload: {
+            connectorId: "outlook",
+            connection: connection("outlook"),
+            reason: "connected",
+          },
+        },
+        {
+          type: "connector.connection.connected",
+          payload: { connectorId: "gmail", connection: connection("gmail"), reason: "connected" },
+        },
+        {
+          type: "connector.connection.disconnected",
+          payload: {
+            connectorId: "outlook",
+            connection: connection("outlook"),
+            reason: "disconnected",
+          },
+        },
+      ],
+    })
+
+    expect(evaluateEventSchedule(schedule, connected!)?.event).toEqual({
+      connectorId: "outlook",
+      connection: connection("outlook"),
+      reason: "connected",
+    })
+    expect(evaluateEventSchedule(schedule, otherConnector!)).toBeNull()
+    expect(evaluateEventSchedule(schedule, disconnected!)).toBeNull()
   })
 })
 
@@ -398,5 +444,26 @@ describe("validateSchedulesAtStartup", () => {
         ontology
       )
     ).toThrow('unsupported member event type "object.created"')
+  })
+
+  // A static connector has no connections, so nothing would ever start such a schedule.
+  test("validates connection event sources against the project's OAuth connectors", () => {
+    const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
+    const validate = (connectorId: string) =>
+      validateSchedulesAtStartup(
+        [
+          defineSchedule("connected").on(
+            events.connector({ kind: "connector", id: connectorId }).connected()
+          ),
+        ],
+        ontology,
+        { registeredOAuthConnectorIds: new Set(["outlook"]) }
+      )
+
+    expect(() => validate("outlook")).not.toThrow()
+    expect(() => validate("erp")).toThrow('unknown OAuth connector "erp"')
+    expect(() => defineSchedule("any-connection-event").on(events.connector(Outlook))).toThrow(
+      ScheduleValidationError
+    )
   })
 })

@@ -2,6 +2,9 @@ import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from ".
 import type { RuleDefinition } from "../../rules"
 import type { DomainEvent } from "../types"
 import type {
+  ConnectorEventSelectorContext,
+  ConnectorEventSelectorOperation,
+  ConnectorEventToken,
   DatasetEventSelectorContext,
   DatasetEventToken,
   EventSelectorSpec,
@@ -107,6 +110,15 @@ export interface UserEventSelectorBuilder extends EventSelectorSpec<UserEventSel
   profileUpdated(): EventSelectorSpec<UserEventSelectorContext<"profileUpdated">>
 }
 
+/** Connection events of one OAuth connector: people connecting, reconnecting and leaving. */
+export interface ConnectorEventSelectorBuilder<TConnector extends ConnectorEventToken>
+  extends EventSelectorSpec<ConnectorEventSelectorContext<TConnector>> {
+  /** A connection became usable: connected, its slot's account replaced, or reconnected. */
+  connected(): EventSelectorSpec<ConnectorEventSelectorContext<TConnector, "connected">>
+  /** Sixb can no longer use a connection: disconnected, revoked, or its owner suspended. */
+  disconnected(): EventSelectorSpec<ConnectorEventSelectorContext<TConnector, "disconnected">>
+}
+
 abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TContext> {
   constructor(protected readonly spec: EventSelectorSpec<TContext>) {}
 
@@ -152,6 +164,10 @@ abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TCon
 
   get pipelineId(): EventSelectorSpec["pipelineId"] {
     return this.spec.pipelineId
+  }
+
+  get connectorId(): EventSelectorSpec["connectorId"] {
+    return this.spec.connectorId
   }
 
   get runStatus(): EventSelectorSpec["runStatus"] {
@@ -405,6 +421,28 @@ class PipelineEventSelectorBuilderImpl<TPipeline extends PipelineEventToken>
   }
 }
 
+class ConnectorEventSelectorBuilderImpl<TConnector extends ConnectorEventToken>
+  extends EventSelectorSpecView<ConnectorEventSelectorContext<TConnector>>
+  implements ConnectorEventSelectorBuilder<TConnector>
+{
+  connected(): EventSelectorSpec<ConnectorEventSelectorContext<TConnector, "connected">> {
+    return this.withOperation("connected")
+  }
+
+  disconnected(): EventSelectorSpec<ConnectorEventSelectorContext<TConnector, "disconnected">> {
+    return this.withOperation("disconnected")
+  }
+
+  private withOperation<TOperation extends ConnectorEventSelectorOperation>(
+    operation: TOperation
+  ): EventSelectorSpec<ConnectorEventSelectorContext<TConnector, TOperation>> {
+    return {
+      ...this.spec,
+      types: [`connector.connection.${operation}`],
+    } as EventSelectorSpec<ConnectorEventSelectorContext<TConnector, TOperation>>
+  }
+}
+
 class UserEventSelectorBuilderImpl
   extends EventSelectorSpecView<UserEventSelectorContext>
   implements UserEventSelectorBuilder
@@ -451,6 +489,9 @@ export interface EventSelectors {
     pipeline: TPipeline
   ): PipelineEventSelectorBuilder<TPipeline>
   users(): UserEventSelectorBuilder
+  connector<TConnector extends ConnectorEventToken>(
+    connector: TConnector
+  ): ConnectorEventSelectorBuilder<TConnector>
 }
 
 export const events: EventSelectors = {
@@ -489,6 +530,14 @@ export const events: EventSelectors = {
   },
   users(): UserEventSelectorBuilder {
     return new UserEventSelectorBuilderImpl({ topic: "users" })
+  },
+  connector<TConnector extends ConnectorEventToken>(
+    connector: TConnector
+  ): ConnectorEventSelectorBuilder<TConnector> {
+    return new ConnectorEventSelectorBuilderImpl({
+      topic: "connectors",
+      connectorId: connector.id,
+    } as EventSelectorSpec<ConnectorEventSelectorContext<TConnector>>)
   },
 }
 

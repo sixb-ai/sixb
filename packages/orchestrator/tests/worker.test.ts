@@ -791,6 +791,79 @@ describe("OrchestratorWorker", () => {
     })
   })
 
+  test("someone connecting starts a workflow with the connection mapped from the event", async () => {
+    const outlookConnected = defineSchedule("outlook-connected").on(
+      events.connector({ kind: "connector", id: "outlook" }).connected()
+    )
+    const subscribe = defineWorkflow("subscribe-mailbox")
+      .input({ connectionId: "string" })
+      .when(outlookConnected, ({ event }) => ({ connectionId: event.connection.id }))
+      .then(
+        defineWorkflowStep("subscribe")
+          .input({ connectionId: "string" })
+          .output({})
+          .run(() => ({}))
+      )
+    const routes = compileRoutes({
+      schedules: [outlookConnected],
+      syncs: [],
+      pipelines: [],
+      workflows: [subscribe],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const dispatches: WorkflowDispatchInput[] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      undefined,
+      createTestWorkflowRunDispatcher(queues, dispatches)
+    )
+
+    const connection = (connectorId: string) => ({
+      id: `ccn_${connectorId}`,
+      connectorId,
+      owner: { type: "user", id: "usr_ada" } as const,
+      slot: "default",
+      account: { id: "account-a", label: "ada@example.com" },
+    })
+    // Another connector's connection, and this one leaving, start nothing.
+    await eventRuntime.append({
+      events: [
+        {
+          type: "connector.connection.connected",
+          payload: { connectorId: "gmail", connection: connection("gmail"), reason: "connected" },
+        },
+        {
+          type: "connector.connection.disconnected",
+          payload: { connectorId: "outlook", connection: connection("outlook"), reason: "revoked" },
+        },
+      ],
+    })
+    const [connected] = await eventRuntime.append({
+      events: [
+        {
+          type: "connector.connection.connected",
+          payload: {
+            connectorId: "outlook",
+            connection: connection("outlook"),
+            reason: "connected",
+          },
+        },
+      ],
+    })
+
+    await waitFor(() => dispatches.length === 1)
+    expect(dispatches[0]).toMatchObject({
+      workflowId: subscribe.id,
+      input: { connectionId: "ccn_outlook" },
+      scheduleId: outlookConnected.id,
+      source: { type: "event", eventId: connected!.id },
+    })
+  })
+
   test("dataset commits pass the immutable version to the Projection dispatcher", async () => {
     const descriptor = invoiceProjectionDescriptor()
     const routes = compileRoutes({

@@ -52,6 +52,7 @@ function eventScheduleRouteKey(
     readonly datasetId?: string
     readonly syncId?: string
     readonly pipelineId?: string
+    readonly connectorId?: string
   }
 ): OrchestratorRouteKey | null {
   switch (topic) {
@@ -72,6 +73,8 @@ function eventScheduleRouteKey(
     case "users":
       // Member events are project-wide: every schedule on one type shares its route.
       return `event-schedule:${eventType}:users`
+    case "connectors":
+      return scope.connectorId ? `event-schedule:${eventType}:${scope.connectorId}` : null
     default:
       return null
   }

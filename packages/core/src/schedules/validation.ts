@@ -18,6 +18,10 @@ const userEventTypes = new Set([
   "user.invited",
   "user.profile.updated",
 ])
+const connectorEventTypes = new Set([
+  "connector.connection.connected",
+  "connector.connection.disconnected",
+])
 const runStatuses = new Set(["succeeded", "failed", "cancelled"])
 const linkIdentityFields = new Set(["target.objectTypeId", "target.primaryId"])
 
@@ -26,6 +30,8 @@ export interface ValidateSchedulesAtStartupOptions {
   readonly registeredDatasetIds?: ReadonlySet<string>
   readonly registeredSyncIds?: ReadonlySet<string>
   readonly registeredPipelineIds?: ReadonlySet<string>
+  /** OAuth connectors only: a static connector has no connections, so no connection events. */
+  readonly registeredOAuthConnectorIds?: ReadonlySet<string>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -156,9 +162,12 @@ function assertEventSourceShape(
       return
     case "users":
       return
+    case "connectors":
+      assertNonEmptyString(value.connectorId, `${path} connectorId`, createError)
+      return
     default:
       throw createError(
-        `${path} must select object, link, rule, dataset, sync, pipeline, or member events.`
+        `${path} must select object, link, rule, dataset, sync, pipeline, member, or connection events.`
       )
   }
 }
@@ -246,6 +255,15 @@ function validateEventSchedule(
     case "users":
       validateMemberSource(schedule)
       return
+    case "connectors":
+      validateRegisteredSource(
+        schedule,
+        source.connectorId,
+        options.registeredOAuthConnectorIds,
+        connectorEventTypes,
+        "OAuth connector"
+      )
+      return
   }
 }
 
@@ -292,7 +310,7 @@ function validateRegisteredSource(
   sourceId: string | undefined,
   registeredIds: ReadonlySet<string> | undefined,
   supportedTypes: ReadonlySet<string>,
-  sourceKind: "rule" | "dataset" | "sync" | "pipeline"
+  sourceKind: "rule" | "dataset" | "sync" | "pipeline" | "OAuth connector"
 ): void {
   validateEventTypes(schedule, supportedTypes, sourceKind)
   if (!registeredIds?.has(sourceId ?? "")) {

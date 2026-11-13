@@ -160,3 +160,30 @@ defineWorkflow("welcome-member")
 
     return { userId: event.user.id, email: event.user.email }
   })
+
+const outlookConnected = defineSchedule("outlook-connected").on(
+  events.connector({ kind: "connector", id: "outlook" }).connected()
+)
+
+defineSchedule("outlook-connected-where")
+  .on(events.connector({ kind: "connector", id: "outlook" }).connected())
+  // @ts-expect-error connection event sources have no conditions
+  .where(() => undefined)
+
+defineWorkflow("subscribe-mailbox")
+  .input({ connectionId: "string", accountId: "string" })
+  .when(outlookConnected, ({ event }) => {
+    event.reason satisfies "connected" | "replaced" | "reconnected"
+    event.connection.owner satisfies { type: "project" } | { type: "user"; id: string }
+
+    // @ts-expect-error a connection becoming usable is never "revoked"
+    event.reason satisfies "revoked"
+
+    return { connectionId: event.connection.id, accountId: event.connection.account.id }
+  })
+  .then(
+    defineWorkflowStep("subscribe")
+      .input({ connectionId: "string", accountId: "string" })
+      .output({})
+      .run(() => ({}))
+  )

@@ -180,9 +180,12 @@ function assertEventSource(source: EventSelectorSpec): void {
       return
     case "users":
       return
+    case "connectors":
+      assertNonEmpty(source.connectorId ?? "", "event source connectorId")
+      return
     default:
       throw new ScheduleValidationError(
-        "Schedule event source must select object, link, rule, dataset, sync, pipeline, or member events."
+        "Schedule event source must select object, link, rule, dataset, sync, pipeline, member, or connection events."
       )
   }
 }

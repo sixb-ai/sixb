@@ -20,6 +20,7 @@ export interface EventScopeKeys {
   readonly datasetId?: string
   readonly syncId?: string
   readonly pipelineId?: string
+  readonly connectorId?: string
 }
 
 export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
@@ -54,6 +55,8 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
       return {}
     case "artifacts":
       return {}
+    case "connectors":
+      return { connectorId: event.payload.connectorId }
     default: {
       // Exhaustiveness guard: a new topic must extend the switch above.
       const _exhaustive: never = event

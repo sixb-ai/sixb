@@ -159,6 +159,20 @@ describe("events selector builder", () => {
     })
   })
 
+  test("builds connection selectors scoped to one connector", () => {
+    const outlook = { kind: "connector", id: "outlook" } as const
+    expect(eventSelectorSpec(events.connector(outlook).connected())).toEqual({
+      topic: "connectors",
+      connectorId: "outlook",
+      types: ["connector.connection.connected"],
+    })
+    expect(eventSelectorSpec(events.connector(outlook).disconnected())).toEqual({
+      topic: "connectors",
+      connectorId: "outlook",
+      types: ["connector.connection.disconnected"],
+    })
+  })
+
   test("builds project-wide member selectors", () => {
     expect(eventSelectorSpec(events.users())).toEqual({ topic: "users" })
     expect(eventSelectorSpec(events.users().joined())).toEqual({

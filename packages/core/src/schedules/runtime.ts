@@ -112,6 +112,9 @@ export function buildEventScheduleContext(event: DomainEvent): RuntimeEventSched
     case "user.invited":
     case "user.profile.updated":
       return { ...event.payload }
+    case "connector.connection.connected":
+    case "connector.connection.disconnected":
+      return { ...event.payload }
     default:
       return null
   }
