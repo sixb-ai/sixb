@@ -51,7 +51,8 @@
     "build": "bun ../../scripts/build-package.ts",
     "test:e2e": "bun ../../scripts/ci-guard.ts --stall 60 --max 180 bun test ./tests/app-entry.e2e.ts ./tests/build-browser.e2e.ts ./tests/shared-shell.e2e.ts",
     "typecheck": "tsc --noEmit",
-    "prepack": "bun run build"
+    "prepack": "bun run build",
+    "generate:frame-editor": "bun ./scripts/generate-frame-editor.ts"
   },
   "dependencies": {
     "@sixb/client": "workspace:^",

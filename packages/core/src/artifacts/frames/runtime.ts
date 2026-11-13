@@ -64,9 +64,16 @@ import type {
  * in place, and the frame sends through the port what moves the canvas, their wheel turns unless
  * the page scrolls them, a finger's drag, Space held to drag, and the zooming above, and the words
  * of what they press, for the canvas to follow the arrow they label.
+ *
+ * A designed document served for editing may be handed its editor with `editor`: the script the
+ * app sends runs once, leaving a start function the runtime takes at once, and is handed the port
+ * that came with the request and the body, which it edits in place. From then on a click on a link
+ * places the caret rather than following it.
  */
 export function frameRuntime(data?: () => DocumentData): void {
   const PROTOCOL = "sixb-frame/1"
+  /** Where the editor's script leaves its start, as the app's frame editor names it. */
+  const EDITOR_GLOBAL = "__sixbFrameEditor"
   const WIDTH = 1280
   const HEIGHT = 720
   const KEYS = [
@@ -981,8 +988,32 @@ export function frameRuntime(data?: () => DocumentData): void {
   window.addEventListener("keyup", onSpace, true)
   window.addEventListener("blur", () => holdSpace(false))
 
+  /** The port the app handed over with `editor`, for the editor alone. */
+  let editorPort: MessagePort | null = null
+  let editorOn = false
+  const startEditor = (code: string) => {
+    if (editorOn) throw new Error("The editor is already running.")
+    if (!designed || !new URLSearchParams(window.location.search).has("sixb-edit")) {
+      throw new Error("Only a designed document served for editing takes an editor.")
+    }
+    if (!editorPort || !document.body) throw new Error("The editor needs its port and a body.")
+    const script = document.createElement("script")
+    script.textContent = code
+    document.head.append(script)
+    script.remove()
+    const scope = window as unknown as Record<string, unknown>
+    const start = scope[EDITOR_GLOBAL]
+    delete scope[EDITOR_GLOBAL]
+    if (typeof start !== "function") throw new Error("The editor did not start.")
+    editorOn = true
+    start({ port: editorPort, body: document.body })
+  }
+
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
+      case "editor":
+        startEditor(String(params.code ?? ""))
+        return
       case "theme": {
         // In the theme's layer, not inline: the deck's own CSS, unlayered, still wins.
         const tokens = (params.tokens ?? {}) as Record<string, string>
@@ -1199,6 +1230,7 @@ export function frameRuntime(data?: () => DocumentData): void {
       event.stopImmediatePropagation()
       const port = event.ports?.[0]
       if ((data.method === "edit" || data.method === "canvas") && port) appPort = port
+      if (data.method === "editor" && port) editorPort = port
       try {
         handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
         post({ id: data.id })
@@ -1220,6 +1252,8 @@ export function frameRuntime(data?: () => DocumentData): void {
   })
 
   document.addEventListener("click", (event) => {
+    // The editor's own: a click there places the caret.
+    if (editorOn) return
     const target = event.target as HTMLElement | null
 
     // A button, or a link within the page, by its words: on a canvas, an opened board follows the

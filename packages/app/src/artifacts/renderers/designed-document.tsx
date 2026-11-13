@@ -6,7 +6,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { useArtifactEditing } from "../edit-session"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../frame"
 import { FrameEmbeds } from "../frame-embeds"
-import { useLiveBoardSource } from "../live/boards"
+import { useLiveBoardSource, useLivePageHeld } from "../live/boards"
 import { liveDocumentOf } from "../live/document"
 import { useLiveArtifactState, useViewerLiveArtifact } from "../live/hooks"
 import type { LiveArtifact } from "../live/session"
@@ -16,6 +16,7 @@ import { useArtifactThemeAttributes } from "../theme"
 import { useFrameEditing, useLiveFrame } from "./live-frame"
 import { ViewerLoading, ViewerNotice } from "./notice"
 import { FrameScreen, usePageEvents } from "./page"
+import { PageEditor } from "./page-editor"
 
 /** How wide a designed document draws without paper: a Letter sheet's width. */
 const SHEET_WIDTH = 816
@@ -32,10 +33,10 @@ export function isDesignedDocument(version: Pick<ArtifactVersion, "outline">): b
  * follows the window across that width; there is nothing to choose. The artifacts it embeds are
  * drawn over it where it puts them.
  *
- * Held live and edited, it is one sheet whose words the reader types into in place, element by
- * element, for everyone at once: as pages, every page after the first shows a copy, and only the
- * original takes typing. Once they are done, it stays that sheet until the stored version holds
- * their words, then shows its pages again.
+ * Held live and edited, it is one sheet the reader edits in place, for everyone at once: as a page
+ * of notes, block by block, when the live document holds it as blocks (./page-editor.tsx); else
+ * its words, element by element. Once they are done, it stays that sheet until the stored version
+ * holds their changes, then shows its pages again.
  */
 export function DesignedDocumentRenderer({
   version,
@@ -51,10 +52,15 @@ export function DesignedDocumentRenderer({
   const held = live && state.synced && !state.left ? live : null
   const typing = editing && state.access === "edit" ? held : null
   const settling = useSettling(version, held, typing !== null)
+  // A page held as blocks is edited with the editor in its frame; one held as text, as a board is.
+  const blocks = useLivePageHeld(held, version.entry)
+  const shown = typing ?? settling
 
   return (
     <DocumentStage version={version}>
-      {typing ? (
+      {shown && blocks ? (
+        <PageEditor version={version} live={shown} editable={typing !== null} />
+      ) : typing ? (
         <DocumentEditor version={version} live={typing} typing />
       ) : settling ? (
         <DocumentEditor version={version} live={settling} typing={false} />

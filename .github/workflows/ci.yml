@@ -108,6 +108,9 @@ jobs:
       - name: Generate search script
         run: bun run generate:search-script
 
+      - name: Generate frame editor
+        run: bun run generate:frame-editor
+
       - name: Verify generated artifacts are committed
         run: git diff --exit-code
 
