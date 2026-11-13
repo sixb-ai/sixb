@@ -82,8 +82,10 @@ Attach it with `.when(highValueInvoice)`, just like a timer. For workflows that 
 use `.when(schedule, mapper)` to turn event data into that input. See
 [workflow event schedules](../workflows/overview.md#start-a-workflow) for an example.
 
-You can also select link changes, rule signals, dataset updates, sync or pipeline outcomes, and
-[member changes](../auth/members.md#react-to-member-changes) such as `events.users().joined()`.
+You can also select link changes, rule signals, dataset updates, sync or pipeline outcomes,
+[member changes](../auth/members.md#react-to-member-changes) such as `events.users().joined()`, and
+[connections](../connectors/authentication.md#react-when-someone-connects) such as
+`events.connector(gmail).connected()`.
 Conditions are supported on object and link events only.
 
 `events.dataset(...).updated()` fires when a new version changes the dataset's rows or

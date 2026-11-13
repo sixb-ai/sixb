@@ -161,6 +161,43 @@ and `connection.slot` on each row. Map the id to a
 [`userRef.fromId`](../projections/overview.md#point-to-members), and use
 [roles](../auth/authorization.md#grant-only-some-objects) to show each person only their own.
 
+### React when someone connects
+
+[Schedules](../schedules/overview.md#run-on-an-event) can start work when a connection of an OAuth
+connector becomes usable or stops being usable:
+
+| Selector | Fires when | `reason` |
+|---|---|---|
+| `events.connector(gmail).connected()` | Someone connects an account, replaces the one in a slot, or reconnects | `"connected"`, `"replaced"`, `"reconnected"` |
+| `events.connector(gmail).disconnected()` | Sixb can no longer use the connection: it was disconnected, its grant revoked, or its owner suspended | `"disconnected"`, `"revoked"`, `"suspended"` |
+
+The event carries the `connection`: its `id`, `owner`, `slot` and `account`. This workflow runs a
+person's first setup as soon as they connect:
+
+```ts
+const gmailConnected = defineSchedule("gmail-connected").on(events.connector(gmail).connected())
+
+export const setUpMailbox = defineWorkflow("set-up-mailbox")
+  .input({ connectionId: "string" })
+  .when(gmailConnected, ({ event }) => ({ connectionId: event.connection.id }))
+  .then(setUpStep)
+```
+
+In the step, `sixb.connector.connections(gmail)` lists the connections the run may use, following
+[the same rule as `sixb.connector()`](#which-runs-can-use-a-connection). A run no one requested,
+like this one, gets them all:
+
+```ts
+for (const { connection, client } of await sixb.connector.connections(gmail).list()) {
+  if (connection.id !== input.connectionId) continue
+  await (await client()).gmail.labels.create("me", { name: "Sixb" })
+}
+```
+
+`forAccount(accountId)` returns the connections of one account instead. Sixb announces each change
+once, after it is saved. An announcement lost to a broker outage or a crash is not repeated, so
+pair a `connected` schedule with a timed one that checks every connection.
+
 ### Act with a person's account
 
 To change something in a person's account, open their connection in an action or a workflow

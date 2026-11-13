@@ -2,6 +2,7 @@ import { AuthorizationError, assertProviderAccess } from "../authorization"
 import type { ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { createConnectorConnections } from "./connection-handles"
 import { createConnectorCodedError } from "./errors"
 import type { ConnectorService } from "./service"
 import type {
@@ -10,6 +11,7 @@ import type {
   ConnectorClient,
   ConnectorConnectionMetadata,
   ConnectorConnectionSelector,
+  ConnectorConnections,
   ConnectorDefinition,
   OAuthConnectorAdapter,
 } from "./types"
@@ -24,6 +26,14 @@ export interface ConnectorRuntime {
     definition: ConnectorDefinition<string, TAdapter>,
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>>
+  /**
+   * The connections of an OAuth connector this run may use: a run someone requested gets the
+   * project's and their own, and a run no one requested, such as one a schedule started, gets
+   * every connected one whose owner isn't suspended.
+   */
+  connections<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): ConnectorConnections<ConnectorClient<TAdapter>>
 }
 
 export interface ConnectorExecutionSource<
@@ -68,7 +78,7 @@ export function createConnectorRuntime(
     return service.connect(definition as ConnectorDefinition<string, ConnectorAdapter>)
   }) as ConnectorRuntime
 
-  registerConnectorExecutionSourceResolver(connector, {
+  const resolver: ConnectorExecutionSourceResolver = {
     async list<TAdapter extends AnyConnectorAdapter>(
       definition: ConnectorDefinition<string, TAdapter>
     ): Promise<readonly ConnectorExecutionSource<TAdapter>[]> {
@@ -102,8 +112,26 @@ export function createConnectorRuntime(
         },
       }))
     },
-  })
+  }
+  registerConnectorExecutionSourceResolver(connector, resolver)
+  connector.connections = <TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ) =>
+    createConnectorConnections<ConnectorClient<TAdapter>>(resolver, definition, (connection) =>
+      mayUsePersonalConnection(execution, connection)
+    )
   return connector
+}
+
+/** The rule `assertPersonalConnectionRequester` enforces, as a filter. */
+function mayUsePersonalConnection(
+  execution: ExecutionContext,
+  connection: ConnectorConnectionMetadata
+): boolean {
+  const owner = connection.owner
+  const requester = execution.requestedBy
+  if (owner.type !== "user" || requester === undefined) return true
+  return requester.type === "user" && requester.id === owner.id
 }
 
 function registerConnectorExecutionSourceResolver(
