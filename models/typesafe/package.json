@@ -54,6 +54,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@sixb/core": "workspace:^"
+    "@sixb/core": "workspace:^",
+    "@sixb/model-protocols": "workspace:*"
   }
 }

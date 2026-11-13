@@ -13,6 +13,7 @@ Shared request serialization and streaming decoders for Sixb model providers.
 | `/responses` | OpenAI Responses | [Reference][responses-api] · [Streaming][responses-streaming] |
 | `/messages` | Anthropic Messages | [Reference][messages-api] · [Streaming][messages-streaming] |
 | `/chat` | OpenAI-compatible Chat Completions | [Streaming reference][chat-streaming] |
+| `/systemone` | System One decision evaluation (TypeSafe Jev, Microsoft-Decision-1) | [Jev reference][systemone-api] |
 
 ```text
 Sixb ModelMessage[] → input serializer → native request fields
@@ -26,8 +27,9 @@ HTTP response body → SSE decoder      → AsyncIterable<LanguageModelStreamEve
 | Provider-namespaced replay data | Replay-scope validation, catalogs, caching, pricing |
 | Raw usage collection and normalization hooks | Provider-specific accounting assumptions |
 
-Only the three subpaths are exported; there is no root API. All use a shared, bounded SSE
-decoder that handles fragmented UTF-8 and closes unfinished streams on abort or consumer return.
+There is no root API. The three language protocols share a bounded SSE decoder that handles
+fragmented UTF-8 and closes unfinished streams on abort or consumer return; System One answers
+with one JSON body.
 
 ## Responses
 
@@ -119,6 +121,24 @@ choice deltas → choice finish → final usage / delayed filter annotations →
 - **Limits:** single choice; bounded replay/tool and annotation buffers. Opaque state and
   provider-executed tools are unsupported. Literal `<think>` tags remain ordinary text.
 
+## System One
+
+```ts
+import { systemOneRequest, systemOneResult } from "@sixb/model-protocols/systemone"
+```
+
+| Function | Purpose |
+| --- | --- |
+| `systemOneRequest(model, { input, questions })` | Build the `POST /systemone` body: `state`, and questions with `criteria`; probability is `noul`. |
+| `systemOneResult(body, questions, options)` | Decode answers into Sixb's shape, with usage, response model and request ID. |
+
+- **Answers:** score probabilities arrive keyed by level index beside a `legend`. Sixb's runtime
+  validates distributions, winning labels and expected scores afterwards.
+- **Failures:** a malformed answer throws `DecisionModelResponseError` carrying the usage, so the
+  call is still recorded. Missing counters stay unknown.
+- **Identity:** `options.assertModel` lets a provider reject the response's `model`, such as a
+  changed pinned Jev version; `options.redact` cleans provider text kept in metadata.
+
 ## Hosting-specific behavior
 
 Matching an API format does not establish feature or billing parity. For Azure, also consult:
@@ -134,6 +154,7 @@ Matching an API format does not establish feature or billing parity. For Azure, 
 [messages-caching]: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 [messages-tools]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming
 [chat-streaming]: https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events
+[systemone-api]: https://docs.typesafe.ai/models
 [azure-claude]: https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-claude
 [azure-claude-models]: https://learn.microsoft.com/azure/foundry/foundry-models/concepts/claude-models
 [azure-chat]: https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-chat-reasoning

@@ -196,6 +196,7 @@
       "@sixb/model-protocols/messages": ["./models/protocols/src/messages.ts"],
       "@sixb/model-protocols/chat": ["./models/protocols/src/chat.ts"],
       "@sixb/model-protocols/models-dev": ["./models/protocols/src/models-dev.ts"],
+      "@sixb/model-protocols/systemone": ["./models/protocols/src/systemone.ts"],
       "@sixb/orchestrator": ["./packages/orchestrator/src/index.ts"],
       "@sixb/pg": ["./storage/pg/src/index.ts"],
       "@sixb/pipeline-worker": ["./packages/pipeline-worker/src/index.ts"],
