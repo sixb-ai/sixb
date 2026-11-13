@@ -201,12 +201,19 @@ async function reuseRun<TRun extends QueuedRun, TResult>(
   return { publish: true, run, queuedAt, created: false }
 }
 
+/**
+ * A request that names an existing run must ask for that same run. A trigger does not have to: the
+ * orchestrator replays retained events whenever it restarts, and a deploy in between may change
+ * the definition. The run the trigger's id names has already answered it, and the worker fails one
+ * that has not started and no longer matches its definition. Rejecting the trigger instead would
+ * hold every later event of its type behind it.
+ */
 async function assertReusable<TRun extends QueuedRun, TResult>(
   input: DispatchQueuedRunInput<TRun, TResult>,
   run: TRun,
   storage: Storage
 ): Promise<void> {
-  if (!input.primitive.matches(run)) {
+  if (!input.automatic && !input.primitive.matches(run)) {
     throw new input.primitive.RunError(
       `[Sixb] ${input.primitive.label} run '${run.id}' already exists with a different request payload.`
     )
