@@ -1,3 +1,4 @@
+import type { ClientStateSource } from "./client-state"
 import type { MicrosoftHttp } from "./http"
 import { type CalendarSurface, calendarSurface } from "./surfaces/calendar"
 import { type ContactsSurface, contactsSurface } from "./surfaces/contacts"
@@ -22,15 +23,15 @@ export interface MicrosoftClient {
 
 export function createMicrosoftClient(
   http: MicrosoftHttp,
-  webhookSecret?: string
+  clientState?: ClientStateSource
 ): MicrosoftClient {
   return {
     calendar: calendarSurface(http),
-    contacts: contactsSurface(http, webhookSecret),
+    contacts: contactsSurface(http, clientState),
     directory: directorySurface(http),
     sites: sitesResource(http),
     drives: drivesSurface(http),
-    mail: mailSurface(http, webhookSecret),
+    mail: mailSurface(http, clientState),
     subscriptions: subscriptionsResource(http),
   }
 }

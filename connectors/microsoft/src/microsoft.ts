@@ -8,13 +8,14 @@ import type {
 import { createTokenSource, validateAuth } from "./auth"
 import { createMicrosoftOAuth } from "./auth/oauth"
 import { createMicrosoftClient, type MicrosoftClient } from "./client"
+import { type ClientStateSource, personalClientState } from "./client-state"
 import { MicrosoftConfigurationError } from "./errors"
 import { createMicrosoftHttp } from "./http"
 import { withSignal } from "./lifetime"
 import { validateWebhookSecret } from "./surfaces/subscriptions/validation"
 import type { MicrosoftConnectorOptions, MicrosoftOAuthConnectorOptions } from "./types/common"
 import { GRAPH_BASE } from "./validation"
-import { microsoftEventsWebhook } from "./webhooks"
+import { microsoftEventsWebhook, microsoftOAuthEventsWebhook } from "./webhooks"
 
 export type MicrosoftConnector = ConnectorAdapter<"microsoft", MicrosoftClient>
 export type MicrosoftOAuthConnector = OAuthConnectorAdapter<"microsoft", MicrosoftClient>
@@ -33,19 +34,14 @@ export function microsoft(
 
 function microsoftApplication(options: MicrosoftConnectorOptions): MicrosoftConnector {
   validateAuth(options.auth)
-  if (options.webhookSecret !== undefined) validateWebhookSecret(options.webhookSecret)
-  if (options.onEvent !== undefined && typeof options.onEvent !== "function") {
-    throw new MicrosoftConfigurationError("onEvent must be a function.")
-  }
-  if (options.onEvent && options.webhookSecret === undefined) {
-    throw new MicrosoftConfigurationError("webhookSecret is required when onEvent is configured.")
-  }
+  validateNotifications(options)
   const timeoutMs = validTimeout(options.timeoutMs)
+  const secret = options.webhookSecret
   return {
     type: "microsoft",
     webhooks:
-      options.onEvent && options.webhookSecret !== undefined
-        ? [microsoftEventsWebhook(options.webhookSecret, options.onEvent)]
+      options.onEvent && secret !== undefined
+        ? [microsoftEventsWebhook(secret, options.onEvent)]
         : undefined,
     async connect(context) {
       const authHttp = await rest({
@@ -62,19 +58,26 @@ function microsoftApplication(options: MicrosoftConnectorOptions): MicrosoftConn
           onUnauthorized: () => token.invalidate(),
         },
         options,
-        timeoutMs
+        timeoutMs,
+        secret === undefined ? undefined : () => secret
       )
     },
   }
 }
 
 function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuthConnector {
+  validateNotifications(options)
   const timeoutMs = validTimeout(options.timeoutMs)
+  const secret = options.webhookSecret
   const { authentication, discoverAccounts } = createMicrosoftOAuth(options.auth.oauth, timeoutMs)
   return {
     type: "microsoft",
     authentication,
     discoverAccounts,
+    webhooks:
+      options.onEvent && secret !== undefined
+        ? [microsoftOAuthEventsWebhook(secret, options.onEvent)]
+        : undefined,
     connect(context) {
       // A 401 must invalidate the exact token that request sent, not whichever is current now.
       const requestTokens = new WeakMap<RestRequestContext, ConnectorAccessToken>()
@@ -92,7 +95,9 @@ function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuth
           onUnauthorized: (request) => requestTokens.get(request)?.invalidate(),
         },
         options,
-        timeoutMs
+        timeoutMs,
+        // Signed on use, so an account id the signature can't carry fails only subscribing.
+        secret === undefined ? undefined : () => personalClientState(secret, context.account.id)
       )
     },
   }
@@ -102,15 +107,13 @@ async function connectGraph(
   context: ConnectorContext,
   auth: GraphAuth,
   options: MicrosoftConnectorOptions | MicrosoftOAuthConnectorOptions,
-  timeoutMs: number
+  timeoutMs: number,
+  clientState: ClientStateSource | undefined
 ): Promise<MicrosoftClient> {
   const common = restOptions(options, timeoutMs)
   const graph = await rest({ ...common, ...auth, baseUrl: GRAPH_BASE }).connect(context)
   const media = await rest({ ...common, baseUrl: GRAPH_BASE }).connect(context)
-  return createMicrosoftClient(
-    createMicrosoftHttp(graph, media, context.signal),
-    "webhookSecret" in options ? options.webhookSecret : undefined
-  )
+  return createMicrosoftClient(createMicrosoftHttp(graph, media, context.signal), clientState)
 }
 
 function restOptions(
@@ -121,6 +124,18 @@ function restOptions(
     timeoutMs,
     minDelayMs: options.minDelayMs,
     retry: options.retry ?? { maxRetries: 2 },
+  }
+}
+
+function validateNotifications(
+  options: MicrosoftConnectorOptions | MicrosoftOAuthConnectorOptions
+): void {
+  if (options.webhookSecret !== undefined) validateWebhookSecret(options.webhookSecret)
+  if (options.onEvent !== undefined && typeof options.onEvent !== "function") {
+    throw new MicrosoftConfigurationError("onEvent must be a function.")
+  }
+  if (options.onEvent && options.webhookSecret === undefined) {
+    throw new MicrosoftConfigurationError("webhookSecret is required when onEvent is configured.")
   }
 }
 
