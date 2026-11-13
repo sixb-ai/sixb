@@ -1,10 +1,13 @@
 import type { ClientStateSource } from "../../client-state"
 import { MicrosoftConfigurationError } from "../../errors"
 import type { MicrosoftHttp } from "../../http"
-import type { ContactSubscribeOptions } from "../../types/contacts"
-import type { MicrosoftSubscription } from "../../types/subscriptions"
+import type {
+  ContactEnsureSubscriptionOptions,
+  ContactSubscribeOptions,
+} from "../../types/contacts"
+import type { MicrosoftSubscription, SubscriptionEnsureResult } from "../../types/subscriptions"
 import { mailboxPath } from "../mail/common"
-import { subscribeOutlook } from "../subscriptions/outlook"
+import { ensureOutlook, subscribeOutlook } from "../subscriptions/outlook"
 import { type ContactExtensionsResource, contactExtensionsResource } from "./extensions"
 import { type ContactFoldersResource, contactFoldersResource } from "./folders"
 import { type ContactItemsResource, contactItemsResource } from "./items"
@@ -18,6 +21,11 @@ export interface ContactsSurface {
   readonly extensions: ContactExtensionsResource
   /** Notifies about every personal contact in the mailbox, in any folder. */
   subscribe(mailbox: string, options: ContactSubscribeOptions): Promise<MicrosoftSubscription>
+  /** Keeps the mailbox's contact subscription alive. See `subscriptions.ensure`. */
+  ensureSubscription(
+    mailbox: string,
+    options: ContactEnsureSubscriptionOptions
+  ): Promise<SubscriptionEnsureResult>
 }
 export function contactsSurface(
   http: MicrosoftHttp,
@@ -29,18 +37,22 @@ export function contactsSurface(
     photo: contactPhotoResource(http),
     extensions: contactExtensionsResource(http),
     async subscribe(mailbox, options) {
-      // Graph has no folder-scoped contact resource; never widen a caller's folder to the mailbox.
-      if ("folderId" in options)
-        throw new MicrosoftConfigurationError(
-          "Contact subscriptions cover the whole mailbox and do not accept folderId."
-        )
-      return subscribeOutlook(
-        http,
-        clientState,
-        "contact",
-        `${mailboxPath(mailbox)}/contacts`,
-        options
-      )
+      assertNoFolder(options)
+      return subscribeOutlook(http, clientState, "contact", contacts(mailbox), options)
+    },
+    async ensureSubscription(mailbox, options) {
+      assertNoFolder(options)
+      return ensureOutlook(http, clientState, "contact", contacts(mailbox), options)
     },
   }
+}
+
+const contacts = (mailbox: string) => `${mailboxPath(mailbox)}/contacts`
+
+// Graph has no folder-scoped contact resource; never widen a caller's folder to the mailbox.
+function assertNoFolder(options: object): void {
+  if ("folderId" in options)
+    throw new MicrosoftConfigurationError(
+      "Contact subscriptions cover the whole mailbox and do not accept folderId."
+    )
 }

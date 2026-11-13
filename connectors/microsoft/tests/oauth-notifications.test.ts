@@ -253,6 +253,20 @@ describe("subscribing with a person's own account", () => {
     expect(states[0]).not.toContain(SECRET)
   })
 
+  test("ensuring a person's subscription creates it with their signed clientState", async () => {
+    const requests = mockFetch((request) =>
+      request.method === "GET" ? json({ value: [] }) : json({ id: "s" }, 201)
+    )
+    const graph = await personalClient(ADA, SECRET)
+    const result = await graph.mail.ensureSubscription(ADA, {
+      changeTypes: ["created"],
+      notificationUrl: NOTIFICATION_URL,
+    })
+
+    expect(result.action).toBe("created")
+    expect(JSON.parse(String(requests[1]?.init.body)).clientState).toBe(await clientStateFor(ADA))
+  })
+
   test("needs the webhook secret, and an account the signature can carry", async () => {
     expect(() => microsoft({ auth: { oauth: OAUTH }, onEvent() {} })).toThrow("webhookSecret")
     expect(microsoft({ auth: { oauth: OAUTH }, webhookSecret: SECRET }).webhooks).toBeUndefined()
