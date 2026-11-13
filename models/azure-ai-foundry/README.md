@@ -2,7 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
-Language, embedding, decision and transcription models are supported.
+Language, embedding, decision, transcription and reranking models are supported.
 
 ## Install
 
@@ -157,6 +157,39 @@ estimated, because neither tokens nor duration are known before Azure decodes th
 [cost limit](../../docs/models/usage-and-limits.md#set-a-monthly-limit) blocks these calls.
 Connected deployments from another resource are rejected.
 
+## Reranking
+
+Deploy a Cohere rerank model in the project and register the deployment under `models.reranking`:
+
+```ts
+export const reranker = foundry.reranking("rerank")
+
+// In your createSixb() options:
+const models = { embedding: [productEmbedding], reranking: [reranker] }
+```
+
+A query then names it with `.rerank({ model: reranker })`, see
+[rerank search results](../../docs/objects/querying.md#rerank-search-results).
+
+| Deployed model | Billed by | Price (GlobalStandard) |
+| --- | --- | --- |
+| `Cohere-rerank-v5-fast` | Input tokens | USD 0.02 per million |
+| `Cohere-rerank-v5-pro` | Input tokens | USD 0.05 per million |
+| `Cohere-rerank-v4.0-fast` | Searches | Unknown: USD 2 per 1,000 searches, a unit Sixb cannot price yet ([#1145](https://github.com/sixb-ai/sixb/issues/1145)) |
+| `Cohere-rerank-v4.0-pro` | Searches | Unknown: USD 2.50 per 1,000 searches |
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | Must run a `Cohere-rerank-*` model; others are rejected. Discovery reports `chat_completion` for Rerank v4.0, but `foundry.chat()` rejects it and catalog listings leave it out |
+| Inference | `POST /providers/cohere/v2/rerank` on the resource origin, with the project's API key; every document is scored |
+| `timeoutMs` | 30 seconds per call, response included; Sixb's query runtime also stops at 30 seconds |
+| Retries | None: errors carry `retryable` and `retryAfterMs` |
+| Price | Azure Retail Prices for Rerank v5 version 1 on GlobalStandard and DataZoneStandard (verified 2026-11-13); other v5 deployments take a `rateCard`, and Rerank v4.0 only a `costEstimator` that reads `usage.raw.search_units` |
+
+Capacity sets the rate limit: Azure's rate-limit headers report one request and 1,000 tokens per
+minute for each unit of a deployment's capacity. Connected deployments from another resource are
+rejected.
+
 ## Stream a response
 
 ```ts
@@ -196,7 +229,7 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Supported language deployments; embedding, decision and transcription deployments are left out |
+| Catalog listings | Supported language deployments; embedding, decision, transcription and reranking deployments are left out |
 | Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
@@ -309,7 +342,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions and transcriptions |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions and reranking |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -337,5 +370,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `provider.e2e.ts` | Protocol controls, tools, media, cancellation and errors | 40 / 16,000 |
 | `decision.e2e.ts` | Decision questions, accounting, errors and chat tier routing | 16 decisions / — |
 | `transcription.e2e.ts` | Each transcription deployment, accounting and errors | 8 transcriptions / — |
+| `reranking.e2e.ts` | Rerank v5 and v4 ranking, usage, pricing and errors, as direct calls | 8 rerank calls / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.

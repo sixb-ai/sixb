@@ -6,19 +6,22 @@ import { PREFIX } from "./util"
  * What a deployment runs, read from its model name. Project discovery reports no kind: an audio
  * or rerank deployment lists no capabilities, or `chat_completion`, like a language model.
  */
-export type FoundryKind = "language" | "embedding" | "decision" | "transcription"
+export type FoundryKind = "language" | "embedding" | "decision" | "transcription" | "reranking"
 
 export const KIND_BINDINGS: Readonly<Record<FoundryKind, string>> = {
   language: "foundry() or foundry.chat()",
   embedding: "foundry.embedding()",
   decision: "foundry.decision()",
   transcription: "foundry.transcription()",
+  reranking: "foundry.reranking()",
 }
 
 export function deploymentKind(deployment: AzureAIFoundryDeployment): FoundryKind {
   if (isEmbeddingDeployment(deployment)) return "embedding"
   if (isDecisionDeployment(deployment)) return "decision"
   if (isTranscriptionDeployment(deployment)) return "transcription"
+  // Discovery reports `chat_completion: "true"` for Rerank v4.0; it is no chat model.
+  if (/^cohere-rerank-/i.test(deployment.modelName)) return "reranking"
   return "language"
 }
 
