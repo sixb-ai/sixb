@@ -12,6 +12,7 @@ import {
   patchFragment,
 } from "./blocks"
 import { diffSequences, diffText, interleave, mergeSequences, mergeText } from "./diff"
+import { isPageEntry, pageEntry, pageEntryHtml, patchPageEntry } from "./page"
 
 // An artifact's open version as a Yjs document, which everyone editing it changes at once:
 //
@@ -26,7 +27,9 @@ import { diffSequences, diffText, interleave, mergeSequences, mergeText } from "
 // with each item's words (`text`, `title`, `label`) as `Y.Text`. Two people moving two items, or
 // one moving an item while another types in it, change different keys and never conflict. A
 // Markdown document holds `document.md` as the blocks its editor edits, a `Y.XmlFragment`
-// (`./blocks`), so typing in one paragraph and moving another merge as block edits do.
+// (`./blocks`), so typing in one paragraph and moving another merge as block edits do. A designed
+// document holds `document.html` as a page, its body's blocks a `Y.XmlFragment` too (`./page`),
+// unless its source is not one an editor can hold whole: then it is text.
 
 /** One file of an artifact as the live layer reads it: its text, or its stored bytes. */
 export type LiveFile = { readonly text: string } | { readonly file: FileRef }
@@ -66,6 +69,8 @@ const CANVAS_TEXT_KEYS: ReadonlySet<string> = new Set(["text", "title", "label"]
 
 /** A Markdown document's entry, which it holds as blocks. */
 const MARKDOWN_ENTRY = "document.md"
+/** A designed document's entry, which it holds as a page. */
+const PAGE_ENTRY = "document.html"
 
 /** The file a kind holds as a structure, if it holds one. */
 function structuredPath(kind: ArtifactKind): string | undefined {
@@ -110,10 +115,8 @@ export function documentKind(doc: Y.Doc): ArtifactKind {
 export function documentFiles(doc: Y.Doc): Map<string, LiveFile> {
   const files = new Map<string, LiveFile>()
   doc.getMap<unknown>(LIVE_FILES).forEach((entry, path) => {
-    if (entry instanceof Y.Text) files.set(path, { text: entry.toString() })
-    else if (entry instanceof Y.Map) files.set(path, { text: canvasText(entry) })
-    else if (entry instanceof Y.XmlFragment) files.set(path, { text: fragmentMarkdown(entry) })
-    else files.set(path, { file: entry as FileRef })
+    const text = textOf(entry)
+    files.set(path, text === undefined ? { file: entry as FileRef } : { text })
   })
   return new Map([...files].sort(([left], [right]) => (left < right ? -1 : 1)))
 }
@@ -247,6 +250,12 @@ export function mergeIntoDocument(
         }
         continue
       }
+      if (isPageEntry(current)) {
+        // A page whose merged source an editor cannot hold whole is text from then on.
+        const merged = mergeText(baseText ?? "", currentText ?? "", file.text)
+        if (!patchPageEntry(current, merged)) files.set(path, new Y.Text(merged))
+        continue
+      }
       if (path === structured) {
         if (current instanceof Y.Map && mergeCanvas(current, baseText ?? "", file.text)) continue
       } else if (current instanceof Y.Text) {
@@ -265,6 +274,8 @@ export function mergeIntoDocument(
 /** What a document's entry is for a file: a structure, a text, or a reference. */
 function entryOf(kind: ArtifactKind, path: string, file: LiveFile): unknown {
   if ("file" in file) return { ...file.file }
+  if (kind === "document" && path === PAGE_ENTRY)
+    return pageEntry(file.text) ?? new Y.Text(file.text)
   if (path === structuredPath(kind)) {
     if (kind === "document") return markdownFragment(file.text)
     const parsed = parseCanvas(file.text)
@@ -275,6 +286,7 @@ function entryOf(kind: ArtifactKind, path: string, file: LiveFile): unknown {
 
 function textOf(entry: unknown): string | undefined {
   if (entry instanceof Y.Text) return entry.toString()
+  if (isPageEntry(entry)) return pageEntryHtml(entry)
   if (entry instanceof Y.Map) return canvasText(entry)
   if (entry instanceof Y.XmlFragment) return fragmentMarkdown(entry)
   return undefined
