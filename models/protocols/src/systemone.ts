@@ -1,6 +1,7 @@
 import {
   type ChoiceQuestion,
   type DecisionAnswer,
+  type DecisionModelRequest,
   DecisionModelResponseError,
   type DecisionModelResponseMetadata,
   type DecisionModelResult,
@@ -10,18 +11,62 @@ import {
   type ScoreQuestion,
 } from "@sixb/core/models"
 
-export function typesafeResponse(
+/** How a provider reads a System One response; the protocol itself carries no identity rules. */
+export interface SystemOneResponseOptions {
+  readonly providerId: string
+  readonly modelId: string
+  /** Opens the error message, such as `[SixbTypeSafe]`. */
+  readonly errorPrefix: string
+  /** Kept as `providerIds.requestId`; the provider redacts it before passing it. */
+  readonly requestId?: string
+  /** Throws to reject the response's `model` field; answers then fail, usage is kept. */
+  readonly assertModel?: (model: unknown) => void
+  /** Applied to provider text kept in metadata, such as the response model. */
+  readonly redact?: (value: string) => string
+}
+
+/** The body of `POST /systemone`. Probability questions are `noul` on the wire. */
+export function systemOneRequest(
+  model: string,
+  { input, questions }: Pick<DecisionModelRequest, "input" | "questions">
+) {
+  return {
+    model,
+    state: input,
+    // Keep user-selected keys as data, including __proto__ and constructor.
+    questions: Object.fromEntries(
+      Object.entries(questions).map(([key, question]) => [key, wireQuestion(question)])
+    ),
+  }
+}
+
+function wireQuestion(question: DecisionQuestion) {
+  const { instructions } = question
+  switch (question.type) {
+    case "choice":
+      return { type: "choice", instructions, criteria: question.options }
+    case "score":
+      return { type: "score", instructions, criteria: question.levels }
+    case "probability":
+      return { type: "noul", instructions }
+  }
+}
+
+/**
+ * Decode answers and billing evidence. A malformed answer throws a `DecisionModelResponseError`
+ * that still carries the usage, so the runtime can record a billable call.
+ */
+export function systemOneResult(
   body: unknown,
   questions: DecisionQuestions,
-  modelId: string,
-  requestId?: string
+  options: SystemOneResponseOptions
 ): DecisionModelResult {
   // Read billing evidence first; malformed answers must not discard it.
-  const metadata = readMetadata(body, requestId)
+  const metadata = readMetadata(body, options)
 
   try {
     const payload = record(body, "response")
-    assertResponseModel(payload.model, modelId)
+    options.assertModel?.(payload.model)
 
     const answers = record(payload.answers, "answers")
     assertKeys(answers, Object.keys(questions), "answer keys")
@@ -35,21 +80,12 @@ export function typesafeResponse(
     return { ...metadata, output }
   } catch (cause) {
     throw new DecisionModelResponseError(
-      "[SixbTypeSafe] Invalid decision response.",
-      "typesafe",
-      modelId,
+      `${options.errorPrefix} Invalid decision response.`,
+      options.providerId,
+      options.modelId,
       metadata,
       { cause }
     )
-  }
-}
-
-function assertResponseModel(value: unknown, requestedModel: string): void {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error("Missing response model")
-  }
-  if (/^jev-\d+\.\d+\.\d+$/.test(requestedModel) && value !== requestedModel) {
-    throw new Error("Pinned model identity changed")
   }
 }
 
@@ -87,6 +123,7 @@ function readChoiceAnswer(answer: Record<string, unknown>): DecisionAnswer<Choic
   }
 }
 
+/** Score probabilities arrive keyed by level index ("0", "1", …), beside a `legend`. */
 function readScoreAnswer(
   answer: Record<string, unknown>,
   question: ScoreQuestion
@@ -108,11 +145,15 @@ function readProbabilityAnswer(
   return { probability: finite(answer.noul) }
 }
 
-function readMetadata(body: unknown, requestId?: string): DecisionModelResponseMetadata {
+function readMetadata(
+  body: unknown,
+  options: SystemOneResponseOptions
+): DecisionModelResponseMetadata {
   const payload = isRecord(body) ? body : {}
   const rawUsage = isRecord(payload.usage) ? payload.usage : {}
   const inputTokens = counter(rawUsage.input_tokens)
   const outputTokens = counter(rawUsage.output_tokens)
+  const model = typeof payload.model === "string" && payload.model.trim() ? payload.model : ""
 
   // Missing or invalid counters remain unknown; keep independent valid counters.
   return {
@@ -120,10 +161,8 @@ function readMetadata(body: unknown, requestId?: string): DecisionModelResponseM
       ...(inputTokens === undefined ? {} : { inputTokens }),
       ...(outputTokens === undefined ? {} : { outputTokens }),
     },
-    ...(typeof payload.model === "string" && payload.model.trim()
-      ? { responseModelId: payload.model }
-      : {}),
-    ...(requestId ? { providerIds: { requestId } } : {}),
+    ...(model ? { responseModelId: options.redact ? options.redact(model) : model } : {}),
+    ...(options.requestId ? { providerIds: { requestId: options.requestId } } : {}),
   }
 }
 
