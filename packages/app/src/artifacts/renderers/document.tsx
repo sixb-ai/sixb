@@ -8,15 +8,7 @@ import {
   MessageSquareWarning,
   OctagonAlert,
 } from "lucide-react"
-import {
-  type ComponentProps,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef } from "react"
 import { useCopyFeedback } from "../copy-feedback"
 import { type ArtifactMessages, useArtifactMessages } from "../messages"
 import {
@@ -40,7 +32,7 @@ const REHYPE_PLUGINS: MarkdownProps["rehypePlugins"] = [
 
 /**
  * A document as a page to read: its title and lede, a measured column, figures with captions,
- * callouts, and an outline that follows the reader. It draws only on theme tokens, so the app's
+ * and callouts. It draws only on theme tokens, so the app's
  * theme, dark mode, and the artifact's own `theme.json` all apply.
  */
 export function DocumentRenderer({
@@ -59,14 +51,6 @@ export function DocumentRenderer({
   const file = useFileText(source)
   const theme = useArtifactThemeAttributes(version)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const headings = useMemo(
-    () =>
-      version.outline.kind === "document"
-        ? version.outline.headings.filter((heading) => heading.depth === 2 || heading.depth === 3)
-        : [],
-    [version.outline]
-  )
-  const activeSlug = useActiveHeading(scrollRef, headings, file.text)
 
   const scrollToSection = useCallback((slug: string) => {
     const heading = scrollRef.current?.querySelector(`[id="${CSS.escape(slug)}"]`)
@@ -104,91 +88,18 @@ export function DocumentRenderer({
       )}
       style={theme.style}
     >
-      <div className="mx-auto flex w-full max-w-[66rem] gap-14 px-6 py-10 @lg:px-12 @lg:py-14">
-        <article className="min-w-0 flex-1">
-          <Markdown
-            className="sixb-document"
-            components={components}
-            rehypePlugins={REHYPE_PLUGINS}
-            urlTransform={artifactUrlTransform}
-          >
-            {file.text}
-          </Markdown>
-        </article>
-        {headings.length > 1 ? (
-          <nav
-            aria-label={messages.document.outline}
-            className="sticky top-14 hidden w-48 shrink-0 self-start @4xl:block"
-          >
-            <p className="mb-3 text-xs font-semibold text-muted-foreground">
-              {messages.document.outline}
-            </p>
-            <ol className="flex flex-col gap-2 text-[13px] leading-snug">
-              {headings.map((heading) => (
-                <li key={heading.slug} className={heading.depth === 3 ? "pl-3" : undefined}>
-                  <a
-                    href={`#${heading.slug}`}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      scrollToSection(heading.slug)
-                    }}
-                    aria-current={activeSlug === heading.slug ? "location" : undefined}
-                    className={cn(
-                      "block transition-colors hover:text-foreground",
-                      activeSlug === heading.slug
-                        ? "font-medium text-foreground"
-                        : "text-muted-foreground"
-                    )}
-                  >
-                    {heading.text}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        ) : null}
+      <div className="sixb-document-page">
+        <Markdown
+          className="sixb-document"
+          components={components}
+          rehypePlugins={REHYPE_PLUGINS}
+          urlTransform={artifactUrlTransform}
+        >
+          {file.text}
+        </Markdown>
       </div>
     </div>
   )
-}
-
-/**
- * The section the reader is in: the last heading that has scrolled past the reading line. The
- * document scrolls itself when its host gives it a height, and scrolls with the page when the host
- * lets it grow, so this follows whichever element scrolls.
- */
-function useActiveHeading(
-  scrollRef: { readonly current: HTMLDivElement | null },
-  headings: readonly { readonly slug: string }[],
-  content: string | undefined
-): string | null {
-  const [active, setActive] = useState<string | null>(null)
-  useEffect(() => {
-    const container = scrollRef.current
-    if (!container || content === undefined || headings.length === 0) return
-    let frame = 0
-    const update = () => {
-      frame = 0
-      const top = Math.max(container.getBoundingClientRect().top, 0) + 96
-      let current: string | null = headings[0]?.slug ?? null
-      for (const heading of headings) {
-        const element = container.querySelector(`[id="${CSS.escape(heading.slug)}"]`)
-        if (element && element.getBoundingClientRect().top <= top) current = heading.slug
-      }
-      setActive(current)
-    }
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update)
-    }
-    update()
-    // Scroll events do not bubble; capturing at the document sees every scrolling element.
-    document.addEventListener("scroll", schedule, { capture: true, passive: true })
-    return () => {
-      document.removeEventListener("scroll", schedule, { capture: true })
-      if (frame) cancelAnimationFrame(frame)
-    }
-  }, [scrollRef, headings, content])
-  return active
 }
 
 export function documentComponents(

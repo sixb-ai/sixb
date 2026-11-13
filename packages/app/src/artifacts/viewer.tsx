@@ -48,6 +48,7 @@ import { useSharedGuest } from "../shared-session"
 import { useCopyFeedback } from "./copy-feedback"
 import { DownloadMenu } from "./downloads"
 import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-session"
+import { MarkdownDocument } from "./editor/markdown-document"
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
@@ -72,7 +73,6 @@ import {
 import { ArtifactReferencesProvider } from "./references/references"
 import { CanvasRenderer } from "./renderers/canvas/renderer"
 import { DesignedDocumentRenderer, isDesignedDocument } from "./renderers/designed-document"
-import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
 import { PageRenderer } from "./renderers/page"
@@ -169,16 +169,18 @@ function ArtifactView({
     (shown ? null : versionQuery.error)
   const edit = useArtifactEdit(target, detail, shown, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
-  // A canvas's latest version, and a designed document's, is held live: everyone's changes show
-  // as they make them, and editing it changes it for everyone at once.
+  // A canvas's latest version, and a document's, is held live: everyone's changes show as they
+  // make them, and editing it changes it for everyone at once. A Markdown document is typed into
+  // as it is shown, with no editing to start.
   const designed = !!shown && isDesignedDocument(shown)
+  const markdown = detail?.artifact.kind === "document" && !!shown && !designed
   const liveView = useLiveView(
     detail &&
       versionNumber === detail.artifact.latestVersion &&
-      (detail.artifact.kind === "canvas" || designed)
+      (detail.artifact.kind === "canvas" || detail.artifact.kind === "document")
       ? target.artifactId
       : null,
-    designed ? "document" : "canvas"
+    detail?.artifact.kind === "document" ? "document" : "canvas"
   )
 
   if (error || (artifactQuery.isSuccess && !detail)) {
@@ -225,7 +227,9 @@ function ArtifactView({
       <EditSessionProvider
         editing={edit.editing || !!liveView?.editing}
         report={edit.report}
-        start={startEditing(edit, liveView)}
+        start={
+          markdown && liveView && !liveView.state.left ? undefined : startEditing(edit, liveView)
+        }
       >
         <LiveArtifactProvider artifact={liveView?.live ?? null}>
           <ArtifactViewProvider
@@ -597,7 +601,7 @@ function ArtifactBody({
       return isDesignedDocument(version) ? (
         <DesignedDocumentRenderer version={version} {...(part ? { part } : {})} />
       ) : (
-        <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+        <MarkdownDocument version={version} latestVersion={latestVersion} part={part} />
       )
     case "sheet":
       return <SheetRenderer version={version} part={part} />
