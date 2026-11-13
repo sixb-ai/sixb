@@ -1,9 +1,12 @@
 import { type RestConnectorOptions, type RestRequestContext, rest } from "@sixb/connector-rest"
-import type {
-  ConnectorAccessToken,
-  ConnectorAdapter,
-  ConnectorContext,
-  OAuthConnectorAdapter,
+import {
+  type ConnectorAccessToken,
+  type ConnectorAdapter,
+  type ConnectorContext,
+  type ConnectorOAuth2Authentication,
+  type ConnectorOAuthCredentials,
+  ConnectorOAuthError,
+  type OAuthConnectorAdapter,
 } from "@sixb/core"
 import { createTokenSource, validateAuth } from "./auth"
 import { createMicrosoftOAuth } from "./auth/oauth"
@@ -12,6 +15,7 @@ import { type ClientStateSource, personalClientState } from "./client-state"
 import { MicrosoftConfigurationError } from "./errors"
 import { createMicrosoftHttp } from "./http"
 import { withSignal } from "./lifetime"
+import { deletePersonalSubscriptions } from "./surfaces/subscriptions/cleanup"
 import { validateWebhookSecret } from "./surfaces/subscriptions/validation"
 import type { MicrosoftConnectorOptions, MicrosoftOAuthConnectorOptions } from "./types/common"
 import { GRAPH_BASE } from "./validation"
@@ -72,7 +76,19 @@ function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuth
   const { authentication, discoverAccounts } = createMicrosoftOAuth(options.auth.oauth, timeoutMs)
   return {
     type: "microsoft",
-    authentication,
+    authentication:
+      secret === undefined
+        ? authentication
+        : {
+            ...authentication,
+            revoke: (context, credentials) =>
+              deleteSubscriptionsOnRevoke(context, credentials, {
+                accountId: () => discoverAccounts(context, credentials)[0]?.id,
+                refresh: authentication.refresh,
+                options,
+                timeoutMs,
+              }),
+          },
     discoverAccounts,
     webhooks:
       options.onEvent && secret !== undefined
@@ -100,6 +116,55 @@ function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuth
         secret === undefined ? undefined : () => personalClientState(secret, context.account.id)
       )
     },
+  }
+}
+
+/**
+ * Entra has no way for an application to revoke one person's grant, but the subscriptions this
+ * connector made for them can still go. Graph accepts only their own token for that, and Sixb is
+ * about to drop it. Best effort: a subscription left behind expires within seven days, and until
+ * then its notifications reach `onEvent` with no connections.
+ */
+async function deleteSubscriptionsOnRevoke(
+  context: ConnectorContext,
+  credentials: ConnectorOAuthCredentials,
+  using: {
+    readonly accountId: () => string | undefined
+    readonly refresh: ConnectorOAuth2Authentication["refresh"]
+    readonly options: MicrosoftOAuthConnectorOptions
+    readonly timeoutMs: number
+  }
+): Promise<void> {
+  try {
+    const accountId = using.accountId()
+    if (accountId === undefined) return
+    const { accessToken } =
+      credentials.expiresAt === undefined || credentials.expiresAt.getTime() > Date.now() + 60_000
+        ? credentials
+        : await using.refresh(context, credentials)
+    const graph = await connectGraph(
+      context,
+      { headers: () => ({ Authorization: `Bearer ${accessToken}` }) },
+      using.options,
+      using.timeoutMs,
+      undefined
+    )
+    const { failed } = await deletePersonalSubscriptions(
+      graph.subscriptions,
+      accountId,
+      `/api/webhooks/${context.connectorId}/events`
+    )
+    if (failed > 0)
+      console.warn(
+        `[SixbMicrosoft] ${failed} subscription(s) of a revoked connection could not be deleted; they expire within seven days.`
+      )
+  } catch (error) {
+    // A grant Entra already refuses, or one that names no account, can't delete anything.
+    if (error instanceof ConnectorOAuthError && error.kind === "terminal") return
+    console.warn(
+      "[SixbMicrosoft] The subscriptions of a revoked connection could not be deleted; they expire within seven days.",
+      error instanceof Error ? error.message : error
+    )
   }
 }
 

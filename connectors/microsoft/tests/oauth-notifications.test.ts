@@ -277,3 +277,95 @@ describe("subscribing with a person's own account", () => {
     expect(requests).toHaveLength(1)
   })
 })
+
+describe("revoking a person's connection", () => {
+  const ROUTE = "https://api.example.com/api/webhooks/outlook/events"
+  const credentials = (expiresAt = new Date("2099-01-01")) => ({
+    accessToken: "token-ada",
+    refreshToken: "refresh-ada",
+    expiresAt,
+    authorizationContext: { oid: ADA, preferredUsername: "ada@example.com" },
+  })
+  const revoke = (secret: string | undefined) =>
+    microsoft({ auth: { oauth: OAUTH }, webhookSecret: secret, retry: { maxRetries: 0 } })
+      .authentication.revoke
+  const context = { ...CONTEXT, connectorId: "outlook" }
+
+  function graph(
+    subscriptions: readonly Record<string, unknown>[],
+    onDelete = () => new Response(null, { status: 204 })
+  ) {
+    return mockFetch((request) => {
+      if (request.url.startsWith("https://login.microsoftonline.com/"))
+        return json({ access_token: "token-refreshed", expires_in: 3600 })
+      if (request.method === "DELETE") return onDelete()
+      return json({ value: subscriptions })
+    })
+  }
+
+  // Countercheck: drop the creatorId comparison in deletePersonalSubscriptions; an administrator
+  // with Subscription.Read.All would delete Grace's subscription too.
+  test("deletes the subscriptions the person made to this connector's receiver, and no others", async () => {
+    const requests = graph([
+      { id: "mine", creatorId: ADA, notificationUrl: ROUTE },
+      {
+        id: "mine-behind-prefix",
+        creatorId: ADA,
+        notificationUrl: "https://example.com/sixb/api/webhooks/outlook/events?x=1",
+      },
+      { id: "mine-elsewhere", creatorId: ADA, notificationUrl: "https://example.com/hooks/graph" },
+      {
+        id: "other-connector",
+        creatorId: ADA,
+        notificationUrl: "https://api.example.com/api/webhooks/calendar/events",
+      },
+      { id: "grace", creatorId: GRACE, notificationUrl: ROUTE },
+      { id: "unknown-creator", notificationUrl: ROUTE },
+    ])
+    await revoke(SECRET)?.(context, credentials())
+    expect(
+      requests.filter((r) => r.method === "DELETE").map((r) => r.url.split("/").pop())
+    ).toEqual(["mine", "mine-behind-prefix"])
+    expect(requests.every((r) => r.headers.get("authorization") === "Bearer token-ada")).toBe(true)
+  })
+
+  test("refreshes an expired token first, and needs no secret to have nothing to clean up", async () => {
+    const requests = graph([{ id: "mine", creatorId: ADA, notificationUrl: ROUTE }])
+    await revoke(SECRET)?.(context, credentials(new Date("2000-01-01")))
+    expect(requests.map((r) => r.method)).toEqual(["POST", "GET", "DELETE"])
+    expect(requests[2]?.headers.get("authorization")).toBe("Bearer token-refreshed")
+    expect(revoke(undefined)).toBeUndefined()
+  })
+
+  // Sixb treats a throwing revoke as a revocation to retry; cleanup must never hold one up.
+  test("never fails the revocation, and says so only when something was left behind", async () => {
+    const warnings: unknown[][] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => warnings.push(args)
+    try {
+      // A grant Entra already refuses can't delete anything; nothing to report.
+      mockFetch(() => json({ error: "invalid_grant" }, 400))
+      await revoke(SECRET)?.(context, credentials(new Date("2000-01-01")))
+      expect(warnings).toHaveLength(0)
+
+      graph([{ id: "gone", creatorId: ADA, notificationUrl: ROUTE }], () =>
+        json({ error: { code: "ResourceNotFound" } }, 404)
+      )
+      await revoke(SECRET)?.(context, credentials())
+      expect(warnings).toHaveLength(0)
+
+      graph([{ id: "stuck", creatorId: ADA, notificationUrl: ROUTE }], () =>
+        json({ error: { code: "ServiceUnavailable" } }, 503)
+      )
+      await revoke(SECRET)?.(context, credentials())
+      mockFetch(() => json({ error: { code: "ServiceUnavailable" } }, 503))
+      await revoke(SECRET)?.(context, credentials())
+      expect(warnings.map(([message]) => String(message))).toEqual([
+        expect.stringContaining("1 subscription(s) of a revoked connection could not be deleted"),
+        expect.stringContaining("could not be deleted; they expire within seven days"),
+      ])
+    } finally {
+      console.warn = warn
+    }
+  })
+})
