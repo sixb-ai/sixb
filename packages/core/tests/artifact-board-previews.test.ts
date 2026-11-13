@@ -252,14 +252,10 @@ describe("publishing a canvas", () => {
     expect(await claimable()).toEqual([job(first.version)])
 
     // The worker rendered each board in both modes: moving one renders nothing.
-    await storeBoardPreviews(
-      { storage: deps.storage.artifacts, blobStorage: deps.blobStorage },
-      first.version,
-      [
-        ...(await pictures("welcome", ["light", "dark"])),
-        ...(await pictures("region", ["light", "dark"])),
-      ]
-    )
+    await storeBoardPreviews(deps.storage.artifacts, first.version, [
+      ...(await pictures("welcome", ["light", "dark"])),
+      ...(await pictures("region", ["light", "dark"])),
+    ])
     await as(alice).artifacts.update(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
@@ -354,11 +350,7 @@ describe("a board's pictures", () => {
       files: await context.put({ "canvas.json": CANVAS, ...BOARDS }),
     })
     const store = (previews: Parameters<typeof storeBoardPreviews>[2]) =>
-      storeBoardPreviews(
-        { storage: context.deps.storage.artifacts, blobStorage: context.deps.blobStorage },
-        version,
-        previews
-      )
+      storeBoardPreviews(context.deps.storage.artifacts, version, previews)
     return { ...context, version, store }
   }
 
@@ -386,7 +378,6 @@ describe("a board's pictures", () => {
       body: new TextEncoder().encode("<svg/>"),
       mediaType: "image/svg+xml",
     })
-    const unstored: FileRef = { ...picture, sizeBytes: picture.sizeBytes + 1 }
     const huge: FileRef = { ...picture, sizeBytes: MAX_BOARD_PREVIEW_BYTES + 1 }
 
     const refused = await store([
@@ -395,7 +386,6 @@ describe("a board's pictures", () => {
       { ...welcome, size: "full", file: svg },
       { ...welcome, size: "small", file: picture },
       { board: "region", theme: "light", size: "full", file: small },
-      { board: "region", theme: "dark", size: "full", file: unstored },
       {
         board: "region",
         theme: "light",
@@ -411,7 +401,6 @@ describe("a board's pictures", () => {
       "welcome dark full: a full picture must be image/png",
       "welcome dark small: a small picture must be image/webp",
       "region light full: a full picture must be image/png",
-      "region dark full: it is not stored",
       `region light small: it is ${MAX_BOARD_PREVIEW_BYTES + 1} bytes, past the ${MAX_BOARD_PREVIEW_BYTES} kept`,
     ])
     expect(

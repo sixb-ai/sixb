@@ -10,12 +10,7 @@ import { DOCUMENT_HTML_ENTRY } from "./validate/document-html"
 // restored or frozen as it was keeps its PDF. It is printed when someone asks for it, by the render
 // worker in a blank sandbox of the project.
 
-/** How long the worker gives one PDF, how many times it tries, and how long it waits between. */
-export const DOCUMENT_PDF_JOB = {
-  timeoutMs: 2 * 60_000,
-  attempts: 2,
-  backoffMs: 15_000,
-} as const
+export { DOCUMENT_PDF_JOB } from "../pdf-job"
 
 /** The largest PDF the worker reads back from its sandbox: past it, the document has none. */
 export const MAX_DOCUMENT_PDF_BYTES = 64 * 1024 * 1024

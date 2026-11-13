@@ -110,6 +110,7 @@ export {
   type SlidesOutline,
 } from "./outline"
 export type { DocumentPaper } from "./paper"
+export { DOCUMENT_PDF_WAIT_MS } from "./pdf-job"
 export {
   type ArtifactFacetsQueryResult,
   type ArtifactObjectsQueryResult,

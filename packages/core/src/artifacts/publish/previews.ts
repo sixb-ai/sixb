@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto"
 import type { Principal } from "../../auth"
-import { statFileRef } from "../../blob-storage/file-content"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import { isValidFileRef } from "../../blob-storage/validation"
 import type { Queue, RenderQueueJob } from "../../queues"
@@ -24,9 +23,8 @@ import { answerArtifactQueries } from "./query-answers"
 // a picture until it is read. The picture is derived data, kept apart from the version by what it
 // shows, its render key, so a version that keeps a board as it was keeps its picture.
 //
-// Whoever publishes a version may render its pictures, as the Agent's layout check does; what is
-// still missing is rendered by the agent worker in a blank sandbox. Either way the board runs with
-// the data its version's author can see: never more.
+// The render worker renders what a version's boards miss, in a blank sandbox, however the version
+// was published. A board runs with the data its version's publisher could see: never more.
 
 /** A board's picture in one mode and size, as its renderer hands it over. */
 export interface BoardPreviewInput {
@@ -329,17 +327,13 @@ export interface RefusedBoardPreview {
 }
 
 /**
- * Keeps pictures of a stored version's boards, each under its board's render key. Who may hand
- * them over is the caller's decision: only whoever rendered them with the author's data. Each
- * picture stands alone: one for a board or a mode the version has no picture for, in another
- * format than its size's, past the size limit, or not stored, is left out and returned, and the
- * others are kept.
+ * Keeps pictures of a stored version's boards, each under its board's render key, as the render
+ * worker stored them. Each picture stands alone: one for a board or a mode the version has no
+ * picture for, in another format than its size's, or past the size limit, is left out and
+ * returned, and the others are kept.
  */
 export async function storeBoardPreviews(
-  context: {
-    readonly storage: Pick<ArtifactStorage, "putBoardPreviews">
-    readonly blobStorage: Pick<BlobStorage, "stat">
-  },
+  storage: Pick<ArtifactStorage, "putBoardPreviews">,
   version: ArtifactVersionRecord,
   previews: readonly BoardPreviewInput[]
 ): Promise<readonly RefusedBoardPreview[]> {
@@ -349,8 +343,12 @@ export async function storeBoardPreviews(
   const keys = new Map(boards.map((board) => [board.id, board.renderKey]))
   const createdAt = new Date()
 
-  const checked = await Promise.all(
-    previews.map(async (preview) => {
+  const checked = previews.map(
+    (
+      preview
+    ):
+      | { readonly record: Omit<ArtifactBoardPreviewRecord, "projectId"> }
+      | { readonly refused: RefusedBoardPreview } => {
       const { board, theme, size, file } = preview
       const refuse = (reason: string) => ({ refused: { board, theme, size, reason } })
 
@@ -366,15 +364,14 @@ export async function storeBoardPreviews(
       if (file.sizeBytes > MAX_BOARD_PREVIEW_BYTES) {
         return refuse(`it is ${file.sizeBytes} bytes, past the ${MAX_BOARD_PREVIEW_BYTES} kept`)
       }
-      if (!(await statFileRef(context.blobStorage, file))) return refuse("it is not stored")
 
       return { record: { renderKey, theme, size, file: { ...file }, createdAt } }
-    })
+    }
   )
 
   const records = checked.flatMap((each) => ("record" in each ? [each.record] : []))
   if (records.length > 0) {
-    await context.storage.putBoardPreviews({ projectId: version.projectId, previews: records })
+    await storage.putBoardPreviews({ projectId: version.projectId, previews: records })
   }
 
   return checked.flatMap((each) => ("refused" in each ? [each.refused] : []))
@@ -391,8 +388,8 @@ export function boardPreviewsJobId(artifactId: string): string {
 
 /**
  * Asks the render worker to render what a stored version's boards still miss, once the canvas
- * rests, `BOARD_PREVIEW_JOB.settleMs` from now, in the artifact's one job: it takes the place of any asked for an earlier revision. Nothing is
- * asked when nothing is missing.
+ * rests, `BOARD_PREVIEW_JOB.settleMs` from now, in the artifact's one job: it takes the place of
+ * any asked for an earlier revision. Nothing is asked when nothing is missing.
  *
  * Boards that read queries show their author's data, so the version's queries are answered now,
  * by `query`, as whoever just published it, and the job carries the answers: kept as a blob only

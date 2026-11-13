@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   type ArtifactFile,
@@ -14,7 +14,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
-import { documentPdfKey } from "@sixb/core/internal/artifacts/publish"
+import { DOCUMENT_PDF_JOB, documentPdfKey } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
@@ -36,8 +36,20 @@ class PrintingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequ
   /** The document.html each print opened, and whether the frame's kit was beside it. */
   readonly printed: { readonly html: string; readonly kit: boolean }[] = []
   destroyed = 0
+  /** Resolves each time a sandbox is destroyed, which ends a job's print. */
+  private onDestroy: (() => void) | undefined
 
-  constructor(private readonly pages: number | null = 3) {}
+  destroyedOnce(): Promise<void> {
+    return new Promise((resolve) => {
+      this.onDestroy = resolve
+    })
+  }
+
+  constructor(
+    private readonly pages: number | null = 3,
+    /** What the print says did not load. */
+    private readonly missing?: string
+  ) {}
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     this.created.push(options)
@@ -55,19 +67,23 @@ class PrintingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequ
           html: readFileSync(join(site, "document.html"), "utf8"),
           kit: readFileSync(join(site, "__sixb/document.css"), "utf8").length > 0,
         })
-        // A sandbox without a browser says so, as the script does.
+        // A sandbox without a browser says so, as the script does; one with writes the PDF.
+        const pdf = `%PDF-1.7 ${this.pages} pages`
+        if (this.pages !== null) writeFileSync(join(sandbox.workingDirectory, "document.pdf"), pdf)
         const report =
           this.pages === null
             ? { skipped: "no_browser" }
             : {
                 pages: this.pages,
-                pdf: Buffer.from(`%PDF-1.7 ${this.pages} pages`).toString("base64"),
+                bytes: pdf.length,
+                ...(this.missing ? { missing: this.missing } : {}),
               }
         return { exitCode: 0, stdout: `${JSON.stringify(report)}\n`, stderr: "", durationMs: 0 }
       },
       destroy: async () => {
         await destroy()
         this.destroyed += 1
+        this.onDestroy?.()
       },
     })
   }
@@ -141,7 +157,14 @@ function setup(options: { readonly sandboxes?: PrintingSandboxes } = {}) {
     })
   const giveUp = (version: ArtifactVersionRecord, renderKey?: string) =>
     failDocumentPdf({ host, job: job(version, renderKey) })
-  return { host, sixb, blobStorage, put, proposal, print, giveUp }
+  /** Prints as the job's `attempt`th try does. */
+  const attempt = (version: ArtifactVersionRecord, attempt: number) =>
+    printDocumentPdf({
+      host,
+      job: { ...job(version), attempt },
+      signal: new AbortController().signal,
+    })
+  return { host, sixb, blobStorage, put, proposal, print, attempt, giveUp }
 }
 
 /** Waits a bounded number of event-loop turns for a condition read from storage. */
@@ -164,7 +187,9 @@ describe("a designed document's PDF, printed by the render worker", () => {
     workers.push(worker)
     await worker.start()
 
+    const printed = sandboxes.destroyedOnce()
     expect(await sixb.artifacts.pdf(artifact.id)).toEqual({ status: "printing" })
+    await printed
     await eventually(async () => (await sixb.artifacts.pdf(artifact.id))?.status === "ready")
     expect(await sixb.artifacts.pdf(artifact.id)).toMatchObject({ status: "ready", pages: 2 })
   })
@@ -256,6 +281,30 @@ describe("a designed document's PDF, printed by the render worker", () => {
     expect(await failing.sixb.artifacts.pdf(other.artifact.id)).toEqual({
       status: "failed",
       reason: "Printing it failed. Try again in a moment.",
+    })
+  })
+
+  // Reproduce by keeping what print.cjs printed whatever it says did not load: a font the CDN
+  // failed to serve once is missing from the PDF for good, under a key that never changes.
+  test("is printed again while a file or a font did not load, and kept so on the last attempt", async () => {
+    const sandboxes = new PrintingSandboxes(2, "fonts.css did not load (503)")
+    const { sixb, proposal, attempt } = setup({ sandboxes })
+    const { artifact, version } = await proposal()
+
+    const first = await attempt(version, 1).catch((error: unknown) => error)
+    expect(String(first)).toContain("fonts.css did not load (503)")
+    expect(await sixb.artifacts.pdf(artifact.id, { print: false })).toEqual({ status: "printing" })
+    expect(sandboxes.destroyed).toBe(1)
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await attempt(version, DOCUMENT_PDF_JOB.attempts)
+    } finally {
+      warn.mockRestore()
+    }
+    expect(await sixb.artifacts.pdf(artifact.id, { print: false })).toMatchObject({
+      status: "ready",
+      pages: 2,
     })
   })
 })

@@ -29,7 +29,14 @@ import type { ArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import type { RenderHost } from "./host"
 import pictureScript from "./picture.cjs" with { type: "text" }
-import { kitFile, RENDER_NETWORK, readBlob, readSandboxFiles, runScript } from "./sandbox"
+import {
+  frameFile,
+  inRenderSandbox,
+  readBlob,
+  readSandboxFiles,
+  runScript,
+  scriptFiles,
+} from "./sandbox"
 
 // The pictures of a canvas version's boards, which a reader sees until they open a board. The
 // worker opens a blank sandbox of the project, which reaches only the CDNs a frame may load from,
@@ -45,6 +52,10 @@ const SCRIPT = "picture.cjs"
 
 /** The frame's own files, which a board's page loads from `__sixb/`. */
 const KIT = ["__sixb/page.css", "__sixb/runtime.js"]
+/** Of the time left once the version is written: the rest reads the pictures back and keeps them. */
+const PICTURE_SHARE = 0.75
+/** How many pictures are put in blob storage at once. */
+const PUTS_AT_ONCE = 8
 
 /**
  * Renders what a version's boards miss and keeps it as their previews. Repeating it renders
@@ -75,34 +86,32 @@ export async function renderBoardPreviews(input: {
     ? await queryAnswers(host.blobStorage, job.payload.queries)
     : undefined
 
-  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(BOARD_PREVIEW_JOB.timeoutMs)])
-  const sandbox = await host.sandboxes.create({ environment: {}, network: RENDER_NETWORK, signal })
-  try {
-    const { previews, dropped } = await picture({
-      sandbox,
-      version,
-      missing,
-      blobStorage: host.blobStorage,
-      ...(queries ? { queries } : {}),
-      signal,
-    })
-    const refused = await storeBoardPreviews(
-      { storage: artifacts, blobStorage: host.blobStorage },
-      version,
-      previews
+  const { previews, dropped, retry } = await inRenderSandbox(
+    { sandboxes: host.sandboxes },
+    `pictured '${artifactId}' version ${number}`,
+    { timeoutMs: BOARD_PREVIEW_JOB.timeoutMs, signal: input.signal },
+    (sandbox, left, signal) =>
+      picture({
+        sandbox,
+        left,
+        signal,
+        version,
+        missing,
+        blobStorage: host.blobStorage,
+        ...(queries ? { queries } : {}),
+        lastAttempt: job.attempt >= BOARD_PREVIEW_JOB.attempts,
+      })
+  )
+  const refused = await storeBoardPreviews(artifacts, version, previews)
+  for (const { board, theme, size, reason } of [...dropped, ...refused]) {
+    console.warn(
+      `[SixbRenderWorker] The ${size} picture of board '${board}' of '${artifactId}' version ${number} in ${theme} mode was not kept: ${reason}.`
     )
-    for (const { board, theme, size, reason } of [...dropped, ...refused]) {
-      console.warn(
-        `[SixbRenderWorker] The ${size} picture of board '${board}' of '${artifactId}' version ${number} in ${theme} mode was not kept: ${reason}.`
-      )
-    }
-  } finally {
-    await sandbox.destroy().catch((error: unknown) => {
-      console.error(
-        `[SixbRenderWorker] Could not destroy the sandbox that pictured '${artifactId}' version ${number}:`,
-        error
-      )
-    })
+  }
+  if (retry) {
+    throw new Error(
+      `[SixbRenderWorker] Boards of '${artifactId}' version ${number} stopped answering: they are pictured again.`
+    )
   }
 }
 
@@ -112,17 +121,21 @@ interface Picture {
   readonly theme: BoardPreviewInput["theme"]
   readonly size: BoardPreviewInput["size"]
   readonly path: string
-  readonly bytes?: number
+  readonly bytes: number
 }
 
 /**
  * Pictures the missing boards of the version in `sandbox`, in every mode each misses, and stores
  * each picture in `blobStorage`. Without query answers, a board that reads a query is not
  * pictured: it would show its queries rejecting, which no reader sees. Each picture stands alone:
- * one too large or that cannot be read or stored is dropped, and returned with why.
+ * one too large or that cannot be read or stored is dropped, and returned with why. When the
+ * browser failed, or a board stopped answering, it throws, and the job tries again for what is
+ * still missing; on its last attempt, what was pictured is kept.
  */
 async function picture(input: {
   readonly sandbox: Sandbox
+  readonly left: () => number
+  readonly lastAttempt: boolean
   readonly version: ArtifactVersionRecord
   readonly missing: readonly MissingBoardPreview[]
   readonly blobStorage: RenderHost["blobStorage"]
@@ -131,6 +144,8 @@ async function picture(input: {
 }): Promise<{
   readonly previews: readonly BoardPreviewInput[]
   readonly dropped: readonly RefusedBoardPreview[]
+  /** A board stopped answering, which the job's next attempt pictures. */
+  readonly retry?: true
 }> {
   const { sandbox, version, signal } = input
   const files = await Promise.all(
@@ -147,7 +162,6 @@ async function picture(input: {
 
   const site = posix.resolve(sandbox.workingDirectory, SITE)
   const out = posix.resolve(sandbox.workingDirectory, OUT)
-  const script = posix.resolve(sandbox.workingDirectory, SCRIPT)
   const boards = new Set(missing.map(({ board }) => board.file))
   const themeFile = bytesOf(ARTIFACT_THEME_FILE)
   const parsed = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile)) : null
@@ -174,7 +188,7 @@ async function picture(input: {
             )
           : file.bytes,
       })),
-    ...KIT.map((path) => ({ path: posix.join(site, path), contents: kitFile(path) })),
+    ...KIT.map((path) => ({ path: posix.join(site, path), contents: frameFile(path) })),
     // What the boards' queries return, where the runtime reads them with no app around it.
     ...Object.entries(input.queries ?? {}).map(([name, answer]) => ({
       path: posix.join(site, "__sixb/queries", `${name}.json`),
@@ -204,29 +218,36 @@ async function picture(input: {
       ),
     },
     { path: posix.join(out, "themes.json"), contents: JSON.stringify(themes) },
-    { path: script, contents: pictureScript },
+    ...scriptFiles(sandbox, SCRIPT, pictureScript),
   ])
 
-  // Most of its time to picture, so it reports what it took before the command is killed.
-  const deadlineMs = Math.floor((BOARD_PREVIEW_JOB.timeoutMs * 4) / 5)
-  const { report, stderr } = await runScript(sandbox, script, [site, out, deadlineMs], {
-    timeoutMs: BOARD_PREVIEW_JOB.timeoutMs,
-    signal,
-  })
-  if (!report || !Array.isArray(report.pictures)) {
-    const why = report?.skipped ?? report?.failed ?? (stderr || "the browser took no picture")
+  // Part of what is left to picture, so it reports what it took before the command is killed.
+  const timeoutMs = input.left()
+  const { report, stderr } = await runScript(
+    sandbox,
+    posix.resolve(sandbox.workingDirectory, SCRIPT),
+    [site, out, Math.floor(timeoutMs * PICTURE_SHARE)],
+    { timeoutMs, signal }
+  )
+  const name = `version ${version.version} of '${version.artifactId}'`
+  if (report?.skipped) {
     console.warn(
-      `[SixbRenderWorker] The boards of version ${version.version} of '${version.artifactId}' were not pictured: ${String(why).slice(0, 500)}.`
+      `[SixbRenderWorker] The boards of ${name} were not pictured: no ${report.skipped}.`
     )
     return { previews: [], dropped: [] }
   }
-  for (const { board, reason } of (report.unpictured ?? []) as {
-    board: string
-    reason: string
-  }[]) {
-    console.warn(
-      `[SixbRenderWorker] Board '${board}' of '${version.artifactId}' was not pictured: ${reason.slice(0, 200)}.`
-    )
+  if (!report || !Array.isArray(report.pictures)) {
+    const why = String(report?.failed ?? (stderr || "the browser took no picture")).slice(0, 500)
+    throw new Error(`[SixbRenderWorker] The boards of ${name} were not pictured: ${why}.`)
+  }
+  const said = (key: string) =>
+    (Array.isArray(report[key]) ? report[key] : []) as { board: string; reason: string }[]
+  for (const { board, reason } of said("unpictured")) {
+    console.warn(`[SixbRenderWorker] Board '${board}' of ${name} was not pictured: ${reason}.`)
+  }
+  const stalls = said("stalls")
+  for (const { board, reason } of stalls) {
+    console.warn(`[SixbRenderWorker] Board '${board}' of ${name} stopped answering: ${reason}.`)
   }
 
   // Only the pictures asked for, where the script writes them.
@@ -234,24 +255,26 @@ async function picture(input: {
     missing.flatMap(({ board, themes }) => themes.map((mode) => `${board.id}\0${mode}`))
   )
   const pictures = (report.pictures as Picture[]).filter(
-    ({ board, theme, path }) => wanted.has(`${board}\0${theme}`) && path.startsWith(`${out}/`)
+    ({ board, theme, path, bytes }) =>
+      wanted.has(`${board}\0${theme}`) && path.startsWith(`${out}/`) && Number.isInteger(bytes)
   )
-  const read = await readSandboxFiles(sandbox, sandbox.workingDirectory, pictures, {
+  const read = await readSandboxFiles(sandbox, pictures, {
     maxBytes: MAX_BOARD_PREVIEW_BYTES,
     signal,
   })
 
   const previews: BoardPreviewInput[] = []
   const dropped: RefusedBoardPreview[] = []
-  for (const [index, { board, theme, size, path }] of pictures.entries()) {
+  const store = async (index: number) => {
+    const { board, theme, size, path } = pictures[index] as Picture
     const bytes = read[index]
-    if (!bytes || !(bytes instanceof Uint8Array)) {
+    if (!(bytes instanceof Uint8Array)) {
       const reason =
-        bytes && "error" in bytes && bytes.error === "too_large"
+        bytes?.error === "too_large"
           ? `it is past the ${MAX_BOARD_PREVIEW_BYTES} bytes kept`
           : "it could not be read"
       dropped.push({ board, theme, size, reason })
-      continue
+      return
     }
     try {
       const file = await input.blobStorage.put({
@@ -267,6 +290,15 @@ async function picture(input: {
       console.warn(`[SixbRenderWorker] Could not store the picture '${path}':`, error)
       dropped.push({ board, theme, size, reason: "it could not be stored" })
     }
+  }
+  for (let at = 0; at < pictures.length; at += PUTS_AT_ONCE) {
+    await Promise.all(pictures.slice(at, at + PUTS_AT_ONCE).map((_, offset) => store(at + offset)))
+  }
+
+  // A board that stopped answering, or one not reached in time, may be pictured next time: tried
+  // again until the last attempt. What was pictured now is kept either way.
+  if ((stalls.length > 0 || report.stopped === true) && !input.lastAttempt) {
+    return { previews, dropped, retry: true }
   }
   return { previews, dropped }
 }
