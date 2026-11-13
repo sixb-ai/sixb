@@ -45,7 +45,12 @@ import {
   type AzureAIFoundryEmbeddingTransportOptions,
   createFoundryEmbedding,
 } from "./embedding"
-import { deploymentKind, KIND_BINDINGS } from "./kinds"
+import {
+  type AzureAIFoundryImageModel,
+  type AzureAIFoundryImageOptions,
+  createFoundryImage,
+} from "./image"
+import { article, deploymentKind, KIND_BINDINGS } from "./kinds"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "./messages-accounting"
 import {
   foundryMessagesRequest,
@@ -169,6 +174,8 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
   ): AzureAIFoundryRerankingModel
   /** A speech deployment, such as gpt-4o-mini-tts, for `models.audio.speech`. */
   speech(deploymentName: string, options?: AzureAIFoundrySpeechOptions): AzureAIFoundrySpeechModel
+  /** An image deployment, such as gpt-image-1.5 or FLUX.1-Kontext-pro, for `models.image`. */
+  image(deploymentName: string, options?: AzureAIFoundryImageOptions): AzureAIFoundryImageModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -227,6 +234,8 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     createFoundryTranscription(providerId, name, options, transport, deployments)
   const reranking = (name: string, options: AzureAIFoundryRerankingOptions = {}) =>
     createFoundryReranking(providerId, name, options, transport, deployments)
+  const image = (name: string, options: AzureAIFoundryImageOptions = {}) =>
+    createFoundryImage(providerId, name, options, transport, deployments)
   const speech = (name: string, options: AzureAIFoundrySpeechOptions = {}) =>
     createFoundrySpeech(providerId, name, options, transport, deployments)
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
@@ -285,6 +294,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     transcription,
     reranking,
     speech,
+    image,
   })
 }
 
@@ -392,7 +402,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
     const kind = deploymentKind(resolution.deployment)
     if (kind !== "language")
       throw new UnsupportedModelFeatureError(
-        `${PREFIX} Use ${KIND_BINDINGS[kind]} for ${kind === "embedding" ? "an" : "a"} ${kind} deployment.`
+        `${PREFIX} Use ${KIND_BINDINGS[kind]} for ${article(kind)} ${kind} deployment.`
       )
     let catalogModel: CatalogModel | undefined
     try {

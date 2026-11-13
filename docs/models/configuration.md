@@ -517,6 +517,9 @@ export const sixb = createSixb({
 
 A `description` says when to pick a model; without one, the provider's own description applies.
 
+To generate images inside your Azure tenant, deploy GPT Image or FLUX.1 Kontext [pro] in Azure AI
+Foundry and register it with `@sixb/azure-ai-foundry`'s `foundry.image("image")`.
+
 Generate images in a workflow step or an action's writeback/effects handler:
 
 ```ts

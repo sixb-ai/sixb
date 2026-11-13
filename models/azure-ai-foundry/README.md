@@ -2,7 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
-Language, embedding, decision, transcription, reranking and speech models are supported.
+Language, embedding, decision, transcription, reranking, speech and image models are supported.
 
 ## Install
 
@@ -221,6 +221,47 @@ audio's length, so its token count, is unknown before the call, so no reservatio
 and a [cost limit](../../docs/models/usage-and-limits.md#image-and-speech-generation) blocks these
 calls. Connected deployments from another resource are rejected.
 
+## Images
+
+Deploy a GPT Image or FLUX model in the project and register the deployment under `models.image`:
+
+```ts
+export const images = foundry.image("image", { description: "Product shots and edits" })
+
+// In your createSixb() options:
+const models = { image: [images] }
+```
+
+Use it with `sixb.models.image.generate()`, see
+[image generation](../../docs/models/configuration.md#image-generation).
+
+| Deployed model | Per call | Reference images | Price (GlobalStandard) |
+| --- | --- | --- | --- |
+| `gpt-image-1` | Up to 10 | Up to 16 | USD 5 per million text input tokens, 40 per million image output tokens |
+| `gpt-image-1-mini` | Up to 10 | Up to 16 | USD 2 and 8 per million |
+| `gpt-image-1.5` | Up to 10 | Up to 16 | USD 5 per million text input, 10 per million text output, 32 per million image output tokens |
+| `gpt-image-2` | Up to 10 | Up to 16 | USD 5 and 30 per million; text output, if any, is unpriced |
+| `FLUX.1-Kontext-pro` | 1 | 1 | USD 0.04 per image |
+| `FLUX-1.1-pro` | 1 | None | USD 0.04 per image |
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | Must run one of the models above; others are rejected, and `foundry.chat()` rejects image deployments. FLUX.2 [pro] and [flex] are refused: they answer only Black Forest Labs' own route, with their own request and a per-megapixel price |
+| Inference | `POST /openai/deployments/<deployment>/images/generations` or, with reference images, `/images/edits`, with `api-version=2025-04-01-preview` on the resource origin and the project's API key. The v1 API does not route FLUX.1 Kontext edits |
+| Options | `size` and `quality` (GPT Image; sizes listed for gpt-image-1, -1-mini and -1.5) are passed on. `seed`, `style` and `aspectRatio` have no API field and come back as warnings, like `quality` for FLUX |
+| Reference images | PNG, JPEG or WebP. Until a binding resolves it accepts up to 16; resolution narrows that to the deployment's limit |
+| `timeoutMs` | 180 seconds per call, response included |
+| Retries | None: errors carry `retryable` and `retryAfterMs` |
+| Price | Azure Retail Prices for the deployment's model version on GlobalStandard and DataZoneStandard, and Standard for FLUX (verified 2026-11-13). Without a text output price, every output token bills at the image rate: gpt-image-1 reports no split |
+
+A GPT Image edit has unknown cost: Azure bills its image input tokens at a rate Sixb's rate cards
+cannot hold yet ([#1149](https://github.com/sixb-ai/sixb/issues/1149)). Other versions and SKUs
+are unknown too, not zero: pass `rateCard` or `costEstimator`. FLUX's per-image price is reserved
+before the call; GPT Image's tokens are not known before it, so a
+[cost limit](../../docs/models/usage-and-limits.md#image-and-speech-generation) blocks those calls.
+gpt-image-1, gpt-image-2 and FLUX1.1 [pro] are covered by fixtures only. Connected deployments from
+another resource are rejected.
+
 ## Stream a response
 
 ```ts
@@ -260,7 +301,7 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Supported language deployments; embedding, decision, transcription, reranking and speech deployments are left out |
+| Catalog listings | Supported language deployments; embedding, decision, transcription, reranking, speech and image deployments are left out |
 | Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
@@ -373,7 +414,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions, reranking and speech |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions, reranking, speech and images |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -403,5 +444,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `transcription.e2e.ts` | Each transcription deployment, accounting and errors | 8 transcriptions / — |
 | `reranking.e2e.ts` | Rerank v5 and v4 ranking, usage, pricing and errors, as direct calls | 8 rerank calls / — |
 | `speech.e2e.ts` | Every format, MP3 and WAV through Sixb with accounting, a transcription round trip and errors | 9 speech calls / — |
+| `image.e2e.ts` | gpt-image-1.5, gpt-image-1-mini and FLUX.1 Kontext through Sixb with accounting, an edit and errors | 6 image calls / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.
