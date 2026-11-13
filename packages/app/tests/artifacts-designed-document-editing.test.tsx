@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
 import { client, type GetArtifactResponse, type GetArtifactVersionResponse } from "@sixb/client"
 import {
   getArtifactQueryKey,
@@ -9,6 +9,7 @@ import { FRAME_PROTOCOL, type FrameEditTarget } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
+import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import * as Y from "yjs"
 import { frameLinkKey } from "../src/artifacts/frame"
@@ -32,6 +33,8 @@ const browser = installDom([
   "HTMLIFrameElement",
   "SVGElement",
   "Event",
+  "CustomEvent",
+  "FocusEvent",
   "MessageEvent",
   "MouseEvent",
   "KeyboardEvent",
@@ -48,7 +51,21 @@ const browser = installDom([
 const originalConfig = client.getConfig()
 // Generated query keys carry the client's base URL, so it is set before any key is built.
 client.setConfig({ baseUrl: "https://api.sixb.test" })
-afterAll(() => client.setConfig({ baseUrl: originalConfig.baseUrl }))
+
+// Radix picks its layout effect when it loads, a no-op without a `document`, and its menus then
+// never mount. It is given React's own for this file, and its own back after.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+
+afterAll(() => {
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
+  client.setConfig({ baseUrl: originalConfig.baseUrl })
+})
 
 /**
  * The editor's channels, each telling the test once its port handled a message: a message on a
@@ -242,6 +259,37 @@ function viewer(room: FakeServer) {
   const held = () => String(room.doc.getMap<unknown>(LIVE_FILES).get(FILE))
   return { ui, queries, frame, listen, ready, post, target, held }
 }
+
+describe("a designed document's downloads", () => {
+  // Reproduce by offering the entry in EntryDownloadMenu for a designed document too: its
+  // document.html downloads alone, without the stylesheets and pictures it shows with.
+  test("are its PDF alone, and nothing where it cannot print", async () => {
+    const { ui, queries } = viewer(server())
+    await act(settle)
+    // The header is up, with what this reader may do: there is nothing to download.
+    await ui.findByRole("button", { name: "Edit" })
+    expect(ui.queryByRole("button", { name: "Download" })).toBeNull()
+
+    await act(async () => {
+      queries.setQueryData(
+        getArtifactVersionQueryKey({ path: { artifactId: ARTIFACT_ID, version: "1" } }),
+        { ...VERSION, pdf: "printable" }
+      )
+      await settle()
+    })
+    const download = await ui.findByRole("button", { name: "Download" })
+    await act(async () => {
+      fireEvent.pointerDown(download, {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      })
+    })
+    const items = await ui.findAllByRole("menuitem")
+    expect(items).toHaveLength(1)
+    expect(items[0]?.textContent).toContain("Ready to print or share")
+  })
+})
 
 describe("a designed document held live in the viewer", () => {
   // Reproduce by holding only a canvas live in Viewer: no Edit is offered, and the proposal

@@ -95,6 +95,9 @@ class SharedQueues implements Queues {
   get lake() {
     return this.inner.lake
   }
+  get renders() {
+    return this.inner.renders
+  }
   get syncRuns() {
     return this.inner.syncRuns
   }

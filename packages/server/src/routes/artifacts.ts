@@ -22,6 +22,8 @@ import {
   boardPreviewStatuses,
   boardPreviews,
   boardsReadLiveData,
+  documentPdf,
+  documentPdfKey,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
   ArtifactCommentRecord,
@@ -53,6 +55,8 @@ import {
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
+  ArtifactPdfQuerySchema,
+  ArtifactPdfResponseSchema,
   ArtifactQueryParamsSchema,
   ArtifactResponseSchema,
   ArtifactRestorePointListResponseSchema,
@@ -201,9 +205,18 @@ async function versionResponse(
       ? new Map([...stored.keys()].map((board) => [board, "none" as const]))
       : stored
 
+  // A designed document prints to PDF when asked, in a project that has sandboxes.
+  let pdf: "ready" | "printable" | "failed" | undefined
+  if (storage && documentPdfKey(version)) {
+    const kept = await documentPdf(storage, version)
+    if (kept) pdf = "failure" in kept ? "failed" : "ready"
+    else if (host.sandboxes) pdf = "printable"
+  }
+
   return {
     ...versionBody(version),
     ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
+    ...(pdf ? { pdf } : {}),
   }
 }
 
@@ -358,6 +371,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
       case "read_only":
         set.status = 403
         break
+      case "pdf_unavailable":
       case "storage_unavailable":
         set.status = 501
         break
@@ -559,6 +573,51 @@ async function artifactBoardPreviewResponse(
       (number !== "latest" && version.frozenAt) ||
         query.revision !== undefined ||
         query.key !== undefined
+        ? "private, max-age=31536000, immutable"
+        : "private, no-cache"
+    )
+    return response
+  } catch (error) {
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/** A designed document's PDF as a download, once printed; 404 `pdf_not_found` until then. */
+async function artifactPdfResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: { readonly artifactId: string; readonly version: string }
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  }
+) {
+  try {
+    const { artifactId } = context.params
+    const number = versionParam(context.params.version)
+    const sixb = requireRequestSixb(context)
+    const version = await sixb.artifacts.getVersion(artifactId, number)
+    if (!version) return await refusal(context, artifactId, context.set)
+
+    const storage = host.storage.artifacts
+    const kept = storage ? await documentPdf(storage, version) : null
+    const pdf = kept && !("failure" in kept) ? kept : null
+    const response =
+      pdf &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: pdf.file,
+        request: context.request,
+        disposition: "attachment",
+      }))
+    if (!response) {
+      context.set.status = 404
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "PDF not found", code: "pdf_not_found" as const }
+    }
+    // What a version prints changes as its content does: a frozen one's never.
+    response.headers.set(
+      "cache-control",
+      number !== "latest" && version.frozenAt
         ? "private, max-age=31536000, immutable"
         : "private, no-cache"
     )
@@ -1327,6 +1386,66 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactVersion",
           security: accessTokenSecurityRequirement("getArtifactVersion"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/versions/:version/pdf",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const pdf = await requireRequestSixb(context).artifacts.pdf(artifactId, {
+            version: versionParam(context.params.version),
+            retry: context.query.retry === "true",
+          })
+          if (!pdf) return await refusal(context, artifactId, context.set)
+          if (pdf.status === "ready") return { status: "ready" as const, pages: pdf.pages }
+          return pdf
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactVersionParamsSchema,
+        query: ArtifactPdfQuerySchema,
+        response: {
+          200: ArtifactPdfResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Print a designed document to PDF",
+          description:
+            "Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "printArtifactPdf",
+          security: accessTokenSecurityRequirement("printArtifactPdf"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/pdf",
+      async (context) => artifactPdfResponse(host, context),
+      {
+        params: ArtifactVersionParamsSchema,
+        detail: {
+          summary: "Get a designed document's PDF",
+          description:
+            "The version printed to PDF, as a download named after the title it printed with. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactPdf",
+          security: accessTokenSecurityRequirement("getArtifactPdf"),
+          responses: {
+            200: {
+              description: "The PDF",
+              content: { "application/pdf": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The PDF is unchanged; reuse the privately cached one" },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+          },
         },
       }
     )

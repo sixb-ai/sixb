@@ -158,7 +158,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | `sixb worker <type>` | Execute one kind of background job. |
 | `sixb worker-group [types...]` | Run several worker types in one process. |
 
-Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, and `lake`. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work.
+Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, `lake`, and `render`, which [prints designed documents to PDF](../artifacts/overview.md#print-a-document-to-pdf) in the project's sandboxes. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work, `render` among it when the project has a sandbox provider.
 
 Public-origin flags have matching environment variables:
 
@@ -183,7 +183,7 @@ sixb worker sync --concurrency 2
 sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
 ```
 
-Agent workers default to 8 concurrent jobs, lake workers to 4, and other types to 1. The same per-type options work with `sixb dev`.
+Agent workers default to 8 concurrent jobs, lake workers to 4, render workers to 2, and other types to 1. The same per-type options work with `sixb dev`.
 
 Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the environment. Command flags take precedence. Replicas multiply the total concurrency.
 

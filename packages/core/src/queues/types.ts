@@ -244,6 +244,24 @@ export interface AgentArtifactPreviewsRequestedQueueJob
     }
   > {}
 
+/**
+ * Someone asked for a designed document's PDF: the render worker prints the version in a blank
+ * sandbox of the project. One job per artifact, which asking again replaces.
+ */
+export interface ArtifactPdfRequestedQueueJob
+  extends QueueJob<
+    "artifact.pdf.requested",
+    {
+      readonly artifactId: string
+      readonly version: number
+      /**
+       * What the version printed when it was asked for: once its content changes, the job prints
+       * nothing, and the next ask prints what it holds then.
+       */
+      readonly renderKey: string
+    }
+  > {}
+
 export type AgentQueueJob =
   | AgentRunRequestedQueueJob
   | AgentWorkflowNodeRequestedQueueJob
@@ -276,6 +294,9 @@ export interface DatasetIngestFlushRequestedQueueJob
 
 export type LakeQueueJob = LakeRetentionRequestedQueueJob | DatasetIngestFlushRequestedQueueJob
 
+/** What renders in a browser, in a sandbox of the project: RenderWorker consumes it. */
+export type RenderQueueJob = ArtifactPdfRequestedQueueJob
+
 export interface Queues {
   readonly vectorIndexing: Queue<
     VectorIndexingQueueJob,
@@ -287,6 +308,12 @@ export interface Queues {
    * LakeWorker consumes this lane, so lake work never waits behind a sync or takes its slot.
    */
   readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
+  /**
+   * What the framework renders in a browser, in a sandbox of the project: a designed document's
+   * PDF. RenderWorker consumes this lane, so a render never waits behind an agent's run or takes
+   * its slot.
+   */
+  readonly renders: Queue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>

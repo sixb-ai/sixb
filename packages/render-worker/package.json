@@ -1,0 +1,60 @@
+{
+  "name": "@sixb/render-worker",
+  "version": "0.2.3",
+  "description": "Worker that renders Sixb artifacts in a browser, in a sandbox",
+  "keywords": [
+    "sixb",
+    "bun",
+    "worker"
+  ],
+  "homepage": "https://sixb.ai",
+  "bugs": {
+    "url": "https://github.com/sixb-ai/sixb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sixb-ai/sixb.git",
+    "directory": "packages/render-worker"
+  },
+  "author": "Sixb contributors",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 300 bun test ./tests/document-pdf.e2e.ts",
+    "prepack": "bun run build"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@sixb/core": "workspace:*",
+    "@sixb/sandboxes-local": "workspace:*",
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}

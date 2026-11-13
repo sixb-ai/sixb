@@ -803,6 +803,7 @@
         "@sixb/orchestrator": "workspace:*",
         "@sixb/pipeline-worker": "workspace:*",
         "@sixb/projection-worker": "workspace:*",
+        "@sixb/render-worker": "workspace:*",
         "@sixb/rules-worker": "workspace:*",
         "@sixb/sandboxes-local": "workspace:^",
         "@sixb/server": "workspace:*",
@@ -944,6 +945,19 @@
       "version": "0.2.4",
       "devDependencies": {
         "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
+      },
+    },
+    "packages/render-worker": {
+      "name": "@sixb/render-worker",
+      "version": "0.2.3",
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@sixb/sandboxes-local": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
@@ -1871,6 +1885,8 @@
     "@sixb/projection-worker": ["@sixb/projection-worker@workspace:packages/projection-worker"],
 
     "@sixb/queues-bullmq": ["@sixb/queues-bullmq@workspace:queues/bullmq"],
+
+    "@sixb/render-worker": ["@sixb/render-worker@workspace:packages/render-worker"],
 
     "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
 

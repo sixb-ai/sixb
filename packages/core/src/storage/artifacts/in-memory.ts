@@ -14,6 +14,8 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
   ArtifactRestorePointRecord,
@@ -81,6 +83,7 @@ interface InMemoryArtifactSnapshot {
   readonly frameGrants: ReadonlyMap<string, ArtifactFrameGrantRecord>
   readonly state: ReadonlyMap<string, ReadonlyMap<string, ArtifactStateEntry>>
   readonly boardPreviews: ReadonlyMap<string, ArtifactBoardPreviewRecord>
+  readonly pdfs: ReadonlyMap<string, ArtifactPdfRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -90,6 +93,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private state = new Map<string, Map<string, ArtifactStateEntry>>()
   /** By project, render key, mode, and size; no artifact owns one. */
   private boardPreviews = new Map<string, ArtifactBoardPreviewRecord>()
+  /** By project and render key; no artifact owns one. */
+  private pdfs = new Map<string, ArtifactPdfRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -478,6 +483,25 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     }
   }
 
+  async getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null> {
+    const kept = this.pdfs.get(`${input.projectId}\0${input.renderKey}`)
+    return kept ? structuredClone(kept) : null
+  }
+
+  async putPdf(input: ArtifactPdfRecord): Promise<void> {
+    const key = `${input.projectId}\0${input.renderKey}`
+    const kept = this.pdfs.get(key)
+    if (!kept || ("failure" in kept && !("failure" in input))) {
+      this.pdfs.set(key, structuredClone(input))
+    }
+  }
+
+  async clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void> {
+    const key = `${input.projectId}\0${input.renderKey}`
+    const kept = this.pdfs.get(key)
+    if (kept && "failure" in kept) this.pdfs.delete(key)
+  }
+
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
     const key = artifactKey(input.projectId, input.artifactId)
     const stored = this.artifacts.get(key)
@@ -588,6 +612,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       frameGrants: this.frameGrants,
       state: this.state,
       boardPreviews: this.boardPreviews,
+      pdfs: this.pdfs,
     })
   }
 
@@ -597,6 +622,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.frameGrants = new Map(restored.frameGrants)
     this.state = new Map([...restored.state].map(([key, kept]) => [key, new Map(kept)]))
     this.boardPreviews = new Map(restored.boardPreviews)
+    this.pdfs = new Map(restored.pdfs)
   }
 
   /**

@@ -23,6 +23,7 @@ const WORKER_TYPES = {
   projection: true,
   workflow: true,
   lake: true,
+  render: true,
 } as const satisfies Record<DeployWorkerType, true>
 
 /** Every service, in the order a deployment lists them. */

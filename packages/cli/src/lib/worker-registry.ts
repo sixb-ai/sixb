@@ -4,13 +4,22 @@ import type { Worker } from "@sixb/core/internal/workers"
 import { LakeWorker } from "@sixb/lake-worker"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
+import { RenderWorker } from "@sixb/render-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 
-export const WORKER_TYPES = ["sync", "agent", "pipeline", "projection", "workflow", "lake"] as const
+export const WORKER_TYPES = [
+  "sync",
+  "agent",
+  "pipeline",
+  "projection",
+  "workflow",
+  "lake",
+  "render",
+] as const
 
 export type WorkerType = (typeof WORKER_TYPES)[number]
 
@@ -79,6 +88,10 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   lake: {
     create: (sixb, options) =>
       new LakeWorker(sixb, { concurrency: options.workerConcurrency?.lake }),
+  },
+  render: {
+    create: (sixb, options) =>
+      new RenderWorker(sixb, { concurrency: options.workerConcurrency?.render }),
   },
 }
 
@@ -207,6 +220,10 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
     workerTypes.push("lake")
   }
 
+  if (renderWorkerRequired(sixb)) {
+    workerTypes.push("render")
+  }
+
   return workerTypes
 }
 
@@ -234,22 +251,32 @@ export function lakeWorkerRequired(sixb: LoadedSixbHost): boolean {
   return getLakeRetentionRuntime(sixb).automatic || getDatasetIngestRuntime(sixb).enabled
 }
 
+/** Renders run in the project's sandboxes, so a project with none asks for none. */
+export function renderWorkerRequired(sixb: LoadedSixbHost): boolean {
+  return sixb.sandboxes !== undefined
+}
+
 /** Requests stay queued while no worker claims them, which looks like an idle system. */
 export function omittedWorkerWarnings(
   sixb: LoadedSixbHost,
   workerTypes: readonly string[]
 ): readonly string[] {
-  if (workerTypes.includes("lake")) return []
+  const omitted = (workerType: WorkerType) => !workerTypes.includes(workerType)
 
   return [
-    ...(getLakeRetentionRuntime(sixb).automatic
+    ...(omitted("lake") && getLakeRetentionRuntime(sixb).automatic
       ? [
           "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
         ]
       : []),
-    ...(getDatasetIngestRuntime(sixb).enabled
+    ...(omitted("lake") && getDatasetIngestRuntime(sixb).enabled
       ? [
           "Ingested changes need a lake worker and this group has none: run `sixb worker lake`, or they wait and never reach their dataset.",
+        ]
+      : []),
+    ...(omitted("render") && renderWorkerRequired(sixb)
+      ? [
+          "Documents print to PDF in a render worker and this group has none: run `sixb worker render`, or a PDF someone asks for never prints.",
         ]
       : []),
   ]

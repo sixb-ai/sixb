@@ -192,6 +192,17 @@ export function useFileName(source: FileSource): string {
   return source.name || messages.file
 }
 
+/** Where a designed document's version downloads as a PDF, once printed. */
+export function documentPdfUrl(version: {
+  readonly artifactId: string
+  readonly version: number
+}): string {
+  return contentUrl(
+    `/api/artifacts/${encodeURIComponent(version.artifactId)}/versions/${version.version}/pdf`,
+    {}
+  )
+}
+
 /**
  * A file's address, as an `<img>`, a `<video>` or a download link loads it, without the client: a
  * shared link's session names its grant in it, since such a request cannot send the header.

@@ -119,6 +119,28 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
       })
     })
 
+    // A render claimed from `agents` would run beside, and in place of, an agent's run.
+    test("renders have their own lane beside agent runs", async () => {
+      await withQueues(async (queues) => {
+        await queues.renders.enqueue({
+          projectId: "project-a",
+          jobs: [
+            {
+              id: "art_pdf_art_p1",
+              type: "artifact.pdf.requested" as const,
+              payload: { artifactId: "art_p1", version: 1, renderKey: "a".repeat(64) },
+            },
+          ],
+        })
+
+        expect(
+          await queues.agents.claim({ projectId: "project-a", workerId: "agent" })
+        ).toHaveLength(0)
+        const claimed = await queues.renders.claim({ projectId: "project-a", workerId: "render" })
+        expect(claimed.map(({ job }) => job.type)).toEqual(["artifact.pdf.requested"])
+      })
+    })
+
     describe("enqueue", () => {
       test("returns envelopes with generated id, createdAt, availableAt, attempt=0", async () => {
         await withQueues(async (queues) => {

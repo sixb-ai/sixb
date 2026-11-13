@@ -14,6 +14,7 @@ import type {
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
   ArtifactKind,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointRecord,
   ArtifactStateEntry,
@@ -205,6 +206,22 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
     createdAt: date(row.createdAt, "createdAt", where),
     expiresAt: date(row.expiresAt, "expiresAt", where),
   }
+}
+
+export function parseArtifactPdfRow(row: Row): ArtifactPdfRecord {
+  const renderKey = text(row.renderKey, "renderKey", "PDF")
+  const where = `PDF '${renderKey}'`
+  const kept = {
+    projectId: text(row.projectId, "projectId", where),
+    renderKey,
+    createdAt: date(row.createdAt, "createdAt", where),
+  }
+  if (row.failure !== null && row.failure !== undefined) {
+    return { ...kept, failure: text(row.failure, "failure", where) }
+  }
+  const file = json(row.file, "file", where)
+  if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
+  return { ...kept, file, pages: positiveInteger(row.pages, "pages", where) }
 }
 
 export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewRecord {

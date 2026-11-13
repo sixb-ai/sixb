@@ -70,12 +70,12 @@ describe("sixb worker-group", () => {
     const output = result.output.replace(/[\u2500-\u257f\s]+/g, " ")
     expect(output).toContain("agent requires --api-public-origin")
     // Agent construction used to throw from inside the `map()` that builds every worker, so the
-    // operator saw one line about agents and never learned sync, pipeline and projection were
-    // never attempted. The three facts: what blocked, what it cost, and the way out — the last
-    // as a remediation in its own section of the panel.
-    expect(output).toContain("3 that were ready (sync, pipeline, projection)")
+    // operator saw one line about agents and never learned sync, pipeline, projection and render
+    // were never attempted. The three facts: what blocked, what it cost, and the way out — the
+    // last as a remediation in its own section of the panel.
+    expect(output).toContain("4 that were ready (sync, pipeline, projection, render)")
     expect(output).toContain("Try this")
-    expect(output).toContain("sixb worker-group sync pipeline projection")
+    expect(output).toContain("sixb worker-group sync pipeline projection render")
     const logEntries = await readLogEntries(logPath)
     expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
