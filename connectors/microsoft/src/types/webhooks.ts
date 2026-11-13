@@ -1,4 +1,4 @@
-import type { WebhookConnection, WebhookHandlerContext } from "@sixb/core"
+import type { ConnectorConnectionHandle, WebhookHandlerContext } from "@sixb/core"
 import type { MicrosoftClient } from "../client"
 import type { SubscriptionChangeType } from "./subscriptions"
 
@@ -44,7 +44,7 @@ export interface MicrosoftOAuthEventContext
    * reauthorize or delete their subscription with one of these clients: Graph accepts only their
    * own token for it.
    */
-  readonly connections: readonly WebhookConnection<MicrosoftClient>[]
+  readonly connections: readonly ConnectorConnectionHandle<MicrosoftClient>[]
 }
 
 export type MicrosoftOAuthEventHandler = (
