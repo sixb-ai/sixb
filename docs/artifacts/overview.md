@@ -155,9 +155,21 @@ headings), and an Agent's later changes merge with theirs whichever way it write
 
 | In a designed document | |
 | --- | --- |
-| Words | Click a heading, a paragraph, a list item, or a table cell and type: bold and links around the rest stay. Enter and Esc leave it |
-| Layout | Stays as its HTML and CSS say: nothing is added, moved, or removed. Ask the Agent for those |
-| View | One sheet while you edit; its pages again once your words are saved |
+| Write | Click anywhere and type. Enter starts a paragraph, or the next item of a list; an empty item ends the list |
+| `/` | Text, headings, lists, a quote, a table, an image, a divider, or a page break, made as the page makes its own: a new heading or table looks like the others |
+| Blocks | The handle beside a block adds one below, drags it, and turns it into another kind, duplicates, moves, or deletes it; ⌘D duplicates, ⌥⇧↑ and ⌥⇧↓ move |
+| Words | Select them for bold, italic, strikethrough, code, or a link (⌘K); ⌘Z and ⇧⌘Z undo and redo your own changes |
+| Tables | Type in a cell; Tab and ⇧Tab move to the next and the one before |
+| Images | Paste, drop, or choose one from `/`: it is added to the document under `images/` |
+| Together | Everyone editing sees the others' carets and selections, named, in their colors |
+| View | One sheet while you edit, page breaks marked; its pages again once your changes are saved |
+
+It stays in its own design: what you type is styled by the document's stylesheets, and keys never
+merge two parts of its layout, a section into the one before it or a cell into the next. Its HTML
+changes only where you edit: the rest is written back exactly as it was. A field of
+[live data](#show-live-data-in-a-document), a repeated row, or markup the editor does not model, such as an SVG, is
+kept as written and moves as a whole. A document whose HTML has no `<body>` tag is edited word by
+word instead, as a board is.
 
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.
@@ -186,9 +198,8 @@ page lists the messages.
 
 ### Edit what a page shows
 
-A canvas's boards and a designed document are edited the same way. A board's HTML stays yours to
-write. What its source holds can also be changed in place: words,
-pictures, and inline styles.
+A canvas's boards are edited in place. A board's HTML stays yours to write. What its source holds
+can also be changed in place: words, pictures, and inline styles.
 
 - Each element in a board's source has an address, its path from the `<body>`, such as
   `body>main:0>h1:0`. What a script builds, such as a chart drawn from live data, has none and
@@ -207,7 +218,7 @@ pictures, and inline styles.
 | `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
 | `boardFramePatches(before, after)` | What a frame showing `before` patches to show `after` |
 
-A board's frame link, or a designed document's, serves it for editing with `?sixb-edit`. The frame's `edit` request then
+A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
 turns editing on, and takes `edit.patch`. With `typing: false`, picking an element types nothing
 into it, as when the reader picks what to comment on.
 
