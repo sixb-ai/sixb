@@ -30,6 +30,7 @@ import type {
   StartConnectorConnectionRunInput,
   StartConnectorConnectionRunResult,
 } from "./contracts"
+import type { ConnectorConnectionEvents } from "./events"
 import type {
   ConnectorAuthorizationRequestHandler,
   ResolveOAuthConnectorDefinition,
@@ -56,6 +57,7 @@ export interface ConnectorConnectionRunServiceOptions {
   readonly processingTtlMs: number
   readonly selectionTtlMs: number
   readonly now: () => Date
+  readonly events: ConnectorConnectionEvents
 }
 
 /** Durable orchestration for the user-visible connector connection flow. */
@@ -69,6 +71,7 @@ export class ConnectorConnectionRunService {
   private readonly processingTtlMs: number
   private readonly selectionTtlMs: number
   private readonly now: () => Date
+  private readonly events: ConnectorConnectionEvents
   private readonly maintenanceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(options: ConnectorConnectionRunServiceOptions) {
@@ -84,6 +87,7 @@ export class ConnectorConnectionRunService {
     )
     this.selectionTtlMs = positiveDuration(options.selectionTtlMs, "account selection TTL")
     this.now = options.now
+    this.events = options.events
   }
 
   async startSelection(
@@ -384,6 +388,7 @@ export class ConnectorConnectionRunService {
       }
       throw storageBoundaryError(error, "Connector account selection could not be persisted.")
     }
+    await this.events.connected([selected.connection], selected.replaced ? "replaced" : "connected")
     const cleanupCompleted = selected.revocationPendingAuthorizationId
       ? await this.continuePendingRevocation(
           run.connectorId,

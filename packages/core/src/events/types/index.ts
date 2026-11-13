@@ -2,6 +2,7 @@ import type { JsonValue } from "../../json"
 import type { OntologyMaterializationEvent } from "../../materialization/events"
 import type { EventOrigin } from "../envelope"
 import type { ArtifactEvent } from "./artifacts"
+import type { ConnectorEvent } from "./connectors"
 import type { DatasetEvent } from "./datasets"
 import type { LinkEvent } from "./links"
 import type { ObjectEvent } from "./objects"
@@ -30,6 +31,11 @@ export type {
   PropertyChangeOperation,
 } from "../property-changes"
 export type { ArtifactCommentedEvent, ArtifactEvent, ArtifactUpdatedEvent } from "./artifacts"
+export type {
+  ConnectorConnectionConnectedEvent,
+  ConnectorConnectionDisconnectedEvent,
+  ConnectorEvent,
+} from "./connectors"
 export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
 export type {
   LinkCreatedEvent,
@@ -94,6 +100,7 @@ export type DomainEvent =
   | DatasetEvent
   | UserEvent
   | ArtifactEvent
+  | ConnectorEvent
 
 export type OntologyDomainEvent = ObjectEvent | LinkEvent | TelemetryEvent
 export type AuthorableDomainEvent = Exclude<DomainEvent, OntologyDomainEvent>

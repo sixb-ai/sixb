@@ -3,6 +3,7 @@ import type { InferPropertyValue } from "../../ontology/inference"
 import type { RuleDefinition } from "../../rules"
 import type { PropertyChangeOperation } from "../property-changes"
 import type {
+  ConnectorEvent,
   DatasetVersionCommittedEvent,
   DomainEvent,
   PipelineRunFinishedEvent,
@@ -54,6 +55,11 @@ export type PipelineEventToken<TId extends string = string> = {
   readonly id: TId
 }
 
+export type ConnectorEventToken<TId extends string = string> = {
+  readonly kind: "connector"
+  readonly id: TId
+}
+
 export type DatasetEventSelectorContext<TDataset extends DatasetEventToken = DatasetEventToken> = {
   readonly kind: "dataset"
   readonly dataset: TDataset
@@ -93,6 +99,17 @@ export type UserEventSelectorContext<
   readonly operation: TOperation
 }
 
+export type ConnectorEventSelectorOperation = "connected" | "disconnected"
+
+export type ConnectorEventSelectorContext<
+  TConnector extends ConnectorEventToken = ConnectorEventToken,
+  TOperation extends ConnectorEventSelectorOperation = ConnectorEventSelectorOperation,
+> = {
+  readonly kind: "connector"
+  readonly connector: TConnector
+  readonly operation: TOperation
+}
+
 export type EventSelectorContext =
   | ObjectEventSelectorContext
   | LinkEventSelectorContext
@@ -101,6 +118,7 @@ export type EventSelectorContext =
   | SyncEventSelectorContext
   | PipelineEventSelectorContext
   | UserEventSelectorContext
+  | ConnectorEventSelectorContext
 
 export type InferEventSelectorContext<TSelector> = TSelector extends {
   readonly [eventSelectorContextType]?: infer TContext
@@ -127,7 +145,12 @@ export type EventSelectorEvent<TContext> =
               ? PipelineEventSelectorEvent<TPipeline, TOperation>
               : TContext extends UserEventSelectorContext<infer TOperation>
                 ? UserEventSelectorEvent<TOperation>
-                : never
+                : TContext extends ConnectorEventSelectorContext<
+                      infer _TConnector,
+                      infer TOperation
+                    >
+                  ? ConnectorEventSelectorEvent<TOperation>
+                  : never
 
 export interface ObjectEventSelectorEvent<TObjectType extends ObjectTypeWithTokens> {
   readonly object: {
@@ -191,6 +214,11 @@ export type UserEventSelectorEvent<
   TOperation extends UserEventSelectorOperation = UserEventSelectorOperation,
 > = Extract<UserEvent, { type: UserEventTypeOf[TOperation] }>["payload"]
 
+/** The payload of the connection event an operation selects. */
+export type ConnectorEventSelectorEvent<
+  TOperation extends ConnectorEventSelectorOperation = ConnectorEventSelectorOperation,
+> = Extract<ConnectorEvent, { type: `connector.connection.${TOperation}` }>["payload"]
+
 export interface EventSelectorSpec<TContext = EventSelectorContext> {
   readonly [eventSelectorContextType]?: TContext
   readonly topic?: DomainEvent["topic"]
@@ -204,6 +232,7 @@ export interface EventSelectorSpec<TContext = EventSelectorContext> {
   readonly datasetId?: string
   readonly syncId?: string
   readonly pipelineId?: string
+  readonly connectorId?: string
   readonly runStatus?: RunEventSelectorOperation
   readonly runId?: string
 }

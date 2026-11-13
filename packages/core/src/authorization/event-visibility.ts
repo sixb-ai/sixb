@@ -81,6 +81,19 @@ export function canViewEvent(
     case "users":
       // Member events carry profiles and invitee emails: the member directory's grant.
       return isAllowed(authorization, { kind: "users.view" })
+    case "connectors": {
+      // Whoever sees the connection: the connector's managers, and the owner of a personal one.
+      const owner = event.payload.connection.owner
+      return (
+        isAllowed(authorization, {
+          kind: "connector.manage",
+          connectorId: event.payload.connectorId,
+        }) ||
+        (owner.type === "user" &&
+          authorization.principal.type === "user" &&
+          authorization.principal.id === owner.id)
+      )
+    }
     case "artifacts":
       // No grant reads an artifact: its owner and the conversations that share it decide, which
       // the events runtime asks per artifact. Grants alone show none.

@@ -17,6 +17,7 @@ export function eventSelectorSpec(selector: EventSelectorSpec<unknown>): EventSe
     ...(selector.datasetId !== undefined ? { datasetId: selector.datasetId } : {}),
     ...(selector.syncId !== undefined ? { syncId: selector.syncId } : {}),
     ...(selector.pipelineId !== undefined ? { pipelineId: selector.pipelineId } : {}),
+    ...(selector.connectorId !== undefined ? { connectorId: selector.connectorId } : {}),
     ...(selector.runStatus !== undefined ? { runStatus: selector.runStatus } : {}),
     ...(selector.runId !== undefined ? { runId: selector.runId } : {}),
   }
@@ -42,6 +43,7 @@ export function buildEventSelectorPredicate(
     if (filter.datasetId !== undefined && scope.datasetId !== filter.datasetId) return false
     if (filter.syncId !== undefined && scope.syncId !== filter.syncId) return false
     if (filter.pipelineId !== undefined && scope.pipelineId !== filter.pipelineId) return false
+    if (filter.connectorId !== undefined && scope.connectorId !== filter.connectorId) return false
     if (filter.runStatus !== undefined && !matchesRunStatus(event, filter.runStatus)) return false
 
     if (!matchesPropertyChange(event, filter)) return false
