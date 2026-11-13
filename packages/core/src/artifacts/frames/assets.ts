@@ -1,9 +1,11 @@
 import type { ArtifactFrameTarget } from "../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { decodeHtmlEntities } from "../html"
+import type { DocumentHeading } from "../outline"
+import type { DocumentPaper } from "../paper"
 import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
 import type { FrameLayout } from "./entries"
-import { FRAME_DECK_CSS, FRAME_PAGE_CSS } from "./kit"
+import { FRAME_DECK_CSS, FRAME_DOCUMENT_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
 
 /**
@@ -29,15 +31,25 @@ export const FRAME_ASSETS: Readonly<
 > = {
   [`${FRAME_ASSET_PREFIX}deck.css`]: { body: FRAME_DECK_CSS, type: "text/css; charset=utf-8" },
   [`${FRAME_ASSET_PREFIX}page.css`]: { body: FRAME_PAGE_CSS, type: "text/css; charset=utf-8" },
+  [`${FRAME_ASSET_PREFIX}document.css`]: {
+    body: FRAME_DOCUMENT_CSS,
+    type: "text/css; charset=utf-8",
+  },
   [`${FRAME_ASSET_PREFIX}runtime.js`]: {
     body: `(${frameRuntime.toString()})()\n`,
     type: "text/javascript; charset=utf-8",
   },
 }
 
-/** The kit for the layout and the runtime, which reads the layout from its own tag. */
-function injected(layout: FrameLayout, base: string): string {
-  return `<link rel="stylesheet" href="${base}${FRAME_ASSET_PREFIX}${layout}.css"><script src="${base}${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"></script>`
+/**
+ * The kit for the layout and the runtime, which reads the layout from its own tag, and a designed
+ * document's paper: its width, height, and margins, top, right, bottom and left, in pixels.
+ */
+function injected(layout: FrameLayout, base: string, paper?: DocumentPaper): string {
+  const sheet = paper
+    ? ` data-sixb-paper="${[paper.width, paper.height, paper.margin.top, paper.margin.right, paper.margin.bottom, paper.margin.left].join(" ")}"`
+    : ""
+  return `<link rel="stylesheet" href="${base}${FRAME_ASSET_PREFIX}${layout}.css"><script src="${base}${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"${sheet}></script>`
 }
 
 /**
@@ -56,8 +68,13 @@ function rootOf(entry: string): string {
  * text, so a `<head>` inside a comment or a script's string is not one. `entry` is where the page
  * is in the version, so an entry in a folder, as a canvas's boards are, finds them.
  */
-export function injectFrameAssets(html: string, layout: FrameLayout, entry = "index.html"): string {
-  const assets = injected(layout, rootOf(entry))
+export function injectFrameAssets(
+  html: string,
+  layout: FrameLayout,
+  entry = "index.html",
+  paper?: DocumentPaper
+): string {
+  const assets = injected(layout, rootOf(entry), paper)
   for (const selector of ["head", "html"]) {
     let injected = false
     const rewritten = new HTMLRewriter()
@@ -73,6 +90,23 @@ export function injectFrameAssets(html: string, layout: FrameLayout, entry = "in
   }
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? ""
   return `${doctype}${assets}${html.slice(doctype.length)}`
+}
+
+/**
+ * Marks each heading of a designed document with the slug publishing named it by, in order,
+ * `data-sixb-section`, so the frame opens the document at the section an address names.
+ */
+export function markDocumentSections(html: string, headings: readonly DocumentHeading[]): string {
+  let index = 0
+  return new HTMLRewriter()
+    .on("h1, h2, h3, h4, h5, h6", {
+      element(element) {
+        const heading = headings[index]
+        index += 1
+        if (heading?.slug) element.setAttribute("data-sixb-section", heading.slug)
+      },
+    })
+    .transform(html)
 }
 
 /**

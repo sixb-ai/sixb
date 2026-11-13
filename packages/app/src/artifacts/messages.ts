@@ -149,6 +149,8 @@ export const en = {
   document: {
     outline: "On this page",
     copySection: (heading: string) => `Copy a link to “${heading}”`,
+    frame: (title: string) => `Document ${title}`,
+    loadFailed: "This document could not be opened.",
     callouts: {
       note: "Note",
       tip: "Tip",
@@ -804,6 +806,8 @@ export const fr: Translation<ArtifactMessages> = {
   document: {
     outline: "Sur cette page",
     copySection: (heading) => `Copier un lien vers « ${heading} »`,
+    frame: (title) => `Document ${title}`,
+    loadFailed: "Ce document n’a pas pu être ouvert.",
     callouts: {
       note: "Remarque",
       tip: "Conseil",

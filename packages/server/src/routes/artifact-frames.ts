@@ -9,6 +9,7 @@ import {
   frameEntries,
   frameLayout,
   injectFrameAssets,
+  markDocumentSections,
   resolveArtifactFrame,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
@@ -110,7 +111,7 @@ async function frameResponse(
   const file = version.files.find((candidate) => candidate.path === path)
   if (!file) return notFound()
 
-  const layout = frameLayout(version.outline.kind)
+  const layout = frameLayout(version)
   if (!lent && layout && frameEntries(version).includes(file.path)) {
     const opened = await openFileRef(host.blobStorage, file.file)
     if (!opened) return notFound()
@@ -123,12 +124,20 @@ async function frameResponse(
     // for the runtime to report and edit them by.
     const editing =
       version.outline.kind === "canvas" && new URL(request.url).searchParams.has("sixb-edit")
-    const source = editing ? annotateBoard(text) : text
+    const { outline } = version
+    // A designed document's headings carry their sections' slugs, to open it at one, and its
+    // runtime gets its paper, to cut it into pages.
+    const source = editing
+      ? annotateBoard(text)
+      : outline.kind === "document"
+        ? markDocumentSections(text, outline.headings)
+        : text
     return new Response(
       injectFrameAssets(
         rewriteFrameReferences(source, frame.targets, file.path),
         layout,
-        file.path
+        file.path,
+        outline.kind === "document" ? outline.paper : undefined
       ),
       { headers }
     )

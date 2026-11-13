@@ -1,3 +1,4 @@
+import type { DocumentPaper } from "./paper"
 import type { ArtifactThemeMode } from "./theme"
 
 /**
@@ -15,6 +16,10 @@ export type ArtifactOutline =
 export interface DocumentOutline {
   readonly kind: "document"
   readonly headings: readonly DocumentHeading[]
+  /** `html` for a designed document, `document.html` with its own stylesheets; absent for Markdown. */
+  readonly format?: "html"
+  /** The sheet a designed document's `@page` rule sets, which gives it pages; absent without one. */
+  readonly paper?: DocumentPaper
 }
 
 export interface DocumentHeading {

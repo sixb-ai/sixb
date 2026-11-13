@@ -339,9 +339,9 @@ async function publish(
       )
     }
   }
-  // A published deck, page, or canvas is laid out in the sandbox's browser, so the Agent sees what
-  // the reader will, and fixes it in its next update.
-  const layout = frameLayout(kind)
+  // A published deck, page, designed document, or canvas is laid out in the sandbox's browser, so
+  // the Agent sees what the reader will, and fixes it in its next update.
+  const layout = frameLayout(version)
   const { outline, entry } = version
   const root = layout ? sources.find((source) => source.path === entry) : undefined
   // A merged version is checked from its installed copy, which holds what it holds.
@@ -380,7 +380,11 @@ async function publish(
           ...canvasOf(bytesOf(CANVAS_FILE)),
         }
       : layout && bytesOf(entry)
-        ? { layout, entry: bytesOf(entry) as Uint8Array }
+        ? {
+            layout,
+            entry: bytesOf(entry) as Uint8Array,
+            ...(outline.kind === "document" && outline.paper ? { paper: outline.paper } : {}),
+          }
         : null
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
@@ -445,6 +449,7 @@ async function publish(
             check.status === "checked"
               ? {
                   screenshots: [...check.screenshots],
+                  ...(check.pages ? { pages: check.pages } : {}),
                   ...(check.overview ? { overview: check.overview } : {}),
                 }
               : { skipped: check.reason },
@@ -800,7 +805,13 @@ async function listSources(
     })
     return [
       {
-        path: kind === "document" ? "document.md" : posix.basename(absolutePath),
+        // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
+        path:
+          kind === "document"
+            ? /\.html?$/i.test(absolutePath)
+              ? "document.html"
+              : "document.md"
+            : posix.basename(absolutePath),
         absolutePath,
         sizeBytes: bytes.byteLength,
         bytes,
@@ -903,7 +914,9 @@ function publishSummary(output: JsonValue): string {
             ? "Read index.html and its scripts closely."
             : kind === "canvas"
               ? "Read each board's HTML closely."
-              : "Read index.html slide by slide."
+              : kind === "document"
+                ? "Read document.html and its stylesheets closely: what fits the paper, and where each page breaks."
+                : "Read index.html slide by slide."
         }`
       )
     } else if (screenshots.length > 0) {
@@ -917,7 +930,13 @@ function publishSummary(output: JsonValue): string {
                   ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
                   : ""
               }`
-            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
+            : kind === "document"
+              ? documentShots(
+                  directory,
+                  screenshots,
+                  typeof check.pages === "number" ? check.pages : undefined
+                )
+              : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
       )
     }
   }
@@ -1009,4 +1028,22 @@ function toPublishError(error: unknown, tool: ArtifactToolName, path?: string): 
 function publishError(tool: ArtifactToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
   return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
+}
+
+/**
+ * Where a designed document's screenshots are: its pages as they print, or its one sheet when it
+ * has no paper, and the top of it on a phone.
+ */
+function documentShots(
+  directory: string,
+  screenshots: readonly string[],
+  pages: number | undefined
+): string {
+  const shot = screenshots.filter((each) => posix.basename(each).startsWith("page-")).length
+  const phone = ` ${directory}/phone.png is its top 4000px on a phone (390px), where it shows as one sheet: check that nothing runs off the side.`
+  if (shot === 0) {
+    return `Layout check: the document as one sheet is ${directory}/document.png. It has no paper, so no pages: give its stylesheet an @page rule with a size to print it.${phone} Open them with read, fix what the warnings name, and update the artifact.`
+  }
+  const count = pages ?? shot
+  return `Layout check: each page as it prints is ${directory}/page-NN.png (${count} pages${count > shot ? `, the first ${shot} shot` : ""}).${phone} Open them with read, check where each page breaks and that nothing is cut off, fix what the warnings name, and update the artifact.`
 }

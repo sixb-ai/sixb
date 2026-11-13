@@ -227,6 +227,33 @@ describe("a deck's frame", () => {
     expect(await data.json()).toEqual([{ unit: "V-12" }])
   })
 
+  test("serves a designed document in the document layout, with its paper and its sections marked", async () => {
+    // Reproduce by passing no paper to injectFrameAssets in routes/artifact-frames.ts: the
+    // runtime gets no sheet to cut the document into pages by.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const proposal = await publish(fixture, alice, "document", [
+      await fixture.put(
+        "document.html",
+        '<!doctype html><html><head><link rel="stylesheet" href="design.css"></head><body><h1>Proposal</h1><h2>Pricing</h2></body></html>',
+        "text/html"
+      ),
+      await fixture.put("design.css", "@page { size: letter; margin: 1in }", "text/css"),
+    ])
+    const minted = await mint(fixture, alice, proposal.artifact.id)
+    expect(minted.status).toBe(200)
+    const { path } = (await minted.json()) as { path: string }
+    const html = await (await fixture.app.fetch(new Request(url(`${path}document.html`)))).text()
+    expect(html).toContain(
+      '<head><link rel="stylesheet" href="__sixb/document.css"><script src="__sixb/runtime.js" data-sixb-layout="document" data-sixb-paper="816 1056 96 96 96 96"></script>'
+    )
+    expect(html).toContain(
+      '<h1 data-sixb-section="proposal">Proposal</h1><h2 data-sixb-section="pricing">Pricing</h2>'
+    )
+    const kit = await fixture.app.fetch(new Request(url(`${path}__sixb/document.css`)))
+    expect(await kit.text()).toContain(".sixb-paper {")
+  })
+
   test("serves each of a canvas's boards as a page under one link, and its shared files as they are", async () => {
     // Reproduce by listing only a version's entry in frames/entries.ts: a canvas's entry is its
     // canvas.json, so its boards are served without the kit and the runtime.

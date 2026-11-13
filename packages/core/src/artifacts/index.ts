@@ -108,6 +108,7 @@ export {
   type SheetSummary,
   type SlidesOutline,
 } from "./outline"
+export type { DocumentPaper } from "./paper"
 export {
   type ArtifactFacetsQueryResult,
   type ArtifactObjectsQueryResult,

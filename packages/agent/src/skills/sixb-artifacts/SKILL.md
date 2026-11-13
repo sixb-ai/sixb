@@ -15,7 +15,7 @@ the question, answer in the chat.
 
 | Kind | Publish it for | Read first |
 | --- | --- | --- |
-| `document` | A report, brief, memo, plan, or write-up: anything read top to bottom | `document.md` |
+| `document` | A report, brief, memo, plan, or write-up: anything read top to bottom; designed, a proposal, contract, or letter in a business's own look | `document.md` |
 | `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
 | `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
@@ -45,8 +45,8 @@ go beside each picture.
    cannot, tell the user the deliverable could not be published; never describe it as ready.
 4. Fix what each warning names and update the artifact when it matters to the reader. A
    deck also comes back with a screenshot of each slide, a page with one at a laptop's width and
-   one at a phone's, and a canvas with one of each board: look at them (`slides.md`, `page.md`,
-   `canvas.md`, Check).
+   one at a phone's, a designed document with one of each page, and a canvas with one of each
+   board: look at them (`slides.md`, `page.md`, `document.md`, `canvas.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
    of it in place, use its address (`references.md`). A figure you cite from live data is the one
