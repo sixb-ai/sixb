@@ -6453,7 +6453,7 @@ export const listArtifactCommentsQueryKey = (options: Options<ListArtifactCommen
 /**
  * List an artifact's comments
  *
- * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.
+ * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them; a shared link's guest reads only the threads started by a guest of the same link, with every reply in them.
  */
 export const listArtifactCommentsOptions = (options: Options<ListArtifactCommentsData>) =>
   queryOptions<
@@ -6477,7 +6477,7 @@ export const listArtifactCommentsOptions = (options: Options<ListArtifactComment
 /**
  * Comment on an artifact
  *
- * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one), and replies only in a thread they read (404 comment_not_found otherwise). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers of the thread receive artifact.commented.
  */
 export const addArtifactCommentMutation = (
   options?: Partial<Options<AddArtifactCommentData>>

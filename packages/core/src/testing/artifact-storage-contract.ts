@@ -1443,12 +1443,18 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Regression proof: drop the guests' count from a provider's createComment; the guest past
-    // the cap is then stored.
-    test("keeps a guest's comment under the name they gave, up to what guests may write", async () => {
+    // Regression proofs: drop the guests' count from a provider's createComment; the guest past
+    // the cap is then stored. Drop `author_grant_id` from what it writes or reads; the guest comes
+    // back without the link whose guests read their thread.
+    test("keeps a guest's comment under the name they gave and the link they came through, up to what guests may write", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        const guest = { type: "guest" as const, id: "shs_visitor", name: "Ava Martin" }
+        const guest = {
+          type: "guest" as const,
+          id: "shs_visitor",
+          name: "Ava Martin",
+          grantId: "shg_kickoff",
+        }
         const comment = (id: string, author: ArtifactCommentAuthor) =>
           artifacts.createComment({
             projectId,
@@ -1464,6 +1470,9 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(
           await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_guest_0" })
         ).toMatchObject({ author: guest })
+        expect((await artifacts.listComments({ projectId, id: "art_report" }))[0]?.author).toEqual(
+          guest
+        )
 
         for (let index = 1; index < ARTIFACT_COMMENT_LIMITS.maxGuestComments; index += 1) {
           await comment(`cmt_guest_${index}`, { ...guest, id: `shs_visitor_${index % 3}` })

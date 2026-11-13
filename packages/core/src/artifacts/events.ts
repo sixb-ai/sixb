@@ -31,12 +31,14 @@ export async function announceArtifactUpdates(
 }
 
 /**
- * Tells whoever reads the artifact that one of its comments changed, as `artifact.commented`.
+ * Tells whoever reads the comment's thread that it changed, as `artifact.commented`: the
+ * artifact's members, and the guests of `shareGrantId`, the link a guest's thread came through.
  * The change is stored by now, so `emit` never fails it.
  */
 export async function announceArtifactComment(
   events: Pick<DomainEventLog, "emit">,
   comment: Pick<ArtifactCommentRecord, "artifactId" | "id" | "parentId">,
+  shareGrantId: string | undefined,
   action: "created" | "resolved" | "reopened" | "deleted"
 ): Promise<void> {
   await events.emit(
@@ -48,6 +50,7 @@ export async function announceArtifactComment(
             artifactId: comment.artifactId,
             commentId: comment.id,
             ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
+            ...(shareGrantId === undefined ? {} : { shareGrantId }),
             action,
           },
         },

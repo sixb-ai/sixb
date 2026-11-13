@@ -98,7 +98,8 @@ const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS update
 const COMMENT_COLUMNS = `
   project_id AS projectId, artifact_id AS artifactId, id, parent_id AS parentId, anchor, body,
   author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
-  author_name AS authorName, created_at AS createdAt, resolved_at AS resolvedAt,
+  author_name AS authorName, author_grant_id AS authorGrantId, created_at AS createdAt,
+  resolved_at AS resolvedAt,
   resolved_by_principal_type AS resolvedByPrincipalType,
   resolved_by_principal_id AS resolvedByPrincipalId,
   origin_thread_id AS originThreadId, origin_run_id AS originRunId
@@ -759,12 +760,14 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           : { point: { x: input.anchor.point.x, y: input.anchor.point.y } }),
         revision: input.anchor.revision,
       }
+      const guest = input.author.type === "guest" ? input.author : undefined
       const row = this.db
         .query(
           `INSERT INTO artifact_comments (
             project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-            author_principal_id, author_name, created_at, origin_thread_id, origin_run_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            author_principal_id, author_name, author_grant_id, created_at, origin_thread_id,
+            origin_run_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           RETURNING ${COMMENT_COLUMNS}`
         )
         .get(
@@ -776,7 +779,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.body,
           input.author.type,
           input.author.id,
-          input.author.type === "guest" ? input.author.name : null,
+          guest?.name ?? null,
+          guest?.grantId ?? null,
           input.createdAt.toISOString(),
           input.origin?.threadId ?? null,
           input.origin?.runId ?? null

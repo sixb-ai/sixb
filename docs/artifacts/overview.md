@@ -227,7 +227,10 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 - A visitor of a [shared link](../auth/shared-access.md#share-an-objects-artifacts) to an object
   that holds the artifact comments as a guest: `author.type` is `guest` and `authorName` the name
   they gave. Only someone who may change the artifact resolves or deletes a guest's comment.
-- Each change sends `artifact.commented` to whoever reads the artifact.
+- A guest reads only the threads started by a guest of the same link, with every reply in them,
+  yours included. Threads your team starts stay internal: to a guest, they do not exist.
+- Each change sends `artifact.commented` to whoever reads its thread. In a guest's thread, it
+  names the link as `shareGrantId`.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters; guests write at most 200
   of them.
 - `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads

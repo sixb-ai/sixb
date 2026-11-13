@@ -83,6 +83,9 @@ The recipient is a guest:
   comments.
 - They comment under a name they type once. Their comments and their live cursor carry it, marked
   as a guest's for everyone.
+- They read only the comment threads that guests of the same link start, themselves or a
+  colleague, from any device and in any later visit, with your replies. Your team's own threads
+  stay internal: the app marks them, and tells you when a guest will see your reply.
 - A board whose canvas reads your data shows its outline until they open it: its picture would
   show what its author sees, and the opened board runs with the visitor's own access.
 - They change nothing: no edits, versions, restores, or page data. Only members who may change the

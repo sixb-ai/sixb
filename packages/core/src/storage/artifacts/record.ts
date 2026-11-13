@@ -446,10 +446,15 @@ function principal(type: unknown, id: unknown, column: string, where: string): P
   return { type: type as Principal["type"], id: text(id, column, where) }
 }
 
-/** A comment's author: a principal, or a guest with the name they gave and nothing else. */
+/**
+ * A comment's author: a principal, or a guest with the name they gave and the link they came
+ * through, and nothing else.
+ */
 function commentAuthor(row: Row, where: string): ArtifactCommentAuthor {
   if (row.authorPrincipalType !== "guest") {
-    if (row.authorName != null) throw corrupt(where, "a principal's comment keeps a guest's name")
+    if (row.authorName != null || row.authorGrantId != null) {
+      throw corrupt(where, "a principal's comment keeps a guest's name or link")
+    }
     return principal(row.authorPrincipalType, row.authorPrincipalId, "author", where)
   }
 
@@ -457,6 +462,7 @@ function commentAuthor(row: Row, where: string): ArtifactCommentAuthor {
     type: "guest",
     id: text(row.authorPrincipalId, "author", where),
     name: text(row.authorName, "authorName", where),
+    grantId: text(row.authorGrantId, "authorGrantId", where),
   }
 }
 

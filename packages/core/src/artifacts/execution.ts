@@ -660,6 +660,9 @@ export function createArtifactsRuntime(
       author: commentAuthor,
       manager: requireCaller,
       reach,
+      ...(authority.type === "delegated"
+        ? { guest: { grantId: authority.delegation?.grantId } }
+        : {}),
     }),
 
     async create(input) {
@@ -985,7 +988,7 @@ async function sharedLinkGuest(
     )
   }
 
-  return { type: "guest", id: delegation.sessionId, name }
+  return { type: "guest", id: delegation.sessionId, name, grantId: delegation.grantId }
 }
 
 function notFound(artifactId: string): ArtifactRequestError {

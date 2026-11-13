@@ -473,6 +473,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("100-shared-link-guests", sharedLinkGuestsSql),
     pgSql("101-connector-connection-owners", connectorConnectionOwnersSql),
     pgSql("102-user-suspension-source", userSuspensionSourceSql),
+    pgSql("103-guest-comment-links", guestCommentLinksSql),
   ],
 })
 
@@ -575,3 +576,4 @@ import connectorConnectionOwnersSql from "./migrations/101-connector-connection-
 import userSuspensionSourceSql from "./migrations/102-user-suspension-source.sql" with {
   type: "text",
 }
+import guestCommentLinksSql from "./migrations/103-guest-comment-links.sql" with { type: "text" }

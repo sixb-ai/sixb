@@ -516,7 +516,12 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       body: input.body,
       author:
         input.author.type === "guest"
-          ? { type: "guest", id: input.author.id, name: input.author.name }
+          ? {
+              type: "guest",
+              id: input.author.id,
+              name: input.author.name,
+              grantId: input.author.grantId,
+            }
           : { type: input.author.type, id: input.author.id },
       ...(input.origin
         ? { origin: { threadId: input.origin.threadId, runId: input.origin.runId } }

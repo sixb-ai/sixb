@@ -22,7 +22,8 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // A shared link's visitor is a guest: they read the artifacts the link's objects hold, follow
 // them, and comment under a name they give, and nothing else. The access rule decides it, as for
-// every other caller; the server's tests prove the routes and sockets that ask it.
+// every other caller; the server's tests prove the routes and sockets that ask it. Of the comments,
+// a guest reads only the threads its link's guests started.
 
 const PROJECT = "artifacts-shared-links"
 
@@ -84,13 +85,17 @@ async function setup() {
   const alice = as("alice", [editors.id])
   const bob = as("bob", [readers.id])
 
-  /** A visitor of a link to the meeting, in the session its secret opens. */
-  const guestOf = async (primaryId: string) => {
-    const invitation = await alice.shares.issue(meetingShare, {
+  /** A link to the meeting, as Alice issues it. */
+  const linkTo = (primaryId: string) =>
+    alice.shares.issue(meetingShare, {
       target: objectRef(Meeting, primaryId),
       destinationPath: `/meetings/${primaryId}`,
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
     })
+
+  /** A visitor of a link to the meeting, a new one by default, in the session its secret opens. */
+  const guestOf = async (primaryId: string, link?: Awaited<ReturnType<typeof linkTo>>) => {
+    const invitation = link ?? (await linkTo(primaryId))
     const credential = await protocol.exchange(invitation.grant.id, invitation.secret)
     if (!credential) throw new Error("The link's secret opened no session.")
 
@@ -104,7 +109,7 @@ async function setup() {
         delegation: { kind: "share", grantId, sessionId },
       })
     ) as ReturnType<typeof as>
-    return { sixb, session: credential.context }
+    return { sixb, session: credential.context, link: invitation }
   }
 
   const document = async (title: string) => {
@@ -207,12 +212,17 @@ describe("a shared link's guest", () => {
 
     await protocol.setGuestName(session, "Ava Martin")
     const comment = await guest.artifacts.addComment(kickoff, { body: "Can we start at 9?" })
-    expect(comment.author).toEqual({ type: "guest", id: session.sessionId, name: "Ava Martin" })
+    expect(comment.author).toEqual({
+      type: "guest",
+      id: session.sessionId,
+      name: "Ava Martin",
+      grantId: session.grantId,
+    })
     expect(await guest.artifacts.listComments(kickoff)).toHaveLength(1)
 
     // Not even their own: resolving and deleting are for members who may change the artifact.
-    const members = await alice.artifacts.addComment(kickoff, { body: "Noted" })
-    for (const id of [comment.id, members.id]) {
+    const reply = await alice.artifacts.addComment(kickoff, { body: "Noted", parentId: comment.id })
+    for (const id of [comment.id, reply.id]) {
       expect(await refusal(guest.artifacts.resolveComment(kickoff, id))).toBe("not_allowed")
       expect(await refusal(guest.artifacts.deleteComment(kickoff, id))).toBe("not_allowed")
     }
@@ -232,31 +242,165 @@ describe("a shared link's guest", () => {
   // Guard proof: answer `[]` for delegated authority in `visible` (events/execution.ts), as
   // before; the guest then follows no artifact.
   test("follows the events of the artifacts it reads, and no others", async () => {
-    const { host, alice, guestOf, document, meetings } = await setup()
+    const { host, protocol, alice, guestOf, document, meetings } = await setup()
     const kickoff = await document("Kick-off")
     const other = await document("Other")
     await meetings.upsert({ properties: { id: "m1", kickoffDoc: artifactRef(kickoff) } })
-    const { sixb: guest } = await guestOf("m1")
+    const { sixb: guest, session } = await guestOf("m1")
+    await protocol.setGuestName(session, "Ava Martin")
     const cursor = await host.events.latestCursor()
 
-    await alice.artifacts.addComment(kickoff, { body: "On the plan" })
-    await alice.artifacts.addComment(other, { body: "Elsewhere" })
+    const question = await guest.artifacts.addComment(kickoff, { body: "On the plan" })
+    await alice.artifacts.addComment(kickoff, { body: "Sure", parentId: question.id })
+    await alice.artifacts.freeze(other)
     await meetings.upsert({
       properties: { id: "m1", title: "Kick-off", kickoffDoc: artifactRef(kickoff) },
     })
 
-    const written = await host.events.read({
-      ...(cursor === undefined ? {} : { afterCursor: cursor }),
-    })
-    const shown = await guest.events.visible(written)
+    const shown = await guest.events.visible(await written(host, cursor))
     expect(
       shown.map((event) => [
         event.type,
         "artifactId" in event.payload ? event.payload.artifactId : null,
       ])
-    ).toEqual([["artifact.commented", kickoff]])
+    ).toEqual([
+      ["artifact.commented", kickoff],
+      ["artifact.commented", kickoff],
+    ])
   })
 })
+
+describe("a shared link's guest, in the comments", () => {
+  /** A meeting's kick-off, with Ava's thread through one link, and the team's own thread. */
+  async function discussed() {
+    const context = await setup()
+    const { protocol, alice, guestOf, document, meetings } = context
+    const kickoff = await document("Kick-off")
+    await meetings.upsert({ properties: { id: "m1", kickoffDoc: artifactRef(kickoff) } })
+
+    const ava = await guestOf("m1")
+    await protocol.setGuestName(ava.session, "Ava Martin")
+    const question = await ava.sixb.artifacts.addComment(kickoff, { body: "Can we start at 9?" })
+    const answer = await alice.artifacts.addComment(kickoff, {
+      body: "Yes, 9 works.",
+      parentId: question.id,
+    })
+    const internal = await alice.artifacts.addComment(kickoff, { body: "Their budget is tight." })
+    const internalReply = await alice.artifacts.addComment(kickoff, {
+      body: "Keep it to the plan.",
+      parentId: internal.id,
+    })
+
+    return { ...context, kickoff, ava, question, answer, internal, internalReply }
+  }
+
+  const ids = (comments: readonly { readonly id: string }[] | null) =>
+    comments?.map((comment) => comment.id)
+
+  // Guard proof: return every comment to a guest in `listComments` (artifacts/comments.ts); Ava
+  // then reads the team's thread.
+  test("reads the threads its link's guests started, with the team's replies, and nothing else", async () => {
+    const { alice, guestOf, kickoff, ava, question, answer, internal, internalReply } =
+      await discussed()
+
+    expect(ids(await ava.sixb.artifacts.listComments(kickoff))).toEqual([question.id, answer.id])
+    expect(ids(await alice.artifacts.listComments(kickoff))).toEqual([
+      question.id,
+      answer.id,
+      internal.id,
+      internalReply.id,
+    ])
+
+    // Her colleague opens the same link, as Ava does again on her phone: the thread is theirs too.
+    const colleague = await guestOf("m1", ava.link)
+    expect(ids(await colleague.sixb.artifacts.listComments(kickoff))).toEqual([
+      question.id,
+      answer.id,
+    ])
+
+    // Another link to the same meeting is another conversation.
+    const other = await guestOf("m1")
+    expect(await other.sixb.artifacts.listComments(kickoff)).toEqual([])
+  })
+
+  // Guard proof: drop the `reads(parent)` check in `addComment` (artifacts/comments.ts); Ava then
+  // replies in the team's thread.
+  test("replies only in a thread it reads, and finds no other", async () => {
+    const { protocol, guestOf, kickoff, ava, question, answer, internal, internalReply } =
+      await discussed()
+
+    for (const parentId of [internal.id, internalReply.id]) {
+      expect(await refusal(ava.sixb.artifacts.addComment(kickoff, { body: "Hm", parentId }))).toBe(
+        "comment_not_found"
+      )
+    }
+    for (const id of [internal.id, internalReply.id]) {
+      expect(await refusal(ava.sixb.artifacts.resolveComment(kickoff, id))).toBe(
+        "comment_not_found"
+      )
+      expect(await refusal(ava.sixb.artifacts.deleteComment(kickoff, id))).toBe("comment_not_found")
+    }
+
+    // In a later session of her link, she still replies in her thread.
+    const later = await guestOf("m1", ava.link)
+    await protocol.setGuestName(later.session, "Ava Martin")
+    const followUp = await later.sixb.artifacts.addComment(kickoff, {
+      body: "Great, see you then.",
+      parentId: question.id,
+    })
+    expect(ids(await ava.sixb.artifacts.listComments(kickoff))).toEqual([
+      question.id,
+      answer.id,
+      followUp.id,
+    ])
+
+    // A guest of another link finds her thread missing, as the team's.
+    const other = await guestOf("m1")
+    await protocol.setGuestName(other.session, "Owen Reed")
+    expect(
+      await refusal(
+        other.sixb.artifacts.addComment(kickoff, { body: "Me too", parentId: question.id })
+      )
+    ).toBe("comment_not_found")
+    expect(await refusal(other.sixb.artifacts.resolveComment(kickoff, answer.id))).toBe(
+      "comment_not_found"
+    )
+  })
+
+  // Guard proof: drop the `shareGrantId` check in `visible` (events/execution.ts); Ava then
+  // hears of the team's thread, and Owen of hers.
+  test("hears only of the threads it reads", async () => {
+    const { host, protocol, alice, guestOf, kickoff, ava, question } = await discussed()
+    const other = await guestOf("m1")
+    await protocol.setGuestName(other.session, "Owen Reed")
+    const cursor = await host.events.latestCursor()
+
+    // The team's thread changes first: the first event Ava hears of proves the filter.
+    const internal = await alice.artifacts.addComment(kickoff, { body: "Price is final." })
+    await alice.artifacts.resolveComment(kickoff, internal.id)
+    const reply = await alice.artifacts.addComment(kickoff, { body: "Done", parentId: question.id })
+    await alice.artifacts.resolveComment(kickoff, question.id)
+    const owens = await other.sixb.artifacts.addComment(kickoff, { body: "Agenda?" })
+
+    const events = await written(host, cursor)
+    const heard = async (sixb: typeof ava.sixb) =>
+      (await sixb.events.visible(events)).map((event) =>
+        event.type === "artifact.commented" ? [event.payload.commentId, event.payload.action] : []
+      )
+
+    expect(await heard(ava.sixb)).toEqual([
+      [reply.id, "created"],
+      [question.id, "resolved"],
+    ])
+    expect(await heard(other.sixb)).toEqual([[owens.id, "created"]])
+    expect(await alice.events.visible(events)).toHaveLength(5)
+  })
+})
+
+/** What the project's log holds after `cursor`. */
+async function written(host: SixbHost, cursor: string | undefined) {
+  return host.events.read({ ...(cursor === undefined ? {} : { afterCursor: cursor }) })
+}
 
 describe("the access rule, for a guest", () => {
   // Guard proof: drop the guest's cap in `throughObjects` (artifacts/access.ts), or its check in

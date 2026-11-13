@@ -219,6 +219,7 @@ const shippedMigrationIds = [
   "097-shared-link-guests",
   "098-connector-connection-owners",
   "099-user-suspension-source",
+  "100-guest-comment-links",
 ]
 
 afterEach(async () => {
@@ -763,6 +764,74 @@ describe("SQLite storage migrations", () => {
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
       db.run("DELETE FROM artifact_comments WHERE id = 'cmt_b'")
       expect(db.query(order).all()).toEqual([{ id: "cmt_a" }, { id: "cmt_guest" }])
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proofs: drop the join on `share_sessions` from 100 and the guest's comment is lost to
+  // its CHECK; drop that CHECK and a guest's comment without its link is taken.
+  test("keeps the shared link each guest's comment came through", () => {
+    const db = replayedDatabase("100-guest-comment-links")
+    try {
+      const at = "2026-01-01T00:00:00.000Z"
+      db.run(
+        `INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id, latest_version,
+          next_version, created_at, updated_at
+        ) VALUES ('p', 'art_canvas01', 'canvas', 'Plan', 'user', 'u', 1, 2, ?, ?)`,
+        [at, at]
+      )
+      db.run(
+        `INSERT INTO share_sessions (
+          project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
+        ) VALUES ('p', 'shs_1', 'shg_kickoff', ?, ?, '2026-01-02T00:00:00.000Z',
+          '2026-01-03T00:00:00.000Z')`,
+        ["a".repeat(64), at]
+      )
+      db.run(
+        `INSERT INTO artifact_comments (
+          project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+          author_name, created_at
+        ) VALUES
+          ('p', 'art_canvas01', 'cmt_guest', '{"revision":1}', 'Hi', 'guest', 'shs_1', 'Ava', ?),
+          ('p', 'art_canvas01', 'cmt_team', '{"revision":1}', 'Hm', 'user', 'u', NULL, ?)`,
+        [at, at]
+      )
+
+      migration("100-guest-comment-links").up(db)
+
+      expect(
+        db
+          .query("SELECT id, author_grant_id FROM artifact_comments ORDER BY created_at, rowid")
+          .all()
+      ).toEqual([
+        { id: "cmt_guest", author_grant_id: "shg_kickoff" },
+        { id: "cmt_team", author_grant_id: null },
+      ])
+
+      // A guest's comment keeps its link, and nobody else's does.
+      const comment = (id: string, type: string, name: string | null, grantId: string | null) =>
+        db.run(
+          `INSERT INTO artifact_comments (
+            project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+            author_name, author_grant_id, created_at
+          ) VALUES ('p', 'art_canvas01', ?, '{"revision":1}', 'Hi', ?, 'shs_2', ?, ?, ?)`,
+          [id, type, name, grantId, at]
+        )
+      expect(() => comment("cmt_linkless", "guest", "Ava", null)).toThrow("CHECK")
+      expect(() => comment("cmt_linked", "user", null, "shg_kickoff")).toThrow("CHECK")
+      comment("cmt_next", "guest", "Ava", "shg_kickoff")
+
+      db.run("PRAGMA foreign_keys = ON")
+      expect(db.query("PRAGMA foreign_key_check(artifact_comments)").all()).toEqual([])
+      expect(
+        db
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'artifact_comments' AND name LIKE 'idx_%'"
+          )
+          .all()
+      ).toEqual([{ name: "idx_artifact_comments_created" }])
     } finally {
       db.close()
     }

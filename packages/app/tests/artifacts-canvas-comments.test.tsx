@@ -129,6 +129,8 @@ const GUEST_SESSION = {
   guestId: "shs_owen",
 }
 const owen = { type: "guest", id: GUEST_SESSION.guestId } as const
+/** Owen's colleague, who opened the same link on her own computer. */
+const ava = { type: "guest", id: "shs_ava" } as const
 
 /**
  * Alice's canvas, which Bob reads, or may change, as the viewer reads it; or, with `guest`, which
@@ -691,7 +693,7 @@ describe("comments through a shared link", () => {
   // Guard proof: drop `naming` from CommentComposer; Owen's reply then goes without a name, which
   // the API refuses.
   test("ask a guest's name once, before their first, and carry it as a guest's", async () => {
-    const api = serveGuest([comment("cmt_1", alice, "Warmer colors")])
+    const api = serveGuest([comment("cmt_1", ava, "Warmer colors", { authorName: "Ava Stone" })])
     const { ui } = await open({ guest: true })
     const panel = await openPanel(ui)
     await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
@@ -716,7 +718,7 @@ describe("comments through a shared link", () => {
     // His own, as theirs to him, marked as a guest's; and nothing to resolve.
     const reply = thread(panel, "cmt_1")
     expect(within(reply).getByText("You")).toBeTruthy()
-    expect(within(reply).getByText("Guest")).toBeTruthy()
+    expect(within(reply).getAllByText("Guest")).toHaveLength(2)
     expect(within(reply).queryByRole("button", { name: "Resolve" })).toBeNull()
 
     // Named once: the next reply asks for nothing more.
@@ -737,6 +739,65 @@ describe("comments through a shared link", () => {
 
     expect(within(thread(panel, "cmt_1")).getByText("Owen Reed")).toBeTruthy()
     expect(within(thread(panel, "cmt_1")).getByText("Guest")).toBeTruthy()
+    ui.unmount()
+  })
+
+  // Guard proofs: drop `notice` from the reply's composer in ThreadCard, and Bob is not told Owen
+  // reads his reply; drop `guestsHere` from `internal`, and Alice's thread is marked on a canvas
+  // no guest comments on.
+  test("tell a member who reads a reply, and mark the team's own threads once guests comment", async () => {
+    // Alice is no longer known to the project: a member reads her as someone, not a team member.
+    const api = serveComments([comment("cmt_1", alice, "Warmer colors", { authorName: null })])
+    const { ui } = await open({ events: true })
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+    expect(within(panel).queryByText("Internal")).toBeNull()
+    expect(within(thread(panel, "cmt_1")).getByText("Someone")).toBeTruthy()
+
+    api.comments.push(
+      comment("cmt_2", owen, "Could we start at 8:30?", { authorName: "Owen Reed" })
+    )
+    await commented("cmt_2")
+    await waitFor(() => expect(thread(panel, "cmt_2")).toBeTruthy())
+
+    // Alice's thread is the team's, Owen's is his.
+    expect(within(thread(panel, "cmt_1")).getByText("Internal")).toBeTruthy()
+    expect(within(thread(panel, "cmt_2")).queryByText("Internal")).toBeNull()
+
+    for (const id of ["cmt_1", "cmt_2"]) {
+      await act(async () => {
+        fireEvent.click(within(thread(panel, id)).getByRole("button", { name: "Reply" }))
+      })
+    }
+    expect(
+      within(thread(panel, "cmt_2")).getByText("Owen Reed (guest) will see your reply")
+    ).toBeTruthy()
+    expect(thread(panel, "cmt_1").textContent).not.toContain("will see your reply")
+    ui.unmount()
+  })
+
+  // What a guest reads is what the API lists: their link's threads, with the team's replies, a
+  // member without a profile name as a team member. Guard proofs: drop `member` from the thread's
+  // `guest` in CommentsPanel, and Owen is told Ava will see his reply, as a member would be; drop
+  // `unnamed` from useCommentAuthors, and Alice is "Someone" to him.
+  test("show a guest their link's threads, with no word of the team's", async () => {
+    serveGuest([
+      comment("cmt_1", ava, "Warmer colors", { authorName: "Ava Stone" }),
+      comment("cmt_2", alice, "On it", { parentId: "cmt_1", authorName: null }),
+    ])
+    const { ui } = await open({ guest: true })
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+
+    expect(within(thread(panel, "cmt_1")).getByText("On it")).toBeTruthy()
+    expect(within(thread(panel, "cmt_1")).getByText("Team member")).toBeTruthy()
+    expect(panel.textContent).not.toContain("Someone")
+    expect(within(panel).getByRole("button", { name: /^Open/ }).textContent).toBe("Open1")
+    await act(async () => {
+      fireEvent.click(within(thread(panel, "cmt_1")).getByRole("button", { name: "1 reply" }))
+    })
+    expect(panel.textContent).not.toContain("Internal")
+    expect(panel.textContent).not.toContain("will see your reply")
     ui.unmount()
   })
 
