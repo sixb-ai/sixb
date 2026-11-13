@@ -109,8 +109,10 @@ publishes it when it is what you asked for.
 
 ## Edit in the app
 
-Sheets, canvases, and [designed documents](#design-a-document) are edited where they open: press
-**Edit** on the latest version.
+A Markdown document is typed into as it opens, like a page of notes: whoever may change it clicks
+and types, with no **Edit** to press. Sheets, canvases, and
+[designed documents](#design-a-document) are edited where they open: press **Edit** on the latest
+version.
 
 A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
 **Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
@@ -118,9 +120,21 @@ numbered version in the version menu. ⌘S saves, and leaving with changes asks 
 changed the sheet while you were editing, the save stops and says so: open what they saved, or save
 yours over it.
 
-A canvas, or a designed document, is edited live, with everyone who has it open: there is no draft
-to save. The header keeps Undo, Redo, and **Done**, your changes are saved as you make them, and
-everyone's are merged. See [Edit live](#edit-live).
+A document or a canvas is edited live, with everyone who has it open: there is no draft to save.
+Your changes are saved as you make them, and everyone's are merged. See [Edit live](#edit-live).
+
+| In a Markdown document | |
+| --- | --- |
+| Write | Click anywhere and type. `#`, `-`, `1.`, `[]`, `>`, ` ``` ` and `---` at the start of a line make a heading, a list, a to-do, a quote, code, or a divider |
+| `/` | On any line: text, headings, lists, to-dos, a quote, a callout, a warning, code, a table, an image, a divider, found by typing their name |
+| Blocks | The handle beside a block adds one below, drags it, and turns it into another kind, duplicates, moves, or deletes it; ⌘D duplicates, ⌥⇧↑ and ⌥⇧↓ move |
+| Words | Select them for bold, italic, strikethrough, code, or a link (⌘K); ⌘Z and ⇧⌘Z undo and redo your own changes |
+| Images | Paste, drop, or choose one from `/`: it is added to the document under `images/`; type its caption under it |
+| Paste | Markdown pasted as text becomes its blocks; what you copy is Markdown |
+| Together | Everyone editing sees the others' carets and selections, named, in their colors |
+
+It reads as it always did: its first heading is the title and the paragraph after it the lede, in
+one centered column. A footnote or raw HTML it does not edit is kept as written.
 
 | In a sheet | |
 | --- | --- |
@@ -147,9 +161,8 @@ works on the artifact, it starts from the latest version and keeps your changes.
 
 ## Edit live
 
-A canvas, or a designed document, is edited by everyone at once over `/ws/artifacts`. Each person
-sees the others' changes as they make them, and who else is there. A Markdown document is not
-edited live.
+A document, Markdown or designed, or a canvas is edited by everyone at once over `/ws/artifacts`.
+Each person sees the others' changes as they make them, and who else is there.
 
 - Whoever may change the artifact edits it; whoever may only read it watches.
 - Changes are written to the current version about 1.5 seconds after the last one, at most every
@@ -249,7 +262,7 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 A document is Markdown with tables, footnotes, and task lists. A few conventions shape its page:
 
 - The first `#` heading is the title, and the paragraph after it is the lede.
-- `## ` and `### ` headings form the outline beside the page.
+- `## ` and `### ` headings are its sections, which a link can open at.
 - A quote that starts with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]`
   becomes a callout.
 - An image with a title alone in its paragraph becomes a figure, and the title becomes its
