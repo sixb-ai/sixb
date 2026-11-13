@@ -760,6 +760,11 @@ models: {
 }
 ```
 
+To search through Azure AI Foundry, register `@sixb/azure-ai-foundry`'s
+`foundry.webSearch("chat-nano")`: it runs the `web_search` tool of an OpenAI language deployment
+that reasons. Foundry language models bring no web search of their own, because Azure runs it with
+Grounding with Bing Search, which Microsoft's Data Protection Addendum does not cover.
+
 The agent searches with it through its [`web_search` tool](./overview.md#search-the-web). Each
 search counts toward [AI usage and limits](./usage-and-limits.md#web-search).
 

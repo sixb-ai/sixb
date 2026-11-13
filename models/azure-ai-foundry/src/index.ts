@@ -28,3 +28,7 @@ export type {
   AzureAIFoundryTranscriptionOptions,
 } from "./transcription"
 export type { FoundryProtocol } from "./transport"
+export type {
+  AzureAIFoundryWebSearchModel,
+  AzureAIFoundryWebSearchOptions,
+} from "./web-search"

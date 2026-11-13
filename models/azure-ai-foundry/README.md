@@ -2,7 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
-Language, embedding, decision, transcription, reranking, speech and image models are supported.
+Language, embedding, decision, transcription, reranking, speech, image and web search models are supported.
 
 ## Install
 
@@ -262,6 +262,40 @@ before the call; GPT Image's tokens are not known before it, so a
 gpt-image-1, gpt-image-2 and FLUX1.1 [pro] are covered by fixtures only. Connected deployments from
 another resource are rejected.
 
+## Web search
+
+Register a search that runs through an OpenAI language deployment's `web_search` tool under
+`models.webSearch`. The agent's [`web_search` tool](../../docs/models/overview.md#search-the-web)
+then uses it:
+
+```ts
+export const search = foundry.webSearch("chat-nano") // A gpt-5.4-nano deployment, say.
+
+// In your createSixb() options:
+const models = { language: [model], webSearch: [search] }
+```
+
+Azure runs the search with Grounding with Bing Search. Microsoft's Data Protection Addendum does
+not cover what is sent to it, and that data leaves your compliance and geographic boundary; a
+subscription admin can turn the tool off (see Azure's
+[web search guide](https://learn.microsoft.com/azure/foundry/openai/how-to/web-search)). Nothing
+searches until you register this binding: Foundry language models bring no web search of their own.
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | An OpenAI language deployment with reasoning, such as `gpt-5.4-nano`; Azure returns a search's results only to reasoning models. Other publishers and other kinds are rejected |
+| Inference | `POST /openai/v1/responses` on the project URL: one `web_search` call (`tool_choice: "required"`, `max_tool_calls: 1`), with `include: ["web_search_call.results"]` and `store: false` |
+| Results | The search call's own results, with title and snippet, in Azure's order and without duplicates; the model's prose is ignored |
+| Domains | Azure filters by hostname. An allowed `*.example.com` or `example.com/docs` is sent as `example.com`; a blocked rule is sent only when it is a bare hostname. Sixb filters the hits by the exact rules afterwards |
+| `reasoning` | The deployment's effort: `low` (default), `medium`, `high` or `xhigh`; Azure runs no web search at `minimal` |
+| `timeoutMs` | 30 seconds, as Sixb's runtime |
+| Retries | None: errors carry `retryable` and `retryAfterMs` |
+| Price | Unknown: Azure reports no count of Bing searches, and the Retail Prices API lists no price for them. Pass a `costEstimator` to price searches; without one they cannot run under a [cost limit](../../docs/models/usage-and-limits.md#web-search) |
+
+Each search reads about 8,000 input tokens of results on the deployment. Azure bills them like
+the deployment's other tokens; Sixb records them under Web search, at unknown cost, and no token
+limit counts them ([#1152](https://github.com/sixb-ai/sixb/issues/1152)).
+
 ## Stream a response
 
 ```ts
@@ -414,7 +448,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions, reranking, speech and images |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions, reranking, speech, images and web search |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -445,5 +479,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `reranking.e2e.ts` | Rerank v5 and v4 ranking, usage, pricing and errors, as direct calls | 8 rerank calls / — |
 | `speech.e2e.ts` | Every format, MP3 and WAV through Sixb with accounting, a transcription round trip and errors | 9 speech calls / — |
 | `image.e2e.ts` | gpt-image-1.5, gpt-image-1-mini and FLUX.1 Kontext through Sixb with accounting, an edit and errors | 6 image calls / — |
+| `web-search.e2e.ts` | Hits, snippets, domain filters and errors, as direct calls | 3 searches / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.

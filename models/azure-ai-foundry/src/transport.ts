@@ -15,6 +15,7 @@ type OneShotRoute =
   | "speech"
   | "image"
   | "image-edit"
+  | "web-search"
 const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
   "embeddings",
   "decision",
@@ -23,6 +24,7 @@ const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
   "speech",
   "image",
   "image-edit",
+  "web-search",
 ])
 
 /** The GA data-plane version: the v1 API does not route audio deployments. */
@@ -203,7 +205,8 @@ export class FoundryTransport {
       return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
     // Speech answers on the resource's v1 API; the project path does not route it.
     if (protocol === "speech") return `${new URL(this.baseUrl).origin}/openai/v1/audio/speech`
-    if (protocol === "responses") return `${this.baseUrl}/responses`
+    // A search is one Responses call, answered in a single JSON body.
+    if (protocol === "responses" || protocol === "web-search") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
   }

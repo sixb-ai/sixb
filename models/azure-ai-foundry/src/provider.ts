@@ -83,6 +83,11 @@ import {
   type TransportOptions,
 } from "./transport"
 import { object, PREFIX } from "./util"
+import {
+  type AzureAIFoundryWebSearchModel,
+  type AzureAIFoundryWebSearchOptions,
+  createFoundryWebSearch,
+} from "./web-search"
 
 export interface AzureAIFoundryOptions extends TransportOptions {
   /** Explicit resource transport: project endpoints do not route embeddings. */
@@ -176,6 +181,11 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
   speech(deploymentName: string, options?: AzureAIFoundrySpeechOptions): AzureAIFoundrySpeechModel
   /** An image deployment, such as gpt-image-1.5 or FLUX.1-Kontext-pro, for `models.image`. */
   image(deploymentName: string, options?: AzureAIFoundryImageOptions): AzureAIFoundryImageModel
+  /** Web search through a language deployment's `web_search` tool, for `models.webSearch`. */
+  webSearch(
+    deploymentName: string,
+    options?: AzureAIFoundryWebSearchOptions
+  ): AzureAIFoundryWebSearchModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -234,6 +244,8 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     createFoundryTranscription(providerId, name, options, transport, deployments)
   const reranking = (name: string, options: AzureAIFoundryRerankingOptions = {}) =>
     createFoundryReranking(providerId, name, options, transport, deployments)
+  const webSearch = (name: string, options: AzureAIFoundryWebSearchOptions = {}) =>
+    createFoundryWebSearch(providerId, name, options, transport, deployments)
   const image = (name: string, options: AzureAIFoundryImageOptions = {}) =>
     createFoundryImage(providerId, name, options, transport, deployments)
   const speech = (name: string, options: AzureAIFoundrySpeechOptions = {}) =>
@@ -295,6 +307,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     reranking,
     speech,
     image,
+    webSearch,
   })
 }
 

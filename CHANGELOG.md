@@ -30,6 +30,9 @@ Sixb packages are versioned independently. Each release entry names the packages
   deployment in `models.image` through `@sixb/azure-ai-foundry`'s `foundry.image("image")`.
   Generations are priced at Azure's retail rates, per token or per image; GPT Image edits run at
   unknown cost.
+- Search the web through an Azure AI Foundry OpenAI deployment's `web_search` tool with
+  `@sixb/azure-ai-foundry`'s `foundry.webSearch("chat-nano")` in `models.webSearch`. Azure bills
+  the Bing searches without reporting them, so searches run at unknown cost.
 
 ### Upgrade notes
 

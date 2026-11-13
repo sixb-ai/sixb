@@ -50,7 +50,7 @@ export function deploymentKind(deployment: AzureAIFoundryDeployment): FoundryKin
 export function assertDeploymentKind(
   deployment: AzureAIFoundryDeployment,
   deploymentName: string,
-  kind: Exclude<FoundryKind, "language">
+  kind: FoundryKind
 ): void {
   const actual = deploymentKind(deployment)
   if (actual !== kind)

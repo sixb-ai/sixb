@@ -104,7 +104,8 @@ Each search is one accounted call, shown as **Web search** in **AI usage** with 
 provider reports. Under a cost limit, a search runs only when its model can price it beforehand,
 usually by the number of results asked for; otherwise it is blocked.
 A search that fails before its provider replies still counts its reserved amount toward cost
-limits, since it may have been billed.
+limits, since it may have been billed. Azure AI Foundry reports no count of the Bing searches it bills,
+so its searches have no price, and run under a cost limit only with a `costEstimator` you supply.
 
 ## Permissions
 
