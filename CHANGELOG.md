@@ -15,6 +15,11 @@ Sixb packages are versioned independently. Each release entry names the packages
   `@sixb/azure-ai-foundry`'s `foundry.decision("decision-1")`. `sixb.models.decision.evaluate()`
   and chat's Auto tier routing then run inside your Azure tenant, priced at Azure's USD 0.042 per
   million input tokens. `@sixb/typesafe` and Foundry share one System One codec.
+- Register an Azure AI Foundry transcription deployment in `models.audio.transcription` with
+  `@sixb/azure-ai-foundry`'s `foundry.transcription("transcribe")`: `gpt-4o-transcribe`,
+  `gpt-4o-mini-transcribe`, `gpt-transcribe` and `whisper` are priced at Azure's retail rates, by
+  token or audio second; `gpt-4o-transcribe-diarize`, which has no retail price, returns its text
+  at unknown cost.
 
 ### Upgrade notes
 

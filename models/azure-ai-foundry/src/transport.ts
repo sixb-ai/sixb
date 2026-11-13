@@ -5,7 +5,17 @@ import { object, PREFIX, positiveInteger } from "./util"
 
 export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
-type FoundryRoute = FoundryProtocol | "embeddings" | "decision"
+type FoundryRoute = FoundryProtocol | OneShotRoute
+/** Routes that answer in one body. A failure is never replayed: the call may have been billed. */
+type OneShotRoute = "embeddings" | "decision" | "transcription"
+const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
+  "embeddings",
+  "decision",
+  "transcription",
+])
+
+/** The GA data-plane version: the v1 API does not route audio deployments. */
+const AUDIO_API_VERSION = "2024-10-21"
 
 export interface TransportOptions {
   readonly endpoint: string
@@ -67,13 +77,13 @@ export class FoundryTransport {
   }
 
   async post(
-    body: string,
+    body: string | FormData,
     signal: AbortSignal,
     providerId: string,
     modelId: string,
     protocol: FoundryRoute = "responses"
   ): Promise<Response> {
-    const url = this.url(protocol)
+    const url = this.url(protocol, modelId)
     const diagnostics = new RequestDiagnostics()
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted()
@@ -82,13 +92,10 @@ export class FoundryTransport {
         diagnostics,
         protocol === "messages" ? "x-api-key" : "api-key"
       )
-      headers.set("content-type", "application/json")
-      headers.set(
-        "accept",
-        protocol === "embeddings" || protocol === "decision"
-          ? "application/json"
-          : "text/event-stream"
-      )
+      // fetch writes a multipart body's content type, boundary included.
+      if (typeof body === "string") headers.set("content-type", "application/json")
+      else headers.delete("content-type")
+      headers.set("accept", ONE_SHOT.has(protocol) ? "application/json" : "text/event-stream")
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
@@ -118,13 +125,8 @@ export class FoundryTransport {
         response,
         await httpError(response, providerId, modelId, signal)
       )
-      // JSON routes answer in one body: the caller decides, from `retryable`, whether to replay.
-      if (
-        protocol === "embeddings" ||
-        protocol === "decision" ||
-        !error.retryable ||
-        attempt >= (this.options.maxRetries ?? 2)
-      )
+      // One-shot routes: the caller decides, from `retryable`, whether to replay.
+      if (ONE_SHOT.has(protocol) || !error.retryable || attempt >= (this.options.maxRetries ?? 2))
         throw error
       await wait(
         Math.min(error.retryAfterMs ?? 250 * 2 ** attempt, this.options.maxRetryDelayMs ?? 60_000),
@@ -167,8 +169,11 @@ export class FoundryTransport {
     return (this.options.fetch ?? fetch)(url, init)
   }
 
-  url(protocol: FoundryRoute): string {
+  url(protocol: FoundryRoute, deployment?: string): string {
     if (protocol === "embeddings") return `${this.baseUrl}/embeddings`
+    // Audio deployments answer on the resource origin, by deployment path.
+    if (protocol === "transcription")
+      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/audio/transcriptions?api-version=${AUDIO_API_VERSION}`
     // Decision models answer on the resource origin; the project path does not route them.
     if (protocol === "decision")
       return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
