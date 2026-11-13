@@ -7,7 +7,6 @@ import {
   type ModelCostEstimator,
   ModelProviderError,
   type ModelRateCard,
-  UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { systemOneRequest, systemOneResult } from "@sixb/model-protocols/systemone"
 import { tokenEstimator } from "./accounting"
@@ -17,6 +16,7 @@ import {
   type FoundryDeployments,
   type ResolvedDeployment,
 } from "./discovery"
+import { assertDeploymentKind } from "./kinds"
 import type { AzureAIFoundryModelMetadata } from "./provider"
 import { azurePublisher } from "./publisher"
 import { abortable, type FoundryTransport, readJson, requestId } from "./transport"
@@ -52,14 +52,6 @@ const MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 /** AbortSignal.timeout's largest delay. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1
-
-/** The Foundry catalog's decision models; project discovery reports no `decision` flag. */
-export function isDecisionDeployment(deployment: AzureAIFoundryDeployment): boolean {
-  return (
-    deployment.capabilities.decision === "true" ||
-    /^microsoft-decision-/i.test(deployment.modelName)
-  )
-}
 
 interface DecisionSettings {
   readonly timeoutMs: number
@@ -127,14 +119,7 @@ function decisionBinding(
       if (resolution) return binding
       const resolved = await deployments.resolve(modelId, input?.offline === true)
       const found = resolved.deployment
-      if (!isDecisionDeployment(found))
-        throw new UnsupportedModelFeatureError(
-          `${PREFIX} Deployment '${modelId}' runs ${found.modelName}, not a decision model. Use foundry.chat() or foundry() for a language model.`
-        )
-      if (found.connectionName)
-        throw new UnsupportedModelFeatureError(
-          `${PREFIX} A decision deployment from a project connection cannot be routed; use the owning resource's project URL and API key.`
-        )
+      assertDeploymentKind(found, modelId, "decision")
       // Azure answers with the lowercase model name, e.g. "microsoft-decision-1".
       const models = [modelId, found.modelName, `${found.modelName}-${found.modelVersion}`].map(
         (name) => name.toLowerCase()
