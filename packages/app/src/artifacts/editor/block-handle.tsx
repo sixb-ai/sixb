@@ -15,7 +15,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import { ArrowDown, ArrowUp, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import type { BlockType } from "./blocks"
+import type { BlockChoice, BlockType } from "./blocks"
 import type { EditorMessages } from "./messages"
 
 // The handle beside the block the pointer is over: `+` adds a block below and opens the `/` menu
@@ -191,51 +191,88 @@ export function BlockHandle({
               editor.commands.focus()
             }}
           >
-            {textual(hovered.current?.node) ? (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Repeat2 className="text-muted-foreground" />
-                  {messages.blockMenu.turnInto}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-52">
-                  {types
-                    .filter((type) => type.turnsInto)
-                    .map((type) => {
-                      const Icon = type.icon
-                      return (
-                        <DropdownMenuItem key={type.id} onSelect={() => turnInto(type)}>
-                          <Icon className="text-muted-foreground" />
-                          {type.label}
-                        </DropdownMenuItem>
-                      )
-                    })}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            ) : null}
-            <DropdownMenuItem onSelect={duplicate}>
-              <Copy className="text-muted-foreground" />
-              {messages.blockMenu.duplicate}
-              <DropdownMenuShortcut>⌘D</DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => move(-1)}>
-              <ArrowUp className="text-muted-foreground" />
-              {messages.blockMenu.moveUp}
-              <DropdownMenuShortcut>⌥⇧↑</DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => move(1)}>
-              <ArrowDown className="text-muted-foreground" />
-              {messages.blockMenu.moveDown}
-              <DropdownMenuShortcut>⌥⇧↓</DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={remove}>
-              <Trash2 />
-              {messages.blockMenu.delete}
-              <DropdownMenuShortcut>Del</DropdownMenuShortcut>
-            </DropdownMenuItem>
+            <BlockMenuItems
+              textual={textual(hovered.current?.node)}
+              types={types}
+              messages={messages}
+              onTurnInto={(id) => {
+                const type = types.find((each) => each.id === id)
+                if (type) turnInto(type)
+              }}
+              onDuplicate={duplicate}
+              onMove={move}
+              onRemove={remove}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </DragHandle>
+  )
+}
+
+/** What can be done to a block from its handle's menu, whichever editor it is in. */
+export function BlockMenuItems({
+  textual,
+  types,
+  messages,
+  onTurnInto,
+  onDuplicate,
+  onMove,
+  onRemove,
+}: {
+  /** Whether it holds words, which "Turn into" changes. */
+  readonly textual: boolean
+  readonly types: readonly BlockChoice[]
+  readonly messages: EditorMessages
+  readonly onTurnInto: (id: string) => void
+  readonly onDuplicate: () => void
+  readonly onMove: (by: -1 | 1) => void
+  readonly onRemove: () => void
+}) {
+  return (
+    <>
+      {textual ? (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Repeat2 className="text-muted-foreground" />
+            {messages.blockMenu.turnInto}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-52">
+            {types
+              .filter((type) => type.turnsInto)
+              .map((type) => {
+                const Icon = type.icon
+                return (
+                  <DropdownMenuItem key={type.id} onSelect={() => onTurnInto(type.id)}>
+                    <Icon className="text-muted-foreground" />
+                    {type.label}
+                  </DropdownMenuItem>
+                )
+              })}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      ) : null}
+      <DropdownMenuItem onSelect={onDuplicate}>
+        <Copy className="text-muted-foreground" />
+        {messages.blockMenu.duplicate}
+        <DropdownMenuShortcut>⌘D</DropdownMenuShortcut>
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => onMove(-1)}>
+        <ArrowUp className="text-muted-foreground" />
+        {messages.blockMenu.moveUp}
+        <DropdownMenuShortcut>⌥⇧↑</DropdownMenuShortcut>
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => onMove(1)}>
+        <ArrowDown className="text-muted-foreground" />
+        {messages.blockMenu.moveDown}
+        <DropdownMenuShortcut>⌥⇧↓</DropdownMenuShortcut>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+        <Trash2 />
+        {messages.blockMenu.delete}
+        <DropdownMenuShortcut>Del</DropdownMenuShortcut>
+      </DropdownMenuItem>
+    </>
   )
 }

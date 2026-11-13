@@ -1,17 +1,13 @@
-import { uploadFile } from "@sixb/client"
-import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
-import { useLocale } from "@sixb/ui/lib/i18n"
 import { useCallback, useEffect, useRef } from "react"
 import * as Y from "yjs"
-import { formatFileSize } from "../file-size"
 import { useLiveArtifactState, useViewerLiveArtifact } from "../live/hooks"
 import { useArtifactMessages } from "../messages"
 import { type ArtifactVersion, versionImageSource } from "../queries"
-import { imagePath } from "../renderers/canvas/board-editor"
 import { DocumentRenderer } from "../renderers/document"
 import { useArtifactThemeAttributes } from "../theme"
 import { DocumentEditor } from "./document-editor"
+import { useImageUpload } from "./upload"
 
 /**
  * A Markdown document's body: once the live document holds its blocks, the editor, which
@@ -28,7 +24,6 @@ export function MarkdownDocument({
   readonly part?: string
 }) {
   const messages = useArtifactMessages()
-  const locale = useLocale()
   const theme = useArtifactThemeAttributes(version)
   const live = useViewerLiveArtifact()
   const state = useLiveArtifactState(live)
@@ -45,24 +40,14 @@ export function MarkdownDocument({
       previews.current.get(src) ?? versionImageSource(version, src)?.inlineUrl ?? null,
     [version]
   )
+  const upload = useImageUpload(live, version)
   const uploadImage = useCallback(
     async (file: File) => {
-      if (!live) throw new Error(messages.editor.imageFailed)
-      if (file.size > ARTIFACT_LIMITS.maxFileBytes) {
-        throw new Error(
-          messages.editor.imageTooLarge(
-            formatFileSize(ARTIFACT_LIMITS.maxFileBytes, locale, messages.files)
-          )
-        )
-      }
-      // Beside the document, under its own name made safe, as a board's pictures are.
-      const path = imagePath(version.entry, file.name)
-      const ref = await uploadFile(file, { fileName: path.split("/").at(-1) ?? path })
-      previews.current.set(path, URL.createObjectURL(file))
-      live.doc.getMap(LIVE_FILES).set(path, { ...ref })
-      return { src: path, alt: file.name.replace(/\.[^.]*$/, "") }
+      const added = await upload(file)
+      previews.current.set(added.src, URL.createObjectURL(file))
+      return added
     },
-    [live, version.entry, messages, locale]
+    [upload]
   )
 
   const fragment =

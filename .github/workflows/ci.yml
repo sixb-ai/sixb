@@ -105,6 +105,9 @@ jobs:
       - name: Generate sandbox CLI
         run: bun run generate:sandbox-cli
 
+      - name: Generate frame editor
+        run: bun run generate:frame-editor
+
       - name: Verify generated artifacts are committed
         run: git diff --exit-code
 

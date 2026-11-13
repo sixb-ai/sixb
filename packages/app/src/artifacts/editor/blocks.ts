@@ -55,6 +55,12 @@ export interface BlockType {
   readonly isActive: (editor: Editor) => boolean
 }
 
+/** A kind of block as the menus show it, whichever editor makes it. */
+export type BlockChoice = Pick<
+  BlockType,
+  "icon" | "label" | "description" | "keywords" | "shortcut" | "turnsInto"
+> & { readonly id: string }
+
 /**
  * The blocks a person can make. `pickImage` is how an image is chosen, which the `/` menu offers
  * where the editor can upload one.
@@ -200,24 +206,6 @@ export function blockTypes(
       isActive: () => false,
     },
   ]
-}
-
-/** The block types a query finds, best first: by label, then by keyword. */
-export function findBlockTypes(types: readonly BlockType[], query: string): BlockType[] {
-  const wanted = query.trim().toLowerCase()
-  if (!wanted) return [...types]
-  const score = (type: BlockType) => {
-    const label = type.label.toLowerCase()
-    if (label.startsWith(wanted)) return 0
-    if (label.includes(wanted)) return 1
-    if (type.keywords.some((keyword) => keyword.startsWith(wanted))) return 2
-    return -1
-  }
-  return types
-    .map((type) => ({ type, rank: score(type) }))
-    .filter(({ rank }) => rank >= 0)
-    .sort((left, right) => left.rank - right.rank)
-    .map(({ type }) => type)
 }
 
 /** The icon a callout of `kind` shows. */
