@@ -299,14 +299,10 @@ function sandbox(check: Check = skippedCheck): LocalBashSandbox {
 type Check = (output: string) => Record<string, unknown>
 const skippedCheck: Check = () => ({ skipped: "no_browser" })
 
-/**
- * A canvas's check as the browser runs it: each board screenshot in light mode, and a board
- * `pictured` in dark mode too, each picture holding the board's id and mode.
- */
+/** A canvas's check as the browser runs it: each board screenshot in light mode, and the canvas. */
 const canvasCheck: Check = (output) => {
   const boards = JSON.parse(readFileSync(join(output, "boards.json"), "utf8")) as {
     readonly id: string
-    readonly pictured: boolean
   }[]
   const shot = (name: string, contents: string) => {
     mkdirSync(join(output, "boards"), { recursive: true })
@@ -319,34 +315,6 @@ const canvasCheck: Check = (output) => {
     problems: [],
     errors: [],
     screenshots: boards.map((board) => shot(`${board.id}.png`, `${board.id} light`)),
-    previews: boards
-      .filter((board) => board.pictured)
-      .flatMap((board) => [
-        {
-          board: board.id,
-          theme: "light",
-          size: "full",
-          path: join(output, "boards", `${board.id}.png`),
-        },
-        {
-          board: board.id,
-          theme: "light",
-          size: "small",
-          path: shot(`${board.id}.light.small.webp`, `${board.id} light small`),
-        },
-        {
-          board: board.id,
-          theme: "dark",
-          size: "full",
-          path: shot(`${board.id}.dark.png`, `${board.id} dark`),
-        },
-        {
-          board: board.id,
-          theme: "dark",
-          size: "small",
-          path: shot(`${board.id}.dark.small.webp`, `${board.id} dark small`),
-        },
-      ]),
     overview: join(output, "overview.png"),
   }
 }
@@ -599,9 +567,9 @@ describe("publish_artifact", () => {
     })
   })
 
-  test("keeps every picture it could read, and warns of a board one of whose was lost", async () => {
-    // Reproduce by handing the pictures over all or nothing: the one picture the sandbox lost
-    // leaves both boards without any, and the Agent is never told.
+  test("checks a canvas's boards and draws it as it opens, leaving its pictures to the render worker", async () => {
+    // Reproduce by storing the check's screenshots as previews: the agent's light screenshot of
+    // each board is kept as what every reader sees, in every mode.
     const board = (id: string, x: number) => ({
       id,
       type: "board",
@@ -617,89 +585,11 @@ describe("publish_artifact", () => {
     )
     write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
     write("work/flow/region.html", "<main><h1>Regions</h1></main>")
-    // The check says it took Welcome's small dark picture, but it is not there to read.
-    const lossy: Check = (output) => {
-      const report = canvasCheck(output)
-      rmSync(join(output, "boards", "welcome.dark.small.webp"))
-      return report
-    }
-
-    const published = (await publish(
-      { path: "work/flow", kind: "canvas", title: "Onboarding" },
-      { check: lossy }
-    )) as { artifactId: string; warnings: { code: string; part?: string; message: string }[] }
-
-    const stored = await storage.artifacts.getVersion({
-      projectId,
-      artifactId: published.artifactId,
-      version: 1,
-    })
-    const outline = stored?.outline
-    const keys =
-      outline?.kind === "canvas"
-        ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
-        : []
-    expect(await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })).toHaveLength(
-      7
-    )
-    expect(published.warnings.filter((warning) => warning.code === "preview_not_kept")).toEqual([
-      {
-        code: "preview_not_kept",
-        part: "welcome",
-        message:
-          "Board 'welcome' has no preview for the small one in dark mode (it could not be read): readers see its outline there until they open it.",
-      },
-    ])
-  })
-
-  test("keeps the pictures of a canvas's boards, and pictures only the boards it changed", async () => {
-    // Reproduce the second half by picturing every board: the welcome board, kept as it was, is
-    // pictured again. Reproduce the first by dropping storePreviews: nothing is kept.
-    const board = (id: string, x: number) => ({
-      id,
-      type: "board",
-      file: `${id}.html`,
-      x,
-      y: 0,
-      w: 390,
-      h: 844,
-    })
-    write(
-      "work/flow/canvas.json",
-      JSON.stringify({ items: [board("welcome", 0), board("region", 480)] })
-    )
-    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
-    write("work/flow/region.html", "<main><h1>Regions</h1></main>")
-    const pictures = async (artifactId: string, version: number) => {
-      const stored = await storage.artifacts.getVersion({ projectId, artifactId, version })
-      const outline = stored?.outline
-      const keys =
-        outline?.kind === "canvas"
-          ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
-          : []
-      const kept = await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })
-      return Promise.all(
-        kept.map(
-          async ({ theme, file }) =>
-            `${theme}: ${await new Response(await blobStorage.open(file.blobId)).text()}`
-        )
-      )
-    }
 
     const first = (await publish(
       { path: "work/flow", kind: "canvas", title: "Onboarding" },
       { check: canvasCheck }
     )) as { artifactId: string; layoutCheck: { overview: string } }
-    expect((await pictures(first.artifactId, 1)).sort()).toEqual([
-      "dark: region dark",
-      "dark: region dark small",
-      "dark: welcome dark",
-      "dark: welcome dark small",
-      "light: region light",
-      "light: region light small",
-      "light: welcome light",
-      "light: welcome light small",
-    ])
     expect(first.layoutCheck.overview).toBe(
       `.sixb/agent/checks/${first.artifactId}-r1/overview.png`
     )
@@ -709,31 +599,22 @@ describe("publish_artifact", () => {
       ),
     })
 
-    write("work/flow/region.html", "<main><h1>Regions, by city</h1></main>")
-    await publishVersion(
-      { id: first.artifactId, path: "work/flow", title: "Onboarding" },
-      { check: canvasCheck }
-    )
-
-    // The update replaced the open version: its check is the new revision's.
-    const checked = JSON.parse(read(`.sixb/agent/checks/${first.artifactId}-r2/boards.json`)) as {
-      readonly id: string
-      readonly pictured: boolean
-    }[]
-    expect(checked.map(({ id, pictured }) => `${id}: ${pictured}`)).toEqual([
-      "welcome: false",
-      "region: true",
-    ])
-    expect((await pictures(first.artifactId, 1)).sort()).toEqual([
-      "dark: region dark",
-      "dark: region dark small",
-      "dark: welcome dark",
-      "dark: welcome dark small",
-      "light: region light",
-      "light: region light small",
-      "light: welcome light",
-      "light: welcome light small",
-    ])
+    const stored = await storage.artifacts.getVersion({
+      projectId,
+      artifactId: first.artifactId,
+      version: 1,
+    })
+    const outline = stored?.outline
+    const keys =
+      outline?.kind === "canvas"
+        ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
+        : []
+    expect(await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })).toEqual([])
+    expect(
+      JSON.parse(read(`.sixb/agent/checks/${first.artifactId}-r1/boards.json`)).map(
+        ({ id }: { id: string }) => id
+      )
+    ).toEqual(["welcome", "region"])
   })
 
   test("publishes one Markdown or HTML file as a document and any other file under its name", async () => {

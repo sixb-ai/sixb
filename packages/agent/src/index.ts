@@ -1,6 +1,5 @@
 export { waitForAbort } from "./abort"
 export type { AgentWorkspacePromptContext } from "./agent-prompt"
-export { renderBoardPreviews } from "./artifacts/board-previews"
 export { createAskParentTool } from "./ask-tool"
 export type { BackgroundCommandStatus } from "./background-commands"
 export {

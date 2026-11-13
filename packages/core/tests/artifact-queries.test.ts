@@ -668,13 +668,13 @@ describe("picturing a canvas's boards that read queries", () => {
     /** The answers the job that pictures the version's boards carries, once it is due. */
     const answers = async () => {
       jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
-      const claimed = await context.deps.queues.agents.claim({
+      const claimed = await context.deps.queues.renders.claim({
         projectId,
         workerId: "test",
         limit: 10,
       })
       const job = claimed[0]?.job
-      if (job?.type !== "agent.artifact-previews.requested" || !job.payload.queries) {
+      if (job?.type !== "artifact.previews.requested" || !job.payload.queries) {
         throw new Error("Expected a job that carries the version's query answers.")
       }
       const blob = await context.deps.blobStorage.open(job.payload.queries.blobId)

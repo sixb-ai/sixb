@@ -477,8 +477,8 @@ export function createArtifactsRuntime(
   blobStorage: BlobStorage,
   options: {
     /**
-     * The project has sandboxes, where the agent worker pictures canvas boards and the render
-     * worker prints designed documents to PDF.
+     * The project has sandboxes, where the render worker pictures canvas boards and prints
+     * designed documents to PDF.
      */
     readonly rendersInSandboxes?: boolean
   } = {}
@@ -650,7 +650,7 @@ export function createArtifactsRuntime(
     await requestBoardPreviews(
       {
         storage,
-        queue: runtime.queues.agents,
+        queue: runtime.queues.renders,
         blobStorage,
         query: (name) => artifacts.query(version.artifactId, name, { version: version.version }),
       },

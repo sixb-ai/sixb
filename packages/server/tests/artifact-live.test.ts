@@ -527,7 +527,7 @@ describe("an artifact edited live", () => {
     await marie.settle()
 
     const claimable = async () =>
-      (await context.queues.agents.claim({ projectId, workerId: "worker", limit: 10 })).map(
+      (await context.queues.renders.claim({ projectId, workerId: "worker", limit: 10 })).map(
         ({ job }) => ({ id: job.id, payload: job.payload })
       )
 

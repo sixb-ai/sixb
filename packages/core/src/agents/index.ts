@@ -200,9 +200,6 @@ export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
 export type {
   AgentRunArtifactPublish,
   AgentRunArtifacts,
-  AgentRunBoardPreviews,
-  AgentRunMissingPreview,
-  AgentRunVersion,
 } from "./run-artifacts"
 export { agentRunArtifacts } from "./run-artifacts"
 export type {

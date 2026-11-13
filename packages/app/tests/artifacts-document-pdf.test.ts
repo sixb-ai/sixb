@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, jest, test } from "bun:test"
 import { client } from "@sixb/client"
+import { DOCUMENT_PDF_WAIT_MS } from "@sixb/core/artifacts"
+import { DOCUMENT_PDF_JOB } from "@sixb/core/internal/artifacts/publish"
 import { downloadDocumentPdf } from "../src/artifacts/pdf"
 import { installDom } from "./helpers/dom"
 
@@ -82,7 +84,7 @@ describe("a designed document's PDF download", () => {
     ])
   })
 
-  // Reproduce by waiting only for `ready` in downloadDocumentPdf: it waits out its two minutes.
+  // Reproduce by waiting only for `ready` in downloadDocumentPdf: it waits out every attempt.
   test("stops as soon as it is said it could not be printed", async () => {
     jest.useFakeTimers()
     const { asked, clicked } = serve(["printing", "failed"])
@@ -103,17 +105,29 @@ describe("a designed document's PDF download", () => {
     expect(clicked).toEqual([])
   })
 
-  test("gives up when the PDF is not printed within two minutes", async () => {
+  // Reproduce by waiting two minutes in downloadDocumentPdf: it gives up while the render worker's
+  // second attempt may still print it.
+  test("gives up once the render worker has made every attempt, and not before", async () => {
     jest.useFakeTimers()
     const { clicked } = serve([])
 
+    let stopped = false
     const done = downloadDocumentPdf({ artifactId: "art_pr0p0sa1x0", version: 2 }).catch(
-      (error: unknown) => error
+      (error: unknown) => {
+        stopped = true
+        return error
+      }
     )
-    for (let elapsed = 0; elapsed < 125_000; elapsed += 1_000) {
+    const wait = async (until: number) => {
+      for (let elapsed = 0; elapsed < until; elapsed += 1_000) {
+        await settle()
+        jest.advanceTimersByTime(1_000)
+      }
       await settle()
-      jest.advanceTimersByTime(1_000)
     }
+    await wait(DOCUMENT_PDF_JOB.timeoutMs + 5_000)
+    expect(stopped).toBe(false)
+    await wait(DOCUMENT_PDF_WAIT_MS - DOCUMENT_PDF_JOB.timeoutMs)
     expect(await done).toBeInstanceOf(Error)
     expect(clicked).toEqual([])
   })
