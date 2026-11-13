@@ -19,7 +19,7 @@ import {
 } from "../src/artifacts/frame-editor/commands"
 import { PageKeys } from "../src/artifacts/frame-editor/keys"
 import { FRAME_EDITOR_GLOBAL } from "../src/artifacts/frame-editor/protocol"
-import { pageSchemaExtensions, sanitize } from "../src/artifacts/frame-editor/schema"
+import { drawnTag, pageSchemaExtensions, sanitize } from "../src/artifacts/frame-editor/schema"
 import { installDom } from "./helpers/dom"
 
 // A designed document's editor and core's page are one format: the editor reads whole what the
@@ -324,6 +324,70 @@ describe("a designed document's editor", () => {
       '<div onclick="x()"><img src="a.png" onerror="x()"><a href="javascript:x()">a</a><script>x()</script></div>'
     sanitize(template.content)
     expect(template.innerHTML).toBe('<div><img src="a.png"><a>a</a></div>')
+  })
+
+  // Reproduce by testing `drawable`'s address as written, or by drawing a node's tag as the live
+  // document names it: a tab inside `javascript:` runs, and a node named `meta` refreshes the frame.
+  test("draws no address that runs script however it is spelled, nor any tag that loads a page", () => {
+    const template = document.createElement("template")
+    template.innerHTML =
+      '<a href="java&#x09;script:x()">a</a><svg><set attributeName="href" to="javascript:x()"></set></svg>'
+    sanitize(template.content)
+    expect(template.innerHTML).toBe("<a>a</a><svg></svg>")
+    expect(drawnTag("meta")).toBe("div")
+    expect(drawnTag("section")).toBe("section")
+    expect(drawnTag('p onclick="x()"')).toBe("div")
+  })
+
+  // Reproduce by reading every pasted element but words as a box: a rule becomes a box holding
+  // an empty paragraph, and a list's items holding paragraphs lose their list.
+  test("pastes a list of paragraphs as a list, and a rule as it was", () => {
+    const schema = getSchema(pageSchemaExtensions())
+    const holder = document.createElement("div")
+    holder.innerHTML = "<ul><li><p>Item one</p></li><li><p>Item two</p></li></ul><hr>"
+    const pasted = DOMParser.fromSchema(schema).parse(holder)
+    const [list, rule] = pasted.content.content
+    expect([list?.type.name, list?.attrs.tag]).toEqual(["box", "ul"])
+    expect(list?.firstChild?.attrs.tag).toBe("li")
+    expect(list?.firstChild?.firstChild?.attrs.tag).toBe("p")
+    expect([rule?.type.name, rule?.attrs.source]).toEqual(["raw", "<hr>"])
+  })
+
+  // Reproduce by dropping the cell check from `duplicate`: the table gets a third cell.
+  test("copies no cell, which would break its table", () => {
+    const { editor, html } = editorOver(PAGE)
+    caret(editor, "Setup")
+    expect(duplicate(editor, blockOf(editor, "Setup"))).toBe(false)
+    expect(html()).toContain("<tr><td>Setup</td><td>$500</td></tr>")
+    editor.destroy()
+  })
+
+  // Reproduce by dropping the item-of-paragraphs case from Enter: each Enter adds another empty
+  // paragraph to the item, and the list never ends.
+  test("ends a list of items holding paragraphs with Enter on an empty one", () => {
+    const { editor, html } = editorOver(
+      "<!doctype html>\n<html>\n<body>\n<ul>\n  <li><p>One</p></li>\n</ul>\n</body>\n</html>\n"
+    )
+    endOf(editor, "One")
+    press(editor, "Enter")
+    editor.commands.insertContent("Two")
+    press(editor, "Enter")
+    press(editor, "Enter")
+    editor.commands.insertContent("After")
+    const written = html()
+    expect(written).toContain("<li><p>One</p></li>")
+    expect(written).toMatch(/<li>\s*<p>Two<\/p>\s*<\/li>\s*<\/ul>\s*<p>After<\/p>/)
+    editor.destroy()
+  })
+
+  // Reproduce by returning true from Tab outside a table: the keyboard never leaves the frame.
+  test("lets Tab leave the frame outside a table", () => {
+    const { editor } = editorOver(PAGE)
+    caret(editor, "Harbor")
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })
+    const handled = editor.view.someProp("handleKeyDown", (handle) => handle(editor.view, event))
+    expect(handled).toBeFalsy()
+    editor.destroy()
   })
 
   test("is started by the frame's runtime under the name the script leaves it at", () => {

@@ -546,6 +546,16 @@ export function startFrameEditor({
       // The live blocks replace the empty page the editor starts with, and the caret it had there
       // lands in a box: it starts at the first words instead.
       onCreate: ({ editor: created }) => {
+        // A page with no blocks yet gets one to type in.
+        if (created.isEditable && fragment.length === 0) {
+          created.view.dispatch(
+            created.state.tr.replaceWith(
+              0,
+              created.state.doc.content.size,
+              words(created.schema, "p")
+            )
+          )
+        }
         const start = Selection.atStart(created.state.doc)
         created.view.dispatch(created.state.tr.setSelection(start).setMeta("addToHistory", false))
       },

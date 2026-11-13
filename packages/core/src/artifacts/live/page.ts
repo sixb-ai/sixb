@@ -1,6 +1,14 @@
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse, parseFragment } from "parse5"
 import * as Y from "yjs"
-import { type BlockMark, type BlockNode, blocksFromY, blocksToY, patchBlocks } from "./blocks"
+import {
+  type BlockMark,
+  type BlockNode,
+  blocksFromY,
+  blocksToY,
+  mergeBlockLists,
+  patchBlocks,
+} from "./blocks"
+import { mergeText } from "./diff"
 
 // A designed document's page as blocks, which its editor edits in the document's frame: its
 // `<body>` as a tree of the elements it is made of, each kept as its source wrote it, so that
@@ -357,13 +365,16 @@ function inlineOf(
 /**
  * Whether an inline element formats words alone: text, line breaks, and other marks that do too.
  * The editor keeps marks on words only, so one around a field or a picture, `<a><img></a>`, would
- * lose them once its block is edited: it is kept whole instead.
+ * lose them once its block is edited: it is kept whole instead. So is a styled one around a mark
+ * written outside it, `<span class="badge"><a></a></span>`, which an edit would split in two.
  */
 function formatsWords(node: Element): boolean {
+  // Marks are written in their rank's order: plain ones read the same either way round.
+  const rank = node.attrs.length > 0 ? (MARK_RANK.get(node.tagName) ?? -1) : -1
   return node.childNodes.every((child) => {
     if (!isElement(child)) return true
     if (child.tagName === "br") return true
-    return MARK_RANK.has(child.tagName) && !isLive(child) && formatsWords(child)
+    return (MARK_RANK.get(child.tagName) ?? -1) > rank && !isLive(child) && formatsWords(child)
   })
 }
 
@@ -498,21 +509,32 @@ function innerOf(block: BlockNode, tag: string): string {
 
 /** What `inner` reads as, written as the editor would write it; cached, as it is asked often. */
 const canonical = new Map<string, string | null>()
+const CANONICAL_LIMIT = 20_000
 function canonicalInner(inner: string, tag: string): string | null {
   const key = `${tag}\u0000${inner}`
   const known = canonical.get(key)
-  if (known !== undefined) return known
-  if (canonical.size > 4000) canonical.clear()
+  if (known !== undefined) {
+    // The least recently read goes first.
+    canonical.delete(key)
+    canonical.set(key, known)
+    return known
+  }
+  if (canonical.size >= CANONICAL_LIMIT) canonical.delete(canonical.keys().next().value as string)
 
-  // Read in place, the parser drops a newline right after `<pre>`; read alone, it would not.
-  const words = tag === "pre" ? inner.replace(/^\r?\n/, "") : inner
-  const context = defaultTreeAdapter.createElement(tag, HTML_NAMESPACE, [])
-  const fragment = parseFragment(context, words, { sourceCodeLocationInfo: true })
-  const content = inlineOf(fragment.childNodes, words, tag === "pre")
+  const content = wordsOf(inner, tag)
   const html = content ? inlineHtml(content) : null
   const written = html !== null && tag === "pre" && /^\r?\n/.test(html) ? `\n${html}` : html
   canonical.set(key, written)
   return written
+}
+
+/** The words `inner` holds, read as the inside of a `tag`; null when a block is among them. */
+function wordsOf(inner: string, tag: string): BlockNode[] | null {
+  // Read in place, the parser drops a newline right after `<pre>`; read alone, it would not.
+  const words = tag === "pre" ? inner.replace(/^\r?\n/, "") : inner
+  const context = defaultTreeAdapter.createElement(tag, HTML_NAMESPACE, [])
+  const fragment = parseFragment(context, words, { sourceCodeLocationInfo: true })
+  return inlineOf(fragment.childNodes, words, tag === "pre")
 }
 
 /** Inline content as source, each mark opened where it starts and closed where it ends. */
@@ -627,6 +649,47 @@ const PAGE_PATCH = {
     `${node.type}\u0000${stringAttr(node, "open")}\u0000${stringAttr(node, "close")}`,
 }
 
+/**
+ * Folds two changes of a page's source, `ours` and `theirs` of `base`, block by block, so the
+ * page's structure holds: as `mergeBlockLists` merges them, a text block both changed by its
+ * words. Null when one of them is not a page an editor holds.
+ */
+export function mergePageSources(
+  base: string,
+  ours: string | PageBlocks,
+  theirs: string
+): string | null {
+  const oursHtml = typeof ours === "string" ? ours : pageHtml(ours)
+  if (oursHtml === base || oursHtml === theirs) return theirs
+  if (theirs === base) return oursHtml
+  const [b, o, t] = [
+    pageBlocks(base),
+    typeof ours === "string" ? pageBlocks(ours) : ours,
+    pageBlocks(theirs),
+  ]
+  if (!b || !o || !t) return null
+  return pageHtml({
+    head: mergeText(b.head, o.head, t.head),
+    blocks: mergeBlockLists(b.blocks, o.blocks, t.blocks, { ...PAGE_PATCH, mergeLeaf: mergeWords }),
+    tail: mergeText(b.tail, o.tail, t.tail),
+  })
+}
+
+/** A text block both sides changed, merged by its words; null when it is not one. */
+function mergeWords(base: BlockNode, ours: BlockNode, theirs: BlockNode): BlockNode | null {
+  if (theirs.type !== "textBlock") return null
+  const tag = stringAttr(theirs, "tag") ?? "p"
+  const inner = mergeText(innerOf(base, tag), innerOf(ours, tag), innerOf(theirs, tag))
+  const content = wordsOf(inner, tag)
+  if (!content) return null
+  const merged: BlockNode = {
+    type: "textBlock",
+    attrs: { ...theirs.attrs, inner },
+    ...(content.length > 0 ? { content } : {}),
+  }
+  return innerOf(merged, tag) === inner ? merged : null
+}
+
 /** Whether a document's entry is a live page. */
 export function isPageEntry(entry: unknown): entry is Y.Map<unknown> {
   return entry instanceof Y.Map && entry.get(PAGE_BODY) instanceof Y.XmlFragment
@@ -634,12 +697,17 @@ export function isPageEntry(entry: unknown): entry is Y.Map<unknown> {
 
 /** The source a live page holds now. */
 export function pageEntryHtml(entry: Y.Map<unknown>): string {
+  return pageHtml(pageEntryBlocks(entry))
+}
+
+/** The page a live page holds now, as blocks. */
+export function pageEntryBlocks(entry: Y.Map<unknown>): PageBlocks {
   const body = entry.get(PAGE_BODY) as Y.XmlFragment
-  return pageHtml({
+  return {
     head: String(entry.get("head") ?? ""),
     blocks: blocksFromY(body.toArray()),
     tail: String(entry.get("tail") ?? ""),
-  })
+  }
 }
 
 /**
