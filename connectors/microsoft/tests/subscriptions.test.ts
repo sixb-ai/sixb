@@ -45,6 +45,18 @@ describe("Graph subscriptions", () => {
     expect(requests[0]?.headers.has("Prefer")).toBe(false)
   })
 
+  // Countercheck: send `input` instead of `body` in subscriptionsResource.create; the first
+  // subscription goes out without a clientState and the built-in receiver would reject it.
+  test("sends the connector's clientState when the input has none", async () => {
+    const requests = mockFetch(() => json({ id: "sub" }, 201))
+    const { clientState: _, ...unsigned } = input
+    await (await connect({ webhookSecret: "hook-secret" })).subscriptions.create(unsigned)
+    await (await connect({ webhookSecret: "hook-secret" })).subscriptions.create(input)
+    await (await connect()).subscriptions.create(unsigned)
+    const states = requests.map((request) => JSON.parse(String(request.init.body)).clientState)
+    expect(states).toEqual(["hook-secret", "secret", undefined])
+  })
+
   test("updates only supported properties and preserves service expiration", async () => {
     const requests = mockFetch(() =>
       json({ id: "a/b", expirationDateTime: "2099-01-01T00:45:00Z" })

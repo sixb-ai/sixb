@@ -230,7 +230,7 @@ describe("Microsoft notifications for people's own accounts", () => {
 })
 
 describe("subscribing with a person's own account", () => {
-  test("mail and contact subscriptions carry a clientState naming the connection's account", async () => {
+  test("mail, contact and event subscriptions carry a clientState naming the connection's account", async () => {
     const requests = mockFetch(() => json({ id: "s" }, 201))
     const graph = await personalClient(ADA, SECRET)
     const options = {
@@ -240,10 +240,16 @@ describe("subscribing with a person's own account", () => {
     }
     await graph.mail.subscribe(ADA, options)
     await graph.contacts.subscribe(ADA, options)
+    await graph.subscriptions.create({
+      resource: `users/${ADA}/events`,
+      changeType: "created,updated,deleted",
+      notificationUrl: NOTIFICATION_URL,
+      expirationDateTime: inDays(3),
+    })
     const states = requests.map((request) => JSON.parse(String(request.init.body)).clientState)
     expect(states[0]).toStartWith(`v1.${ADA}.`)
     expect(states[0].length).toBeLessThanOrEqual(128)
-    expect(states[1]).toBe(states[0])
+    expect(states.slice(1)).toEqual([states[0], states[0]])
     expect(states[0]).not.toContain(SECRET)
   })
 

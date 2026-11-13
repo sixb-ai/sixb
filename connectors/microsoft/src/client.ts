@@ -32,6 +32,6 @@ export function createMicrosoftClient(
     sites: sitesResource(http),
     drives: drivesSurface(http),
     mail: mailSurface(http, clientState),
-    subscriptions: subscriptionsResource(http),
+    subscriptions: subscriptionsResource(http, clientState),
   }
 }
