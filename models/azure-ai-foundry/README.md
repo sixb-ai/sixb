@@ -2,6 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
+Language, embedding and decision models are supported.
 
 ## Install
 
@@ -81,6 +82,40 @@ Reference prices come from models.dev; use `rateCard` or `costEstimator` for dep
 pricing. Missing pricing remains unknown and blocks cost-limited calls before inference.
 
 See [embedding internals](./docs/embeddings.md) for resolution, transport, and failure handling.
+
+## Decision models
+
+Deploy `Microsoft-Decision-1` in the project and register the deployment under `models.decision`.
+Azure rejects deployment names that contain "Microsoft", so pass your own name, such as
+`decision-1`:
+
+```ts
+export const decision = foundry.decision("decision-1")
+
+// In your createSixb() options:
+const models = { decision: [decision] }
+```
+
+Use it with `sixb.models.decision.evaluate()`, see
+[decision models](../../docs/models/configuration.md#decision-models). With language model tiers, it
+also picks the tier of each chat message on Auto; Azure answers in about 150–450 ms, within
+Sixb's 2-second limit.
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | Must run a decision model (`Microsoft-Decision-*`); others are rejected, and `foundry.chat()` rejects decision deployments |
+| Inference | `POST /providers/microsoft/v1/systemone` on the resource origin, with the project's API key |
+| Questions | Choice with 2–255 options, score with 2–10 levels, probability; Azure rejects a one-option choice |
+| Context | 32,768 tokens for the input and the longest question; Azure's rejection is surfaced as is |
+| `timeoutMs` | 30 seconds per evaluation, response included |
+| Retries | None: errors carry `retryable` and `retryAfterMs`; quota is metered in requests per minute |
+| Response model | Must be the deployment's model; answers from another are rejected, their usage kept |
+| Price | `Microsoft-Decision-1` version 1: USD 0.042 per million input tokens, output free |
+
+The price is Azure's retail meter "Microsoft Decision 1 1M Tokens", the same in every region
+(verified 2026-11-13 against the [Azure Retail Prices API](https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Microsoft%20Decision%20Models%27)).
+Other decision models have unknown cost, not zero: pass `rateCard` or `costEstimator` for them. Connected deployments from another resource are rejected;
+configure that resource's project URL and API key.
 
 ## Stream a response
 
@@ -234,7 +269,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient inference HTTP failures; no replay after stream acceptance or ambiguous network failure |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings and decisions |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -260,5 +295,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `profiles.e2e.ts` | Discovered deployment profiles | 8 / 4,096 |
 | `contracts.e2e.ts` | Tools, images, durable replay, strict JSON and accounting | 16 / 16,384 |
 | `provider.e2e.ts` | Protocol controls, tools, media, cancellation and errors | 40 / 16,000 |
+| `decision.e2e.ts` | Decision questions, accounting, errors and chat tier routing | 16 decisions / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.

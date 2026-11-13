@@ -15,9 +15,20 @@ import {
 } from "@sixb/core/models"
 import { tokenEstimator } from "./accounting"
 import type { CatalogEmbeddingModel, RemoteModelsDevCatalog } from "./catalog"
-import type { AzureAIFoundryDeployment, FoundryDeployments, ResolvedDeployment } from "./discovery"
+import {
+  type AzureAIFoundryDeployment,
+  deploymentMetadata,
+  type FoundryDeployments,
+  type ResolvedDeployment,
+} from "./discovery"
 import type { AzureAIFoundryModelMetadata } from "./provider"
-import { abortable, type FoundryTransport, requestId, type TransportOptions } from "./transport"
+import {
+  abortable,
+  type FoundryTransport,
+  readJson,
+  requestId,
+  type TransportOptions,
+} from "./transport"
 import { counter, object, PREFIX } from "./util"
 
 export type AzureAIFoundryEmbeddingTransportOptions = Pick<
@@ -92,19 +103,7 @@ export function createFoundryEmbedding(
     rateCard: options.rateCard && defineModelRateCard(options.rateCard),
     costEstimator: options.costEstimator,
   })
-  const deployment = resolution?.deployment
-  const metadata = Object.freeze(
-    deployment
-      ? {
-          deployment,
-          modelName: deployment.modelName,
-          modelVersion: deployment.modelVersion,
-          publisher: deployment.modelPublisher,
-          sku: deployment.sku.name,
-          discoveredAt: resolution.discoveredAt,
-        }
-      : {}
-  )
+  const metadata = deploymentMetadata(resolution)
   let pending: Promise<AzureAIFoundryEmbeddingModel> | undefined
   const binding: AzureAIFoundryEmbeddingModel = Object.freeze({
     providerId,
@@ -286,26 +285,6 @@ function invalidResponse(
   )
 }
 
-async function readResponse(response: Response, signal: AbortSignal): Promise<unknown> {
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error("Empty embedding response")
-  const chunks: Uint8Array[] = []
-  let bytes = 0
-  try {
-    for (;;) {
-      const chunk = await abortable(() => reader.read(), signal)
-      if (chunk.done) break
-      bytes += chunk.value.length
-      if (bytes > 128 * 1024 * 1024) throw new Error("Embedding response exceeds 128 MiB")
-      chunks.push(chunk.value)
-    }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
-  } finally {
-    void reader.cancel().catch(() => {})
-    reader.releaseLock()
-  }
-}
-
 function embeddingUsage(raw: JsonObject | undefined): ModelUsage {
   const inputTokens = counter(raw?.prompt_tokens)
   const totalTokens = counter(raw?.total_tokens)
@@ -351,7 +330,7 @@ async function readEmbeddingResult(
   }
   let body: Record<string, unknown> | undefined
   try {
-    body = record(await readResponse(response, signal))
+    body = record(await readJson(response, signal, 128 * 1024 * 1024))
   } catch {
     if (signal.aborted) throw signal.reason
     throw invalidResponse(providerId, modelId, facts)
