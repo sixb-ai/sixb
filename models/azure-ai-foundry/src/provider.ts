@@ -61,6 +61,11 @@ import {
 } from "./reranking"
 import { resolveModel } from "./resolution"
 import {
+  type AzureAIFoundrySpeechModel,
+  type AzureAIFoundrySpeechOptions,
+  createFoundrySpeech,
+} from "./speech"
+import {
   type AzureAIFoundryTranscriptionModel,
   type AzureAIFoundryTranscriptionOptions,
   createFoundryTranscription,
@@ -162,6 +167,8 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
     deploymentName: string,
     options?: AzureAIFoundryRerankingOptions
   ): AzureAIFoundryRerankingModel
+  /** A speech deployment, such as gpt-4o-mini-tts, for `models.audio.speech`. */
+  speech(deploymentName: string, options?: AzureAIFoundrySpeechOptions): AzureAIFoundrySpeechModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -220,6 +227,8 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     createFoundryTranscription(providerId, name, options, transport, deployments)
   const reranking = (name: string, options: AzureAIFoundryRerankingOptions = {}) =>
     createFoundryReranking(providerId, name, options, transport, deployments)
+  const speech = (name: string, options: AzureAIFoundrySpeechOptions = {}) =>
+    createFoundrySpeech(providerId, name, options, transport, deployments)
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
@@ -275,6 +284,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     decision,
     transcription,
     reranking,
+    speech,
   })
 }
 

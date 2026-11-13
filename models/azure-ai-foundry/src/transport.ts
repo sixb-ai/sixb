@@ -7,12 +7,13 @@ export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
 type FoundryRoute = FoundryProtocol | OneShotRoute
 /** Routes that answer in one body. A failure is never replayed: the call may have been billed. */
-type OneShotRoute = "embeddings" | "decision" | "transcription" | "reranking"
+type OneShotRoute = "embeddings" | "decision" | "transcription" | "reranking" | "speech"
 const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
   "embeddings",
   "decision",
   "transcription",
   "reranking",
+  "speech",
 ])
 
 /** The GA data-plane version: the v1 API does not route audio deployments. */
@@ -96,7 +97,11 @@ export class FoundryTransport {
       // fetch writes a multipart body's content type, boundary included.
       if (typeof body === "string") headers.set("content-type", "application/json")
       else headers.delete("content-type")
-      headers.set("accept", ONE_SHOT.has(protocol) ? "application/json" : "text/event-stream")
+      // Speech streams its audio as events: the only stream that reports usage.
+      headers.set(
+        "accept",
+        ONE_SHOT.has(protocol) && protocol !== "speech" ? "application/json" : "text/event-stream"
+      )
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
@@ -181,6 +186,8 @@ export class FoundryTransport {
     // Cohere rerankers answer Cohere's v2 API on the resource origin.
     if (protocol === "reranking")
       return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
+    // Speech answers on the resource's v1 API; the project path does not route it.
+    if (protocol === "speech") return `${new URL(this.baseUrl).origin}/openai/v1/audio/speech`
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
@@ -193,6 +200,15 @@ export async function readJson(
   signal: AbortSignal,
   maxBytes: number
 ): Promise<unknown> {
+  return JSON.parse(await readText(response, signal, maxBytes))
+}
+
+/** Read a body as UTF-8 up to `maxBytes`; the reader is released on success, failure or abort. */
+export async function readText(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number
+): Promise<string> {
   const reader = response.body?.getReader()
   if (!reader) throw new Error("Empty response")
   const chunks: Uint8Array[] = []
@@ -205,7 +221,7 @@ export async function readJson(
       if (bytes > maxBytes) throw new Error(`Response exceeds ${maxBytes} bytes`)
       chunks.push(chunk.value)
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+    return Buffer.concat(chunks).toString("utf8")
   } finally {
     void reader.cancel().catch(() => {})
     reader.releaseLock()
