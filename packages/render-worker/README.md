@@ -19,11 +19,12 @@ still waiting, and it runs once the canvas has rested 15 seconds. One render:
   writes the version there with each board as its frame serves it, and what its queries return as
   its publisher read them.
 - Pictures each missing board with the image's Chromium, through Playwright, at its own size, in
-  each mode the reader sees: full as PNG, and at most 480 pixels wide as WebP. A board whose page
-  did not load whole is not pictured: a broken picture would stay. Without query answers, a board
-  that reads a query is not pictured either.
-- Keeps the pictures as the boards' previews, then destroys the sandbox. After three attempts the
-  boards keep their outlines.
+  each mode the reader sees: full as PNG, and at most 480 pixels wide as WebP. A board whose
+  page did not load whole is not pictured: a broken picture would stay. Without query answers, a
+  board that reads a query is not pictured either. A board that fails costs only itself.
+- Keeps what it pictured as the boards' previews. When a board stopped answering, or time ran out
+  before every board, it tries again for what is still missing; after three attempts the boards it
+  could not picture keep their outlines.
 
 `artifact.pdf.requested`: a designed document's version printed to PDF, which
 `sixb.artifacts.pdf()` asks for. One print:
@@ -33,10 +34,16 @@ still waiting, and it runs once the canvas has rested 15 seconds. One render:
 - Opens a blank sandbox of the project, which reaches only the CDNs a frame may load from, and
   writes the version there with the frame's stylesheets and runtime, as its frame serves it.
 - Prints it there with the image's Chromium, through Playwright: it waits for the document's fonts
-  and images, and prints on the paper its `@page` rule sets, with its backgrounds.
-- Keeps the PDF under the version's render key, then destroys the sandbox.
+  and images, and prints on the paper its `@page` rule sets, with its backgrounds. When a file or a
+  font did not load, it prints again on its second attempt, and keeps that PDF, which shows
+  without it.
+- Keeps the PDF under the version's render key.
 - Keeps why it could not print instead: at once when the sandbox has no browser, else after its
   second attempt. Whoever waits for the PDF hears it.
+
+Each render's steps are bounded by the time its job has left, and its sandbox is destroyed after,
+waited for at most 30 seconds. What a render wrote in the sandbox comes back a piece at a time,
+at most 512 KiB of it to a command, as some providers keep at most 1 MiB of a command's output.
 
 ## The sandbox's browser
 

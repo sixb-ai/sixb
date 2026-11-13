@@ -10,7 +10,14 @@ import type { ArtifactPdfRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import type { RenderHost } from "./host"
 import printScript from "./print.cjs" with { type: "text" }
-import { kitFile, RENDER_NETWORK, readBlob, runScript } from "./sandbox"
+import {
+  frameFile,
+  inRenderSandbox,
+  readBlob,
+  readSandboxFiles,
+  runScript,
+  scriptFiles,
+} from "./sandbox"
 
 // A designed document's PDF, which someone asked for: the worker opens a blank sandbox of the
 // project, which reaches only the CDNs a frame may load from, writes the version there as its frame
@@ -18,9 +25,12 @@ import { kitFile, RENDER_NETWORK, readBlob, runScript } from "./sandbox"
 // destroys the sandbox. When it cannot be printed, why is kept there instead, so whoever is
 // waiting for it hears so at once.
 
-/** Where the version is written in the sandbox, beside the script that prints it. */
+/** Where the version is written in the sandbox, beside the script that prints it, and the PDF. */
 const SITE = "document"
 const SCRIPT = "print.cjs"
+const PDF = "document.pdf"
+/** Of the time left once the version is written: the rest reads the PDF back and keeps it. */
+const PRINT_SHARE = 0.6
 
 /** The frame's own files, which the entry loads from `__sixb/`. */
 const KIT = ["__sixb/document.css", "__sixb/runtime.js"]
@@ -45,19 +55,22 @@ export async function printDocumentPdf(input: {
   if (!version || documentPdfKey(version, document) !== renderKey) return
   if (await artifacts.getPdf({ projectId: host.id, renderKey })) return
 
-  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(DOCUMENT_PDF_JOB.timeoutMs)])
-  const sandbox = await host.sandboxes.create({ environment: {}, network: RENDER_NETWORK, signal })
-  try {
-    const printed = await print(sandbox, version, document, host.blobStorage, signal)
-    await artifacts.putPdf({ projectId: host.id, renderKey, ...printed, createdAt: new Date() })
-  } finally {
-    await sandbox.destroy().catch((error: unknown) => {
-      console.error(
-        `[SixbRenderWorker] Could not destroy the sandbox that printed '${artifactId}' version ${number}:`,
-        error
-      )
-    })
-  }
+  const printed = await inRenderSandbox(
+    { sandboxes: host.sandboxes },
+    `printed '${artifactId}' version ${number}`,
+    { timeoutMs: DOCUMENT_PDF_JOB.timeoutMs, signal: input.signal },
+    (sandbox, left, signal) =>
+      print({
+        sandbox,
+        left,
+        signal,
+        version,
+        document,
+        blobStorage: host.blobStorage,
+        lastAttempt: job.attempt >= DOCUMENT_PDF_JOB.attempts,
+      })
+  )
+  await artifacts.putPdf({ projectId: host.id, renderKey, ...printed, createdAt: new Date() })
 }
 
 /**
@@ -80,28 +93,32 @@ export async function failDocumentPdf(input: {
 /**
  * Prints the version in `sandbox`, a blank one created for it, with `document` for its entry when
  * given: its markup with the values its fields read written in. Stores the PDF, named after its
- * title. When nothing printed, says why, as whoever asked for it hears it.
+ * title. When nothing printed, says why, as whoever asked for it hears it. A file or a font that
+ * did not load is printed without only on the last attempt: until then, the job tries again.
  */
-async function print(
-  sandbox: Sandbox,
-  version: ArtifactVersionRecord,
-  document: FileRef | undefined,
-  blobStorage: RenderHost["blobStorage"],
-  signal: AbortSignal
-): Promise<{ readonly file: FileRef; readonly pages: number } | { readonly failure: string }> {
+async function print(input: {
+  readonly sandbox: Sandbox
+  readonly left: () => number
+  readonly signal: AbortSignal
+  readonly version: ArtifactVersionRecord
+  readonly document: FileRef | undefined
+  readonly blobStorage: RenderHost["blobStorage"]
+  readonly lastAttempt: boolean
+}): Promise<{ readonly file: FileRef; readonly pages: number } | { readonly failure: string }> {
+  const { sandbox, version, document, signal } = input
   const { outline } = version
   if (outline.kind !== "document" || outline.format !== "html") {
     return { failure: "It is not a designed document." }
   }
 
   const site = posix.resolve(sandbox.workingDirectory, SITE)
-  const script = posix.resolve(sandbox.workingDirectory, SCRIPT)
+  const pdf = posix.resolve(sandbox.workingDirectory, PDF)
   const files = await Promise.all(
     version.files.map(async (file) => {
       const entry = file.path === version.entry
       // The markup with the values written in, which it prints instead of its own.
       const bytes = await readBlob(
-        blobStorage,
+        input.blobStorage,
         entry && document ? document.blobId : file.file.blobId
       )
       // The entry as its frame serves it: with the kit, the runtime, and its paper.
@@ -118,17 +135,17 @@ async function print(
   )
   await sandbox.writeFiles([
     ...files,
-    ...KIT.map((path) => ({ path: posix.join(site, path), contents: kitFile(path) })),
-    { path: script, contents: printScript },
+    ...KIT.map((path) => ({ path: posix.join(site, path), contents: frameFile(path) })),
+    ...scriptFiles(sandbox, SCRIPT, printScript),
   ])
 
-  // Half its time to print, so it reports why it stopped before the command is killed.
-  const deadlineMs = Math.floor(DOCUMENT_PDF_JOB.timeoutMs / 2)
+  // Part of what is left to print, so it says why it stopped before the command is killed.
+  const timeoutMs = input.left()
   const { report, stderr } = await runScript(
     sandbox,
-    script,
-    [site, deadlineMs, MAX_DOCUMENT_PDF_BYTES],
-    { timeoutMs: DOCUMENT_PDF_JOB.timeoutMs, signal }
+    posix.resolve(sandbox.workingDirectory, SCRIPT),
+    [site, pdf, Math.floor(timeoutMs * PRINT_SHARE), MAX_DOCUMENT_PDF_BYTES],
+    { timeoutMs, signal }
   )
   if (report?.skipped) {
     const why = report.skipped === "no_node" ? "Node.js" : "headless browser"
@@ -137,16 +154,29 @@ async function print(
     }
   }
   const pages = typeof report?.pages === "number" ? report.pages : 0
-  if (typeof report?.pdf !== "string" || pages < 1) {
+  const size = typeof report?.bytes === "number" ? report.bytes : 0
+  if (pages < 1 || size < 1) {
     const detail = String(report?.failed ?? (stderr || "the browser wrote no PDF"))
     console.warn(
       `[SixbRenderWorker] Version ${version.version} of '${version.artifactId}' was not printed: ${detail.slice(0, 500)}`
     )
     return { failure: "It could not be printed. Try again in a moment." }
   }
+  if (typeof report?.missing === "string") {
+    const missing = `Version ${version.version} of '${version.artifactId}' printed without what did not load: ${report.missing.slice(0, 200)}`
+    // Thrown, the job tries again, as a CDN that failed once may not again.
+    if (!input.lastAttempt) throw new Error(`[SixbRenderWorker] ${missing}.`)
+    console.warn(`[SixbRenderWorker] ${missing}; it is kept so.`)
+  }
 
-  const bytes = Buffer.from(report.pdf, "base64")
-  const file = await blobStorage.put({
+  const [bytes] = await readSandboxFiles(sandbox, [{ path: pdf, bytes: size }], {
+    maxBytes: MAX_DOCUMENT_PDF_BYTES,
+    signal,
+  })
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error(`[SixbRenderWorker] The PDF of '${version.artifactId}' could not be read back.`)
+  }
+  const file = await input.blobStorage.put({
     body: bytes,
     expectedSizeBytes: bytes.byteLength,
     // The name it downloads as: its title, without what a file name may not hold.

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
@@ -39,6 +39,8 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
   /** The board pages each picture opened, by path, as the frame serves them. */
   readonly opened: Record<string, string>[] = []
   destroyed = 0
+  /** A board that stops answering, which the browser does not picture. */
+  stalls?: string
   /** Resolves each time a sandbox is destroyed, which ends a job's render. */
   private onDestroy: (() => void) | undefined
 
@@ -74,6 +76,7 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
 }
 
 function picture(site: string, out: string, sandboxes: PicturingSandboxes) {
+  const stalled = sandboxes.stalls
   const statuses = JSON.parse(readFileSync(join(site, "__sixb/queries.json"), "utf8")) as Record<
     string,
     number
@@ -97,16 +100,24 @@ function picture(site: string, out: string, sandboxes: PicturingSandboxes) {
   )
   const themes = Object.keys(JSON.parse(readFileSync(join(out, "themes.json"), "utf8")))
   mkdirSync(join(out, "boards"), { recursive: true })
-  const pictures = boards.flatMap((board) =>
-    themes.flatMap((theme) =>
-      (["full", "small"] as const).map((size) => {
-        const path = join(out, "boards", `${board.id}.${theme}.${size === "full" ? "png" : "webp"}`)
-        writeFileSync(path, `${board.id} ${theme}${size === "small" ? " small" : ""}`)
-        return { board: board.id, theme, size, path }
-      })
+  const pictures = boards
+    .filter((board) => board.id !== stalled)
+    .flatMap((board) =>
+      themes.flatMap((theme) =>
+        (["full", "small"] as const).map((size) => {
+          const path = join(
+            out,
+            "boards",
+            `${board.id}.${theme}.${size === "full" ? "png" : "webp"}`
+          )
+          const contents = `${board.id} ${theme}${size === "small" ? " small" : ""}`
+          writeFileSync(path, contents)
+          return { board: board.id, theme, size, path, bytes: contents.length }
+        })
+      )
     )
-  )
-  return { pictures, unpictured: [], stalls: [] }
+  const stalls = stalled ? [{ board: stalled, reason: "it did not respond within 10 seconds" }] : []
+  return { pictures, unpictured: [], stalls }
 }
 
 const workers: RenderWorker[] = []
@@ -392,6 +403,30 @@ describe("a canvas version's previews", () => {
     expect(await pictures(scripted)).toEqual(welcomeOnly)
   })
 
+  // Reproduce by keeping what was pictured however the script ends in renderBoardPreviews: a board
+  // that stopped answering once keeps its outline, the job done.
+  test("keep what was pictured, and are pictured again while a board stopped answering", async () => {
+    const sandboxes = new PicturingSandboxes()
+    sandboxes.stalls = "region"
+    const { canvas, pictures, job, render } = setup()
+    const { version } = await canvas()
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const first = await render(job(version), sandboxes).catch((error: unknown) => error)
+      expect(String(first)).toContain("stopped answering")
+      expect(await pictures(version)).toHaveLength(4)
+
+      // On its last attempt, what was pictured is all there is.
+      await render({ ...job(version), attempt: BOARD_PREVIEW_JOB.attempts }, sandboxes)
+      expect(warn.mock.calls.map(([message]) => String(message))).toContainEqual(
+        expect.stringContaining("Board 'region' of version 1")
+      )
+    } finally {
+      warn.mockRestore()
+    }
+    expect(await pictures(version)).toHaveLength(4)
+  })
+
   // Reproduce by enqueueing the job on the agents' lane in requestBoardPreviews: the render worker
   // never claims it, and the boards keep their outlines.
   test("are rendered by the render worker for a version saved in the app, from the renders lane", async () => {
@@ -406,6 +441,10 @@ describe("a canvas version's previews", () => {
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
     await worker.start()
     await rendered
+    // Kept once the sandbox is gone.
+    for (let turn = 0; turn < 50 && (await pictures(version)).length < 8; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
 
     expect(await pictures(version)).toHaveLength(8)
   })
