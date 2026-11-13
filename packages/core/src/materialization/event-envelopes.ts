@@ -116,13 +116,13 @@ export function materializationEvent(
 
 /**
  * What the events of a commit say about who asked for it and what wrote it, read from the
- * execution it ran under. A primitive's id lives in the execution's authority, the only place the
- * durable record keeps it.
+ * execution it ran under. A primitive's id lives in the execution's authority and a script's path
+ * in its source, the only places the durable record keeps them.
  */
 export function eventAttribution(
   execution: Pick<
     ExecutionRecord,
-    "id" | "correlationId" | "requestedBy" | "executor" | "authorizationRef"
+    "id" | "correlationId" | "requestedBy" | "executor" | "authorizationRef" | "source"
   >
 ): OntologyMaterializationEventAttribution {
   const attribution = {
@@ -135,9 +135,9 @@ export function eventAttribution(
 }
 
 function eventExecutor(
-  execution: Pick<ExecutionRecord, "id" | "executor" | "authorizationRef">
+  execution: Pick<ExecutionRecord, "id" | "executor" | "authorizationRef" | "source">
 ): EventExecutor {
-  const { executor, authorizationRef } = execution
+  const { executor, authorizationRef, source } = execution
   switch (executor.type) {
     case "request":
       return { type: "request", requestId: executor.requestId }
@@ -145,6 +145,11 @@ function eventExecutor(
       return { type: "agent", runId: executor.runId }
     case "kernel":
       return { type: "kernel", operation: structuredClone(executor.operation) }
+    case "script":
+      if (source.type !== "script") {
+        throw new Error(`[Sixb] Script execution '${execution.id}' has no script source.`)
+      }
+      return { type: "script", runId: executor.runId, path: source.path }
     case "primitive":
       if (
         authorizationRef.type !== "trustedPrimitive" ||

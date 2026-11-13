@@ -38,6 +38,7 @@ import {
 } from "../datasets/ingest-flush"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
+import type { ErrorReporter } from "../error-reporting/reporter"
 import {
   reportEventDeliveryFailure,
   reportMaintenancePassFailure,
@@ -47,6 +48,7 @@ import {
   createDomainEventService,
   type DomainEventLog,
   type DomainEventService,
+  type EventsAppendInput,
   OntologyOutboxDispatcher,
 } from "../events"
 import {
@@ -225,10 +227,15 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
   readonly projectRoot: string
   private readonly cron: MaintenancePass
+  private readonly errorReporter: ErrorReporter
+  /** What every execution in this process runs on once it has bound a script; see `withScope`. */
+  private scriptProcess: { readonly context: SixbHostContext; readonly enqueues: boolean } | null =
+    null
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
     const errorReporter = attachSixbErrorReporter(this, options.onError)
+    this.errorReporter = errorReporter
     this.projectId = options.id ?? "default"
     this.locale = resolveProjectLocale(options.locale)
     this.timeZone = resolveProjectTimeZone(options.timeZone)
@@ -421,8 +428,12 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
 
+    if (capturedScope.execution.executor.type === "script") this.enterScriptProcess()
+    const hostContext = this.scriptProcess?.context ?? this.hostContext
+    const enqueues = this.scriptProcess?.enqueues ?? true
+
     const modelExecution = new ModelExecutionSession(
-      { ...this.hostContext, runtimeAuthorization: capturedScope.authorization },
+      { ...hostContext, runtimeAuthorization: capturedScope.authorization },
       capturedScope.execution
     )
     const embeddingModels = bindEmbeddingModels(this.hostContext.embeddingModels, modelExecution)
@@ -438,7 +449,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     })
 
     const runtime: SixbRuntimeContext = {
-      ...this.hostContext,
+      ...hostContext,
       embeddingModels,
       rerankingModels,
       modelExecution,
@@ -452,7 +463,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         materializer: this.materializer.withScope(capturedScope),
         notifyCommittedFacts: () => {
           this.committedFacts.notify()
-          this.vectorIndexing?.notify()
+          // Pending indexing waits for the instance's maintenance pass to dispatch it.
+          if (enqueues) this.vectorIndexing?.notify()
         },
         // A projection this process applies is visible to its next read.
         onProjectionApplied: () => this.appliedMarkings.invalidate(),
@@ -463,6 +475,32 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this.sixbDependencies(),
       capturedScope.execution
     )
+  }
+
+  /**
+   * A script runs in a process of its own, beside the project's running instance, and everything
+   * this process runs from now on, such as an action the script applies, is the script's doing.
+   *
+   * With a process-scoped broker, the instance holds the subscribers: ontology changes stay in the
+   * outbox for it to publish, and appending any other event is refused rather than delivered to
+   * nobody. With process-scoped queues, nothing here would ever claim a job, so enqueueing is
+   * refused.
+   */
+  private enterScriptProcess(): void {
+    if (this.scriptProcess) return
+    const publishes = this.broker.scope !== "process"
+    const enqueues = this.queues.scope !== "process"
+    if (!publishes) this.committedFacts.relinquish()
+    this.scriptProcess = {
+      enqueues,
+      context: {
+        ...this.hostContext,
+        ...(publishes
+          ? {}
+          : { events: refuseScriptEvents(this.eventService, this.projectId, this.errorReporter) }),
+        ...(enqueues ? {} : { queues: refuseScriptEnqueues(this.queues) }),
+      },
+    }
   }
 
   get id(): string {
@@ -670,4 +708,73 @@ function assertSandboxCredentials<TParams extends ParamsConfig>(
     source: sandboxes.configuration?.source,
   })
   if (issue) throw new SandboxError(`[Sixb] ${issue}`)
+}
+
+const QUEUE_LANES = [
+  "vectorIndexing",
+  "lake",
+  "syncRuns",
+  "pipelines",
+  "projections",
+  "workflows",
+  "agents",
+] as const satisfies readonly Exclude<keyof Queues, "scope" | "health" | "close">[]
+
+/** The event log with appends refused, for a script whose broker nobody else here listens to. */
+function refuseScriptEvents(
+  events: DomainEventService,
+  projectId: string,
+  errorReporter: ErrorReporter
+): DomainEventService {
+  const refusal = () =>
+    new Error(
+      "[Sixb] A script cannot append events on this project's broker: it only works inside one " +
+        "process. Append them from the app or the API, or configure a shared broker."
+    )
+  return delegate(events, (property) => {
+    if (property === "append") {
+      return async (): Promise<never> => {
+        throw refusal()
+      }
+    }
+    if (property === "emit") {
+      // `emit` never rejects: the work behind it already succeeded, so the loss is reported.
+      return async (input: EventsAppendInput): Promise<void> => {
+        reportEventDeliveryFailure(errorReporter, refusal(), {
+          projectId,
+          eventTypes: input.events.map((event) => event.type),
+        })
+      }
+    }
+    return undefined
+  })
+}
+
+/** The project's queues with every `enqueue` refused, for a script that cannot reach their workers. */
+function refuseScriptEnqueues(queues: Queues): Queues {
+  const refused = async (): Promise<never> => {
+    throw new Error(
+      "[Sixb] A script cannot start work on this project's queues: they only work inside one " +
+        "process. Start it from the app or the API, or configure shared queues."
+    )
+  }
+  const lanes = new Map<PropertyKey, unknown>(
+    QUEUE_LANES.map((lane) => [
+      lane,
+      delegate(queues[lane], (property) => (property === "enqueue" ? refused : undefined)),
+    ])
+  )
+  return delegate(queues, (property) => lanes.get(property))
+}
+
+/** `target`, with the members `override` returns replaced and every other method bound to it. */
+function delegate<T extends object>(target: T, override: (property: PropertyKey) => unknown): T {
+  return new Proxy(target, {
+    get(object, property) {
+      const replaced = override(property)
+      if (replaced !== undefined) return replaced
+      const value: unknown = Reflect.get(object, property, object)
+      return typeof value === "function" ? value.bind(object) : value
+    },
+  })
 }

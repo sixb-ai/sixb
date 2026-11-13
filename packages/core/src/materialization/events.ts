@@ -29,6 +29,8 @@ export type EventExecutor =
     }
   | { readonly type: "agent"; readonly runId: string }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
+  /** A `sixb run` script, by its path relative to the project. */
+  | { readonly type: "script"; readonly runId: string; readonly path: string }
 
 interface OntologyMaterializationEventBase {
   readonly id: string

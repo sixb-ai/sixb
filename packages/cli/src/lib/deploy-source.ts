@@ -104,6 +104,11 @@ export function repoRootOf(projectDir: string): Promise<string> {
   return git(projectDir, ["rev-parse", "--show-toplevel"])
 }
 
+/** The commit checked out where the project is, or null outside a git repository. */
+export function headCommit(projectDir: string): Promise<string | null> {
+  return git(projectDir, ["rev-parse", "HEAD"]).catch(() => null)
+}
+
 /** Who deploys, recorded with the release. */
 export async function deployer(projectDir: string): Promise<string> {
   if (process.env.GITHUB_ACTIONS && process.env.GITHUB_ACTOR) {

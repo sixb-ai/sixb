@@ -19,6 +19,7 @@ export function renderProcessManifest(
     runDir: layout.runDir,
     logDir: layout.logDir,
     releasePath: layout.releaseRecord,
+    env: release.env,
     services: release.services.map((service) => ({
       name: service.name,
       processName: `${release.name}-${service.name}`,

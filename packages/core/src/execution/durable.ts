@@ -168,6 +168,8 @@ function durableExecutor(execution: ExecutionContext): CreateExecutionInput["exe
       return { type: "agent", runId: execution.executor.runId }
     case "kernel":
       return { type: "kernel", operation: structuredClone(execution.executor.operation) }
+    case "script":
+      return { type: "script", runId: execution.executor.runId }
   }
 }
 
