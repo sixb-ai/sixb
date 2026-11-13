@@ -44,8 +44,12 @@ function presenceOf(artifact: LiveArtifact) {
   if (entry) return entry
 
   const created = { value: readPresence(artifact), listeners: new Set<() => void>() }
+  // Awareness changes with every caret that moves, this reader's own included: only a change to
+  // who is here, or to what they selected, is told to the readers of it.
   artifact.awareness.on("change", () => {
-    created.value = readPresence(artifact)
+    const next = readPresence(artifact)
+    if (JSON.stringify(next) === JSON.stringify(created.value)) return
+    created.value = next
     for (const listener of created.listeners) listener()
   })
   entry = created

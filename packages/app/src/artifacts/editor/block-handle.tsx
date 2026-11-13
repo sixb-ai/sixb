@@ -12,9 +12,9 @@ import {
 import type { Editor } from "@tiptap/core"
 import { DragHandle } from "@tiptap/extension-drag-handle-react"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { TextSelection } from "@tiptap/pm/state"
+import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import { ArrowDown, ArrowUp, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { BlockType } from "./blocks"
 import type { EditorMessages } from "./messages"
 
@@ -45,10 +45,25 @@ export function BlockHandle({
   const hovered = useRef<Hovered | null>(null)
   const [menu, setMenu] = useState(false)
 
+  // The block pointed at moves with what anyone changes before it, while its menu is open too;
+  // one taken out is pointed at no more.
+  useEffect(() => {
+    const follow = ({ transaction }: { readonly transaction: Transaction }) => {
+      const current = hovered.current
+      if (!current || !transaction.docChanged) return
+      const mapped = transaction.mapping.mapResult(current.pos)
+      const node = mapped.deleted ? null : transaction.doc.nodeAt(mapped.pos)
+      hovered.current = node ? { node, pos: mapped.pos } : null
+    }
+    editor.on("transaction", follow)
+    return () => {
+      editor.off("transaction", follow)
+    }
+  }, [editor])
+
   const block = () => {
     const current = hovered.current
     if (!current) return null
-    // The block may have moved since it was pointed at: read it again where it is.
     const node = editor.state.doc.nodeAt(current.pos)
     return node ? { node, pos: current.pos } : null
   }
@@ -108,17 +123,12 @@ export function BlockHandle({
     const sibling = parent.maybeChild(index + by)
     if (!sibling) return
     const tr = editor.state.tr
-    if (by === 1) {
-      tr.delete(at.pos, at.pos + at.node.nodeSize)
-      tr.insert(at.pos + sibling.nodeSize, at.node)
-      hovered.current = { node: at.node, pos: at.pos + sibling.nodeSize }
-    } else {
-      const target = at.pos - sibling.nodeSize
-      tr.delete(at.pos, at.pos + at.node.nodeSize)
-      tr.insert(target, at.node)
-      hovered.current = { node: at.node, pos: target }
-    }
+    const target = by === 1 ? at.pos + sibling.nodeSize : at.pos - sibling.nodeSize
+    tr.delete(at.pos, at.pos + at.node.nodeSize)
+    tr.insert(target, at.node)
     editor.view.dispatch(tr.scrollIntoView())
+    // Where it went, which mapping its old place cannot tell.
+    hovered.current = { node: at.node, pos: target }
     editor.commands.focus()
   }
 

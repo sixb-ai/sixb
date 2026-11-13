@@ -78,6 +78,7 @@ export function MarkdownDocument({
         imageSource={imageSource}
         messages={messages.editor}
         theme={theme}
+        {...(part ? { part } : {})}
         {...(state.access === "edit" ? { uploadImage } : {})}
       />
     )

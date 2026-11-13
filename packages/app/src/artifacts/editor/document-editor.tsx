@@ -1,3 +1,4 @@
+import { createHeadingSlugger } from "@sixb/core/artifacts"
 import { blocksToMarkdown, markdownToBlocks } from "@sixb/core/artifacts/live"
 import { toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -5,9 +6,10 @@ import { type Editor, Extension } from "@tiptap/core"
 import { Collaboration } from "@tiptap/extension-collaboration"
 import { CollaborationCaret } from "@tiptap/extension-collaboration-caret"
 import { Placeholder } from "@tiptap/extensions"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { Fragment, type Node as ProseMirrorNode, Slice } from "@tiptap/pm/model"
+import type { Transaction } from "@tiptap/pm/state"
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react"
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Awareness } from "y-protocols/awareness"
 import type * as Y from "yjs"
 import { BlockHandle } from "./block-handle"
@@ -40,6 +42,8 @@ export interface DocumentEditorProps {
    * it; throws, saying why, when it cannot. Without it, images are not added.
    */
   readonly uploadImage?: (file: File) => Promise<{ readonly src: string; readonly alt: string }>
+  /** The section to open at: the slug of its heading, as the document page names it. */
+  readonly part?: string
 }
 
 export function DocumentEditor({
@@ -50,6 +54,7 @@ export function DocumentEditor({
   messages,
   theme,
   uploadImage,
+  part,
 }: DocumentEditorProps) {
   const picker = useRef<HTMLInputElement | null>(null)
   const editorRef = useRef<Editor | null>(null)
@@ -63,16 +68,31 @@ export function DocumentEditor({
   const addImages = async (files: readonly File[], at?: number) => {
     const editor = editorRef.current
     if (!editor || !uploadImage) return
+    // Where they go moves with what anyone changes while they upload.
     let pos = at ?? editor.state.selection.to
-    for (const file of files) {
-      try {
-        const { src, alt } = await uploadImage(file)
-        const figure = { type: "image", attrs: { src, alt, title: null } }
-        editor.chain().insertContentAt(pos, figure).focus().run()
-        pos = editor.state.selection.to
-      } catch (error) {
-        toast.error(error instanceof Error && error.message ? error.message : messages.imageFailed)
+    const follow = ({ transaction }: { readonly transaction: Transaction }) => {
+      pos = transaction.mapping.map(pos)
+    }
+    editor.on("transaction", follow)
+    try {
+      for (const file of files) {
+        try {
+          const { src, alt } = await uploadImage(file)
+          const figure = { type: "image", attrs: { src, alt, title: null } }
+          editor
+            .chain()
+            .insertContentAt(Math.min(pos, editor.state.doc.content.size), figure)
+            .focus()
+            .run()
+          pos = editor.state.selection.to
+        } catch (error) {
+          toast.error(
+            error instanceof Error && error.message ? error.message : messages.imageFailed
+          )
+        }
       }
+    } finally {
+      editor.off("transaction", follow)
     }
   }
   const slash = useMemo(() => new SlashMenuStore(), [])
@@ -136,19 +156,41 @@ export function DocumentEditor({
           }
           const text = event.clipboardData?.getData("text/plain") ?? ""
           if (event.clipboardData?.getData("text/html") || !looksLikeMarkdown(text)) return false
+          // Code is pasted as it is.
+          if (view.state.selection.$from.parent.type.spec.code) return false
           const content = markdownToBlocks(text).content ?? []
-          const editorOf = (view as unknown as { editor?: Editor }).editor
-          if (!editorOf) return false
-          return editorOf.commands.insertContent(content as never)
+          // Words alone go into the line they are pasted in; blocks, as blocks.
+          const [only] = content
+          const inline = content.length === 1 && only?.type === "paragraph"
+          // Markdown trims a paragraph's spaces; words pasted into a line keep theirs.
+          const space = (match: RegExpMatchArray | null) =>
+            match ? [{ type: "text", text: match[0] }] : []
+          const nodes = inline
+            ? [
+                ...space(text.match(/^[ \t]+/)),
+                ...(only.content ?? []),
+                ...space(text.match(/[ \t]+$/)),
+              ]
+            : content
+          try {
+            const fragment = Fragment.fromJSON(view.state.schema, nodes)
+            view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(fragment)).scrollIntoView())
+            return true
+          } catch {
+            return false
+          }
         },
         clipboardTextSerializer: (slice) => {
+          const plain = () => slice.content.textBetween(0, slice.content.size, "\n\n", "\n")
           const json = slice.content.toJSON() as { readonly type: string }[] | null
           if (!json?.length) return ""
-          const blocks = json[0]?.type === "text" ? [{ type: "paragraph", content: json }] : json
+          const inline = slice.content.firstChild?.isInline === true
+          const blocks = inline ? [{ type: "paragraph", content: json }] : json
           try {
-            return blocksToMarkdown({ type: "doc", content: blocks as never }).trimEnd()
+            // A slice of list items or cells writes nothing as Markdown alone: its words, then.
+            return blocksToMarkdown({ type: "doc", content: blocks as never }).trimEnd() || plain()
           } catch {
-            return slice.content.textBetween(0, slice.content.size, "\n\n")
+            return plain()
           }
         },
       },
@@ -157,7 +199,23 @@ export function DocumentEditor({
   )
   editorRef.current = editor
 
-  if (editor && editor.isEditable !== editable) editor.setEditable(editable)
+  useEffect(() => {
+    if (editor && editor.isEditable !== editable) editor.setEditable(editable)
+  }, [editor, editable])
+
+  // A link to one of its sections opens there, as the document page does.
+  useEffect(() => {
+    if (!editor || !part) return
+    const slug = createHeadingSlugger()
+    let found: number | null = null
+    editor.state.doc.forEach((node, pos) => {
+      if (found !== null || node.type.name !== "heading") return
+      if (slug(node.textContent.replace(/\s+/g, " ").trim()) === part) found = pos
+    })
+    if (found === null) return
+    const dom = editor.view.nodeDOM(found)
+    if (dom instanceof HTMLElement) dom.scrollIntoView({ block: "start" })
+  }, [editor, part])
 
   return (
     <FigureContext.Provider value={{ source: imageSource, caption: messages.caption }}>

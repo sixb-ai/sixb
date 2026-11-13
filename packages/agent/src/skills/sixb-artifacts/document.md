@@ -22,6 +22,9 @@ Everything else is Markdown.
 GitHub-flavored Markdown: tables, task lists, strikethrough, autolinks, footnotes (`[^1]`), and
 fenced code blocks with a language. Raw HTML is not rendered.
 
+Once people edit a document in the app, it is written back as its editor writes Markdown: `-`
+bullets, `*emphasis*`, `**bold**`, `#` headings. Read it again before you change words in place.
+
 | Write | It renders as |
 | --- | --- |
 | `> [!NOTE]` as the first line of a quote | A callout. Also `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]` |
