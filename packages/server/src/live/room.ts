@@ -20,6 +20,7 @@ import {
   loadArtifactDocument,
   mergeIntoDocument,
   parseArtifactLiveRecord,
+  readChange,
   readDocumentState,
   readLiveFiles,
   sameArtifactFiles,
@@ -666,13 +667,14 @@ export class LiveRoom {
    */
   private readable(bytes: Uint8Array): boolean {
     try {
-      syncProtocol.readSyncMessage(
-        decoding.createDecoder(bytes),
-        encoding.createEncoder(),
-        this.shadow,
-        null
+      readChange(this.shadow, () =>
+        syncProtocol.readSyncMessage(
+          decoding.createDecoder(bytes),
+          encoding.createEncoder(),
+          this.shadow,
+          null
+        )
       )
-      documentFiles(this.shadow)
       return true
     } catch {
       this.shadow.destroy()

@@ -2,7 +2,15 @@ import * as Y from "yjs"
 import type { FileRef } from "../../blob-storage/types"
 import { CANVAS_FILE, type CanvasItem, formatCanvas, parseCanvas } from "../canvas"
 import type { ArtifactKind } from "../kinds"
-import { fragmentMarkdown, markdownFragment, patchFragment } from "./blocks"
+import {
+  blocksFromY,
+  blocksToMarkdown,
+  fragmentMarkdown,
+  markdownFragment,
+  mergeMarkdownBlocks,
+  patchBlocks,
+  patchFragment,
+} from "./blocks"
 import { diffSequences, diffText, interleave, mergeSequences, mergeText } from "./diff"
 
 // An artifact's open version as a Yjs document, which everyone editing it changes at once:
@@ -110,6 +118,77 @@ export function documentFiles(doc: Y.Doc): Map<string, LiveFile> {
   return new Map([...files].sort(([left], [right]) => (left < right ? -1 : 1)))
 }
 
+/**
+ * Makes `change` to a document, then reads back what it touched as `documentFiles` would, and
+ * throws where that would: a keystroke reads back the block it is in, not the whole document.
+ * A file replaced, or anything but a block of a Markdown document, is read whole.
+ */
+export function readChange(doc: Y.Doc, change: () => void): void {
+  const files = doc.getMap<unknown>(LIVE_FILES)
+  // What each event changed, read as it fires: Yjs reads an event's changes then, or never.
+  const changes: {
+    readonly target: Y.AbstractType<unknown>
+    readonly keys: readonly string[]
+    readonly inserted: readonly unknown[]
+  }[] = []
+  const collect = (events: Y.YEvent<Y.AbstractType<unknown>>[]) => {
+    for (const event of events) {
+      changes.push({
+        target: event.target,
+        keys: event.target === files ? [...(event as Y.YMapEvent<unknown>).keysChanged] : [],
+        inserted:
+          event.target instanceof Y.XmlFragment
+            ? event.changes.delta.flatMap((part) => (Array.isArray(part.insert) ? part.insert : []))
+            : [],
+      })
+    }
+  }
+  files.observeDeep(collect)
+  try {
+    change()
+  } finally {
+    files.unobserveDeep(collect)
+  }
+
+  const whole = new Set<string>()
+  const blocks = new Map<Y.XmlFragment, Set<Y.XmlElement | Y.XmlText>>()
+  const blockOf = (fragment: Y.XmlFragment, child: unknown) => {
+    if (!(child instanceof Y.XmlElement || child instanceof Y.XmlText)) return
+    const set = blocks.get(fragment) ?? new Set()
+    set.add(child)
+    blocks.set(fragment, set)
+  }
+  for (const { target, keys, inserted } of changes) {
+    if (target === files) {
+      for (const key of keys) whole.add(key)
+      continue
+    }
+    // The file the change is in, and the block it is in.
+    const path: Y.AbstractType<unknown>[] = []
+    for (let type: Y.AbstractType<unknown> | null = target; type && type !== files; ) {
+      path.unshift(type)
+      type = type.parent as Y.AbstractType<unknown> | null
+    }
+    const [entry] = path
+    const key = entry?._item?.parentSub
+    if (!entry || typeof key !== "string") continue
+    if (!(entry instanceof Y.XmlFragment)) {
+      whole.add(key)
+    } else if (target === entry) {
+      // Blocks added: each is read; one taken out is not there to read.
+      for (const child of inserted) blockOf(entry, child)
+    } else {
+      blockOf(entry, path[1])
+    }
+  }
+
+  for (const key of whole) textOf(files.get(key))
+  for (const [fragment, children] of blocks) {
+    const content = blocksFromY([...children].filter((child) => child.parent === fragment))
+    blocksToMarkdown({ type: "doc", content })
+  }
+}
+
 /** The canvas a document holds as its structure, for a viewer to read and edit; null without. */
 export function documentCanvas(
   doc: Y.Doc
@@ -156,7 +235,16 @@ export function mergeIntoDocument(
       const baseText = before && "text" in before ? before.text : currentText
 
       if (current instanceof Y.XmlFragment) {
-        patchFragment(current, mergeText(baseText ?? "", currentText ?? "", file.text))
+        // Unchanged since the write's files, it takes the write's blocks. Else the two are merged
+        // as blocks: how the Agent writes its Markdown, which need not be how the document's
+        // blocks write it, is no change.
+        if (currentText === baseText) patchFragment(current, file.text)
+        else {
+          patchBlocks(
+            current,
+            mergeMarkdownBlocks(baseText ?? "", blocksFromY(current.toArray()), file.text)
+          )
+        }
         continue
       }
       if (path === structured) {

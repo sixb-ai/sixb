@@ -190,6 +190,63 @@ describe("an image a person adds", () => {
   })
 })
 
+describe("what is pasted and copied", () => {
+  const pasteText = (editor: Editor, text: string) => {
+    const paste = {
+      clipboardData: { files: [], getData: (type: string) => (type === "text/plain" ? text : "") },
+      preventDefault() {},
+    }
+    let handled = false
+    act(() => {
+      editor.view.someProp("handlePaste", (handle) => {
+        handled = handle(editor.view, paste as never, null as never) || handled
+        return handled
+      })
+    })
+    return handled
+  }
+
+  // Reproduce by inserting pasted Markdown as blocks whatever it holds: bold words pasted into a
+  // sentence split it into three paragraphs.
+  test("puts Markdown words pasted into a line in that line", async () => {
+    const { editor, fragment } = await open()
+    act(() => {
+      editor.commands.setTextSelection(endOf(editor, "Three weeks in North") - 1)
+    })
+    expect(pasteText(editor, " with **bold** words")).toBe(true)
+    expect(fragmentMarkdown(fragment)).toContain("Three weeks in North with **bold** words.")
+  })
+
+  // Reproduce by dropping the code check from handlePaste: a pasted comment becomes a heading.
+  test("pastes into code as it is", async () => {
+    const { editor } = await open()
+    act(() => {
+      editor.commands.setContent(
+        { type: "doc", content: [{ type: "codeBlock", attrs: { language: "sh" } }] },
+        { emitUpdate: false }
+      )
+      editor.commands.setTextSelection(1)
+    })
+    expect(pasteText(editor, "# a comment\n- not a list")).toBe(false)
+  })
+
+  // Reproduce by returning blocksToMarkdown's output alone from clipboardTextSerializer: copied
+  // list items put nothing on the clipboard as text.
+  test("copies list items as their words when they write no Markdown alone", async () => {
+    const { editor } = await open()
+    const from = endOf(editor, "Install the app") - "Install the app".length
+    const to = endOf(editor, "Load the jobs")
+    const slice = editor.state.doc.slice(from, to)
+    let text = ""
+    editor.view.someProp("clipboardTextSerializer", (serialize) => {
+      text = serialize(slice, editor.view)
+      return true
+    })
+    expect(text).toContain("Install the app")
+    expect(text).toContain("Load the jobs")
+  })
+})
+
 describe("the / menu's blocks", () => {
   test("are found by their name first, then by what else they are called", () => {
     const types = blockTypes(en.editor.blocks)

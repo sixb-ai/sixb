@@ -83,3 +83,15 @@ describe("a Markdown document in the editor", () => {
     expect(dump(server)).toEqual(dump(written))
   })
 })
+
+describe("a Markdown table in the editor", () => {
+  // Reproduce by leaving cells' content as TipTap's `block+`: a list made in a cell is written
+  // as nothing, its words lost.
+  test("holds words alone in its cells, as a Markdown table can", () => {
+    for (const cell of [schema.nodes.tableCell, schema.nodes.tableHeader]) {
+      expect(cell?.contentMatch.matchType(schema.nodes.paragraph as never)).toBeTruthy()
+      expect(cell?.contentMatch.matchType(schema.nodes.bulletList as never)).toBeFalsy()
+      expect(cell?.contentMatch.matchType(schema.nodes.image as never)).toBeFalsy()
+    }
+  })
+})

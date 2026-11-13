@@ -1,8 +1,9 @@
 import { cn } from "@sixb/ui/lib/utils"
 import type { Editor } from "@tiptap/core"
-import { TextSelection } from "@tiptap/pm/state"
+import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import { useEditorState } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
+import { ySyncPluginKey } from "@tiptap/y-tiptap"
 import {
   Bold,
   Check,
@@ -47,11 +48,17 @@ export function SelectionToolbar({
     }),
   })
 
-  // Each new selection opens on its marks.
-  const selection = useEditorState({ editor, selector: ({ editor }) => editor.state.selection })
+  // Each new selection this reader makes opens on its marks; another editor's typing, which
+  // moves it, leaves the link field open.
   useEffect(() => {
-    if (selection) setMode("marks")
-  }, [selection])
+    const reset = ({ transaction }: { readonly transaction: Transaction }) => {
+      if (transaction.selectionSet && !transaction.getMeta(ySyncPluginKey)) setMode("marks")
+    }
+    editor.on("transaction", reset)
+    return () => {
+      editor.off("transaction", reset)
+    }
+  }, [editor])
   useEffect(() => {
     if (linkRequest > 0) setMode("link")
   }, [linkRequest])

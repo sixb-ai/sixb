@@ -88,15 +88,20 @@ export const CodeBlockWithMeta = CodeBlock.extend({
   },
 })
 
-/** A header cell, with its column's alignment. */
+/**
+ * A header cell, with its column's alignment. A Markdown cell holds one line of words: its
+ * paragraphs, each a line, and no other block.
+ */
 const AlignedHeader = TableHeader.extend({
+  content: "paragraph+",
   addAttributes() {
     return { ...this.parent?.(), ...align }
   },
 })
 
-/** A body cell, with its column's alignment. */
+/** A body cell, with its column's alignment, and words alone. */
 const AlignedCell = TableCell.extend({
+  content: "paragraph+",
   addAttributes() {
     return { ...this.parent?.(), ...align }
   },

@@ -134,7 +134,10 @@ Your changes are saved as you make them, and everyone's are merged. See [Edit li
 | Together | Everyone editing sees the others' carets and selections, named, in their colors |
 
 It reads as it always did: its first heading is the title and the paragraph after it the lede, in
-one centered column. A footnote or raw HTML it does not edit is kept as written.
+one centered column, with embedded artifacts in place. What it does not edit, front matter, a
+footnote, raw HTML, or a list mixing to-dos and plain items, is kept as written. Once someone
+edits it, `document.md` is written as the editor writes Markdown (`-` bullets, `*emphasis*`, `#`
+headings), and an Agent's later changes merge with theirs whichever way it writes them.
 
 | In a sheet | |
 | --- | --- |

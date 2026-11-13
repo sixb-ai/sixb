@@ -649,6 +649,8 @@ function ArtifactHeader({
   // A canvas held live is edited live, not as a draft the header saves: until its document holds
   // it, Edit waits. Only one the server never holds live is edited as a draft.
   const heldLive = !!liveView && !liveView.state.left
+  // A Markdown document held live is typed into as it is shown: there is no editing to start.
+  const typedInto = artifact.kind === "document" && !isDesignedDocument(version)
   if (liveView?.editing) {
     return <LiveEditBar chrome={chrome} detail={detail} version={version} liveView={liveView} />
   }
@@ -756,7 +758,7 @@ function ArtifactHeader({
     >
       {live ? <RefreshButton version={version} /> : null}
       {heldLive ? (
-        liveView.editable ? (
+        liveView.editable && !typedInto ? (
           <Button
             size="sm"
             variant="ghost"
