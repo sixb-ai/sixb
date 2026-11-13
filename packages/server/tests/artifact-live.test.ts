@@ -611,9 +611,9 @@ describe("an artifact edited live", () => {
     ])
   })
 
-  // Reproduce by refusing every kind but a canvas in LiveRoom.open: the designed document is
-  // left as not_live too.
-  test("refuses whoever may not read the artifact, and one not edited live, but opens a designed document", async () => {
+  // Reproduce by refusing every kind but a canvas in LiveRoom.open: both documents are left as
+  // not_live too.
+  test("refuses whoever may not read the artifact, and one not edited live, but opens documents", async () => {
     const context = await setup()
     const rooms = context.rooms()
     const stranger = new Client(rooms, context.olivia, "art_0000000000", "x-1")
@@ -623,15 +623,23 @@ describe("an artifact edited live", () => {
     ])
 
     const { artifact } = await context.marie.artifacts.create({
+      kind: "file",
+      title: "Regions",
+      files: await context.put({ "regions.csv": "region,visits\nNorth,1284\n" }),
+    })
+    const file = new Client(rooms, context.marie, artifact.id, "marie-2")
+    await file.join()
+    expect(file.messages).toEqual([{ type: "left", artifactId: artifact.id, reason: "not_live" }])
+
+    const plan = await context.marie.artifacts.create({
       kind: "document",
       title: "Plan",
       files: await context.put({ "document.md": "# Plan\n" }),
     })
-    const document = new Client(rooms, context.marie, artifact.id, "marie-2")
-    await document.join()
-    expect(document.messages).toEqual([
-      { type: "left", artifactId: artifact.id, reason: "not_live" },
-    ])
+    const notes = new Client(rooms, context.marie, plan.artifact.id, "marie-4")
+    await notes.join()
+    await notes.settle()
+    expect(notes.messages[0]).toMatchObject({ type: "joined", access: "edit" })
 
     const designed = await context.marie.artifacts.create({
       kind: "document",
