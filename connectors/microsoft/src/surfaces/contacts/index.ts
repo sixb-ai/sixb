@@ -1,3 +1,4 @@
+import type { ClientStateSource } from "../../client-state"
 import { MicrosoftConfigurationError } from "../../errors"
 import type { MicrosoftHttp } from "../../http"
 import type { ContactSubscribeOptions } from "../../types/contacts"
@@ -18,7 +19,10 @@ export interface ContactsSurface {
   /** Notifies about every personal contact in the mailbox, in any folder. */
   subscribe(mailbox: string, options: ContactSubscribeOptions): Promise<MicrosoftSubscription>
 }
-export function contactsSurface(http: MicrosoftHttp, webhookSecret?: string): ContactsSurface {
+export function contactsSurface(
+  http: MicrosoftHttp,
+  clientState?: ClientStateSource
+): ContactsSurface {
   return {
     items: contactItemsResource(http),
     folders: contactFoldersResource(http),
@@ -32,7 +36,7 @@ export function contactsSurface(http: MicrosoftHttp, webhookSecret?: string): Co
         )
       return subscribeOutlook(
         http,
-        webhookSecret,
+        clientState,
         "contact",
         `${mailboxPath(mailbox)}/contacts`,
         options
