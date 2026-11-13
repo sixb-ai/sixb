@@ -803,13 +803,13 @@ export function createArtifactsRuntime(
     })
   }
 
-  /** A live room's write-back: only a canvas or a designed document keeps one to merge it into. */
+  /** A live room's write-back: only a canvas or a document keeps one to merge it into. */
   const writeLive = async (
     artifactId: string,
     input: LiveArtifactWrite
   ): Promise<PublishedArtifact> => {
     const artifact = await requireUpdatable(artifactId)
-    if (!keepsDocument(artifact.kind, input.files)) {
+    if (!keepsDocument(artifact.kind)) {
       throw invalidArtifact(
         `Artifact '${artifactId}' is a ${artifact.kind} that is not edited live: publish its files.`
       )

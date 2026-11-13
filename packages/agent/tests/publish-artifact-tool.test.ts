@@ -391,7 +391,8 @@ async function refusal(
 async function publishElsewhere(
   artifactId: string,
   markdown: string,
-  origin?: { readonly threadId: string; readonly runId: string }
+  origin?: { readonly threadId: string; readonly runId: string },
+  kind: "document" | "page" = "document"
 ): Promise<void> {
   const latest = await storage.artifacts.get({ projectId, id: artifactId })
   if (!latest) throw new Error(`Artifact '${artifactId}' was not stored.`)
@@ -402,12 +403,12 @@ async function publishElsewhere(
   await storage.artifacts.publish({
     projectId,
     artifactId,
-    kind: "document",
+    kind,
     version: {
       title: "Plan",
-      entry: "document.md",
-      files: [{ path: "document.md", file }],
-      outline: { kind: "document", headings: [] },
+      entry: kind === "page" ? "index.html" : "document.md",
+      files: [{ path: kind === "page" ? "index.html" : "document.md", file }],
+      outline: kind === "page" ? { kind: "page" } : { kind: "document", headings: [] },
       references: [],
       author: owner,
       ...(origin ? { origin } : {}),
@@ -1468,11 +1469,11 @@ describe("publish_artifact", () => {
   test("refuses to update over a save made during the run, and installs it", async () => {
     // Reproduce by publishing without the installed revision as base: the Agent's update replaces
     // the person's save unseen. Reproduce the install by skipping it on the refusal: the copy
-    // still holds revision 1.
-    write("work/plan/document.md", "# Plan\n\nDraft.\n")
+    // still holds revision 1. A page, as a document or a canvas would merge both instead.
+    write("work/plan/index.html", "<!doctype html><title>Plan</title><p>Draft.</p>")
     const { artifactId } = (await publish({
       path: "work/plan",
-      kind: "document",
+      kind: "page",
       title: "Plan",
     })) as {
       artifactId: string
@@ -1480,9 +1481,14 @@ describe("publish_artifact", () => {
     const installed = install()
     await installed
 
-    await publishElsewhere(artifactId, "# Plan\n\nThe person's edit.\n")
+    await publishElsewhere(
+      artifactId,
+      "<!doctype html><title>Plan</title><p>The person's edit.</p>",
+      undefined,
+      "page"
+    )
 
-    write("work/plan/document.md", "# Plan\n\nThe Agent's edit.\n")
+    write("work/plan/index.html", "<!doctype html><title>Plan</title><p>The Agent's edit.</p>")
     const { version } = tools({ installed })
     const error = await version
       .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
@@ -1496,13 +1502,18 @@ describe("publish_artifact", () => {
 
     // The copy and the manifest now hold the person's version, marked as edited.
     const copy = `.sixb/agent/artifacts/${artifactId}`
-    expect(read(`${copy}/document.md`)).toBe("# Plan\n\nThe person's edit.\n")
+    expect(read(`${copy}/index.html`)).toBe(
+      "<!doctype html><title>Plan</title><p>The person's edit.</p>"
+    )
     expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
       expect.objectContaining({ id: artifactId, version: 1, revision: 2, edited: true }),
     ])
 
     // Built on that revision, the next update goes through.
-    write("work/plan/document.md", "# Plan\n\nThe person's edit, then the Agent's.\n")
+    write(
+      "work/plan/index.html",
+      "<!doctype html><title>Plan</title><p>The person's edit, then the Agent's.</p>"
+    )
     expect(
       await publishVersion({ id: artifactId, path: "work/plan", title: "Plan" }, { installed })
     ).toMatchObject({ artifactId, version: 1, revision: 3 })
@@ -1518,15 +1529,25 @@ describe("publish_artifact", () => {
     )
 
     // Published from work/plan since, that folder takes what a refusal installs, as the copy does.
-    await publishElsewhere(artifactId, "# Plan\n\nThe person's second edit.\n")
-    write("work/plan/document.md", "# Plan\n\nThe Agent's second edit.\n")
+    await publishElsewhere(
+      artifactId,
+      "<!doctype html><title>Plan</title><p>The person's second edit.</p>",
+      undefined,
+      "page"
+    )
+    write(
+      "work/plan/index.html",
+      "<!doctype html><title>Plan</title><p>The Agent's second edit.</p>"
+    )
     const refused = await version
       .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
       .catch((error: unknown) => error)
     expect(version.errorText(refused)).toContain(
       "and written into work/plan, the folder you published it from"
     )
-    expect(read("work/plan/document.md")).toBe("# Plan\n\nThe person's second edit.\n")
+    expect(read("work/plan/index.html")).toBe(
+      "<!doctype html><title>Plan</title><p>The person's second edit.</p>"
+    )
   })
 
   test("lays a deck out with the files it publishes, and only those", async () => {

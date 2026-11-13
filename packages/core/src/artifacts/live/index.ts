@@ -5,6 +5,12 @@
  */
 
 export {
+  type BlockMark,
+  type BlockNode,
+  blocksToMarkdown,
+  markdownToBlocks,
+} from "./blocks"
+export {
   annotateBoard,
   applyBoardEditToText,
   type BoardChange,

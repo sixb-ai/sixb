@@ -2,6 +2,7 @@ import * as Y from "yjs"
 import type { FileRef } from "../../blob-storage/types"
 import { CANVAS_FILE, type CanvasItem, formatCanvas, parseCanvas } from "../canvas"
 import type { ArtifactKind } from "../kinds"
+import { fragmentMarkdown, markdownFragment, patchFragment } from "./blocks"
 import { diffSequences, diffText, interleave, mergeSequences, mergeText } from "./diff"
 
 // An artifact's open version as a Yjs document, which everyone editing it changes at once:
@@ -15,7 +16,9 @@ import { diffSequences, diffText, interleave, mergeSequences, mergeText } from "
 //   items: Y.Map<id, Y.Map<key, value>>   order: Y.Array<id>
 //
 // with each item's words (`text`, `title`, `label`) as `Y.Text`. Two people moving two items, or
-// one moving an item while another types in it, change different keys and never conflict.
+// one moving an item while another types in it, change different keys and never conflict. A
+// Markdown document holds `document.md` as the blocks its editor edits, a `Y.XmlFragment`
+// (`./blocks`), so typing in one paragraph and moving another merge as block edits do.
 
 /** One file of an artifact as the live layer reads it: its text, or its stored bytes. */
 export type LiveFile = { readonly text: string } | { readonly file: FileRef }
@@ -53,9 +56,13 @@ export function isLiveTextPath(path: string): boolean {
 /** The item keys of a canvas held as `Y.Text`: words that people type. */
 const CANVAS_TEXT_KEYS: ReadonlySet<string> = new Set(["text", "title", "label"])
 
+/** A Markdown document's entry, which it holds as blocks. */
+const MARKDOWN_ENTRY = "document.md"
+
 /** The file a kind holds as a structure, if it holds one. */
 function structuredPath(kind: ArtifactKind): string | undefined {
-  return kind === "canvas" ? CANVAS_FILE : undefined
+  if (kind === "canvas") return CANVAS_FILE
+  return kind === "document" ? MARKDOWN_ENTRY : undefined
 }
 
 /**
@@ -97,6 +104,7 @@ export function documentFiles(doc: Y.Doc): Map<string, LiveFile> {
   doc.getMap<unknown>(LIVE_FILES).forEach((entry, path) => {
     if (entry instanceof Y.Text) files.set(path, { text: entry.toString() })
     else if (entry instanceof Y.Map) files.set(path, { text: canvasText(entry) })
+    else if (entry instanceof Y.XmlFragment) files.set(path, { text: fragmentMarkdown(entry) })
     else files.set(path, { file: entry as FileRef })
   })
   return new Map([...files].sort(([left], [right]) => (left < right ? -1 : 1)))
@@ -147,6 +155,10 @@ export function mergeIntoDocument(
       const currentText = textOf(current)
       const baseText = before && "text" in before ? before.text : currentText
 
+      if (current instanceof Y.XmlFragment) {
+        patchFragment(current, mergeText(baseText ?? "", currentText ?? "", file.text))
+        continue
+      }
       if (path === structured) {
         if (current instanceof Y.Map && mergeCanvas(current, baseText ?? "", file.text)) continue
       } else if (current instanceof Y.Text) {
@@ -166,6 +178,7 @@ export function mergeIntoDocument(
 function entryOf(kind: ArtifactKind, path: string, file: LiveFile): unknown {
   if ("file" in file) return { ...file.file }
   if (path === structuredPath(kind)) {
+    if (kind === "document") return markdownFragment(file.text)
     const parsed = parseCanvas(file.text)
     if ("canvas" in parsed) return canvasStructure(parsed.canvas.items)
   }
@@ -175,6 +188,7 @@ function entryOf(kind: ArtifactKind, path: string, file: LiveFile): unknown {
 function textOf(entry: unknown): string | undefined {
   if (entry instanceof Y.Text) return entry.toString()
   if (entry instanceof Y.Map) return canvasText(entry)
+  if (entry instanceof Y.XmlFragment) return fragmentMarkdown(entry)
   return undefined
 }
 
