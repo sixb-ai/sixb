@@ -6,6 +6,7 @@ export type ArtifactRequestErrorCode =
   | "artifact_moved"
   | "comment_not_found"
   | "comments_full"
+  | "holder_not_found"
   | "invalid_artifact"
   | "invalid_comment"
   | "invalid_state"

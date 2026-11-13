@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress } from "../../address"
+import type { DocumentMark } from "../../frames/document-data"
 import { decodeHtmlEntities } from "../../html"
 import { ARTIFACT_LIMITS } from "../../limits"
 import { createHeadingSlugger, type DocumentHeading, type DocumentOutline } from "../../outline"
@@ -22,6 +23,8 @@ export async function validateDocument(
   readonly entry: string
   readonly outline: DocumentOutline
   readonly references: readonly FoundReference[]
+  /** A designed document's fields and repeated elements. */
+  readonly marks?: readonly DocumentMark[]
 }> {
   const markdown = files.find((file) => file.path === DOCUMENT_ENTRY)
   const designed = files.some((file) => file.path === DOCUMENT_HTML_ENTRY)

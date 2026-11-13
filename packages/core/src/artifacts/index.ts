@@ -102,6 +102,7 @@ export {
   type CanvasOutlineItem,
   createHeadingSlugger,
   type DocumentHeading,
+  type DocumentHolder,
   type DocumentOutline,
   type FileOutline,
   type SheetOutline,

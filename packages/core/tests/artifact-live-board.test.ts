@@ -71,6 +71,22 @@ describe("a board's elements", () => {
     )
   })
 
+  test("take no typing where a designed document shows live data: a field, the text around it, a repeated element", () => {
+    // Reproduce by dropping isLive and holdsField from kindOf: the field and its paragraph are
+    // text, and typing into either writes over a value the document shows live.
+    const kinds = boardElements(
+      `<p>Fee <span data-sixb-field="amount">$4,000</span> a month.</p><b>Plain</b>
+       <ul><li data-sixb-each="timeline"><b data-sixb-field="label">Kickoff</b></li></ul>`
+    ).map(({ address, kind }) => [address, kind])
+    expect(kinds).toEqual([
+      ["body>p:0", "box"],
+      ["body>p:0>span:0", "whole"],
+      ["body>b:0", "text"],
+      ["body>ul:0", "box"],
+      ["body>ul:0>li:0", "whole"],
+    ])
+  })
+
   test("are addressed the same in a board with no body tag, and nowhere in its head", () => {
     // An implied body is no element of the source: its children are.
     expect(boardElements("<h1>Hi</h1><p>There</p>").map(({ address }) => address)).toEqual([

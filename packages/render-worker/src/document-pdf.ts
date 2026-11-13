@@ -15,7 +15,6 @@ import {
 } from "@sixb/core/internal/artifacts/frames"
 import {
   DOCUMENT_PDF_JOB,
-  documentPdf,
   documentPdfKey,
   MAX_DOCUMENT_PDF_BYTES,
 } from "@sixb/core/internal/artifacts/publish"
@@ -64,15 +63,15 @@ export async function printDocumentPdf(input: {
   const artifacts = host.storage.artifacts
   if (!artifacts || !host.sandboxes) return
 
-  const { artifactId, version: number, renderKey } = job.payload
+  const { artifactId, version: number, renderKey, document } = job.payload
   const version = await artifacts.getVersion({ projectId: host.id, artifactId, version: number })
-  if (!version || documentPdfKey(version) !== renderKey) return
-  if (await documentPdf(artifacts, version)) return
+  if (!version || documentPdfKey(version, document) !== renderKey) return
+  if (await artifacts.getPdf({ projectId: host.id, renderKey })) return
 
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(DOCUMENT_PDF_JOB.timeoutMs)])
   const sandbox = await host.sandboxes.create({ environment: {}, network: PRINT_NETWORK, signal })
   try {
-    const printed = await print(sandbox, version, host.blobStorage, signal)
+    const printed = await print(sandbox, version, document, host.blobStorage, signal)
     await artifacts.putPdf({ projectId: host.id, renderKey, ...printed, createdAt: new Date() })
   } finally {
     await sandbox.destroy().catch((error: unknown) => {
@@ -102,12 +101,14 @@ export async function failDocumentPdf(input: {
 }
 
 /**
- * Prints the version in `sandbox`, a blank one created for it, and stores the PDF, named after its
+ * Prints the version in `sandbox`, a blank one created for it, with `document` for its entry when
+ * given: its markup with the values its fields read written in. Stores the PDF, named after its
  * title. When nothing printed, says why, as whoever asked for it hears it.
  */
 async function print(
   sandbox: Sandbox,
   version: ArtifactVersionRecord,
+  document: FileRef | undefined,
   blobStorage: DocumentPdfHost["blobStorage"],
   signal: AbortSignal
 ): Promise<{ readonly file: FileRef; readonly pages: number } | { readonly failure: string }> {
@@ -118,21 +119,22 @@ async function print(
 
   const site = posix.resolve(sandbox.workingDirectory, SITE)
   const script = posix.resolve(sandbox.workingDirectory, SCRIPT)
+  const read = async (blobId: string) =>
+    new Uint8Array(await new Response(await blobStorage.open(blobId)).arrayBuffer())
   const files = await Promise.all(
     version.files.map(async (file) => {
-      const bytes = new Uint8Array(
-        await new Response(await blobStorage.open(file.file.blobId)).arrayBuffer()
-      )
+      const entry = file.path === version.entry
+      // The markup with the values written in, which it prints instead of its own.
+      const bytes = await read(entry && document ? document.blobId : file.file.blobId)
       // The entry as its frame serves it: with the kit, the runtime, and its paper.
-      const contents =
-        file.path === version.entry
-          ? injectFrameAssets(
-              rewriteFrameReferences(new TextDecoder().decode(bytes), [], file.path),
-              "document",
-              file.path,
-              outline.paper
-            )
-          : bytes
+      const contents = entry
+        ? injectFrameAssets(
+            rewriteFrameReferences(new TextDecoder().decode(bytes), [], file.path),
+            "document",
+            file.path,
+            outline.paper
+          )
+        : bytes
       return { path: posix.join(site, file.path), contents }
     })
   )

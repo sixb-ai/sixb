@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 214" width="672" height="214" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#5b6d73">
+  <!-- Hours, Eastern time: x = 24 + minutes after 12:30 PM × 1.6 -->
+  <g stroke="#dfe5e7" stroke-width="1">
+    <line x1="72" x2="72" y1="22" y2="178"/>
+    <line x1="168" x2="168" y1="22" y2="178"/>
+    <line x1="264" x2="264" y1="22" y2="178"/>
+    <line x1="360" x2="360" y1="22" y2="178"/>
+    <line x1="456" x2="456" y1="22" y2="178"/>
+    <line x1="552" x2="552" y1="22" y2="178"/>
+    <line x1="648" x2="648" y1="22" y2="178"/>
+  </g>
+  <line x1="24" x2="648" y1="178" y2="178" stroke="#9fb0b5"/>
+  <g text-anchor="middle">
+    <text x="72" y="196">1 PM</text>
+    <text x="168" y="196">2 PM</text>
+    <text x="264" y="196">3 PM</text>
+    <text x="360" y="196">4 PM</text>
+    <text x="456" y="196">5 PM</text>
+    <text x="552" y="196">6 PM</text>
+    <text x="648" y="196">7 PM</text>
+  </g>
+
+  <!-- The alarm -->
+  <line x1="36.8" x2="36.8" y1="22" y2="178" stroke="#B45A2B" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="36.8" y="14" text-anchor="middle" fill="#B45A2B" font-weight="700">Alarm 12:38</text>
+
+  <!-- Response -->
+  <text x="44" y="36" fill="#132A33" font-weight="700">Response target · 45 min</text>
+  <rect x="36.8" y="43" width="72" height="14" rx="2" fill="#d4e7ea"/>
+  <circle cx="56" cy="50" r="5" fill="#2F7280" stroke="#ffffff" stroke-width="1.5"/>
+  <text x="118" y="54" fill="#2F7280" font-weight="700">Acknowledged in 12 min</text>
+
+  <!-- Resolution -->
+  <text x="44" y="84" fill="#132A33" font-weight="700">Resolution target · 4 hours</text>
+  <rect x="36.8" y="91" width="384" height="14" rx="2" fill="#d4e7ea"/>
+  <line x1="420.8" x2="420.8" y1="87" y2="109" stroke="#2F7280" stroke-width="1.5"/>
+  <text x="430" y="102">4:38, paused while you authorize</text>
+
+  <!-- Field work -->
+  <text x="44" y="132" fill="#132A33" font-weight="700">In the field</text>
+  <path d="M228.8 139 l6 7 l-6 7 l-6 -7 z" fill="#132A33"/>
+  <text x="228.8" y="168" text-anchor="middle">Dispatched 2:38</text>
+  <rect x="324.8" y="139" width="192" height="14" rx="2" fill="#2F7280"/>
+  <text x="332" y="149.5" fill="#ffffff" font-weight="700">On site · diagnosis</text>
+  <circle cx="641.6" cy="146" r="6" fill="#B45A2B" stroke="#ffffff" stroke-width="1.5"/>
+  <text x="632" y="168" text-anchor="end" fill="#B45A2B" font-weight="700">Quote Q-881 · 6:56</text>
+</svg>

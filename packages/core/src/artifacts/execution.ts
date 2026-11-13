@@ -1,7 +1,8 @@
 import { createAgentThreadAccessRule } from "../agents/thread-access"
 import { type Principal, SYSTEM_PRINCIPAL } from "../auth"
-import { isRuntimeAllowed } from "../authorization"
+import { AuthorizationError, isRuntimeAllowed } from "../authorization"
 import type { BlobStorage, FileRef } from "../blob-storage/types"
+import { computeBlobDigest } from "../blob-storage/utils"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { type AuthorizedObjectReader, objectReadersIn } from "../execution/authorized-object-reader"
 import type { SharedAccessDelegationRef } from "../execution/types"
@@ -30,15 +31,18 @@ import {
   type HolderAccess,
 } from "./access"
 import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
+import { documentMarks, fillDocumentHtml } from "./document-fill"
 import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
+import { type DocumentQueryResult, documentData } from "./frames/document-data"
 import { type ArtifactHolding, readableHoldings } from "./holders"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { firstArtifactDocument, keepsDocument } from "./live/state"
+import type { DocumentHolder } from "./outline"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
-import { documentPdf, documentPdfKey, requestDocumentPdf } from "./publish/pdf"
+import { documentPdfKey, requestDocumentPdf } from "./publish/pdf"
 import {
   type BoardPreviewRequester,
   boardsReadLiveData,
@@ -54,10 +58,12 @@ import {
   storeArtifactVersion,
 } from "./publish/publish"
 import { type ArtifactQueryChecker, createArtifactQueryChecker } from "./publish/queries"
+import { DOCUMENT_HTML_ENTRY } from "./publish/validate/document-html"
 import {
   ARTIFACT_QUERY_KINDS,
   type ArtifactQueryResult,
   artifactQueryPath,
+  DOCUMENT_HOLDER_QUERY,
   isArtifactQueryName,
   parseArtifactQuery,
 } from "./queries"
@@ -198,16 +204,25 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   holders(artifactId: string): Promise<ArtifactHolders | null>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
   /**
-   * A designed document's PDF, printed as its stylesheets' `@page` rule lays it out: `ready` with
-   * its file once printed, else `printing`, having asked the render worker to print it, which takes
-   * a few seconds. `failed` with why when it could not be printed; `retry` asks again instead.
+   * A designed document's PDF, printed as its stylesheets' `@page` rule lays it out, with the
+   * values its fields read as the caller reads them: `ready` with its file once printed, else
+   * `printing`, having asked the render worker to print it, which takes a few seconds; `print:
+   * false` reads it without asking. `failed` with why when it could not be printed; `retry` asks
+   * again instead. A document that shows live data answers with a `key` naming the values it
+   * prints: asked again with it, it reads what that first ask printed, whatever the values are by
+   * then, and asks nothing more.
    * Whoever reads the artifact may ask. `null` when the caller cannot read the artifact or it has
    * no such version. Throws `invalid_artifact` for a version that is not a designed document, and
    * `pdf_unavailable` in a project without sandboxes, where nothing prints.
    */
   pdf(
     artifactId: string,
-    options?: { readonly version?: number | "latest"; readonly retry?: boolean }
+    options?: {
+      readonly version?: number | "latest"
+      readonly retry?: boolean
+      readonly print?: boolean
+      readonly key?: string
+    }
   ): Promise<ArtifactPdf | null>
   /**
    * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
@@ -257,7 +272,7 @@ export interface ArtifactStateRuntime {
 }
 
 /** A designed document's PDF: its file once printed, being printed, or why it could not be. */
-export type ArtifactPdf =
+export type ArtifactPdf = (
   | {
       readonly status: "ready"
       readonly file: FileRef
@@ -266,6 +281,10 @@ export type ArtifactPdf =
     }
   | { readonly status: "printing" }
   | { readonly status: "failed"; readonly reason: string }
+) & {
+  /** The values a document that shows live data prints, to ask for that PDF again with. */
+  readonly key?: string
+}
 
 /** The objects that hold an artifact, as the caller reads them. */
 export interface ArtifactHolders {
@@ -503,6 +522,126 @@ export function createArtifactsRuntime(
 
   const rule = (): ArtifactAccessRule => createRuntimeArtifactAccessRule(runtime)
   const checkQuery = createArtifactQueryChecker(runtime)
+
+  /** Runs one of a version's queries, or a designed document's holder, as the caller. */
+  const runQuery = async (
+    read: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
+    name: string
+  ): Promise<ArtifactQueryResult> => {
+    // A file artifact is delivered as it is: its one file is never run.
+    const { artifact, version } = read
+    const holder = version.outline.kind === "document" ? version.outline.holder : undefined
+
+    // What a designed document's fields read of the object that holds it: that object, with
+    // the objects each link they read through reaches.
+    if (holder && name === DOCUMENT_HOLDER_QUERY) {
+      const refs: ObjectQuery = { kind: "refs", refs: [await requireHolder(artifact.id, holder)] }
+      const expansions = holder.links.map((linkId) => ({
+        linkId,
+        direction: "outgoing" as const,
+      }))
+      return runArtifactQuery(runtime, name, {
+        kind: "objects",
+        query: expansions.length > 0 ? { kind: "expand", input: refs, expansions } : refs,
+      })
+    }
+
+    const file =
+      ARTIFACT_QUERY_KINDS.includes(artifact.kind) && isArtifactQueryName(name)
+        ? version.files.find((candidate) => candidate.path === artifactQueryPath(name))
+        : undefined
+    if (!file) {
+      throw new ArtifactRequestError(
+        "query_not_found",
+        `[Sixb] Version ${version.version} of artifact '${artifact.id}' has no query '${name}'.`
+      )
+    }
+
+    const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
+    const parse = (start?: ObjectQuery) =>
+      parseArtifactQuery(file.path, text, start ? { holder: start } : {})
+    let parsed = parse(holder ? { kind: "refs", refs: [] } : undefined)
+    // A query that starts from the holder is read again from the one the caller reads.
+    if (holder && "usesHolder" in parsed && parsed.usesHolder) {
+      parsed = parse({ kind: "refs", refs: [await requireHolder(artifact.id, holder)] })
+    }
+    if ("error" in parsed) {
+      throw new ArtifactRequestError("query_invalid", `[Sixb] ${parsed.error}`)
+    }
+
+    return runArtifactQuery(runtime, name, parsed.query)
+  }
+
+  /**
+   * A designed document's markup with the values its fields read written in, as the caller reads
+   * them, and no field left marked; null when it shows no live data. What the caller cannot read
+   * keeps its written text.
+   */
+  const writtenIn = async (read: {
+    readonly artifact: ArtifactRecord
+    readonly version: ArtifactVersionRecord
+  }): Promise<string | null> => {
+    const { version } = read
+    const entry = version.files.find((file) => file.path === DOCUMENT_HTML_ENTRY)
+    if (version.outline.kind !== "document" || !entry) return null
+
+    const html = await readArtifactText(blobStorage, entry, ARTIFACT_LIMITS.maxDocumentBytes)
+    const reads = documentData().reads(documentMarks(html))
+    if (!reads.holder && reads.queries.length === 0) return null
+
+    // What the caller may not read, or no one object holds, keeps its written text; anything
+    // else that fails is thrown, never written in as text that stays.
+    const answer = (name: string) =>
+      runQuery(read, name).then(
+        (result) => result as DocumentQueryResult,
+        (error: unknown) => {
+          if (error instanceof AuthorizationError || error instanceof ArtifactRequestError) {
+            return undefined
+          }
+          throw error
+        }
+      )
+    const [holder, ...results] = await Promise.all([
+      reads.holder ? answer(DOCUMENT_HOLDER_QUERY) : undefined,
+      ...reads.queries.map(answer),
+    ])
+    const queries: Record<string, DocumentQueryResult> = {}
+    reads.queries.forEach((name, index) => {
+      const result = results[index]
+      if (result) queries[name] = result
+    })
+    const row = holder?.objects?.[0]
+    return fillDocumentHtml(html, { ...(row ? { holder: row } : {}), queries }, { plain: true })
+  }
+
+  /**
+   * The one object of the type a designed document names that holds it, as the caller reads it.
+   * Throws `holder_not_found` when none does, or several do: its fields keep their written text.
+   */
+  const requireHolder = async (
+    artifactId: string,
+    holder: DocumentHolder
+  ): Promise<{ readonly objectTypeId: string; readonly primaryId: string }> => {
+    const found = new Set<string>()
+    const holdings = readableHoldings({
+      runtime,
+      reader: runtime.objectReader,
+      objects: runtime.storage.objects,
+      artifactId,
+    })
+    for await (const holding of holdings) {
+      if (holding.objectTypeId === holder.objectTypeId) found.add(holding.primaryId)
+      if (found.size > 1) break
+    }
+    const [primaryId] = found
+    if (found.size !== 1 || primaryId === undefined) {
+      throw new ArtifactRequestError(
+        "holder_not_found",
+        `[Sixb] No one ${holder.objectTypeId} you read holds artifact '${artifactId}', so its fields show what is written in them.`
+      )
+    }
+    return { objectTypeId: holder.objectTypeId, primaryId }
+  }
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
     if (!options.rendersInSandboxes || !storage) return
@@ -727,12 +866,36 @@ export function createArtifactsRuntime(
     },
 
     async freeze(artifactId, input = {}) {
+      // A designed document's fields are written in first, as the person freezing reads them: the
+      // version it closes is plain HTML that never changes.
+      let baseRevision = input.baseRevision
+      const open = await readVersion(artifactId, "latest")
+      const filled = open && !open.version.frozenAt ? await writtenIn(open) : null
+      if (open && filled !== null) {
+        await requireUpdatable(artifactId)
+        const document = await blobStorage.put({
+          body: new TextEncoder().encode(filled),
+          fileName: DOCUMENT_HTML_ENTRY,
+          mediaType: "text/html",
+        })
+        const written = await write({
+          artifactId,
+          kind: "document",
+          files: open.version.files.map((file) =>
+            file.path === DOCUMENT_HTML_ENTRY ? { path: file.path, file: document } : file
+          ),
+          baseRevision: baseRevision ?? open.version.revision,
+          title: open.version.title,
+        })
+        baseRevision = written.version.revision
+      }
+
       const frozenAt = new Date()
       const frozen = await change(artifactId, (storage, author) =>
         storage.freeze({
           projectId: runtime.projectId,
           artifactId,
-          ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+          ...(baseRevision === undefined ? {} : { baseRevision }),
           frozenAt,
           frozenBy: author,
         })
@@ -852,11 +1015,25 @@ export function createArtifactsRuntime(
           `Version ${version.version} of '${artifactId}' is not a designed document, which alone prints to PDF.`
         )
       }
+      // A document that shows live data prints the values the caller reads, written in, and its
+      // key names them; a frozen one holds them already. Asked with its key, it is the PDF of
+      // those values, and they are not read again.
+      const { key } = pdfOptions
+      const filled = key !== undefined || version.frozenAt ? null : await writtenIn(read)
+      const printed = filled === null ? null : new TextEncoder().encode(filled)
+      const digest = key ?? (printed ? computeBlobDigest(printed) : undefined)
+      const keyed = digest ? { key: digest } : {}
+      const renderKey = documentPdfKey(version, digest ? { digest } : undefined) as string
       const storage = requireStorage()
-      const kept = await documentPdf(storage, version)
-      if (kept && !("failure" in kept))
-        return { status: "ready", file: kept.file, pages: kept.pages }
-      if (kept && !pdfOptions.retry) return { status: "failed", reason: kept.failure }
+      const kept = await storage.getPdf({ projectId: runtime.projectId, renderKey })
+      if (kept && !("failure" in kept)) {
+        return { status: "ready", file: kept.file, pages: kept.pages, ...keyed }
+      }
+      if (kept && (!pdfOptions.retry || key !== undefined)) {
+        return { status: "failed", reason: kept.failure, ...keyed }
+      }
+      // The ask that gave the key asked for it to be printed.
+      if (pdfOptions.print === false || key !== undefined) return { status: "printing", ...keyed }
       if (!options.rendersInSandboxes) {
         throw new ArtifactRequestError(
           "pdf_unavailable",
@@ -864,34 +1041,25 @@ export function createArtifactsRuntime(
         )
       }
 
-      await requestDocumentPdf({ storage, queue: runtime.queues.renders }, version)
-      return { status: "printing" }
+      const document = printed
+        ? await blobStorage.put({
+            body: printed,
+            fileName: DOCUMENT_HTML_ENTRY,
+            mediaType: "text/html",
+          })
+        : undefined
+      await requestDocumentPdf({ storage, queue: runtime.queues.renders }, version, {
+        ...(document ? { document } : {}),
+        retry: pdfOptions.retry === true,
+      })
+      return { status: "printing", ...keyed }
     },
 
     async query(artifactId, name, options = {}) {
       const read = await readVersion(artifactId, options.version ?? "latest")
       if (!read) return null
 
-      // A file artifact is delivered as it is: its one file is never run.
-      const { artifact, version } = read
-      const file =
-        ARTIFACT_QUERY_KINDS.includes(artifact.kind) && isArtifactQueryName(name)
-          ? version.files.find((candidate) => candidate.path === artifactQueryPath(name))
-          : undefined
-      if (!file) {
-        throw new ArtifactRequestError(
-          "query_not_found",
-          `[Sixb] Version ${version.version} of artifact '${artifactId}' has no query '${name}'.`
-        )
-      }
-
-      const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
-      const parsed = parseArtifactQuery(file.path, text)
-      if ("error" in parsed) {
-        throw new ArtifactRequestError("query_invalid", `[Sixb] ${parsed.error}`)
-      }
-
-      return runArtifactQuery(runtime, name, parsed.query)
+      return runQuery(read, name)
     },
 
     async listVersions(artifactId, input = {}) {

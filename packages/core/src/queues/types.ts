@@ -246,7 +246,7 @@ export interface AgentArtifactPreviewsRequestedQueueJob
 
 /**
  * Someone asked for a designed document's PDF: the render worker prints the version in a blank
- * sandbox of the project. One job per artifact, which asking again replaces.
+ * sandbox of the project. One job per PDF, by its render key.
  */
 export interface ArtifactPdfRequestedQueueJob
   extends QueueJob<
@@ -259,6 +259,11 @@ export interface ArtifactPdfRequestedQueueJob
        * nothing, and the next ask prints what it holds then.
        */
       readonly renderKey: string
+      /**
+       * The `document.html` it prints instead of the version's own: with the values its fields
+       * read, as whoever asked reads them, written in.
+       */
+      readonly document?: FileRef
     }
   > {}
 

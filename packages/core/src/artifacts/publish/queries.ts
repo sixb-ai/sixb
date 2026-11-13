@@ -24,10 +24,12 @@ import {
   type ArtifactQuery,
   artifactQueryName,
   type CheckedArtifactQuery,
+  DOCUMENT_HOLDER_QUERY,
   parseArtifactQuery,
 } from "../queries"
 import { describeArtifactQuery } from "../run-query"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "./files"
+import { DOCUMENT_HTML_ENTRY } from "./validate/document-html"
 
 /**
  * Admits a query as the version's author: it throws what running it as them would throw, and
@@ -247,12 +249,16 @@ function outermostProject(
  * its author through `checker`, and returns what each check learned by query name, for the kind's
  * own check. Fails closed: a version that holds a query is refused without one. A file artifact is
  * delivered as it is, so its one file is never read as a query.
+ *
+ * A designed document's query may start from the object that holds it, `holder`, an object of
+ * the type it names: it is checked from every object of that type its author reads.
  */
 export async function checkArtifactQueries(
   blobStorage: ArtifactBlobStorage,
   kind: ArtifactKind,
   files: readonly ArtifactFile[],
-  checker: ArtifactQueryChecker | undefined
+  checker: ArtifactQueryChecker | undefined,
+  options: { readonly holder?: string } = {}
 ): Promise<ReadonlyMap<string, CheckedArtifactQuery>> {
   const checked = new Map<string, CheckedArtifactQuery>()
   if (kind === "file") return checked
@@ -261,9 +267,10 @@ export async function checkArtifactQueries(
   const [first] = queries
   if (!first) return checked
 
-  if (!ARTIFACT_QUERY_KINDS.includes(kind)) {
+  const markdown = kind === "document" && !files.some((file) => file.path === DOCUMENT_HTML_ENTRY)
+  if (!ARTIFACT_QUERY_KINDS.includes(kind) || markdown) {
     throw invalidArtifact(
-      `'${first.path}': a ${kind} runs no query. A document shows a live sheet instead.`
+      `'${first.path}': a ${markdown ? "Markdown document" : kind} runs no query. A Markdown document shows a live sheet instead; a designed one, document.html, runs queries.`
     )
   }
 
@@ -287,9 +294,18 @@ export async function checkArtifactQueries(
         `'${file.path}' is not a query: name it queries/<name>.json, with lowercase letters, digits and hyphens, at most 64 characters.`
       )
     }
+    if (kind === "document" && name === DOCUMENT_HOLDER_QUERY) {
+      throw invalidArtifact(
+        `'${file.path}': "${DOCUMENT_HOLDER_QUERY}" is what a document's fields read of the object that holds it. Name the query otherwise.`
+      )
+    }
 
     const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
-    const parsed = parseArtifactQuery(file.path, text)
+    const parsed = parseArtifactQuery(
+      file.path,
+      text,
+      options.holder ? { holder: { kind: "start", objectTypeId: options.holder } } : {}
+    )
     if ("error" in parsed) throw invalidArtifact(parsed.error)
 
     try {

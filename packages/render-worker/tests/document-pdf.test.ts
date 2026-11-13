@@ -111,20 +111,37 @@ function setup(options: { readonly sandboxes?: PrintingSandboxes } = {}) {
         "design.css": "@page { size: letter; margin: 0.75in }",
       }),
     })
-  const job = (version: ArtifactVersionRecord, renderKey = documentPdfKey(version) ?? "") => ({
+  const job = (
+    version: ArtifactVersionRecord,
+    renderKey = documentPdfKey(version) ?? "",
+    document?: ArtifactFile["file"]
+  ) => ({
     id: "job",
     projectId,
     createdAt: new Date().toISOString(),
     availableAt: new Date().toISOString(),
     attempt: 1,
     type: "artifact.pdf.requested" as const,
-    payload: { artifactId: version.artifactId, version: version.version, renderKey },
+    payload: {
+      artifactId: version.artifactId,
+      version: version.version,
+      renderKey,
+      ...(document ? { document } : {}),
+    },
   })
-  const print = (version: ArtifactVersionRecord, renderKey?: string) =>
-    printDocumentPdf({ host, job: job(version, renderKey), signal: new AbortController().signal })
+  const print = (
+    version: ArtifactVersionRecord,
+    renderKey?: string,
+    document?: ArtifactFile["file"]
+  ) =>
+    printDocumentPdf({
+      host,
+      job: job(version, renderKey, document),
+      signal: new AbortController().signal,
+    })
   const giveUp = (version: ArtifactVersionRecord, renderKey?: string) =>
     failDocumentPdf({ host, job: job(version, renderKey) })
-  return { host, sixb, blobStorage, proposal, print, giveUp }
+  return { host, sixb, blobStorage, put, proposal, print, giveUp }
 }
 
 /** Waits a bounded number of event-loop turns for a condition read from storage. */
@@ -191,6 +208,21 @@ describe("a designed document's PDF, printed by the render worker", () => {
     // Asked again, it is found: nothing prints twice.
     await print(version)
     expect(sandboxes.created).toHaveLength(1)
+  })
+
+  // Reproduce by passing no document to print() in printDocumentPdf: the browser opens the
+  // version's own document.html, its fields as written.
+  test("prints the document with the values whoever asked reads, written in", async () => {
+    const sandboxes = new PrintingSandboxes(1)
+    const { sixb, put, proposal, print } = setup({ sandboxes })
+    const { artifact, version } = await proposal()
+    const [filled] = await put({ "document.html": "<h1>Harbor Co</h1>" })
+    if (!filled) throw new Error("Expected the filled document.")
+
+    await print(version, documentPdfKey(version, filled.file) ?? "", filled.file)
+    expect(sandboxes.printed[0]?.html).toContain("<h1>Harbor Co</h1>")
+    // Kept under what it printed: the version's own markup has no PDF.
+    expect(await sixb.artifacts.pdf(artifact.id, { print: false })).toEqual({ status: "printing" })
   })
 
   test("prints nothing for content that changed since it was asked", async () => {

@@ -111,6 +111,9 @@ describe("publishing a designed document", () => {
       ["<img src='https://example.com/logo.png'>", "not a file in the artifact"],
       ["<img src='images/missing.png'>", "not one of the artifact's files"],
       ["<link rel='stylesheet' href='https://example.com/x.css'>", "loads the stylesheet"],
+      // Reproduce by dropping RAW_TEXT_ELEMENTS from validateHtmlDocument: a value written into
+      // the style ends it, and what follows runs.
+      ["<style data-sixb-field='name'>p {}</style>", "whose text is not markup"],
     ]
     for (const [html, message] of cases) {
       expect(await refusal(publish({ "document.html": html }))).toContain(message)

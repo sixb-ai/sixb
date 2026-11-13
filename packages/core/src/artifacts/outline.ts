@@ -20,6 +20,18 @@ export interface DocumentOutline {
   readonly format?: "html"
   /** The sheet a designed document's `@page` rule sets, which gives it pages; absent without one. */
   readonly paper?: DocumentPaper
+  /**
+   * The object a designed document shows live data of, as `<meta name="sixb:object-type">` names
+   * its type: the one object of that type that holds the document. Absent without the tag.
+   */
+  readonly holder?: DocumentHolder
+}
+
+/** What a designed document reads of the object that holds it. */
+export interface DocumentHolder {
+  readonly objectTypeId: string
+  /** The links of the holder its fields read through, which reading the holder expands. */
+  readonly links: readonly string[]
 }
 
 export interface DocumentHeading {

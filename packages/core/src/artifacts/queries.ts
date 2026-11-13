@@ -15,8 +15,23 @@ import type { ArtifactKind } from "./kinds"
  */
 export const ARTIFACT_QUERIES_DIRECTORY = "queries/"
 
-/** The kinds that show live data. A document shows a live sheet instead, and a file is as it is. */
-export const ARTIFACT_QUERY_KINDS: readonly ArtifactKind[] = ["sheet", "page", "slides", "canvas"]
+/**
+ * The kinds that show live data: a designed document among them, never a Markdown one, which shows
+ * a live sheet instead. A file is as it is.
+ */
+export const ARTIFACT_QUERY_KINDS: readonly ArtifactKind[] = [
+  "sheet",
+  "page",
+  "slides",
+  "canvas",
+  "document",
+]
+
+/**
+ * What a designed document's fields read of the object that holds it, a query of its own: the
+ * holder, with the links they read through. No query file may take its name.
+ */
+export const DOCUMENT_HOLDER_QUERY = "holder"
 
 /** A query read from its file: rows, or the facets of the rows. */
 export type ArtifactQuery =
@@ -125,11 +140,17 @@ class QueryShapeError extends Error {
  *
  * Only what an author writes is read: the fields core resolves itself are refused, as the API
  * refuses them. `page`, `vector` and `rerank` are refused too, saying why.
+ *
+ * `{ "kind": "holder" }` starts from the object that holds a designed document, which `holder`
+ * stands for: refused without it. `usesHolder` says whether the query starts from it anywhere.
  */
 export function parseArtifactQuery(
   path: string,
-  text: string
-): { readonly query: ArtifactQuery; readonly at: "$" | "$.query" } | { readonly error: string } {
+  text: string,
+  options: { readonly holder?: ObjectQuery } = {}
+):
+  | { readonly query: ArtifactQuery; readonly at: "$" | "$.query"; readonly usesHolder: boolean }
+  | { readonly error: string } {
   let value: unknown
   try {
     value = JSON.parse(text)
@@ -137,8 +158,9 @@ export function parseArtifactQuery(
     return { error: `${path} is not valid JSON.` }
   }
 
+  const context: ReadContext = { ...options, usesHolder: false }
   try {
-    return readFile(value)
+    return { ...readFile(value, context), usesHolder: context.usesHolder }
   } catch (error) {
     if (error instanceof QueryShapeError)
       return { error: `${path}: ${error.path}: ${error.message}` }
@@ -146,11 +168,20 @@ export function parseArtifactQuery(
   }
 }
 
-function readFile(value: unknown): { query: ArtifactQuery; at: "$" | "$.query" } {
+/** What reading a file takes and learns: the holder's node, and whether it was used. */
+interface ReadContext {
+  readonly holder?: ObjectQuery
+  usesHolder: boolean
+}
+
+function readFile(
+  value: unknown,
+  context: ReadContext
+): { query: ArtifactQuery; at: "$" | "$.query" } {
   const file = record(value, "$")
 
   if (Object.hasOwn(file, "kind")) {
-    return { query: { kind: "objects", query: readNode(file, "$") }, at: "$" }
+    return { query: { kind: "objects", query: readNode(file, "$", context) }, at: "$" }
   }
 
   if (!Object.hasOwn(file, "query")) {
@@ -165,11 +196,14 @@ function readFile(value: unknown): { query: ArtifactQuery; at: "$" | "$.query" }
     // A file written for `sixb objects query` keeps its total: a reader always gets one.
     if (file.includeTotal !== undefined) boolean(file, "includeTotal", "$")
 
-    return { query: { kind: "objects", query: readNode(file.query, "$.query") }, at: "$.query" }
+    return {
+      query: { kind: "objects", query: readNode(file.query, "$.query", context) },
+      at: "$.query",
+    }
   }
 
   only(file, "$", ["query", "facets"], "a facets request")
-  const query = readNode(file.query, "$.query")
+  const query = readNode(file.query, "$.query", context)
   const facets = list(file.facets, "$.facets").map((facet, index) =>
     readFacet(facet, `$.facets[${index}]`)
   )
@@ -210,9 +244,21 @@ const REFUSED_NODES: Readonly<Record<string, string>> = {
   rerank: "each reader who opens the artifact would pay for a reranking call.",
 }
 
-function readNode(value: unknown, path: string): ObjectQuery {
+function readNode(value: unknown, path: string, context: ReadContext): ObjectQuery {
   const node = record(value, path)
   const kind = node.kind
+
+  if (kind === "holder") {
+    only(node, path, ["kind"], 'a "holder" node')
+    if (!context.holder) {
+      throw new QueryShapeError(
+        `${path}.kind`,
+        '"holder" starts from the object that holds a designed document, which names its type with <meta name="sixb:object-type">.'
+      )
+    }
+    context.usesHolder = true
+    return context.holder
+  }
 
   if (typeof kind === "string" && Object.hasOwn(REFUSED_NODES, kind)) {
     throw new QueryShapeError(
@@ -223,13 +269,13 @@ function readNode(value: unknown, path: string): ObjectQuery {
   if (typeof kind !== "string" || !Object.hasOwn(NODE_KEYS, kind)) {
     throw new QueryShapeError(
       `${path}.kind`,
-      `${JSON.stringify(kind)} is not a query node; use ${Object.keys(NODE_KEYS).join(", ")}.`
+      `${JSON.stringify(kind)} is not a query node; use ${Object.keys(NODE_KEYS).join(", ")}, or holder in a designed document.`
     )
   }
 
   const known = kind as keyof typeof NODE_KEYS
   only(node, path, ["kind", ...NODE_KEYS[known]], `a "${known}" node`)
-  const input = () => readNode(node.input, `${path}.input`)
+  const input = () => readNode(node.input, `${path}.input`, context)
 
   switch (known) {
     case "start":
@@ -286,7 +332,7 @@ function readNode(value: unknown, path: string): ObjectQuery {
         kind: known,
         op: oneOf(node, "op", path, ["union", "intersect", "subtract"] as const),
         inputs: list(node.inputs, `${path}.inputs`).map((each, index) =>
-          readNode(each, `${path}.inputs[${index}]`)
+          readNode(each, `${path}.inputs[${index}]`, context)
         ),
       }
 
