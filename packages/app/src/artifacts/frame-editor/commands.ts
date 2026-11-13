@@ -322,6 +322,8 @@ export function duplicate(editor: Editor, pos: number): boolean {
   const node = editor.state.doc.nodeAt(pos)
   if (!node) return false
   const tag = tagOf(node)
+  // A cell or a caption is one of its kind where it stands: a second would break its table.
+  if (SINGLE_BLOCK_TAGS.has(tag)) return false
   const open = node.attrs.open
   const copy =
     typeof open === "string" && tag

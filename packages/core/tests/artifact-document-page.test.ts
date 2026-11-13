@@ -6,11 +6,14 @@ import type { BlockNode } from "../src/artifacts/live/blocks"
 import {
   createArtifactDocument,
   documentFiles,
+  holdPage,
   LIVE_FILES,
   mergeIntoDocument,
+  readChange,
 } from "../src/artifacts/live/document"
 import {
   isPageEntry,
+  mergePageSources,
   PAGE_BODY,
   pageBlocks,
   pageEntry,
@@ -285,6 +288,132 @@ describe("a designed document held live", () => {
     const doc = new Y.Doc()
     doc.getMap("files").set("document.html", entry)
     expect(pageEntryHtml(entry as Y.Map<unknown>)).toBe(PAGE)
+  })
+})
+
+describe("a designed document's page, merged", () => {
+  const PAGE_OF = (body: string) => `<!doctype html>\n<html>\n<body>\n${body}\n</body>\n</html>\n`
+
+  // Reproduce by merging pages as text in mergeIntoDocument: what one side typed into a block the
+  // other moved is left as loose words at the top of the body.
+  test("merges block by block, so a block one side moved keeps the words the other typed", () => {
+    const base = PAGE_OF("<p>one</p>\n<p>two</p>")
+    const typed = PAGE_OF("<p>one!</p>\n<p>two</p>")
+    const swapped = PAGE_OF("<p>two</p>\n<p>one</p>")
+    const merged = mergePageSources(base, typed, swapped) as string
+    expect(pageBlocks(merged)?.blocks.every((block) => block.type === "textBlock")).toBe(true)
+    expect(merged).toContain("<p>one!</p>")
+
+    // One side takes a paragraph out while the other edits it: the edit stays, as a block.
+    const deleted = PAGE_OF("<p>one</p>")
+    const edited = PAGE_OF("<p>one</p>\n<p>two, more</p>")
+    expect(mergePageSources(base, deleted, edited)).toBe(PAGE_OF("<p>one</p>\n<p>two, more</p>"))
+    // Both change one paragraph's words, in different places.
+    const ours = PAGE_OF("<p>one, ours</p>\n<p>two</p>")
+    const theirs = PAGE_OF("<p>One</p>\n<p>two</p>")
+    expect(mergePageSources(base, ours, theirs)).toBe(PAGE_OF("<p>One, ours</p>\n<p>two</p>"))
+    // A list one side took out while the other added an item to it leaves no stray item.
+    const list = PAGE_OF("<ul>\n  <li>a</li>\n</ul>\n<p>x</p>")
+    const noList = PAGE_OF("<p>x</p>")
+    const longer = PAGE_OF("<ul>\n  <li>a</li>\n  <li>c</li>\n</ul>\n<p>x</p>")
+    const result = mergePageSources(list, noList, longer) as string
+    expect(pageBlocks(result)?.blocks.map((block) => block.attrs?.tag)).toEqual(["ul", "p"])
+  })
+
+  // Reproduce by dropping holdPage from loadArtifactDocument, or the page branch for a Y.Text in
+  // mergeIntoDocument: a document kept as text before pages stays text, edited word by word.
+  test("holds as a page a document.html kept as text, once it reads as one", () => {
+    const doc = createArtifactDocument(
+      "document",
+      new Map([["document.html", { text: "<p>x</p>" }]])
+    )
+    expect(doc.getMap(LIVE_FILES).get("document.html")).toBeInstanceOf(Y.Text)
+    mergeIntoDocument(
+      doc,
+      new Map([["document.html", { text: "<p>x</p>" }]]),
+      new Map([["document.html", { text: PAGE }]])
+    )
+    expect(isPageEntry(doc.getMap(LIVE_FILES).get("document.html"))).toBe(true)
+    expect(documentFiles(doc).get("document.html")).toEqual({ text: PAGE })
+
+    // A document stored with its page as text: two servers loading it make the same change.
+    const stored = new Y.Doc()
+    stored.getMap("artifact").set("kind", "document")
+    stored.getMap(LIVE_FILES).set("document.html", new Y.Text(PAGE))
+    const state = Y.encodeStateAsUpdate(stored)
+    const [first, second] = [new Y.Doc(), new Y.Doc()]
+    for (const each of [first, second]) {
+      Y.applyUpdate(each, state)
+      holdPage(each, 1234)
+    }
+    expect(Y.encodeStateAsUpdate(first)).toEqual(Y.encodeStateAsUpdate(second))
+    Y.applyUpdate(first, Y.encodeStateAsUpdate(second))
+    expect(isPageEntry(first.getMap(LIVE_FILES).get("document.html"))).toBe(true)
+    expect(documentFiles(first).get("document.html")).toEqual({ text: PAGE })
+  })
+
+  // Reproduce by dropping the rank check from formatsWords: an edit writes the link outside the
+  // badge, splitting the badge in two.
+  test("keeps a styled mark around a mark written outside it whole", () => {
+    const source = '<body><p><span class="badge">New <a href="#">see</a></span> other</p></body>'
+    const read = page(source)
+    const paragraph = read.blocks[0] as BlockNode
+    expect(paragraph.content?.[0]?.type).toBe("rawInline")
+    const edited = {
+      ...paragraph,
+      content: [...(paragraph.content ?? []), { type: "text", text: "!" }],
+    }
+    expect(pageHtml({ ...read, blocks: [edited] })).toBe(
+      '<body><p><span class="badge">New <a href="#">see</a></span> other!</p></body>'
+    )
+    // Plain marks read the same either way round, and stay editable.
+    expect(page("<body><p><em><strong>x</strong></em></p></body>").blocks[0]?.content?.[0]).toEqual(
+      {
+        type: "text",
+        text: "x",
+        marks: [
+          { type: "em", attrs: { open: "<em>", close: "</em>" } },
+          { type: "strong", attrs: { open: "<strong>", close: "</strong>" } },
+        ],
+      }
+    )
+  })
+
+  // Reproduce by reading the whole document in readChange: nothing fails, but a keystroke costs
+  // the whole page. The check: what a change leaves unreadable still throws.
+  test("reads back what a change touched, and throws where the document would", () => {
+    const doc = createArtifactDocument("document", new Map([["document.html", { text: PROPOSAL }]]))
+    const body = (doc.getMap(LIVE_FILES).get("document.html") as Y.Map<unknown>).get(
+      PAGE_BODY
+    ) as Y.XmlFragment
+    expect(() =>
+      readChange(doc, () => textContaining(body, "Invoices").insert(0, "x"))
+    ).not.toThrow()
+    // A block added, as an editor adds one, from another copy of the document.
+    const other = new Y.Doc()
+    Y.applyUpdate(other, Y.encodeStateAsUpdate(doc))
+    const otherBody = (other.getMap(LIVE_FILES).get("document.html") as Y.Map<unknown>).get(
+      PAGE_BODY
+    ) as Y.XmlFragment
+    const before = Y.encodeStateVector(doc)
+    const paragraph = new Y.XmlElement("textBlock")
+    paragraph.setAttribute("tag", "p")
+    paragraph.insert(0, [new Y.XmlText("New")])
+    otherBody.insert(0, [paragraph])
+    const added = Y.encodeStateAsUpdate(other, before)
+    expect(() => readChange(doc, () => Y.applyUpdate(doc, added))).not.toThrow()
+    expect(pageEntryHtml(doc.getMap(LIVE_FILES).get("document.html") as Y.Map<unknown>)).toContain(
+      "<p>New</p>"
+    )
+    // And a block of a Markdown document.
+    const md = createArtifactDocument("document", new Map([["document.md", { text: "# A\n" }]]))
+    const fragment = md.getMap(LIVE_FILES).get("document.md") as Y.XmlFragment
+    expect(() =>
+      readChange(md, () => fragment.insert(1, [new Y.XmlElement("paragraph")]))
+    ).not.toThrow()
+    expect(() =>
+      readChange(doc, () => doc.getMap(LIVE_FILES).set("boards/x.html", new Y.Map()))
+    ).toThrow()
   })
 })
 

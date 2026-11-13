@@ -2,7 +2,7 @@ import * as Y from "yjs"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ArtifactDocument, ArtifactFile, ArtifactRecord } from "../../storage/artifacts/types"
 import type { ArtifactKind } from "../kinds"
-import { createArtifactDocument, documentFiles, mergeIntoDocument } from "./document"
+import { createArtifactDocument, documentFiles, holdPage, mergeIntoDocument } from "./document"
 import { readLiveFiles } from "./files"
 
 // An artifact's document as storage keeps it: its whole Yjs state in one blob, replaced by every
@@ -36,12 +36,13 @@ export async function loadArtifactDocument(
 ): Promise<Y.Doc> {
   const doc = new Y.Doc()
   const stored = artifact.document
+  const clientID = madeClientId(artifact.id, stored, files)
   if (stored?.revision === artifact.revision) {
     Y.applyUpdate(doc, await readDocumentState(blobStorage, stored.file))
+    holdPage(doc, clientID)
     return doc
   }
 
-  const clientID = madeClientId(artifact.id, stored, files)
   const live = await readLiveFiles(blobStorage, files)
   let made: Y.Doc
   if (stored) {
@@ -55,6 +56,7 @@ export async function loadArtifactDocument(
 
   Y.applyUpdate(doc, Y.encodeStateAsUpdate(made))
   made.destroy()
+  holdPage(doc, clientID)
   return doc
 }
 

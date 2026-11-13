@@ -1,4 +1,5 @@
 import type { FrameEmbed, FrameEvent } from "@sixb/core/artifacts"
+import { isPageEntry, LIVE_FILES } from "@sixb/core/artifacts/live"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { GripVertical, Plus, SeparatorHorizontal } from "lucide-react"
@@ -117,6 +118,8 @@ export function PageEditor({
   const [hover, setHover] = useState<HoverState | null>(null)
   const [line, setLine] = useState<EditorRect | null>(null)
   const [mode, setMode] = useState<ToolbarMode>("marks")
+  /** Bumped to load the frame again, and its editor with it. */
+  const [loads, setLoads] = useState(0)
 
   const send = useCallback((message: AppToEditor) => port.current?.postMessage(message), [])
   const run = useCallback((command: EditorCommand) => send({ type: "run", command }), [send])
@@ -220,6 +223,12 @@ export function PageEditor({
           picker.current?.click()
           return
         case "gone":
+          // The page was replaced by another, which the editor in the frame no longer edits:
+          // the frame loads again, with an editor on the new one. A page that became text is
+          // edited as text, by whoever shows this one.
+          if (isPageEntry(live.doc.getMap<unknown>(LIVE_FILES).get(version.entry))) {
+            setLoads((count) => count + 1)
+          }
           return
       }
     },
@@ -299,6 +308,7 @@ export function PageEditor({
   return (
     <>
       <ArtifactFrame
+        key={loads}
         handle={frame}
         version={version}
         title={messages.document.frame(version.title)}

@@ -168,8 +168,9 @@ It stays in its own design: what you type is styled by the document's stylesheet
 merge two parts of its layout, a section into the one before it or a cell into the next. Its HTML
 changes only where you edit: the rest is written back exactly as it was. A field of
 [live data](#show-live-data-in-a-document), a repeated row, or markup the editor does not model, such as an SVG, is
-kept as written and moves as a whole. A document whose HTML has no `<body>` tag is edited word by
-word instead, as a board is.
+kept as written and moves as a whole. A document whose HTML the editor cannot hold as blocks, one
+with no `<body>` tag or with markup after `</body>`, is edited word by word instead, as a board is,
+until a change makes it one it can.
 
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.

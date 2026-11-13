@@ -43,16 +43,28 @@ export function tagAttributes(open: string | null | undefined): Record<string, s
  */
 export function drawable(name: string, value: string): boolean {
   if (/^on/i.test(name)) return false
-  if (/^(href|src|action|formaction|xlink:href|srcdoc)$/i.test(name)) {
-    return !/^\s*(javascript|vbscript):/i.test(value) && name.toLowerCase() !== "srcdoc"
+  if (/^(href|src|action|formaction|xlink:href|srcdoc|data)$/i.test(name)) {
+    // As browsers read an address: without the whitespace and control characters within it.
+    const address = value.replace(/[\u0000-\u0020\u007f]/g, "")
+    return !/^(javascript|vbscript):/i.test(address) && name.toLowerCase() !== "srcdoc"
   }
   return true
+}
+
+/** Elements never drawn in the frame: they run script, load a page, or change the frame's own. */
+const UNDRAWN =
+  /^(script|iframe|object|embed|base|meta|link|form|frame|frameset|portal|noscript|template|set|animate|animatemotion|animatetransform)$/i
+
+/** The tag a node of the page is drawn as: its own, unless it is one never drawn. */
+export function drawnTag(tag: unknown): string {
+  const name = String(tag ?? "")
+  return /^[a-z][a-z0-9-]*$/i.test(name) && !UNDRAWN.test(name) ? name : "div"
 }
 
 /** Removes from markup drawn in the frame whatever could run script: see `drawable`. */
 export function sanitize(root: DocumentFragment | Element): void {
   for (const element of Array.from(root.querySelectorAll("*"))) {
-    if (/^(script|iframe|object|embed|base|meta|form|frame|frameset)$/i.test(element.tagName)) {
+    if (UNDRAWN.test(element.localName)) {
       element.remove()
       continue
     }
@@ -91,6 +103,39 @@ function openOf(element: HTMLElement): string {
   return html.slice(0, html.indexOf(">") + 1)
 }
 
+/** Elements that hold blocks, read as boxes when pasted. */
+const CONTAINER_TAGS: ReadonlySet<string> = new Set([
+  "div",
+  "section",
+  "article",
+  "aside",
+  "header",
+  "footer",
+  "main",
+  "nav",
+  "ul",
+  "ol",
+  "dl",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "figure",
+  "details",
+  "fieldset",
+  "hgroup",
+  "search",
+])
+
+/** Whether a pasted element holds blocks: an element among its children that is not inline. */
+function holdsBlocks(element: HTMLElement): boolean {
+  return Array.from(element.children).some((child) => {
+    const tag = child.localName
+    return CONTAINER_TAGS.has(tag) || PAGE_TEXT_TAGS.has(tag) || tag === "hr" || tag === "img"
+  })
+}
+
 /** The page's body: its blocks. */
 const PageDocument = Node.create({ name: "doc", topNode: true, content: "block+" })
 
@@ -105,14 +150,19 @@ export const Box = Node.create({
   addAttributes: () => attributes(["tag", "open", "close", "before", "end"], { tag: "div" }),
   parseHTML: () => [
     {
+      // What is pasted: a container, or an element of words that holds blocks, a list item
+      // holding paragraphs. Anything else gives its content alone.
       tag: "*",
       priority: 10,
-      getAttrs: (element) =>
-        PAGE_TEXT_TAGS.has(tagOf(element)) ? false : { tag: tagOf(element), open: openOf(element) },
+      getAttrs: (element) => {
+        const tag = tagOf(element)
+        const box = CONTAINER_TAGS.has(tag) || (PAGE_TEXT_TAGS.has(tag) && holdsBlocks(element))
+        return box ? { tag, open: openOf(element) } : false
+      },
     },
   ],
   renderHTML: ({ node }) => [
-    String(node.attrs.tag),
+    drawnTag(node.attrs.tag),
     { ...tagAttributes(node.attrs.open as string | null) },
     0,
   ],
@@ -128,11 +178,12 @@ export const TextBlock = Node.create({
   parseHTML: () => [
     {
       tag: [...PAGE_TEXT_TAGS].join(","),
-      getAttrs: (element) => ({ tag: tagOf(element), open: openOf(element) }),
+      getAttrs: (element) =>
+        holdsBlocks(element) ? false : { tag: tagOf(element), open: openOf(element) },
     },
   ],
   renderHTML: ({ node }) => [
-    String(node.attrs.tag),
+    drawnTag(node.attrs.tag),
     { ...tagAttributes(node.attrs.open as string | null) },
     0,
   ],
@@ -165,6 +216,8 @@ export const RawBlock = Node.create({
       priority: 60,
       getAttrs: (element) => ({ source: element.textContent ?? "" }),
     },
+    // A rule pasted from elsewhere, as it was written.
+    { tag: "hr", getAttrs: (element) => ({ source: openOf(element) }) },
   ],
   renderHTML: ({ node }) => ["div", { "data-sixb-raw": "" }, String(node.attrs.source ?? "")],
 })

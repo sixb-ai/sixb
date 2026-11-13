@@ -129,14 +129,63 @@ function enter(editor: Editor): boolean {
   const $pos = tr.doc.resolve(pos)
   const inList = tag === "li" && LIST_TAGS.has(tagOf($pos.parent))
 
-  if (inList && node.content.size === 0) {
-    liftOut(tr, pos, words(editor.schema, "p"))
-    editor.view.dispatch(tr.scrollIntoView())
-    return true
+  if (node.content.size === 0) {
+    // An empty item ends its list, and an empty description its list of terms.
+    if (inList || ((tag === "dd" || tag === "dt") && tagOf($pos.parent) === "dl")) {
+      liftOut(tr, pos, words(editor.schema, "p"))
+      editor.view.dispatch(tr.scrollIntoView())
+      return true
+    }
+    // The last, empty, paragraph of an item that holds paragraphs: the next item, or, alone in
+    // its item, the end of the list.
+    const item = $pos.parent
+    const itemPos = $pos.depth > 0 ? $pos.before() : -1
+    const listOfItem = itemPos >= 0 ? tr.doc.resolve(itemPos).parent : null
+    if (
+      tagOf(item) === "li" &&
+      LIST_TAGS.has(tagOf(listOfItem)) &&
+      $pos.index() === item.childCount - 1
+    ) {
+      if (item.childCount === 1) {
+        liftOut(tr, itemPos, words(editor.schema, "p"))
+      } else {
+        tr.delete(pos, pos + node.nodeSize)
+        const after = tr.mapping.map(itemPos + item.nodeSize)
+        const open = typeof item.attrs.open === "string" ? withoutId(item.attrs.open, "li") : "<li>"
+        tr.insert(
+          after,
+          item.type.create({ ...item.attrs, open, before: null, end: null }, [
+            words(editor.schema, "p"),
+          ])
+        )
+        tr.setSelection(TextSelection.create(tr.doc, after + 2))
+      }
+      editor.view.dispatch(tr.scrollIntoView())
+      return true
+    }
   }
 
   const offset = tr.selection.$from.parentOffset
   const open = typeof node.attrs.open === "string" ? withoutId(node.attrs.open, tag) : `<${tag}>`
+
+  // Within the last paragraph of an item that holds paragraphs, past its start: the next item
+  // takes the words after the caret, as in a list of words alone.
+  const item = $pos.depth > 0 ? $pos.parent : null
+  if (
+    item &&
+    offset > 0 &&
+    tagOf(item) === "li" &&
+    LIST_TAGS.has(tagOf(tr.doc.resolve($pos.before()).parent)) &&
+    $pos.index() === item.childCount - 1
+  ) {
+    const itemOpen = typeof item.attrs.open === "string" ? withoutId(item.attrs.open, "li") : "<li>"
+    tr.split(tr.selection.from, 2, [
+      { type: item.type, attrs: { ...item.attrs, open: itemOpen, before: null, end: null } },
+      { type: node.type, attrs: { ...node.attrs, open, before: null, inner: null } },
+    ])
+    editor.view.dispatch(tr.scrollIntoView())
+    return true
+  }
   const next =
     ENDS_IN_PARAGRAPH.has(tag) || (!inList && tag !== "dt" && tag !== "dd")
       ? words(editor.schema, "p")
@@ -246,7 +295,8 @@ function forwardDelete(editor: Editor): boolean {
 function nextCell(editor: Editor, by: -1 | 1): boolean {
   const at = wordsAt(editor.state.selection)
   const tag = tagOf(at?.node)
-  if (!at || (tag !== "td" && tag !== "th")) return true
+  // Out of a table, Tab leaves the frame, as it leaves any field.
+  if (!at || (tag !== "td" && tag !== "th")) return false
   const cells: number[] = []
   const $pos = editor.state.doc.resolve(at.pos)
   let tableDepth = 0
