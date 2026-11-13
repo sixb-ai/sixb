@@ -387,10 +387,33 @@ export function move(editor: Editor, pos: number, by: -1 | 1): number | null {
 }
 
 /**
- * The block the reader means at a point: the innermost block there, words or a picture or a box;
- * a table's cells and rows, which do not move on their own, mean their table.
+ * The block the pointer is beside: the innermost block under it, or, between blocks, the nearer
+ * of the two; never the box around them, whose handle would be far from the pointer. In the margin
+ * beside a block, where its handle is, the block on that line. A table is pointed at whole.
  */
 export function blockAt(
+  view: EditorView,
+  x: number,
+  y: number
+): { node: ProseMirrorNode; pos: number } | null {
+  const under = blockUnder(view, x, y)
+  if (under?.node.type.name !== "box" || tagOf(under.node) === "table") return under
+  // Beside the blocks, over a box's padding or the page's margin: the block on this line.
+  for (let probe = x + BESIDE_STEP; probe <= x + BESIDE_REACH; probe += BESIDE_STEP) {
+    const beside = blockUnder(view, probe, y)
+    if (beside && (beside.node.type.name !== "box" || tagOf(beside.node) === "table")) {
+      const rect = rectOf(view.nodeDOM(beside.pos))
+      if (rect && y >= rect.top && y <= rect.bottom) return beside
+    }
+  }
+  return under
+}
+
+/** How far right of the pointer, and by what steps, a block beside it is looked for. */
+const BESIDE_REACH = 240
+const BESIDE_STEP = 12
+
+function blockUnder(
   view: EditorView,
   x: number,
   y: number
@@ -402,15 +425,33 @@ export function blockAt(
   let node = pos >= 0 ? doc.nodeAt(pos) : null
   if (!node || node.isInline) {
     const $pos = doc.resolve(found.pos)
-    if ($pos.depth === 0) {
-      // Between blocks at the top: the block just after, or before.
-      const after = $pos.nodeAfter ?? $pos.nodeBefore
-      if (!after) return null
-      pos = $pos.nodeAfter ? found.pos : found.pos - after.nodeSize
-      node = after
-    } else {
+    if ($pos.parent.isTextblock) {
       pos = $pos.before($pos.depth)
       node = $pos.parent
+    } else {
+      // Between blocks: the nearer of the one before and the one after.
+      const before = $pos.nodeBefore
+      const after = $pos.nodeAfter
+      const distance = (child: ProseMirrorNode | null, at: number) => {
+        if (!child) return Number.POSITIVE_INFINITY
+        const rect = rectOf(view.nodeDOM(at))
+        if (!rect) return Number.POSITIVE_INFINITY
+        return y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0
+      }
+      const beforePos = before ? found.pos - before.nodeSize : -1
+      const nearer =
+        distance(before, beforePos) <= distance(after, found.pos)
+          ? { node: before, pos: beforePos }
+          : { node: after, pos: found.pos }
+      if (nearer.node) {
+        node = nearer.node
+        pos = nearer.pos
+      } else if ($pos.depth > 0) {
+        pos = $pos.before($pos.depth)
+        node = $pos.parent
+      } else {
+        return null
+      }
     }
   }
   // The outermost table around it, if any.
