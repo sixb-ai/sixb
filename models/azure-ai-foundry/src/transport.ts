@@ -7,11 +7,12 @@ export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
 type FoundryRoute = FoundryProtocol | OneShotRoute
 /** Routes that answer in one body. A failure is never replayed: the call may have been billed. */
-type OneShotRoute = "embeddings" | "decision" | "transcription"
+type OneShotRoute = "embeddings" | "decision" | "transcription" | "reranking"
 const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
   "embeddings",
   "decision",
   "transcription",
+  "reranking",
 ])
 
 /** The GA data-plane version: the v1 API does not route audio deployments. */
@@ -177,6 +178,9 @@ export class FoundryTransport {
     // Decision models answer on the resource origin; the project path does not route them.
     if (protocol === "decision")
       return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
+    // Cohere rerankers answer Cohere's v2 API on the resource origin.
+    if (protocol === "reranking")
+      return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`

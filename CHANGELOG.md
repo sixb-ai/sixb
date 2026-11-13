@@ -20,6 +20,9 @@ Sixb packages are versioned independently. Each release entry names the packages
   `gpt-4o-mini-transcribe`, `gpt-transcribe` and `whisper` are priced at Azure's retail rates, by
   token or audio second; `gpt-4o-transcribe-diarize`, which has no retail price, returns its text
   at unknown cost.
+- Rerank search results with an Azure AI Foundry Cohere deployment through `@sixb/azure-ai-foundry`'s
+  `foundry.reranking("rerank")`. Rerank v5 is priced at Azure's USD 0.02 (fast) and 0.05 (pro) per
+  million input tokens; Rerank v4.0, billed per search, runs at unknown cost.
 
 ### Upgrade notes
 
