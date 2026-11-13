@@ -2,7 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
-Language, embedding, decision, transcription and reranking models are supported.
+Language, embedding, decision, transcription, reranking and speech models are supported.
 
 ## Install
 
@@ -190,6 +190,37 @@ Capacity sets the rate limit: Azure's rate-limit headers report one request and 
 minute for each unit of a deployment's capacity. Connected deployments from another resource are
 rejected.
 
+## Speech
+
+Deploy `gpt-4o-mini-tts` in the project and register the deployment under `models.audio.speech`:
+
+```ts
+export const voice = foundry.speech("tts", { voice: "coral" })
+
+// In your createSixb() options:
+const models = { audio: { speech: [voice] } }
+```
+
+Use it with `sixb.models.audio.speak()`, see
+[speech generation](../../docs/models/configuration.md#speech-generation).
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | Must run `gpt-4o-mini-tts`; others are rejected, `tts` and `tts-hd` because they stream no usage. `foundry.chat()` rejects speech deployments |
+| Inference | `POST /openai/v1/audio/speech` on the resource origin, with the project's API key and `stream_format: "sse"`: only the event stream reports token usage |
+| Formats | `audio/mpeg` (default), `audio/ogg` (Opus), `audio/aac` (ADTS), `audio/flac` and `audio/wav`; a reply in another format fails. A streamed WAV's header sizes are written once the file is complete |
+| Stream | Complete only at its `speech.audio.done` event, which carries the usage: a stream cut off before it, or ending in an `error` event, fails with the usage it reported. Up to 128 MiB of audio |
+| `voice` | Used when a request names none; default `alloy`. Azure rejects voices it does not have, listing those it does |
+| Text | Up to 4,096 characters; `instructions` and `speed` are passed on (speed changes the length, not the tokens billed). `language` is not: the model reads the text in its own language, and the result warns |
+| `timeoutMs` | 120 seconds per call, response included |
+| Retries | None: errors carry `retryable` and `retryAfterMs` |
+| Price | USD 0.60 per million text input tokens and USD 12 per million audio output tokens on GlobalStandard; DataZoneStandard and Standard are 10% more (Azure Retail Prices, versions 2025-03-20 and 2025-12-15, verified 2026-11-13) |
+
+Other versions and SKUs have unknown cost, not zero: pass `rateCard` or `costEstimator`. The
+audio's length, so its token count, is unknown before the call, so no reservation is estimated
+and a [cost limit](../../docs/models/usage-and-limits.md#image-and-speech-generation) blocks these
+calls. Connected deployments from another resource are rejected.
+
 ## Stream a response
 
 ```ts
@@ -229,7 +260,7 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Supported language deployments; embedding, decision, transcription and reranking deployments are left out |
+| Catalog listings | Supported language deployments; embedding, decision, transcription, reranking and speech deployments are left out |
 | Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
@@ -342,7 +373,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions and reranking |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions, transcriptions, reranking and speech |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -371,5 +402,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `decision.e2e.ts` | Decision questions, accounting, errors and chat tier routing | 16 decisions / — |
 | `transcription.e2e.ts` | Each transcription deployment, accounting and errors | 8 transcriptions / — |
 | `reranking.e2e.ts` | Rerank v5 and v4 ranking, usage, pricing and errors, as direct calls | 8 rerank calls / — |
+| `speech.e2e.ts` | Every format, MP3 and WAV through Sixb with accounting, a transcription round trip and errors | 9 speech calls / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.
