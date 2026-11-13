@@ -1,39 +1,22 @@
-const ISO_TIMESTAMP_OFFSET_PATTERN =
-  /^(\d{1,4})[-/](\d{1,2})[-/](\d{1,2})[T ]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?[+-]\d{2}(?::?\d{2})?$/
-
-function isCalendarDay(year: number, month: number, day: number): boolean {
-  if (month < 1 || month > 12 || day < 1) return false
-  const lastDay = new Date(0)
-  lastDay.setUTCFullYear(year, month, 0)
-  return day <= lastDay.getUTCDate()
-}
+import { isCalendarDay, TIMESTAMP_FORMAT } from "./value-limits"
 
 /**
- * Normalize a dataset timestamp value into an ISO-8601 string in UTC when it carries an offset.
- *
- * DuckDB's appender drops the UTC offset when casting a varchar into a TIMESTAMPTZ
- * column, causing timestamps with offsets (such as QuickBooks '-08:00') to lose their offset
- * and be stored hours off. Normalizing strings that carry an offset to an explicit UTC ISO string
- * ('...Z') ensures the true instant in time is preserved while letting DuckDB reject invalid dates
- * or malformed formats.
+ * The string to append for a `timestamp` value. DuckDB's appender drops a numeric UTC offset when
+ * it casts a varchar into a TIMESTAMPTZ column, so `2017-01-02T09:51:02-08:00` would be stored
+ * eight hours early. A string carrying one is rewritten in UTC (`...Z`), at millisecond precision.
+ * Anything else passes through for DuckDB to read or refuse, including a day that does not exist.
  */
 export function normalizeDuckDbTimestampValue(value: unknown): string {
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value !== "string") return String(value)
 
-  if (typeof value === "string") {
-    const match = ISO_TIMESTAMP_OFFSET_PATTERN.exec(value)
-    if (match) {
-      const [, year, month, day] = match
-      if (isCalendarDay(Number(year), Number(month), Number(day))) {
-        const parsed = new Date(value)
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed.toISOString()
-        }
-      }
-    }
-  }
+  const match = TIMESTAMP_FORMAT.exec(value)
+  if (!match) return value
 
-  return String(value)
+  const [, year, , month, day, offset] = match
+  if (offset === undefined || offset === "Z") return value
+  if (!isCalendarDay(Number(year), Number(month), Number(day))) return value
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString()
 }

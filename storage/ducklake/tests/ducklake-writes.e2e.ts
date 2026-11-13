@@ -509,6 +509,8 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await overflowWrite.abort()
   })
 
+  // DuckDB's appender drops the offset itself: append the raw string in `row-appender.ts` instead
+  // of `normalizeDuckDbTimestampValue(value)` and e1 reads back as 09:51:02, eight hours early.
   test("preserves the UTC instant of timestamp strings with timezone offsets", async () => {
     const eventsDataset = defineDataset("raw.events.timestamps", {
       schema: [col("id", "string"), col("createdAt", "timestamp")],
