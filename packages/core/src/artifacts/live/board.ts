@@ -174,21 +174,55 @@ export function boardElement(source: string, address: string): BoardElement | nu
  * words hashed, as the frame serves a board for editing. Nothing else in it changes.
  */
 export function annotateBoard(source: string): string {
-  const changes: BoardChange[] = []
-  for (const { element, node } of located(source)) {
-    const index = startTagClose(source, node)
-    if (index === null) continue
+  return annotated(source).source
+}
 
-    const attributes = [
-      `${BOARD_ADDRESS_ATTRIBUTE}="${escapeAttribute(element.address)}"`,
-      `${BOARD_KIND_ATTRIBUTE}="${element.kind}"`,
-      ...(element.kind === "text"
-        ? [`${BOARD_TEXT_ATTRIBUTE}="${boardTextHash(textOf(node))}"`]
-        : []),
-    ]
-    changes.push({ index, remove: 0, insert: ` ${attributes.join(" ")}` })
+/** The attributes that mark an element in a board served for editing. */
+function marksOf({ element, node }: Located): Record<string, string> {
+  return {
+    [BOARD_ADDRESS_ATTRIBUTE]: element.address,
+    [BOARD_KIND_ATTRIBUTE]: element.kind,
+    ...(element.kind === "text" ? { [BOARD_TEXT_ATTRIBUTE]: boardTextHash(textOf(node)) } : {}),
   }
-  return applyBoardEdit(source, changes)
+}
+
+/**
+ * A board's source marked for editing, its elements as located in the source it was given, and
+ * where each offset of that source moved to once marked.
+ */
+function annotated(source: string): {
+  readonly source: string
+  readonly found: readonly Located[]
+  readonly at: (offset: number) => number
+} {
+  const found = located(source)
+  const changes: BoardChange[] = []
+  for (const each of found) {
+    const index = startTagClose(source, each.node)
+    if (index === null) continue
+    const marks = Object.entries(marksOf(each)).map(
+      ([name, value]) => `${name}="${escapeAttribute(value)}"`
+    )
+    changes.push({ index, remove: 0, insert: ` ${marks.join(" ")}` })
+  }
+  // Each offset moves by what was inserted before it: changes are in source order.
+  const shifts: number[] = []
+  let total = 0
+  for (const change of changes) {
+    total += change.insert.length
+    shifts.push(total)
+  }
+  const at = (offset: number) => {
+    let low = 0
+    let high = changes.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if ((changes[middle] as BoardChange).index < offset) low = middle + 1
+      else high = middle
+    }
+    return offset + (low === 0 ? 0 : (shifts[low - 1] as number))
+  }
+  return { source: applyBoardEdit(source, changes), found, at }
 }
 
 /**
@@ -442,10 +476,9 @@ export interface BoardFramePatch {
  */
 export function boardFramePatches(before: string, after: string): BoardFramePatch[] | null {
   if (before === after) return []
-  const beforeSource = annotateBoard(before)
-  const afterSource = annotateBoard(after)
-  const old = located(beforeSource)
-  const next = located(afterSource)
+  const marked = { before: annotated(before), after: annotated(after) }
+  const old = marked.before.found
+  const next = marked.after.found
   const same =
     old.length === next.length &&
     old.every(
@@ -455,20 +488,45 @@ export function boardFramePatches(before: string, after: string): BoardFramePatc
     )
   if (!same) return null
 
+  // What lies wholly before or after the span the two differ in is as it was.
+  let from = 0
+  const most = Math.min(before.length, after.length)
+  while (from < most && before[from] === after[from]) from += 1
+  let suffix = 0
+  while (
+    suffix < most - from &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+  const to = after.length - suffix
+
   const patches: BoardFramePatch[] = []
-  for (const [index, { element, node }] of next.entries()) {
-    const previous = (old[index] as Located).node
-    const attributes = attributesOf(node)
-    const changed = JSON.stringify(attributesOf(previous)) !== JSON.stringify(attributes)
+  for (const [index, located] of next.entries()) {
+    const { element, node } = located
+    if (element.end <= from || element.start >= to) continue
+    const previous = old[index] as Located
+    // As the frame holds them: the element's own, and those that mark it.
+    const attributes = { ...attributesOf(node), ...marksOf(located) }
+    const changed =
+      JSON.stringify({ ...attributesOf(previous.node), ...marksOf(previous) }) !==
+      JSON.stringify(attributes)
 
     // What holds no addressed element is written whole. A box's own words, between its
     // children, are not: the frame loads the board again when they change.
     let html: string | undefined
     if (element.kind === "box") {
-      if (ownContent(beforeSource, previous) !== ownContent(afterSource, node)) return null
+      const own = (side: typeof marked.before, node: Element) =>
+        ownContent(side.source, node, side.at)
+      if (own(marked.before, previous.node) !== own(marked.after, node)) return null
     } else {
-      const inner = innerOf(afterSource, node)
-      if (inner !== null && innerOf(beforeSource, previous) !== inner) html = inner
+      const inner = innerOf(marked.after.source, node, marked.after.at)
+      if (
+        inner !== null &&
+        innerOf(marked.before.source, previous.node, marked.before.at) !== inner
+      ) {
+        html = inner
+      }
     }
 
     if (changed || html !== undefined) {
@@ -527,7 +585,10 @@ function located(source: string): Located[] {
           kind,
           start: node.sourceCodeLocation.startOffset,
           end: node.sourceCodeLocation.endOffset,
-          label: labelOf(node, kind),
+          // Read only where it is shown: an edit or a patch never needs it.
+          get label() {
+            return labelOf(node, kind)
+          },
         },
       })
       if (kind !== "box") return
@@ -708,29 +769,41 @@ function attributesOf(node: Element): Record<string, string> {
   return Object.fromEntries(node.attrs.map((attribute) => [attribute.name, attribute.value]))
 }
 
-/** What an element holds in the source, between its tags; null for one with no end tag. */
-function innerOf(source: string, node: Element): string | null {
+/**
+ * What an element holds in `source`, between its tags; null for one with no end tag. `at` moves
+ * an offset of the source it was located in to one of `source`.
+ */
+function innerOf(
+  source: string,
+  node: Element,
+  at: (offset: number) => number = (offset) => offset
+): string | null {
   const location = node.sourceCodeLocation
   const start = location?.startTag?.endOffset
-  const end = location?.endTag?.startOffset
-  if (start === undefined) return null
-  return source.slice(start, end ?? location?.endOffset ?? start)
+  const end = location?.endTag?.startOffset ?? location?.endOffset ?? start
+  if (start === undefined || end === undefined) return null
+  return source.slice(at(start), at(end))
 }
 
-/** What a box holds in the source besides its addressed children. */
-function ownContent(source: string, node: Element): string | null {
-  const inner = innerOf(source, node)
-  const start = node.sourceCodeLocation?.startTag?.endOffset
-  if (inner === null || start === undefined) return inner
+/** What a box holds in `source` besides its addressed children, `at` as for {@link innerOf}. */
+function ownContent(
+  source: string,
+  node: Element,
+  at: (offset: number) => number = (offset) => offset
+): string | null {
+  const location = node.sourceCodeLocation
+  const start = location?.startTag?.endOffset
+  const end = location?.endTag?.startOffset ?? location?.endOffset ?? start
+  if (start === undefined || end === undefined) return null
 
   let own = ""
-  let at = start
+  let from = start
   for (const child of node.childNodes) {
     if (!isElement(child) || UNADDRESSED.has(child.tagName) || !child.sourceCodeLocation) continue
-    own += source.slice(at, child.sourceCodeLocation.startOffset)
-    at = child.sourceCodeLocation.endOffset
+    own += source.slice(at(from), at(child.sourceCodeLocation.startOffset))
+    from = child.sourceCodeLocation.endOffset
   }
-  return own + source.slice(at, start + inner.length)
+  return own + source.slice(at(from), at(end))
 }
 
 function elementAt(source: string, address: string, kinds: readonly BoardElementKind[]): Located {
