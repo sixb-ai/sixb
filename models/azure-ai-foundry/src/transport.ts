@@ -5,6 +5,7 @@ import { object, PREFIX, positiveInteger } from "./util"
 
 export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
+type FoundryRoute = FoundryProtocol | "embeddings" | "decision"
 
 export interface TransportOptions {
   readonly endpoint: string
@@ -70,7 +71,7 @@ export class FoundryTransport {
     signal: AbortSignal,
     providerId: string,
     modelId: string,
-    protocol: FoundryProtocol | "embeddings" = "responses"
+    protocol: FoundryRoute = "responses"
   ): Promise<Response> {
     const url = this.url(protocol)
     const diagnostics = new RequestDiagnostics()
@@ -82,7 +83,12 @@ export class FoundryTransport {
         protocol === "messages" ? "x-api-key" : "api-key"
       )
       headers.set("content-type", "application/json")
-      headers.set("accept", protocol === "embeddings" ? "application/json" : "text/event-stream")
+      headers.set(
+        "accept",
+        protocol === "embeddings" || protocol === "decision"
+          ? "application/json"
+          : "text/event-stream"
+      )
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
@@ -112,8 +118,10 @@ export class FoundryTransport {
         response,
         await httpError(response, providerId, modelId, signal)
       )
+      // JSON routes answer in one body: the caller decides, from `retryable`, whether to replay.
       if (
         protocol === "embeddings" ||
+        protocol === "decision" ||
         !error.retryable ||
         attempt >= (this.options.maxRetries ?? 2)
       )
@@ -159,11 +167,39 @@ export class FoundryTransport {
     return (this.options.fetch ?? fetch)(url, init)
   }
 
-  url(protocol: FoundryProtocol | "embeddings"): string {
+  url(protocol: FoundryRoute): string {
     if (protocol === "embeddings") return `${this.baseUrl}/embeddings`
+    // Decision models answer on the resource origin; the project path does not route them.
+    if (protocol === "decision")
+      return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
+  }
+}
+
+/** Read a JSON body up to `maxBytes`; the reader is released on success, failure or abort. */
+export async function readJson(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number
+): Promise<unknown> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error("Empty response")
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  try {
+    for (;;) {
+      const chunk = await abortable(() => reader.read(), signal)
+      if (chunk.done) break
+      bytes += chunk.value.length
+      if (bytes > maxBytes) throw new Error(`Response exceeds ${maxBytes} bytes`)
+      chunks.push(chunk.value)
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+  } finally {
+    void reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
@@ -231,7 +267,10 @@ async function httpError(
       }
       const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"))
       const error = object(object(parsed)?.error)
+      // Decision models reject some requests with `{ "detail": "..." }` instead of `error`.
+      const detail = object(parsed)?.detail
       if (typeof error?.message === "string") message = error.message
+      else if (typeof detail === "string") message = detail
       if (typeof error?.code === "string") code = error.code
       else if (typeof error?.type === "string") code = error.type
     } catch {
