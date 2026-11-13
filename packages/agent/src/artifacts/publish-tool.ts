@@ -218,7 +218,7 @@ async function publish(
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
-  // drop whatever was written since. A canvas is merged instead, from the copy's files.
+  // drop whatever was written since. A canvas or a document is merged instead, from the copy's files.
   const base =
     "artifactId" in request.target ? installed.baseOf(request.target.artifactId) : undefined
   const baseRevision =

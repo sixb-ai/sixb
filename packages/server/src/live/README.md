@@ -1,6 +1,6 @@
 # Live artifacts
 
-`/ws/artifacts` lets several people edit a canvas, or a designed document, at once. Every connected
+`/ws/artifacts` lets several people edit a canvas, or a document, Markdown or designed, at once. Every connected
 client holds the artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). Each
 server holding the artifact keeps one copy, and writes it back into storage as an ordinary artifact
 write.
@@ -38,7 +38,8 @@ whose content it holds, replaced with every content write (see
 
 - On `join`, the server reads the person's access to the artifact. `owner` and `update` edit,
   `read` watches, and anything else is refused with `left`.
-- The first join opens the room from the stored document. Other kinds are refused as `not_live`.
+- The first join opens the room from the stored document. A sheet, a page, a deck or a file is
+  refused as `not_live`.
 - `joined` says who the connection is (`user`: id, name and color, read once per connection). A
   shared link's guest is read at each join instead, from its session: `guest:<sessionId>`, the
   name they gave, and `guest: true`. Once they give a name, their socket reads it from the session

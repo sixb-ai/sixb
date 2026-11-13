@@ -2,7 +2,6 @@ import * as Y from "yjs"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ArtifactDocument, ArtifactFile, ArtifactRecord } from "../../storage/artifacts/types"
 import type { ArtifactKind } from "../kinds"
-import { DOCUMENT_HTML_ENTRY } from "../publish/validate/document-html"
 import { createArtifactDocument, documentFiles, mergeIntoDocument } from "./document"
 import { readLiveFiles } from "./files"
 
@@ -11,16 +10,11 @@ import { readLiveFiles } from "./files"
 // the same history, so their changes merge as Yjs merges concurrent edits.
 
 /**
- * Whether an artifact holding `files` is edited live, and so keeps its content as a document: a
- * canvas, and a designed document, whose words people type into in place. A Markdown document is
- * not edited live.
+ * Whether an artifact is edited live, and so keeps its content as a document: a canvas, and a
+ * document, Markdown or designed, which people edit in place.
  */
-export function keepsDocument(
-  kind: ArtifactKind,
-  files: readonly { readonly path: string }[]
-): boolean {
-  if (kind === "canvas") return true
-  return kind === "document" && files.some((file) => file.path === DOCUMENT_HTML_ENTRY)
+export function keepsDocument(kind: ArtifactKind): boolean {
+  return kind === "canvas" || kind === "document"
 }
 
 /**
@@ -92,7 +86,7 @@ export async function firstArtifactDocument(
   kind: ArtifactKind,
   files: readonly ArtifactFile[]
 ): Promise<FileRef | undefined> {
-  if (!keepsDocument(kind, files)) return undefined
+  if (!keepsDocument(kind)) return undefined
   const doc = createArtifactDocument(kind, await readLiveFiles(blobStorage, files))
   try {
     return await storeArtifactDocument(blobStorage, doc)
