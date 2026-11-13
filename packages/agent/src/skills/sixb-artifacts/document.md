@@ -81,6 +81,9 @@ work/proposal/
   `@page { size: letter; margin: 0.75in 0.85in; }` (or `A4`, or two lengths). That is what makes
   pages: the reader sees them, downloads them as a PDF, and the layout check shoots each one. Keep
   the margins there, not on `<body>`, and give `<body>` no width, margin, or padding of its own.
+- **Editable.** People edit it block by block in the app. Write the `<body>` and `</body>` tags,
+  with nothing after `</body>` but `</html>`, and words in elements of their own (`<p>`, `<li>`,
+  `<td>`), not loose beside blocks: what does not fit is still kept, but edited word by word.
 - **Markup.** Any HTML that lays out text, tables, figures, and pictures, styled by any CSS: grids,
   columns, `::before` numbering, `<svg>`. No scripts, `on…` handlers, `<iframe>`, `<form>`, or
   `<base>`: publishing refuses them. Images are files in the artifact (or another artifact's,

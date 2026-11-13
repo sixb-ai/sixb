@@ -78,6 +78,11 @@ export type FrameRequest =
    * then keeps panning the canvas rather than scrolling itself.
    */
   | FrameRequestOf<"canvas", { readonly moving: boolean }>
+  /**
+   * Runs a designed document's editor in its frame, served for editing: `code` is the editor's
+   * script, which takes the `MessagePort` the request transfers and edits the body in place.
+   */
+  | FrameRequestOf<"editor", { readonly code: string }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL

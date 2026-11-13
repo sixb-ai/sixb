@@ -185,7 +185,9 @@ export const en = {
       table: { label: "Table", description: "Rows and columns" },
       image: { label: "Image", description: "Upload a picture" },
       divider: { label: "Divider", description: "A line between sections" },
+      pageBreak: { label: "Page break", description: "Start a new page after this" },
     },
+    pageBreak: "Page break",
     handle: {
       add: "Add a block below",
       drag: "Drag to move",
@@ -900,7 +902,9 @@ export const fr: Translation<ArtifactMessages> = {
       table: { label: "Tableau", description: "Des lignes et des colonnes" },
       image: { label: "Image", description: "Importer une image" },
       divider: { label: "Séparateur", description: "Une ligne entre deux sections" },
+      pageBreak: { label: "Saut de page", description: "Commencer une nouvelle page ensuite" },
     },
+    pageBreak: "Saut de page",
     handle: {
       add: "Ajouter un bloc dessous",
       drag: "Glisser pour déplacer",
