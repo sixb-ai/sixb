@@ -101,7 +101,7 @@ export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
    */
   readonly baseFiles?: readonly ArtifactFile[]
   /**
-   * The title of `baseRevision`. A canvas merged past it keeps a title someone gave it since,
+   * The title of `baseRevision`. A write merged past it keeps a title someone gave it since,
    * unless this write changes the title itself.
    */
   readonly baseTitle?: string
@@ -604,8 +604,8 @@ export function createArtifactsRuntime(
   }
 
   /**
-   * Stores the latest version, authored by the caller, who may update the artifact. A canvas
-   * written since the base is merged into, not refused: the merge is what is checked.
+   * Stores the latest version, authored by the caller, who may update the artifact. One that
+   * keeps a document, written since the base, is merged into, not refused: the merge is checked.
    */
   const write = async (
     input: ArtifactWrite & { readonly title: string }
@@ -637,15 +637,15 @@ export function createArtifactsRuntime(
     })
   }
 
-  /** A live room's write-back: only a canvas keeps a document to merge it into. */
+  /** A live room's write-back: only a canvas or a designed document keeps one to merge it into. */
   const writeLive = async (
     artifactId: string,
     input: LiveArtifactWrite
   ): Promise<PublishedArtifact> => {
     const artifact = await requireUpdatable(artifactId)
-    if (!keepsDocument(artifact.kind)) {
+    if (!keepsDocument(artifact.kind, input.files)) {
       throw invalidArtifact(
-        `Artifact '${artifactId}' is a ${artifact.kind}, which is not edited live: publish its files.`
+        `Artifact '${artifactId}' is a ${artifact.kind} that is not edited live: publish its files.`
       )
     }
 
@@ -733,7 +733,7 @@ export function createArtifactsRuntime(
     },
 
     async restore(artifactId, revision, input = {}) {
-      // A canvas's document takes the restored content as a change, so editors keep theirs.
+      // A live document takes the restored content as a change, so editors keep theirs.
       const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
       const point = await context.storage.getRestorePoint({
         projectId: runtime.projectId,

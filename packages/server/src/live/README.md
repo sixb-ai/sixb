@@ -1,8 +1,9 @@
 # Live artifacts
 
-`/ws/artifacts` lets several people edit a canvas at once. Every connected client holds the
-artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). Each server holding the
-artifact keeps one copy, and writes it back into storage as an ordinary artifact write.
+`/ws/artifacts` lets several people edit a canvas, or a designed document, at once. Every connected
+client holds the artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). Each
+server holding the artifact keeps one copy, and writes it back into storage as an ordinary artifact
+write.
 
 | File | Role |
 | --- | --- |
@@ -21,7 +22,7 @@ whose content it holds, replaced with every content write (see
 
 - Every server loads a room from that state, and every client's document comes from a room. Any
   copy, on any server and after any reload, continues the same history.
-- Every write to a canvas is made into that document, whoever makes it
+- Every write to an artifact that keeps a document is made into it, whoever makes it
   (`packages/core/src/artifacts/publish/merge.ts`):
   - A live write-back carries the room's state, which is applied to the stored one.
   - A write of files (the Agent, HTTP) is applied as the change from the files it was made from.

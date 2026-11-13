@@ -109,7 +109,8 @@ publishes it when it is what you asked for.
 
 ## Edit in the app
 
-Sheets and canvases are edited where they open: press **Edit** on the latest version.
+Sheets, canvases, and [designed documents](#design-a-document) are edited where they open: press
+**Edit** on the latest version.
 
 A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
 **Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
@@ -117,9 +118,9 @@ numbered version in the version menu. ⌘S saves, and leaving with changes asks 
 changed the sheet while you were editing, the save stops and says so: open what they saved, or save
 yours over it.
 
-A canvas is edited live, with everyone who has it open: there is no draft to save. The header keeps
-Undo, Redo, and **Done**, your changes are saved as you make them, and everyone's are merged. See
-[Edit a canvas live](#edit-a-canvas-live).
+A canvas, or a designed document, is edited live, with everyone who has it open: there is no draft
+to save. The header keeps Undo, Redo, and **Done**, your changes are saved as you make them, and
+everyone's are merged. See [Edit live](#edit-live).
 
 | In a sheet | |
 | --- | --- |
@@ -135,15 +136,22 @@ Undo, Redo, and **Done**, your changes are saved as you make them, and everyone'
 | Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
 | Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
 
+| In a designed document | |
+| --- | --- |
+| Words | Click a heading, a paragraph, a list item, or a table cell and type: bold and links around the rest stay. Enter and Esc leave it |
+| Layout | Stays as its HTML and CSS say: nothing is added, moved, or removed. Ask the Agent for those |
+| View | One sheet while you edit; its pages again once your words are saved |
+
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.
 
-## Edit a canvas live
+## Edit live
 
-A canvas is edited by everyone at once over `/ws/artifacts`. Each person sees the others' changes
-as they make them, and who else is there.
+A canvas, or a designed document, is edited by everyone at once over `/ws/artifacts`. Each person
+sees the others' changes as they make them, and who else is there. A Markdown document is not
+edited live.
 
-- Whoever may change the canvas edits it; whoever may only read it watches.
+- Whoever may change the artifact edits it; whoever may only read it watches.
 - Changes are written to the current version about 1.5 seconds after the last one, at most every
   10 seconds while someone keeps editing, and when the last editor leaves. Each write is a normal
   change, by the last person who edited, and sends `artifact.updated`.
@@ -160,9 +168,10 @@ on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
 `@sixb/client/artifact-live` the socket. The [WebSockets](../websockets/overview.md#live-artifacts)
 page lists the messages.
 
-### Edit what a board shows
+### Edit what a page shows
 
-A board's HTML stays yours to write. What its source holds can also be changed in place: words,
+A canvas's boards and a designed document are edited the same way. A board's HTML stays yours to
+write. What its source holds can also be changed in place: words,
 pictures, and inline styles.
 
 - Each element in a board's source has an address, its path from the `<body>`, such as
@@ -182,7 +191,7 @@ pictures, and inline styles.
 | `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
 | `boardFramePatches(before, after)` | What a frame showing `before` patches to show `after` |
 
-A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
+A board's frame link, or a designed document's, serves it for editing with `?sixb-edit`. The frame's `edit` request then
 turns editing on, and takes `edit.patch`. With `typing: false`, picking an element types nothing
 into it, as when the reader picks what to comment on.
 
@@ -271,6 +280,7 @@ proposal/
 - Its images are files in the artifact or another artifact's, and its stylesheets are files in the
   artifact or on a CDN such as Google Fonts.
 - Its headings form its outline and the sections an address names, as a Markdown document's do.
+- Its words are [edited in place](#edit-in-the-app) in the app, live, by everyone at once.
 - A version holds everything it shows: to share a design between documents, keep it in a
   [skill](../models/tools-and-authorization.md#add-a-skill) and copy its files into each one.
 

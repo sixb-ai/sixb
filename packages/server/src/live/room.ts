@@ -16,6 +16,7 @@ import {
   AGENT_PRESENCE_MS,
   artifactLiveStream,
   artifactPresenceStream,
+  keepsDocument,
   loadArtifactDocument,
   mergeIntoDocument,
   parseArtifactLiveRecord,
@@ -187,7 +188,7 @@ export class LiveRoom {
     const storage = requireArtifacts(host)
     const artifact = await storage.get({ projectId: host.projectId, id: artifactId })
     if (!artifact) return "not_found"
-    if (artifact.kind !== "canvas") return "not_live"
+    if (artifact.kind !== "canvas" && artifact.kind !== "document") return "not_live"
 
     const version = await storage.getVersion({
       projectId: host.projectId,
@@ -195,6 +196,7 @@ export class LiveRoom {
       version: artifact.latestVersion,
     })
     if (!version) return "not_found"
+    if (!keepsDocument(artifact.kind, version.files)) return "not_live"
 
     const doc = await loadArtifactDocument(host.blobStorage, artifact, version.files)
     const room = new LiveRoom(

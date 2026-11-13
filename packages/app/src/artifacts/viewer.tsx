@@ -168,12 +168,16 @@ function ArtifactView({
     (shown ? null : versionQuery.error)
   const edit = useArtifactEdit(target, detail, shown, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
-  // A canvas's latest version is held live: everyone's changes show as they make them, and
-  // editing it changes it for everyone at once.
+  // A canvas's latest version, and a designed document's, is held live: everyone's changes show
+  // as they make them, and editing it changes it for everyone at once.
+  const designed = !!shown && isDesignedDocument(shown)
   const liveView = useLiveView(
-    detail?.artifact.kind === "canvas" && versionNumber === detail.artifact.latestVersion
+    detail &&
+      versionNumber === detail.artifact.latestVersion &&
+      (detail.artifact.kind === "canvas" || designed)
       ? target.artifactId
-      : null
+      : null,
+    designed ? "document" : "canvas"
   )
 
   if (error || (artifactQuery.isSuccess && !detail)) {
