@@ -31,8 +31,9 @@ export interface MicrosoftOAuth {
 /**
  * Entra's authorization code flow for a confidential web app, acting as the person who signs in.
  *
- * There is deliberately no `revoke`: Entra has no endpoint that lets an app revoke one person's
- * refresh token. Disconnecting deletes the stored grant.
+ * There is no grant revocation: Entra has no endpoint that lets an app revoke one person's
+ * refresh token. Disconnecting deletes the stored grant. With notifications configured,
+ * `microsoft()` adds a `revoke` that deletes the person's subscriptions instead.
  */
 export function createMicrosoftOAuth(
   options: MicrosoftOAuthOptions,
