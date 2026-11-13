@@ -4,7 +4,7 @@ import { existsSync, statSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { InMemoryStorage, migrateStorage } from "@sixb/core"
+import { checkStorageSchema, InMemoryStorage, migrateStorage } from "@sixb/core"
 import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -1362,6 +1362,18 @@ describe("SQLite storage migrations", () => {
         version: index + 1,
       }))
     )
+  })
+
+  // Guard proof: drop the first read in `SqliteStorage`'s constructor, and the read-only connection
+  // finds no -shm file to open: both calls fail with SQLITE_CANTOPEN.
+  test("reads before anything writes, alone on a file the runner migrated", async () => {
+    const storage = new SqliteStorage({ path: await migratedDirectory() })
+    try {
+      await storage.ping()
+      expect(await checkStorageSchema(storage)).toEqual({ ok: true, verified: true })
+    } finally {
+      storage.close()
+    }
   })
 
   test("preserves every existing execution, Agent authority included, when adding delegated authority", () => {
