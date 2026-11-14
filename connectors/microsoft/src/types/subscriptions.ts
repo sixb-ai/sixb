@@ -31,6 +31,25 @@ export interface SubscriptionCreateOptions extends RequestOptions {
   readonly immutableIds?: boolean
 }
 
+/** A subscription to keep alive: what `create` takes, with the expiry left to `ensure`. */
+export type SubscriptionEnsureInput = Omit<SubscriptionCreate, "expirationDateTime">
+
+export interface SubscriptionEnsureOptions extends SubscriptionCreateOptions {
+  /** Renew once less than this is left. Defaults to three days. */
+  readonly renewWithinMs?: number
+  /** How long from now a created or renewed subscription lasts. Defaults to six days. */
+  readonly lifetimeMs?: number
+}
+
+export interface SubscriptionEnsureResult {
+  readonly subscription: MicrosoftSubscription
+  /**
+   * `adopted`: creating it returned 409 or an unknown outcome, and a matching subscription was
+   * found, possibly the one that create made.
+   */
+  readonly action: "kept" | "renewed" | "created" | "adopted"
+}
+
 /** Fields may be omitted by Graph, including when using $select. Treat clientState as a secret. */
 export interface MicrosoftSubscription {
   readonly id: string
@@ -51,6 +70,9 @@ export interface MicrosoftSubscription {
 }
 
 export type MailChangeType = SubscriptionChangeType
+
+export type MailEnsureSubscriptionOptions = Omit<MailSubscribeOptions, "expirationDateTime"> &
+  Pick<SubscriptionEnsureOptions, "renewWithinMs" | "lifetimeMs">
 
 export interface MailSubscribeOptions extends RequestOptions {
   /** Omit to watch messages across the mailbox. */

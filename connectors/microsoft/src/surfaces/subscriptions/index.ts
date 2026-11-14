@@ -8,9 +8,13 @@ import type {
   MicrosoftSubscription,
   SubscriptionCreate,
   SubscriptionCreateOptions,
+  SubscriptionEnsureInput,
+  SubscriptionEnsureOptions,
+  SubscriptionEnsureResult,
   SubscriptionUpdate,
 } from "../../types/subscriptions"
 import { query, resource, segment } from "../../validation"
+import { ensureSubscription } from "./ensure"
 import { validateCreate, validateUpdate } from "./validation"
 
 export interface MicrosoftSubscriptionsResource {
@@ -22,6 +26,14 @@ export interface MicrosoftSubscriptionsResource {
     input: SubscriptionCreate,
     options?: SubscriptionCreateOptions
   ): Promise<MicrosoftSubscription>
+  /**
+   * Keeps one subscription alive: keeps it while more than `renewWithinMs` is left, renews it,
+   * or creates it when Graph has none with this resource and URL. Call it on a schedule.
+   */
+  ensure(
+    input: SubscriptionEnsureInput,
+    options?: SubscriptionEnsureOptions
+  ): Promise<SubscriptionEnsureResult>
   get(id: string, options?: SelectOptions): Promise<MicrosoftSubscription>
   /** Graph does not support OData query options on this collection. */
   list(options?: RequestOptions): Promise<GraphPage<MicrosoftSubscription>>
@@ -107,6 +119,9 @@ export function subscriptionsResource(
         201,
         subscription
       )
+    },
+    ensure(input, options) {
+      return ensureSubscription(api, input, options)
     },
     async get(id, options) {
       return resource(await http.json(`${path(id)}${query(options)}`, { signal: options?.signal }))
