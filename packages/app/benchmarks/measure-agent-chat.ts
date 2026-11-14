@@ -1,3 +1,4 @@
+import type { AgentRunStreamEvent, ModelUiChunk } from "@sixb/client"
 import { Markdown } from "@sixb/ui/components"
 import { getCachedHighlight, highlightCode } from "@sixb/ui/lib/shiki"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -16,6 +17,24 @@ import { createLiveRunState, type LiveRunState, liveRunReducer } from "../src/ag
 import type { AgentMessage, AgentRun } from "../src/agent/types"
 
 const AT = "2026-11-14T15:00:00.000Z"
+
+const BASE_EVENT = {
+  schemaVersion: 1,
+  projectId: "proj_bench",
+  runId: "run_live",
+  threadId: "thr_bench",
+  attempt: 1,
+  occurredAt: AT,
+} as const
+
+function chunkEvent(chunk: ModelUiChunk): AgentRunStreamEvent {
+  return {
+    ...BASE_EVENT,
+    type: "agent.ui.chunk",
+    chunkIndex: 0,
+    chunk,
+  } as AgentRunStreamEvent
+}
 
 function buildSavedHistory(turns = 15): {
   readonly messages: readonly AgentMessage[]
@@ -95,10 +114,11 @@ function buildSavedHistory(turns = 15): {
   return { messages, runs }
 }
 
-function buildStreamChunks(runId: string) {
+function buildStreamChunks() {
+  const started = { ...BASE_EVENT, type: "agent.run.started" } as AgentRunStreamEvent
   const events: Parameters<typeof liveRunReducer>[1][] = [
-    { type: "event", event: { type: "agent.run.started", runId } },
-    { type: "event", event: { type: "agent.ui.chunk", chunk: { type: "start-step" } } },
+    { type: "event", event: started },
+    { type: "event", event: chunkEvent({ type: "start-step" }) },
   ]
 
   for (let index = 0; index < 6; index += 1) {
@@ -106,27 +126,26 @@ function buildStreamChunks(runId: string) {
     events.push(
       {
         type: "event",
-        event: {
-          type: "agent.ui.chunk",
-          chunk: {
-            type: "tool-input-available",
-            toolCallId,
-            toolName: "read",
-            input: { path: `f${index}.ts` },
-          },
-        },
+        event: chunkEvent({
+          type: "tool-input-available",
+          toolCallId,
+          toolName: "read",
+          input: { path: `f${index}.ts` },
+        }),
       },
       {
         type: "event",
-        event: {
-          type: "agent.ui.chunk",
-          chunk: { type: "tool-output-available", toolCallId, output: { ok: true } },
-        },
+        event: chunkEvent({
+          type: "tool-output-available",
+          toolCallId,
+          toolName: "read",
+          output: { ok: true },
+        }),
       }
     )
   }
 
-  events.push({ type: "event", event: { type: "agent.ui.chunk", chunk: { type: "start-step" } } })
+  events.push({ type: "event", event: chunkEvent({ type: "start-step" }) })
   const markdown = [
     "# Summary\n\n",
     "```typescript\nexport const status = 1\n```\n\n",
@@ -138,10 +157,11 @@ function buildStreamChunks(runId: string) {
   for (let offset = 0; offset < markdown.length; offset += 8) {
     events.push({
       type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: { type: "text-delta", id: "t1", delta: markdown.slice(offset, offset + 8) },
-      },
+      event: chunkEvent({
+        type: "text-delta",
+        id: "t1",
+        delta: markdown.slice(offset, offset + 8),
+      }),
     })
   }
   return { events, markdown }
@@ -154,7 +174,7 @@ function median(samples: readonly number[]): number {
 
 async function main() {
   const { messages: saved, runs } = buildSavedHistory(25)
-  const { events, markdown } = buildStreamChunks("run_live")
+  const { events, markdown } = buildStreamChunks()
   const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
 
   // 1. State fold + message/part/delegation normalization across a 50-message thread + stream

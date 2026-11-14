@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { AgentRunStreamEvent, ModelUiChunk } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
@@ -37,6 +38,28 @@ installDom([
 
 const at = "2026-11-14T12:00:00.000Z"
 
+const BASE_EVENT = {
+  schemaVersion: 1,
+  projectId: "proj",
+  runId: "run_live",
+  threadId: "thr_1",
+  attempt: 1,
+  occurredAt: at,
+} as const
+
+function runStartedEvent(): AgentRunStreamEvent {
+  return { ...BASE_EVENT, type: "agent.run.started" } as AgentRunStreamEvent
+}
+
+function chunkEvent(chunk: ModelUiChunk): AgentRunStreamEvent {
+  return {
+    ...BASE_EVENT,
+    type: "agent.ui.chunk",
+    chunkIndex: 0,
+    chunk,
+  } as AgentRunStreamEvent
+}
+
 function savedTurn(index: number, status: AgentRun["status"] = "succeeded") {
   const userMessage: AgentMessage = {
     id: `msg_u_${index}`,
@@ -69,7 +92,9 @@ function savedTurn(index: number, status: AgentRun["status"] = "succeeded") {
       { type: "text", text: `Completed reply ${index} with **markdown**.` },
     ],
     annotations:
-      index === 3 ? [{ code: "output_limit_reached", severity: "warning", message: "Cut" }] : [],
+      index === 3
+        ? [{ code: "output_limit_reached", severity: "warning", scope: "run", message: "Cut" }]
+        : [],
     contentVersion: 1,
     createdAt: at,
   }
@@ -156,32 +181,25 @@ describe("agent chat re-render stability", () => {
     expect(liveToolRenders).toBe(0)
 
     let live = createLiveRunState("run_live")
+    live = liveRunReducer(live, { type: "event", event: runStartedEvent() })
+    live = liveRunReducer(live, { type: "event", event: chunkEvent({ type: "start-step" }) })
     live = liveRunReducer(live, {
       type: "event",
-      event: { type: "agent.run.started", runId: "run_live" },
+      event: chunkEvent({
+        type: "tool-input-available",
+        toolCallId: "c_live",
+        toolName: "live_probe",
+        input: {},
+      }),
     })
     live = liveRunReducer(live, {
       type: "event",
-      event: { type: "agent.ui.chunk", chunk: { type: "start-step" } },
-    })
-    live = liveRunReducer(live, {
-      type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: {
-          type: "tool-input-available",
-          toolCallId: "c_live",
-          toolName: "live_probe",
-          input: {},
-        },
-      },
-    })
-    live = liveRunReducer(live, {
-      type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: { type: "tool-output-available", toolCallId: "c_live", output: { ready: true } },
-      },
+      event: chunkEvent({
+        type: "tool-output-available",
+        toolCallId: "c_live",
+        toolName: "live_probe",
+        output: { ready: true },
+      }),
     })
     view.rerender(ui(live))
     expect(savedRenders).toBe(3)
@@ -190,17 +208,11 @@ describe("agent chat re-render stability", () => {
     // Stream 20 text chunks in step 2: neither saved rows nor the settled live tool view re-render.
     // Removal proof: drop the WeakMap in `liveParts` / `normalizedParts` or `memo` on
     // `AnswerToolViews`; `liveToolRenders` climbs to 21.
-    live = liveRunReducer(live, {
-      type: "event",
-      event: { type: "agent.ui.chunk", chunk: { type: "start-step" } },
-    })
+    live = liveRunReducer(live, { type: "event", event: chunkEvent({ type: "start-step" }) })
     for (let index = 0; index < 20; index += 1) {
       live = liveRunReducer(live, {
         type: "event",
-        event: {
-          type: "agent.ui.chunk",
-          chunk: { type: "text-delta", id: "t_live", delta: `chunk ${index} ` },
-        },
+        event: chunkEvent({ type: "text-delta", id: "t_live", delta: `chunk ${index} ` }),
       })
       view.rerender(ui(live))
     }
@@ -289,39 +301,32 @@ describe("agent chat re-render stability", () => {
 
     // Untouched tool and reasoning parts keep NormalizedPart identity across later text chunks.
     let live = createLiveRunState("run_live")
+    live = liveRunReducer(live, { type: "event", event: runStartedEvent() })
     live = liveRunReducer(live, {
       type: "event",
-      event: { type: "agent.run.started", runId: "run_live" },
+      event: chunkEvent({ type: "reasoning-delta", id: "r1", delta: "Checking schema" }),
     })
     live = liveRunReducer(live, {
       type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: { type: "reasoning-delta", id: "r1", delta: "Checking schema" },
-      },
+      event: chunkEvent({ type: "reasoning-end", id: "r1" }),
     })
     live = liveRunReducer(live, {
       type: "event",
-      event: { type: "agent.ui.chunk", chunk: { type: "reasoning-end", id: "r1" } },
+      event: chunkEvent({
+        type: "tool-input-available",
+        toolCallId: "c1",
+        toolName: "read",
+        input: { path: "a.ts" },
+      }),
     })
     live = liveRunReducer(live, {
       type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: {
-          type: "tool-input-available",
-          toolCallId: "c1",
-          toolName: "read",
-          input: { path: "a.ts" },
-        },
-      },
-    })
-    live = liveRunReducer(live, {
-      type: "event",
-      event: {
-        type: "agent.ui.chunk",
-        chunk: { type: "tool-output-available", toolCallId: "c1", output: { content: "x" } },
-      },
+      event: chunkEvent({
+        type: "tool-output-available",
+        toolCallId: "c1",
+        toolName: "read",
+        output: { content: "x" },
+      }),
     })
 
     const beforeText = conversationMessages({
@@ -331,13 +336,10 @@ describe("agent chat re-render stability", () => {
     })[0]!
     const normalizedBefore = normalizedParts(beforeText.parts)
 
+    live = liveRunReducer(live, { type: "event", event: chunkEvent({ type: "start-step" }) })
     live = liveRunReducer(live, {
       type: "event",
-      event: { type: "agent.ui.chunk", chunk: { type: "start-step" } },
-    })
-    live = liveRunReducer(live, {
-      type: "event",
-      event: { type: "agent.ui.chunk", chunk: { type: "text-delta", id: "t1", delta: "Answer" } },
+      event: chunkEvent({ type: "text-delta", id: "t1", delta: "Answer" }),
     })
 
     const afterText = conversationMessages({

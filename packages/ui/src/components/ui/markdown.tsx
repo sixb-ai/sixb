@@ -89,22 +89,26 @@ const COMPONENTS: Components = {
       </td>
     )
   },
-  code({ node: _node, className, children, ...props }) {
-    const insidePre = useContext(getInsidePreContext())
-    const match = /language-([^\s]+)/.exec(className ?? "")
-    if (!insidePre && !match) {
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      )
-    }
-    const MemoCodeBlock = getMemoizedCodeBlock()
-    return <MemoCodeBlock lang={match?.[1] ?? ""} code={codeText(children).replace(/\n$/, "")} />
+  code({ node: _node, ...props }) {
+    return <MarkdownCode {...props} />
   },
 }
 
 const SHORT_CELL = 24
+
+function MarkdownCode({ className, children, ...props }: ComponentProps<"code">) {
+  const insidePre = useContext(getInsidePreContext())
+  const match = /language-([^\s]+)/.exec(className ?? "")
+  if (!insidePre && !match) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    )
+  }
+  const MemoCodeBlock = getMemoizedCodeBlock()
+  return <MemoCodeBlock lang={match?.[1] ?? ""} code={codeText(children).replace(/\n$/, "")} />
+}
 
 /** A table that scrolls sideways, its edges fading only where columns are scrolled out of view. */
 function ScrollTable({ children, ...props }: ComponentProps<"table">) {
