@@ -130,7 +130,11 @@ describe("owned model adapters", () => {
       },
     })
     const client = await connectorDefinition.adapter.connect()
-    const resolve = (async () => client) as AgentToolRunContext["sixb"]["connector"]
+    const resolve = Object.assign(async () => client, {
+      connections() {
+        throw new Error("unused")
+      },
+    }) as AgentToolRunContext["sixb"]["connector"]
     const definition = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
       .input({ query: "string", limit: "integer", mode: stringEnum(["quick", "deep"]) })

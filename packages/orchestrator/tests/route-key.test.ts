@@ -126,6 +126,28 @@ const cases: readonly [string, StoredDomainEvent, readonly OrchestratorRouteKey[
     },
     ["event-schedule:user.joined:users"],
   ],
+  [
+    "connection events route by connector",
+    {
+      ...base,
+      id: "evt-connected",
+      type: "connector.connection.connected",
+      topic: "connectors",
+      partitionKey: "ccn_1",
+      payload: {
+        connectorId: "outlook",
+        connection: {
+          id: "ccn_1",
+          connectorId: "outlook",
+          owner: { type: "user", id: "usr_ada" },
+          slot: "default",
+          account: { id: "account-a", label: "ada@example.com" },
+        },
+        reason: "connected",
+      },
+    },
+    ["event-schedule:connector.connection.connected:outlook"],
+  ],
 ]
 
 test.each(cases)("routeKeysForEvent: %s", (_name, event, expected) => {
@@ -136,4 +158,13 @@ test("a member event schedule listens on the key its events route to", () => {
   expect(eventScheduleRouteKeyForSelector("user.joined", events.users().joined())).toBe(
     "event-schedule:user.joined:users"
   )
+})
+
+test("a connection event schedule listens on the key its events route to", () => {
+  expect(
+    eventScheduleRouteKeyForSelector(
+      "connector.connection.connected",
+      events.connector({ kind: "connector", id: "outlook" }).connected()
+    )
+  ).toBe("event-schedule:connector.connection.connected:outlook")
 })

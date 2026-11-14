@@ -26,6 +26,11 @@ export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"
 export {
   buildEventSelectorPredicate,
+  type ConnectorEventSelectorBuilder,
+  type ConnectorEventSelectorContext,
+  type ConnectorEventSelectorEvent,
+  type ConnectorEventSelectorOperation,
+  type ConnectorEventToken,
   type DatasetEventSelectorBuilder,
   type DatasetEventSelectorContext,
   type DatasetEventSelectorEvent,
@@ -84,6 +89,9 @@ export type {
   ArtifactUpdatedEvent,
   AuthorableDomainEvent,
   AuthorableEventDraft,
+  ConnectorConnectionConnectedEvent,
+  ConnectorConnectionDisconnectedEvent,
+  ConnectorEvent,
   DatasetEvent,
   DatasetVersionCommittedEvent,
   DomainEvent,

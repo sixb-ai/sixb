@@ -389,6 +389,34 @@ describe("personal connections in actions and workflows", () => {
     expect((await open(await action(), connector, "user-b")).accountId).toBe("account-b")
   })
 
+  // Removal proof: return true from mayUsePersonalConnection; Ada's own run lists Ben's account.
+  test("listing connections follows the same rule as opening one", async () => {
+    const { action, eventWorkflow, connector } = await personalHost()
+    // Listed by connection id, which is random here; sorted by account to compare.
+    const listed = async (sixb: Sixb) =>
+      (
+        await Promise.all(
+          (
+            await sixb.connector.connections(connector).list()
+          ).map(async (handle) => [handle.connection.owner, (await handle.client()).accountId])
+        )
+      ).sort((left, right) => String(left[1]).localeCompare(String(right[1])))
+
+    expect(await listed(await eventWorkflow())).toEqual([
+      [userOwner("user-a"), "account-a"],
+      [userOwner("user-b"), "account-b"],
+    ])
+    expect(await listed(await action(userOwner("user-a")))).toEqual([
+      [userOwner("user-a"), "account-a"],
+    ])
+    expect(await listed(await action({ type: "serviceAccount", id: "service-a" }))).toEqual([])
+
+    const byAccount = await (await eventWorkflow()).connector
+      .connections(connector)
+      .forAccount("account-b")
+    expect(byAccount.map(({ connection }) => connection.owner)).toEqual([userOwner("user-b")])
+  })
+
   test("a person without a connection in that slot reads as not found", async () => {
     const { eventWorkflow, connector } = await personalHost()
     const sixb = await eventWorkflow()

@@ -7,7 +7,7 @@ import { createAgentSkillCatalog } from "../agents/skills"
 import { assertMaxSteps } from "../agents/step-limits"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
 import { assertNoProviderWebTools, resolveAgentWebOptions } from "../agents/web"
-import type { ConnectorDefinition } from "../connectors"
+import { type ConnectorDefinition, isOAuthConnectorDefinition } from "../connectors"
 import { isDatasetPick } from "../datasets/builders"
 import { columnsByName } from "../datasets/column-index"
 import type { DatasetDefinition } from "../datasets/types"
@@ -163,6 +163,9 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     registeredDatasetIds: new Set(datasetsById.keys()),
     registeredSyncIds: new Set(syncsById.keys()),
     registeredPipelineIds: new Set(pipelinesById.keys()),
+    registeredOAuthConnectorIds: new Set(
+      [...connectorsById.values()].filter(isOAuthConnectorDefinition).map(({ id }) => id)
+    ),
   })
   for (const sync of syncs) {
     validateScheduleReferences("Sync", sync.id, sync.triggers, schedulesById)

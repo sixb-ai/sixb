@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { isSixbError } from "../../errors/internal"
+import type { DomainEventService } from "../../events"
 import type {
   AuthUserStore,
   ConnectorConnectionRecord,
@@ -62,6 +63,7 @@ import type {
   StartConnectorConnectionRunResult,
 } from "./contracts"
 import { connectorAuthorizationStatusError } from "./credential-mutations"
+import { ConnectorConnectionEvents } from "./events"
 import { runBoundedConnectorProviderOperation } from "./provider-operation"
 import { ConnectorAuthorizationRequestHandler } from "./request"
 import { ConnectorConnectionRunService } from "./runs"
@@ -86,6 +88,8 @@ export interface ConnectorConnectionServiceOptions {
   readonly connectionRunProcessingTtlMs?: number
   readonly refreshSkewMs?: number
   readonly now?: () => Date
+  /** Where connection events go. Without it, connecting and disconnecting announce nothing. */
+  readonly events?: Pick<DomainEventService, "emit">
 }
 
 /** Process-owned composition of connector connection lookup and OAuth lifecycle state. */
@@ -98,6 +102,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   private readonly authorizations: DefaultConnectorAuthorizationLifecycle
   private readonly requests: ConnectorAuthorizationRequestHandler
   private readonly runs: ConnectorConnectionRunService
+  private readonly events: ConnectorConnectionEvents
   readonly callbackProcess: ConnectorConnectionCallbackProcess
 
   constructor(
@@ -119,6 +124,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       "provider operation timeout"
     )
     this.providerOperationTimeoutMs = providerOperationTimeoutMs
+    this.events = new ConnectorConnectionEvents(options.events)
 
     this.authorizations = new DefaultConnectorAuthorizationLifecycle({
       projectId,
@@ -132,6 +138,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       providerOperationTimeoutMs,
       refreshSkewMs: options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS,
       now,
+      events: this.events,
     })
     this.requests = new ConnectorAuthorizationRequestHandler({
       projectId,
@@ -153,6 +160,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
         options.connectionRunProcessingTtlMs ?? providerOperationTimeoutMs * 2 + 30_000,
       selectionTtlMs: accountSelectionTtlMs,
       now,
+      events: this.events,
     })
     this.callbackProcess = Object.freeze({
       completeConnectionRun: (input: CompleteConnectorConnectionRunInput) =>
@@ -221,6 +229,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   async revokeUserConnections(userId: string): Promise<void> {
     const principal = { type: "user", id: nonblank(userId, "user id") } as const
     const failures: unknown[] = []
+    const suspended: ConnectorConnectionRecord[] = []
     for (const definition of this.definitionsById.values()) {
       if (!isOAuthConnectorDefinition(definition)) continue
       if (!connectorConnectionOwners(definition).includes("user")) continue
@@ -240,12 +249,18 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       )
       for (const authorizationId of authorizationIds) {
         try {
-          await this.authorizations.revokeAuthorization({ definition, authorizationId, principal })
+          const revoked = await this.authorizations.revokeAuthorization({
+            definition,
+            authorizationId,
+            principal,
+          })
+          suspended.push(...revoked.disconnected)
         } catch (error) {
           failures.push(error)
         }
       }
     }
+    await this.events.disconnected(suspended, "suspended")
     if (failures.length > 0) {
       throw new AggregateError(
         failures,
@@ -559,6 +574,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       }
       throw storageBoundaryError(error, "Connector account selection could not be persisted.")
     }
+    await this.events.connected([result.connection], result.replaced ? "replaced" : "connected")
     if (result.revocationPendingAuthorizationId) {
       await this.continuePendingRevocation(definition, result.revocationPendingAuthorizationId)
     }
@@ -615,6 +631,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
         connectionId: normalizedConnectionId,
       })
       if (!disconnected) return null
+      await this.events.disconnected([disconnected.connection], "disconnected")
       if (disconnected.revocationPendingAuthorizationId) {
         await this.continuePendingRevocation(
           definition,
@@ -649,6 +666,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       ),
       principal: actor.principal,
     })
+    await this.events.disconnected(revoked.disconnected, "revoked")
     return {
       affectedConnections: revoked.disconnected.map((connection) =>
         connectorConnectionView(connection, "revoked")

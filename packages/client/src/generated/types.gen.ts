@@ -23219,6 +23219,7 @@ export type ListEventsData = {
       | "rules"
       | "users"
       | "artifacts"
+      | "connectors"
     type?:
       | "object.created"
       | "object.updated"
@@ -23255,6 +23256,8 @@ export type ListEventsData = {
       | "user.profile.updated"
       | "artifact.updated"
       | "artifact.commented"
+      | "connector.connection.connected"
+      | "connector.connection.disconnected"
     afterCursor?: string
     limit?: string
   }
@@ -24482,6 +24485,8 @@ export type ListEventsResponses = {
             | "user.profile.updated"
             | "artifact.updated"
             | "artifact.commented"
+            | "connector.connection.connected"
+            | "connector.connection.disconnected"
           topic:
             | "objects"
             | "telemetry"
@@ -24494,6 +24499,7 @@ export type ListEventsResponses = {
             | "rules"
             | "users"
             | "artifacts"
+            | "connectors"
           payload: {
             [key: string]: unknown
           }

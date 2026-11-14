@@ -50,6 +50,7 @@ export type HarnessOptions = Pick<
   | "credentialMutationLeaseMs"
   | "providerOperationTimeoutMs"
   | "refreshSkewMs"
+  | "events"
 > & {
   readonly systemRuntimeClock?: boolean
   readonly systemStorageClock?: boolean
@@ -195,6 +196,7 @@ export function createHarness(options: HarnessOptions = {}) {
     credentialMutationLeaseMs: options.credentialMutationLeaseMs,
     providerOperationTimeoutMs: options.providerOperationTimeoutMs,
     refreshSkewMs: options.refreshSkewMs,
+    events: options.events,
   })
   const process = afterReady(requireConnectionProcess(service), ready)
 

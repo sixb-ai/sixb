@@ -64,8 +64,9 @@ This abbreviated example shows common fields. The event also carries its subject
 | `syncs`, `pipelines` | Run lifecycle events. |
 | `users` | `user.joined`, `user.invited`, `user.suspended`, `user.reactivated`, `user.profile.updated` |
 | `artifacts` | `artifact.updated`, `artifact.commented` |
+| `connectors` | `connector.connection.connected`, `connector.connection.disconnected` |
 
-Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. Member events require `can.view(project.users)`, like the [member directory](../auth/members.md#read-the-member-directory). Artifact events go to whoever can read the [artifact](../artifacts/overview.md#versions-and-restore-points). There is no separate grant to read all domain events.
+Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. Member events require `can.view(project.users)`, like the [member directory](../auth/members.md#read-the-member-directory). Artifact events go to whoever can read the [artifact](../artifacts/overview.md#versions-and-restore-points). Connection events go to whoever sees the connection: members with `can.manage` on its connector, and the owner of a [personal connection](../connectors/authentication.md#let-people-connect-their-own-accounts). There is no separate grant to read all domain events.
 
 ## Replay events
 
