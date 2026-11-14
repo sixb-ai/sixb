@@ -11,6 +11,10 @@ Sixb packages are versioned independently. Each release entry names the packages
   ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
   `results` and `cost_per_result`. Marketing API limits (codes 80000–80014) are retried like
   Graph throttling.
+- Register an Azure AI Foundry deployment of `Microsoft-Decision-1` in `models.decision` with
+  `@sixb/azure-ai-foundry`'s `foundry.decision("decision-1")`. `sixb.models.decision.evaluate()`
+  and chat's Auto tier routing then run inside your Azure tenant, priced at Azure's USD 0.042 per
+  million input tokens. `@sixb/typesafe` and Foundry share one System One codec.
 
 ### Upgrade notes
 

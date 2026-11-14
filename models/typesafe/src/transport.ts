@@ -3,8 +3,7 @@ import {
   type DecisionModelResult,
   ModelProviderError,
 } from "@sixb/core/models"
-import { typesafeQuestions } from "./request"
-import { typesafeResponse } from "./response"
+import { systemOneRequest, systemOneResult } from "@sixb/model-protocols/systemone"
 
 export interface TypesafeTransport {
   readonly endpoint: string
@@ -37,11 +36,7 @@ export async function evaluateTypesafe(
   const response = await transport.fetch(transport.endpoint, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: modelId,
-      state: request.input,
-      questions: typesafeQuestions(request.questions),
-    }),
+    body: JSON.stringify(systemOneRequest(modelId, request)),
     signal,
   })
 
@@ -63,7 +58,22 @@ export async function evaluateTypesafe(
     })
   }
 
-  return typesafeResponse(body, request.questions, modelId, requestId)
+  return systemOneResult(body, request.questions, {
+    providerId: "typesafe",
+    modelId,
+    errorPrefix: "[SixbTypeSafe]",
+    requestId,
+    assertModel: (model) => assertResponseModel(model, modelId),
+  })
+}
+
+function assertResponseModel(value: unknown, requestedModel: string): void {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("Missing response model")
+  }
+  if (/^jev-\d+\.\d+\.\d+$/.test(requestedModel) && value !== requestedModel) {
+    throw new Error("Pinned model identity changed")
+  }
 }
 
 function httpError(response: Response, modelId: string, requestId: string | undefined) {
