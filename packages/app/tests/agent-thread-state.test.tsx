@@ -47,6 +47,10 @@ function typeText(element: HTMLElement, value: string): void {
   fireEvent.keyUp(element, { key: value.at(-1) ?? "a" })
 }
 
+function messageInput(screen: ReturnType<typeof render>): HTMLTextAreaElement {
+  return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
+}
+
 function seedThreadAndArtifacts(): QueryClient {
   const cache = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
@@ -144,29 +148,25 @@ describe("per-thread composer drafts", () => {
     )
 
     const view = render(ui("thr_a"))
-    const input = () => view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
-
-    typeText(input(), "Draft for thread A")
-    expect(input().value).toBe("Draft for thread A")
+    typeText(messageInput(view), "Draft for thread A")
+    expect(messageInput(view).value).toBe("Draft for thread A")
 
     // Switch to thread B: starts clean without thread A's draft.
     view.rerender(ui("thr_b"))
-    expect(input().value).toBe("")
-    typeText(input(), "Draft for thread B")
+    expect(messageInput(view).value).toBe("")
+    typeText(messageInput(view), "Draft for thread B")
 
     // Unmount completely (leaving the chat page) and remount on thread A.
     view.unmount()
     const reopened = render(ui("thr_a"))
-    const reopenedInput = () =>
-      reopened.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
-    expect(reopenedInput().value).toBe("Draft for thread A")
+    expect(messageInput(reopened).value).toBe("Draft for thread A")
 
     // Switch back to thread B and send: clears thread B while keeping thread A intact.
     reopened.rerender(ui("thr_b"))
-    expect(reopenedInput().value).toBe("Draft for thread B")
+    expect(messageInput(reopened).value).toBe("Draft for thread B")
     fireEvent.click(reopened.getByRole("button", { name: "Send message" }))
     expect(sent).toEqual(["thr_b:Draft for thread B"])
-    expect(reopenedInput().value).toBe("")
+    expect(messageInput(reopened).value).toBe("")
     expect(store.readDraft("thr_b")).toBeNull()
     expect(store.readDraft("thr_a")?.text).toBe("Draft for thread A")
     reopened.unmount()
@@ -239,18 +239,18 @@ describe("per-thread open artifact state", () => {
 
     function Probe() {
       const panel = useArtifactPanel()
+      const openReport = () => panel?.open({ type: "artifact", artifactId: REPORT })
+      const openFile = () => panel?.open({ type: "file", source: file })
+      const closePanel = () => panel?.close()
       return (
         <>
-          <button
-            type="button"
-            onClick={() => panel?.open({ type: "artifact", artifactId: REPORT })}
-          >
+          <button type="button" onClick={openReport}>
             Open report
           </button>
-          <button type="button" onClick={() => panel?.open({ type: "file", source: file })}>
+          <button type="button" onClick={openFile}>
             Open file
           </button>
-          <button type="button" onClick={() => panel?.close()}>
+          <button type="button" onClick={closePanel}>
             Close panel
           </button>
           <output data-testid="open-key">{panel?.openKey ?? "none"}</output>
@@ -343,28 +343,22 @@ describe("per-thread open artifact state", () => {
       </QueryClientProvider>
     )
 
+    const expectedUrl = `/threads/thr_a?artifact=${REPORT}`
     fireEvent.click(view.getByText("Open thread A"))
-    await waitFor(() =>
-      expect(view.getByTestId("url").textContent).toBe(`/threads/thr_a?artifact=${REPORT}`)
-    )
-    const inputA = view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
-    expect(inputA.value).toBe("Continue analyzing Q4")
+    await waitFor(() => expect(view.getByTestId("url").textContent).toBe(expectedUrl))
+    expect(messageInput(view).value).toBe("Continue analyzing Q4")
 
     // Switch directly to thread B: URL has no artifact and input is empty.
     fireEvent.click(view.getByText("Open thread B"))
     await waitFor(() => expect(view.getByTestId("url").textContent).toBe("/threads/thr_b"))
-    expect((view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe("")
+    expect(messageInput(view).value).toBe("")
 
     // Leave to /threads, then return to thread A: both the artifact and draft come right back.
     fireEvent.click(view.getByText("Leave thread"))
     expect(view.getByText("All threads list")).toBeTruthy()
     fireEvent.click(view.getByText("Open thread A"))
-    await waitFor(() =>
-      expect(view.getByTestId("url").textContent).toBe(`/threads/thr_a?artifact=${REPORT}`)
-    )
-    expect((view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(
-      "Continue analyzing Q4"
-    )
+    await waitFor(() => expect(view.getByTestId("url").textContent).toBe(expectedUrl))
+    expect(messageInput(view).value).toBe("Continue analyzing Q4")
     view.unmount()
     cache.clear()
   })

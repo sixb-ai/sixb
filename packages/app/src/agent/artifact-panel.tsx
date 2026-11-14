@@ -195,8 +195,9 @@ export function ArtifactPanelRoot({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: sync restored artifact once on mount
   useEffect(() => {
-    if (!routeTarget && localTarget?.type === "artifact" && routeRef.current.onRouteTargetChange) {
-      routeRef.current.onRouteTargetChange(localTarget, { replace: true })
+    const changeRoute = routeRef.current.onRouteTargetChange
+    if (!routeTarget && localTarget?.type === "artifact" && changeRoute) {
+      changeRoute(localTarget, { replace: true })
     }
   }, [])
 

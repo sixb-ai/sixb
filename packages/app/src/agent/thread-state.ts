@@ -109,9 +109,6 @@ export function useThreadStateStore(owner?: object | null): ThreadStateStore {
 }
 
 function isEmptyDraft(draft: ThreadComposerDraft): boolean {
-  return (
-    draft.text.length === 0 &&
-    draft.attachments.length === 0 &&
-    draft.explicitContext.length === 0
-  )
+  if (draft.text.length > 0) return false
+  return draft.attachments.length === 0 && draft.explicitContext.length === 0
 }

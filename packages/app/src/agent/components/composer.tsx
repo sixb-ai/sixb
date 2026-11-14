@@ -352,17 +352,8 @@ export const Composer = memo(function Composer({
   }
 
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
-  const readyAttachments = useMemo(
-    () =>
-      attachments.flatMap((attachment) =>
-        attachment.status === "ready" ? [attachment.fileRef] : []
-      ),
-    [attachments]
-  )
-  const explicitContext = useMemo(
-    () => contextEntries.filter((entry) => entry.origin === "explicit"),
-    [contextEntries]
-  )
+  const readyAttachments = useMemo(() => readyAttachmentFiles(attachments), [attachments])
+  const explicitContext = useMemo(() => explicitEntries(contextEntries), [contextEntries])
 
   useEffect(() => {
     if (!draftKey || loadedDraftKey !== draftKey) return
@@ -1396,4 +1387,12 @@ function readInitialDraftContext(
     .filter((context) => !explicitIds.has(agentContextIdentity(context)))
     .map((context) => ({ context, origin: "ambient" as const }))
   return [...ambient, ...explicit]
+}
+
+function readyAttachmentFiles(attachments: readonly ComposerAttachment[]): AgentFileRef[] {
+  return attachments.flatMap((item) => (item.status === "ready" ? [item.fileRef] : []))
+}
+
+function explicitEntries(entries: readonly AgentContextEntryInput[]): AgentContextEntryInput[] {
+  return entries.filter((entry) => entry.origin === "explicit")
 }
