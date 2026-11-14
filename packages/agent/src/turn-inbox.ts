@@ -15,7 +15,7 @@ import type {
   Principal,
 } from "@sixb/core/storage"
 import { renderCurrentTime, type SentSettings } from "./agent-prompt"
-import { conversationAuthors, type ConversationReaders } from "./message-authors"
+import { type ConversationReaders, conversationAuthors } from "./message-authors"
 import {
   type AgentToolOutputFileOf,
   agentTraceFromModelSteps,
@@ -49,7 +49,10 @@ export class TurnInbox {
   #read: AgentInboxItemRecord[] = []
   readonly #context: TurnInboxContext
 
-  constructor(private readonly session: AgentRunSession, context: TurnInboxContext) {
+  constructor(
+    private readonly session: AgentRunSession,
+    context: TurnInboxContext
+  ) {
     this.#context = context
   }
 

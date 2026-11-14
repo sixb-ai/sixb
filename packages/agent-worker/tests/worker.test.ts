@@ -437,12 +437,16 @@ function finish(unified: ModelFinishReason): WorkerTestStreamEvent {
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
  * reasoning + text. A stateful stream handler guarantees per-call ordering.
  */
-function toolThenAnswerModel(captureReplay?: (prompt: string) => void): WorkerTestModel {
+function toolThenAnswerModel(
+  captureReplay?: (prompt: string) => void,
+  beforeAnswer?: () => Promise<void>
+): WorkerTestModel {
   let call = 0
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (options) => {
       call += 1
+      if (call === 2) await beforeAnswer?.()
       if (call === 1) {
         return stream([
           { type: "stream-start", warnings: [] },
@@ -13943,7 +13947,11 @@ describe("AgentWorker", () => {
   })
 
   test("a stale worker records billable calls but cannot write the fenced run or message", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    // This worker started the run, and another delivery rotates its execution token while the
+    // model answers. Rotated before the first call, the turn's first inbox read is fenced and no
+    // call is made at all.
+    let rotateToken = async () => {}
+    const sixb = buildSixb(toolThenAnswerModel(undefined, () => rotateToken()))
     const storage = agentStorageOf(sixb)
 
     const {
@@ -13952,7 +13960,6 @@ describe("AgentWorker", () => {
       text: "echo hi",
     })
 
-    // This worker started the run, but another delivery rotated its execution token.
     const staleRun = requireConversationRun(
       await storage.runs.start({
         id: runId,
@@ -13960,11 +13967,13 @@ describe("AgentWorker", () => {
         execution: freshTestExecution(),
       })
     )
-    await storage.runs.reclaim({
-      projectId: PROJECT_ID,
-      id: runId,
-      execution: freshTestExecution(),
-    })
+    rotateToken = async () => {
+      await storage.runs.reclaim({
+        projectId: PROJECT_ID,
+        id: runId,
+        execution: freshTestExecution(),
+      })
+    }
 
     const promise = runTurnInSession({
       storage: workerStorageOf(sixb.storage),

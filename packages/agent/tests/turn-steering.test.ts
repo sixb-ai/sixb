@@ -140,7 +140,6 @@ function testTool(
 }
 
 async function runTurn(
-  storage: InMemoryStorage,
   session: AgentRunSession<ConversationAgentRunRecord>,
   tools: readonly ModelTool[]
 ) {
@@ -183,91 +182,91 @@ function answer(text: string): LanguageModelStreamEvent[] {
 }
 
 describe("a turn's mid-run steers", () => {
-  test.each(["in-process", "http"] as const)(
-    "are read after the running step and replay byte-identically (%s)",
-    async (mode) => {
-      const requests: LanguageModelRequest[] = []
-      const model = new WorkerTestModel({
-        stream: async (request) => {
-          requests.push(request)
-          const firstCall = requests.length === 1
-          return {
-            events: (async function* (): AsyncGenerator<LanguageModelStreamEvent> {
-              for (const event of firstCall
-                ? [
-                    { type: "stream-start" } as const,
-                    {
-                      type: "tool-call" as const,
-                      toolCallId: "call_1",
-                      toolName: "check_folder",
-                      input: "{}",
-                    },
-                    {
-                      type: "finish" as const,
-                      finishReason: "tool-calls" as const,
-                      usage: { inputTokens: 20, outputTokens: 8 },
-                    },
-                  ]
-                : answer("Checked src/v2 as asked.")) {
-                yield event
-              }
-            })(),
-          }
-        },
+  test.each([
+    "in-process",
+    "http",
+  ] as const)("are read after the running step and replay byte-identically (%s)", async (mode) => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        requests.push(request)
+        const firstCall = requests.length === 1
+        return {
+          events: (async function* (): AsyncGenerator<LanguageModelStreamEvent> {
+            for (const event of firstCall
+              ? [
+                  { type: "stream-start" } as const,
+                  {
+                    type: "tool-call" as const,
+                    toolCallId: "call_1",
+                    toolName: "check_folder",
+                    input: "{}",
+                  },
+                  {
+                    type: "finish" as const,
+                    finishReason: "tool-calls" as const,
+                    usage: { inputTokens: 20, outputTokens: 8 },
+                  },
+                ]
+              : answer("Checked src/v2 as asked.")) {
+              yield event
+            }
+          })(),
+        }
+      },
+    })
+
+    const { storage, host } = createHost(model)
+    const run = await seedTurn(storage, "run_1")
+    const tool = testTool("check_folder", async () => {
+      // Ava steers while the tool runs: her message waits for the step to finish.
+      await storage.agents.inbox.enqueue({
+        id: "inb_1",
+        projectId,
+        threadId,
+        messageId: "msg_steer_1",
+        authorPrincipal: ava,
+        mode: "steer",
+        parts: [{ type: "text", text: "Check src/v2 instead." }],
+        timeZone: "America/New_York",
+        locale: "en-US",
+        createdAt: new Date("2026-11-14T16:01:30.000Z"),
       })
+      return "src/v1 has 3 files."
+    })
 
-      const { storage, host } = createHost(model)
-      const run = await seedTurn(storage, "run_1")
-      const tool = testTool("check_folder", async () => {
-        // Ava steers while the tool runs: her message waits for the step to finish.
-        await storage.agents.inbox.enqueue({
-          id: "inb_1",
-          projectId,
-          threadId,
-          messageId: "msg_steer_1",
-          authorPrincipal: ava,
-          mode: "steer",
-          parts: [{ type: "text", text: "Check src/v2 instead." }],
-          timeZone: "America/New_York",
-          locale: "en-US",
-          createdAt: new Date("2026-11-14T16:01:30.000Z"),
-        })
-        return "src/v1 has 3 files."
-      })
+    const session = await openSession(mode, host, run)
+    const finished = await runTurn(session, [tool])
 
-      const session = await openSession(mode, host, run)
-      const finished = await runTurn(storage, session, [tool])
+    expect(finished.status).toBe("succeeded")
+    expect(requests).toHaveLength(2)
+    // The step after the tool read the steer, so the thread's inbox is empty.
+    expect(await storage.agents.inbox.list({ projectId, threadId })).toEqual([])
 
-      expect(finished.status).toBe("succeeded")
-      expect(requests).toHaveLength(2)
-      // The step after the tool read the steer, so the thread's inbox is empty.
-      expect(await storage.agents.inbox.list({ projectId, threadId })).toEqual([])
+    const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
+    expect(messages.map((message) => ({ role: message.role, runId: message.runId }))).toEqual([
+      { role: "user", runId: null },
+      { role: "assistant", runId: "run_1" },
+      { role: "user", runId: null },
+      { role: "assistant", runId: "run_1" },
+    ])
+    const steer = messages[2]
+    expect(steer?.id).toBe("msg_steer_1")
+    expect(steer?.authorPrincipal).toEqual(ava)
+    expect(steer?.parts).toEqual([{ type: "text", text: "Check src/v2 instead." }])
+    expect(steer?.metadata).toEqual({ timeZone: "America/New_York", locale: "en-US" })
 
-      const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
-      expect(messages.map((message) => ({ role: message.role, runId: message.runId }))).toEqual([
-        { role: "user", runId: null },
-        { role: "assistant", runId: "run_1" },
-        { role: "user", runId: null },
-        { role: "assistant", runId: "run_1" },
-      ])
-      const steer = messages[2]
-      expect(steer?.id).toBe("msg_steer_1")
-      expect(steer?.authorPrincipal).toEqual(ava)
-      expect(steer?.parts).toEqual([{ type: "text", text: "Check src/v2 instead." }])
-      expect(steer?.metadata).toEqual({ timeZone: "America/New_York", locale: "en-US" })
-
-      // The next turn's request starts with the bytes the steered request sent, its steer too: only
-      // the answer that followed it is new.
-      const replayed = conversationModelMessages({
-        threadContext: agentThreadModelContext(
-          await readAgentTurnHistory({ projectId, storage }, threadId)
-        ),
-        project: { timeZone: "UTC", locale: "en-US" },
-      })
-      const steered = requests[1]!.messages.slice(1)
-      expect(replayed.slice(0, steered.length)).toEqual(steered)
-    }
-  )
+    // The next turn's request starts with the bytes the steered request sent, its steer too: only
+    // the answer that followed it is new.
+    const replayed = conversationModelMessages({
+      threadContext: agentThreadModelContext(
+        await readAgentTurnHistory({ projectId, storage }, threadId)
+      ),
+      project: { timeZone: "UTC", locale: "en-US" },
+    })
+    const steered = requests[1]!.messages.slice(1)
+    expect(replayed.slice(0, steered.length)).toEqual(steered)
+  })
 
   test("are read before the turn ends when they come as the model answers", async () => {
     const requests: LanguageModelRequest[] = []
@@ -276,7 +275,11 @@ describe("a turn's mid-run steers", () => {
       stream: async (request) => {
         requests.push(request)
         if (requests.length === 2) {
-          return { events: (async function* () { yield* answer("Q4 is included now.") })() }
+          return {
+            events: (async function* () {
+              yield* answer("Q4 is included now.")
+            })(),
+          }
         }
         return {
           events: (async function* (): AsyncGenerator<LanguageModelStreamEvent> {
@@ -309,7 +312,7 @@ describe("a turn's mid-run steers", () => {
     storage = fixture.storage
     const run = await seedTurn(fixture.storage, "run_late")
     const session = await openSession("in-process", fixture.host, run)
-    const finished = await runTurn(fixture.storage, session, [])
+    const finished = await runTurn(session, [])
 
     expect(finished.status).toBe("succeeded")
     expect(requests).toHaveLength(2)
@@ -425,17 +428,14 @@ describe("a turn's mid-run steers", () => {
 
     // Neither reached the thread, so both wait again, as if never read.
     const pending = await storage.agents.inbox.list({ projectId, threadId })
-    expect(
-      pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))
-    ).toEqual([
-      { id: "inb_0", claimed: false },
-      { id: "inb_1", claimed: false },
-    ])
+    expect(pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual(
+      [
+        { id: "inb_0", claimed: false },
+        { id: "inb_1", claimed: false },
+      ]
+    )
     const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
-    expect(messages.map((message) => message.id)).toEqual([
-      "msg_trigger_run_stop",
-      messages[1]!.id,
-    ])
+    expect(messages.map((message) => message.id)).toEqual(["msg_trigger_run_stop", messages[1]!.id])
     expect(messages[1]!.role).toBe("assistant")
   })
 
