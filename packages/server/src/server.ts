@@ -1,13 +1,14 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { findDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/security"
-import type { Server } from "bun"
+import type { Server, ServerWebSocket } from "bun"
 import { Elysia, ParseError } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import {
@@ -100,6 +101,14 @@ export interface SixbServerOptions {
   ingestFlush?: boolean
 }
 
+export interface SixbServerStopOptions {
+  /**
+   * How long in-flight HTTP requests may take to finish before remaining connections are closed.
+   * Defaults to 65 seconds, matching the Action drain window; `0` closes them at once.
+   */
+  readonly timeoutMs?: number
+}
+
 export function createSixbServer(options: SixbServerOptions): SixbServer {
   return new SixbServer(options)
 }
@@ -118,6 +127,8 @@ export class SixbServer {
   private readonly timing: SixbRequestTimingOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
+  private closeWebSockets: (() => void) | null = null
+  private stopping = false
   private readonly hostsOntologyMaintenance: boolean
   private readonly flushesIngestion: boolean
   private maintenance: OntologyMaintenanceHandle | null = null
@@ -190,10 +201,20 @@ export class SixbServer {
     return this.sharedAccessOptions
   }
 
+  /** Marks the server as stopping so `/ready` answers `503` before connections close. */
+  markStopping(): void {
+    this.stopping = true
+  }
+
+  isStopping(): boolean {
+    return this.stopping
+  }
+
   async start(): Promise<void> {
     if (this.app !== null || this.bunServer !== null || this.maintenance !== null) {
       throw new Error("[SixbServer] Server is already running.")
     }
+    this.stopping = false
 
     // Startup cannot see through SQL steps: check what they derive before serving any request.
     await checkPipelineMarkings({
@@ -215,15 +236,18 @@ export class SixbServer {
 
     try {
       this.app = createSixbApi(this)
-      this.bunServer = startApiServer(this.app, {
+      const started = startApiServer(this.app, {
         host: this.hostname,
         port: this.port,
         resolveClientAddress: this.resolveClientAddress,
         timing: this.timing,
       })
+      this.bunServer = started.bunServer
+      this.closeWebSockets = started.closeWebSockets
     } catch (error) {
       this.app = null
       this.bunServer = null
+      this.closeWebSockets = null
       this.maintenance = null
       await maintenance?.stop()
       const message = error instanceof Error ? error.message : String(error)
@@ -245,18 +269,32 @@ export class SixbServer {
     if (ingest) ingest.writesInline = inline
   }
 
-  async stop(): Promise<void> {
+  async stop(options: SixbServerStopOptions = {}): Promise<void> {
+    const timeoutMs = resolveStopTimeoutMs(options.timeoutMs, ACTION_RUN_DRAIN_TIMEOUT_MS)
+    this.stopping = true
     this.setIngestFlush(false)
     this.stopSweeper?.()
     this.stopSweeper = null
-    if (this.bunServer) {
-      this.bunServer.stop(true)
-      this.bunServer = null
+
+    const bunServer = this.bunServer
+    const closeWebSockets = this.closeWebSockets
+    const app = this.app
+    this.bunServer = null
+    this.closeWebSockets = null
+    this.app = null
+
+    const stopAppAndSockets = async () => {
+      try {
+        if (app) await stopElysiaHooks(app)
+      } finally {
+        closeWebSockets?.()
+      }
     }
 
-    if (this.app) {
-      await this.app.stop()
-      this.app = null
+    if (bunServer) {
+      await drainBunServer(bunServer, timeoutMs, stopAppAndSockets)
+    } else {
+      await stopAppAndSockets()
     }
 
     const maintenance = this.maintenance
@@ -517,6 +555,7 @@ export function createSixbApi(server: SixbServer) {
   registerHttpRoutes(app, host, {
     sharedAccess,
     browserPolicy: apiBrowserPolicy,
+    isStopping: () => server.isStopping(),
     connectorConnections: {
       resolveReturnTo: (request, returnTo) =>
         server.resolveAuthRedirectContext(request, { returnTo }).returnTo,
@@ -608,6 +647,7 @@ function startApiServer(
     readonly timing: SixbRequestTimingOptions
   }
 ) {
+  const openSockets = new Set<ServerWebSocket<unknown>>()
   const bunServer = Bun.serve({
     port: options.port,
     hostname: options.host,
@@ -624,22 +664,130 @@ function startApiServer(
       }
       return timeRequest(request, options.timing, () => app.fetch(request))
     },
-    websocket: getElysiaWsHandler(app),
+    websocket: getElysiaWsHandler(app, openSockets),
   } as Parameters<typeof Bun.serve>[0])
 
   attachBunServer(app, bunServer)
-  return bunServer
+  return {
+    bunServer,
+    closeWebSockets: () => {
+      for (const ws of [...openSockets]) {
+        try {
+          ws.close(1001, "Server stopping")
+        } catch {
+          // Already closed.
+        }
+      }
+      openSockets.clear()
+    },
+  }
 }
 
-function getElysiaWsHandler(app: SixbApp) {
+function getElysiaWsHandler(app: SixbApp, openSockets: Set<ServerWebSocket<unknown>>) {
   const cfg = (app as unknown as { config?: { websocket?: Record<string, unknown> } }).config
-  return {
+  const base = {
     ...elysiaWebSocket,
     ...(cfg?.websocket ?? {}),
+  } as NonNullable<Parameters<typeof Bun.serve>[0]["websocket"]>
+  return {
+    ...base,
     maxPayloadLength: MAX_WEBSOCKET_MESSAGE_BYTES,
+    open(ws: ServerWebSocket<unknown>) {
+      openSockets.add(ws)
+      return base.open?.(ws)
+    },
+    close(ws: ServerWebSocket<unknown>, code: number, reason: string) {
+      openSockets.delete(ws)
+      return base.close?.(ws, code, reason)
+    },
   } as Parameters<typeof Bun.serve>[0]["websocket"]
+}
+
+function resolveStopTimeoutMs(timeoutMs: number | undefined, fallbackMs: number): number {
+  const resolved = timeoutMs ?? fallbackMs
+  if (!Number.isFinite(resolved) || resolved < 0) {
+    throw new Error("[SixbServer] Stop timeout must be a non-negative finite number.")
+  }
+  return resolved
+}
+
+async function drainBunServer(
+  server: ReturnType<typeof Bun.serve>,
+  timeoutMs: number,
+  beforeWait: () => Promise<void>
+): Promise<void> {
+  if (timeoutMs <= 0) {
+    try {
+      await beforeWait()
+    } finally {
+      await server.stop(true)
+    }
+    return
+  }
+
+  const draining = server.stop(false)
+  try {
+    await beforeWait()
+  } catch (error) {
+    await server.stop(true)
+    await draining
+    throw error
+  }
+
+  // Bun's `stop(false)` can stay pending on an already-answered 413 socket whose unread upload
+  // body has not hit its idle timeout yet, even though `pendingRequests` is already 0.
+  await waitUntilIdleOrTimeout(server, draining, timeoutMs)
+  await server.stop(true)
+  await draining
+}
+
+async function waitUntilIdleOrTimeout(
+  server: ReturnType<typeof Bun.serve>,
+  draining: Promise<void>,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let settled = false
+  void draining.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    }
+  )
+
+  while (!settled && (server.pendingRequests > 0 || server.pendingWebSockets > 0)) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        draining,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, Math.min(remaining, 25))
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
 }
 
 function attachBunServer(app: SixbApp, bunServer: ReturnType<typeof Bun.serve>) {
   ;(app as unknown as { server: typeof bunServer }).server = bunServer
+}
+
+/**
+ * Runs Elysia's `onStop` hooks (such as `LiveRooms.close()`) and awaits their promises without
+ * waiting on `bunServer.stop(false)` first, which stays pending while WebSockets are still open.
+ */
+async function stopElysiaHooks(app: SixbApp): Promise<void> {
+  const internal = app as unknown as {
+    server: unknown
+    event?: { stop?: ReadonlyArray<{ fn: (instance: SixbApp) => unknown }> }
+  }
+  const hooks = internal.event?.stop ?? []
+  internal.server = null
+  await Promise.all(hooks.map((hook) => Promise.resolve(hook.fn(app))))
 }

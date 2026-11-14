@@ -478,4 +478,95 @@ describe("QueueWorker", () => {
 
     expect(claimSizes).toContain(2)
   })
+
+  // To see this fail, route `drain()` straight to `stop()`: `aborted` flips to true and the
+  // in-flight job is returned to the queue instead of completing.
+  test("drain finishes in-flight jobs without claiming newly queued ones", async () => {
+    const queues = new InMemoryQueues()
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const completed: string[] = []
+    let aborted = false
+
+    class DrainingWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
+      protected async execute(
+        claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
+        signal: AbortSignal
+      ): Promise<void> {
+        started.resolve()
+        signal.addEventListener("abort", () => {
+          aborted = true
+        })
+        await release.promise
+        completed.push(claimed.job.id)
+      }
+    }
+
+    const worker = new DrainingWorker(workerConfig(queues))
+    const [first] = await enqueue(queues, "first")
+
+    await worker.start()
+    await started.promise
+
+    const draining = worker.drain(5_000)
+    await flush()
+    const [second] = await enqueue(queues, "second")
+    await flush()
+
+    release.resolve()
+    expect(await draining).toBe(true)
+    expect(aborted).toBe(false)
+    expect(completed).toEqual([first!.id])
+
+    const remaining = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "next" })
+    expect(remaining.map((entry) => entry.job.id)).toEqual([second!.id])
+  })
+
+  // To see this fail, omit the timer fallback in `Worker.drainRunning`: `drain(1_000)` never
+  // settles when an in-flight job ignores completion.
+  test("drain aborts remaining jobs once its timeout elapses", async () => {
+    jest.useFakeTimers()
+    const queues = new InMemoryQueues()
+    let started = false
+    let aborted = false
+
+    class StuckWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
+      protected async execute(
+        _claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
+        signal: AbortSignal
+      ): Promise<void> {
+        started = true
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true
+            const error = new Error("Aborted")
+            error.name = "AbortError"
+            reject(error)
+          })
+        })
+      }
+    }
+
+    const worker = new StuckWorker(workerConfig(queues))
+    await enqueue(queues, "stuck")
+    await worker.start()
+    await runTimersUntil(() => started)
+
+    let outcome: boolean | undefined
+    const draining = worker.drain(1_000).then((value) => {
+      outcome = value
+    })
+    jest.advanceTimersByTime(999)
+    await flush()
+    expect(outcome).toBeUndefined()
+
+    jest.advanceTimersByTime(1)
+    await runTimersUntil(() => outcome !== undefined)
+    await draining
+    expect(outcome).toBe(false)
+    expect(aborted).toBe(true)
+  })
 })

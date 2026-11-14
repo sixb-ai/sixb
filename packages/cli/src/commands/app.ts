@@ -7,7 +7,7 @@ import {
   resolveProductionPaths,
   resolveRuntimeEntry,
 } from "../lib/production"
-import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { printStopping, renderCliError, renderStatic, roleView, startTask } from "../ui"
 
 export interface AppOptions {
@@ -65,14 +65,22 @@ export async function runApp(options: AppOptions = {}) {
       })
     )
 
-    await runUntilSignal(async () => {
-      app.stop()
-      printStopping("app")
-      await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    })
+    await runUntilSignal(
+      async (signal) => {
+        app.stop()
+        printStopping("app")
+        const timeoutMs = signal === "SIGTERM" ? resolveDrainTimeoutMs(5_000) : 0
+        await stopQuietly(() => customAppServer?.stop({ timeoutMs }) ?? Promise.resolve())
+      },
+      {
+        onInterrupt: () => {
+          void stopQuietly(() => customAppServer?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
+        },
+      }
+    )
   } catch (error) {
     app.stop()
-    await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+    await stopQuietly(() => customAppServer?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
     await renderCliError(error)
     process.exit(1)
   }

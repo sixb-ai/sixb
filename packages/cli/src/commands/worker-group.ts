@@ -1,6 +1,10 @@
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+
+// Leaves 10 s inside the default 70 s kill timeout for abort finalization and provider shutdown.
+const DEFAULT_WORKER_DRAIN_TIMEOUT_MS = 60_000
+
 import { recordApiPublicOrigin, stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
@@ -57,8 +61,18 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   let sixb: LoadedSixbHost | null = null
   let workers: QueueWorkerProcess[] = []
 
-  async function stopWorkersAndProviders() {
-    await Promise.all(workers.map((worker) => stopQuietly(() => worker.stop())))
+  async function stopWorkersAndProviders(drainTimeoutMs?: number) {
+    await Promise.all(
+      workers.map((worker) =>
+        stopQuietly(async () => {
+          if (drainTimeoutMs !== undefined) {
+            await worker.drain(drainTimeoutMs)
+          } else {
+            await worker.stop()
+          }
+        })
+      )
+    )
     if (sixb) {
       await stopSixbProviders(sixb)
     }
@@ -127,12 +141,25 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     )
 
     await Promise.race([
-      runUntilSignal(async () => {
-        app.stop()
-        printStopping("worker-group")
-        await stopWorkersAndProviders()
-        sixb = null
-      }),
+      runUntilSignal(
+        async (signal) => {
+          app.stop()
+          printStopping("worker-group")
+          const drainTimeoutMs =
+            signal === "SIGTERM"
+              ? resolveDrainTimeoutMs(DEFAULT_WORKER_DRAIN_TIMEOUT_MS)
+              : undefined
+          await stopWorkersAndProviders(drainTimeoutMs)
+          sixb = null
+        },
+        {
+          onInterrupt: () => {
+            for (const worker of workers) {
+              void stopQuietly(() => worker.stop())
+            }
+          },
+        }
+      ),
       ...workers.map(waitForWorkerFailure),
     ])
   } catch (error) {

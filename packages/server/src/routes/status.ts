@@ -6,7 +6,16 @@ import {
   ReadinessResponseSchema,
   StatusResponseSchema,
 } from "../schemas/status"
-export function registerStatusRoutes(app: Elysia, host: SixbHostView) {
+
+export interface StatusRouteOptions {
+  readonly isStopping?: () => boolean
+}
+
+export function registerStatusRoutes(
+  app: Elysia,
+  host: SixbHostView,
+  options: StatusRouteOptions = {}
+) {
   app.get("/health", () => ({ status: "ok" as const }), {
     response: { 200: HealthResponseSchema },
     detail: {
@@ -20,6 +29,14 @@ export function registerStatusRoutes(app: Elysia, host: SixbHostView) {
   app.get(
     "/ready",
     async ({ set }) => {
+      if (options.isStopping?.()) {
+        set.status = 503
+        return {
+          status: "unready" as const,
+          storage: { reachable: false, schemaValid: false },
+          reason: "Server is shutting down.",
+        }
+      }
       const readiness = await host.checkReadiness()
       if (readiness.status === "unready") set.status = 503
       return readiness

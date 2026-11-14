@@ -222,4 +222,95 @@ describe("SixbServer start", () => {
     await expect(fetch(`${baseUrl}/api/project`)).rejects.toThrow()
     await server.stop()
   })
+
+  // Reproduce: drop `isStopping` from `registerStatusRoutes`; `/ready` keeps answering 200 while
+  // the server drains.
+  test("reports unready on /ready as soon as shutdown is marked", async () => {
+    const server = new SixbServer({
+      host: new SixbHost({
+        id: "test-project",
+        ontology: [],
+        broker: new InMemoryBroker(),
+        storage: new InMemoryStorage(),
+        lakeStorage: new InMemoryLakeStorage(),
+        blobStorage: new InMemoryBlobStorage(),
+        queues: new InMemoryQueues(),
+      }),
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+    })
+
+    await server.start()
+    try {
+      const baseUrl = `http://127.0.0.1:${server.getPort()}`
+      expect((await fetch(`${baseUrl}/ready`)).status).toBe(200)
+
+      server.markStopping()
+      const response = await fetch(`${baseUrl}/ready`)
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({
+        status: "unready",
+        storage: { reachable: false, schemaValid: false },
+        reason: "Server is shutting down.",
+      })
+      expect((await fetch(`${baseUrl}/health`)).status).toBe(200)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  // Reproduce: revert `drainBunServer` in `SixbServer.stop()` to `bunServer.stop(true)`; the
+  // in-flight `/api/project` request rejects instead of answering 200.
+  test("drains an in-flight HTTP request and closes open WebSockets on stop", async () => {
+    const storage = new InMemoryStorage()
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const host = new SixbHost({
+      id: "test-project",
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage,
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    const originalStatus = host.getOntologyOperationalStatus.bind(host)
+    spyOn(host, "getOntologyOperationalStatus").mockImplementation(async () => {
+      started.resolve()
+      await release.promise
+      return originalStatus()
+    })
+
+    const server = new SixbServer({
+      host,
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+    })
+    await server.start()
+
+    const baseUrl = `http://127.0.0.1:${server.getPort()}`
+    const ws = new WebSocket(`ws://127.0.0.1:${server.getPort()}/ws/events`)
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener("open", () => resolve(), { once: true })
+      ws.addEventListener("error", () => reject(new Error("ws open failed")), { once: true })
+    })
+    const wsClosed = new Promise<number>((resolve) => {
+      ws.addEventListener("close", (event) => resolve(event.code), { once: true })
+    })
+
+    const inFlight = fetch(`${baseUrl}/api/status`)
+    await started.promise
+
+    const stopping = server.stop({ timeoutMs: 5_000 })
+    expect(await wsClosed).toBe(1001)
+
+    release.resolve()
+    const response = await inFlight
+    expect(response.status).toBe(200)
+    await stopping
+  })
 })

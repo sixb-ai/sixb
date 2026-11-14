@@ -1,7 +1,11 @@
 import { SixbCliError } from "../lib/errors"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+
+// Leaves 10 s inside the default 70 s kill timeout for abort finalization and provider shutdown.
+const DEFAULT_WORKER_DRAIN_TIMEOUT_MS = 60_000
+
 import { recordApiPublicOrigin, stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
@@ -97,15 +101,29 @@ export async function runWorker(options: WorkerOptions = {}) {
     )
 
     await Promise.race([
-      runUntilSignal(async () => {
-        app.stop()
-        printStopping("worker")
-        await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-        if (sixb) {
-          await stopSixbProviders(sixb)
+      runUntilSignal(
+        async (signal) => {
+          app.stop()
+          printStopping("worker")
+          if (signal === "SIGTERM") {
+            const timeoutMs = resolveDrainTimeoutMs(DEFAULT_WORKER_DRAIN_TIMEOUT_MS)
+            await stopQuietly(async () => {
+              await worker?.drain(timeoutMs)
+            })
+          } else {
+            await stopQuietly(() => worker?.stop() ?? Promise.resolve())
+          }
+          if (sixb) {
+            await stopSixbProviders(sixb)
+          }
+          sixb = null
+        },
+        {
+          onInterrupt: () => {
+            void stopQuietly(() => worker?.stop() ?? Promise.resolve())
+          },
         }
-        sixb = null
-      }),
+      ),
       waitForWorkerFailure(worker),
     ])
   } catch (error) {
