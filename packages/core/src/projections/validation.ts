@@ -377,6 +377,12 @@ export function validateProjectionsAtStartup(
         )
       }
     }
+    if (projection.missing !== undefined && projection.missing !== "remove") {
+      throw new ProjectionValidationError(
+        `${prefix}: unknown missing policy "${String(projection.missing)}". Use "remove".`
+      )
+    }
+
     const propertyIds = new Set(objectType.properties.map((p) => p.id))
     for (const [propId, columnName] of Object.entries(projection.properties)) {
       if (!propertyIds.has(propId)) {

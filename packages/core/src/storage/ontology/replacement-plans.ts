@@ -23,6 +23,12 @@ export interface ReplacementPlanRef {
 export interface OpenReplacementPlanInput extends ReplacementPlanRef {
   /** The commit the plan's work will carry, timed for a plan opened now. */
   readonly commit: OntologyCommitWrite
+  /**
+   * Also plans every object of this type that an edit created and no live root of the source
+   * asserts, whichever roots the candidate replaces: a source that removes what its dataset misses
+   * decides their existence too.
+   */
+  readonly createdObjects?: { readonly objectTypeId: string }
 }
 
 export interface OpenedReplacementPlan {

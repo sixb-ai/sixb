@@ -73207,6 +73207,10 @@
                               }
                             ]
                           },
+                          "missing": {
+                            "type": "string",
+                            "enum": ["remove"]
+                          },
                           "latestRun": {
                             "anyOf": [
                               {
@@ -75166,6 +75170,10 @@
                               "additionalProperties": false
                             }
                           ]
+                        },
+                        "missing": {
+                          "type": "string",
+                          "enum": ["remove"]
                         },
                         "latestRun": {
                           "anyOf": [

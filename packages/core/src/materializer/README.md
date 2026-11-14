@@ -112,6 +112,16 @@ of the run, unless the active source the plan replaces moved meanwhile: the plan
 Storage keeps a plan while its candidate is ready and maintenance deletes it afterwards, before the
 candidate itself, along with the touches no ready plan still needs.
 
+An object an edit created exists through its `create` override, whatever the source holds. A
+projection with `.whenMissing("remove")` hands that existence to its source once the source was
+read after the edit: given the read time (`sourceReadAt`, which the worker resolves from the
+dataset version's lineage), the plan rewrites the `create` of an object written before it, and
+missing from the candidate, as a `patch`, in the same commit. The object then goes like any object
+its source withdraws, and its edited values stay dormant until the row comes back. `open` adds the
+created objects no live root asserts; those a live root asserts are planned with their root. That
+holds for a delta too: an object no live root asserts is missing from the whole version unless the
+delta adds it, and one a live root asserts is decided only when the delta replaces that root.
+
 The commit time is fixed when the plan opens: every planned row carries it as `updatedAt`, every
 planned event as `occurredAt`. A resumed plan keeps it, so a publication that commits later than
 it opened, after retries, stamps its writes with that earlier time, even over an edit committed in

@@ -49,6 +49,12 @@ export type SourceEditConflictResolution =
   | { readonly strategy: "mostRecent"; readonly sourceTimestamp: string }
 
 /**
+ * What an object projection does with an object an Action created once its dataset no longer
+ * holds it. `remove`: the object is removed, as an object the projection created would be.
+ */
+export type ObjectProjectionMissingPolicy = "remove"
+
+/**
  * Lowered, serializable definition for projecting a dataset into object instances.
  *
  * Each row contributes one complete object root to an authoritative replacement snapshot, with
@@ -72,6 +78,11 @@ export interface ObjectProjectionDefinition {
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   /** Defaults to `editsWin` when omitted by a legacy lowered definition. */
   readonly conflictResolution?: SourceEditConflictResolution
+  /**
+   * Set by `.whenMissing()`. Omitted, an object an Action created stays until it is deleted, even
+   * when the dataset never holds it.
+   */
+  readonly missing?: ObjectProjectionMissingPolicy
 }
 
 /**

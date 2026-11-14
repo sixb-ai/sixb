@@ -14,6 +14,7 @@ import {
   prop,
 } from "../src"
 import { categorizeProjections } from "../src/projections"
+import { computeProjectionRevision } from "../src/projections/revision"
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -109,6 +110,20 @@ describe("defineProjection", () => {
       strategy: "mostRecent",
       sourceTimestamp: "updated_at",
     })
+  })
+
+  test("removes what the dataset misses only when asked, which changes the revision", () => {
+    const keeping = defineProjection("room-proj", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+    const removing = keeping.whenMissing("remove")
+
+    expect("missing" in keeping).toBe(false)
+    expect(removing.missing).toBe("remove")
+    expect(computeProjectionRevision(removing, canonicalRoomsDataset)).not.toBe(
+      computeProjectionRevision(keeping, canonicalRoomsDataset)
+    )
+    expect(() => keeping.whenMissing("keep" as "remove")).toThrow(ProjectionValidationError)
   })
 
   test("builds definition with FK links", () => {

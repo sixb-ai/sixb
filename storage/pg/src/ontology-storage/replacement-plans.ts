@@ -158,6 +158,48 @@ function revision(kind: "object" | "link"): string {
     : `${linkRevision(key)}::text`
 }
 
+/**
+ * Adds the objects of `objectTypeId` an edit created and no live root of the source asserts, and
+ * returns how many. An object's root is keyed by the object itself.
+ */
+async function planCreatedObjects(
+  sql: SQLClient,
+  input: OpenReplacementPlanInput,
+  versionId: string,
+  objectTypeId: string
+): Promise<number> {
+  const rootKey = jsonTupleExpression([
+    `'"object"'`,
+    "to_jsonb(overrides.object_type_id)::text",
+    "to_jsonb(overrides.primary_id)::text",
+  ])
+  const planned = await sql`
+    WITH keyed AS (
+      SELECT ${sql.unsafe(columnKeyExpression(["object_type_id", "primary_id"]))} AS identity_key
+      FROM ontology_object_overrides AS overrides
+      WHERE overrides.project_id = ${input.projectId} AND overrides.object_type_id = ${objectTypeId}
+        AND overrides.value->>'kind' = 'create'
+        AND NOT EXISTS (
+          SELECT 1 FROM ontology_source_roots AS live
+          JOIN ontology_sources AS versions ON versions.version_id = live.version_id
+          WHERE live.project_id = overrides.project_id
+            AND live.root_key = ${sql.unsafe(rootKey)}
+            AND live.retired_at IS NULL AND NOT live.deleted
+            AND versions.source_id = ${input.source.projectionId}
+            AND versions.status IN ${sql.unsafe(PUBLISHED)}
+        )
+    )
+    INSERT INTO ${sql(IDENTITIES)} (
+      version_id, entity_kind, identity_key, sort_key, diff_required, expand_at, source_key,
+      target_key
+    )
+    SELECT ${versionId}, 'object', identity_key, ${sql.unsafe(SORT_KEY)}, TRUE, NULL, NULL, NULL
+    FROM keyed
+    ON CONFLICT DO NOTHING
+  `
+  return planned.count
+}
+
 export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlanStorage {
   constructor(private readonly sql: SQLClient) {}
 
@@ -233,7 +275,15 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
           target_key
         FROM keyed
       `
-      if (opened.count >= ANALYZE_ROWS) await analyzePlans(sql)
+      const created = input.createdObjects
+        ? await planCreatedObjects(
+            sql,
+            input,
+            candidate.version_id,
+            input.createdObjects.objectTypeId
+          )
+        : 0
+      if (opened.count + created >= ANALYZE_ROWS) await analyzePlans(sql)
       return { committedAt: commit.committedAt }
     })
   }

@@ -27,7 +27,9 @@ export const customerProjection = defineProjection("customers", Customer)
 ```
 
 Use a [pipeline](../pipelines/overview.md) first if the rows need cleaning or reshaping.
-Removing a dataset row withdraws its projected values and links, but does not delete the object.
+Removing a dataset row removes the object it projected, with its links. App edits to that object
+are kept and apply again if the row comes back. An object an Action created stays: see
+[Objects that Actions create](#objects-that-actions-create).
 
 If the object type defines [vector search profiles](../ontology/properties.md#configure-vector-search),
 projections also refresh their embeddings in the background. Objects become searchable once the
@@ -142,6 +144,34 @@ not its ingestion time. For each property, a source value replaces an app edit w
 is equal to or newer than the edit's timestamp.
 
 For timestamped readings, see [Telemetry projections](telemetry.md).
+
+## Objects that Actions create
+
+An object an Action created stays until it is deleted, even when the dataset never holds its row.
+When the dataset is the source of truth for those objects too, such as customers an Action creates
+in an invoicing system, append `.whenMissing("remove")`:
+
+```ts
+export const customerProjection = defineProjection("customers", Customer)
+  .fromDataset(customers)
+  .properties({ id: "customer_id", name: "contact_name" })
+  .whenMissing("remove")
+```
+
+A run then removes such an object, with its links, once the dataset no longer holds its row. It
+only decides from data read after the Action last wrote the object:
+
+| Dataset version                                  | Object                             |
+| ------------------------------------------------ | ---------------------------------- |
+| Read before the Action wrote the object          | Stays: the sync has not caught up  |
+| Read after, with the object's row                | Stays                              |
+| Read after, without the object's row             | Removed, with its links            |
+
+- A version is read when the [sync](../syncs/overview.md) run that wrote it started; through
+  pipelines, when the earliest of their input syncs started. When that is unknown, such as for rows
+  a webhook wrote, the object stays.
+- The values the Action set are kept as app edits: if the row comes back, the object comes back
+  with them. An object the app deleted stays deleted.
 
 ## Runs
 

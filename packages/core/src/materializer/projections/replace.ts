@@ -23,6 +23,7 @@ import type {
   OntologyMaterializationStorage,
   OntologySourceRecord,
   OntologyStorage,
+  OpenReplacementPlanInput,
   ReplacementPlanRef,
   ReplacementPlanStatus,
 } from "../../storage/ontology"
@@ -50,6 +51,7 @@ import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
   normalizeProjectionSourceRef,
+  normalizeSourceReadAt,
 } from "../shared/normalize"
 import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 import { createProjectionEntryValidator } from "./entry-validator"
@@ -67,6 +69,11 @@ interface PreparedProjectionReplacement {
   readonly execution: ProjectionExecution
   readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
   readonly base?: ProjectionSourceBase
+  /**
+   * Set when the projection removes what its dataset misses and its source read time is known:
+   * an object an edit created before it, which the dataset does not hold, is withdrawn.
+   */
+  readonly withdrawCreatesBefore?: string
   readonly signal?: AbortSignal
   readonly resolved: ResolvedSourceProjection
   readonly projectionKind: "object" | "link"
@@ -127,12 +134,14 @@ function prepareProjectionReplacement(
     idempotencyKey: createProjectionIdempotencyKey(runIdentity),
     normalizedCallerIntent: { source, datasetVersion },
   })
+  const withdrawCreatesBefore = missingRemovalReadAt(resolved, raw.input.sourceReadAt)
   const command = {
     source,
     datasetVersion,
     execution,
     entries: raw.input.entries,
     ...(raw.input.base ? { base: Object.freeze({ ...raw.input.base }) } : {}),
+    ...(withdrawCreatesBefore ? { withdrawCreatesBefore } : {}),
     resolved,
     projectionKind,
     runIdentity,
@@ -141,6 +150,21 @@ function prepareProjectionReplacement(
   }
   if (raw.input.signal === undefined) return command
   return { ...command, signal: raw.input.signal }
+}
+
+/**
+ * A read time matters only to a projection that removes what its dataset misses. An unknown one
+ * withdraws nothing: the projection keeps what edits created, as it does without the policy.
+ */
+function missingRemovalReadAt(
+  resolved: ResolvedSourceProjection,
+  sourceReadAt: string | undefined
+): string | undefined {
+  if (sourceReadAt === undefined) return undefined
+  if (resolved.definition._tag !== "ObjectProjectionDefinition") return undefined
+  if (resolved.definition.missing !== "remove") return undefined
+
+  return normalizeSourceReadAt(sourceReadAt)
 }
 
 function validateProjectionDataset(
@@ -351,6 +375,7 @@ async function commitProjectionCandidate(
   const { committedAt } = await plans.open({
     ...plan,
     commit: projectionCommit(context.projectId, command, ready.identity),
+    ...createdObjectsToPlan(command),
   })
   const commit = projectionCommit(context.projectId, command, { ...ready.identity, committedAt })
   for (let round = 1; ; round += 1) {
@@ -510,11 +535,27 @@ function projectionCommit(
   }
 }
 
+/** The objects edits created, which only a projection that withdraws them has to decide. */
+function createdObjectsToPlan(
+  command: PreparedProjectionReplacement
+): Pick<OpenReplacementPlanInput, "createdObjects"> {
+  const { definition } = command.resolved
+  if (!command.withdrawCreatesBefore || definition._tag !== "ObjectProjectionDefinition") return {}
+
+  return { createdObjects: { objectTypeId: definition.objectTypeId } }
+}
+
 function planInput(
   command: PreparedProjectionReplacement,
   commit: OntologyCommitWrite
 ): ProjectionReplacementPlanInput {
-  const input = { projectionKind: command.projectionKind, commit }
+  const input = {
+    projectionKind: command.projectionKind,
+    commit,
+    ...(command.withdrawCreatesBefore
+      ? { withdrawCreatesBefore: command.withdrawCreatesBefore }
+      : {}),
+  }
   return command.signal === undefined ? input : { ...input, signal: command.signal }
 }
 

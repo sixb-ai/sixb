@@ -479,6 +479,10 @@ function Mapping({ projection }: { readonly projection: Projection }) {
               ? messages.editsWin
               : messages.mostRecent(conflict.sourceTimestamp),
         },
+        {
+          label: messages.missing,
+          value: projection.missing === "remove" ? messages.missingRemove : messages.missingKeep,
+        },
       ]}
     />
   )

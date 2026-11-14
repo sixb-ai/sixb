@@ -1,4 +1,8 @@
-import type { EffectiveLinkChange, EffectiveObjectChange } from "../../materialization/model"
+import type {
+  EffectiveLinkChange,
+  EffectiveObjectChange,
+  ObjectOverride,
+} from "../../materialization/model"
 import {
   linkRefKey,
   linkRefSortKey,
@@ -8,6 +12,7 @@ import {
   utf8JsonByteLength,
 } from "../../materialization/refs"
 import type {
+  ExactObjectOverrideWrite,
   MaterializationPlanWorkItem,
   MaterializationWorkRecord,
   OntologyCommitWrite,
@@ -48,6 +53,8 @@ export interface ProjectionReplacementPlanInput {
   readonly projectionKind: "object" | "link"
   /** The commit the plan carries, timed as the plan was opened. */
   readonly commit: OntologyCommitWrite
+  /** An object an edit created before this instant, and that the dataset misses, is withdrawn. */
+  readonly withdrawCreatesBefore?: string
   readonly signal?: AbortSignal
 }
 
@@ -121,7 +128,9 @@ function planReplacementObject(
   input: ProjectionReplacementPlanInput,
   state: SourceReplacementObjectState
 ): MaterializationWorkRecord[] {
-  const resolved = resolveReplacementObject(context, state)
+  const withdrawn = withdrawnCreate(input, state)
+  const override = withdrawn ? withdrawn.value : (state.override?.value ?? null)
+  const resolved = resolveReplacementObject(context, state, override)
   if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
 
   const change = diffEffectiveObject({
@@ -142,6 +151,10 @@ function planReplacementObject(
   ]
   if (Boolean(state.effective) !== Boolean(resolved)) {
     work.push({ kind: "incident-object", recordKey: `incident:${sortKey}`, ref: state.ref })
+  }
+
+  if (withdrawn) {
+    work.push(planWork({ kind: "object-override-upsert", value: withdrawn }, sortKey))
   }
 
   if (!change) return work
@@ -257,15 +270,42 @@ function appendLinkChangeWork(
   work.push(eventWork(buildLinkMaterializationEventDraft(change)))
 }
 
+/**
+ * An edit's create gives its object existence until the source is read after it. A dataset read
+ * later that does not hold the object decides: the create becomes a patch, as an edit of a source
+ * object would. It keeps every value the edits set and leaves existence to the source, so the
+ * object goes like any object its projection withdraws, and comes back with those values if the
+ * dataset holds it again. An edit after the read keeps the create until the next one.
+ */
+function withdrawnCreate(
+  input: ProjectionReplacementPlanInput,
+  state: SourceReplacementObjectState
+): ExactObjectOverrideWrite | null {
+  const { withdrawCreatesBefore } = input
+  const override = state.override
+  if (!withdrawCreatesBefore || state.candidateSource) return null
+  if (override?.value.kind !== "create" || override.updatedAt >= withdrawCreatesBefore) return null
+
+  return {
+    ref: state.ref,
+    value: { kind: "patch", set: override.value.properties, unset: [] },
+    editedAt: storedObjectEditedAt(override),
+    expectedLastCommitId: override.lastCommitId,
+    lastCommitId: input.commit.id,
+    updatedAt: input.commit.committedAt,
+  }
+}
+
 function resolveReplacementObject(
   context: Pick<MaterializerContext, "ontology">,
-  state: SourceReplacementObjectState
+  state: SourceReplacementObjectState,
+  override: ObjectOverride | null
 ) {
   return resolveEffectiveObject({
     ref: state.ref,
     primaryPropertyId: context.ontology.getPrimaryPropertyId(state.ref.objectTypeId),
     source: state.candidateSource,
-    override: state.override?.value ?? null,
+    override,
     editedAt: storedObjectEditedAt(state.override),
     latestTelemetry: state.latestTelemetry,
   })

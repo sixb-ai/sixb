@@ -515,8 +515,46 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
            GROUP BY entity_kind, identity_key`
         )
         .run(candidate.version_id, ...rows.values)
+      if (input.createdObjects) {
+        this.planCreatedObjects(input, candidate.version_id, input.createdObjects.objectTypeId)
+      }
       return { committedAt: commit.committedAt }
     })
+  }
+
+  /** Adds the objects of `objectTypeId` an edit created and no live root of the source asserts. */
+  private planCreatedObjects(
+    input: OpenReplacementPlanInput,
+    versionId: number,
+    objectTypeId: string
+  ): void {
+    this.db
+      .query(
+        `INSERT INTO ${IDENTITIES} (
+           version_id, entity_kind, identity_key, sort_key, diff_required, expand_at,
+           source_key, target_key
+         )
+         SELECT ?, 'object', identity_key, ${SORT_KEY}, 1, NULL, NULL, NULL
+         FROM (
+           SELECT json_array(overrides.object_type_id, overrides.primary_id) AS identity_key
+           FROM ontology_object_overrides AS overrides
+           WHERE overrides.project_id = ? AND overrides.object_type_id = ?
+             AND json_extract(overrides.value, '$.kind') = 'create'
+             AND NOT EXISTS (
+               SELECT 1 FROM ontology_source_roots AS live
+               CROSS JOIN ontology_sources AS versions ON versions.version_id = live.version_id
+               WHERE live.project_id = overrides.project_id
+                 AND live.root_key = json_array(
+                   'object', overrides.object_type_id, overrides.primary_id
+                 )
+                 AND live.retired_at IS NULL AND live.deleted = 0
+                 AND versions.source_id = ? AND versions.status IN ${PUBLISHED}
+             )
+         )
+         WHERE true
+         ON CONFLICT DO NOTHING`
+      )
+      .run(versionId, input.projectId, objectTypeId, input.source.projectionId)
   }
 
   async *streamState(

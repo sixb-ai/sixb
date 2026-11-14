@@ -25,6 +25,7 @@ import type {
   LinkProjectionDefinition,
   LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionMissingPolicy,
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionTarget,
@@ -433,6 +434,12 @@ export interface ObjectProjectionBuilder<
   resolveConflicts(
     resolution: ObjectProjectionConflictResolution<TDataset>
   ): ObjectProjectionBuilder<TObjectType, TDataset>
+  /**
+   * `remove`: an object an Action created is removed too once the dataset, read after the Action
+   * last wrote it, does not hold it. A dataset read before then keeps it: the sync has not caught
+   * up yet. Without it, such an object stays until it is deleted.
+   */
+  whenMissing(policy: ObjectProjectionMissingPolicy): ObjectProjectionBuilder<TObjectType, TDataset>
 }
 
 /**
@@ -576,6 +583,7 @@ function objectProjectionBuilder<
   readonly users: Readonly<Record<string, ProjectionUserKey>>
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   readonly conflictResolution: SourceEditConflictResolution
+  readonly missing?: ObjectProjectionMissingPolicy
 }): ObjectProjectionBuilder<TObjectType, TDataset> {
   const definition: ObjectProjectionDefinition & {
     readonly conflictResolution: SourceEditConflictResolution
@@ -588,6 +596,7 @@ function objectProjectionBuilder<
     ...(Object.keys(input.users).length > 0 ? { users: { ...input.users } } : {}),
     links: { ...input.links },
     conflictResolution: { ...input.conflictResolution },
+    ...(input.missing ? { missing: input.missing } : {}),
   }
 
   return Object.assign(definition, {
@@ -612,6 +621,17 @@ function objectProjectionBuilder<
         ...input,
         conflictResolution: resolution as SourceEditConflictResolution,
       })
+    },
+    whenMissing(
+      policy: ObjectProjectionMissingPolicy
+    ): ObjectProjectionBuilder<TObjectType, TDataset> {
+      if (policy !== "remove") {
+        throw new ProjectionValidationError(
+          `whenMissing() takes "remove", received ${JSON.stringify(policy)}.`
+        )
+      }
+
+      return objectProjectionBuilder({ ...input, missing: policy })
     },
   })
 }
