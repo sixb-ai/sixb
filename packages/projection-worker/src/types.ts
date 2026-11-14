@@ -12,6 +12,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStorage,
   RunExecution,
+  SyncRunStorage,
 } from "@sixb/core/storage"
 
 export interface ProjectionWorkerContext {
@@ -19,6 +20,8 @@ export interface ProjectionWorkerContext {
   readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
+  /** The sync runs a dataset version comes from, read for when its source was read. */
+  readonly syncRuns?: Pick<SyncRunStorage, "getById">
   /** The member directory, for projections that resolve members by email or id. */
   readonly users?: Pick<AuthUserStore, "list">
   readonly datasets: Pick<SixbDefinitions["datasets"], "getById">

@@ -230,6 +230,12 @@ export interface ProjectionSourceReplacement {
   /** Without a base, entries replace the whole source. With a base, unchanged roots are retained. */
   readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
   readonly base?: ProjectionSourceBase
+  /**
+   * When the data of `datasetVersion` started being read from its source: the earliest start of
+   * the sync runs it comes from, through every pipeline in between. Omitted when unknown. A
+   * projection that removes what its dataset misses removes nothing an edit wrote after it.
+   */
+  readonly sourceReadAt?: string
   readonly signal?: AbortSignal
 }
 

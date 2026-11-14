@@ -222,7 +222,8 @@ function normalizeProjectionDefinition(projection: ProjectionDefinition): JsonVa
           ])
       ),
       conflictResolution: projection.conflictResolution ?? { strategy: "editsWin" },
-      ...(projection.whenMissingPolicy ? { whenMissingPolicy: projection.whenMissingPolicy } : {}),
+      // Written only when set: projections that keep what their dataset misses keep their revision.
+      ...(projection.missing ? { missing: projection.missing } : {}),
     }
   }
   if (projection._tag === "LinkProjectionDefinition") {

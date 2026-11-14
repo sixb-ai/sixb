@@ -34,6 +34,7 @@ import { MISSING_TARGET_GRACE_MS } from "./retry-backoff"
 import { mapLinkProjectionEntries } from "./run-link-projection"
 import { mapObjectProjectionEntries } from "./run-object-projection"
 import { runTelemetryProjection } from "./run-telemetry-projection"
+import { resolveSourceReadAt } from "./source-read-time"
 import type {
   ClaimedProjectionExecution,
   ProjectionJob,
@@ -236,12 +237,14 @@ async function materializeProjection(
             validated.version.rowCount,
             signal
           ))
+        const sourceReadAt = await missingRemovalReadAt(input, validated)
         await getOntologyMutationRuntime(input.runtime).replaceProjection({
           source: { projectionId: validated.projection.id },
           datasetVersion: input.job.datasetVersion,
           execution: execution.execution,
           entries,
           ...(incremental ? { base: incremental.base } : {}),
+          ...(sourceReadAt ? { sourceReadAt } : {}),
           signal,
         })
       } finally {
@@ -250,6 +253,22 @@ async function materializeProjection(
       return { protocol: "replacement" }
     }
   }
+}
+
+/** Only a projection that removes what its dataset misses needs to know when it was read. */
+async function missingRemovalReadAt(
+  input: RunProjectionJobInput,
+  validated: ValidatedProjectionJob
+): Promise<string | undefined> {
+  if (validated.kind !== "object" || validated.projection.missing !== "remove") return undefined
+  if (!input.runtime.syncRuns) return undefined
+
+  return resolveSourceReadAt({
+    projectId: input.runtime.projectId,
+    version: validated.version,
+    lakeStorage: input.runtime.lakeStorage,
+    syncRuns: input.runtime.syncRuns,
+  })
 }
 
 async function replacementEntries(

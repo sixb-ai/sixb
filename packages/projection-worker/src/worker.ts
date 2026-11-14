@@ -208,6 +208,7 @@ function buildProjectionContext(
     ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage,
+    ...(host.storage.syncRuns ? { syncRuns: host.storage.syncRuns } : {}),
     ...(host.storage.auth ? { users: host.storage.auth.users } : {}),
     datasets: host.definitions.datasets,
     projections: host.definitions.projections,

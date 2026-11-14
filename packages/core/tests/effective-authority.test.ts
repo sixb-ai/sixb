@@ -176,48 +176,8 @@ describe("explainEffectiveObject", () => {
   test.each([
     ["a deleted object", input({ source: source({ name: "One" }), override: { kind: "delete" } })],
     ["a patch without a source row", input({ override: rename, editedAt: { name: LATER } })],
-    [
-      "an action-created object missing from source read after create with whenMissing remove",
-      input({
-        override: { kind: "create", properties: { id: "one", name: "Created" } },
-        editedAt: { id: EARLIER, name: EARLIER },
-        whenMissingPolicy: "remove",
-        sourceReadStartedAt: LATER,
-      }),
-    ],
   ])("resolves %s to nothing, as resolveEffectiveObject does", (_, object) => {
     expect(resolveEffectiveObject(object)).toBeNull()
     expect(explainEffectiveObject(object)).toBeNull()
-  })
-
-  test.each([
-    [
-      "action-created object when source read is before create",
-      input({
-        override: { kind: "create", properties: { id: "one", name: "Created" } },
-        editedAt: { id: LATER, name: LATER },
-        whenMissingPolicy: "remove",
-        sourceReadStartedAt: EARLIER,
-      }),
-    ],
-    [
-      "action-created object when source read time cannot be determined",
-      input({
-        override: { kind: "create", properties: { id: "one", name: "Created" } },
-        editedAt: { id: EARLIER, name: EARLIER },
-        whenMissingPolicy: "remove",
-      }),
-    ],
-    [
-      "action-created object when projection does not specify whenMissing policy",
-      input({
-        override: { kind: "create", properties: { id: "one", name: "Created" } },
-        editedAt: { id: EARLIER, name: EARLIER },
-        sourceReadStartedAt: LATER,
-      }),
-    ],
-  ])("keeps %s existing", (_, object) => {
-    expect(resolveEffectiveObject(object)).not.toBeNull()
-    expect(explainEffectiveObject(object)?.existence).toBe("create")
   })
 })

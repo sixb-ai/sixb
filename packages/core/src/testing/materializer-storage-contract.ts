@@ -142,13 +142,30 @@ const conflictDeviceProjection = defineProjection(
   .properties({ id: "id", name: "name", state: "state" })
   .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
 
-const ontology = new OntologyRegistry({ sources: [Device, ConflictDevice] })
+const Customer = defineObjectType({
+  id: "StorageContractCustomer",
+  name: "Customer",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string", { required: true }),
+  ],
+})
+const customers = defineDataset("storage_contract_customers", {
+  schema: [col("id", "string"), col("name", "string")],
+})
+const customerProjection = defineProjection("storage_contract_customers", Customer)
+  .fromDataset(customers)
+  .properties({ id: "id", name: "name" })
+  .whenMissing("remove")
+
+const ontology = new OntologyRegistry({ sources: [Device, ConflictDevice, Customer] })
 const projections = new ProjectionRegistry({
   projections: [
     deviceProjection,
     temperatureProjection,
     devicePeersProjection,
     conflictDeviceProjection,
+    customerProjection,
   ],
   ontology,
   datasetsById: new Map<string, DatasetDefinition>([
@@ -156,6 +173,7 @@ const projections = new ProjectionRegistry({
     [readings.id, readings],
     [devicePeers.id, devicePeers],
     [conflictDevices.id, conflictDevices],
+    [customers.id, customers],
   ]),
 })
 
@@ -1352,6 +1370,118 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     }
   })
 
+  // Removal proof: drop `createdObjects` from this provider's `open`; "draft" then stays, since
+  // nothing plans it. Plan every created object whatever the live roots: the first delta then
+  // withdraws "kept", which a root it never read still asserts.
+  test(`${name} plans the objects edits created that no live root of the source asserts`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const writtenAt = "2026-03-01T12:00:00.000Z"
+    const readBefore = "2026-03-01T11:00:00.000Z"
+    const readAfter = "2026-03-01T13:00:00.000Z"
+    const materializer = contractMaterializer(storage, { clock: () => new Date(writtenAt) })
+    const source = { projectionId: customerProjection.id }
+    let version = 0
+
+    const publish = async (
+      values: readonly (ProjectionSourceEntry | ProjectionSourceDeletion)[],
+      options: { readonly sourceReadAt: string; readonly delta?: boolean }
+    ) => {
+      version += 1
+      const datasetVersion = {
+        datasetId: customers.id,
+        versionId: `customers-v${version}`,
+        createdAt: `2026-03-${String(version + 1).padStart(2, "0")}T00:00:00.000Z`,
+      }
+      const base = options.delta ? await materializer.projections.getActive(source) : null
+      const execution = await claim(storage, {
+        runId: `customers-run-${version}`,
+        projectionId: customerProjection.id,
+        protocol: "replacement",
+        datasetVersion,
+      })
+      const bound = await projectionMaterializer(
+        materializer,
+        storage,
+        customerProjection.id,
+        execution.projectionRunId
+      )
+      return bound.projections.replace({
+        source,
+        datasetVersion,
+        execution,
+        entries: entries(values),
+        sourceReadAt: options.sourceReadAt,
+        ...(base?.lastCommitId
+          ? { base: { materializationId: base.materializationId, lastCommitId: base.lastCommitId } }
+          : {}),
+      })
+    }
+    const customer = (primaryId: string) =>
+      storage.objects.getByPrimaryId({
+        projectId: CONTRACT_PROJECT,
+        objectTypeId: Customer.id,
+        primaryId,
+      })
+    const names = async (...ids: readonly string[]) =>
+      Promise.all(ids.map(async (id) => (await customer(id))?.properties.name ?? null))
+
+    try {
+      await materializer.withScope(runtimeScope()).edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "create-customers" },
+        operations: ["kept", "gone", "draft"].map((id) => ({
+          id,
+          kind: "object.create" as const,
+          ref: { objectTypeId: Customer.id, primaryId: id },
+          properties: { name: `${id} by an Action` },
+        })),
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+      // Read before the Action wrote them: nothing goes, and kept and gone get live roots.
+      await publish([customerEntry("kept"), customerEntry("gone")], { sourceReadAt: readBefore })
+      expect(await names("kept", "gone", "draft")).toEqual([
+        "kept by an Action",
+        "gone by an Action",
+        "draft by an Action",
+      ])
+
+      // A delta read after them: draft, which no live root asserts, goes. The roots of kept and
+      // gone, which the delta did not read, still assert them.
+      await publish([], { sourceReadAt: readAfter, delta: true })
+      expect(await names("kept", "gone", "draft")).toEqual([
+        "kept by an Action",
+        "gone by an Action",
+        null,
+      ])
+
+      // A delta that deletes gone's root decides gone.
+      await publish(
+        [
+          {
+            root: { kind: "object", ref: { objectTypeId: Customer.id, primaryId: "gone" } },
+            deleted: true,
+          },
+        ],
+        { sourceReadAt: readAfter, delta: true }
+      )
+      expect(await names("kept", "gone")).toEqual(["kept by an Action", null])
+
+      // The withdrawn create was kept as a patch: back in the dataset, gone has its Action's name.
+      await publish([customerEntry("kept"), customerEntry("gone")], { sourceReadAt: readAfter })
+      expect(await names("kept", "gone", "draft")).toEqual([
+        "kept by an Action",
+        "gone by an Action",
+        null,
+      ])
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
   // Removal proof: compare a link's edge override by an unqualified `identity_key` in the SQLite
   // revision; it then reads another link's override, and the untouched link is planned again.
   // Drop the touches of slot overrides from every provider: b is then not planned again.
@@ -2256,6 +2386,14 @@ function sourceEntry(id: string, name: string, parentId?: string): ProjectionSou
           ]
         : []),
     ],
+  }
+}
+
+function customerEntry(id: string): ProjectionSourceEntry {
+  const ref = { objectTypeId: Customer.id, primaryId: id }
+  return {
+    root: { kind: "object", ref },
+    assertions: [{ kind: "object", ref, properties: { name: `${id} in the source` } }],
   }
 }
 

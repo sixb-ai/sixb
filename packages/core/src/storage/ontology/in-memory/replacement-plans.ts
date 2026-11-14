@@ -215,20 +215,31 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
           addIdentity(plan, row.assertion, true)
         }
       }
-      if (input.whenMissingPolicy === "remove" && input.objectTypeId) {
-        for (const stored of this.state.objectOverrides.values()) {
-          if (
-            stored.projectId === input.projectId &&
-            stored.ref.objectTypeId === input.objectTypeId &&
-            stored.value.kind === "create"
-          ) {
-            addIdentity(plan, { kind: "object", ref: stored.ref }, true)
-          }
+      if (input.createdObjects) {
+        for (const ref of this.unassertedCreatedObjects(input, input.createdObjects.objectTypeId)) {
+          addIdentity(plan, { kind: "object", ref }, true)
         }
       }
       this.state.replacementPlans.set(key, plan)
       return { committedAt: plan.committedAt }
     })
+  }
+
+  /** The objects of `objectTypeId` an edit created and no live root of the source asserts. */
+  private *unassertedCreatedObjects(
+    input: OpenReplacementPlanInput,
+    objectTypeId: string
+  ): Iterable<OntologyObjectRef> {
+    const liveRoots = this.state.activeSourceRoots.get(
+      projectEntityKey(input.projectId, input.source.projectionId)
+    )
+    for (const stored of this.state.objectOverrides.values()) {
+      if (stored.projectId !== input.projectId || stored.ref.objectTypeId !== objectTypeId) continue
+      if (stored.value.kind !== "create") continue
+      if (liveRoots?.has(projectionEntityKey({ kind: "object", ref: stored.ref }))) continue
+
+      yield stored.ref
+    }
   }
 
   async *streamState(

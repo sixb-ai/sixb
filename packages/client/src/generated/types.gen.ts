@@ -25246,6 +25246,7 @@ export type ListProjectionsResponses = {
             strategy: "mostRecent"
             sourceTimestamp: string
           }
+      missing?: "remove"
       latestRun:
         | {
             id: string
@@ -25850,6 +25851,7 @@ export type GetProjectionResponses = {
               strategy: "mostRecent"
               sourceTimestamp: string
             }
+        missing?: "remove"
         latestRun:
           | {
               id: string

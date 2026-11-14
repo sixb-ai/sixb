@@ -6,9 +6,7 @@ import type {
   DatasetVersionRef,
   LakeStorage,
 } from "../lake-storage/types"
-import type { PinnedDatasetVersion } from "../materialization/model"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { SyncRunStorage } from "../storage/sync-runs/types"
 
 const DEFAULT_LINEAGE_DEPTH = 5
 const MAX_LINEAGE_DEPTH = 20
@@ -193,73 +191,4 @@ function versionRef(ref: DatasetVersionRef): DatasetVersionRef {
 
 function versionKey(ref: DatasetVersionRef): string {
   return JSON.stringify([ref.datasetId, ref.versionId])
-}
-
-/**
- * Resolves the earliest source read start timestamp across all upstream syncs that produced
- * this dataset version. Returns undefined if read time cannot be determined.
- */
-export async function resolveDatasetSourceReadStartedAt(input: {
-  readonly projectId: string
-  readonly datasetVersion: PinnedDatasetVersion
-  readonly lakeStorage?: Pick<LakeStorage, "getVersion">
-  readonly syncRuns?: SyncRunStorage
-}): Promise<string | undefined> {
-  if (!input.lakeStorage || !input.syncRuns) return undefined
-
-  const root = await input.lakeStorage.getVersion(
-    input.datasetVersion.datasetId,
-    input.datasetVersion.versionId
-  )
-  if (!root) return undefined
-
-  const visited = new Set<string>()
-  const readStartTimes: string[] = []
-  let frontier: readonly DatasetVersionRef[] = [
-    { datasetId: input.datasetVersion.datasetId, versionId: input.datasetVersion.versionId },
-  ]
-
-  while (frontier.length > 0) {
-    const nextFrontier: DatasetVersionRef[] = []
-
-    for (const ref of frontier) {
-      const key = versionKey(ref)
-      if (visited.has(key)) continue
-      visited.add(key)
-
-      const version =
-        ref.datasetId === input.datasetVersion.datasetId &&
-        ref.versionId === input.datasetVersion.versionId
-          ? root
-          : await input.lakeStorage.getVersion(ref.datasetId, ref.versionId)
-
-      if (!version) return undefined
-
-      const producer = version.producer
-      if (producer?.kind === "sync") {
-        if (!producer.runId) return undefined
-        const run = await input.syncRuns.getById({
-          projectId: input.projectId,
-          id: producer.runId,
-        })
-        if (!run?.startedAt) return undefined
-        readStartTimes.push(run.startedAt.toISOString())
-      } else if (producer?.kind === "pipeline") {
-        const inputs = version.inputs ?? []
-        if (inputs.length === 0) return undefined
-        for (const inputRef of inputs) {
-          nextFrontier.push(inputRef)
-        }
-      } else {
-        return undefined
-      }
-    }
-
-    frontier = nextFrontier
-  }
-
-  if (readStartTimes.length === 0) return undefined
-
-  readStartTimes.sort()
-  return readStartTimes[0]
 }

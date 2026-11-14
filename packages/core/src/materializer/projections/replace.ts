@@ -1,4 +1,3 @@
-import { resolveDatasetSourceReadStartedAt } from "../../datasets/lineage"
 import { assertPinnedDatasetWatermark } from "../../materialization/dataset-watermark"
 import {
   MaterializationConflictError,
@@ -24,6 +23,7 @@ import type {
   OntologyMaterializationStorage,
   OntologySourceRecord,
   OntologyStorage,
+  OpenReplacementPlanInput,
   ReplacementPlanRef,
   ReplacementPlanStatus,
 } from "../../storage/ontology"
@@ -51,6 +51,7 @@ import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
   normalizeProjectionSourceRef,
+  normalizeSourceReadAt,
 } from "../shared/normalize"
 import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 import { createProjectionEntryValidator } from "./entry-validator"
@@ -68,6 +69,11 @@ interface PreparedProjectionReplacement {
   readonly execution: ProjectionExecution
   readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
   readonly base?: ProjectionSourceBase
+  /**
+   * Set when the projection removes what its dataset misses and its source read time is known:
+   * an object an edit created before it, which the dataset does not hold, is withdrawn.
+   */
+  readonly withdrawCreatesBefore?: string
   readonly signal?: AbortSignal
   readonly resolved: ResolvedSourceProjection
   readonly projectionKind: "object" | "link"
@@ -128,12 +134,14 @@ function prepareProjectionReplacement(
     idempotencyKey: createProjectionIdempotencyKey(runIdentity),
     normalizedCallerIntent: { source, datasetVersion },
   })
+  const withdrawCreatesBefore = missingRemovalReadAt(resolved, raw.input.sourceReadAt)
   const command = {
     source,
     datasetVersion,
     execution,
     entries: raw.input.entries,
     ...(raw.input.base ? { base: Object.freeze({ ...raw.input.base }) } : {}),
+    ...(withdrawCreatesBefore ? { withdrawCreatesBefore } : {}),
     resolved,
     projectionKind,
     runIdentity,
@@ -142,6 +150,21 @@ function prepareProjectionReplacement(
   }
   if (raw.input.signal === undefined) return command
   return { ...command, signal: raw.input.signal }
+}
+
+/**
+ * A read time matters only to a projection that removes what its dataset misses. An unknown one
+ * withdraws nothing: the projection keeps what edits created, as it does without the policy.
+ */
+function missingRemovalReadAt(
+  resolved: ResolvedSourceProjection,
+  sourceReadAt: string | undefined
+): string | undefined {
+  if (sourceReadAt === undefined) return undefined
+  if (resolved.definition._tag !== "ObjectProjectionDefinition") return undefined
+  if (resolved.definition.missing !== "remove") return undefined
+
+  return normalizeSourceReadAt(sourceReadAt)
 }
 
 function validateProjectionDataset(
@@ -341,25 +364,6 @@ async function commitProjectionCandidate(
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
   const plans = context.storage.ontology.replacementPlans
-  const objectTypeId =
-    command.resolved.definition._tag === "ObjectProjectionDefinition"
-      ? command.resolved.definition.objectTypeId
-      : undefined
-  const whenMissingPolicy =
-    command.resolved.definition._tag === "ObjectProjectionDefinition"
-      ? command.resolved.definition.whenMissingPolicy
-      : undefined
-
-  const sourceReadStartedAt =
-    whenMissingPolicy === "remove"
-      ? await resolveDatasetSourceReadStartedAt({
-          projectId: context.projectId,
-          datasetVersion: command.datasetVersion,
-          lakeStorage: context.lakeStorage,
-          syncRuns: context.storage.syncRuns,
-        })
-      : undefined
-
   const plan: ReplacementPlanRef = {
     projectId: context.projectId,
     source: command.source,
@@ -371,29 +375,14 @@ async function commitProjectionCandidate(
   const { committedAt } = await plans.open({
     ...plan,
     commit: projectionCommit(context.projectId, command, ready.identity),
-    ...(whenMissingPolicy ? { whenMissingPolicy } : {}),
-    ...(objectTypeId ? { objectTypeId } : {}),
+    ...createdObjectsToPlan(command),
   })
   const commit = projectionCommit(context.projectId, command, { ...ready.identity, committedAt })
   for (let round = 1; ; round += 1) {
-    await planProjectionReplacement(
-      context,
-      plans,
-      plan,
-      planInput(command, commit, sourceReadStartedAt)
-    )
+    await planProjectionReplacement(context, plans, plan, planInput(command, commit))
     const attempt = await withSerializationRetry(context, () =>
       context.storage.transaction(
-        (storage) =>
-          executeProjectionTransaction(
-            context,
-            storage,
-            command,
-            ready,
-            commit,
-            plan,
-            sourceReadStartedAt
-          ),
+        (storage) => executeProjectionTransaction(context, storage, command, ready, commit, plan),
         { isolation: "serializable" }
       )
     )
@@ -422,8 +411,7 @@ async function executeProjectionTransaction(
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement,
   commit: OntologyCommitWrite,
-  plan: ReplacementPlanRef,
-  sourceReadStartedAt?: string
+  plan: ReplacementPlanRef
 ): Promise<ProjectionCommitAttempt> {
   await ensureMaterializerExecution(storage.executions, command.scopeExecution)
   await assertProjectionExecution(storage, context.projectId, command)
@@ -444,14 +432,7 @@ async function executeProjectionTransaction(
     assertDeltaBase(active, command)
   }
   throwIfAborted(command.signal)
-  const status = await refreshProjectionPlan(
-    context,
-    storage,
-    command,
-    commit,
-    plan,
-    sourceReadStartedAt
-  )
+  const status = await refreshProjectionPlan(context, storage, command, commit, plan)
   if (!status.fresh) return { kind: "stale", unplanned: status.unplanned }
   const session = await storage.ontology.materializations.begin({
     commit,
@@ -497,18 +478,12 @@ async function refreshProjectionPlan(
   storage: MaterializerStorage,
   command: PreparedProjectionReplacement,
   commit: OntologyCommitWrite,
-  plan: ReplacementPlanRef,
-  sourceReadStartedAt?: string
+  plan: ReplacementPlanRef
 ): Promise<ReplacementPlanStatus> {
   const plans = storage.ontology.replacementPlans
   const status = await plans.refresh(plan)
   if (status.fresh || status.unplanned > context.batching.transactionReplanRows) return status
-  await planProjectionReplacement(
-    context,
-    plans,
-    plan,
-    planInput(command, commit, sourceReadStartedAt)
-  )
+  await planProjectionReplacement(context, plans, plan, planInput(command, commit))
   return plans.refresh(plan)
 }
 
@@ -560,20 +535,26 @@ function projectionCommit(
   }
 }
 
+/** The objects edits created, which only a projection that withdraws them has to decide. */
+function createdObjectsToPlan(
+  command: PreparedProjectionReplacement
+): Pick<OpenReplacementPlanInput, "createdObjects"> {
+  const { definition } = command.resolved
+  if (!command.withdrawCreatesBefore || definition._tag !== "ObjectProjectionDefinition") return {}
+
+  return { createdObjects: { objectTypeId: definition.objectTypeId } }
+}
+
 function planInput(
   command: PreparedProjectionReplacement,
-  commit: OntologyCommitWrite,
-  sourceReadStartedAt?: string
+  commit: OntologyCommitWrite
 ): ProjectionReplacementPlanInput {
-  const whenMissingPolicy =
-    command.resolved.definition._tag === "ObjectProjectionDefinition"
-      ? command.resolved.definition.whenMissingPolicy
-      : undefined
-  const input: ProjectionReplacementPlanInput = {
+  const input = {
     projectionKind: command.projectionKind,
     commit,
-    ...(whenMissingPolicy ? { whenMissingPolicy } : {}),
-    ...(sourceReadStartedAt ? { sourceReadStartedAt } : {}),
+    ...(command.withdrawCreatesBefore
+      ? { withdrawCreatesBefore: command.withdrawCreatesBefore }
+      : {}),
   }
   return command.signal === undefined ? input : { ...input, signal: command.signal }
 }

@@ -1399,6 +1399,7 @@ export type {
   ObjectProjectionBuilder,
   ObjectProjectionConflictResolution,
   ObjectProjectionDefinition,
+  ObjectProjectionMissingPolicy,
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionDefinitionCatalog,

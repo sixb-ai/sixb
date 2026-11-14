@@ -30,7 +30,7 @@ import type {
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
-import { queueTestProjectionRun } from "@sixb/core/testing"
+import { createTestSixb, queueTestProjectionRun, startTestSyncRun } from "@sixb/core/testing"
 import { runProjectionJob } from "../src/run-projection-job"
 
 const Device = defineObjectType({
@@ -106,17 +106,39 @@ function fixture(
     storage,
   })
   let time = Date.parse("2026-01-01T00:00:00.000Z")
-  const write = async (rows: readonly DatasetRow[]) => {
+  /** Writes a version as a sync run would; one that `startedAt` gives is recorded as started then. */
+  const write = async (rows: readonly DatasetRow[], startedAt?: Date) => {
     await lake.createDataset(sourceDataset)
     const latest = await lake.getLatestVersion(sourceDataset.id)
     while (latest && Date.now() <= latest.createdAt.getTime()) await Bun.sleep(1)
+    const runId = `write-${time}`
+    const syncRun = startedAt
+      ? await startTestSyncRun(storage, {
+          id: runId,
+          projectId: host.id,
+          syncId: "synthetic",
+          datasetId: sourceDataset.id,
+          mode: "snapshot",
+          startedAt,
+        })
+      : null
     const writer = await lake.beginWrite({
       dataset: sourceDataset,
       mode: "snapshot",
-      producer: { kind: "sync", id: "synthetic", runId: `write-${time}` },
+      producer: { kind: "sync", id: "synthetic", runId },
     })
     await writer.writeRows(rows)
     const version = await writer.commit({ commitMessage: "synthetic changes" })
+    if (syncRun) {
+      await storage.syncRuns.finish({
+        id: runId,
+        projectId: host.id,
+        executionToken: syncRun.execution?.token,
+        status: "succeeded",
+        rowsRead: rows.length,
+        output: { datasetId: version.datasetId, versionId: version.versionId },
+      })
+    }
     time++
     return version
   }
@@ -150,6 +172,7 @@ function fixture(
       ontology: host.definitions.ontology,
       lakeStorage: lake,
       projectionRunsStorage: storage.projectionRuns,
+      syncRuns: storage.syncRuns,
       datasets: host.definitions.datasets,
       projections: host.definitions.projections,
     }
@@ -283,13 +306,33 @@ test("duplicate target identities take the full validation path and preserve the
   expect(await f.active()).toEqual(head)
 })
 
+// Removal proof: drop `sourceReadAt` from the replacement `runProjectionJob` sends; "acme" then
+// stays. The last version is read as a delta, as every run after the first one is.
+test("removes an object an Action created once a version read after it misses it", async () => {
+  const f = fixture(projection.whenMissing("remove"))
+  await f.run((await f.write([{ id: "known", name: "Known" }])).versionId)
+  await createTestSixb(f.host)
+    .objects(Device)
+    .upsert({ properties: { id: "acme", name: "Acme" } })
+  const actionWroteAt = Date.now()
+
+  // The sync started before the Action wrote: it has not caught up yet.
+  const before = await f.write([{ id: "known", name: "Known" }], new Date(actionWroteAt - 60_000))
+  await f.run(before.versionId)
+  expect(await f.object("acme")).not.toBeNull()
+
+  const after = await f.write([{ id: "known", name: "Known 2" }], new Date(actionWroteAt + 60_000))
+  const result = await f.run(after.versionId)
+  expect(result.run.progress.sourceChangesRead).toBe(1)
+  expect(await f.object("acme")).toBeNull()
+})
+
 test("a link projection replaces only changed edge roots and keeps unchanged edges", async () => {
   const definition = defineProjection("incremental_peers", Device.l.peers)
     .fromDataset(dataset)
     .sourceField("id")
     .targetField("name")
   const f = fixture(definition)
-  const { createTestSixb } = await import("@sixb/core/testing")
   for (const id of ["a", "b", "c"]) {
     await createTestSixb(f.host)
       .objects(Device)
@@ -447,7 +490,6 @@ test("a timestamp-only delta re-evaluates mostRecent against a runtime edit", as
     .properties({ id: "id", name: "name" })
     .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
   const f = fixture(definition, undefined, timedDataset)
-  const { createTestSixb } = await import("@sixb/core/testing")
   try {
     await f.run(
       (await f.write([{ id: "a", name: "Source", updated_at: "2020-01-01T00:00:00.000Z" }]))
@@ -481,7 +523,6 @@ test("rebinding a projection to a new dataset replaces its source and keeps edit
       ])
     ).versionId
   )
-  const { createTestSixb } = await import("@sixb/core/testing")
   await createTestSixb(original.host)
     .objects(Device)
     .upsert({ properties: { id: "a", name: "Edited" } })

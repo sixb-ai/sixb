@@ -100,6 +100,7 @@ export const ObjectProjectionSchema = z.object({
   users: z.record(z.enum(["email", "id"])).optional(),
   links: z.record(ForeignKeyDescriptorSchema),
   conflictResolution: SourceEditConflictResolutionSchema,
+  missing: z.literal("remove").optional(),
   latestRun: ProjectionRunSchema.nullable(),
 })
 

@@ -92,14 +92,18 @@ export function createMaterializerFixture(
     readonly storage?: InMemoryStorage
     readonly scope?: ExecutionScope
     readonly conflictResolution?: "editsWin" | "mostRecent"
+    /** Builds the device projection with `.whenMissing("remove")`. */
+    readonly removeMissing?: boolean
   } = {}
 ) {
+  const devicesProjection =
+    input.conflictResolution === "mostRecent" ? mostRecentDeviceProjection : deviceProjection
   const ontology = new OntologyRegistry({
     sources: [input.search ? defineObjectType({ ...Device, search: input.search }) : Device],
   })
   const projections = new ProjectionRegistry({
     projections: [
-      input.conflictResolution === "mostRecent" ? mostRecentDeviceProjection : deviceProjection,
+      input.removeMissing ? devicesProjection.whenMissing("remove") : devicesProjection,
       temperatureProjection,
     ],
     ontology,

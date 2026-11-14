@@ -400,6 +400,10 @@ export function normalizePinnedDatasetVersion(version: PinnedDatasetVersion): Pi
   })
 }
 
+export function normalizeSourceReadAt(value: string): string {
+  return normalizeTimestamp(value, "Projection source read time")
+}
+
 export function normalizeProjectionRunId(runId: string): string {
   return normalizeNonblank(runId, "Projection run id")
 }

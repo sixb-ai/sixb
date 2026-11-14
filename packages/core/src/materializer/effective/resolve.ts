@@ -49,9 +49,6 @@ export interface EffectiveObjectInput {
   readonly override: ObjectOverride | null
   readonly editedAt: Readonly<Record<string, string>>
   readonly latestTelemetry: readonly StoredTelemetryPoint[]
-  readonly whenMissingPolicy?: "remove"
-  readonly sourceReadStartedAt?: string
-  readonly overrideCreatedAt?: string
 }
 
 /** What makes an object exist: a projection's source row, or an edit that created it. */
@@ -128,7 +125,7 @@ function resolveObject(
   input: EffectiveObjectInput,
   record?: PropertyAuthorityRecorder
 ): { readonly value: ResolvedObjectValue; readonly existence: ObjectExistenceAuthority } | null {
-  const resolved = resolveObjectAuthority(input, record)
+  const resolved = resolveObjectAuthority(input.source, input.override, input.editedAt, record)
   if (!resolved) return null
 
   const { properties, existence } = resolved
@@ -140,27 +137,16 @@ function resolveObject(
 }
 
 function resolveObjectAuthority(
-  input: EffectiveObjectInput,
+  source: StoredSourceObjectAssertion | null,
+  override: ObjectOverride | null,
+  editedAt: Readonly<Record<string, string>>,
   record: PropertyAuthorityRecorder | undefined
 ): ResolvedObjectAuthority | null {
-  const { source, override, editedAt } = input
   switch (override?.kind) {
     case "delete":
       return null
     case "create":
       if (!source) {
-        const createTime =
-          input.overrideCreatedAt ??
-          input.editedAt[input.primaryPropertyId] ??
-          Object.values(input.editedAt)[0]
-
-        if (
-          input.whenMissingPolicy === "remove" &&
-          isReadAfterCreate(input.sourceReadStartedAt, createTime)
-        ) {
-          return null
-        }
-
         for (const propertyId of Object.keys(override.properties)) {
           record?.(propertyId, { kind: "edit", editedAt: editedAt[propertyId] })
         }
@@ -175,17 +161,6 @@ function resolveObjectAuthority(
       recordSourceProperties(source, record)
       return { properties: { ...source.assertion.properties }, existence: "source" }
   }
-}
-
-function isReadAfterCreate(
-  sourceReadStartedAt: string | undefined,
-  createTime: string | undefined
-): boolean {
-  if (!sourceReadStartedAt || !createTime) return false
-  const readTime = new Date(sourceReadStartedAt).getTime()
-  const created = new Date(createTime).getTime()
-  if (Number.isNaN(readTime) || Number.isNaN(created)) return false
-  return readTime > created
 }
 
 function resolveSourceAndEdits(

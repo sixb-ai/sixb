@@ -24,6 +24,7 @@ export type {
   LinkProjectionDefinition,
   LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionMissingPolicy,
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionKind,

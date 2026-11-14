@@ -1,4 +1,3 @@
-import type { LakeStorage } from "../lake-storage/types"
 import { MaterializationValidationError } from "../materialization/errors"
 import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
@@ -15,7 +14,6 @@ export interface OntologyMaterializerDependencies {
   readonly materializationId?: () => string
   readonly maxSerializationRetries?: number
   readonly onSerializationRetry?: (attempt: number, error: unknown) => void
-  readonly lakeStorage?: Pick<LakeStorage, "getVersion">
   /** @internal Bounded-memory instrumentation for core semantic buffers. */
   readonly observeCoreBuffer?: (boundary: string, rows: number) => void
 }
@@ -25,7 +23,6 @@ export interface MaterializerContext {
   readonly ontology: OntologyRegistry
   readonly projectionRegistry: ProjectionRegistry
   readonly storage: MaterializerStorage
-  readonly lakeStorage?: Pick<LakeStorage, "getVersion">
   readonly batching: MaterializationBatching
   readonly clock: () => Date
   readonly materializationId: () => string
@@ -34,18 +31,13 @@ export interface MaterializerContext {
   readonly observeCoreBuffer?: (boundary: string, rows: number) => void
 }
 
-export interface CreateMaterializerContextInput {
+export function createMaterializerContext(input: {
   readonly projectId: string
   readonly ontology: OntologyRegistry
   readonly projections: ProjectionRegistry
   readonly storage: MaterializerStorage
-  readonly lakeStorage?: Pick<LakeStorage, "getVersion">
   readonly dependencies?: OntologyMaterializerDependencies
-}
-
-export function createMaterializerContext(
-  input: CreateMaterializerContextInput
-): MaterializerContext {
+}): MaterializerContext {
   if (input.projectId.trim().length === 0) {
     throw new MaterializationValidationError("Materializer project id must be nonblank.")
   }
@@ -79,11 +71,6 @@ export function createMaterializerContext(
     ontology: input.ontology,
     projectionRegistry: input.projections,
     storage: input.storage,
-    ...(input.lakeStorage
-      ? { lakeStorage: input.lakeStorage }
-      : dependencies.lakeStorage
-        ? { lakeStorage: dependencies.lakeStorage }
-        : {}),
     batching: resolveMaterializationBatching(dependencies.batching),
     clock: dependencies.clock ?? (() => new Date()),
     materializationId: dependencies.materializationId ?? createProjectionMaterializationId,
