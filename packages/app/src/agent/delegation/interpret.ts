@@ -91,28 +91,28 @@ export interface DelegationTurn {
 /** Earlier threads hold `wait_agent`; a `wait` or a `stop` for commands alone is left out. */
 const DELEGATION_TOOLS = new Set(["spawn_agent", "message_agent", "wait", "stop", "wait_agent"])
 
-const delegationTurnEntries = new WeakMap<
-  AgentConversationMessage,
-  { readonly turn: DelegationTurn; readonly signature: string }
->()
+export interface DelegationTurnEntry {
+  readonly turn: DelegationTurn
+  readonly signature: string
+}
 
-export function delegationTurnEntry(
-  message: AgentConversationMessage
-): { readonly turn: DelegationTurn; readonly signature: string } | null {
-  if (message.role !== "assistant") return null
-  const cached = delegationTurnEntries.get(message)
+const delegationTurnEntries = new WeakMap<AgentConversationMessage, DelegationTurnEntry>()
+
+export function delegationTurnEntry(msg: AgentConversationMessage): DelegationTurnEntry | null {
+  if (msg.role !== "assistant") return null
+  const cached = delegationTurnEntries.get(msg)
   if (cached) return cached
 
   const tools: NormalizedTool[] = []
-  let sig = `${message.runId ?? ""}:`
-  for (const part of message.parts) {
+  let sig = `${msg.runId ?? ""}:`
+  for (const part of msg.parts) {
     if (part.type === "tool" && DELEGATION_TOOLS.has(part.toolName)) {
       tools.push(normalizedTool(part))
       sig += `${part.toolName}@${part.state};`
     }
   }
-  const entry = { turn: { runId: message.runId, tools }, signature: sig }
-  delegationTurnEntries.set(message, entry)
+  const entry = { turn: { runId: msg.runId, tools }, signature: sig }
+  delegationTurnEntries.set(msg, entry)
   return entry
 }
 

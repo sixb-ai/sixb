@@ -114,9 +114,7 @@ describe("Markdown", () => {
     expect(html).toContain('<div class="prose-table">')
     expect(html).toMatch(/<td[^>]*class="whitespace-nowrap"[^>]*>inv_01<\/td>/)
     expect(html).toMatch(/<td[^>]*class="whitespace-nowrap"[^>]*>\$12,400<\/td>/)
-    expect(html).not.toMatch(
-      /<td[^>]*class="whitespace-nowrap"[^>]*>Quarterly platform enterprise/
-    )
+    expect(html).not.toMatch(/<td[^>]*class="whitespace-nowrap"[^>]*>Quarterly/)
   })
 
   test("strips unsafe URL schemes and never injects raw HTML markup", () => {

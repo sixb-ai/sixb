@@ -1,9 +1,4 @@
-import {
-  badgeLabel,
-  getCachedHighlight,
-  highlightCode,
-  isPlainCodeLang,
-} from "@sixb/ui/lib/shiki"
+import { badgeLabel, getCachedHighlight, highlightCode, isPlainCodeLang } from "@sixb/ui/lib/shiki"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
 import {
