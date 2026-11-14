@@ -49,7 +49,15 @@ function sameToolSequence(a: readonly NormalizedPart[], b: readonly NormalizedPa
   }
 }
 
-function AnswerToolViewsList({ parts }: { readonly parts: readonly NormalizedPart[] }) {
+interface AnswerToolViewsProps {
+  readonly parts: readonly NormalizedPart[]
+}
+
+function sameAnswerTools(prev: AnswerToolViewsProps, next: AnswerToolViewsProps): boolean {
+  return sameToolSequence(prev.parts, next.parts)
+}
+
+function AnswerToolViewsList({ parts }: AnswerToolViewsProps) {
   const views = useContext(AgentToolViewsContext)
   if (views.size === 0) return null
 
@@ -62,9 +70,7 @@ function AnswerToolViewsList({ parts }: { readonly parts: readonly NormalizedPar
   })
 }
 
-export const AnswerToolViews = memo(AnswerToolViewsList, (prev, next) =>
-  sameToolSequence(prev.parts, next.parts)
-)
+export const AnswerToolViews = memo(AnswerToolViewsList, sameAnswerTools)
 
 /** A call shown through the project's view, or through `fallback` when the view throws. */
 export function ProjectToolView({

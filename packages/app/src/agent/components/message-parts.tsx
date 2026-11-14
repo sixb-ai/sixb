@@ -311,13 +311,15 @@ function WorkGroupView({ parts, inProgress, nested = false }: WorkGroupProps) {
   )
 }
 
-const WorkGroup = memo(
-  WorkGroupView,
-  (prev, next) =>
+function sameWorkGroup(prev: WorkGroupProps, next: WorkGroupProps): boolean {
+  return (
     prev.inProgress === next.inProgress &&
     (prev.nested ?? false) === (next.nested ?? false) &&
     sameElements(prev.parts, next.parts)
-)
+  )
+}
+
+const WorkGroup = memo(WorkGroupView, sameWorkGroup)
 
 /** Reasoning inside a work group: plain, quiet text that flows with the rest of the chain. */
 function GroupReasoning({ text, streaming }: { text: string; streaming: boolean }) {
@@ -336,14 +338,13 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
  * inspector. All keep their bodies borderless and inline so an expanded result flows within the
  * group rather than reading as a nested dropdown.
  */
-function ToolCallRowView({
-  tool,
-  parts,
-}: {
-  tool: NormalizedTool
+interface ToolCallRowProps {
+  readonly tool: NormalizedTool
   /** The rest of its work, which names the children a wait is for. */
-  parts: readonly NormalizedPart[]
-}) {
+  readonly parts: readonly NormalizedPart[]
+}
+
+function ToolCallRowView({ tool, parts }: ToolCallRowProps) {
   const view = useAgentToolView(tool.toolName)
   const row =
     view?.placement === "work" ? (
@@ -365,10 +366,11 @@ function ToolCallRowView({
   )
 }
 
-const ToolCallRow = memo(
-  ToolCallRowView,
-  (prev, next) => Object.is(prev.tool, next.tool) && sameElements(prev.parts, next.parts)
-)
+function sameToolCallRow(prev: ToolCallRowProps, next: ToolCallRowProps): boolean {
+  return Object.is(prev.tool, next.tool) && sameElements(prev.parts, next.parts)
+}
+
+const ToolCallRow = memo(ToolCallRowView, sameToolCallRow)
 
 /**
  * Under a call whose output was too large for the model's context, the whole output it saved: it

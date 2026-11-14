@@ -112,11 +112,29 @@ const LANG_BADGES: Record<string, string> = {
   astro: "ASTRO",
 }
 
-const PLAIN_LANGS = new Set(["", "text", "txt", "plain", "plaintext"])
+const PLAIN_LANGS: Record<string, true> = {
+  "": true,
+  text: true,
+  txt: true,
+  plain: true,
+  plaintext: true,
+}
+
 const MAX_HIGHLIGHT_CACHE = 256
 
-const highlightCache = new Map<string, string>()
-const inflightHighlights = new Map<string, Promise<string>>()
+// Lazy-initialized so importing unrelated @sixb/ui components can tree-shake this module cleanly.
+let highlightCache: Map<string, string> | null = null
+let inflightHighlights: Map<string, Promise<string>> | null = null
+
+function getHighlightCache(): Map<string, string> {
+  highlightCache ??= new Map()
+  return highlightCache
+}
+
+function getInflightHighlights(): Map<string, Promise<string>> {
+  inflightHighlights ??= new Map()
+  return inflightHighlights
+}
 
 function normalizeLang(lang: string): string {
   return lang.trim().toLowerCase()
@@ -127,25 +145,26 @@ function cacheKey(code: string, lang: string): string {
 }
 
 function writeCache(key: string, html: string): void {
-  if (highlightCache.has(key)) highlightCache.delete(key)
-  else if (highlightCache.size >= MAX_HIGHLIGHT_CACHE) {
-    const oldest = highlightCache.keys().next().value
-    if (oldest !== undefined) highlightCache.delete(oldest)
+  const cache = getHighlightCache()
+  if (cache.has(key)) cache.delete(key)
+  else if (cache.size >= MAX_HIGHLIGHT_CACHE) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
   }
-  highlightCache.set(key, html)
+  cache.set(key, html)
 }
 
 /** Whether `lang` names a syntax grammar rather than plain unhighlighted text. */
 export function isPlainCodeLang(lang: string): boolean {
-  return PLAIN_LANGS.has(normalizeLang(lang))
+  return PLAIN_LANGS[normalizeLang(lang)] === true
 }
 
 /** Synchronous lookup of a previously highlighted block so remounts and handoffs never flash. */
 export function getCachedHighlight(code: string, lang: string): string | null {
+  if (!highlightCache) return null
   const key = cacheKey(code, lang)
   const hit = highlightCache.get(key)
   if (hit === undefined) return null
-  // Refresh LRU recency.
   highlightCache.delete(key)
   highlightCache.set(key, hit)
   return hit
@@ -176,9 +195,10 @@ export async function highlightCode(code: string, lang: string): Promise<string>
   const cached = getCachedHighlight(code, lang)
   if (cached !== null) return cached
 
+  const inflight = getInflightHighlights()
   const key = cacheKey(code, lang)
-  const inflight = inflightHighlights.get(key)
-  if (inflight) return inflight
+  const existing = inflight.get(key)
+  if (existing) return existing
 
   const resolved = normalizeLang(lang) || "text"
   const task = (async () => {
@@ -192,10 +212,10 @@ export async function highlightCode(code: string, lang: string): Promise<string>
       writeCache(key, fallback)
       return fallback
     } finally {
-      inflightHighlights.delete(key)
+      inflight.delete(key)
     }
   })()
 
-  inflightHighlights.set(key, task)
+  inflight.set(key, task)
   return task
 }

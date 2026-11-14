@@ -129,7 +129,7 @@ function buildStreamChunks(runId: string) {
   events.push({ type: "event", event: { type: "agent.ui.chunk", chunk: { type: "start-step" } } })
   const markdown = [
     "# Summary\n\n",
-    "```typescript\nexport const status = \"stable\"\n```\n\n",
+    "```typescript\nexport const status = 1\n```\n\n",
     "| Check | Result |\n| :--- | ---: |\n| Saved rows | 0 |\n\n",
     "- [x] Bare code blocks\n- [x] Aligned tables\n\n",
     "```\nStream -> Transcript -> Markdown\n```\n",
@@ -187,7 +187,7 @@ async function main() {
   }
 
   // 2. Markdown + Transcript SSR throughput
-  await highlightCode('export const status = "stable"', "typescript")
+  await highlightCode("export const status = 1", "typescript")
   const ssrSamples: number[] = []
   for (let sample = 0; sample < 15; sample += 1) {
     const start = Bun.nanoseconds()
@@ -221,7 +221,7 @@ async function main() {
         savedMessages: saved.length,
         streamEvents: events.length,
         savedIdentityPreserved: identityPreserved,
-        shikiCacheWarm: getCachedHighlight('export const status = "stable"', "typescript") !== null,
+        shikiCacheWarm: getCachedHighlight("export const status = 1", "typescript") !== null,
         streamFoldMedianMs: Number(median(foldSamples).toFixed(2)),
         markdownSsrMedianMs: Number(median(ssrSamples).toFixed(2)),
         transcript50MsgSsrMs: Number(transcriptSsrMs.toFixed(2)),

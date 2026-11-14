@@ -107,15 +107,20 @@ describe("agent chat re-render stability", () => {
 
     let savedRenders = 0
     let liveToolRenders = 0
+
+    function SavedProbe() {
+      savedRenders += 1
+      return <div>saved</div>
+    }
+
+    function LiveProbe() {
+      liveToolRenders += 1
+      return <div>live</div>
+    }
+
     const views = [
-      defineAgentToolView("saved_probe", { placement: "answer" }).render(() => {
-        savedRenders += 1
-        return <div>saved</div>
-      }),
-      defineAgentToolView("live_probe", { placement: "answer" }).render(() => {
-        liveToolRenders += 1
-        return <div>live</div>
-      }),
+      defineAgentToolView("saved_probe", { placement: "answer" }).render(SavedProbe),
+      defineAgentToolView("live_probe", { placement: "answer" }).render(LiveProbe),
     ]
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
@@ -212,12 +217,15 @@ describe("agent chat re-render stability", () => {
     const t1 = savedTurn(1)
     const saved = [t1.userMessage, t1.assistantMessage]
     let consumerRenders = 0
+
+    function SavedReferenceProbe() {
+      useOpenArtifactAddress()
+      consumerRenders += 1
+      return <div>consumer</div>
+    }
+
     const views = [
-      defineAgentToolView("saved_probe", { placement: "answer" }).render(() => {
-        useOpenArtifactAddress()
-        consumerRenders += 1
-        return <div>consumer</div>
-      }),
+      defineAgentToolView("saved_probe", { placement: "answer" }).render(SavedReferenceProbe),
     ]
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } })

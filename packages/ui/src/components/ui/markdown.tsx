@@ -8,6 +8,8 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
 import {
   type ComponentProps,
+  type ComponentType,
+  type Context,
   createContext,
   isValidElement,
   memo,
@@ -26,9 +28,20 @@ import { useUiMessages } from "../../lib/i18n/ui"
 // the docs site's `Bun.markdown` options so both surfaces render the same constructs.
 const REMARK_PLUGINS = [remarkGfm]
 
-// Marks `<code>` inside a fenced or indented `<pre>` block so language-less code blocks still
-// render as `CodeBlock` rather than falling through to inline `<code>`.
-const InsidePreContext = createContext(false)
+// Lazy-initialized so barrel imports of @sixb/ui/components never evaluate side effects or pull
+// Shiki into apps that do not render Markdown.
+let insidePreContext: Context<boolean> | null = null
+let memoizedCodeBlock: ComponentType<{ lang: string; code: string }> | null = null
+
+function getInsidePreContext(): Context<boolean> {
+  insidePreContext ??= createContext(false)
+  return insidePreContext
+}
+
+function getMemoizedCodeBlock(): ComponentType<{ lang: string; code: string }> {
+  memoizedCodeBlock ??= memo(CodeBlock)
+  return memoizedCodeBlock
+}
 
 // react-markdown builds a React element tree (no `dangerouslySetInnerHTML`) and never renders raw
 // HTML unless a rehype-raw plugin is added, so untrusted content cannot inject markup. URLs go
@@ -48,7 +61,8 @@ const COMPONENTS: Components = {
   // `<figure>` isn't nested inside a `<pre>`, while `InsidePreContext` distinguishes block code
   // without a language tag from inline backticks.
   pre({ children }) {
-    return <InsidePreContext.Provider value={true}>{children}</InsidePreContext.Provider>
+    const PreContext = getInsidePreContext()
+    return <PreContext.Provider value={true}>{children}</PreContext.Provider>
   },
   // A wide table scrolls inside its own box instead of squeezing a narrow column, and a short
   // cell (an id, an amount, a date) stays on one line.
@@ -76,7 +90,7 @@ const COMPONENTS: Components = {
     )
   },
   code({ node: _node, className, children, ...props }) {
-    const insidePre = useContext(InsidePreContext)
+    const insidePre = useContext(getInsidePreContext())
     const match = /language-([^\s]+)/.exec(className ?? "")
     if (!insidePre && !match) {
       return (
@@ -85,7 +99,8 @@ const COMPONENTS: Components = {
         </code>
       )
     }
-    return <CodeBlock lang={match?.[1] ?? ""} code={codeText(children).replace(/\n$/, "")} />
+    const MemoCodeBlock = getMemoizedCodeBlock()
+    return <MemoCodeBlock lang={match?.[1] ?? ""} code={codeText(children).replace(/\n$/, "")} />
   },
 }
 
@@ -160,7 +175,7 @@ export interface MarkdownProps extends Omit<ComponentProps<"div">, "children"> {
  * Render a markdown string with the shared `.prose` style (see `@sixb/ui/globals.css`) and
  * Shiki-highlighted code blocks. Safe for untrusted input — no raw HTML, sanitized link targets.
  */
-const Markdown = memo(function Markdown({
+function Markdown({
   children,
   className,
   components,
@@ -184,9 +199,9 @@ const Markdown = memo(function Markdown({
       </ReactMarkdown>
     </div>
   )
-})
+}
 
-const CodeBlock = memo(function CodeBlock({ lang, code }: { lang: string; code: string }) {
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const messages = useUiMessages()
   const plain = isPlainCodeLang(lang)
   const cached = plain ? null : getCachedHighlight(code, lang)
@@ -240,12 +255,11 @@ const CodeBlock = memo(function CodeBlock({ lang, code }: { lang: string; code: 
     }
   }, [code, lang, plain])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    return () => {
       if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-    },
-    []
-  )
+    }
+  }, [])
 
   const copy = async () => {
     try {
@@ -295,6 +309,6 @@ const CodeBlock = memo(function CodeBlock({ lang, code }: { lang: string; code: 
       )}
     </figure>
   )
-})
+}
 
 export { defaultUrlTransform, Markdown }

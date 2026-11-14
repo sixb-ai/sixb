@@ -53,7 +53,12 @@ import { type ComputerOfflineNoticeProps, shownFolder } from "../components/comp
 import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
-import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
+import {
+  type AgentConversationTurn,
+  conversationMessages,
+  conversationTurn,
+  type PendingUserMessage,
+} from "../conversation"
 import type { TranscriptDelegation } from "../delegation/context"
 import { projectDictation } from "../dictation"
 import { useAgentMessages } from "../i18n"
@@ -1692,12 +1697,12 @@ function useExtendedWaitingStatus(run: Pick<AgentRun, "status" | "createdAt"> | 
   return visible
 }
 
-function sameTurn(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+function sameTurn(a: AgentConversationTurn, b: AgentConversationTurn): boolean {
   const keysA = Object.keys(a)
   const keysB = Object.keys(b)
   if (keysA.length !== keysB.length) return false
   for (const key of keysA) {
-    if (!Object.is(a[key], b[key])) return false
+    if (!Object.is(Reflect.get(a, key), Reflect.get(b, key))) return false
   }
   return true
 }

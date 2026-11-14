@@ -18,8 +18,8 @@ import {
   type ComponentType,
   createContext,
   lazy,
-  memo,
   type MouseEvent,
+  memo,
   type ReactNode,
   Suspense,
   useCallback,
@@ -178,7 +178,12 @@ function ReplyCallout({
   )
 }
 
-const DEFAULT_REFERENCING_COMPONENTS = withArtifactReferences({ aside: ReplyCallout })
+let defaultReferencingComponents: Components | null = null
+
+function getReferencingComponents(): Components {
+  defaultReferencingComponents ??= withArtifactReferences({ aside: ReplyCallout })
+  return defaultReferencingComponents
+}
 
 /** Markdown with `artifact:` addresses and callouts resolved, as a chat reply renders it. */
 export const ReferencingMarkdown = memo(function ReferencingMarkdown({
@@ -191,7 +196,7 @@ export const ReferencingMarkdown = memo(function ReferencingMarkdown({
   return (
     <Markdown
       className={className}
-      components={DEFAULT_REFERENCING_COMPONENTS}
+      components={getReferencingComponents()}
       rehypePlugins={REPLY_PLUGINS}
       urlTransform={artifactUrlTransform}
     >

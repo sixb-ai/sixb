@@ -75,17 +75,16 @@ describe("Markdown", () => {
   test("keeps hyphenated and symbol language identifiers and handles empty code fences", () => {
     // Reproduce by matching `/language-(\w+)/` or `String(children)` in markdown.tsx: `c++` becomes
     // `C` and an empty fence renders the literal word "undefined".
-    const cppHtml = renderToStaticMarkup(
-      <Markdown>{["```c++", "int main() { return 0; }", "```"].join("\n")}</Markdown>
-    )
+    const cpp = ["```c++", "int main() { return 0; }", "```"].join("\n")
+    const cppHtml = renderToStaticMarkup(<Markdown>{cpp}</Markdown>)
     expect(cppHtml).toContain('<span class="code-badge">C++</span>')
 
-    const objcHtml = renderToStaticMarkup(
-      <Markdown>{["```objective-c", "@interface Box : NSObject", "```"].join("\n")}</Markdown>
-    )
+    const objc = ["```objective-c", "@interface Box : NSObject", "```"].join("\n")
+    const objcHtml = renderToStaticMarkup(<Markdown>{objc}</Markdown>)
     expect(objcHtml).toContain('<span class="code-badge">OBJC</span>')
 
-    const emptyHtml = renderToStaticMarkup(<Markdown>{["```ts", "```"].join("\n")}</Markdown>)
+    const empty = ["```ts", "```"].join("\n")
+    const emptyHtml = renderToStaticMarkup(<Markdown>{empty}</Markdown>)
     expect(emptyHtml).toContain('<span class="code-badge">TS</span>')
     expect(emptyHtml).not.toContain("undefined")
   })
@@ -93,9 +92,8 @@ describe("Markdown", () => {
   test("opens external links in a new tab while keeping fragment links in place", () => {
     // Reproduce by adding `target="_blank"` unconditionally on `COMPONENTS.a`; `#overview` and
     // footnote references open a new tab instead of scrolling in place.
-    const html = renderToStaticMarkup(
-      <Markdown>{"[Docs](https://sixb.ai) and [Section](#overview)"}</Markdown>
-    )
+    const links = "[Docs](https://sixb.ai) and [Section](#overview)"
+    const html = renderToStaticMarkup(<Markdown>{links}</Markdown>)
 
     expect(html).toContain(
       '<a href="https://sixb.ai" target="_blank" rel="noreferrer noopener">Docs</a>'
@@ -168,9 +166,8 @@ describe("shiki helpers and prose styles", () => {
     expect(getCachedHighlight(snippet, "ts")).toBe(highlighted)
     expect(getCachedHighlight(snippet, "TS")).toBe(highlighted)
 
-    const rendered = renderToStaticMarkup(
-      <Markdown>{["```ts", snippet, "```"].join("\n")}</Markdown>
-    )
+    const source = ["```ts", snippet, "```"].join("\n")
+    const rendered = renderToStaticMarkup(<Markdown>{source}</Markdown>)
     expect(rendered).toContain(highlighted)
   })
 

@@ -340,16 +340,22 @@ export const Composer = memo(function Composer({
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
   const commandText = commandQuery(value)
   const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
-  const changeApprovalModeRef = useRef<(mode: AgentApprovalMode) => void>(() => {})
+  const changeApprovalMode = useCallback(
+    (mode: AgentApprovalMode) => {
+      onApprovalModeChange?.(mode)
+      setModeAnnouncement(
+        agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
+      )
+    },
+    [onApprovalModeChange, agentMessages.approvalModes]
+  )
   const availableCommands = useMemo(
     (): readonly ComposerCommand[] => [
       ...builtInCommands({
         models,
         onSelectModel: choosesModel ? onSelectModel : undefined,
         onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
-        onApprovalModeChange: showPermissions
-          ? (mode) => changeApprovalModeRef.current(mode)
-          : undefined,
+        onApprovalModeChange: showPermissions ? changeApprovalMode : undefined,
         messages: agentMessages.commands,
       }),
       ...customCommands,
@@ -360,6 +366,7 @@ export const Composer = memo(function Composer({
       onSelectModel,
       onResetModelSelection,
       showPermissions,
+      changeApprovalMode,
       agentMessages.commands,
       customCommands,
     ]
@@ -757,16 +764,6 @@ export const Composer = memo(function Composer({
     })
   }
 
-  const changeApprovalMode = useCallback(
-    (mode: AgentApprovalMode) => {
-      onApprovalModeChange?.(mode)
-      setModeAnnouncement(
-        agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
-      )
-    },
-    [onApprovalModeChange, agentMessages.approvalModes]
-  )
-  changeApprovalModeRef.current = changeApprovalMode
 
   const runCommand = (command: ComposerCommand) => {
     command.run()
