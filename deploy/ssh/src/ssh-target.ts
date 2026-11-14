@@ -13,6 +13,7 @@ import type {
   DeployLogsOptions,
   DeployOperationContext,
   DeployRelease,
+  DeployScript,
   DeploySetupContext,
   DeploySource,
   DeployStatus,
@@ -22,7 +23,13 @@ import { addKey, listKeys, removeKeys, removeKeysWhere } from "./access"
 import { checkDns, ENV_TOKEN_CHECK, runChecks } from "./check"
 import { generateCiKey, knownHostsLines, readHostKeys, renderCiInstall } from "./ci"
 import { ENV_TOKEN_FILE } from "./layout"
-import { controlServices, deployRelease, readStatus, streamLogs } from "./operations"
+import {
+  controlServices,
+  deployRelease,
+  readStatus,
+  runDeployScript,
+  streamLogs,
+} from "./operations"
 import { ensureEnvToken, pickPublicKey, renderAdminScript } from "./setup"
 import { shellQuote } from "./shell"
 import { resolveSshConfig } from "./ssh-config"
@@ -109,6 +116,10 @@ export class SshTarget implements DeployTarget {
     context: DeployOperationContext
   ): Promise<void> {
     return this.#connected((shell) => controlServices(shell, context.name, action, service))
+  }
+
+  run(script: DeployScript, context: DeployOperationContext): Promise<number> {
+    return this.#connected((shell) => runDeployScript(shell, context.name, script))
   }
 
   async check(release: DeployRelease, context: DeployCheckContext): Promise<DeployCheck[]> {

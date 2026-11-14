@@ -8,10 +8,13 @@ const INT64_MAX = 2n ** 63n - 1n
 /** The dates DuckDB reads: year, month and day in that order, separated by `-` or `/`. */
 const DATE_PART = String.raw`(\d{1,4})([-/])(\d{1,2})\2(\d{1,2})`
 
-/** The time DuckDB reads after one, and an offset: `Z` in capitals or numbers, never a name. */
-const TIME_PART = String.raw`(?:[T ]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?`
+/**
+ * The time DuckDB reads after one, and an offset: `Z` in capitals or numbers, never a name. The
+ * offset is captured, for `normalizeDuckDbTimestampValue` to find.
+ */
+const TIME_PART = String.raw`(?:[T ]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?(Z|[+-]\d{2}(?::?\d{2})?)?)?`
 
-const TIMESTAMP_FORMAT = new RegExp(`^${DATE_PART}${TIME_PART}$`)
+export const TIMESTAMP_FORMAT = new RegExp(`^${DATE_PART}${TIME_PART}$`)
 const DATE_FORMAT = new RegExp(`^${DATE_PART}$`)
 
 /**
@@ -84,7 +87,7 @@ function datedRefusal(value: unknown, format: RegExp, kind: string): string | nu
     : `'${value}' names a day that does not exist.`
 }
 
-function isCalendarDay(year: number, month: number, day: number): boolean {
+export function isCalendarDay(year: number, month: number, day: number): boolean {
   if (month < 1 || month > 12 || day < 1) return false
 
   // Day 0 of the next month is the last of this one. `setUTCFullYear` keeps years below 100.

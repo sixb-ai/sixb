@@ -113,10 +113,10 @@ turn N's last request sent, on every storage:
   stored objects back in its own key order. Tool outputs, synthesized call arguments and Anthropic
   `tool_use` inputs; opaque provider items replay as stored, since the provider parses them.
 - **A projected tool output replays as the model read it.** When a tool's `toModelOutput` differs
-  from its output (`view_file`, `publish_artifact`, `wait_agent`, project tools returning files), the
+  from its output (`read` showing a file, `publish_artifact`, `wait`, project tools returning files), the
   tool-call part keeps it as `modelOutput`, and `toModelMessages` sends it verbatim. The HTTP API
   leaves it out. Its files are materialized again where that output named them: `tool-files/` of
-  the call that stored one, `children/<key>/` for `wait_agent`, or the path a file it showed already
+  the call that stored one, `children/<key>/` for `wait`, or the path a file it showed already
   had. The 50-file window and the sandbox budget bound what is materialized, never what is replayed;
   a user's files take the budget first.
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
@@ -136,8 +136,9 @@ turn N's last request sent, on every storage:
   (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
   history's saved files back while the model starts: those the sandbox lacks, newest within a
   budget, read a few at a time and no further than their declared size, written oldest first.
-  `read` and `view_file` page by themselves and are never saved; a sandbox or store that cannot
-  take the file leaves the model the part's copy. A cleared preview points at the file.
+  `read` pages by itself, and `glob` and `grep` cap what they return: they are never saved; a
+  sandbox or store that cannot take the file leaves the model the part's copy. A cleared preview
+  points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
@@ -203,8 +204,12 @@ For a blank sandbox:
    and nothing else.
 2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
    sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
-3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
-   `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
+3. Each `read` call runs a fixed, bounded script with model input passed as command arguments.
+   `glob` and `grep` run the run's own `lib/search.mjs` on Bun or Node, with the request as one
+   JSON argument ([sandbox-search.ts](../src/tools/sandbox-search.ts), engine in
+   [tools/search/](../src/tools/search/)): one walker and one `.gitignore` matcher in every
+   sandbox, where `rg` or GNU tools may be missing. Each `bash` call becomes
+   `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 `bash` with `run_in_background` starts a command that outlives its call
@@ -213,7 +218,7 @@ For a blank sandbox:
 call leaves behind (a cgroup, a PID namespace) leaves it alone, in a process group of its own
 (`set -m`: macOS has no `setsid`). Its output, pid and exit code are files under `background/` in
 the context directory; the pid file carries the start's nonce, so a file an earlier start left is
-never read. `bash_stop` waits for the group to be known, sends it SIGTERM from inside the sandbox,
+never read. `stop` waits for the group to be known, sends it SIGTERM from inside the sandbox,
 then SIGKILL after 3 seconds, and aborts the held call. Where the group is out of reach, as under
 bwrap's PID namespace on Linux, the stop is that abort at once: a kill, with no grace period. A
 command reads as stopped when a signal of its stop ended it; one that exited meanwhile, or caught
@@ -247,7 +252,7 @@ app data is the API, with its run token — there is no open internet. See
 
 The Agent can delegate focused tasks to headless child agents with `spawn_agent`, on a tier or any
 language model configured in `models.language`, keep working after a child starts, and collect
-results with `wait_agent` only when it needs them. Children are created at runtime; no extra
+results with `wait` only when it needs them. Children are created at runtime; no extra
 project configuration is required. The conversation rules say when to delegate: independent,
 heavier investigations that can run in parallel, never a lookup or a quick generation.
 
@@ -291,7 +296,7 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
 - **The child pauses.** Its loop stops after the step that made the call (`pauseAfterStep` on
   `holdsRun` for the child), or at its finish when a command left running held one. It ends
   `succeeded` with `finishReason: "awaiting_approval"`, maybe without an answer, with what it did
-  as its thread's next message and its `out/` in its result. `wait_agent` treats it as done:
+  as its thread's next message and its `out/` in its result. `wait` treats it as done:
   `status: "awaiting_approval"`, its waiting calls, and no files, which would pass for complete.
 - **The turn never stops a child for a held call.** Its own call pauses it after the step that
   made it. A child's pauses it only once none of its children is queued or running
@@ -337,7 +342,7 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   In that last case the acquire starts a fresh state under a new name
   (`startSubagentWorkspaceAgain`), where a conversation would need an explicit recreation, which
   nobody can do on a child's thread. Either way `resetAt` reaches the system prompt.
-- **The parent waits by the old id.** `wait_agent` resolves the run id of a child of an earlier turn
+- **The parent waits by the old id.** `wait` resolves the run id of a child of an earlier turn
   of the conversation to its thread's latest run, the one of this turn that continues it when there
   is one, and answers with the id it was given. `spawn_agent` refuses a key a continuation holds:
   its run works in a thread an earlier turn spawned.
@@ -364,7 +369,7 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
 - **As it answers.** When the model answers without tools and a step is left, `beforeComplete`
   reads the inbox once more. A message there adds a step after the answer, marked `afterAnswer`:
   the child is told its parent has not received that answer, and writes its result again. Its
-  answer is what it wrote after; `wait_agent` also returns the one before as `earlierAnswer`, so
+  answer is what it wrote after; `wait` also returns the one before as `earlierAnswer`, so
   an addendum never replaces the answer it amends, or says in `answerNote` that the child did not
   answer again.
 - **In the child's thread.** Each delivery is a user message of the run that read it, between the
@@ -375,30 +380,40 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
   reading, and what came that it never read is kept on its run (`result.unread`): the run that
   continues it, under a later turn and perhaps another runner, reads it first, in its trigger.
   Mail sent after it stopped reading is refused, saying it paused or ended. Until it continues,
-  `wait_agent` lists the unread in `unread`.
+  `wait` lists the unread in `unread`.
 - **Refusals.** A key that is no child of the turn, a child of one of the conversation's 20 latest
   earlier turns (spawn it again), a child that ended, and a paused one are refused, each with what
   to do.
 
+## Questions to the user
+
+The conversational Agent asks the user with the same `ask`. The tool returns at once
+(`{ status: "asked" }`), and the turn ends after the step that asked (`stepAskedUser` in
+`runAgentTurn`'s `pauseAfterStep`), finishing `stop`: nothing waits for a decision, so no record
+holds it. The app and the TUI show the questions of a thread's last turn with their choices; the
+user's answer is their next message, which the next turn reads right after the call. A call refused
+for its input asks nothing and the turn goes on. A held call in the same step still pauses the turn
+`awaiting_approval`.
+
 ## Questions to the parent
 
-A child asks with `ask_parent({ question })` and waits for the answer within its step. The
-question and its replies go through the turn's mailbox, as messages do (`src/subagent-inbox.ts`,
-`src/family-mailbox.ts`, `src/subagent-tools.ts`):
+A child asks with `ask({ questions })`, one to four of them, and waits for the answer within its
+step. Its questions reach the parent as one text (`agentQuestionsText`: each with its choices,
+numbered when there are several), and they and their replies go through the turn's mailbox, as
+messages do (`src/ask-tool.ts`, `src/subagent-inbox.ts`, `src/family-mailbox.ts`,
+`src/subagent-tools.ts`). Earlier threads hold `ask_parent({ question })` calls, read the same way:
 
 - **Asking.** The child puts its question, id `<childRunId>:<modelCallId>:<toolCallId>`, in the
   turn's mailbox and waits for the reply to it (`inReplyTo` the question), bounded by its signal:
-  its cancel, or its parent's. One question at a time: a second `ask_parent` while one waits is
-  refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
+  its cancel, or its parent's. One call at a time: a second `ask` while one waits is refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
 - **The parent's wait wakes.** A question wakes the parent's waits at once (see
-  [the parent's waits](#the-parents-waits)). `wait_agent` returns as soon as a question comes, from any child
+  [the parent's waits](#the-parents-waits)). `wait` returns as soon as a question comes, from any child
   of the turn, not only those it waits for, since a child blocked on its question never finishes.
   A question it already returned no longer stops a wait for other children, only a wait for its
   own. `questions` (`key`, `runId`, `id`, `text`) lists the questions it returns first and those
   of the children it waits for, and each is on its child's result.
 - **Answering.** While the child waits on a question the model has read, the parent's next
-  `message_agent` to its key is the answer: an `answer` mail, which `ask_parent` returns as
-  `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
+  `message_agent` to its key is the answer: an `answer` mail, which `ask` returns as `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
   the second is a message. A message sent before the model read the question stays a message. The
   answer's id is the call's, so a replay is the same answer, sent once.
 - **A question the model has not read.** When the model answers without tools, a question it has
@@ -406,18 +421,18 @@ question and its replies go through the turn's mailbox, as messages do (`src/sub
   answer that ignores it.
 - **The turn's end.** Before the turn records its end, while it still runs, it writes a `deferred`
   reply to each child still waiting on its question, and waits for each to pause: `succeeded`, `finishReason: "awaiting_answer"`, its work in its thread, the
-  `ask_parent` call and its `deferred` output, which names the question's id, included, and its
+  `ask` call and its `deferred` output, which names the question's id, included, and its
   `out/` in its result. Only then does it wait for its other children when it pauses, and record its end, which
   cancels those still at work. The repair pass leaves a running turn's children alone, so a child
   that pauses is never cancelled under it. A cancelled turn or one that fails or times out stops
   its children, waiting or not, and their own signal ends the wait. A child that held a call in
-  the same step pauses `awaiting_approval`: only a decision continues it, its `ask_parent` output
+  the same step pauses `awaiting_approval`: only a decision continues it, its `ask` output
   then says it goes on without an answer, and it can ask again.
 - **The next turn continues it.** A turn reads, after its conversation, a
   `<sixb_waiting_children>` block of the conversation's children still paused on a question. It
   comes from one indexed read, `runs.listThreadSubagents` with `finishReason: "awaiting_answer"`
   (a partial index on paused children), which finds none at once in a conversation that has none,
-  however many turns it had. `wait_agent` lists a paused child's id as `awaiting_answer`, with its
+  however many turns it had. `wait` lists a paused child's id as `awaiting_answer`, with its
   question, read from the last message of the run that paused. `message_agent` to a key no child
   of the turn holds reads the latest child under that key in the conversation, then the latest run
   of its thread, past the continuations that failed or were cancelled. One `awaiting_answer` is
@@ -425,12 +440,12 @@ question and its replies go through the turn's mailbox, as messages do (`src/sub
   [paused children](#paused-children) are, with the answer's `mail` part in its trigger instead of
   outcomes; the failed attempts' messages leave the thread first, and a second answer in the same
   turn is refused. The continuation reads it, as a `<sixb_parent_answer>` block, after the thread's
-  messages, so its request starts with the bytes the paused run's last one had. `wait_agent` by
+  messages, so its request starts with the bytes the paused run's last one had. `wait` by
   the old id returns its answer.
 
 ## The parent's waits
 
-A turn waits for its children three ways: `wait_agent`; before its end, for each child it told
+A turn waits for its children three ways: `wait`; before its end, for each child it told
 that its question waits to pause; and, when it pauses, for those still at work. Each wakes on
 what it waits for (`src/subagent-tools.ts`, `src/family-mailbox.ts`):
 
@@ -455,8 +470,8 @@ parent runs, and ends failed one it refuses for good: its parent's wait always r
 Child events are recorded in the broker, and reach whoever reads the conversation: the API lists
 its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by
 `threads.listChildren`), and `/ws/agents` streams a child's run as a turn's. The parent
-receives their durable results through `wait_agent`: each child's final answer, the text it wrote
-after its last local tool call, else its last text. `wait_agent` returns once every child it waits
+receives their durable results through `wait`: each child's final answer, the text it wrote
+after its last local tool call, else its last text. `wait` returns once every child it waits
 for has ended, or one asks a question.
 
 Files travel through blob storage, never through the model (`src/child-files.ts`):
@@ -476,10 +491,10 @@ Files travel through blob storage, never through the model (`src/child-files.ts`
   published. Past the same limits none comes back and the result's `filesError` says why and what
   to do; its answer still does. A child that fails, is cancelled, times out or is interrupted
   returns none, as it returns no answer.
-- **In the parent.** `wait_agent` returns a rich tool result (`{ kind: "agentToolResult" }`): the
+- **In the parent.** `wait` returns a rich tool result (`{ kind: "agentToolResult" }`): the
   children's results as JSON text, then each file as a file part. The JSON lists each child's files
   by their path in `out/` and their `sandboxPath`, under `.sixb/agent/children/<key>/` (a key that
-  is not a safe path segment gets a hash suffix), where `wait_agent` copies them, one at a time, and
+  is not a safe path segment gets a hash suffix), where `wait` copies them, one at a time, and
   where later turns materialize them again, since the result's files reach `$SIXB_ATTACHMENTS` only
   then. Each file part names its child: its `logicalPath` is `<key>/<path>` and its `fileName` is
   unique, so later turns and the app pair them without their order. A child's files are in the first result that
@@ -513,5 +528,5 @@ messages whole. A later run of the thread (`thread.create: false`) is single-fli
   copied from its turn: its thread reports that one to every reader (`approvalModeSource: "run"`).
 - **Deletion**: its row goes with the conversation's (`ON DELETE CASCADE`).
 
-The parent's own messages keep `spawn_agent` and `wait_agent`: they are the conversation's
+The parent's own messages keep `spawn_agent` and `wait`: they are the conversation's
 condensed view of the child, and the only one a fork reader gets.

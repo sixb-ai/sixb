@@ -17,7 +17,7 @@ import {
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { renderCurrentTime, sentSettings } from "./agent-prompt"
-import { unansweredQuestion } from "./ask-parent-tool"
+import { unansweredQuestion } from "./ask-tool"
 import { storeChildOutputs } from "./child-files"
 import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
@@ -84,7 +84,7 @@ export async function runSubagent(input: {
   readonly runFiles: AgentRunFiles
   /**
    * What its parent sends it while it runs, read before its next step, and the questions it asks,
-   * through the inbox's `ask_parent` among its tools.
+   * through the inbox's `ask` among its tools.
    */
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
@@ -262,7 +262,7 @@ async function settleSubagent(
 
 /**
  * Keep the child's outcome: its answer, what it wrote under `out/`, and what it did as its thread's
- * next message. A paused child keeps its files too, for the run that continues it; `wait_agent`
+ * next message. A paused child keeps its files too, for the run that continues it; `wait`
  * hands over only a finished child's, as an unfinished one's would pass for complete. Its `out/`
  * is stored even when its workspace is kept: a continuation that finds it lost gets it back.
  */

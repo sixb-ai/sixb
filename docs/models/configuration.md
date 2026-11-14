@@ -217,7 +217,7 @@ the free space and the room kept for the answer, which add up to the model's win
 |---|---|
 | Sixb instructions | Sixb's own prompt |
 | Project instructions | `SIXB.md` |
-| Memory, Skills, Ontology | their index in the prompt, and the files the agent read with `read` or `view_file` |
+| Memory, Skills, Ontology | their index in the prompt, and the files the agent read with `read` |
 | Tools | the tool definitions |
 | Summary | what a condensed conversation keeps of its earlier messages |
 | Messages, Tool results, Files and images | the conversation itself |

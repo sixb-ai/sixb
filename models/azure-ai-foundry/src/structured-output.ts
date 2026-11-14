@@ -13,6 +13,14 @@ const KEYWORDS = new Set([
   "$ref",
   "$defs",
   "definitions",
+  // Taken by strict mode on Azure's Responses and Chat APIs (measured November 2026); a strict
+  // `minimum` is enforced. `uniqueItems` is refused.
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "minItems",
+  "maxItems",
 ])
 const TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"])
 

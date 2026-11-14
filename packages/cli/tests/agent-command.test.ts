@@ -29,6 +29,8 @@ interface Script {
   readonly queued?: boolean
   /** Answers a read of the turn in place of `queued`, when it returns a response. */
   readonly runRead?: () => Response | null
+  /** The thread's messages, newest first, as a read of them lists them. */
+  readonly messages?: readonly Record<string, unknown>[]
 }
 
 async function fakeApi(script: Script) {
@@ -64,7 +66,9 @@ async function fakeApi(script: Script) {
         posted.push(await request.json())
         return Response.json({ run: { id: RUN } })
       }
-      if (path === `/api/agent-threads/${THREAD}/messages`) return Response.json({ messages: [] })
+      if (path === `/api/agent-threads/${THREAD}/messages`) {
+        return Response.json({ messages: script.messages ?? [] })
+      }
       if (path === `/api/agent-runs/${RUN}/claim`) {
         claims.push(RUN)
         return Response.json({ error: { kind: "Error", message: "No." } }, { status: 409 })
@@ -205,6 +209,53 @@ describe("sixb agent", () => {
     expect(child.signalCode).toBeNull()
     expect(exitCode).toBe(1)
     expect(JSON.parse(stdout)).toMatchObject({ status: "running" })
+  })
+
+  // Guard proofs: in printAnswer (src/commands/agent.ts), drop the questions; a turn that ended on
+  // one prints nothing, and --json gives empty text. Send `text` as typed in runAgent; "2" reaches
+  // the model alone.
+  test("prints the questions a turn ended on, and a choice's number answers with that choice", async () => {
+    const asked = {
+      id: "agt_msg_2",
+      threadId: THREAD,
+      runId: RUN,
+      role: "assistant",
+      createdAt: "2026-10-31T00:00:01.000Z",
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "ask_1",
+          toolName: "ask",
+          state: "output-available",
+          input: {
+            questions: [{ question: "Which environment?", choices: ["staging", "production"] }],
+          },
+          output: { status: "asked" },
+        },
+      ],
+    }
+    const { env, posted } = await fakeApi({
+      messages: [asked],
+      stream: (socket) => socket.send(snapshot("succeeded")),
+      run: { status: "succeeded", finishReason: "stop" },
+    })
+
+    const shown = await runAgent(env)
+    expect(shown.stdout).toContain("Which environment?\n  1. staging\n  2. production")
+    expect(shown.stderr).toContain(`sixb agent --thread ${THREAD}`)
+    const json = await runAgent(env, "--json")
+    expect(JSON.parse(json.stdout).questions).toEqual([
+      { question: "Which environment?", choices: ["staging", "production"], multiple: false },
+    ])
+
+    const answered = await runCliToCompletion({
+      cmd: ["bun", CLI, "agent", "--cloud", "--json", "--thread", THREAD, "2"],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      env,
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+    expect(answered.exitCode).toBe(0)
+    expect(posted.at(-1)?.text).toBe("production")
   })
 
   // Guard proof: in runAgent (src/commands/agent.ts), send `approvalMode: settings.approvalMode`

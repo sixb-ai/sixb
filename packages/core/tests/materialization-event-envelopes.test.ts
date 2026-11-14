@@ -272,7 +272,23 @@ describe("eventAttribution", () => {
       type: "trustedPrimitive",
       primitive: { kind: "action", id: "approve", runId: "run-1" },
     },
+    source: { type: "http", requestId: "request-1" },
   } as const
+
+  test("names a script by its path, which only its source records", () => {
+    expect(
+      eventAttribution({
+        id: "execution-2",
+        correlationId: "correlation-2",
+        executor: { type: "script", runId: "script-1" },
+        source: { type: "script", path: "scripts/fix.ts" },
+        authorizationRef: { type: "script", runId: "script-1" },
+      })
+    ).toEqual({
+      correlationId: "correlation-2",
+      executor: { type: "script", runId: "script-1", path: "scripts/fix.ts" },
+    })
+  })
 
   test("refuses a primitive execution without that primitive's authority", () => {
     expect(() =>

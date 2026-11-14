@@ -129,6 +129,12 @@ export interface DeployTarget {
   check(release: DeployRelease, context: DeployCheckContext): Promise<readonly DeployCheck[]>
   /** Prepares the target for the release, fixing what `check` reports as fixable. */
   setup?(release: DeployRelease, context: DeploySetupContext): Promise<void>
+  /**
+   * Runs a script against the deployed project, as `sixb run` would there, with the environment the
+   * deployment's services start from and the script's output on this terminal. Resolves with its
+   * exit code; rejects only when the target cannot run it.
+   */
+  run?(script: DeployScript, context: DeployOperationContext): Promise<number>
   /** Who may deploy and operate the deployment, for a target reached with keys. */
   readonly access?: DeployAccess
   /** Credentials for a CI job that deploys, for a target reached with keys. */
@@ -339,3 +345,15 @@ export interface DeployLogsOptions {
 }
 
 export type DeployControlAction = "restart" | "start" | "stop"
+
+/** A script `sixb run --deployed` runs on the deployment. */
+export interface DeployScript {
+  /**
+   * Its path relative to the project, with forward slashes. It runs from there in the deployed
+   * code, so its imports resolve against what is deployed.
+   */
+  readonly path: string
+  readonly source: Uint8Array
+  /** Passed to the script untouched. */
+  readonly args: readonly string[]
+}

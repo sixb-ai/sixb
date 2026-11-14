@@ -128,6 +128,12 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.connection = openSqliteStoreConnection({ path })
     if (path) {
       this.connection.db.run("PRAGMA journal_mode = WAL")
+
+      // SQLite creates the -wal and -shm files on a connection's first read, not on the pragma,
+      // and a read-only connection cannot create them. Without this read, a process alone on the
+      // file that reads before it writes, such as `sixb check` or `sixb run`, gets SQLITE_CANTOPEN.
+      this.connection.db.query("SELECT count(*) FROM sqlite_master").get()
+
       this.readConnection = openSqliteStoreConnection({ path, readonly: true })
     } else {
       this.readConnection = this.connection

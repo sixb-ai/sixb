@@ -11,6 +11,7 @@ export type DurableExecutionExecutor =
   | { readonly type: "primitive"; readonly kind: TrustedPrimitiveKind; readonly runId: string }
   | { readonly type: "agent"; readonly runId: string }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
+  | { readonly type: "script"; readonly runId: string }
 
 /**
  * Durable trigger provenance. An `execution` source is the single logical parent; queue delivery
@@ -24,6 +25,7 @@ export type DurableExecutionSource =
   | { readonly type: "event"; readonly eventId: string }
   | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
+  | { readonly type: "script"; readonly path: string }
 
 /** Immutable execution provenance and the reference required to restore its runtime authority. */
 export interface ExecutionRecord {

@@ -135,6 +135,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       activeCount: () => call("children.activeCount"),
       spawn: (draft) => call("children.spawn", [draft]),
       clearAttempt: (attempt) => call("children.clearAttempt", [attempt]),
+      cancel: (runId) => call("children.cancel", [runId]),
     },
     async renewLease(leaseExpiresAt) {
       try {

@@ -177,6 +177,9 @@ function describeEditor(
     }
   }
 
+  // A script is known by its file, which is what someone looking at this would search for.
+  if (executor?.type === "script") return { title: executor.path, run: null }
+
   const title =
     executor?.type === "agent"
       ? messages.agent

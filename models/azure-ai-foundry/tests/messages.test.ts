@@ -332,7 +332,7 @@ test("sends exact Claude schemas and strict tools; optional properties need not 
     },
   }).messages("deployment", { definition, identity: metadata })
   const optional = { ...schema, required: [] }
-  const tools = [{ name: "answer", description: "Answer", inputSchema: optional }]
+  const tools = [{ name: "answer", description: "Answer", inputSchema: optional, strict: true }]
   await collect(
     (
       await model.stream(
@@ -360,6 +360,53 @@ test("sends exact Claude schemas and strict tools; optional properties need not 
     model.stream(request({ responseFormat: { type: "json", name: "answer", schema: constrained } }))
   ).rejects.toThrow("Claude schema")
   expect(bodies).toHaveLength(2)
+})
+
+// Regression proof: drop the isStrictToolLimitError retry in postMessages, the
+// strictToolRefusals check in foundryMessagesRequest, or the messagesStrictTools budget.
+test("keeps Claude's strict tools within its limits, and unconstrained once it refuses them", async () => {
+  const bodies: { tools: { name: string; strict?: boolean }[] }[] = []
+  const model = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    maxRetries: 0,
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init?.body))
+      bodies.push(body)
+      if (
+        body.tools.some(
+          (tool: { name: string; strict?: boolean }) => tool.strict && tool.name === "too_large"
+        )
+      ) {
+        return Response.json(
+          {
+            type: "error",
+            error: { type: "invalid_request_error", message: "The compiled grammar is too large." },
+          },
+          { status: 400 }
+        )
+      }
+      return message()
+    },
+  }).messages("deployment", { definition, identity: metadata })
+  const tool = (name: string) => ({
+    name,
+    description: "Strict.",
+    inputSchema: schema,
+    strict: true,
+  })
+
+  const many = Array.from({ length: 21 }, (_, index) => tool(`budget_${index}`))
+  await collect((await model.stream(request({ tools: many }))).events)
+  expect(bodies[0]?.tools.filter((entry) => entry.strict)).toHaveLength(20)
+
+  await collect((await model.stream(request({ tools: [tool("too_large")] }))).events)
+  await collect((await model.stream(request({ tools: [tool("too_large")] }))).events)
+  expect(bodies.slice(1).map((body) => body.tools[0]?.strict ?? false)).toEqual([
+    true,
+    false,
+    false,
+  ])
 })
 
 test("validates the conservative Claude schema subset without rewriting contracts", () => {

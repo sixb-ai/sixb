@@ -268,7 +268,7 @@ describe("web_fetch", () => {
 
     expect(output.contentType).toBe("")
     expect(modelText(output)).toBe(
-      `The file (unknown type, ${PDF.byteLength} bytes) is saved at .sixb/agent/tool-outputs/fetch_1.pdf: open it with view_file.`
+      `The file (unknown type, ${PDF.byteLength} bytes) is saved at .sixb/agent/tool-outputs/fetch_1.pdf: open it with read.`
     )
   })
 

@@ -21,6 +21,11 @@ interface EditSession {
   /** Whether the reader is editing the version shown. */
   readonly editing: boolean
   readonly report: (draft: ArtifactDraft | null) => void
+  /**
+   * Starts editing, as the header's Edit does: absent while the reader edits already, or may not
+   * change the artifact.
+   */
+  readonly start?: (() => void) | undefined
 }
 
 const EditSessionContext = createContext<EditSession>({ editing: false, report: () => {} })
@@ -28,10 +33,11 @@ const EditSessionContext = createContext<EditSession>({ editing: false, report: 
 export function EditSessionProvider({
   editing,
   report,
+  start,
   children,
 }: EditSession & { readonly children: ReactNode }) {
   return (
-    <EditSessionContext.Provider value={{ editing, report }}>
+    <EditSessionContext.Provider value={{ editing, report, start }}>
       {children}
     </EditSessionContext.Provider>
   )
@@ -40,6 +46,14 @@ export function EditSessionProvider({
 /** Whether the version shown is being edited: a renderer that edits shows its editing tools. */
 export function useArtifactEditing(): boolean {
   return useContext(EditSessionContext).editing
+}
+
+/**
+ * Starts editing from within the artifact, as the header's Edit does, for a change the reader
+ * makes there; null while they edit already, or may not change it.
+ */
+export function useStartEditing(): (() => void) | null {
+  return useContext(EditSessionContext).start ?? null
 }
 
 /** Tells the viewer what the renderer's draft holds, for the header's Save. */

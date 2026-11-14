@@ -6,8 +6,10 @@ import {
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
+  createScriptRuntimeAuthorization,
   type DelegatedActionApplyTarget,
 } from "./authorization"
+import { assertScriptPath } from "./script"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -121,6 +123,26 @@ function assertNestedProvenance(source: ExecutionSource, correlationId: string |
   }
 }
 
+/**
+ * The scope of one `sixb run`: unrestricted, requested by nobody, and recorded under the script's
+ * project-relative path. Only the CLI creates one; there is no public way to.
+ */
+export function createScriptScope(input: {
+  readonly projectId: string
+  readonly path: string
+}): ExecutionScope {
+  assertNonEmpty(input.projectId, "Execution project id")
+  assertScriptPath(input.path)
+  const execution = freezeExecution({
+    id: `exec_${randomUUID()}`,
+    projectId: input.projectId,
+    executor: Object.freeze({ type: "script", runId: `script_${randomUUID()}` }),
+    source: Object.freeze({ type: "script", path: input.path }),
+    correlationId: `corr_${randomUUID()}`,
+  })
+  return Object.freeze({ execution, authorization: createScriptRuntimeAuthorization(execution) })
+}
+
 export function createTestingScope(input: {
   readonly projectId: string
   readonly context?: AuthorizationContext
@@ -206,6 +228,8 @@ function sourceIdentifier(source: ExecutionSource): {
       return { label: "Execution source dataset version id", value: source.versionId }
     case "execution":
       return { label: "Execution source execution id", value: source.executionId }
+    case "script":
+      return { label: "Execution source script path", value: source.path }
   }
 }
 

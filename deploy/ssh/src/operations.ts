@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto"
 import type {
   DeployContext,
   DeployControlAction,
   DeployLogsOptions,
   DeployRelease,
+  DeployScript,
   DeploySource,
   DeployStatus,
 } from "@sixb/core/deploy"
@@ -128,6 +130,56 @@ export async function controlServices(
   service: string | undefined
 ): Promise<void> {
   await shell.run(ctlScript(name, [action, ...(service ? [service] : [])]))
+}
+
+/**
+ * Uploads the script, then runs it through `ctl run` in a terminal on the server: Ctrl-C reaches
+ * the script there, and so does a dropped connection, as a hangup. Holding the deploy lock shared
+ * for the whole run keeps a deploy from replacing the code it imports or migrating its storage;
+ * runs share it with each other. Resolves with the script's exit code.
+ */
+export async function runDeployScript(
+  shell: RemoteShell,
+  name: string,
+  script: DeployScript
+): Promise<number> {
+  const root = `"$HOME"/${shellQuote(name)}`
+  const staged = `${root}/deploy/runs/${randomUUID()}`
+  await shell.run(
+    [
+      `if [ ! -x ${root}/deploy/ctl ]; then`,
+      `  echo "Nothing named ${name} is deployed on this server yet." >&2; exit 1`,
+      "fi",
+      "umask 077",
+      `mkdir -p ${root}/deploy/runs`,
+      // An upload whose run never started is left behind; a day later it goes.
+      `find ${root}/deploy/runs -type f -mmin +1440 -delete 2> /dev/null || true`,
+      `cat > ${staged}`,
+    ].join("\n"),
+    { stdin: new Blob([Uint8Array.from(script.source)]).stream() }
+  )
+
+  const run = [
+    `cd ${root}`,
+    `exec 9> ${root}/deploy/lock`,
+    "if ! flock -s -n 9; then",
+    `  echo "Waiting for a deploy of ${name} to finish…" >&2`,
+    "fi",
+    "if ! flock -s -w 600 9; then",
+    `  echo "A deploy of ${name} has held its lock for 10 minutes." >&2`,
+    `  rm -f ${staged}`,
+    "  exit 1",
+    "fi",
+    `exec ${root}/deploy/ctl run ${staged} ${[script.path, ...script.args].map(shellQuote).join(" ")}`,
+  ].join("\n")
+  try {
+    await shell.run(run, { terminal: true })
+    return 0
+  } catch (error) {
+    // 255 is OpenSSH's own failure; any other code is the script's.
+    if (error instanceof RemoteScriptError && error.exitCode !== 255) return error.exitCode
+    throw error
+  }
 }
 
 /** Runs the deployment's `ctl` with arguments; fails plainly when nothing is deployed yet. */

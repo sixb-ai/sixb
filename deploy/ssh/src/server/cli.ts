@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import type { DeployRecord, DeployStatus } from "@sixb/core/deploy"
 import { followLogFiles, type LogLine, readRecentLogLines, renderProcessLogLine } from "./logs"
 import { loadProcessManifest, type ProcessManifest, statePath } from "./manifest"
+import { runScript } from "./run"
 import { isMissing, isPidRunning, readProcessState } from "./state"
 import { runSupervisor, type SupervisorCommand, sendSupervisorCommand } from "./supervisor"
 
@@ -14,6 +15,7 @@ import { runSupervisor, type SupervisorCommand, sendSupervisorCommand } from "./
  *   status [--json] [--check]       --check exits 1 unless every process is running
  *   logs [service] [--tail n] [--follow]
  *   restart|start|stop [service]
+ *   run <staged> <path> [args...]  run an uploaded script with `sixb run`; see ./run.ts
  */
 const argv = process.argv.slice(2)
 
@@ -25,6 +27,17 @@ try {
 }
 
 async function main(): Promise<void> {
+  // A script's arguments are anything, `--manifest` included; `ctl` appends the real one last.
+  if (argv[0] === "run") {
+    const [, staged, path, ...args] = argv.slice(0, -2)
+    const manifestPath = argv.at(-1)
+    if (argv.at(-2) !== "--manifest" || !manifestPath || !staged || !path) {
+      throw new Error("[SshTarget] Usage: run <staged> <path> [args...] --manifest <path>")
+    }
+    const manifest = await loadProcessManifest(manifestPath)
+    return process.exit(await runScript({ manifest, staged, path, args }))
+  }
+
   const manifestPath = option("--manifest")
   if (!manifestPath) throw new Error("[SshTarget] --manifest is required.")
   const [command, service] = positionals()

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { normalizeRequesterGroupIds, snapshotRequesterGroupIds } from "../../auth/attribution"
 import { kernelOperationId } from "../../execution/kernel-operation"
+import { isScriptPath } from "../../execution/script"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -128,6 +129,9 @@ function assertExecutor(executor: DurableExecutionExecutor): void {
     case "kernel":
       assertKernelOperation(executor.operation, "Executor kernel operation")
       return
+    case "script":
+      assertNonBlank(executor.runId, "Executor script run id")
+      return
     default:
       invalid(`Unknown execution executor type '${String((executor as { type?: unknown }).type)}'.`)
   }
@@ -154,6 +158,11 @@ function assertSource(source: DurableExecutionSource): void {
       return
     case "execution":
       assertNonBlank(source.executionId, "Execution source execution id")
+      return
+    case "script":
+      if (!isScriptPath(source.path)) {
+        invalid("Execution source script path must be relative to the project.")
+      }
       return
     default:
       invalid(
@@ -196,6 +205,9 @@ function assertAuthorizationRef(ref: AuthorizationRef): void {
     case "kernel":
       assertKernelOperation(ref.operation, "Authority kernel operation")
       return
+    case "script":
+      assertNonBlank(ref.runId, "Authority script run id")
+      return
     case "disabled":
       return
     default:
@@ -205,6 +217,9 @@ function assertAuthorizationRef(ref: AuthorizationRef): void {
 
 function assertExecutorAuthority(record: ExecutionRecord): void {
   const { executor, authorizationRef, requestedBy, source } = record
+  if (source.type === "script" && executor.type !== "script") {
+    invalid("Only a script execution has a script source.")
+  }
 
   switch (executor.type) {
     case "request": {
@@ -277,6 +292,18 @@ function assertExecutorAuthority(record: ExecutionRecord): void {
       }
       if (requestedBy !== undefined) {
         invalid("Kernel executions cannot have a requested-by principal.")
+      }
+      return
+    }
+    case "script": {
+      if (source.type !== "script") {
+        invalid("Script executions require a script source.")
+      }
+      if (authorizationRef.type !== "script" || authorizationRef.runId !== executor.runId) {
+        invalid("Script authority must match the executor run id.")
+      }
+      if (requestedBy !== undefined) {
+        invalid("Script executions cannot have a requested-by principal.")
       }
       return
     }

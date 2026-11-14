@@ -6,7 +6,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatInput } from "@sixb/model-protocols/chat"
-import { prepareRequest } from "./request"
+import { foundryStrictTool, prepareRequest } from "./request"
 import { foundryOutputSchema } from "./structured-output"
 import { PREFIX, positiveInteger } from "./util"
 
@@ -100,21 +100,21 @@ export function foundryChatRequest(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Chat structured output requires verified OpenAI-compatible strict-schema support. DeepSeek JSON mode is not strict schema decoding.`
     )
-  const tools = request.tools.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema,
-      ...(profile === "openai"
-        ? {
-            strict:
-              caps.nativeStructuredOutput === true &&
-              foundryOutputSchema(tool.inputSchema) !== undefined,
-          }
-        : {}),
-    },
-  }))
+  const tools = request.tools.map((tool) => {
+    const strict =
+      profile === "openai" && caps.nativeStructuredOutput === true
+        ? foundryStrictTool(tool)
+        : undefined
+    return {
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: strict ?? tool.inputSchema,
+        ...(profile === "openai" ? { strict: strict !== undefined } : {}),
+      },
+    }
+  })
   return {
     ...options.request,
     model: definition.modelId,
@@ -134,10 +134,8 @@ export function foundryChatRequest(
           tool_choice: "auto",
           ...(profile === "openai"
             ? {
-                parallel_tool_calls:
-                  !schema &&
-                  !tools.some((tool) => tool.function.strict) &&
-                  caps.parallelToolCalls === true,
+                // Strict tools keep parallel calls (measured on Azure, November 2026).
+                parallel_tool_calls: !schema && caps.parallelToolCalls === true,
               }
             : {}),
         }

@@ -1,18 +1,20 @@
-import { CANVAS_FILE } from "@sixb/core/artifacts"
+import { CANVAS_FILE, parseFrameEvent } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useStoreApi } from "@xyflow/react"
 import type { LucideIcon } from "lucide-react"
 import {
   createContext,
   type ReactNode,
+  type RefObject,
   useContext,
   useEffect,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react"
-import { ArtifactFrame } from "../../frame"
+import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import type { ArtifactVersion } from "../../queries"
+import type { BoardGestures } from "./gestures"
 import type { BoardPreviews } from "./previews"
 
 /** The most boards and embeds live at once: each board is a page running in its own frame. */
@@ -157,6 +159,13 @@ interface LiveBoards {
   readonly mode: "light" | "dark"
   /** Opens a board over the canvas. */
   readonly open?: (id: string) => void
+  /**
+   * Whether the reader uses the running boards' pages in place: while they read the canvas, not
+   * while they edit it or place a comment.
+   */
+  readonly interactive?: boolean
+  /** What the canvas does with what a running board's page hands it. */
+  readonly gestures?: BoardGestures | null
 }
 
 const LiveBoardsContext = createContext<LiveBoards>({
@@ -340,8 +349,12 @@ function usePagesVersion(version: ArtifactVersion | null): ArtifactVersion | nul
  * A board's page, running, when the view shows it large enough, over its tile: the tile stays
  * under the frame while it fades in, once its page is ready, so a board never flashes blank as it
  * starts or stops; then the tile goes, so nothing of it shows through a page drawn on the board's
- * own surface. On the board a frame takes no clicks, so dragging across it pans; it is a picture
- * until the reader opens it.
+ * own surface.
+ *
+ * While the reader reads the canvas, a running page is theirs to use in place: its clicks, keys,
+ * text and cursor are its own, and its frame hands the canvas what moves it, as `gestures.ts`
+ * says. Editing the canvas or placing a comment, or until it runs, it takes no clicks: a drag
+ * across it pans, as across its picture.
  */
 export function LiveBoard({
   id,
@@ -354,15 +367,28 @@ export function LiveBoard({
   readonly title: string
   readonly tile: ReactNode
 }) {
-  const { version } = useContext(LiveBoardsContext)
+  const { version, interactive = false, gestures = null } = useContext(LiveBoardsContext)
   const live = useLive(id)
   const pages = usePagesVersion(version)
   // The pages whose frame said it is ready: a frame that runs other pages, or stops, shows the
   // tile again until it is.
   const [ready, setReady] = useState<ArtifactVersion | null>(null)
   const running = live && pages !== null && ready === pages
+  const usable = running && interactive
+
+  const page = useRef<HTMLDivElement | null>(null)
+  const handle = useRef<ArtifactFrameHandle | null>(null)
+  /** Each load the frame said it is ready, for its port to be handed over again. */
+  const [loads, setLoads] = useState(0)
+  useCanvasPort(id, gestures, handle, loads, page)
+
   return (
-    <div className="group/board relative size-full" data-running={running ? "" : undefined}>
+    <div
+      ref={page}
+      className="group/board relative size-full"
+      data-running={running ? "" : undefined}
+      data-interactive={usable ? "" : undefined}
+    >
       {/* Gone once the frame has faded in over it: as long as the fade, then not drawn at all. */}
       <div className="size-full transition-[visibility] delay-300 group-data-[running]/board:invisible">
         {tile}
@@ -372,13 +398,49 @@ export function LiveBoard({
           version={pages}
           entry={file}
           title={title}
-          decorative
+          decorative={!usable}
+          handle={handle}
           className="absolute inset-0 overflow-hidden rounded-[10px]"
           onEvent={(event) => {
-            if (event.event === "ready") setReady(pages)
+            if (event.event !== "ready") return
+            setReady(pages)
+            setLoads((count) => count + 1)
           }}
         />
       ) : null}
     </div>
   )
+}
+
+/**
+ * Each load of a running board's frame, a port of its own, handed over with its first `canvas`
+ * request: what moves the canvas comes through it alone, never through the window, where the
+ * page's scripts post too. The frame hears from then on whether the canvas pans by the wheel.
+ */
+function useCanvasPort(
+  id: string,
+  gestures: BoardGestures | null,
+  handle: RefObject<ArtifactFrameHandle | null>,
+  loads: number,
+  page: RefObject<HTMLElement | null>
+): void {
+  useEffect(() => {
+    if (loads === 0 || !gestures) return
+
+    const channel = new MessageChannel()
+    channel.port1.onmessage = (message: MessageEvent) => {
+      const event = parseFrameEvent(message.data)
+      if (event) gestures.receive(id, event, page.current)
+    }
+    const tell = (moving: boolean, transfer: Transferable[] = []) => {
+      handle.current?.send("canvas", { moving }, transfer).catch(() => {})
+    }
+
+    tell(gestures.moving(), [channel.port2])
+    const stop = gestures.onMoving((moving) => tell(moving))
+    return () => {
+      stop()
+      channel.port1.close()
+    }
+  }, [id, gestures, handle, loads, page])
 }

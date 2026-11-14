@@ -22,9 +22,11 @@ import type { AgentMessageRecord } from "@sixb/core/storage"
 import { listSandboxFiles } from "../sandbox-files"
 import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
 import { BASH_TOOL_SPEC, keptCommandOutput } from "./bash"
+import { GLOB_TOOL_SPEC } from "./glob"
+import { GREP_TOOL_SPEC } from "./grep"
 import { READ_TOOL_SPEC } from "./read"
 import { AgentFileBudget } from "./tool-files"
-import { VIEW_FILE_TOOL_SPEC } from "./view-file"
+import { LEGACY_VIEW_FILE_TOOL } from "./view-file"
 import { WEB_FETCH_TOOL_SPEC } from "./web-fetch/tool"
 
 /**
@@ -65,12 +67,15 @@ const LISTED_OUTPUTS_MAX_FILES = 1_000
 const LIST_TIMEOUT_MS = 30_000
 
 /**
- * Never saved here: the readers page through files themselves, and `web_fetch` saves its page
- * itself ({@link ToolOutputFiles.store}).
+ * Never saved here: the readers page through files themselves, `glob` and `grep` cap what they
+ * return and show it as text a saved JSON would not be, and `web_fetch` saves its page itself
+ * ({@link ToolOutputFiles.store}).
  */
 const UNSAVED_TOOLS: ReadonlySet<string> = new Set([
   READ_TOOL_SPEC.name,
-  VIEW_FILE_TOOL_SPEC.name,
+  GLOB_TOOL_SPEC.name,
+  GREP_TOOL_SPEC.name,
+  LEGACY_VIEW_FILE_TOOL,
   WEB_FETCH_TOOL_SPEC.name,
 ])
 

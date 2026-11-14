@@ -334,10 +334,7 @@ export const fr: Translation<AgentMessages> = {
       timeout: "Temps écoulé",
       unknown: "Délégué",
     },
-    fromAgent: "L’agent a dit",
-    asks: "A demandé",
-    answer: "L’agent a répondu",
-    answerHint: "Votre prochain message lui répond.",
+    noAnswer: "Il a continué sans réponse, une fois l’approbation décidée.",
     close: "Fermer",
     viewRequest: "Voir sa demande plus bas",
     stepsLater: "En cours. Ses étapes s’afficheront ici une fois terminé.",
@@ -369,6 +366,9 @@ export const fr: Translation<AgentMessages> = {
     heardFrom: (key) => `Réponse de ${key}`,
     heardFromCount: (agents) => `Réponses de ${count(agents, "sous-agent")}`,
     waitFailed: "Impossible d’attendre les sous-agents",
+    stoppingAgent: (key) => `Arrêt de ${key}`,
+    stoppedAgent: (key) => `${key} arrêté`,
+    stopAgentFailed: (key) => `Impossible d’arrêter ${key}`,
     line: {
       names: (names) =>
         names.length <= 1
@@ -443,6 +443,35 @@ export const fr: Translation<AgentMessages> = {
       name ? `Impossible de consulter ${name}` : "Impossible de consulter le fichier",
     open: (name) => `Ouvrir ${name}`,
   },
+  questions: {
+    card: (count) => (count === 1 ? "La question de l’agent" : "Les questions de l’agent"),
+    asked: "Vous a demandé",
+    waiting: "En attente d’une réponse",
+    running: "Vous pose une question",
+    send: "Envoyer la réponse",
+    sending: "Envoi…",
+    pickAny: "Plusieurs choix possibles",
+    typeAnswer: "Saisir une réponse",
+    typeOther: "Ou saisir une autre réponse",
+    somethingElse: "Autre chose…",
+    next: "Question suivante",
+    back: "Question précédente",
+    step: (step, total) => `Question ${step} sur ${total}`,
+    dismiss: "Répondre dans la conversation",
+  },
+  edit: {
+    title: (name) => (name ? `${name} modifié` : "Fichier modifié"),
+    running: (name) => (name ? `Modification de ${name}` : "Modification d’un fichier"),
+    failed: (name) =>
+      name ? `Impossible de modifier ${name}` : "Impossible de modifier le fichier",
+  },
+  write: {
+    created: (name) => (name ? `${name} créé` : "Fichier créé"),
+    replaced: (name) => (name ? `${name} réécrit` : "Fichier réécrit"),
+    running: (name) => (name ? `Écriture de ${name}` : "Écriture d’un fichier"),
+    failed: (name) => (name ? `Impossible d’écrire ${name}` : "Impossible d’écrire le fichier"),
+    lines: (lines) => count(lines, "ligne"),
+  },
   read: {
     file: {
       title: (name) => (name ? `${name} lu` : "Fichier lu"),
@@ -459,6 +488,12 @@ export const fr: Translation<AgentMessages> = {
       running: (name) => `Consultation du guide ${quoted(name)}`,
       failed: (name) => `Impossible de lire le guide ${quoted(name)}`,
     },
+    directory: {
+      title: (name) => (name ? `Contenu de ${name} listé` : "Dossier listé"),
+      running: (name) => (name ? `Liste du contenu de ${name}` : "Liste d’un dossier"),
+      failed: (name) => (name ? `Impossible de lister ${name}` : "Impossible de lister le dossier"),
+    },
+    entries: (entries) => count(entries, "élément"),
     memory: {
       title: (project) => (project ? "Mémoire du projet consultée" : "Mémoire consultée"),
       running: (project) =>
@@ -473,6 +508,59 @@ export const fr: Translation<AgentMessages> = {
     line: (line) => `ligne ${number(line)}`,
     lines: (start, end) => `lignes ${number(start)} à ${number(end)}`,
     moreAvailable: (range) => `${range} · suite disponible`,
+  },
+  search: {
+    found: (files) =>
+      files === 0 ? "Aucun fichier trouvé" : count(files, "fichier trouvé", "fichiers trouvés"),
+    foundMore: (files) => `Plus de ${number(files)} fichiers trouvés`,
+    looked: "Fichiers recherchés",
+    looking: "Recherche de fichiers",
+    lookFailed: "Impossible de rechercher des fichiers",
+    searchedFor: (term) => `Recherche de ${quoted(term)}`,
+    searched: "Fichiers parcourus",
+    searching: "Recherche dans les fichiers",
+    searchFailed: (term) =>
+      term ? `Impossible de rechercher ${quoted(term)}` : "Impossible de parcourir les fichiers",
+    memory: {
+      title: (project) => (project ? "Mémoire du projet parcourue" : "Mémoire parcourue"),
+      running: (project) =>
+        project ? "Recherche dans la mémoire du projet" : "Recherche dans la mémoire",
+      failed: (project) =>
+        project
+          ? "Impossible de parcourir la mémoire du projet"
+          : "Impossible de parcourir la mémoire",
+    },
+    guide: {
+      title: (name) => (name ? `Guide ${quoted(name)} parcouru` : "Guides parcourus"),
+      running: (name) =>
+        name ? `Recherche dans le guide ${quoted(name)}` : "Recherche dans les guides",
+      failed: (name) =>
+        name
+          ? `Impossible de parcourir le guide ${quoted(name)}`
+          : "Impossible de parcourir les guides",
+    },
+    ontology: {
+      title: "Ontologie parcourue",
+      running: "Recherche dans l’ontologie",
+      failed: "Impossible de parcourir l’ontologie",
+    },
+    term: (term) => quoted(term),
+    files: (files) => (files === 0 ? "aucun fichier" : count(files, "fichier")),
+    moreFiles: (files) => `plus de ${number(files)} fichiers`,
+    matches: (matches, files) => `${count(matches, "occurrence")} dans ${count(files, "fichier")}`,
+    moreMatches: (matches) => `plus de ${number(matches)} occurrences`,
+    noMatches: "aucune occurrence",
+    moreInFile: (matches) =>
+      `${count(matches, "autre occurrence", "autres occurrences")} dans ce fichier`,
+    noFiles: "Aucun fichier ne correspond à cette recherche.",
+    noLines: "Aucune ligne ne correspond à cette recherche.",
+    truncatedFiles: (files) => `Seuls les ${number(files)} premiers fichiers sont listés.`,
+    truncatedMatches: (lines) =>
+      `Seules les ${number(lines)} premières lignes trouvées sont affichées. D’autres fichiers correspondent.`,
+    incomplete:
+      "La recherche s’est arrêtée avant d’avoir tout parcouru : certains résultats peuvent manquer.",
+    error: "La recherche n’a pas pu s’exécuter.",
+    in: (path) => `dans ${path}`,
   },
   bash: {
     preparing: "Préparation d’une commande",

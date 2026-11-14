@@ -64,12 +64,18 @@ function readRun(stateDir: string, table: string) {
   }
 }
 
-function freePort(): number {
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
-  const { port } = server
-  server.stop(true)
+/**
+ * `sixb dev` binds the app and the API. Left to its default the API takes the app port plus one,
+ * which nothing here would have checked, so both are found free together and both are passed.
+ */
+function freePorts(): { readonly app: number; readonly api: number } {
+  const servers = [0, 1].map(() =>
+    Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
+  )
+  const [app, api] = servers.map((server) => server.port as number)
+  for (const server of servers) server.stop(true)
 
-  return port as number
+  return { app: app!, api: api! }
 }
 
 async function untilEnded(stateDir: string, table: string) {
@@ -85,13 +91,27 @@ async function untilEnded(stateDir: string, table: string) {
 
 async function runDevUntilEnded(stateDir: string, table: string) {
   let output = ""
-  const dev = Bun.spawn(["bun", CLI, "dev", "--entry", CONFIG, "--port", String(freePort())], {
-    cwd: import.meta.dir,
-    env: { ...process.env, SIXB_E2E_DIR: stateDir },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const ports = freePorts()
+  const dev = Bun.spawn(
+    [
+      "bun",
+      CLI,
+      "dev",
+      "--entry",
+      CONFIG,
+      "--port",
+      String(ports.app),
+      "--api-port",
+      String(ports.api),
+    ],
+    {
+      cwd: import.meta.dir,
+      env: { ...process.env, SIXB_E2E_DIR: stateDir },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  )
   const logs = Promise.all(
     [dev.stdout, dev.stderr].map(async (stream) => {
       for await (const chunk of stream) output += new TextDecoder().decode(chunk)

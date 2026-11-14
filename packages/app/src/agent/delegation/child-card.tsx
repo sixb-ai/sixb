@@ -10,17 +10,10 @@ import { heldCallOf } from "../approvals"
 import { ApprovalCard } from "../components/approval-card"
 import { FileAttachmentCard } from "../components/file-attachment-card"
 import { useAgentMessages } from "../i18n"
-import {
-  AgentAvatar,
-  Exchanges,
-  ModelChip,
-  NEEDS_READER_TEXT,
-  statusLabel,
-  WorkedFor,
-} from "./child-parts"
+import { AgentAvatar, ModelChip, NEEDS_READER_TEXT, statusLabel, WorkedFor } from "./child-parts"
 import { ChildWork } from "./child-work"
 import { useDelegationCards } from "./context"
-import { type AgentChild, activeRun, childTitle, liveQuestion } from "./interpret"
+import { type AgentChild, activeRun, childTitle } from "./interpret"
 import type { ChildModel } from "./model"
 import { type ChildrenSource, refreshChildren } from "./use-children"
 
@@ -206,12 +199,11 @@ export function ChildDetail({
 }
 
 /**
- * What waits on the reader from one sub-agent, under the reply's line: the question it asked, and
- * the calls it holds for approval. Named when the reply has several, so each says whose it is.
+ * What waits on the reader from one sub-agent, under the reply's line: the calls it holds for
+ * approval. What passed between it and the Agent reads in its panel, from its own thread.
  */
 export function ChildAttention({
   model,
-  observed,
   named,
 }: {
   readonly model: ChildModel
@@ -219,37 +211,11 @@ export function ChildAttention({
   readonly named: boolean
 }) {
   const labels = useAgentMessages().delegation
-  const cards = useDelegationCards()
-  const { child, view, live, state, needsReader } = model
-  const exchanges = cards?.delegation.exchanges.get(child.id) ?? []
-  const openQuestion =
-    view?.awaiting?.type === "answer"
-      ? view.awaiting.question.text
-      : state === "asking" && live
-        ? liveQuestion(live.parts)
-        : null
-  const asks = exchanges.length > 0 || openQuestion !== null
-  if (!asks && model.approvals.length === 0 && !model.heldLater) return null
+  const { child } = model
+  if (model.approvals.length === 0 && !model.heldLater) return null
 
   return (
     <div className="flex flex-col gap-2" data-child-key={child.key}>
-      {asks ? (
-        <div className="pl-[1.875rem]">
-          {named ? (
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              {childTitle(child.key)}
-            </p>
-          ) : null}
-          <Exchanges
-            exchanges={exchanges}
-            openQuestion={openQuestion}
-            urgent={needsReader || state === "asking"}
-          />
-          {state === "answer" && !observed ? (
-            <p className="mt-1 text-xs text-muted-foreground">{labels.answerHint}</p>
-          ) : null}
-        </div>
-      ) : null}
       {model.heldLater ? (
         <button
           type="button"

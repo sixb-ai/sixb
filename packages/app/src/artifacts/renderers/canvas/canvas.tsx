@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useStartEditing } from "../../edit-session"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
@@ -38,18 +39,21 @@ import { CanvasCommentPins } from "./comment-pins"
 import { CommentModeHint, CommentTools, useCanvasCommenting } from "./commenting"
 import { CommentsPanel } from "./comments-panel"
 import { CanvasControls } from "./controls"
+import type { Box } from "./draft"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
-import { CanvasEditingProvider } from "./editing"
-import { BoardFocus } from "./focus"
+import { CanvasEditingProvider, type CanvasItemEditing } from "./editing"
+import { BoardFocus, followedArrow } from "./focus"
+import { useBoardGestures } from "./gestures"
 import { CANVAS_NODE_TYPES, NAME_SCALE, zoomMarks } from "./items"
 import { PresenceLayer } from "./presence"
 import { boardPreviewUrl, useBoardPreviews } from "./previews"
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
- * controls in a corner. Boards and embeds run live once the view shows them large enough;
- * double-click a board, press Enter on it, or press its Open to open it over the canvas. It opens
- * on the item an address named, else fitted to everything. Given an editor, its items are
+ * controls in a corner. Boards and embeds run live once the view shows them large enough, and a
+ * running board's page is the reader's to use in place while they read; double-click a board,
+ * press Enter on it, or press its Open to open it over the canvas. It opens on the item an
+ * address named, else fitted to everything. Given an editor, its items are
  * selected, moved, resized, connected, and typed into, with a toolbar to add more.
  */
 export default memo(function CanvasBoard({
@@ -157,16 +161,6 @@ function Board({
 
     void fitView({ nodes: [{ id }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 220 })
   }, [opened, fitView])
-  const live = useMemo(
-    () => ({
-      version: version ?? null,
-      live: running,
-      previews,
-      mode,
-      ...(version ? { open: setOpened } : {}),
-    }),
-    [version, running, previews, mode]
-  )
   // An opened board's picture, at its own size, under its page until the page is ready.
   const pictureOf = useCallback(
     (id: string) =>
@@ -175,6 +169,7 @@ function Board({
   )
 
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
+  const resizeBoard = useResizeBoard(board.editing ? board.items : null)
   // What edits a board's elements in place: the live canvas, while the reader edits it.
   const editBoard = edit?.live?.editBoard
   const stopCapturing = edit?.live?.stopCapturing
@@ -273,6 +268,36 @@ function Board({
       void fitView({ nodes: [{ id: on }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 260 })
     },
     [commenting, boards, opened, fitView]
+  )
+
+  // Read, the running boards' pages are the reader's to use in place, and a button or a link in one
+  // that reads as the label of an arrow leaving it glides the canvas to the board it points to.
+  const reads = !board.editing && !commenting.commenting && opened === null
+  const follow = useRef<(from: string, text: string) => void>(() => {})
+  const gestures = useBoardGestures({
+    root: board.root,
+    pointed,
+    reading: reads,
+    opened: opened !== null,
+    padding: CANVAS_FIT_PADDING,
+    onPress: (from, text) => follow.current(from, text),
+  })
+  follow.current = (from, text) => {
+    const to = followedArrow(arrows, boards, from, text)
+    const target = boards.find((each) => each.id === to)
+    if (target) gestures.glide(target)
+  }
+  const live = useMemo(
+    () => ({
+      version: version ?? null,
+      live: running,
+      previews,
+      mode,
+      interactive: reads && version !== undefined,
+      gestures,
+      ...(version ? { open: setOpened } : {}),
+    }),
+    [version, running, previews, mode, reads, gestures]
   )
 
   // Read, the board's handlers stay the same from one draw to the next, so React Flow doesn't
@@ -416,6 +441,8 @@ function Board({
             live={liveArtifact ?? null}
             canvas={boardEditor}
             mode={commenting.commenting ? "comment" : boardEditor ? "edit" : "read"}
+            // Keep this size resizes the board as its handles on the canvas do.
+            {...(resizeBoard ? { onResizeBoard: resizeBoard } : {})}
             {...(commenting.enabled
               ? {
                   pins: commenting.pins,
@@ -466,6 +493,30 @@ function Board({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Keep this size: a board resized as its handles on the canvas resize it, while the canvas is
+ * edited. Outside editing, for whoever may change the canvas, it starts editing and resizes the
+ * board once editing is on, as if they had resized it there: the header's Undo takes it back.
+ * Null for whoever may not change the canvas.
+ */
+function useResizeBoard(items: CanvasItemEditing | null): ((id: string, box: Box) => void) | null {
+  const start = useStartEditing()
+  const [waiting, setWaiting] = useState<{ readonly id: string; readonly box: Box } | null>(null)
+
+  useEffect(() => {
+    if (!waiting || !items) return
+    items.resize(waiting.id, waiting.box)
+    setWaiting(null)
+  }, [waiting, items])
+
+  if (items) return items.resize
+  if (!start) return null
+  return (id, box) => {
+    setWaiting({ id, box })
+    start()
+  }
 }
 
 /** What belongs to the comments: their panel, their pins, and a board's element tools. */

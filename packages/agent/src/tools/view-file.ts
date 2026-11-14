@@ -2,9 +2,7 @@ import { posix } from "node:path"
 import type { AgentToolFiles, FileRef, JsonValue } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
-import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../attachments"
-import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxFileRegistry } from "../sandbox-file-registry"
 import { readSandboxFile, resolveSandboxPath, SandboxFileError } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
@@ -13,24 +11,14 @@ import { AGENT_FILE_MAX_BYTES } from "./tool-files"
 
 const VIEW_FILE_TIMEOUT_MS = 30_000
 
-export const VIEW_FILE_TOOL_SPEC = {
-  name: "view_file",
-  description:
-    "Inspect a file in the current run sandbox. Use this for historical attachments and files created by bash. Paths must stay inside the working directory or the run's context directory. Images are prepared for visual input when supported; other formats return bounded text or metadata.",
-  inputSchema: {
-    type: "object",
-    properties: { path: { type: "string", minLength: 1 } },
-    required: ["path"],
-    additionalProperties: false,
-  } satisfies JsonObject,
-} as const
+/**
+ * What `read` took over: earlier threads hold calls to `view_file`, and their results replay as
+ * they were stored, images included.
+ */
+export const LEGACY_VIEW_FILE_TOOL = "view_file"
 
-interface ViewFileInput {
-  readonly path: string
-}
-
-export function createViewFileTool(input: {
-  readonly resolveSandbox: () => Promise<AgentSandboxHandle>
+/** What `read` needs to show a file as itself, an image or a PDF, rather than as text. */
+export interface SandboxFileViewer {
   readonly attachments: PreparedAgentAttachmentContext
   readonly registry: AgentSandboxFileRegistry
   readonly filesForToolCall: (options: {
@@ -42,67 +30,79 @@ export function createViewFileTool(input: {
     readonly signal: AbortSignal
     readonly toolCallId: string
   }) => AgentToolModelOutput | Promise<AgentToolModelOutput>
-}): ModelTool<ViewFileInput> {
-  return {
-    ...VIEW_FILE_TOOL_SPEC,
-    parseInput: parseViewFileInput,
-    async execute({ path }, { signal, toolCallId }): Promise<JsonValue> {
-      signal.throwIfAborted()
-      const handle = await input.resolveSandbox()
-      let absolutePath: string
-      try {
-        absolutePath = resolveSandboxPath(handle, path)
-      } catch (error) {
-        throw toViewFileError(error)
-      }
-      const knownFileRef =
-        input.registry.get(absolutePath) ??
-        preparedFileRefAtPath(input.attachments, handle.sandbox.workingDirectory, absolutePath)
-
-      let fileRef: FileRef
-      if (knownFileRef) {
-        fileRef = knownFileRef
-      } else {
-        const bytes = await readSandboxFile(handle, {
-          path: absolutePath,
-          maxBytes: AGENT_FILE_MAX_BYTES,
-          signal,
-          timeoutMs: VIEW_FILE_TIMEOUT_MS,
-        }).catch((error: unknown) => {
-          throw toViewFileError(error)
-        })
-        const fileName = safePublishedFileName(posix.basename(absolutePath))
-        const file = await input.filesForToolCall({ toolCallId, signal }).put({
-          body: bytes,
-          fileName,
-          mediaType: inferFileMediaType(fileName, bytes),
-        })
-        fileRef = file.fileRef
-      }
-
-      // Prepared attachments and files tools stored are immutable snapshots and can be reused.
-      // Arbitrary bash paths stay mutable, so do not cache their published snapshot at the source
-      // path; a later view_file call must read the path again.
-      if (knownFileRef) input.registry.register(absolutePath, fileRef)
-      return richViewFileResult(fileRef)
-    },
-    toModelOutput(output, { toolCallId, signal }) {
-      return input.toolResultToModelOutput({ output, toolCallId, signal })
-    },
-    errorText: agentToolErrorText,
-  }
 }
 
-function parseViewFileInput(value: unknown): ViewFileInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw viewFileError("input must be an object")
+/**
+ * A sandbox file as a rich result: the file itself, stored with the call, which the run's media
+ * bridge shows the model as an image or a document when it can, and as metadata otherwise. An
+ * attachment, or a file a tool stored, is the snapshot it already is.
+ */
+export async function viewSandboxFile(
+  viewer: SandboxFileViewer,
+  handle: AgentSandboxHandle,
+  input: { readonly path: string; readonly toolCallId: string; readonly signal: AbortSignal }
+): Promise<JsonValue> {
+  input.signal.throwIfAborted()
+  let absolutePath: string
+  try {
+    absolutePath = resolveSandboxPath(handle, input.path)
+  } catch (error) {
+    throw toViewError(error)
   }
-  const input = value as Record<string, unknown>
-  if (Object.keys(input).some((key) => key !== "path")) {
-    throw viewFileError("input contains an unknown property")
+  const knownFileRef =
+    viewer.registry.get(absolutePath) ??
+    preparedFileRefAtPath(viewer.attachments, handle.sandbox.workingDirectory, absolutePath)
+
+  let fileRef: FileRef
+  if (knownFileRef) {
+    fileRef = knownFileRef
+  } else {
+    const bytes = await readSandboxFile(handle, {
+      path: absolutePath,
+      maxBytes: AGENT_FILE_MAX_BYTES,
+      signal: input.signal,
+      timeoutMs: VIEW_FILE_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      throw toViewError(error)
+    })
+    const fileName = safePublishedFileName(posix.basename(absolutePath))
+    const file = await viewer
+      .filesForToolCall({ toolCallId: input.toolCallId, signal: input.signal })
+      .put({ body: bytes, fileName, mediaType: inferFileMediaType(fileName, bytes) })
+    fileRef = file.fileRef
   }
-  if (typeof input.path !== "string") throw viewFileError("path must be a string")
-  return { path: input.path }
+
+  // Prepared attachments and files tools stored are immutable snapshots and can be reused.
+  // Arbitrary bash paths stay mutable, so do not cache their published snapshot at the source
+  // path; a later read must read the path again.
+  if (knownFileRef) viewer.registry.register(absolutePath, fileRef)
+  return richViewFileResult(fileRef)
+}
+
+/** Whether `path` names an attachment or a file a tool stored, which `read` shows as itself. */
+export function isKnownSandboxFile(
+  viewer: SandboxFileViewer,
+  handle: AgentSandboxHandle,
+  path: string
+): boolean {
+  let absolutePath: string
+  try {
+    absolutePath = resolveSandboxPath(handle, path)
+  } catch {
+    return false
+  }
+  const fileRef =
+    viewer.registry.get(absolutePath) ??
+    preparedFileRefAtPath(viewer.attachments, handle.sandbox.workingDirectory, absolutePath)
+  return fileRef !== undefined && !isTextMediaType(fileRef.mediaType)
+}
+
+function isTextMediaType(mediaType: string | undefined): boolean {
+  return (
+    mediaType !== undefined &&
+    (mediaType.startsWith("text/") ||
+      /^application\/(json|xml|yaml|x-yaml|javascript|typescript|csv|x-sh)\b/.test(mediaType))
+  )
 }
 
 function preparedFileRefAtPath(
@@ -146,10 +146,8 @@ function safePublishedFileName(value: string): string {
 }
 
 /** A sandbox file refusal becomes the message the Agent sees; anything else passes through. */
-function toViewFileError(error: unknown): unknown {
-  return error instanceof SandboxFileError ? viewFileError(error.message) : error
-}
-
-function viewFileError(message: string): AgentToolPublicError {
-  return new AgentToolPublicError(`[SixbAgent] view_file ${message}.`)
+function toViewError(error: unknown): unknown {
+  return error instanceof SandboxFileError
+    ? new AgentToolPublicError(`[SixbAgent] read ${error.message}.`)
+    : error
 }

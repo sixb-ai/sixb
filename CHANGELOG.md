@@ -2,6 +2,73 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
+  portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
+  ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
+  `results` and `cost_per_result`. Marketing API limits (codes 80000–80014) are retried like
+  Graph throttling.
+
+### Upgrade notes
+
+- `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
+  omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
+  `"ads"` too.
+
+## 2026-11-12 — Sixb 0.2.4
+
+0.2.4 gives the Agent tools to edit files, ask questions and wait on its background work, sends
+strict tool schemas each provider can take, lets DuckLake processes hand memory back between bursts,
+and connects Instagram accounts with Instagram Login.
+
+### Highlights
+
+- Edit and create files with the Agent's `edit({ path, old_string, new_string, replace_all? })`
+  and `write({ path, content })`. A file is changed only as the run last read it, so a change made
+  meanwhile by the user, another process or the run's own `bash` is never overwritten. `read`
+  replaces `view_file` and shows any file, images included.
+- Ask the user with `ask`: one to four questions, each with up to four choices; the turn ends
+  until they answer. A sub-agent's `ask` reaches its parent, and goes up to the user when only the
+  user can answer.
+- Wait on background commands and sub-agents alike with `wait({ ids, timeoutMs? })`, and stop
+  either with `stop({ id })`. `publish_artifact({ id })` publishes a new version of an artifact.
+  `bash_output`, `bash_stop`, `wait_agent`, `update_artifact`, `view_file` and `ask_parent` are
+  gone; conversations that called them still continue.
+- Mark a tool's schema strict with `strict: true` on `ModelToolSpecification`: each adapter sends
+  it in the form its provider takes, or unconstrained when it can't. Anthropic keeps within its
+  strict-tool limits, so a project with many tools no longer gets `400 Too many strict tools`.
+  Arguments are read as the schema allows, so `"42"` for a number or `null` for an optional
+  property no longer fail a call.
+- Hand DuckLake memory back between bursts: DuckDB flushes freed memory as it goes, and drops its
+  remote file cache after 60 seconds without work. A process waiting between runs holds about 0.1
+  GB instead of 1 GB.
+- Use a board running on a canvas in place, zoom an opened board like the canvas, and resize its
+  page for the reader.
+- Connect an Instagram professional account with its own credentials, without a Page or a
+  business portfolio, with `@sixb/connector-meta`'s `meta({ appId, appSecret, accounts:
+  "instagram", login: "instagram" })` (Instagram API with Instagram Login, the Instagram app's ID
+  and secret). The connection reads and publishes on `graph.instagram.com`, and its 60-day token
+  is refreshed at the first use after 30 days. `reauthenticate: true` asks for credentials on
+  every sign-in, and `batch.execute` sends each read on its own there, since that host has no
+  batch endpoint.
+
+### Upgrade notes
+
+- No migration. Upgrade the packages below together.
+- The Agent's tools changed names (see above). Skills or project instructions that name the old
+  tools should name the new ones.
+
+### Package versions
+
+- `0.2.4`: `@sixb/core`, `@sixb/agent`, `@sixb/app`, `@sixb/server`, `@sixb/cli`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`, `@sixb/ducklake`, `@sixb/lake-worker`,
+  `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/rules-worker`,
+  `@sixb/sync-worker`, `@sixb/workflow-worker`, `@sixb/model-protocols`, `@sixb/anthropic`,
+  `@sixb/azure-ai-foundry`, `@sixb/vercel-ai-gateway`, `@sixb/connector-meta`.
+
 ## 2026-11-10 — Sixb 0.2.3
 
 0.2.3 makes the data plane run on its own: the lake is retained and compacted, webhook changes are
@@ -171,6 +238,11 @@ execution token stays `running` on 0.2.2, whose workers skip it.
   the same wait, until you roll forward.
 - DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
   it. Compaction never creates a dataset version, and time travel reads the same rows after it.
+- DuckLake hands memory back between bursts of work: DuckDB returns what its queries freed to the
+  system within seconds (`allocator_background_threads`, and an allocator flush from 32 MB instead
+  of 512 MB), and after a minute without DuckDB work each process drops DuckDB's cache of remote
+  files (`duckdb.releaseMemoryAfterIdleMs`). A project's own `duckdb.config` still wins. See
+  _Memory_ in the `@sixb/ducklake` README.
 - A pipeline step that replaces a keyed output now stores only the rows that changed, so projections
   of it apply only those. A version that changes no row is still recorded, and fires no
   `updated()`.

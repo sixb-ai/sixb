@@ -1142,6 +1142,7 @@ export {
   SixbHost,
   SyncValidationError,
 } from "./runtime"
+export type { ScriptContext } from "./runtime/script"
 export type { SchedulesRuntime } from "./schedules/execution"
 export type {
   ActionRunFailure,

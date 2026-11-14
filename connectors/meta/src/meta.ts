@@ -12,6 +12,7 @@ import {
   observeMetaResponses,
   readJson,
 } from "./http"
+import { createMetaInstagramLoginAuthentication } from "./instagram-business-login"
 import { createMetaInstagramAuthentication, discoverMetaInstagramAccounts } from "./instagram-login"
 import { createMetaAuthentication, discoverMetaPages } from "./oauth"
 import type {
@@ -31,6 +32,7 @@ import type {
 import type { MetaInstagramAccount } from "./types/pages"
 
 const GRAPH_API_HOST = "https://graph.facebook.com"
+const INSTAGRAM_GRAPH_API_HOST = "https://graph.instagram.com"
 const DEFAULT_GRAPH_VERSION = "v23.0"
 
 export type MetaConnector = ConnectorAdapter<"meta", MetaClient>
@@ -47,8 +49,9 @@ export type MetaInstagramOAuthConnector = OAuthConnectorAdapter<"meta", MetaInst
  *
  * Pass `appId` and `appSecret` instead of `accessToken` to let users sign in with Facebook:
  * each connection is then one Page, and its client defaults to that Page's token. Add
- * `accounts: "instagram"` with a Unified Login `configId` to connect Instagram professional
- * accounts without a Page: each connection is then one Instagram account.
+ * `accounts: "instagram"` with a Unified Login `configId`, or with `login: "instagram"` and the
+ * Instagram app's ID and secret for Instagram Login, to connect Instagram professional accounts
+ * without a Page: each connection is then one Instagram account.
  *
  * Register it from a project's `connectors/` directory:
  *
@@ -68,7 +71,9 @@ export function meta(
   options: MetaConnectorOptions | MetaOAuthConnectorOptions | MetaInstagramOAuthConnectorOptions
 ): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector {
   if (options.appId !== undefined && options.accounts === "instagram")
-    return metaInstagramOAuth(options)
+    return options.login === "instagram"
+      ? metaInstagramLoginOAuth(options)
+      : metaInstagramOAuth(options)
   if (options.appId !== undefined) return metaOAuth(options as MetaOAuthConnectorOptions)
 
   const { accessToken } = options
@@ -96,7 +101,7 @@ function metaOAuth(options: MetaOAuthConnectorOptions): MetaOAuthConnector {
     discoverAccounts: (_context, credentials) => discoverMetaPages(credentials),
     async connect(context) {
       const http = await transport.connect(context, context.tokenSource)
-      const { pages: _pages, ...client } = createMetaClient(http)
+      const { ads: _ads, pages: _pages, ...client } = createMetaClient(http)
       return {
         ...client,
         account: await readConnectedPage(http, context.account.id, context.account.label),
@@ -106,14 +111,33 @@ function metaOAuth(options: MetaOAuthConnectorOptions): MetaOAuthConnector {
 }
 
 function metaInstagramOAuth(
-  options: MetaInstagramOAuthConnectorOptions
+  options: Extract<MetaInstagramOAuthConnectorOptions, { readonly configId: string }>
 ): MetaInstagramOAuthConnector {
   const transport = createMetaTransport(options)
-  const authentication = createMetaInstagramAuthentication(options, {
-    graphBaseUrl: transport.baseUrl,
-    graphVersion: transport.version,
-  })
+  return instagramAccountConnector(
+    transport,
+    createMetaInstagramAuthentication(options, {
+      graphBaseUrl: transport.baseUrl,
+      graphVersion: transport.version,
+    })
+  )
+}
 
+/** Instagram Login: the same Instagram client, on `graph.instagram.com` with the account's token. */
+function metaInstagramLoginOAuth(
+  options: Extract<MetaInstagramOAuthConnectorOptions, { readonly login: "instagram" }>
+): MetaInstagramOAuthConnector {
+  const transport = createMetaTransport(options, INSTAGRAM_GRAPH_API_HOST)
+  return instagramAccountConnector(
+    transport,
+    createMetaInstagramLoginAuthentication(options, { graphVersion: transport.version })
+  )
+}
+
+function instagramAccountConnector(
+  transport: ReturnType<typeof createMetaTransport>,
+  authentication: MetaInstagramOAuthConnector["authentication"]
+): MetaInstagramOAuthConnector {
   return {
     type: "meta",
     authentication,
@@ -121,6 +145,7 @@ function metaInstagramOAuth(
     async connect(context) {
       const http = await transport.connect(context, context.tokenSource)
       const {
+        ads: _ads,
         pages: _pages,
         facebook: _facebook,
         facebookVideo: _video,
@@ -197,9 +222,9 @@ function isPermissionError(error: unknown): boolean {
   return code === 10 || (code !== undefined && code >= 200 && code < 300)
 }
 
-function createMetaTransport(options: MetaTransportOptions) {
+function createMetaTransport(options: MetaTransportOptions, host = GRAPH_API_HOST) {
   const version = options.graphVersion ?? DEFAULT_GRAPH_VERSION
-  const baseUrl = options.baseUrl ?? `${GRAPH_API_HOST}/${version}/`
+  const baseUrl = options.baseUrl ?? `${host}/${version}/`
   const retry = createMetaRetryController(options.retry, options.maxRetries)
   const observe = createMetaResponseObserver(options.onResponse)
   const retryContexts = new WeakMap<Response, Promise<MetaRetryContext>>()
@@ -281,6 +306,8 @@ function createMetaTransport(options: MetaTransportOptions) {
         retry,
         observe,
         signal: context.signal,
+        // graph.instagram.com has no batch endpoint.
+        batchRequests: host === INSTAGRAM_GRAPH_API_HOST ? "separate" : "graph",
       }
     },
   }

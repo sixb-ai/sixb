@@ -20,6 +20,9 @@
       "path": "connectors/companycam/tsconfig.build.json"
     },
     {
+      "path": "connectors/ctm/tsconfig.build.json"
+    },
+    {
       "path": "connectors/exa/tsconfig.build.json"
     },
     {
@@ -177,6 +180,9 @@
     },
     {
       "path": "sandboxes/azure/tsconfig.build.json"
+    },
+    {
+      "path": "sandboxes/boxd/tsconfig.build.json"
     },
     {
       "path": "sandboxes/local/tsconfig.build.json"

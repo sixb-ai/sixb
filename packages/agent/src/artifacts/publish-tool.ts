@@ -57,18 +57,17 @@ import {
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
-const UPDATE_TOOL = "update_artifact"
 const OPEN_TOOL = "open_artifact"
-type ArtifactToolName = typeof CREATE_TOOL | typeof UPDATE_TOOL | typeof OPEN_TOOL
+type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
 const PUBLISHABLE_KINDS = ARTIFACT_KINDS
 type PublishableKind = ArtifactKind
 
-// Creating and revising are two tools, and every argument of each is required and meaningful. A
-// mode carried by an optional or null argument is where models differ: some fill every field, some
-// send "null" or "" for nothing. Every model picks a tool by name. With all properties required
-// and no length or pattern keywords, every model adapter can also send both schemas as strict.
+// One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
+// kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
+// can (strict where it may), and an empty id or "null", which a model sends for nothing, is no id:
+// ids start `art_`.
 const PATH_PROPERTY = {
   type: "string",
   description: "A file or a directory in the sandbox, relative to the working directory.",
@@ -80,40 +79,37 @@ const TITLE_PROPERTY = {
 
 export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   name: CREATE_TOOL,
-  description:
-    "Publish a new artifact from a file or directory in the sandbox: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish. To change an artifact you already published, use update_artifact. Returns the artifact's id and version; a refusal says what to fix.",
+  strict: true,
+  description: [
+    "Publish a file or directory in the sandbox as an artifact: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish.",
+    "Pass kind for a new artifact. Pass id to update one of this conversation's, or one an object the user may edit holds: your files replace its current version's, which stays open, and its kind stays; versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first.",
+    "Returns the artifact's id, version and revision; a refusal says what to fix.",
+  ].join("\n"),
   inputSchema: {
     type: "object",
     properties: {
       path: PATH_PROPERTY,
-      kind: { type: "string", enum: [...PUBLISHABLE_KINDS] },
       title: TITLE_PROPERTY,
+      kind: {
+        type: "string",
+        enum: [...PUBLISHABLE_KINDS],
+        description: "A new artifact's kind. With an id it is ignored: an update keeps its kind.",
+      },
+      id: {
+        type: "string",
+        description: "The artifact to update, such as art_k3m9q2x7tp. Leave it out to create one.",
+      },
     },
-    required: ["path", "kind", "title"],
-    additionalProperties: false,
-  } satisfies JsonObject,
-} as const
-
-export const UPDATE_ARTIFACT_TOOL_SPEC = {
-  name: UPDATE_TOOL,
-  description:
-    "Update an artifact of this conversation, or one an object the user may edit holds, from a file or directory in the sandbox: your files replace its current version's, which stays open, and its kind stays. Versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first. Returns the version and revision it wrote; a refusal says what to fix.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "The artifact's id, such as art_k3m9q2x7tp." },
-      path: PATH_PROPERTY,
-      title: TITLE_PROPERTY,
-    },
-    required: ["id", "path", "title"],
+    required: ["path", "title"],
     additionalProperties: false,
   } satisfies JsonObject,
 } as const
 
 export const OPEN_ARTIFACT_TOOL_SPEC = {
   name: OPEN_TOOL,
+  strict: true,
   description:
-    "Open an artifact $SIXB_ARTIFACTS does not list, such as one a project object holds: its current version is installed under $SIXB_ARTIFACTS_DIR/<id>/ and listed in $SIXB_ARTIFACTS, to read it, or to revise it with update_artifact when the user may change it. Publishes nothing. Returns its title, revision, and whether the user may only read it.",
+    "Open an artifact $SIXB_ARTIFACTS does not list, such as one a project object holds: its current version is installed under $SIXB_ARTIFACTS_DIR/<id>/ and listed in $SIXB_ARTIFACTS, to read it, or to revise it with publish_artifact and its id when the user may change it. Publishes nothing. Returns its title, revision, and whether the user may only read it.",
   inputSchema: {
     type: "object",
     properties: {
@@ -124,17 +120,8 @@ export const OPEN_ARTIFACT_TOOL_SPEC = {
   } satisfies JsonObject,
 } as const
 
-export interface PublishArtifactToolInput {
-  readonly path: string
-  readonly kind: PublishableKind
-  readonly title: string
-}
-
-export interface UpdateArtifactToolInput {
-  readonly id: string
-  readonly path: string
-  readonly title: string
-}
+/** A publish: of a new artifact by its kind, or of an artifact's current version by its id. */
+export type PublishArtifactToolInput = PublishRequest
 
 export interface OpenArtifactToolInput {
   readonly id: string
@@ -156,10 +143,10 @@ interface PublishToolsInput {
 }
 
 /**
- * `publish_artifact` and `update_artifact`: each reads a file or a directory from the sandbox,
- * stores its bytes, and publishes them through the run's session, which applies a run's rules (see
- * `AgentRunArtifacts.publish`). An update replaces the open version's content, or opens the next
- * version after one the user created. What it wrote exists when the tool returns, so the
+ * `publish_artifact` reads a file or a directory from the sandbox, stores its bytes, and publishes
+ * them through the run's session, which applies a run's rules (see `AgentRunArtifacts.publish`):
+ * a new artifact of its kind, or, by id, the open version's content replaced, or the next version
+ * opened after one the user created. What it wrote exists when the tool returns, so the
  * conversation shows it mid-turn and a cancelled run keeps it.
  *
  * `open_artifact` installs one the conversation does not list, as the requester reads it, so an
@@ -167,27 +154,14 @@ interface PublishToolsInput {
  */
 export function createPublishArtifactTools(
   input: PublishToolsInput
-): readonly [
-  ModelTool<PublishArtifactToolInput>,
-  ModelTool<UpdateArtifactToolInput>,
-  ModelTool<OpenArtifactToolInput>,
-] {
+): readonly [ModelTool<PublishArtifactToolInput>, ModelTool<OpenArtifactToolInput>] {
   return [
     {
       ...PUBLISH_ARTIFACT_TOOL_SPEC,
       parseInput: parsePublishArtifactInput,
-      execute: (request, { signal }) =>
-        publish(input, CREATE_TOOL, { ...request, target: { kind: request.kind } }, signal),
-      toModelOutput: (output) => ({ type: "text", value: publishSummary(output, CREATE_TOOL) }),
+      execute: (request, { signal }) => publish(input, request, signal),
+      toModelOutput: (output) => ({ type: "text", value: publishSummary(output) }),
       errorText: (error) => publishErrorText(error, CREATE_TOOL),
-    },
-    {
-      ...UPDATE_ARTIFACT_TOOL_SPEC,
-      parseInput: parseUpdateArtifactInput,
-      execute: (request, { signal }) =>
-        publish(input, UPDATE_TOOL, { ...request, target: { artifactId: request.id } }, signal),
-      toModelOutput: (output) => ({ type: "text", value: publishSummary(output, UPDATE_TOOL) }),
-      errorText: (error) => publishErrorText(error, UPDATE_TOOL),
     },
     {
       ...OPEN_ARTIFACT_TOOL_SPEC,
@@ -216,10 +190,10 @@ interface PublishRequest {
 
 async function publish(
   input: PublishToolsInput,
-  tool: ArtifactToolName,
   request: PublishRequest,
   signal: AbortSignal
 ): Promise<JsonValue> {
+  const tool = CREATE_TOOL
   signal.throwIfAborted()
   const installed = await input.installed
 
@@ -234,7 +208,7 @@ async function publish(
 
     throw publishError(
       tool,
-      `artifact '${artifactId}' is not open in this conversation, so nothing was published: call ${OPEN_TOOL} with its id, then revise its copy and update it`
+      `artifact '${artifactId}' is not open in this conversation, so nothing was published: call ${OPEN_TOOL} with its id, then revise its copy and publish it with its id`
     )
   }
 
@@ -242,6 +216,7 @@ async function publish(
     "kind" in request.target
       ? request.target.kind
       : (await updatableArtifact(input, request.target.artifactId, tool, installed)).kind
+
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
@@ -441,6 +416,8 @@ async function publish(
       : []
   return {
     artifactId: artifact.id,
+    // A new artifact, or a revision of one: what its summary and its row say.
+    created: "kind" in request.target,
     version: version.version,
     revision: version.revision,
     // An Agent's write always leaves the version open: only the user creates a version.
@@ -643,7 +620,7 @@ async function updatableArtifact(
 function noArtifact(tool: ArtifactToolName, artifactId: string): AgentToolPublicError {
   return publishError(
     tool,
-    `there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
+    `there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, leave out id and pass its kind`
   )
 }
 
@@ -662,7 +639,7 @@ async function artifactMoved(
   signal: AbortSignal
 ): Promise<AgentToolPublicError> {
   // Read as the requester: whatever moved it, it is a version they can read.
-  const artifact = await updatableArtifact(input, artifactId, UPDATE_TOOL)
+  const artifact = await updatableArtifact(input, artifactId, CREATE_TOOL)
   const latest = await input.artifacts.getVersion(artifactId, artifact.latestVersion)
   if (!latest) {
     throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
@@ -695,14 +672,14 @@ async function artifactMoved(
       error
     )
     return publishError(
-      UPDATE_TOOL,
+      CREATE_TOOL,
       `${moved}. Its revision ${latest.revision} could not be installed in the sandbox, so tell the user you could not build on it`
     )
   }
 
   return publishError(
-    UPDATE_TOOL,
-    `${moved}. $SIXB_ARTIFACTS lists revision ${latest.revision}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/${folder ? ` and written into ${folder}, the folder you published it from` : ""}: start again from it as it is, keep its changes, make yours again, and update it`
+    CREATE_TOOL,
+    `${moved}. $SIXB_ARTIFACTS lists revision ${latest.revision}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/${folder ? ` and written into ${folder}, the folder you published it from` : ""}: start again from it as it is, keep its changes, make yours again, and publish it with its id`
   )
 }
 
@@ -870,22 +847,22 @@ function openSummary(output: JsonValue): string {
     `Opened "${String(output.title)}": artifact ${String(output.artifactId)}, version ${String(output.version)} at revision ${String(output.revision)}, ${where}.`,
     output.readOnly === true
       ? "The user may read it but not change it: do not update it."
-      : `To change it, edit a copy of that folder and call ${UPDATE_TOOL} with this id: this conversation then shares it.`,
+      : `To change it, edit a copy of that folder and call ${CREATE_TOOL} with this id: this conversation then shares it.`,
   ].join(" ")
 }
 
-function publishSummary(output: JsonValue, tool: ArtifactToolName): string {
+function publishSummary(output: JsonValue): string {
   if (typeof output !== "object" || output === null || Array.isArray(output)) {
     return JSON.stringify(output)
   }
   const written = `artifact ${String(output.artifactId)}, version ${String(output.version)} at revision ${String(output.revision)}`
   const lines = [
-    tool === CREATE_TOOL
+    output.created === true
       ? `Published "${String(output.title)}" as ${written}.`
       : `Updated "${String(output.title)}": ${written}.`,
     output.open === false
       ? "The version is frozen."
-      : `The version is open: each update replaces it until the user creates a version. To change it, call ${UPDATE_TOOL} with this id.`,
+      : `The version is open: each update replaces it until the user creates a version. To change it, call ${CREATE_TOOL} with this id.`,
   ]
   const copy = `$SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/`
   const since =
@@ -933,14 +910,14 @@ function publishSummary(output: JsonValue, tool: ArtifactToolName): string {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
         kind === "page"
-          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.`
+          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with read, fix what the warnings name, and update the artifact.`
           : kind === "canvas"
-            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and update the artifact.${
+            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with read, fix what the warnings name, and update the artifact.${
                 typeof check.overview === "string"
                   ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
                   : ""
               }`
-            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and update the artifact.`
+            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
       )
     }
   }
@@ -948,15 +925,36 @@ function publishSummary(output: JsonValue, tool: ArtifactToolName): string {
 }
 
 function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
-  const input = inputObject(value, CREATE_TOOL, ["path", "kind", "title"])
-  if (!PUBLISHABLE_KINDS.includes(input.kind as PublishableKind)) {
+  const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id"])
+  const kind = input.kind === undefined || input.kind === null ? undefined : input.kind
+  if (kind !== undefined && !PUBLISHABLE_KINDS.includes(kind as PublishableKind)) {
     throw publishError(CREATE_TOOL, `kind must be one of ${PUBLISHABLE_KINDS.join(", ")}`)
   }
-  return {
-    path: pathInput(input.path, CREATE_TOOL),
-    kind: input.kind as PublishableKind,
-    title: titleInput(input.title, CREATE_TOOL),
+  if (input.id !== undefined && input.id !== null && typeof input.id !== "string") {
+    throw publishError(CREATE_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
   }
+  // What a model sends for "no id": nothing, an empty string, or the word.
+  const id = typeof input.id === "string" ? input.id.trim() : ""
+  const noId = id === "" || /^(null|none|undefined)$/i.test(id)
+  if (!noId && !isArtifactId(id)) {
+    throw publishError(
+      CREATE_TOOL,
+      `id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, leave out id and pass its kind`
+    )
+  }
+  if (noId && kind === undefined) {
+    throw publishError(
+      CREATE_TOOL,
+      "pass kind to publish a new artifact, or the id of one to update it"
+    )
+  }
+  const path = pathInput(input.path, CREATE_TOOL)
+  const title = titleInput(input.title, CREATE_TOOL)
+  // With an id, a kind is ignored: an update keeps the artifact's, and a model that sends every
+  // field, as strict mode has it, fills one in.
+  return noId
+    ? { path, title, target: { kind: kind as PublishableKind } }
+    : { path, title, target: { artifactId: id } }
 }
 
 function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
@@ -966,22 +964,6 @@ function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
     throw publishError(OPEN_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
   }
   return { id }
-}
-
-function parseUpdateArtifactInput(value: unknown): UpdateArtifactToolInput {
-  const input = inputObject(value, UPDATE_TOOL, ["id", "path", "title"])
-  const id = typeof input.id === "string" ? input.id.trim() : ""
-  if (!isArtifactId(id)) {
-    throw publishError(
-      UPDATE_TOOL,
-      `id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
-    )
-  }
-  return {
-    id,
-    path: pathInput(input.path, UPDATE_TOOL),
-    title: titleInput(input.title, UPDATE_TOOL),
-  }
 }
 
 function inputObject(

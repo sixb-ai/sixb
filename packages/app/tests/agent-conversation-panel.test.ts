@@ -225,6 +225,49 @@ test("offers Continue on the newest answer that stopped short, not on older ones
   expect(pending).toMatch(/<button[^>]*disabled=""[^>]*>.*Continuing…/)
 })
 
+// Reproduce: drop `onAnswer={asking?.onAnswer}` from the Transcript in ConversationPanel; the
+// reply then asks the question too. Give it the question's onAnswer whatever readOnly says; a
+// reader who cannot write then sees the question nowhere.
+test("the Agent's question takes the composer's place, or waits in the reply for a reader", () => {
+  const asked: AgentMessage = {
+    ...question,
+    id: "asked",
+    runId: "run",
+    role: "assistant",
+    seq: 2,
+    parts: [
+      {
+        type: "tool-call",
+        toolCallId: "ask",
+        toolName: "ask",
+        state: "output-available",
+        input: { questions: [{ question: "Which year?", choices: ["2025", "2026"] }] },
+        output: { status: "asked" },
+      },
+    ],
+  }
+  const transcript = {
+    threadId: "thread",
+    ...conversation({ messages: [question, asked] }),
+  }
+  const props = {
+    question: {
+      questions: [{ question: "Which year?", choices: ["2025", "2026"], multiple: false }],
+      onAnswer: noop,
+      onDismiss: noop,
+    },
+  }
+
+  const answering = renderPanel(props, transcript)
+  expect(answering).toContain("2026")
+  expect(answering).not.toContain("Waiting for an answer")
+
+  const reading = renderPanel({ ...props, readOnly: true }, transcript)
+  expect(reading).not.toContain("2026")
+  expect(reading).toContain("Waiting for an answer")
+  expect(reading).toContain("Which year?")
+})
+
 const noop = () => {}
 
 const idle = { presentation: { kind: "idle" }, activeRunId: null } as const

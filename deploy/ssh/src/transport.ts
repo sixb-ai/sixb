@@ -111,7 +111,7 @@ export class LocalShell implements RemoteShell {
   constructor(private readonly env: Readonly<Record<string, string>> = {}) {}
 
   async run(script: string, options: RunOptions = {}): Promise<void> {
-    const inline = options.stdin !== undefined
+    const inline = options.stdin !== undefined || options.terminal === true
     await runProcess(inline ? ["bash", "-c", script] : ["bash", "-s"], {
       ...options,
       ...(inline ? {} : { stdin: new Blob([script]).stream() }),
@@ -127,7 +127,10 @@ async function runProcess(
   options: RunOptions & { readonly env?: Readonly<Record<string, string>> }
 ): Promise<void> {
   if (options.terminal) {
-    const child = Bun.spawn([...command], { stdio: ["inherit", "inherit", "inherit"] })
+    const child = Bun.spawn([...command], {
+      stdio: ["inherit", "inherit", "inherit"],
+      env: { ...process.env, ...options.env },
+    })
     const exitCode = await child.exited
     if (exitCode !== 0) throw new RemoteScriptError(`exited with code ${exitCode}`, exitCode)
     return

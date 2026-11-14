@@ -3,6 +3,7 @@ import type { DatasetColumnDefinition, DatasetRow, DatasetSchema, FileRef } from
 import { LakeValueRefusedError } from "@sixb/core/lake-storage"
 import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import type { DuckDbAppender } from "./duckdb-runtime"
+import { normalizeDuckDbTimestampValue } from "./duckdb-timestamp"
 
 /**
  * Append one validated dataset row into the staging table's DuckDB appender. `position` is where
@@ -62,7 +63,7 @@ function appendColumnValue(
       )
       return
     case "timestamp":
-      appender.appendVarchar(value instanceof Date ? value.toISOString() : String(value))
+      appender.appendVarchar(normalizeDuckDbTimestampValue(value))
       return
     case "json":
       appender.appendVarchar(JSON.stringify(value))

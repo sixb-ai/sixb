@@ -15,16 +15,24 @@ export interface ToolLine {
   readonly held?: boolean
   /** A shell command, shown whole as the call's panel. */
   readonly command?: string
+  /** The preview is diff lines, `+` added and `-` removed, colored as such. */
+  readonly diff?: boolean
+  /** The preview rows start with paths, shown as the person reads them. */
+  readonly paths?: boolean
 }
 
 const PREVIEW_LINES = 4
 
 const NO_OUTCOMES: ReadonlyMap<string, ApprovalOutcome> = new Map()
 
-/** `outcomes` says how the held calls ended, by approval id: a decided call is no longer held. */
+/**
+ * `outcomes` says how the held calls ended, by approval id: a decided call is no longer held.
+ * `folder` is the one a computer's turns work in: a search names where it looked relative to it.
+ */
 export function toolLine(
   part: ToolPart,
-  outcomes: ReadonlyMap<string, ApprovalOutcome> = NO_OUTCOMES
+  outcomes: ReadonlyMap<string, ApprovalOutcome> = NO_OUTCOMES,
+  folder?: string
 ): ToolLine {
   const input = record(part.input) ?? partialInput(part.inputText)
   const output = record(part.output)
@@ -70,6 +78,31 @@ export function toolLine(
         ...error,
       }
     }
+    case "wait":
+    case "stop": {
+      // Background commands by their id, sub-agents by their key; with a sub-agent, the result is
+      // rich, its JSON in its text.
+      const ids = Array.isArray(input?.ids) ? input.ids.map(text) : [text(input?.id)]
+      const value = record(richValue(output))
+      const commands = Array.isArray(value?.commands) ? value.commands.map(record) : []
+      const results = Array.isArray(value?.results) ? value.results.map(record) : []
+      const [command] = commands
+      const one = commands.length + results.length === 1
+      const written = one ? text(command?.output) : ""
+      const childStatus = one && !command ? text(results[0]?.status) : ""
+      return {
+        verb: part.name,
+        // One command reads as bash_output's did: its id, then what it runs.
+        detail: [...ids, one && command ? firstLine(text(command.command)) : ""]
+          .filter(Boolean)
+          .join("  "),
+        ...(written.trim() ? { preview: lines(written) } : {}),
+        ...(one && command ? backgroundNote(text(command.status), command.exitCode) : {}),
+        ...(childStatus ? childNote(childStatus) : {}),
+        ...error,
+      }
+    }
+    // What `wait` and `stop` were called for a background command: earlier threads hold them.
     case "bash_output":
     case "bash_stop": {
       const output_ = text(output?.output)
@@ -83,6 +116,19 @@ export function toolLine(
       }
     }
     case "read": {
+      // A file shown as itself, an image or a PDF, reads as view_file did.
+      if (output?.kind === "agentToolResult") {
+        return { verb: "view", detail: text(input?.path), ...error }
+      }
+      if (Array.isArray(output?.entries)) {
+        const entries = `${output.entries.length} ${output.entries.length === 1 ? "entry" : "entries"}`
+        return {
+          verb: "list",
+          detail: text(input?.path),
+          note: output.truncated === true ? `${entries}+` : entries,
+          ...error,
+        }
+      }
       const lineCount = typeof output?.endLine === "number" && typeof output.startLine === "number"
       return {
         verb: "read",
@@ -93,6 +139,106 @@ export function toolLine(
         ...error,
       }
     }
+    case "edit": {
+      const changed = text(output?.diff)
+        .split("\n")
+        .filter((line) => /^[+-]/.test(line))
+
+      // The diff is cut on a large edit, so the edit counts its lines; an output stored before it
+      // did carries only the diff.
+      const added =
+        typeof output?.added === "number"
+          ? output.added
+          : changed.filter((line) => line.startsWith("+")).length
+      const removed =
+        typeof output?.removed === "number"
+          ? output.removed
+          : changed.filter((line) => line.startsWith("-")).length
+
+      return {
+        verb: "edit",
+        detail: text(input?.path),
+        ...(output?.diff !== undefined
+          ? { note: `+${added} −${removed}`, diff: true, preview: limited(changed) }
+          : {}),
+        ...error,
+      }
+    }
+    case "write": {
+      const linesWritten = typeof output?.lines === "number" ? output.lines : undefined
+      return {
+        verb: output?.created === false ? "rewrite" : "write",
+        detail: text(input?.path),
+        ...(linesWritten !== undefined ? { note: plural(linesWritten, "line") } : {}),
+        ...error,
+      }
+    }
+    case "glob": {
+      const files = Array.isArray(output?.files) ? output.files.map(text) : undefined
+      const found = files?.length ?? 0
+
+      return {
+        verb: "glob",
+        detail: searchDetail(input, text(input?.pattern), folder),
+        ...(files
+          ? {
+              note: searchNote(
+                output,
+                found === 0
+                  ? "no files"
+                  : output?.truncated === true
+                    ? `${found}+ files`
+                    : plural(found, "file")
+              ),
+              ...(found > 0 ? { preview: limitedRows(files, "file", "files"), paths: true } : {}),
+            }
+          : {}),
+        ...error,
+      }
+    }
+    case "grep": {
+      const matches = Array.isArray(output?.matches) ? output.matches.map(record) : undefined
+      const shown = matches?.length ?? 0
+      const counted = Object.values(record(output?.more) ?? {}).filter(
+        (count): count is number => typeof count === "number"
+      )
+      const total = counted.reduce((sum, count) => sum + count, shown)
+
+      const files = typeof output?.files === "number" ? output.files : 0
+      const found = `${total} ${total === 1 ? "match" : "matches"}`
+
+      return {
+        verb: "grep",
+        detail: searchDetail(input, input?.pattern ? `"${text(input.pattern)}"` : "", folder),
+        ...(matches
+          ? {
+              note: searchNote(
+                output,
+                total === 0
+                  ? "no matches"
+                  : output?.truncated === true
+                    ? `${total}+ matches`
+                    : `${found} in ${plural(files, "file")}`
+              ),
+              ...(shown > 0
+                ? {
+                    preview: limitedRows(
+                      matches.map(
+                        (match) => `${text(match?.path)}:${match?.line} ${text(match?.text).trim()}`
+                      ),
+                      "match",
+                      "matches",
+                      total
+                    ),
+                    paths: true,
+                  }
+                : {}),
+            }
+          : {}),
+        ...error,
+      }
+    }
+    // Earlier threads hold calls to it.
     case "view_file":
       return { verb: "view", detail: text(input?.path), ...error }
     case "web_search": {
@@ -112,11 +258,14 @@ export function toolLine(
         ...(failed ? fetchFailure(part.error) : {}),
       }
     case "publish_artifact":
+    // What `publish_artifact` with an id was called: earlier threads hold calls to them.
     case "update_artifact":
-    // What `update_artifact` was called: earlier threads hold calls to it.
     case "publish_artifact_version":
       return {
-        verb: part.name === "publish_artifact" ? "publish" : "update",
+        verb:
+          part.name === "publish_artifact" && !text(input?.id).startsWith("art_")
+            ? "publish"
+            : "update",
         detail: text(input?.title) || text(input?.path) || text(input?.artifactId),
         ...(output?.artifactId ? { note: `artifact:${text(output.artifactId)}` } : {}),
         ...error,
@@ -134,6 +283,7 @@ export function toolLine(
         detail: [text(input?.key), firstLine(text(input?.task))].filter(Boolean).join("  "),
         ...error,
       }
+    // What `wait` was called for sub-agents: earlier threads hold calls to it.
     case "wait_agent": {
       const runIds = Array.isArray(input?.runIds) ? input.runIds.length : 0
       return {
@@ -148,12 +298,32 @@ export function toolLine(
         detail: [text(input?.key), firstLine(text(input?.text))].filter(Boolean).join("  "),
         ...error,
       }
-    case "ask_parent":
+    case "ask":
+    // What `ask` was called for a sub-agent: earlier threads hold calls to it.
+    case "ask_parent": {
+      const questions = askedQuestions(input)
+      // One question reads on the line; several, each with its choices numbered, under it. A row's
+      // runs of spaces collapse to one, so the choices are kept apart by a dot.
+      const [first] = questions
       return {
         verb: "ask",
-        detail: firstLine(text(input?.question) || text(input?.text)),
+        detail:
+          questions.length === 1 && first ? first.question : plural(questions.length, "question"),
+        ...(questions.length > 1 || first?.choices.length
+          ? {
+              preview: questions.map((question) =>
+                [
+                  ...(questions.length > 1 ? [question.question] : []),
+                  question.choices.map((choice, index) => `${index + 1}. ${choice}`).join(" · "),
+                ]
+                  .filter(Boolean)
+                  .join("  ")
+              ),
+            }
+          : {}),
         ...error,
       }
+    }
     default:
       return {
         verb: part.name,
@@ -262,6 +432,14 @@ function backgroundNote(status: string, exitCode: unknown): Pick<ToolLine, "note
   return exitCode === 0 ? { note: "exit 0" } : { note: `exit ${exitCode}`, failed: true }
 }
 
+/** How a sub-agent a `wait` or a `stop` named stands, beside its line. */
+function childNote(status: string): Pick<ToolLine, "note" | "failed"> {
+  if (status === "succeeded") return { note: "done" }
+  if (status === "cancelled") return { note: "stopped" }
+  if (status === "failed") return { note: "failed", failed: true }
+  return { note: status.replaceAll("_", " ") }
+}
+
 /** How decided calls ended, as the web chat's approval card names it. */
 function decidedLine(outcomes: readonly ApprovalOutcome[]): Pick<ToolLine, "note" | "failed"> {
   const ended = outcomes.map(outcomeNote)
@@ -303,6 +481,19 @@ function parseJson(value: string): unknown {
   }
 }
 
+/** A rich result's value, its JSON text parsed; any other output as it is. */
+function richValue(output: Record<string, unknown> | undefined): unknown {
+  if (output?.kind !== "agentToolResult" || !Array.isArray(output.content)) return output
+  const [first] = output.content
+  const textPart = record(first)
+  if (typeof textPart?.text !== "string") return undefined
+  try {
+    return JSON.parse(textPart.text)
+  } catch {
+    return undefined
+  }
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -315,11 +506,16 @@ function partialInput(inputText: string | undefined): Record<string, unknown> | 
   try {
     return record(JSON.parse(inputText))
   } catch {
-    const command = /"(?:command|path|task|key|query|url)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(inputText)
-    const value = command?.[1]
-    return value !== undefined
-      ? { command: value, path: value, task: value, query: value, url: value }
-      : undefined
+    const found = /"(command|path|task|key|query|url|pattern)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(
+      inputText
+    )
+    const [, key, value] = found ?? []
+    if (value === undefined) return undefined
+
+    // A search's pattern is only its pattern: it is no path its line would say it looked in.
+    if (key === "pattern") return { pattern: value }
+
+    return { command: value, path: value, task: value, query: value, url: value }
   }
 }
 
@@ -333,6 +529,113 @@ function text(value: unknown): string {
 
 function firstLine(value: string): string {
   return value.trim().split("\n")[0]?.trim() ?? ""
+}
+
+export interface AskedQuestion {
+  readonly question: string
+  readonly choices: readonly string[]
+  readonly multiple: boolean
+}
+
+/** The questions of an `ask` call, or of an earlier `ask_parent` call's one question. */
+function askedQuestions(input: Record<string, unknown> | undefined): AskedQuestion[] {
+  if (typeof input?.question === "string") {
+    return [{ question: input.question.trim(), choices: [], multiple: false }]
+  }
+  if (!Array.isArray(input?.questions)) return []
+  return input.questions.flatMap((value) => {
+    const question = record(value)
+    if (typeof question?.question !== "string") return []
+    const choices = Array.isArray(question.choices)
+      ? question.choices.filter((choice): choice is string => typeof choice === "string")
+      : []
+    return [{ question: question.question.trim(), choices, multiple: question.multiple === true }]
+  })
+}
+
+/** What a reply asked the user with its last `ask`: its questions, or none. */
+export function askedInReply(
+  message: { readonly role: string; readonly parts: readonly Part[] } | null | undefined
+): readonly AskedQuestion[] {
+  if (message?.role !== "assistant") return []
+  const asked = [...message.parts]
+    .reverse()
+    .find(
+      (part): part is ToolPart =>
+        part.kind === "tool" && part.name === "ask" && part.state === "done"
+    )
+  return askedQuestions(record(asked?.input))
+}
+
+/**
+ * A reply of a number to the Agent's question, its last reply's one question with choices, is the
+ * choice under that number: "2" answers "2026". Anything else is sent as typed.
+ */
+export function pickedAnswer(
+  messages: readonly { readonly role: string; readonly parts: readonly Part[] }[],
+  text: string
+): string {
+  const number = text.trim()
+  if (!/^\d+$/.test(number)) return text
+  const questions = askedInReply(messages.at(-1))
+  if (questions.length !== 1) return text
+  return questions[0]?.choices[Number(number) - 1] ?? text
+}
+
+/** At most a few rows, with how many more there were. */
+function limited(rows: readonly string[]): string[] {
+  return rows.length > PREVIEW_LINES
+    ? [...rows.slice(0, PREVIEW_LINES), `… ${plural(rows.length - PREVIEW_LINES, "more line")}`]
+    : [...rows]
+}
+
+/**
+ * The first rows, then the rest counted by what they are: `… 8 more files`. `total` counts what
+ * the rows stand for when some were never listed, as a file's matches past the ones grep shows.
+ */
+function limitedRows(
+  rows: readonly string[],
+  one: string,
+  many: string,
+  total = rows.length
+): string[] {
+  const shown = rows.slice(0, PREVIEW_LINES)
+  const left = total - shown.length
+  return left > 0 ? [...shown, `… ${left} more ${left === 1 ? one : many}`] : shown
+}
+
+/**
+ * A search as the call wrote it: its pattern, the files it was limited to, and where it looked, as
+ * the person reads it. The folder the agent works in goes unsaid, however the call named it.
+ */
+function searchDetail(
+  input: Record<string, unknown> | undefined,
+  pattern: string,
+  folder: string | undefined
+): string {
+  const path = givenText(input?.path)
+  const include = givenText(input?.include)
+  const place = path.replace(/(.)\/+$/, "$1")
+  const working =
+    place === "." ||
+    (folder !== undefined && [folder, folder.replace(/^\/private/, "")].includes(place))
+
+  return [
+    ...(pattern ? [pattern] : []),
+    ...(include ? [include] : []),
+    ...(path && !working ? [`in ${friendlyPath(path, folder)}`] : []),
+  ].join("  ")
+}
+
+/** What a search found, and that it stopped early when it did. */
+function searchNote(output: Record<string, unknown> | undefined, found: string): string {
+  return output?.incomplete === true ? `${found} · stopped early` : found
+}
+
+/** A string the call gave: models send `"null"` and `"undefined"` for nothing. */
+function givenText(value: unknown): string {
+  const given = text(value).trim()
+  return given === "null" || given === "undefined" ? "" : given
 }
 
 function lines(value: string): string[] {

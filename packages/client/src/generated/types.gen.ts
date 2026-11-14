@@ -11438,6 +11438,11 @@ export type GetObjectLineageResponses = {
                         indexingId: string
                       }
                 }
+              | {
+                  type: "script"
+                  runId: string
+                  path: string
+                }
             /**
              * Absent for a direct write, and for an Action run the caller cannot view.
              */
@@ -11491,6 +11496,11 @@ export type GetObjectLineageResponses = {
                         type: "ontology.indexVectors"
                         indexingId: string
                       }
+                }
+              | {
+                  type: "script"
+                  runId: string
+                  path: string
                 }
           }
         | {
@@ -22957,6 +22967,11 @@ export type GetObjectLinkLineageResponses = {
                         indexingId: string
                       }
                 }
+              | {
+                  type: "script"
+                  runId: string
+                  path: string
+                }
             /**
              * Absent for a direct write, and for an Action run the caller cannot view.
              */
@@ -23010,6 +23025,11 @@ export type GetObjectLinkLineageResponses = {
                         type: "ontology.indexVectors"
                         indexingId: string
                       }
+                }
+              | {
+                  type: "script"
+                  runId: string
+                  path: string
                 }
           }
         | {
@@ -23346,6 +23366,11 @@ export type ListEventsResponses = {
                       indexingId: string
                     }
               }
+            | {
+                type: "script"
+                runId: string
+                path: string
+              }
           commitId: string
           commitOrdinal: number
           type: "object.created"
@@ -23512,6 +23537,11 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+              }
+            | {
+                type: "script"
+                runId: string
+                path: string
               }
           commitId: string
           commitOrdinal: number
@@ -23680,6 +23710,11 @@ export type ListEventsResponses = {
                       indexingId: string
                     }
               }
+            | {
+                type: "script"
+                runId: string
+                path: string
+              }
           commitId: string
           commitOrdinal: number
           type: "object.deleted"
@@ -23836,6 +23871,11 @@ export type ListEventsResponses = {
                       indexingId: string
                     }
               }
+            | {
+                type: "script"
+                runId: string
+                path: string
+              }
           commitId: string
           commitOrdinal: number
           type: "telemetry.appended"
@@ -23940,6 +23980,11 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+              }
+            | {
+                type: "script"
+                runId: string
+                path: string
               }
           commitId: string
           commitOrdinal: number
@@ -24106,6 +24151,11 @@ export type ListEventsResponses = {
                       indexingId: string
                     }
               }
+            | {
+                type: "script"
+                runId: string
+                path: string
+              }
           commitId: string
           commitOrdinal: number
           type: "link.updated"
@@ -24270,6 +24320,11 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+              }
+            | {
+                type: "script"
+                runId: string
+                path: string
               }
           commitId: string
           commitOrdinal: number

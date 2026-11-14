@@ -2,16 +2,17 @@ import type { AgentConversationMessage } from "../conversation"
 import type { AgentMessages } from "../i18n/en"
 import type { NormalizedTool } from "../parts"
 import { toolResultValue } from "../parts"
+import { COMMAND_TOOLS, isStop, namedIds } from "../waits"
 
-// A command the agent runs in the background outlives the call that started it: later calls read
-// it (`bash_output`) or stop it (`bash_stop`), maybe turns later, and on the owner's computer the
+// A command the agent runs in the background outlives the call that started it: later calls wait
+// for it (`wait`) or stop it (`stop`), maybe turns later, and on the owner's computer the
 // open `sixb` reports how it stands between turns. The chat shows it as one card in the work's
 // steps, in place of its start, merging all of these: only a reader who opens the steps sees it.
 
 export type BackgroundCommandStatus = "running" | "exited" | "stopped"
 
-/** The tools that start, read and stop a background command. */
-export const BACKGROUND_TOOLS: ReadonlySet<string> = new Set(["bash", "bash_output", "bash_stop"])
+/** The tools that start, read and stop a background command, earlier threads' included. */
+export const BACKGROUND_TOOLS: ReadonlySet<string> = new Set(["bash", ...COMMAND_TOOLS])
 
 /** How much of what the agent read of a command the card keeps: its newest characters. */
 const OUTPUT_TAIL_CHARS = 8_000
@@ -169,50 +170,46 @@ export function readThreadBackground(
         continue
       }
 
-      // A read or a stop on its way names the command it is for.
+      // A read or a stop on its way names the commands it is for.
       if (tool.state === "input-streaming" || tool.state === "input-available") {
-        const input = isRecord(tool.input) ? tool.input : {}
-        const key = typeof input.id === "string" ? byId.get(input.id) : undefined
-        if (!key) continue
-        const pending =
-          tool.toolName === "bash_stop"
-            ? "stopping"
-            : typeof input.wait === "number" && input.wait > 0
-              ? "waiting"
-              : "reading"
-        merge(key, { pending })
+        const pending = isStop(tool) ? "stopping" : waits(tool) ? "waiting" : "reading"
+        for (const id of namedIds(tool)) {
+          const key = byId.get(id)
+          if (key) merge(key, { pending })
+        }
         continue
       }
       if (tool.state !== "output-available") continue
 
-      const read = commandState(tool.output)
-      if (!read) continue
-      const key = backgroundKey(read)
-      const known = commands.get(key)
-      // Its start is beyond what the conversation shows: the read stands for it.
-      const current: CommandFromCalls = known ?? {
-        ...read,
-        runId: message.runId,
-        output: "",
-        truncated: false,
-      }
-      byId.set(read.id, key)
+      for (const report of reportsOf(tool)) {
+        const read = commandState(report)
+        if (!read) continue
+        const key = backgroundKey(read)
+        const known = commands.get(key)
+        // Its start is beyond what the conversation shows: the read stands for it.
+        const current: CommandFromCalls = known ?? {
+          ...read,
+          runId: message.runId,
+          output: "",
+          truncated: false,
+        }
+        byId.set(read.id, key)
 
-      const written =
-        typeof outputOf(tool.output)?.output === "string" ? outputOf(tool.output)?.output : ""
-      const skipped = Number(outputOf(tool.output)?.skippedBytes ?? 0) > 0
-      const joined = current.output + (written ?? "")
-      // An end is final: a later read never says it runs again.
-      const ended = current.status !== "running" ? current : read
-      const { pending: _pending, ...rest } = current
-      commands.set(key, {
-        ...rest,
-        status: ended.status,
-        ...(ended.exitCode === undefined ? {} : { exitCode: ended.exitCode }),
-        ...(ended.endedAt === undefined ? {} : { endedAt: ended.endedAt }),
-        output: joined.slice(-OUTPUT_TAIL_CHARS),
-        truncated: current.truncated || skipped || joined.length > OUTPUT_TAIL_CHARS,
-      })
+        const written = typeof outputOf(report)?.output === "string" ? outputOf(report)?.output : ""
+        const skipped = Number(outputOf(report)?.skippedBytes ?? 0) > 0
+        const joined = current.output + (written ?? "")
+        // An end is final: a later read never says it runs again.
+        const ended = current.status !== "running" ? current : read
+        const { pending: _pending, ...rest } = current
+        commands.set(key, {
+          ...rest,
+          status: ended.status,
+          ...(ended.exitCode === undefined ? {} : { exitCode: ended.exitCode }),
+          ...(ended.endedAt === undefined ? {} : { endedAt: ended.endedAt }),
+          output: joined.slice(-OUTPUT_TAIL_CHARS),
+          truncated: current.truncated || skipped || joined.length > OUTPUT_TAIL_CHARS,
+        })
+      }
     }
   }
 
@@ -297,15 +294,13 @@ export function backgroundCardState(input: {
 /** What a background call reads as, in the work and as the live label of a turn at work. */
 export function backgroundRowLabel(tool: NormalizedTool, messages: AgentMessages): string {
   const rows = messages.background.rows
-  const input = isRecord(tool.input) ? tool.input : {}
-  const row =
-    tool.toolName === "bash_stop"
-      ? rows.stop
-      : tool.toolName === "bash_output"
-        ? typeof input.wait === "number" && input.wait > 0
-          ? rows.wait
-          : rows.read
-        : rows.start
+  const row = isStop(tool)
+    ? rows.stop
+    : COMMAND_TOOLS.has(tool.toolName)
+      ? waits(tool)
+        ? rows.wait
+        : rows.read
+      : rows.start
   return tool.state === "input-streaming" || tool.state === "input-available"
     ? row.running
     : row.title
@@ -344,6 +339,20 @@ function commandState(output: unknown): {
     ...(typeof endedAt === "string" ? { endedAt } : {}),
     ...(typeof outputPath === "string" ? { outputPath } : {}),
   }
+}
+
+/** Whether a call waits for its commands to end: `wait` unless told 0, `bash_output` when told. */
+function waits(tool: NormalizedTool): boolean {
+  const input = isRecord(tool.input) ? tool.input : {}
+  if (tool.toolName === "wait") return input.timeoutMs !== 0
+  return typeof input.wait === "number" && input.wait > 0
+}
+
+/** What a call reports of each command: `wait` and `stop` list theirs, earlier tools one. */
+function reportsOf(tool: NormalizedTool): readonly unknown[] {
+  if (tool.toolName !== "wait" && tool.toolName !== "stop") return [tool.output]
+  const value = toolResultValue(tool.output)
+  return isRecord(value) && Array.isArray(value.commands) ? value.commands : []
 }
 
 function outputOf(output: unknown): Record<string, unknown> | null {

@@ -33679,6 +33679,23 @@
                                     },
                                     "required": ["type", "operation"],
                                     "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["script"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId", "path"],
+                                    "additionalProperties": false
                                   }
                                 ]
                               },
@@ -33831,6 +33848,23 @@
                                       }
                                     },
                                     "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["script"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId", "path"],
                                     "additionalProperties": false
                                   }
                                 ]
@@ -66181,6 +66215,23 @@
                                     },
                                     "required": ["type", "operation"],
                                     "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["script"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId", "path"],
+                                    "additionalProperties": false
                                   }
                                 ]
                               },
@@ -66333,6 +66384,23 @@
                                       }
                                     },
                                     "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["script"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId", "path"],
                                     "additionalProperties": false
                                   }
                                 ]
@@ -67329,6 +67397,23 @@
                                         },
                                         "required": ["type", "operation"],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   },
@@ -67822,6 +67907,23 @@
                                           }
                                         },
                                         "required": ["type", "operation"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -68317,6 +68419,23 @@
                                         },
                                         "required": ["type", "operation"],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   },
@@ -68780,6 +68899,23 @@
                                         },
                                         "required": ["type", "operation"],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   },
@@ -69130,6 +69266,23 @@
                                           }
                                         },
                                         "required": ["type", "operation"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -69622,6 +69775,23 @@
                                         },
                                         "required": ["type", "operation"],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   },
@@ -70112,6 +70282,23 @@
                                           }
                                         },
                                         "required": ["type", "operation"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["script"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId", "path"],
                                         "additionalProperties": false
                                       }
                                     ]

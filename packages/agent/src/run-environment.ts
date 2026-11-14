@@ -87,10 +87,14 @@ import {
 } from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import { createBashOutputTool, createBashStopTool } from "./tools/background"
+import { createStopTool, createWaitTool, type WaitableChildren } from "./tools/background"
 import { createBashTool } from "./tools/bash"
+import { createEditTool } from "./tools/edit"
+import { FileReadLedger } from "./tools/file-writes"
+import { createGlobTool } from "./tools/glob"
+import { createGrepTool } from "./tools/grep"
 import { agentModelToolSpecs, fetchesWeb } from "./tools/model-spec"
-import { createReadTool } from "./tools/read"
+import { createReadTool, READ_TOOL_SPEC } from "./tools/read"
 import {
   AgentToolResultMediaBridge,
   allocateInlineImages,
@@ -103,9 +107,10 @@ import {
   savedToolOutputFiles,
   ToolOutputFiles,
 } from "./tools/tool-outputs"
-import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
+import { LEGACY_VIEW_FILE_TOOL, type SandboxFileViewer } from "./tools/view-file"
 import { createWebFetchTool } from "./tools/web-fetch/tool"
 import { createWebSearchTool } from "./tools/web-search"
+import { createWriteTool } from "./tools/write"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -184,6 +189,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly history: AgentTurnHistory
   /** Framework-owned tools of the conversational Agent: delegation. */
   readonly frameworkTools?: readonly ModelTool[]
+  /** Its children, which `wait` and `stop` reach beside its background commands. */
+  readonly children?: WaitableChildren
 }
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -198,7 +205,7 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly requestedBy?: Principal
   /** Its thread's messages, whose files are projected again, and the paused run it continues. */
   readonly history: SubagentHistory
-  /** Framework-owned tools of a child: `ask_parent`. */
+  /** Framework-owned tools of a child: `ask`, to its parent. */
   readonly frameworkTools?: readonly ModelTool[]
   /** Weigh the thread before the first call, and compact it on the child's thread when needed. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
@@ -415,6 +422,7 @@ export async function createConversationAgentEnvironment(
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
+      ...(input.children ? { children: input.children } : {}),
       ...(memory ? { memory } : {}),
       ...(conversation === undefined ? {} : { conversation }),
       onDetachedTeardown: input.onDetachedTeardown,
@@ -814,6 +822,8 @@ interface AgentEnvironmentSetup
   readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
+  /** The Agent's children, which `wait` and `stop` reach beside its background commands. */
+  readonly children?: WaitableChildren
   /**
    * A conversation, or a child of one, publishes artifacts into its conversation, through its
    * session, and edits them from their installed copies; other runs return text.
@@ -892,17 +902,15 @@ async function startAgentEnvironment(
     }),
   ]
 
-  appendBuiltInTool(
-    tools,
-    createViewFileTool({
-      resolveSandbox: () => ready,
-      attachments: attachmentContext,
-      registry: fileRegistry,
-      filesForToolCall: ({ toolCallId, signal }) =>
-        filesForToolCall({ toolName: "view_file", toolCallId, signal }),
-      toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    })
-  )
+  // How `read` shows an image, a PDF or another file that is not text: as itself, stored with
+  // the call, through the run's media bridge.
+  const fileViewer: SandboxFileViewer = {
+    attachments: attachmentContext,
+    registry: fileRegistry,
+    filesForToolCall: ({ toolCallId, signal }) =>
+      filesForToolCall({ toolName: READ_TOOL_SPEC.name, toolCallId, signal }),
+    toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+  }
   const resolveSandbox = () => ready
   // Its own budget: saving outputs never takes what published artifacts and tool files need.
   const toolOutputFiles = new ToolOutputFiles({
@@ -918,10 +926,16 @@ async function startAgentEnvironment(
       console.error("[SixbAgent] Could not stop the run's background commands:", error)
     })
   }
-  appendBuiltInTool(tools, createReadTool(resolveSandbox))
+  // One per run: `edit` and `write` change only files this run read, as it read them.
+  const fileReads = new FileReadLedger()
+  appendBuiltInTool(tools, createReadTool(resolveSandbox, fileReads, fileViewer))
+  appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
+  appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
+  appendBuiltInTool(tools, createGlobTool(resolveSandbox))
+  appendBuiltInTool(tools, createGrepTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
-  appendBuiltInTool(tools, createBashOutputTool(resolveSandbox, background))
-  appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))
+  appendBuiltInTool(tools, createWaitTool(resolveSandbox, background, input.children))
+  appendBuiltInTool(tools, createStopTool(resolveSandbox, background, input.children))
   if (plan.web?.search) {
     appendBuiltInTool(tools, createWebSearchTool({ search: input.webSearch, web: plan.web }))
   }
@@ -1141,11 +1155,16 @@ function agentSandboxPath(handle: AgentSandboxHandle, path: string): string {
 }
 
 /**
- * The tools whose images reach the model after their step: the project's and `view_file`, whose
- * outputs go through the run's media bridge. A replay asks the same of the stored trace.
+ * The tools whose images reach the model after their step: the project's and `read`, whose
+ * outputs go through the run's media bridge, and `view_file`, which earlier threads hold. A replay
+ * asks the same of the stored trace.
  */
 function suppliesToolFiles(plan: Pick<ResolvedAgentExecutionPlan, "tools">): SuppliesToolFiles {
-  const names = new Set([...plan.tools.map((tool) => tool.name), VIEW_FILE_TOOL_SPEC.name])
+  const names = new Set([
+    ...plan.tools.map((tool) => tool.name),
+    READ_TOOL_SPEC.name,
+    LEGACY_VIEW_FILE_TOOL,
+  ])
   return (toolName) => names.has(toolName)
 }
 

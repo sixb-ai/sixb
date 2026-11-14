@@ -1,3 +1,4 @@
+import type { MetaAdsApi } from "./ads"
 import type { MetaBatchApi } from "./batch"
 import type { FacebookPageApi } from "./facebook"
 import type { InstagramMediaApi, InstagramUserApi } from "./instagram"
@@ -5,6 +6,9 @@ import type { MetaInstagramAccount, PagesApi } from "./pages"
 import type { FacebookVideoApi, InstagramContainerApi, MetaResourceOptions } from "./publishing"
 
 export interface MetaClient {
+  /** Read-only Marketing API: ad accounts, campaigns, ad sets, ads, creatives and Ads Insights. */
+  readonly ads: MetaAdsApi
+
   /** Read-only Graph API batch requests. */
   readonly batch: MetaBatchApi
 
@@ -46,17 +50,18 @@ export interface MetaConnectedInstagramAccount {
 
 /**
  * Client for one Instagram account connected through Unified Login. Every request defaults to
- * the grant's token. Pages are absent: the account needs none, and the token reaches none.
+ * the grant's token. Pages and ads are absent: the account needs none, and the token reaches none.
  */
 export interface MetaInstagramAccountClient
-  extends Omit<MetaClient, "pages" | "facebook" | "facebookVideo"> {
+  extends Omit<MetaClient, "ads" | "pages" | "facebook" | "facebookVideo"> {
   readonly account: MetaConnectedInstagramAccount
 }
 
 /**
  * Client for one Page connected through Facebook Login. Every request defaults to the Page access
- * token. `pages` is absent: it needs the user token, which Meta expires after about 60 days.
+ * token. `pages` is absent: it needs the user token, which Meta expires after about 60 days. `ads`
+ * is absent too: a Page token reads no ad account.
  */
-export interface MetaPageClient extends Omit<MetaClient, "pages"> {
+export interface MetaPageClient extends Omit<MetaClient, "ads" | "pages"> {
   readonly account: MetaConnectedPage
 }

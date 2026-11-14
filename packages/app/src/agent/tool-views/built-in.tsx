@@ -5,13 +5,18 @@ import { isBackgroundStart } from "../background/interpret"
 import { BashToolView } from "../bash/bash-tool-view"
 import { WebFetchToolView } from "../components/web-fetch-tool-view"
 import { WebSearchToolView } from "../components/web-search-tool-view"
+import { EditToolView, WriteToolView } from "../file-edits/file-edit-tool-view"
 import type { NormalizedTool } from "../parts"
 import { OpenArtifactToolView } from "../publish-artifact/open-artifact-tool-view"
 import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
 import { ReadToolView } from "../read/read-tool-view"
+import { coerceGlobOutput, coerceGrepOutput } from "../search/interpret"
+import { GlobToolView, GrepToolView } from "../search/search-tool-view"
 import { coerceWebFetchOutput } from "../utils/web-fetch"
 import { coerceWebSearchOutput } from "../utils/web-search"
+import { describeViewFile } from "../view-file/interpret"
 import { ViewFileToolView } from "../view-file/view-file-tool-view"
+import { waitsForCommandsOnly } from "../waits"
 
 type BuiltInToolView = (tool: NormalizedTool) => ReactNode
 
@@ -37,16 +42,38 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
         />
       ),
   ],
-  // A failed read or stop keeps the inspector, which says why.
+  // A wait or a stop for commands alone is their row; one for a sub-agent is the sub-agent's. A
+  // failed one keeps the inspector, which says why. Earlier threads hold bash_output and bash_stop.
+  ...["wait", "stop", "bash_output", "bash_stop"].map((name): [string, BuiltInToolView] => [
+    name,
+    (tool) =>
+      tool.state === "output-error" || !waitsForCommandsOnly(tool) ? null : (
+        <BackgroundToolRow tool={tool} />
+      ),
+  ]),
+  // A file read shows as itself, an image or a PDF, keeps the view view_file had.
   [
-    "bash_output",
-    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
+    "read",
+    (tool) =>
+      describeViewFile(tool).file ? <ViewFileToolView tool={tool} /> : <ReadToolView tool={tool} />,
+  ],
+  ["edit", (tool) => <EditToolView tool={tool} />],
+  ["write", (tool) => <WriteToolView tool={tool} />],
+  [
+    "glob",
+    (tool) =>
+      tool.state !== "output-available" || coerceGlobOutput(tool.output) !== null ? (
+        <GlobToolView tool={tool} />
+      ) : null,
   ],
   [
-    "bash_stop",
-    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
+    "grep",
+    (tool) =>
+      tool.state !== "output-available" || coerceGrepOutput(tool.output) !== null ? (
+        <GrepToolView tool={tool} />
+      ) : null,
   ],
-  ["read", (tool) => <ReadToolView tool={tool} />],
+  // Earlier threads hold calls to it.
   ["view_file", (tool) => <ViewFileToolView tool={tool} />],
   ["publish_artifact", publishArtifact],
   ["update_artifact", publishArtifact],

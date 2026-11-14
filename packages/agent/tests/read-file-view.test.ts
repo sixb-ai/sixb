@@ -11,8 +11,9 @@ import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../src/attachments"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { AgentSandboxFileRegistry } from "../src/sandbox-file-registry"
+import { createReadTool } from "../src/tools/read"
 import { createAgentToolFiles } from "../src/tools/tool-files"
-import { createViewFileTool } from "../src/tools/view-file"
+import type { SandboxFileViewer } from "../src/tools/view-file"
 
 const PNG_BYTES = Uint8Array.from(
   Buffer.from(
@@ -21,7 +22,7 @@ const PNG_BYTES = Uint8Array.from(
   )
 )
 
-describe("view_file tool", () => {
+describe("read, for a file that is not text", () => {
   test("reuses a FileRef registered by another tool without republishing it", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const fileRef = await blobStorage.put({
@@ -35,8 +36,7 @@ describe("view_file tool", () => {
     registry.register(toolFilePath, fileRef)
     let publications = 0
     const viewFile = executableViewFileTool(
-      createViewFileTool({
-        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+      readTool(sandbox, {
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: () => {
@@ -64,18 +64,17 @@ describe("view_file tool", () => {
   test("rereads and republishes a mutable bash-created image", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const sandbox = new ViewFileSandbox()
-    sandbox.files.set(`${sandbox.workingDirectory}/scratch/bash-image.bin`, PNG_BYTES)
+    sandbox.files.set(`${sandbox.workingDirectory}/scratch/bash-image.png`, PNG_BYTES)
     const registry = new AgentSandboxFileRegistry()
     let publications = 0
     const viewFile = executableViewFileTool(
-      createViewFileTool({
-        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+      readTool(sandbox, {
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: ({ toolCallId, signal }) => {
           publications += 1
           return createAgentToolFiles({
-            toolName: "view_file",
+            toolName: "read",
             toolCallId,
             signal,
             blobStorage,
@@ -86,16 +85,16 @@ describe("view_file tool", () => {
       })
     )
 
-    const first = await viewFile.execute({ path: "scratch/bash-image.bin" })
+    const first = await viewFile.execute({ path: "scratch/bash-image.png" })
     const updatedBytes = Uint8Array.from([...PNG_BYTES, 0])
-    sandbox.files.set(`${sandbox.workingDirectory}/scratch/bash-image.bin`, updatedBytes)
-    const second = await viewFile.execute({ path: "scratch/bash-image.bin" })
+    sandbox.files.set(`${sandbox.workingDirectory}/scratch/bash-image.png`, updatedBytes)
+    const second = await viewFile.execute({ path: "scratch/bash-image.png" })
 
     expect(first).toMatchObject({
       kind: "agentToolResult",
       content: [
         { type: "text" },
-        { type: "file", fileRef: { fileName: "bash-image.bin", mediaType: "image/png" } },
+        { type: "file", fileRef: { fileName: "bash-image.png", mediaType: "image/png" } },
       ],
     })
     expect(second).toMatchObject({
@@ -105,7 +104,7 @@ describe("view_file tool", () => {
         {
           type: "file",
           fileRef: {
-            fileName: "bash-image.bin",
+            fileName: "bash-image.png",
             mediaType: "image/png",
             sizeBytes: updatedBytes.byteLength,
           },
@@ -120,6 +119,34 @@ describe("view_file tool", () => {
     )
   })
 
+  // Reproduce: rethrow NotTextError in read's execute; a binary file without an image's name is
+  // then refused as "binary, not UTF-8 text" instead of shown.
+  test("shows a file it cannot page as text as itself, whatever its name", async () => {
+    const blobStorage = new InMemoryBlobStorage()
+    const sandbox = new ViewFileSandbox()
+    sandbox.files.set(`${sandbox.workingDirectory}/out/chart`, PNG_BYTES)
+    const read = executableViewFileTool(
+      readTool(sandbox, {
+        attachments: emptyAttachments(),
+        registry: new AgentSandboxFileRegistry(),
+        filesForToolCall: ({ toolCallId, signal }) =>
+          createAgentToolFiles({
+            toolName: "read",
+            toolCallId,
+            signal,
+            blobStorage,
+            resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+          }),
+        toolResultToModelOutput: unusedToolResultProjection,
+      })
+    )
+
+    expect(await read.execute({ path: "out/chart" })).toMatchObject({
+      kind: "agentToolResult",
+      content: [{ type: "text" }, { type: "file", fileRef: { mediaType: "image/png" } }],
+    })
+  })
+
   test("returns clear metadata for formats that cannot be rendered as images", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const fileRef = await blobStorage.put({
@@ -132,8 +159,7 @@ describe("view_file tool", () => {
     const path = `${sandbox.workingDirectory}/report.pdf`
     registry.register(path, fileRef)
     const viewFile = executableViewFileTool(
-      createViewFileTool({
-        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+      readTool(sandbox, {
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: () => {
@@ -166,8 +192,7 @@ describe("view_file tool", () => {
     }
     const registry = new AgentSandboxFileRegistry()
     const viewFile = executableViewFileTool(
-      createViewFileTool({
-        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+      readTool(sandbox, {
         attachments,
         registry,
         filesForToolCall: () => {
@@ -200,8 +225,7 @@ describe("view_file tool", () => {
   test("rejects paths outside the sandbox before reading them", async () => {
     const sandbox = new ViewFileSandbox()
     const viewFile = executableViewFileTool(
-      createViewFileTool({
-        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+      readTool(sandbox, {
         attachments: emptyAttachments(),
         registry: new AgentSandboxFileRegistry(),
         filesForToolCall: () => {
@@ -211,12 +235,20 @@ describe("view_file tool", () => {
       })
     )
 
-    await expect(viewFile.execute({ path: "../../etc/passwd" })).rejects.toThrow(
+    await expect(viewFile.execute({ path: "../../etc/photo.png" })).rejects.toThrow(
       "path must stay inside the sandbox working directory"
     )
     expect(sandbox.commands).toHaveLength(0)
   })
 })
+
+function readTool(sandbox: Sandbox, viewer: SandboxFileViewer) {
+  return createReadTool(
+    async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
+    undefined,
+    viewer
+  )
+}
 
 function unusedToolResultProjection(): { readonly type: "text"; readonly value: string } {
   return { type: "text", value: "unused" }
@@ -273,6 +305,14 @@ class ViewFileSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.commands.push({ command, args })
+    // The read script: the fingerprint, the real path, then the page as base64.
+    if (args[0] === "-c" && args[2] === "sixb-read") {
+      const path = `${this.workingDirectory}/${args[3]}`
+      const bytes = this.files.get(path)
+      if (!bytes) return { exitCode: 10, stdout: "", stderr: "", durationMs: 1 }
+      const stdout = `1:${bytes.byteLength}\n${path}\n${Buffer.from(bytes).toString("base64")}`
+      return { exitCode: 0, stdout, stderr: "", durationMs: 1 }
+    }
     const encodedPath = options.env?.SIXB_READ_PATH_B64
     const path = encodedPath ? Buffer.from(encodedPath, "base64").toString("utf-8") : ""
     const bytes = this.files.get(path)

@@ -48,15 +48,39 @@ export type MetaOAuthConnectorOptions = MetaOAuthBaseOptions & { readonly accoun
       }
   )
 
-/**
- * Instagram API with Unified Login: the client logs in with Instagram or Facebook, picks a
- * business portfolio and the Instagram professional accounts to share, without a Facebook Page.
- * Each connection is one shared account, read and published through `graph.facebook.com` with
- * the grant's Business Integration System User token.
- */
-export interface MetaInstagramOAuthConnectorOptions extends MetaOAuthBaseOptions {
-  /** Facebook Login for Business configuration of the "System-user access token" type (Unified login). */
-  readonly configId: string
+interface MetaInstagramBaseOptions extends MetaOAuthBaseOptions {
   readonly accounts: "instagram"
-  readonly scopes?: never
 }
+
+/**
+ * Connect Instagram professional accounts without a Facebook Page. Each connection is one account.
+ *
+ * - Unified Login (`configId`): the client logs in with Instagram or Facebook, picks a business
+ *   portfolio and the accounts to share. Read and published through `graph.facebook.com` with the
+ *   grant's Business Integration System User token. `appId` and `appSecret` are the Meta app's.
+ * - Instagram Login (`login: "instagram"`): the client signs in on instagram.com with the account's
+ *   own credentials; no Page and no business portfolio. Read and published through
+ *   `graph.instagram.com` with a 60-day Instagram user token the connector refreshes. `appId` and
+ *   `appSecret` are the Instagram app's, from "API setup with Instagram login".
+ */
+export type MetaInstagramOAuthConnectorOptions =
+  | (MetaInstagramBaseOptions & {
+      /** Facebook Login for Business configuration of the "System-user access token" type (Unified login). */
+      readonly configId: string
+      readonly login?: never
+      readonly scopes?: never
+    })
+  | (MetaInstagramBaseOptions & {
+      readonly login: "instagram"
+      /**
+       * Instagram Login permissions. Defaults to `instagram_business_basic`,
+       * `instagram_business_content_publish` and `instagram_business_manage_insights`.
+       */
+      readonly scopes?: readonly string[]
+      /**
+       * Ask for the account's credentials on every sign-in, even when the browser is signed in to
+       * Instagram (`force_reauth`), so several accounts connect one after the other.
+       */
+      readonly reauthenticate?: boolean
+      readonly configId?: never
+    })

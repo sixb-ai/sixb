@@ -175,6 +175,7 @@ A deploy that fails before the services stop leaves them running. One that fails
 | `sixb deploy status` | Show each process with its memory, CPU, and restarts, and the deployed commit. |
 | `sixb deploy logs [service]` | Print recent log lines. `--follow` keeps printing; `--tail <lines>` sets how many (default 100). |
 | `sixb deploy restart [service]` | Restart one service, or all of them. `stop` and `start` work the same way. |
+| `sixb run --deployed <script>` | Run a one-off [script](../fundamentals/scripts.md) on the deployment, with its environment. |
 
 A process that exits is restarted automatically, and the services start when the server boots, without anyone logging in.
 

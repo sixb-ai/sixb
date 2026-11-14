@@ -17,6 +17,7 @@ import {
   buildCreateSecretSql,
   buildSetPostgresPoolSql,
   quoteIdentifier,
+  quoteSqlString,
   requiredExtensions,
 } from "./sql"
 
@@ -47,6 +48,11 @@ export interface DuckDbRuntime extends DuckDbQueryRuntime {
    * interleaved read or write would observe the wrong connection state.
    */
   withExclusive<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
+  /**
+   * Drop DuckDB's cache of remote files and return the memory DuckDB freed to the system. The
+   * runtime does this on its own once it has been idle for `releaseMemoryAfterIdleMs`.
+   */
+  releaseMemory(): Promise<void>
   close(): Promise<void>
 }
 
@@ -83,6 +89,31 @@ const DUCKLAKE_EXTENSION_VERSION = "ac7595b0"
 /** Builds this process has warned about. */
 const warnedDuckLakeBuilds = new Set<string>()
 
+/**
+ * Settings the provider changes from DuckDB's defaults; `duckdb.config` overrides each.
+ *
+ * With `allocator_background_threads`, DuckDB's worker threads flush the allocator
+ * (`malloc_trim` with glibc) when they run out of work. Without it, what a burst of queries freed
+ * stayed in malloc's arenas: a process idled near 1 GB after a burst that settles near 0.3 GB
+ * with it, within seconds, no slower and with the file cache intact.
+ *
+ * DuckDB also flushes when it frees more than `allocator_bulk_deallocation_flush_threshold` in
+ * one piece. At DuckDB's 512 MB that rarely happens, so the next query grew on top of what the
+ * last one freed; at 32 MB a burst of queries peaked lower, no slower. The flush is throttled to
+ * once per 100 ms per process.
+ */
+const DUCKDB_CONFIG_DEFAULTS: Readonly<Record<string, string>> = {
+  allocator_background_threads: "true",
+  allocator_bulk_deallocation_flush_threshold: "32MB",
+}
+
+/**
+ * The first read after a release fetches from object storage again, several times slower than a
+ * cached one. A minute keeps a person's session and back-to-back pipeline steps on the cache, and
+ * still returns it long before a worker's next scheduled run.
+ */
+const DEFAULT_RELEASE_MEMORY_AFTER_IDLE_MS = 60_000
+
 class NodeDuckDbRuntime implements DuckDbRuntime {
   private closing = false
   private closed = false
@@ -90,10 +121,19 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
   private operations: Promise<void> = Promise.resolve()
   private readonly readers = new Set<DuckDbReader>()
   private closePromise: Promise<void> | undefined
+  // Operations accepted and not yet settled, on the main connection.
+  private active = 0
+  private idleTimer: ReturnType<typeof setTimeout> | undefined
+  // The limit releaseMemory() re-applies, and what DuckDB reported once it was applied. DuckDB
+  // reports the limit rounded to a tenth of a unit, so re-applying what it reports would lower it
+  // step by step. A report that differs from the last one is a limit set since, and replaces it.
+  private memoryLimit: string | undefined
+  private reportedMemoryLimit: string | undefined
 
   constructor(
     private readonly instance: DuckDBInstance,
     private readonly connection: DuckDBConnection,
+    private readonly releaseMemoryAfterIdleMs: number | false,
     private readonly temporaryDirectory?: string
   ) {}
 
@@ -109,6 +149,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
         ...options,
         onClose: async () => {
           this.readers.delete(reader)
+          this.scheduleIdleRelease()
           await options.onClose?.()
         },
       })
@@ -172,6 +213,46 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     })
   }
 
+  /**
+   * DuckDB keeps remote Parquet it read in memory for later queries, up to `memory_limit`, and
+   * glibc keeps what DuckDB frees in its arenas. Neither shrinks without memory pressure inside
+   * this process, which several processes on one host never put on each other.
+   *
+   * Turning the external file cache off drops what it holds; it is turned back on for the next
+   * burst of work. Setting `memory_limit` makes DuckDB flush its allocator (`malloc_trim(0)`).
+   */
+  async releaseMemory(): Promise<void> {
+    await this.enqueue(async () => {
+      const reader = await this.connection.runAndReadAll(
+        "SELECT current_setting('enable_external_file_cache') AS cache, current_setting('memory_limit') AS memory_limit"
+      )
+      const [settings] = reader.convertRowObjects(sixbDuckDbValueConverter)
+      if (settings?.cache === true) {
+        try {
+          await this.connection.run("SET GLOBAL enable_external_file_cache = false")
+        } finally {
+          // A cache left off would read as the project's own setting on every later release.
+          await this.connection.run("SET GLOBAL enable_external_file_cache = true")
+        }
+      }
+
+      const reported = String(settings?.memory_limit)
+      if (reported !== this.reportedMemoryLimit) this.memoryLimit = reported
+      await this.connection.run(
+        `SET GLOBAL memory_limit = ${quoteSqlString(this.memoryLimit ?? reported)}`
+      )
+      this.reportedMemoryLimit = await this.currentMemoryLimit()
+    }, false)
+  }
+
+  private async currentMemoryLimit(): Promise<string> {
+    const reader = await this.connection.runAndReadAll(
+      "SELECT current_setting('memory_limit') AS memory_limit"
+    )
+    const [settings] = reader.convertRowObjects(sixbDuckDbValueConverter)
+    return String(settings?.memory_limit)
+  }
+
   close(): Promise<void> {
     this.closePromise ??= this.finish()
     return this.closePromise
@@ -185,6 +266,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
 
   private async finish(): Promise<void> {
     this.closing = true
+    this.cancelIdleRelease()
     const results = await Promise.allSettled([...this.readers].map((reader) => reader.close()))
     // resetRuntime()/close() can run while an API read is still using this
     // runtime. Wait for accepted work before closing the native connection.
@@ -197,8 +279,11 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     if (failed?.status === "rejected") throw failed.reason
   }
 
-  private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+  /** `releaseWhenIdle: false` keeps a release from scheduling the next one. */
+  private enqueue<T>(operation: () => T | Promise<T>, releaseWhenIdle = true): Promise<T> {
     this.assertAcceptingOperations()
+    this.cancelIdleRelease()
+    this.active++
 
     // Keep the chain alive after failures so one rejected query does not block
     // all later work on this runtime.
@@ -210,7 +295,33 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
       () => {},
       () => {}
     )
+    void this.operations.then(() => {
+      this.active--
+      if (releaseWhenIdle) this.scheduleIdleRelease()
+    })
     return result
+  }
+
+  private scheduleIdleRelease(): void {
+    const delay = this.releaseMemoryAfterIdleMs
+    if (delay === false || this.closing || this.active > 0 || this.readers.size > 0) return
+    // New work and close() cancel the timer, so it fires only on an idle, open runtime.
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined
+      this.releaseMemory().catch((error: unknown) => {
+        if (this.closing) return
+        const reason = error instanceof Error ? error.message : String(error)
+        console.warn(`[SixbDuckLake] Could not release idle DuckDB memory: ${reason}`)
+      })
+    }, delay)
+    // An idle timer must never keep the process alive.
+    this.idleTimer.unref?.()
+  }
+
+  private cancelIdleRelease(): void {
+    if (this.idleTimer === undefined) return
+    clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
   }
 
   private assertAcceptingOperations(): void {
@@ -314,10 +425,16 @@ export async function createDuckDbRuntime(
   let instance: DuckDBInstance | undefined
   try {
     instance = await DuckDBInstance.create(path, {
+      ...DUCKDB_CONFIG_DEFAULTS,
       ...options.config,
       ...(temporaryDirectory ? { temp_directory: temporaryDirectory } : {}),
     })
-    return new NodeDuckDbRuntime(instance, await instance.connect(), temporaryDirectory)
+    return new NodeDuckDbRuntime(
+      instance,
+      await instance.connect(),
+      options.releaseMemoryAfterIdleMs ?? DEFAULT_RELEASE_MEMORY_AFTER_IDLE_MS,
+      temporaryDirectory
+    )
   } catch (error) {
     instance?.closeSync()
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })

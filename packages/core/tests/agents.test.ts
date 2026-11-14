@@ -189,13 +189,20 @@ describe("defineAgentTool", () => {
     }
     for (const name of [
       "bash",
+      "wait",
+      "stop",
       "bash_output",
       "bash_stop",
       "read",
+      "edit",
+      "write",
+      "glob",
+      "grep",
       "view_file",
       "spawn_agent",
       "wait_agent",
       "message_agent",
+      "ask",
       "ask_parent",
     ]) {
       expect(() => validateName(name)).toThrow("reserved by the framework")

@@ -4,6 +4,7 @@ import {
   type CanvasBoard,
   type FrameEditTarget,
   type FrameEvent,
+  type FrameZoom,
   parseFrameEvent,
 } from "@sixb/core/artifacts"
 import {
@@ -51,6 +52,7 @@ import {
   type PinPlace,
   pinPoint,
 } from "./comment-pins"
+import type { PageSize } from "./page-size"
 
 // A board opened over the canvas, as its page runs in its frame, and what the reader does on it:
 // read it, edit what it shows, or pick what to comment on.
@@ -63,6 +65,7 @@ import {
 //
 //   frame ── edit.select ──▶ the element picked, its toolbar        (the reader's own click)
 //         ── edit.text ───▶ mergeBoardText → the board's Y.Text     (only for the element picked)
+//         ── zoom ────────▶ the opened board zoomed, not the browser (the reader's own gesture)
 //         ◀─ edit.patch ── what the document changed since the frame's version
 
 /** What edits a board's elements: the live canvas, under the reader's own undo. */
@@ -167,12 +170,13 @@ function useBoardFrame({
 }
 
 /**
- * An opened board at its size on screen: its page in its frame, the picture under it until it is
- * ready, comments' pins over it, and, editing, the picked element's tools.
+ * An opened board at its size on screen: its page in its frame, laid out at `size`, the picture
+ * under it until it is ready, comments' pins over it, and, editing, the picked element's tools.
  */
 export function BoardStage({
   version,
   board,
+  size,
   title,
   scale,
   live,
@@ -188,9 +192,13 @@ export function BoardStage({
   onOpenPin,
   onSubmitDraft,
   onCancelDraft,
+  onContentHeight,
+  onZoom,
 }: {
   readonly version: ArtifactVersion
   readonly board: CanvasBoard
+  /** The size the page is laid out at: the board's, or the one the reader chose to see it at. */
+  readonly size: PageSize
   readonly title: string
   readonly scale: number
   /** The canvas held live, whose document the board is patched from. */
@@ -208,6 +216,10 @@ export function BoardStage({
   readonly onOpenPin: (id: string) => void
   readonly onSubmitDraft: (body: string) => Promise<void>
   readonly onCancelDraft: () => void
+  /** The page's height as laid out at its width, as the frame reports it. */
+  readonly onContentHeight?: (height: number) => void
+  /** The reader zoomed over the page: the frame passes it on instead of the browser zooming. */
+  readonly onZoom?: (zoom: FrameZoom) => void
 }) {
   const messages = useArtifactMessages().canvas
   const frame = useBoardFrame({ version, board, live })
@@ -252,12 +264,15 @@ export function BoardStage({
   // post too.
   const port = useRef<{ readonly mine: MessagePort; handed: MessagePort | null } | null>(null)
   const onEditRef = useRef<(event: FrameEvent) => void>(() => {})
+  const onZoomRef = useRef(onZoom)
+  onZoomRef.current = onZoom
   useEffect(() => {
     if (frame.loads === 0) return
     const channel = new MessageChannel()
     channel.port1.onmessage = (message: MessageEvent) => {
       const event = parseFrameEvent(message.data)
-      if (event?.event.startsWith("edit.")) onEditRef.current(event)
+      if (event?.event === "zoom") onZoomRef.current?.(event.params)
+      else if (event?.event.startsWith("edit.")) onEditRef.current(event)
     }
     port.current = { mine: channel.port1, handed: channel.port2 }
     return () => channel.port1.close()
@@ -284,11 +299,11 @@ export function BoardStage({
       const x = at?.x ?? rect.x + rect.width
       const y = at?.y ?? rect.y
       return {
-        x: Math.min(1, Math.max(0, x / board.w)),
-        y: Math.min(1, Math.max(0, y / board.h)),
+        x: Math.min(1, Math.max(0, x / size.w)),
+        y: Math.min(1, Math.max(0, y / size.h)),
       }
     },
-    [board.w, board.h]
+    [size.w, size.h]
   )
 
   const onEvent = useCallback(
@@ -301,9 +316,11 @@ export function BoardStage({
         frame.ready()
       } else if (event.event === "press") {
         onPress(event.params.text)
+      } else if (event.event === "size") {
+        onContentHeight?.(event.params.height)
       }
     },
-    [frame, onPress]
+    [frame, onPress, onContentHeight]
   )
 
   onEditRef.current = (event: FrameEvent) => {
@@ -326,7 +343,7 @@ export function BoardStage({
             // The page's body is the whole board, named by its title.
             ...(target.address === "body" ? { anchor: title } : {}),
             point: point(at, target.rect),
-            under: Math.min(1, (target.rect.y + target.rect.height) / board.h),
+            under: Math.min(1, (target.rect.y + target.rect.height) / size.h),
           })
           return
         }
@@ -361,7 +378,7 @@ export function BoardStage({
       <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
         <div
           className="absolute top-0 left-0 origin-top-left"
-          style={{ width: board.w, height: board.h, transform: `scale(${scale})` }}
+          style={{ width: size.w, height: size.h, transform: `scale(${scale})` }}
         >
           <ArtifactFrame
             key={board.id}
@@ -378,14 +395,15 @@ export function BoardStage({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-0" data-board-overlay="">
+      {/* Over the page's resize handles: a pin at the page's edge stays pressable. */}
+      <div className="pointer-events-none absolute inset-0 z-10" data-board-overlay="">
         {pins.map((pin, index) => {
           const at = pinPoint(pin, pin.point ? 0 : index)
           return (
             <div
               key={pin.id}
               className="absolute"
-              style={{ left: at.x * board.w * scale, top: at.y * board.h * scale }}
+              style={{ left: at.x * size.w * scale, top: at.y * size.h * scale }}
             >
               <CommentPin
                 number={pin.number}
@@ -403,13 +421,13 @@ export function BoardStage({
         {draft ? (
           <div
             className="absolute"
-            style={{ left: draft.point.x * board.w * scale, top: draft.point.y * board.h * scale }}
+            style={{ left: draft.point.x * size.w * scale, top: draft.point.y * size.h * scale }}
           >
             <CommentPin label={messages.comments.newPin} active resolved={false} draft />
             <div
               className={cn("absolute", draftAbove(draft) ? "bottom-9" : null)}
               style={{
-                ...cardPlace(draft.point.x * board.w * scale, board.w * scale),
+                ...cardPlace(draft.point.x * size.w * scale, size.w * scale),
                 // Under what it is about, so the words it points at stay in view.
                 ...(draftAbove(draft)
                   ? {}
@@ -417,7 +435,7 @@ export function BoardStage({
                       top:
                         Math.max(
                           0,
-                          ((draft.under ?? draft.point.y) - draft.point.y) * board.h * scale
+                          ((draft.under ?? draft.point.y) - draft.point.y) * size.h * scale
                         ) + 10,
                     }),
               }}
@@ -436,6 +454,7 @@ export function BoardStage({
             key={selected.address ?? "scripted"}
             target={selected}
             scale={scale}
+            width={size.w}
             board={board}
             version={version}
             live={live}
@@ -514,6 +533,7 @@ function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonl
 function ElementTools({
   target,
   scale,
+  width: pageWidth,
   board,
   version,
   live,
@@ -524,6 +544,8 @@ function ElementTools({
 }: {
   readonly target: FrameEditTarget
   readonly scale: number
+  /** The page's width as laid out. */
+  readonly width: number
   readonly board: CanvasBoard
   readonly version: ArtifactVersion
   readonly live: LiveArtifact | null
@@ -542,7 +564,7 @@ function ElementTools({
   useLayoutEffect(() => {
     setWidth(toolbar.current?.offsetWidth ?? 0)
   })
-  const left = Math.max(4, Math.min(rect.x * scale, board.w * scale - width - 4))
+  const left = Math.max(4, Math.min(rect.x * scale, pageWidth * scale - width - 4))
   const above = rect.y * scale >= 44
   const top = above ? rect.y * scale - 40 : (rect.y + rect.height) * scale + 8
 

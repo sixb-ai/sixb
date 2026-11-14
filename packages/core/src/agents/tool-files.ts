@@ -14,7 +14,7 @@ import type { AgentToolFilePutInput } from "./types"
 
 /** Where a run's sandbox keeps its files, relative to its working directory. */
 export const SANDBOX_CONTEXT_DIRECTORY = ".sixb/agent"
-/** The most a file a tool stores, or one `view_file` reads, may hold: an artifact's file limit. */
+/** The most a file a tool stores, or one `read` shows as itself, may hold: an artifact's file limit. */
 export const AGENT_FILE_MAX_BYTES = ARTIFACT_LIMITS.maxFileBytes
 const MAX_FILE_NAME_BYTES = 255
 const MAX_MEDIA_TYPE_LENGTH = 255

@@ -54,6 +54,7 @@ const ANSWER_INSTRUCTIONS = [
 
 export const WEB_FETCH_TOOL_SPEC = {
   name: "web_fetch",
+  strict: true,
   description:
     "Read a web page, PDF or image by URL. A large page is saved to a file. Pass a question to get an answer from the page.",
   inputSchema: {
@@ -266,7 +267,7 @@ function savedNote(output: WebFetchToolOutput): string {
   if (/\.(?:md|txt)$/.test(output.path ?? "")) {
     return `The page (${size} sent) is saved as text at ${output.path}: read it in pieces with the read tool, or search it with grep.`
   }
-  return `The file (${output.contentType || "unknown type"}, ${size}) is saved at ${output.path}: open it with view_file.`
+  return `The file (${output.contentType || "unknown type"}, ${size}) is saved at ${output.path}: open it with read.`
 }
 
 function truncatedAnswerNote(output: WebFetchToolOutput): string {

@@ -3,6 +3,7 @@ import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
 import { toolResultValue } from "../parts"
+import { namedIds } from "../waits"
 import { useBackgroundCards } from "./context"
 import { backgroundRowLabel } from "./interpret"
 
@@ -35,22 +36,35 @@ export function BackgroundToolRow({ tool }: { readonly tool: NormalizedTool }) {
   )
 }
 
-/** The command a call names: its own input, what it returned, or the start of that id. */
+/**
+ * The commands a call names: its own input, what it returned, or the starts of those ids. `wait`
+ * names several by id and returns them in `commands`; the tools before it named one.
+ */
 function commandNamed(
   tool: NormalizedTool,
   commands: ReadonlyMap<string, { readonly id: string; readonly command: string }> | undefined
 ): string {
   const input = isRecord(tool.input) ? tool.input : {}
+  if (typeof input.command === "string") return firstLine(input.command)
   const output = toolResultValue(tool.output)
-  const named =
-    typeof input.command === "string"
-      ? input.command
-      : isRecord(output) && typeof output.command === "string"
-        ? output.command
-        : [...(commands?.values() ?? [])].reverse().find((command) => command.id === input.id)
-            ?.command
-  const line = named?.trim().split("\n")[0] ?? ""
-  return line || (typeof input.id === "string" ? input.id : "")
+  const returned = isRecord(output)
+    ? Array.isArray(output.commands)
+      ? output.commands.filter(isRecord)
+      : [output]
+    : []
+  const started = [...(commands?.values() ?? [])].reverse()
+  return namedIds(tool)
+    .map((id) => {
+      const named =
+        returned.find((command) => command.id === id)?.command ??
+        started.find((command) => command.id === id)?.command
+      return (typeof named === "string" && firstLine(named)) || id
+    })
+    .join(", ")
+}
+
+function firstLine(value: string): string {
+  return value.trim().split("\n")[0] ?? ""
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

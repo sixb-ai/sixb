@@ -7,8 +7,8 @@ both to the harness.
 ```text
 runner (the cloud worker today)          harness (@sixb/agent)
 claims the run → AgentRunSession         builds the prompt and tools, runs the loop, finishes
-opens its environment → openSandbox      bash · bash_output · bash_stop · read · view_file ·
-                                         publish_artifact · children
+opens its environment → openSandbox      read · edit · write · glob · grep · bash · wait ·
+                                         stop · publish_artifact · children
 ```
 
 ```text
@@ -16,7 +16,7 @@ runAgentTurn                 a conversation turn
 runSubagent                  a child agent's run
 runWorkflowAgentNode         a workflow agent step: the loop, then the structured finalizer
 create*AgentEnvironment      the run's prompt, tools and files, in the environment its runner opens
-SubagentCoordinator          spawn_agent, wait_agent, message_agent, and the children's questions
+SubagentCoordinator          spawn_agent, message_agent, children for wait and stop, their questions
 ```
 
 A run reaches shared state only through its session (see

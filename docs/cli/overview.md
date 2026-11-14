@@ -124,6 +124,7 @@ Run these from your project root:
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
+| `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |

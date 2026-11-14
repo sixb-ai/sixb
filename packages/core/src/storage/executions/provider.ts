@@ -27,7 +27,7 @@ export function compareExecutionCreation(
 export interface ExecutionStorageRow {
   readonly projectId: string
   readonly id: string
-  readonly executorKind: "agent" | "kernel" | "request" | TrustedPrimitiveKind
+  readonly executorKind: "agent" | "kernel" | "request" | "script" | TrustedPrimitiveKind
   readonly executorId: string
   readonly sourceKind:
     | "ontologyCommit"
@@ -36,6 +36,7 @@ export interface ExecutionStorageRow {
     | "execution"
     | "http"
     | "schedule"
+    | "script"
     | "webhook"
   readonly sourceId: string
   readonly requestedByUserId: string | null
@@ -44,7 +45,13 @@ export interface ExecutionStorageRow {
   readonly correlationId: string
   /** SQL-only projection of an execution source, used to enforce the parent foreign key. */
   readonly parentExecutionId: string | null
-  readonly authorityKind: "delegated" | "disabled" | "kernel" | "principal" | "trustedPrimitive"
+  readonly authorityKind:
+    | "delegated"
+    | "disabled"
+    | "kernel"
+    | "principal"
+    | "script"
+    | "trustedPrimitive"
   readonly authorityUserId: string | null
   readonly authorityServiceAccountId: string | null
   readonly authoritySessionId: string | null
@@ -129,6 +136,8 @@ function flattenExecutor(
       return { executorKind: "agent", executorId: record.executor.runId }
     case "kernel":
       return { executorKind: "kernel", executorId: kernelOperationId(record.executor.operation) }
+    case "script":
+      return { executorKind: "script", executorId: record.executor.runId }
   }
 }
 
@@ -152,6 +161,8 @@ function flattenSource(
       }
     case "execution":
       return { sourceKind: "execution", sourceId: record.source.executionId }
+    case "script":
+      return { sourceKind: "script", sourceId: record.source.path }
   }
 }
 
@@ -227,6 +238,9 @@ function flattenAuthority(
         authorityKind: "kernel",
         authorityKernelOperation: record.authorizationRef.operation.type,
       }
+    case "script":
+      // The run id is the executor's, which the row already holds.
+      return { ...empty, authorityKind: "script" }
     case "disabled":
       return { ...empty, authorityKind: "disabled" }
   }
@@ -246,6 +260,8 @@ function inflateExecutor(row: ExecutionStorageRow): CreateExecutionInput["execut
           row.executorId
         ),
       }
+    case "script":
+      return { type: "script", runId: row.executorId }
     default:
       return { type: "primitive", kind: row.executorKind, runId: row.executorId }
   }
@@ -268,6 +284,8 @@ function inflateSource(row: ExecutionStorageRow): CreateExecutionInput["source"]
     }
     case "execution":
       return { type: "execution", executionId: row.sourceId }
+    case "script":
+      return { type: "script", path: row.sourceId }
   }
 }
 
@@ -336,6 +354,8 @@ function inflateAuthority(row: ExecutionStorageRow): CreateExecutionInput["autho
           row.executorId
         ),
       }
+    case "script":
+      return { type: "script", runId: row.executorId }
     case "disabled":
       return { type: "disabled" }
   }

@@ -171,7 +171,7 @@ async function readHandedSources(
 
 /**
  * The child's side: the files its parent handed over, at the same paths in its sandbox, listed in
- * `$SIXB_ATTACHMENTS` and readable with `view_file`.
+ * `$SIXB_ATTACHMENTS` and readable with `read`.
  */
 export async function prepareHandedFiles(input: {
   readonly projectId: string

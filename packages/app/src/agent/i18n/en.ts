@@ -351,10 +351,8 @@ export const en = {
       timeout: "Ran out of time",
       unknown: "Delegated",
     },
-    fromAgent: "Agent said",
-    asks: "Asked",
-    answer: "Agent answered",
-    answerHint: "Your next message answers it.",
+    /** A sub-agent's question its turn ended on while it held a call: the decision continued it. */
+    noAnswer: "It went on without an answer, once the approval was decided.",
     close: "Close",
     viewRequest: "See its request below",
     stepsLater: "At work. Its steps show here once it finishes.",
@@ -386,6 +384,9 @@ export const en = {
     heardFrom: (key: string) => `Heard back from ${key}`,
     heardFromCount: (agents: number) => `Heard back from ${count(agents, "sub-agent")}`,
     waitFailed: "Couldn't wait for the sub-agents",
+    stoppingAgent: (key: string) => `Stopping ${key}`,
+    stoppedAgent: (key: string) => `Stopped ${key}`,
+    stopAgentFailed: (key: string) => `Couldn't stop ${key}`,
     askedAgent: (question: string) => `Asked the agent: ${question}`,
     /** The reply's line: the sub-agents by name, and how they stand. */
     line: {
@@ -466,6 +467,40 @@ export const en = {
     failed: (name: string) => `Couldn't view ${name || "a file"}`,
     open: (name: string) => `Open ${name}`,
   },
+  /** The Agent's questions to the user, from its `ask` tool. */
+  questions: {
+    card: (count: number): string =>
+      count === 1 ? "The agent's question" : "The agent's questions",
+    asked: "Asked you",
+    /** For someone who reads the conversation but cannot answer in it. */
+    waiting: "Waiting for an answer",
+    running: "Asking you",
+    send: "Send answer",
+    sending: "Sending…",
+    pickAny: "Pick any",
+    typeAnswer: "Type an answer",
+    typeOther: "Or type another answer",
+    somethingElse: "Something else…",
+    next: "Next question",
+    back: "Previous question",
+    step: (step: number, total: number): string => `Question ${step} of ${total}`,
+    /** Close the question, to reply in the composer instead. */
+    dismiss: "Reply in chat",
+  },
+  /** The edit tool, for a change to part of a file (`name` may be empty). */
+  edit: {
+    title: (name: string) => `Edited ${name || "a file"}`,
+    running: (name: string) => `Editing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't edit ${name || "a file"}`,
+  },
+  /** The write tool, for a file created or replaced whole (`name` may be empty). */
+  write: {
+    created: (name: string) => `Created ${name || "a file"}`,
+    replaced: (name: string) => `Rewrote ${name || "a file"}`,
+    running: (name: string) => `Writing ${name || "a file"}`,
+    failed: (name: string) => `Couldn't write ${name || "a file"}`,
+    lines: (lines: number) => count(lines, "line"),
+  },
   /** The read tool, for a file (`name` may be empty), a skill reference, or a skill guide. */
   read: {
     file: {
@@ -484,6 +519,13 @@ export const en = {
       failed: (name: string) => `Couldn't read the ${name} guide`,
     },
     /** A file of the user's memory, or of the project's when `project`. */
+    /** A folder the agent listed. */
+    directory: {
+      title: (name: string) => `Listed ${name || "a folder"}`,
+      running: (name: string) => `Listing ${name || "a folder"}`,
+      failed: (name: string) => `Couldn't list ${name || "a folder"}`,
+    },
+    entries: (entries: number) => count(entries, "entry", "entries"),
     memory: {
       title: (project: boolean): string => (project ? "Read project memory" : "Read memory"),
       running: (project: boolean): string =>
@@ -498,6 +540,63 @@ export const en = {
     line: (line: number) => `line ${line}`,
     lines: (start: number, end: number) => `lines ${start}–${end}`,
     moreAvailable: (range: string) => `${range} · more available`,
+  },
+  /**
+   * The glob and grep tools: files found by name, and text searched for in them. A search reads
+   * as the shell's ("Searched files"), however it ran.
+   */
+  search: {
+    found: (files: number) => (files === 0 ? "No files found" : `Found ${count(files, "file")}`),
+    /** More files match than the ones listed. */
+    foundMore: (files: number) => `Found ${number(files)}+ files`,
+    looked: "Looked for files",
+    looking: "Looking for files",
+    lookFailed: "Couldn't look for files",
+    /** `term` is the pattern, when it reads as words. */
+    searchedFor: (term: string) => `Searched for “${term}”`,
+    searched: "Searched files",
+    searching: "Searching files",
+    searchFailed: (term?: string) =>
+      term ? `Couldn't search for “${term}”` : "Couldn't search files",
+    /** A search in the user's memory, or in the project's when `project`. */
+    memory: {
+      title: (project: boolean): string =>
+        project ? "Searched project memory" : "Searched memory",
+      running: (project: boolean): string =>
+        project ? "Searching project memory" : "Searching memory",
+      failed: (project: boolean): string =>
+        project ? "Couldn't search project memory" : "Couldn't search memory",
+    },
+    /** A search in the Agent's guides, or in one of them when it has a `name`. */
+    guide: {
+      title: (name: string) => (name ? `Searched the ${name} guide` : "Searched the guides"),
+      running: (name: string) => (name ? `Searching the ${name} guide` : "Searching the guides"),
+      failed: (name: string) =>
+        name ? `Couldn't search the ${name} guide` : "Couldn't search the guides",
+    },
+    ontology: {
+      title: "Searched the ontology",
+      running: "Searching the ontology",
+      failed: "Couldn't search the ontology",
+    },
+    term: (term: string) => `“${term}”`,
+    files: (files: number) => (files === 0 ? "no files" : count(files, "file")),
+    moreFiles: (files: number) => `${number(files)}+ files`,
+    matches: (matches: number, files: number) =>
+      `${count(matches, "match", "matches")} in ${count(files, "file")}`,
+    moreMatches: (matches: number) => `${number(matches)}+ matches`,
+    noMatches: "no matches",
+    /** Under a file's lines, the ones it holds past them. */
+    moreInFile: (matches: number) => `${count(matches, "more match", "more matches")} in this file`,
+    noFiles: "No file matches this search.",
+    noLines: "No line matches this search.",
+    truncatedFiles: (files: number) => `Only the first ${number(files)} files are listed.`,
+    truncatedMatches: (lines: number) =>
+      `Only the first ${number(lines)} matching lines are shown. More files match.`,
+    incomplete: "The search stopped before it looked everywhere, so some results may be missing.",
+    error: "The search could not run.",
+    /** Before the folder a search looked in. */
+    in: (path: string) => `in ${path}`,
   },
   /** Headlines of the agent's shell commands: past tense when done, progressive while running. */
   bash: {
@@ -776,7 +875,7 @@ export const en = {
     publishing: (title: string) => `Publishing ${title || "an artifact"}`,
     published: (title: string) => `Published ${title || "an artifact"}`,
     publishFailed: (title: string) => `Couldn't publish ${title || "an artifact"}`,
-    /** An `update_artifact` call, which changes an artifact's current version. */
+    /** A `publish_artifact` call with an id, which changes an artifact's current version. */
     updating: (title: string) => `Updating ${title || "an artifact"}`,
     updated: (title: string) => `Updated ${title || "an artifact"}`,
     updateFailed: (title: string) => `Couldn't update ${title || "an artifact"}`,

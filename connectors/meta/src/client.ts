@@ -1,4 +1,5 @@
 import type { MetaHttpContext } from "./http"
+import { createAdsApi } from "./resources/ads"
 import { createBatchApi } from "./resources/batch"
 import { createFacebookPageApi } from "./resources/facebook"
 import { createFacebookVideoApi } from "./resources/facebook-publishing"
@@ -9,6 +10,7 @@ import type { MetaClient } from "./types/client"
 
 export function createMetaClient(context: MetaHttpContext): MetaClient {
   return {
+    ads: createAdsApi(context),
     batch: createBatchApi(context),
     pages: createPagesApi(context),
     instagram: (igUserId, options) => createInstagramUserApi(context, igUserId, options),

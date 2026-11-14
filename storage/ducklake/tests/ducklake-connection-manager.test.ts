@@ -200,6 +200,9 @@ class RecordingRuntime implements DuckDbRuntime {
   stopReaders(): Promise<void> {
     return Promise.resolve()
   }
+  releaseMemory(): Promise<void> {
+    return Promise.resolve()
+  }
 
   readonly statements: string[] = []
   closed = false
@@ -290,6 +293,9 @@ class PausedRefreshRuntime implements DuckDbRuntime {
     throw new Error("Not used in this test")
   }
   stopReaders(): Promise<void> {
+    return Promise.resolve()
+  }
+  releaseMemory(): Promise<void> {
     return Promise.resolve()
   }
 
