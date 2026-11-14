@@ -41,7 +41,7 @@ import {
   writeArtifactPanelWidth,
 } from "./artifact-panel-state"
 import { useAgentMessages } from "./i18n"
-import { readThreadPanelTarget, writeThreadPanelTarget } from "./thread-state"
+import { useThreadStateStore } from "./thread-state"
 
 /**
  * A place in the panel a part of the conversation fills itself, such as a sub-agent's thread: the
@@ -132,19 +132,24 @@ export function ArtifactPanelRoot({
 }: ArtifactPanelRootProps) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
-  const [localTarget, setLocalTarget] = useState<PanelTarget | null>(() =>
-    routeTarget ? null : readThreadPanelTarget(scopeKey)
-  )
-  const target: PanelTarget | null = routeTarget ?? localTarget
-  // What the reader followed a reference from, so the panel can take them back.
-  const [trail, setTrail] = useState<readonly PanelTarget[]>([])
-  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null)
+  const store = useThreadStateStore()
+  const storeRef = useRef(store)
+  storeRef.current = store
   const presentation = artifactPanelPresentation({
     compact,
     isMobile: useIsMobile(),
     hasCanvas: Boolean(overlayHost),
     split,
   })
+  // Restore side-by-side panels and dock canvases automatically; never auto-pop a blocking modal.
+  const canAutoRestore = presentation !== "dialog"
+  const [localTarget, setLocalTarget] = useState<PanelTarget | null>(() =>
+    routeTarget || !canAutoRestore ? null : store.readPanelTarget(scopeKey)
+  )
+  const target: PanelTarget | null = routeTarget ?? localTarget
+  // What the reader followed a reference from, so the panel can take them back.
+  const [trail, setTrail] = useState<readonly PanelTarget[]>([])
+  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null)
   const [revealCount, reveal] = useReducer((count: number) => count + 1, 0)
   const openerRef = useRef<HTMLElement | null>(null)
   const scopeRef = useRef(scopeKey)
@@ -167,24 +172,26 @@ export function ArtifactPanelRoot({
       openerRef.current = null
       if (routeTarget) {
         setLocalTarget(null)
-        writeThreadPanelTarget(scopeKey, routeTarget)
-      } else {
-        const restored = readThreadPanelTarget(scopeKey)
+        storeRef.current.writePanelTarget(scopeKey, routeTarget)
+      } else if (canAutoRestore) {
+        const restored = storeRef.current.readPanelTarget(scopeKey)
         setLocalTarget(restored)
         if (restored?.type === "artifact" && routeRef.current.onRouteTargetChange) {
           routeRef.current.onRouteTargetChange(restored, { replace: true })
         }
+      } else {
+        setLocalTarget(null)
       }
       return
     }
 
     if (routeTarget) {
       setLocalTarget(null)
-      writeThreadPanelTarget(scopeKey, routeTarget)
+      storeRef.current.writePanelTarget(scopeKey, routeTarget)
     } else if (prevRouteKey !== null && localTargetRef.current === null) {
-      writeThreadPanelTarget(scopeKey, null)
+      storeRef.current.writePanelTarget(scopeKey, null)
     }
-  }, [scopeKey, routeTarget])
+  }, [scopeKey, routeTarget, canAutoRestore])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: sync restored artifact once on mount
   useEffect(() => {
@@ -194,7 +201,7 @@ export function ArtifactPanelRoot({
   }, [])
 
   const show = useCallback((next: PanelTarget) => {
-    if (next.type !== "slot") writeThreadPanelTarget(scopeRef.current, next)
+    if (next.type !== "slot") storeRef.current.writePanelTarget(scopeRef.current, next)
     const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
     if (changeRoute && next.type === "artifact") {
       localTargetRef.current = null
@@ -220,7 +227,7 @@ export function ArtifactPanelRoot({
     [show]
   )
   const close = useCallback(() => {
-    writeThreadPanelTarget(scopeRef.current, null)
+    storeRef.current.writePanelTarget(scopeRef.current, null)
     const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
     localTargetRef.current = null
     setLocalTarget(null)

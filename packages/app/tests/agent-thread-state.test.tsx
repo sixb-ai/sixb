@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import {
   getAgentQueryKey,
   getAgentThreadQueryKey,
@@ -12,18 +12,12 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { Composer } from "../src/agent/components/composer"
 import { AgentChatPage } from "../src/agent/react-router"
-import {
-  clearThreadDraft,
-  readThreadDraft,
-  readThreadPanelTarget,
-  writeThreadDraft,
-  writeThreadPanelTarget,
-} from "../src/agent/thread-state"
+import { ThreadStateContext, threadStateStoreFor } from "../src/agent/thread-state"
 import { type FileSource, messageFileSource } from "../src/artifacts/file-source"
 import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
 
-const browser = installDom([
+installDom([
   "localStorage",
   "sessionStorage",
   "document",
@@ -45,14 +39,13 @@ const browser = installDom([
   "cancelAnimationFrame",
 ])
 
-afterEach(async () => {
-  await Bun.sleep(0)
-  browser.localStorage.clear()
-  browser.sessionStorage.clear()
-})
-
 const REPORT = "art_rep0rt0001"
 const SHEET = "art_sh33t00002"
+
+function typeText(element: HTMLElement, value: string): void {
+  fireEvent.input(element, { target: { value } })
+  fireEvent.keyUp(element, { key: value.at(-1) ?? "a" })
+}
 
 function seedThreadAndArtifacts(): QueryClient {
   const cache = new QueryClient({
@@ -143,6 +136,7 @@ describe("per-thread composer drafts", () => {
     // and unmounting discards both drafts.
     const sent: string[] = []
     const cache = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+    const store = threadStateStoreFor(cache)
     const ui = (draftKey: string) => (
       <QueryClientProvider client={cache}>
         <Composer draftKey={draftKey} onSend={(text) => sent.push(`${draftKey}:${text}`)} />
@@ -152,13 +146,13 @@ describe("per-thread composer drafts", () => {
     const view = render(ui("thr_a"))
     const input = () => view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
 
-    fireEvent.input(input(), { target: { value: "Draft for thread A" } })
+    typeText(input(), "Draft for thread A")
     expect(input().value).toBe("Draft for thread A")
 
     // Switch to thread B: starts clean without thread A's draft.
     view.rerender(ui("thr_b"))
     expect(input().value).toBe("")
-    fireEvent.input(input(), { target: { value: "Draft for thread B" } })
+    typeText(input(), "Draft for thread B")
 
     // Unmount completely (leaving the chat page) and remount on thread A.
     view.unmount()
@@ -173,13 +167,14 @@ describe("per-thread composer drafts", () => {
     fireEvent.click(reopened.getByRole("button", { name: "Send message" }))
     expect(sent).toEqual(["thr_b:Draft for thread B"])
     expect(reopenedInput().value).toBe("")
-    expect(readThreadDraft("thr_b")).toBeNull()
-    expect(readThreadDraft("thr_a")?.text).toBe("Draft for thread A")
+    expect(store.readDraft("thr_b")).toBeNull()
+    expect(store.readDraft("thr_a")?.text).toBe("Draft for thread A")
     reopened.unmount()
     cache.clear()
   })
 
-  test("stores attachments and explicit context per thread and handles bad storage", () => {
+  test("stores attachments and explicit context per thread and evicts oldest past the cap", () => {
+    const store = threadStateStoreFor({})
     const attachment = {
       blobId: "blob_1",
       digest: `sha256:${"a".repeat(64)}`,
@@ -198,22 +193,29 @@ describe("per-thread composer drafts", () => {
       },
     ]
 
-    writeThreadDraft("thr_a", {
+    store.writeDraft("thr_a", {
       text: "Review",
       attachments: [attachment],
       explicitContext: explicit,
     })
-    expect(readThreadDraft("thr_a")).toEqual({
+    expect(store.readDraft("thr_a")).toEqual({
       text: "Review",
       attachments: [attachment],
       explicitContext: explicit,
     })
 
-    clearThreadDraft("thr_a")
-    expect(readThreadDraft("thr_a")).toBeNull()
+    store.clearDraft("thr_a")
+    expect(store.readDraft("thr_a")).toBeNull()
 
-    browser.sessionStorage.setItem("sixb.agent.thread-state.v1", "{malformed")
-    expect(readThreadDraft("thr_a")).toBeNull()
+    for (let index = 0; index < 55; index += 1) {
+      store.writeDraft(`thr_${index}`, {
+        text: `Note ${index}`,
+        attachments: [],
+        explicitContext: [],
+      })
+    }
+    expect(store.readDraft("thr_0")).toBeNull()
+    expect(store.readDraft("thr_54")?.text).toBe("Note 54")
   })
 })
 
@@ -257,12 +259,15 @@ describe("per-thread open artifact state", () => {
     }
 
     const cache = seedThreadAndArtifacts()
+    const store = threadStateStoreFor(cache)
     const ui = (scopeKey: string) => (
       <QueryClientProvider client={cache}>
         <MemoryRouter>
-          <ArtifactPanelRoot scopeKey={scopeKey}>
-            <Probe />
-          </ArtifactPanelRoot>
+          <ThreadStateContext.Provider value={store}>
+            <ArtifactPanelRoot scopeKey={scopeKey}>
+              <Probe />
+            </ArtifactPanelRoot>
+          </ThreadStateContext.Provider>
         </MemoryRouter>
       </QueryClientProvider>
     )
@@ -289,18 +294,19 @@ describe("per-thread open artifact state", () => {
     view.rerender(ui("thr_a"))
     view.rerender(ui("thr_b"))
     expect(view.getByTestId("open-key").textContent).toBe("none")
-    expect(readThreadPanelTarget("thr_a")).toEqual({ type: "artifact", artifactId: REPORT })
-    expect(readThreadPanelTarget("thr_b")).toBeNull()
+    expect(store.readPanelTarget("thr_a")).toEqual({ type: "artifact", artifactId: REPORT })
+    expect(store.readPanelTarget("thr_b")).toBeNull()
     view.unmount()
     cache.clear()
   })
 
   test("restores a thread's open artifact and draft across route navigation", async () => {
-    // Removal proof: drop `readThreadPanelTarget` / `readThreadDraft` on mount; leaving
-    // `/threads/thr_a` for `/threads` and coming back loses both the open artifact and the draft.
+    // Removal proof: drop `readPanelTarget` / `readDraft` on mount; leaving `/threads/thr_a` for
+    // `/threads` and coming back loses both the open artifact and the unsent draft.
     const cache = seedThreadAndArtifacts()
-    writeThreadPanelTarget("thr_a", { type: "artifact", artifactId: REPORT })
-    writeThreadDraft("thr_a", {
+    const store = threadStateStoreFor(cache)
+    store.writePanelTarget("thr_a", { type: "artifact", artifactId: REPORT })
+    store.writeDraft("thr_a", {
       text: "Continue analyzing Q4",
       attachments: [],
       explicitContext: [],

@@ -19,7 +19,7 @@ import {
 import { useDictation } from "@sixb/ui/hooks"
 import type { SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   ArrowUp,
@@ -47,7 +47,7 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
-import { clearThreadDraft, readThreadDraft, writeThreadDraft } from "../thread-state"
+import { type ThreadStateStore, useThreadStateStore } from "../thread-state"
 import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
@@ -270,13 +270,15 @@ export const Composer = memo(function Composer({
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
   const unnamedContext = agentMessages.context.unnamed
+  const queryClient = useQueryClient()
+  const threadState = useThreadStateStore(queryClient)
   const [loadedDraftKey, setLoadedDraftKey] = useState(draftKey)
-  const [value, setValue] = useState(() => readInitialDraftText(draftKey))
+  const [value, setValue] = useState(() => readInitialDraftText(threadState, draftKey))
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
-    readInitialDraftAttachments(draftKey)
+    readInitialDraftAttachments(threadState, draftKey)
   )
   const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
-    readInitialDraftContext(draftKey, ambientContext)
+    readInitialDraftContext(threadState, draftKey, ambientContext)
   )
   const [mention, setMention] = useState<AgentContextMention | null>(null)
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
@@ -340,9 +342,9 @@ export const Composer = memo(function Composer({
 
   if (loadedDraftKey !== draftKey) {
     setLoadedDraftKey(draftKey)
-    setValue(readInitialDraftText(draftKey))
-    setAttachments(readInitialDraftAttachments(draftKey))
-    setContextEntries(readInitialDraftContext(draftKey, ambientContext))
+    setValue(readInitialDraftText(threadState, draftKey))
+    setAttachments(readInitialDraftAttachments(threadState, draftKey))
+    setContextEntries(readInitialDraftContext(threadState, draftKey, ambientContext))
     setMention(null)
     setDismissedMention(null)
     setDismissedCommand(null)
@@ -364,12 +366,12 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     if (!draftKey || loadedDraftKey !== draftKey) return
-    writeThreadDraft(draftKey, {
+    threadState.writeDraft(draftKey, {
       text: value,
       attachments: readyAttachments,
       explicitContext,
     })
-  }, [draftKey, loadedDraftKey, value, readyAttachments, explicitContext])
+  }, [threadState, draftKey, loadedDraftKey, value, readyAttachments, explicitContext])
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
@@ -587,7 +589,7 @@ export const Composer = memo(function Composer({
   const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
     onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
-    if (draftKey) clearThreadDraft(draftKey)
+    if (draftKey) threadState.clearDraft(draftKey)
     setValue("")
     voice.reset()
     setAttachments([])
@@ -1367,13 +1369,16 @@ function contextLabel(label: string): { readonly label?: string } {
   }
 }
 
-function readInitialDraftText(draftKey: string | undefined): string {
-  return draftKey ? (readThreadDraft(draftKey)?.text ?? "") : ""
+function readInitialDraftText(store: ThreadStateStore, draftKey: string | undefined): string {
+  return draftKey ? (store.readDraft(draftKey)?.text ?? "") : ""
 }
 
-function readInitialDraftAttachments(draftKey: string | undefined): ComposerAttachment[] {
+function readInitialDraftAttachments(
+  store: ThreadStateStore,
+  draftKey: string | undefined
+): ComposerAttachment[] {
   if (!draftKey) return []
-  return (readThreadDraft(draftKey)?.attachments ?? []).map((fileRef) => ({
+  return (store.readDraft(draftKey)?.attachments ?? []).map((fileRef) => ({
     id: attachmentId(),
     status: "ready",
     fileRef,
@@ -1381,10 +1386,11 @@ function readInitialDraftAttachments(draftKey: string | undefined): ComposerAtta
 }
 
 function readInitialDraftContext(
+  store: ThreadStateStore,
   draftKey: string | undefined,
   ambientContext: readonly AgentContextInput[]
 ): AgentContextEntryInput[] {
-  const explicit = draftKey ? (readThreadDraft(draftKey)?.explicitContext ?? []) : []
+  const explicit = draftKey ? (store.readDraft(draftKey)?.explicitContext ?? []) : []
   const explicitIds = new Set(explicit.map((entry) => agentContextIdentity(entry.context)))
   const ambient = ambientContext
     .filter((context) => !explicitIds.has(agentContextIdentity(context)))
