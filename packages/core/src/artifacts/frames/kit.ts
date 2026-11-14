@@ -570,3 +570,98 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   }
   img[data-sixb-ref="unavailable"] { display: block; min-width: 120px; min-height: 68px; border-radius: var(--radius); background: var(--muted); }
 `)
+
+/**
+ * A designed document's kit. Its own stylesheets design it: the kit only sets it on the stage.
+ *
+ * As one sheet, the body is the sheet: as wide as its paper, with the paper's margins as its
+ * padding, so its lines break where they will on paper, on the stage in the app's colors. A
+ * document's own CSS, unlayered, overrides any of that.
+ *
+ * As pages, the runtime moves the body's content into a flow laid out in columns of the paper's
+ * content box, and shows each column on a sheet of its own. The body becomes the stage those
+ * sheets sit on, so the rules that make it one are important: a document that styles its body as
+ * its sheet would otherwise draw the stage as one. So are those that size the sheets, their content
+ * boxes and the flow, which are elements a document's own `article` or `div` rules would reach.
+ * Its body's inherited styles, its font and its color, still reach every page.
+ */
+export const FRAME_DOCUMENT_CSS = kit(`  :root {
+    --sixb-stage: ${LIGHT["--muted"]};
+    --sixb-stage-border: ${LIGHT["--border"]};
+    --sixb-paper-width: 816px;
+    --sixb-paper-margin-top: 72px;
+    --sixb-paper-margin-right: 72px;
+    --sixb-paper-margin-bottom: 72px;
+    --sixb-paper-margin-left: 72px;
+  }
+  html { color-scheme: light; background: var(--sixb-stage); }
+  body {
+    width: 100%;
+    max-width: var(--sixb-paper-width);
+    min-height: calc(100vh - 64px);
+    margin: 32px auto;
+    padding: var(--sixb-paper-margin-top) var(--sixb-paper-margin-right) var(--sixb-paper-margin-bottom) var(--sixb-paper-margin-left);
+    background: #fff;
+    color: #18181b;
+    box-shadow: 0 0 0 1px var(--sixb-stage-border);
+  }
+  @media (max-width: 720px) {
+    body { min-height: 100vh; margin: 0; padding: 28px 20px; box-shadow: none; }
+  }
+  img, svg { max-width: 100%; }
+  /* A page break, as one sheet: the stage shows through, from edge to edge of the sheet. */
+  .sixb-page-break {
+    display: block;
+    height: 24px;
+    margin: var(--sixb-paper-margin-bottom) calc(-1 * var(--sixb-paper-margin-right)) var(--sixb-paper-margin-top) calc(-1 * var(--sixb-paper-margin-left));
+    background: var(--sixb-stage);
+    box-shadow: inset 0 1px 0 var(--sixb-stage-border), inset 0 -1px 0 var(--sixb-stage-border);
+  }
+  @media (max-width: 720px) {
+    .sixb-page-break { height: 0; margin: 32px 0; box-shadow: inset 0 1px 0 var(--sixb-stage-border); }
+  }
+
+  html.sixb-pages, html.sixb-pages body { min-height: 0 !important; }
+  html.sixb-pages body {
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 24px 16px !important;
+    background: var(--sixb-stage) !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+  /* Until the content is cut into pages, it shows as nothing: never as one long column. */
+  html.sixb-pages:not([data-sixb-pages]) body { visibility: hidden !important; }
+  .sixb-pages, .sixb-paper, .sixb-paper-content, .sixb-flow {
+    box-sizing: content-box !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+  .sixb-pages {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 24px !important;
+    width: auto !important;
+    zoom: var(--sixb-zoom, 1);
+  }
+  .sixb-paper {
+    position: relative !important;
+    flex: none !important;
+    width: var(--sixb-paper-width) !important;
+    height: var(--sixb-paper-height) !important;
+    overflow: hidden !important;
+    background: #fff;
+    box-shadow: 0 0 0 1px var(--sixb-stage-border), 0 1px 3px rgb(0 0 0 / 0.06);
+  }
+  .sixb-paper-content {
+    position: absolute !important;
+    inset: var(--sixb-paper-margin-top) var(--sixb-paper-margin-right) var(--sixb-paper-margin-bottom) var(--sixb-paper-margin-left) !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: hidden !important;
+  }
+`)

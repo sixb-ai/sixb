@@ -53677,6 +53677,44 @@
                                     "required": ["depth", "text", "slug"],
                                     "additionalProperties": false
                                   }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": ["html"],
+                                  "description": "html for a designed document, document.html with its own stylesheets"
+                                },
+                                "paper": {
+                                  "type": "object",
+                                  "properties": {
+                                    "width": {
+                                      "type": "number"
+                                    },
+                                    "height": {
+                                      "type": "number"
+                                    },
+                                    "margin": {
+                                      "type": "object",
+                                      "properties": {
+                                        "top": {
+                                          "type": "number"
+                                        },
+                                        "right": {
+                                          "type": "number"
+                                        },
+                                        "bottom": {
+                                          "type": "number"
+                                        },
+                                        "left": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": ["top", "right", "bottom", "left"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": ["width", "height", "margin"],
+                                  "additionalProperties": false,
+                                  "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                                 }
                               },
                               "required": ["kind", "headings"],
@@ -56878,6 +56916,44 @@
                                     "required": ["depth", "text", "slug"],
                                     "additionalProperties": false
                                   }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": ["html"],
+                                  "description": "html for a designed document, document.html with its own stylesheets"
+                                },
+                                "paper": {
+                                  "type": "object",
+                                  "properties": {
+                                    "width": {
+                                      "type": "number"
+                                    },
+                                    "height": {
+                                      "type": "number"
+                                    },
+                                    "margin": {
+                                      "type": "object",
+                                      "properties": {
+                                        "top": {
+                                          "type": "number"
+                                        },
+                                        "right": {
+                                          "type": "number"
+                                        },
+                                        "bottom": {
+                                          "type": "number"
+                                        },
+                                        "left": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": ["top", "right", "bottom", "left"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": ["width", "height", "margin"],
+                                  "additionalProperties": false,
+                                  "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                                 }
                               },
                               "required": ["kind", "headings"],
@@ -57760,6 +57836,44 @@
                                     "required": ["depth", "text", "slug"],
                                     "additionalProperties": false
                                   }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": ["html"],
+                                  "description": "html for a designed document, document.html with its own stylesheets"
+                                },
+                                "paper": {
+                                  "type": "object",
+                                  "properties": {
+                                    "width": {
+                                      "type": "number"
+                                    },
+                                    "height": {
+                                      "type": "number"
+                                    },
+                                    "margin": {
+                                      "type": "object",
+                                      "properties": {
+                                        "top": {
+                                          "type": "number"
+                                        },
+                                        "right": {
+                                          "type": "number"
+                                        },
+                                        "bottom": {
+                                          "type": "number"
+                                        },
+                                        "left": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": ["top", "right", "bottom", "left"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": ["width", "height", "margin"],
+                                  "additionalProperties": false,
+                                  "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                                 }
                               },
                               "required": ["kind", "headings"],
@@ -60712,6 +60826,44 @@
                                 "required": ["depth", "text", "slug"],
                                 "additionalProperties": false
                               }
+                            },
+                            "format": {
+                              "type": "string",
+                              "enum": ["html"],
+                              "description": "html for a designed document, document.html with its own stylesheets"
+                            },
+                            "paper": {
+                              "type": "object",
+                              "properties": {
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "margin": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["width", "height", "margin"],
+                              "additionalProperties": false,
+                              "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                             }
                           },
                           "required": ["kind", "headings"],
@@ -61509,6 +61661,44 @@
                                     "required": ["depth", "text", "slug"],
                                     "additionalProperties": false
                                   }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": ["html"],
+                                  "description": "html for a designed document, document.html with its own stylesheets"
+                                },
+                                "paper": {
+                                  "type": "object",
+                                  "properties": {
+                                    "width": {
+                                      "type": "number"
+                                    },
+                                    "height": {
+                                      "type": "number"
+                                    },
+                                    "margin": {
+                                      "type": "object",
+                                      "properties": {
+                                        "top": {
+                                          "type": "number"
+                                        },
+                                        "right": {
+                                          "type": "number"
+                                        },
+                                        "bottom": {
+                                          "type": "number"
+                                        },
+                                        "left": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": ["top", "right", "bottom", "left"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": ["width", "height", "margin"],
+                                  "additionalProperties": false,
+                                  "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                                 }
                               },
                               "required": ["kind", "headings"],
@@ -62594,6 +62784,44 @@
                                 "required": ["depth", "text", "slug"],
                                 "additionalProperties": false
                               }
+                            },
+                            "format": {
+                              "type": "string",
+                              "enum": ["html"],
+                              "description": "html for a designed document, document.html with its own stylesheets"
+                            },
+                            "paper": {
+                              "type": "object",
+                              "properties": {
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "margin": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["width", "height", "margin"],
+                              "additionalProperties": false,
+                              "description": "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
                             }
                           },
                           "required": ["kind", "headings"],

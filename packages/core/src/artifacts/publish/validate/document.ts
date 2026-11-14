@@ -6,14 +6,14 @@ import { ARTIFACT_LIMITS } from "../../limits"
 import { createHeadingSlugger, type DocumentHeading, type DocumentOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
 import type { FoundReference } from "../references"
+import { DOCUMENT_HTML_ENTRY, validateHtmlDocument } from "./document-html"
 
 /** The file a document renders from. */
 export const DOCUMENT_ENTRY = "document.md"
 
 /**
- * Reads a document's Markdown: its headings become the outline, and every image must be a file in
- * the version or an `artifact:` address, so the document renders the same wherever it is opened.
- * The addresses it shows and links to are returned with the section each sits in, to resolve.
+ * Reads a document, from its Markdown in `document.md` or, designed, from `document.html`: one or
+ * the other, never both.
  */
 export async function validateDocument(
   blobStorage: ArtifactBlobStorage,
@@ -23,8 +23,36 @@ export async function validateDocument(
   readonly outline: DocumentOutline
   readonly references: readonly FoundReference[]
 }> {
-  const entry = files.find((file) => file.path === DOCUMENT_ENTRY)
-  if (!entry) throw invalidArtifact(`A document needs its Markdown in '${DOCUMENT_ENTRY}'.`)
+  const markdown = files.find((file) => file.path === DOCUMENT_ENTRY)
+  const designed = files.some((file) => file.path === DOCUMENT_HTML_ENTRY)
+  if (markdown && designed) {
+    throw invalidArtifact(
+      `A document renders from '${DOCUMENT_ENTRY}' or from '${DOCUMENT_HTML_ENTRY}', not both: keep one.`
+    )
+  }
+  if (designed) return validateHtmlDocument(blobStorage, files)
+  if (!markdown) {
+    throw invalidArtifact(
+      `A document needs its Markdown in '${DOCUMENT_ENTRY}', or its HTML in '${DOCUMENT_HTML_ENTRY}' when it has a design of its own.`
+    )
+  }
+  return validateMarkdownDocument(blobStorage, markdown, files)
+}
+
+/**
+ * Reads a document's Markdown: its headings become the outline, and every image must be a file in
+ * the version or an `artifact:` address, so the document renders the same wherever it is opened.
+ * The addresses it shows and links to are returned with the section each sits in, to resolve.
+ */
+async function validateMarkdownDocument(
+  blobStorage: ArtifactBlobStorage,
+  entry: ArtifactFile,
+  files: readonly ArtifactFile[]
+): Promise<{
+  readonly entry: string
+  readonly outline: DocumentOutline
+  readonly references: readonly FoundReference[]
+}> {
   const markdown = await readArtifactText(blobStorage, entry, ARTIFACT_LIMITS.maxDocumentBytes)
 
   // The same options the docs site renders with, so headings and images read the same way.

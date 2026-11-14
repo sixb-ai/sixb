@@ -664,4 +664,64 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
     },
     { timeout: 120_000 }
   )
+  test(
+    "cuts a designed document into its pages, and finds what runs past a page's edge or a phone's",
+    async () => {
+      // Reproduce by checking a designed document as a page: it is measured at 1280px and on a
+      // phone, its print-sized type is small text, and nothing is cut into pages.
+      const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<style>@page { size: letter; margin: 0.75in } body { font: 10pt Helvetica, Arial, sans-serif }
+.page { break-before: page } .eyebrow { font-size: 7pt; text-transform: uppercase }
+article { max-width: 600px; padding: 2rem } div { position: static; padding: 12px }</style></head>
+<body>
+  <section><p class="eyebrow">Service proposal</p><h1>Job flow</h1><p>One path for every job.</p></section>
+  <section class="page"><h2>Pricing</h2>
+    <table style="width: 900px"><tr><td>Setup</td><td>Kickoff and connection</td><td>$500</td></tr></table>
+  </section>
+  <section class="page"><h2>Acceptance</h2><p>Sign below.</p></section>
+</body></html>`
+      const result = await checkLayout({
+        layout: "document",
+        paper: { width: 816, height: 1056, margin: { top: 72, right: 72, bottom: 72, left: 72 } },
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "deck"),
+        files: [],
+        entry: new TextEncoder().encode(html),
+        name: "designed",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.pages).toBe(3)
+      expect(result.screenshots).toEqual([
+        ".sixb/agent/checks/designed/phone.png",
+        ".sixb/agent/checks/designed/page-01.png",
+        ".sixb/agent/checks/designed/page-02.png",
+        ".sixb/agent/checks/designed/page-03.png",
+      ])
+      // Reproduce by making no sheet's copy of the flow in the runtime's paginate: every sheet
+      // past the first is blank, and pages 2 and 3 are the same picture.
+      const shot = (name: string) => readFileSync(join(root, ".sixb/agent/checks/designed", name))
+      expect(shot("page-02.png").equals(shot("page-03.png"))).toBe(false)
+      // Reproduce by dropping !important from the kit's .sixb-paper rules: the document's own
+      // article rule narrows every sheet. A PNG's width and height, at bytes 16 to 24.
+      const page = shot("page-01.png")
+      expect([page.readUInt32BE(16), page.readUInt32BE(20)]).toEqual([816, 1056])
+      const found = result.warnings.map((warning) => `${warning.part ?? "-"} ${warning.code}`)
+      expect(found).toContain("page 2 layout_outside")
+      expect(found.filter((each) => each.includes("small_text"))).toEqual([])
+      expect(result.warnings.find((warning) => warning.part === "page 2")?.message).toContain(
+        "Page 2: table"
+      )
+      // Reproduce by dropping the phone pass from checkDocument: the table that is too wide for a
+      // phone's one sheet goes unreported.
+      expect(result.warnings.find((warning) => warning.part === "phone")?.message).toContain(
+        "On a phone (390px): table"
+      )
+    },
+    { timeout: 120_000 }
+  )
 })
