@@ -84,7 +84,7 @@ A cost limit lets a call start only when Sixb can estimate its cost first:
 | --- | --- |
 | Per image (most image models, Gemini image models) | Runs. Sixb reserves the price of every image requested. |
 | Per character (most speech models) | Runs. Sixb reserves the price of the text. |
-| By tokens (GPT Image, Gemini speech) | Blocked: the output's size is unknown before the call. |
+| By tokens (GPT Image, Gemini speech, Azure AI Foundry's gpt-4o-mini-tts) | Blocked: the output's size is unknown before the call. |
 
 A call with reference images is also blocked under a cost limit when its model is priced by
 tokens. A model whose provider has no published price can only run without a cost limit.

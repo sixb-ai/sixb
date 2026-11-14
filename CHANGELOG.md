@@ -23,6 +23,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 - Rerank search results with an Azure AI Foundry Cohere deployment through `@sixb/azure-ai-foundry`'s
   `foundry.reranking("rerank")`. Rerank v5 is priced at Azure's USD 0.02 (fast) and 0.05 (pro) per
   million input tokens; Rerank v4.0, billed per search, runs at unknown cost.
+- Generate speech with an Azure AI Foundry `gpt-4o-mini-tts` deployment in `models.audio.speech`
+  through `@sixb/azure-ai-foundry`'s `foundry.speech("tts")`, in MP3, Opus, AAC, FLAC or WAV,
+  priced at Azure's USD 0.60 per million text tokens and USD 12 per million audio tokens.
 
 ### Upgrade notes
 

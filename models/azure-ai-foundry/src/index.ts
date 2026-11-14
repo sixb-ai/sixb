@@ -21,6 +21,7 @@ export type {
 } from "./provider"
 export { createAzureAIFoundry } from "./provider"
 export type { AzureAIFoundryRerankingModel, AzureAIFoundryRerankingOptions } from "./reranking"
+export type { AzureAIFoundrySpeechModel, AzureAIFoundrySpeechOptions } from "./speech"
 export type {
   AzureAIFoundryTranscriptionModel,
   AzureAIFoundryTranscriptionOptions,
