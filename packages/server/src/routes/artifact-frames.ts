@@ -32,9 +32,9 @@ interface FrameContext {
 /**
  * Serves a version's files to its sandboxed frame, under the token a frame link carries: the token
  * is the credential, so the route is public. Each entry gets its layout's kit and the runtime,
- * which are served beside the files. A canvas's board asked for with `?sixb-edit` is served for
- * editing: its static elements marked with their addresses. Hidden from OpenAPI: clients receive frame links, they
- * never build them.
+ * which are served beside the files. A canvas's board, or a designed document, asked for with
+ * `?sixb-edit` is served for editing: its static elements marked with their addresses. Hidden from
+ * OpenAPI: clients receive frame links, they never build them.
  */
 export function registerArtifactFrameRoutes(
   app: Elysia,
@@ -120,18 +120,17 @@ async function frameResponse(
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
 
-    // A canvas's board served for editing has its static elements marked with their addresses,
-    // for the runtime to report and edit them by.
-    const editing =
-      version.outline.kind === "canvas" && new URL(request.url).searchParams.has("sixb-edit")
     const { outline } = version
+    // A canvas's board, or a designed document, served for editing has its static elements
+    // marked with their addresses, for the runtime to report and edit them by.
+    const editing =
+      (outline.kind === "canvas" || outline.kind === "document") &&
+      new URL(request.url).searchParams.has("sixb-edit")
+    const marked = editing ? annotateBoard(text) : text
     // A designed document's headings carry their sections' slugs, to open it at one, and its
     // runtime gets its paper, to cut it into pages.
-    const source = editing
-      ? annotateBoard(text)
-      : outline.kind === "document"
-        ? markDocumentSections(text, outline.headings)
-        : text
+    const source =
+      outline.kind === "document" ? markDocumentSections(marked, outline.headings) : marked
     return new Response(
       injectFrameAssets(
         rewriteFrameReferences(source, frame.targets, file.path),

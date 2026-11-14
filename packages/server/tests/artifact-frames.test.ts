@@ -252,6 +252,14 @@ describe("a deck's frame", () => {
     )
     const kit = await fixture.app.fetch(new Request(url(`${path}__sixb/document.css`)))
     expect(await kit.text()).toContain(".sixb-paper {")
+
+    // Reproduce by marking a canvas's board alone for editing in routes/artifact-frames.ts: the
+    // document comes back unmarked, and nothing in it takes the reader's typing.
+    const editing = await (
+      await fixture.app.fetch(new Request(url(`${path}document.html?sixb-edit`)))
+    ).text()
+    expect(editing).toContain('<h2 data-sixb-at="body>h2:0" data-sixb-edit="text" data-sixb-text="')
+    expect(editing).toContain('data-sixb-section="pricing">Pricing</h2>')
   })
 
   test("serves each of a canvas's boards as a page under one link, and its shared files as they are", async () => {
