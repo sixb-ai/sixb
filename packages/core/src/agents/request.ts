@@ -427,7 +427,7 @@ export async function startQueuedAgentTurnFromInbox(
   finishedRun: ConversationAgentRunRecord,
   input: { readonly onlyImmediate: boolean }
 ): Promise<AgentQueuedTurnStart> {
-  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
   })
