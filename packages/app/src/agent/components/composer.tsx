@@ -764,7 +764,6 @@ export const Composer = memo(function Composer({
     })
   }
 
-
   const runCommand = (command: ComposerCommand) => {
     command.run()
     setValue("")
