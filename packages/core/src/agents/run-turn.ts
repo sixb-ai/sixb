@@ -280,6 +280,11 @@ async function readSentSettings(
   const retained = new Set(userMessages.map((message) => message.id))
   const zones: Record<string, string> = {}
   const locales: Record<string, string> = {}
+  for (const message of userMessages) {
+    const metadata = message.metadata
+    if (typeof metadata?.timeZone === "string") zones[message.id] = metadata.timeZone
+    if (typeof metadata?.locale === "string") locales[message.id] = metadata.locale
+  }
   for (const run of runs) {
     if (run.kind !== "conversation" || !retained.has(run.triggerMessageId)) continue
 
