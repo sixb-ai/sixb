@@ -12,10 +12,12 @@ import { describeViewFile } from "./interpret"
 
 /**
  * A file the agent viewed. It belongs to the work, not to the answer, so it stays in the trace: an
- * image as a small preview, any other file as a compact chip, each opening in the artifact panel.
+ * image as an inline thumbnail beside its label, any other file as a compact chip, each opening in
+ * the artifact panel.
  */
 export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
-  const messages = useAgentMessages().viewFile
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.viewFile
   const { target, file } = describeViewFile(tool)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const label =
@@ -24,6 +26,31 @@ export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
       : running
         ? messages.running(target)
         : messages.title(target)
+
+  if (
+    file &&
+    tool.state === "output-available" &&
+    file.source &&
+    fileView(file.fileRef) === "image"
+  ) {
+    const name = file.fileRef.fileName?.trim() || agentMessages.files.file
+    return (
+      <div className="min-w-0">
+        <OpenFile file={file} name={name}>
+          <span className="group/view flex w-fit max-w-full items-center gap-2 rounded-md py-0.5 pr-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
+            <img
+              src={file.source.inlineUrl}
+              alt={name}
+              loading="lazy"
+              className="size-9 shrink-0 rounded-md border border-border/80 bg-muted/40 object-cover transition-transform group-hover/view:scale-[1.03]"
+            />
+            <Eye className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate font-medium">{label}</span>
+          </span>
+        </OpenFile>
+      </div>
+    )
+  }
 
   return (
     <div className="min-w-0 space-y-1.5">
@@ -37,31 +64,18 @@ export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
       </div>
       {file && tool.state === "output-available" ? (
         <div className="pl-5">
-          <ViewedFile file={file} />
+          <ViewedFileChip file={file} />
         </div>
       ) : null}
     </div>
   )
 }
 
-function ViewedFile({ file }: { file: NormalizedFile }) {
+function ViewedFileChip({ file }: { file: NormalizedFile }) {
   const messages = useAgentMessages().files
   const locale = useLocale()
-  const { fileRef, source } = file
+  const { fileRef } = file
   const name = fileRef.fileName?.trim() || messages.file
-
-  if (source && fileView(fileRef) === "image") {
-    return (
-      <OpenFile file={file} name={name}>
-        <img
-          src={source.inlineUrl}
-          alt={name}
-          loading="lazy"
-          className="block h-auto max-h-28 w-auto max-w-[min(10rem,100%)] rounded-md border border-border/70 bg-muted/40 object-contain"
-        />
-      </OpenFile>
-    )
-  }
 
   return (
     <OpenFile file={file} name={name}>
@@ -91,7 +105,7 @@ function OpenFile({
   const { source } = file
   const className = cn(
     "block w-fit max-w-full rounded-md outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring",
-    source && "hover:opacity-80"
+    source && "hover:opacity-85"
   )
 
   if (source && panel) {

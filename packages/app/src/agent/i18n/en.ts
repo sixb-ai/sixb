@@ -321,6 +321,7 @@ export const en = {
     messageAgentFailed: (key: string) => `Could not message ${key}`,
     reasoning: "Reasoning",
     steps: (steps: number) => count(steps, "step"),
+    latest: "Latest",
     searchFailedHint: "Web search failed. See work details.",
     noSources: "No sources found.",
     running: "running",

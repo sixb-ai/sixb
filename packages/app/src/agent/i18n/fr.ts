@@ -301,6 +301,7 @@ export const fr: Translation<AgentMessages> = {
     messageAgentFailed: (key) => `Impossible d’envoyer un message à ${key}`,
     reasoning: "Raisonnement",
     steps: (steps) => count(steps, "étape"),
+    latest: "Plus récent",
     searchFailedHint: "La recherche web a échoué. Voir le détail du travail.",
     noSources: "Aucune source trouvée.",
     running: "en cours",
