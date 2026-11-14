@@ -305,7 +305,8 @@ export const Composer = memo(function Composer({
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sizerRef = useRef<HTMLSpanElement>(null)
-  // The text's width in a single row, measured while it has one.
+  const spacerRef = useRef<HTMLSpanElement>(null)
+  // How wide the text is when it shares a row with the controls.
   const inlineWidthRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
@@ -552,9 +553,16 @@ export const Composer = memo(function Composer({
     }
   }, [disabled, pending])
 
-  // A draft that no longer fits in one row beside the controls takes a row of its own, with the
-  // controls under it. The row's width is measured while the draft still has it, so the box only
-  // folds back once the text fits there again.
+  const placeholderText =
+    voice.status === "stopping"
+      ? messages.dictationTranscribing
+      : voice.isActive
+        ? messages.dictationListening
+        : awaitingApproval
+          ? agentMessages.approvals.composerPlaceholder
+          : (placeholder ?? messages.placeholder)
+  // A draft, or a placeholder in an empty box, that no longer fits in one row beside the controls
+  // takes a row of its own, with the controls under it.
   const expanded =
     wraps ||
     value.includes("\n") ||
@@ -567,11 +575,12 @@ export const Composer = memo(function Composer({
   const measure = () => {
     const el = textareaRef.current
     if (!el) return
-    if (!expanded) inlineWidthRef.current = el.clientWidth
-    const sizer = sizerRef.current
-    setWraps(
-      sizer !== null && inlineWidthRef.current > 0 && sizer.offsetWidth > inlineWidthRef.current
-    )
+    if (rootRef.current?.clientWidth) {
+      if (!expanded) inlineWidthRef.current = el.clientWidth
+      else if (spacerRef.current) inlineWidthRef.current = spacerRef.current.offsetWidth
+      const sizer = sizerRef.current
+      setWraps(sizer !== null && sizer.offsetWidth > inlineWidthRef.current)
+    }
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
@@ -580,29 +589,42 @@ export const Composer = memo(function Composer({
   measureRef.current = measure
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
-  useLayoutEffect(measure, [value, attachments.length, contextEntries.length, expanded])
+  useLayoutEffect(measure, [
+    value,
+    placeholderText,
+    voice.isActive,
+    attachments.length,
+    contextEntries.length,
+    expanded,
+  ])
 
   // The row's width changes without the text changing: the model label settles after the first
-  // render, or the window resizes. A height measured at the old width would keep a wrapped
-  // placeholder's two lines.
+  // render, a run starts or stops, or the window resizes. Once the text has its own row, the
+  // spacer beside `+` holds the width the text would have had inline.
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    let width = el.clientWidth
+    const spacer = voice.isActive ? null : spacerRef.current
+    let textWidth = el.clientWidth
+    let spacerWidth = spacer?.offsetWidth ?? 0
     let frame = 0
     // Measuring resizes the textarea, so it waits a frame rather than resize inside the callback.
     const observer = new ResizeObserver(() => {
-      if (el.clientWidth === width) return
-      width = el.clientWidth
+      const nextTextWidth = el.clientWidth
+      const nextSpacerWidth = spacer?.offsetWidth ?? 0
+      if (nextTextWidth === textWidth && nextSpacerWidth === spacerWidth) return
+      textWidth = nextTextWidth
+      spacerWidth = nextSpacerWidth
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => measureRef.current())
     })
     observer.observe(el)
+    if (spacer) observer.observe(spacer)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(frame)
     }
-  }, [])
+  }, [voice.isActive])
 
   // While a turn runs, a message goes somewhere: the send button does what Enter does. A file
   // never goes into the answer in flight, which reads text at its next step: it goes after it.
@@ -1043,8 +1065,9 @@ export const Composer = memo(function Composer({
             onRun={runCommand}
           />
           {/*
-            One row while the draft fits beside the controls; once it doesn't, the draft gets a row
-            of its own and the controls sit under it. Attachments and context lead, on their own row.
+            One row while the draft, or the placeholder in an empty box, fits beside the controls;
+            once it doesn't, the text gets a row of its own and the controls sit under it.
+            Attachments and context lead, on their own row.
           */}
           <div
             data-dragging={draggingFiles || undefined}
@@ -1054,16 +1077,18 @@ export const Composer = memo(function Composer({
             data-focus-on-tap=""
             className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px] @max-[30rem]/composer-row:gap-y-1 @max-[30rem]/composer-row:rounded-[26px]"
           >
-            {/* The draft on one line, to tell when it stops fitting there. */}
+            {/* The text on one line, to tell when it stops fitting beside the controls. */}
             <span
               aria-hidden="true"
               className="pointer-events-none invisible absolute inset-0 overflow-hidden"
             >
               <span
                 ref={sizerRef}
-                className="absolute whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
+                data-composer-sizer=""
+                className="absolute grid whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
               >
-                {value}
+                <span>{value}</span>
+                {voice.isActive ? null : <span>{placeholderText}</span>}
               </span>
             </span>
             {contextEntries.length > 0 || attachments.length > 0 ? (
@@ -1105,6 +1130,8 @@ export const Composer = memo(function Composer({
                   }
                 />
                 <span
+                  ref={spacerRef}
+                  data-composer-spacer=""
                   aria-hidden="true"
                   className="hidden flex-1 group-data-[expanded]/composer:block @max-[30rem]/composer-row:block"
                 />
@@ -1129,15 +1156,7 @@ export const Composer = memo(function Composer({
               disabled={disabled}
               readOnly={voice.isActive}
               rows={1}
-              placeholder={
-                voice.status === "stopping"
-                  ? messages.dictationTranscribing
-                  : voice.isActive
-                    ? messages.dictationListening
-                    : awaitingApproval
-                      ? agentMessages.approvals.composerPlaceholder
-                      : (placeholder ?? messages.placeholder)
-              }
+              placeholder={placeholderText}
               aria-label={messages.message}
               className={cn(
                 "max-h-[200px] min-h-10 min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-2 py-2 text-[16px] leading-6 tracking-[-0.012em] shadow-none placeholder:text-muted-foreground focus-visible:ring-0 md:text-[16px] dark:bg-transparent",
