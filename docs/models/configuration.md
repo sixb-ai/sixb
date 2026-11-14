@@ -731,6 +731,9 @@ models: {
 
 Registration does not change search behavior. Each query must choose its reranking model.
 
+To rerank inside your Azure tenant, deploy a Cohere rerank model in Azure AI Foundry and register
+it with `@sixb/azure-ai-foundry`'s `foundry.reranking("rerank")`, your deployment's name.
+
 ## Web search models
 
 A web search model searches the web and returns links with a title and a snippet. Sixb picks one:

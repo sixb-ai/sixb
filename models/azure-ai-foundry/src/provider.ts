@@ -54,6 +54,11 @@ import {
   validateMessagesOptions,
 } from "./messages-request"
 import { type RequestOptions, responsesRequest, validateOptions } from "./request"
+import {
+  type AzureAIFoundryRerankingModel,
+  type AzureAIFoundryRerankingOptions,
+  createFoundryReranking,
+} from "./reranking"
 import { resolveModel } from "./resolution"
 import {
   type AzureAIFoundryTranscriptionModel,
@@ -152,6 +157,11 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
     deploymentName: string,
     options?: AzureAIFoundryTranscriptionOptions
   ): AzureAIFoundryTranscriptionModel
+  /** A Cohere rerank deployment, such as Cohere-rerank-v5-fast, for `models.reranking`. */
+  reranking(
+    deploymentName: string,
+    options?: AzureAIFoundryRerankingOptions
+  ): AzureAIFoundryRerankingModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -208,6 +218,8 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     createFoundryDecision(providerId, name, options, transport, deployments)
   const transcription = (name: string, options: AzureAIFoundryTranscriptionOptions = {}) =>
     createFoundryTranscription(providerId, name, options, transport, deployments)
+  const reranking = (name: string, options: AzureAIFoundryRerankingOptions = {}) =>
+    createFoundryReranking(providerId, name, options, transport, deployments)
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
@@ -262,6 +274,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     embedding,
     decision,
     transcription,
+    reranking,
   })
 }
 

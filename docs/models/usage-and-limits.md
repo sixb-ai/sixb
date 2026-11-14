@@ -94,8 +94,9 @@ tokens. A model whose provider has no published price can only run without a cos
 Queries using `.rerank()` add one accounted model call for their candidates. Direct provider
 `rerank()` calls bypass Sixb's usage and limit controls.
 
-Gateway rerankers report a cost without token usage. Reranking counts toward cost limits only;
-a model without catalog pricing cannot run while a cost limit applies.
+Gateway rerankers report a cost without token usage. Azure AI Foundry's Rerank v5 is priced by
+input tokens, and Rerank v4.0, billed per search, has no price Sixb can apply. Reranking counts
+toward cost limits only; a model without pricing cannot run while a cost limit applies.
 
 ## Web search
 
