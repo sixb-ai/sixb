@@ -243,6 +243,7 @@ export const CreateAgentThreadResponseSchema = z.object({
   thread: AgentThreadSchema,
 })
 
+/** The computer and folder a thread moves to, whether it runs in the cloud or elsewhere. */
 export const MoveAgentThreadToComputerBodySchema = z
   .object({ computer: AgentThreadComputerInputSchema })
   .strict()

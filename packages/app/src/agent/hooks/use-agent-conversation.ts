@@ -108,6 +108,7 @@ import {
   useNewThreadPlace,
 } from "./use-new-thread-place"
 import { useAgentThreadLists } from "./use-thread-lists"
+import { useThreadPlace } from "./use-thread-place"
 import { useThreadStream } from "./use-thread-stream"
 
 interface PendingSend {
@@ -957,6 +958,7 @@ export function useAgentConversation({
   }, [])
 
   const sandboxRecovery =
+    thread?.runsOn !== "computer" &&
     thread?.sandboxState &&
     !isRunning &&
     ["busy", "blocked", "unavailable"].includes(thread.sandboxState.status)
@@ -995,6 +997,7 @@ export function useAgentConversation({
   // A turn that never answered can run again, by whoever asked for it, once the sandbox works,
   // unless it would fail the same way: a conversation too long for its model.
   const canRetry =
+    !(access === "participant" && thread?.runsOn === "computer") &&
     !sandboxRecovery &&
     ((presentation.kind === "failed" && presentation.run.error?.code !== CONTEXT_LIMIT_EXCEEDED) ||
       ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
@@ -1138,8 +1141,8 @@ export function useAgentConversation({
     [runs, access, user]
   )
 
-  // Where the conversation moved, after the last message saved before then: the files earlier
-  // turns worked on stayed behind.
+  // Where the conversation moved, across every cloud <-> computer handoff and its latest folder:
+  // the files earlier turns worked on stayed behind.
   const movedAt = thread?.movedAt
   const savedBefore = movedAt
     ? new Set(savedMessages.filter((saved) => saved.createdAt <= movedAt).map(({ id }) => id))
@@ -1147,18 +1150,78 @@ export function useAgentConversation({
   // The last one the transcript shows: not every saved message is drawn.
   const movedAfterId =
     savedBefore && messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
-  const moved =
-    thread && movedAfterId
-      ? {
-          afterMessageId: movedAfterId,
-          label:
-            thread.runsOn !== "computer"
-              ? agentMessages.computer.movedToCloud
-              : thread.computer
-                ? agentMessages.computer.movedToFolder(shownFolder(thread.computer.folder))
-                : agentMessages.computer.movedElsewhere,
+  const { moved, moves } = useMemo(() => {
+    const entries = new Map<string, string>()
+    const shownIds = new Set(
+      messages.flatMap((message) => (message.id !== null ? [message.id] : []))
+    )
+    const placeByTrigger = new Map<string, "cloud" | "computer">()
+    for (const run of [...runs].reverse()) {
+      placeByTrigger.set(run.triggerMessageId, run.runsOn === "computer" ? "computer" : "cloud")
+    }
+    let lastShownId: string | null = null
+    let previousPlace: "cloud" | "computer" | null = null
+    let sawCloud = false
+    let sawComputer = false
+    for (const saved of savedMessages) {
+      if (saved.role === "user") {
+        const runPlace = placeByTrigger.get(saved.id)
+        if (runPlace !== undefined) {
+          if (runPlace === "cloud") sawCloud = true
+          else sawComputer = true
+          if (previousPlace !== null && previousPlace !== runPlace && lastShownId !== null) {
+            entries.set(
+              lastShownId,
+              runPlace === "cloud"
+                ? agentMessages.computer.movedToCloud
+                : agentMessages.computer.movedToComputer
+            )
+          }
+          previousPlace = runPlace
         }
-      : null
+      }
+      if (shownIds.has(saved.id)) lastShownId = saved.id
+    }
+
+    if (!thread || !movedAfterId) {
+      return { moved: null, moves: entries }
+    }
+    const currentPlace = thread.runsOn === "computer" ? "computer" : "cloud"
+    const hasMessagesAfterMove = movedAt
+      ? savedMessages.some((saved) => saved.createdAt > movedAt)
+      : false
+    if (
+      !hasMessagesAfterMove &&
+      sawCloud &&
+      sawComputer &&
+      previousPlace === currentPlace &&
+      currentPlace === "cloud"
+    ) {
+      return { moved: null, moves: entries }
+    }
+    const latestLabel =
+      thread.runsOn !== "computer"
+        ? agentMessages.computer.movedToCloud
+        : thread.computer
+          ? !hasMessagesAfterMove && previousPlace === "cloud"
+            ? agentMessages.computer.movedToComputerFolder(shownFolder(thread.computer.folder))
+            : agentMessages.computer.movedToFolder(shownFolder(thread.computer.folder))
+          : agentMessages.computer.movedElsewhere
+    entries.set(movedAfterId, latestLabel)
+    return {
+      moved: { afterMessageId: movedAfterId, label: latestLabel },
+      moves: entries,
+    }
+  }, [agentMessages.computer, messages, movedAfterId, movedAt, runs, savedMessages, thread])
+
+  const hasPendingApprovals =
+    isAwaitingApproval(latestRun) &&
+    approvals.some((approval) => approval.status === "pending" && approval.runId === latestRun?.id)
+  const placeBusy =
+    thread?.runsOn === "computer"
+      ? activeRun?.status === "running" || hasPendingApprovals
+      : isRunning || hasPendingApprovals
+  const place = useThreadPlace({ thread, access, busy: placeBusy })
 
   // Its background commands: what its owner's sixb reports of them, and their Stop, to its owner
   // alone, as the computer is theirs. A command started in a folder runs on there once the thread
@@ -1272,6 +1335,7 @@ export function useAgentConversation({
       threadId,
       messages,
       moved: stableMoved,
+      moves,
       turn,
       anchorCurrentTurn,
       onRetry: canRetry ? stableRetry : undefined,
@@ -1285,6 +1349,7 @@ export function useAgentConversation({
       threadId,
       messages,
       stableMoved,
+      moves,
       turn,
       anchorCurrentTurn,
       canRetry,
@@ -1521,6 +1586,8 @@ export function useAgentConversation({
     pendingProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
+    /** Where the reader's own conversation runs, and how to switch it between cloud and computer. */
+    place,
     /** Where the reader's own conversation runs on their computer, for its badge. */
     computer: access === "owner" ? (thread?.computer ?? null) : null,
     /** Spread into `<ComputerOfflineNotice>` while its computer is offline. */

@@ -9,6 +9,7 @@ import {
   participantsToAdd,
   planAgentThreadFork,
   queuedTurnInCloud,
+  queuedTurnOnComputer,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -445,20 +446,32 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
           .get(input.projectId, input.id) as AgentThreadRow | null
         const thread = row ? rowToThreadRecord(row) : null
-        assertAssignableComputer(
-          thread,
-          this.activeRunOf(input.projectId, thread),
-          input.computer,
-          input.id,
-          "SixbSqlite"
-        )
+        const active = this.activeRunOf(input.projectId, thread)
+        assertAssignableComputer(thread, active, input.computer, input.id, "SixbSqlite")
+        const queued = queuedTurnOnComputer(active, input.computer)
+        if (queued) {
+          this.db
+            .query("UPDATE agent_runs SET spec = ? WHERE project_id = ? AND id = ?")
+            .run(JSON.stringify(queued.spec), input.projectId, queued.id)
+        }
+        if (thread.runsOn !== "computer") {
+          this.db
+            .query(`
+              UPDATE agent_threads
+              SET sandbox_state = json_set(sandbox_state, '$.status', 'unavailable')
+              WHERE project_id = ?
+                AND parent_thread_id = ?
+                AND json_extract(sandbox_state, '$.status') IN ('new', 'ready')
+            `)
+            .run(input.projectId, input.id)
+        }
         const movedAt = movesComputerPlace(thread, input.computer)
           ? (input.movedAt ?? new Date()).toISOString()
           : null
         this.db
           .query(`
             UPDATE agent_threads
-            SET computer_id = ?, computer_name = ?, computer_folder = ?,
+            SET runs_on = 'computer', computer_id = ?, computer_name = ?, computer_folder = ?,
               moved_at = COALESCE(?, moved_at)
             WHERE project_id = ? AND id = ?
           `)

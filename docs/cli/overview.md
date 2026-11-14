@@ -37,8 +37,10 @@ They can't read your Sixb sign-in, `~/.ssh`, or `~/.aws`, and never hold a crede
 adds the run's own to its requests to your API. A conversation that runs on your computer takes
 messages from you alone, and works on the computer and in the folder it started in: `sixb` open
 there runs its turns. Opened from another folder or another of your computers, it says where it
-works; `ctrl+f` moves it here, and only here runs its turns from then on. Quitting, or closing the
-terminal, stops a turn running here: it ends interrupted, and runs again only if you retry it.
+works; `ctrl+f` moves it here, and only here runs its turns from then on. `ctrl+g` hands it back
+to the cloud, from where any of your computers, or the app, can move it on again. Quitting, or
+closing the terminal, stops a turn running here: it ends interrupted, and runs again only if you
+retry it.
 A command the agent runs in the background, such as a dev server, keeps running after its turn,
 until it exits, the agent stops it, or you quit `sixb` there.
 
@@ -48,10 +50,10 @@ up to the repository's root: see
 
 In the app, such a conversation shows its computer and folder, and whether `sixb` is open there.
 A message you send from the app runs on your computer as one typed in `sixb` does, in the
-permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the
-cloud** moves the conversation to the cloud instead, for good: the waiting message runs there,
-and the files in the folder stay on your computer. A conversation moves only once no turn is
-running or waiting for your approval.
+permission mode the app sends it with; while `sixb` is closed, it waits for it. The place in the
+conversation's header moves it between the cloud and a folder on any of your computers, as often
+as you need: only the folder it works in now holds its files, and the transcript marks each move.
+A conversation moves only once no turn is running or waiting for your approval.
 
 Messages from the app run only in folders you've chosen on this computer. Turn on **Messages from
 the web** in `ctrl+p` to choose this one, and off again to forget it. Until then a message waits, or

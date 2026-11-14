@@ -21,6 +21,7 @@ import {
   listAgentThreadRuns,
   listAgentThreads,
   listModels,
+  moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   postAgentThreadMessage,
   setAgentThreadApprovalMode,
@@ -769,19 +770,6 @@ function ThreadView(
   const [typed, setTyped] = useState("")
   const [contextOpen, setContextOpen] = useState(false)
   const [stopOpen, setStopOpen] = useState(false)
-  // A conversation adds what only it can show: what it uses of its model's context.
-  const slashCommands = useMemo(
-    () => [
-      ...props.slashCommands,
-      {
-        name: "context",
-        description: "What the conversation uses of the model's context",
-        run: () => setContextOpen(true),
-      },
-    ],
-    [props.slashCommands]
-  )
-  const slash = useSlashMenu(slashCommands, typed)
   const scroll = useRef<ScrollBoxRenderable>(null)
 
   const mine = thread !== null && owns(connection, thread)
@@ -882,6 +870,43 @@ function ThreadView(
     void reload()
     props.say("Its turns now run in this folder")
   }
+  // And back to the cloud, from where they can move anywhere again.
+  const moveCloud = async () => {
+    const { error } = await moveAgentThreadToCloud({ client, path: { threadId } })
+    if (error) return props.say(errorText(error), "error")
+    void reload()
+    props.say("Its turns now run in the cloud")
+  }
+  const canMoveHere = mine && (!onComputer || !here)
+  const canMoveCloud = mine && onComputer
+  // A conversation adds what only it can show: its context use, and moving between here and cloud.
+  const slashCommands = [
+    ...props.slashCommands,
+    ...(canMoveHere
+      ? [
+          {
+            name: "here",
+            description: "Run this conversation in this folder",
+            run: () => void moveHere(),
+          },
+        ]
+      : []),
+    ...(canMoveCloud
+      ? [
+          {
+            name: "cloud",
+            description: "Move this conversation to the cloud",
+            run: () => void moveCloud(),
+          },
+        ]
+      : []),
+    {
+      name: "context",
+      description: "What the conversation uses of the model's context",
+      run: () => setContextOpen(true),
+    },
+  ]
+  const slash = useSlashMenu(slashCommands, typed)
 
   useEffect(() => {
     void reload()
@@ -992,8 +1017,11 @@ function ThreadView(
     if (key.name === "down" && slash.move(1)) return
     if (key.name === "escape") return void stop()
     if (key.ctrl && key.name === "x" && runningBackground.length > 0) return setStopOpen(true)
-    if (key.ctrl && key.name === "f" && onComputer && mine && !here) {
+    if (key.ctrl && key.name === "f" && canMoveHere) {
       return void moveHere()
+    }
+    if (key.ctrl && key.name === "g" && canMoveCloud) {
+      return void moveCloud()
     }
     if (key.name === "pageup") scroll.current?.scrollBy(-10)
     if (key.name === "pagedown") scroll.current?.scrollBy(10)
@@ -1175,10 +1203,25 @@ function ThreadView(
           onSubmit={send}
         />
         <box flexDirection="row" justifyContent="space-between" paddingTop={1}>
-          <text fg={colors.faint}>
-            {onComputer ? shortPath(runner.folder, homedir(), 40) : "Runs in the cloud"}
+          <text wrapMode="none" flexShrink={1}>
+            <span fg={colors.faint}>
+              {onComputer ? shortPath(runner.folder, homedir(), 36) : "Runs in the cloud"}
+            </span>
+            {!onComputer && mine && width >= 64 ? (
+              <>
+                <span fg={colors.faint}>{"  ·  "}</span>
+                <span fg={colors.text}>ctrl+f</span>
+                <span fg={colors.muted}> move here</span>
+              </>
+            ) : onComputer && mine && here && width >= 68 ? (
+              <>
+                <span fg={colors.faint}>{"  ·  "}</span>
+                <span fg={colors.text}>ctrl+g</span>
+                <span fg={colors.muted}> cloud</span>
+              </>
+            ) : null}
           </text>
-          <text>
+          <text flexShrink={0}>
             <span fg={colors.text}>ctrl+p</span>
             <span fg={colors.muted}> commands</span>
           </text>

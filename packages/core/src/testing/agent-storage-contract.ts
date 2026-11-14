@@ -908,11 +908,14 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
     })
 
     // Guard proof: drop `movesComputerPlace` from a store's assignComputer; a rename on the same
-    // folder records a move.
-    test("moves a computer's thread to another computer or folder, and says when", async () => {
-      await withStorage(async (storage) => {
+    // folder records a move. Drop `runs_on = 'computer'` from assignComputer; a cloud thread gets a
+    // computer without running on one.
+    test("moves a thread between the cloud, computers and folders back and forth", async () => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
-        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+        await storage.threads.create(
+          threadInput({ id: "thr_cloud", sandboxParams: { repo: "app" } })
+        )
         const thread = { projectId, id: "thr_1" }
 
         // The same folder under a new name is no move.
@@ -931,14 +934,102 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           movedAt: at("2026-06-23T12:00:00.000Z"),
         })
         await expect(storage.threads.getById(thread)).resolves.toMatchObject({
+          runsOn: "computer",
           computer: elsewhere,
           movedAt: at("2026-06-23T12:00:00.000Z"),
         })
 
+        // A queued cloud turn keeps the thread in the cloud until it finishes.
+        await createRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_cloud_queued",
+            threadId: "thr_cloud",
+            spec: { model: { provider: "test", modelId: "large" } },
+            execution: execution("cloud_queued"),
+          })
+        )
         await expectAgentError(
           storage.threads.assignComputer({ projectId, id: "thr_cloud", computer: laptop }),
-          "invalid_input"
+          "active_run_exists"
         )
+        await storage.runs.finishQueued({
+          projectId,
+          id: "run_cloud_queued",
+          status: "cancelled",
+        })
+
+        // Idle in the cloud, it moves to the computer, back to the cloud, and to another folder,
+        // keeping its cloud sandbox binding for when it returns.
+        const toLaptop = await storage.threads.assignComputer({
+          projectId,
+          id: "thr_cloud",
+          computer: laptop,
+          movedAt: at("2026-06-23T13:00:00.000Z"),
+        })
+        expect(toLaptop).toMatchObject({
+          runsOn: "computer",
+          computer: laptop,
+          sandboxParams: { repo: "app" },
+          movedAt: at("2026-06-23T13:00:00.000Z"),
+        })
+        const backToCloud = await storage.threads.moveToCloud({
+          projectId,
+          id: "thr_cloud",
+          movedAt: at("2026-06-23T14:00:00.000Z"),
+        })
+        expect(backToCloud.thread).not.toHaveProperty("runsOn")
+        expect(backToCloud.thread).not.toHaveProperty("computer")
+        expect(backToCloud.thread).toMatchObject({
+          sandboxParams: { repo: "app" },
+          movedAt: at("2026-06-23T14:00:00.000Z"),
+        })
+        const backToElsewhere = await storage.threads.assignComputer({
+          projectId,
+          id: "thr_cloud",
+          computer: elsewhere,
+          movedAt: at("2026-06-23T15:00:00.000Z"),
+        })
+        expect(backToElsewhere).toMatchObject({
+          runsOn: "computer",
+          computer: elsewhere,
+          movedAt: at("2026-06-23T15:00:00.000Z"),
+        })
+
+        // A queued computer turn carries its new place across a folder move, and drops it on cloud.
+        await createRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_with_place",
+            threadId: "thr_cloud",
+            spec: {
+              model: { provider: "test", modelId: "large" },
+              runsOn: "computer",
+              computer: { id: elsewhere.id, folder: elsewhere.folder },
+            },
+            execution: execution("with_place"),
+          })
+        )
+        await storage.threads.assignComputer({
+          projectId,
+          id: "thr_cloud",
+          computer: laptop,
+          movedAt: at("2026-06-23T16:00:00.000Z"),
+        })
+        expect((await storage.runs.getById({ projectId, id: "run_with_place" }))?.spec).toEqual({
+          model: { provider: "test", modelId: "large" },
+          runsOn: "computer",
+          computer: { id: laptop.id, folder: laptop.folder },
+        })
+        const cloudAgain = await storage.threads.moveToCloud({
+          projectId,
+          id: "thr_cloud",
+          movedAt: at("2026-06-23T17:00:00.000Z"),
+        })
+        expect(cloudAgain.queued?.spec).toEqual({ model: { provider: "test", modelId: "large" } })
+
         await expectAgentError(
           storage.threads.assignComputer({ projectId, id: "thr_none", computer: laptop }),
           "thread_not_found"
@@ -947,9 +1038,61 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           storage.threads.assignComputer({ ...thread, computer: { ...laptop, id: " " } }),
           "invalid_input"
         )
-        expect(await storage.threads.getById({ projectId, id: "thr_cloud" })).not.toHaveProperty(
-          "computer"
-        )
+      })
+    })
+
+    // Guard proof: drop the child-state update from a store's assignComputer; a continuation on
+    // the computer hands its child its out/ back, and a later return to the cloud resumes a
+    // workspace that never saw the computer's work.
+    test("retires a paused child's cloud workspace when its conversation moves to a computer", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({
+          projectId,
+          id: "child_1",
+          execution: execution("child_token", new Date("2099-01-01")),
+        })
+        const acquire = {
+          projectId,
+          id: "thread_child_1",
+          action: "acquire" as const,
+          runId: "child_1",
+          executionToken: "child_token",
+          name: "child-workspace",
+          sourceFingerprint: "b".repeat(64),
+        }
+        await storage.threads.transitionSandbox(acquire)
+        await storage.threads.transitionSandbox({
+          ...acquire,
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        await storage.runs.finish({
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          result: { text: "Looked west." },
+        })
+        await storage.runs.finish({
+          projectId,
+          id: "parent_1",
+          executionToken: "parent_token",
+          status: "succeeded",
+        })
+
+        await storage.threads.assignComputer({
+          projectId,
+          id: "parent_thread",
+          computer: laptop,
+        })
+        await expect(
+          storage.threads.getById({ projectId, id: "thread_child_1" })
+        ).resolves.toMatchObject({
+          sandboxState: { name: "child-workspace", status: "unavailable" },
+        })
       })
     })
 

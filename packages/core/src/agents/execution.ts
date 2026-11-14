@@ -822,19 +822,14 @@ export function createAgentRuntime<
     return view ?? thread
   }
 
-  const ownedComputerThread = async (threadId: string): Promise<AgentThreadRecord> => {
+  const ownedMovableThread = async (threadId: string): Promise<AgentThreadRecord> => {
     const readable = await rule.read(threadId)
     if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+    assertConversationThread(readable.thread)
     if (readable.access !== "owner") {
       throw new AgentRequestError(
         "not_thread_owner",
         `[Sixb] Only the owner of Agent thread '${threadId}' moves it.`
-      )
-    }
-    if (readable.thread.runsOn !== "computer") {
-      throw new AgentRequestError(
-        "invalid_message",
-        `[Sixb] Agent thread '${threadId}' runs in the cloud, on no computer.`
       )
     }
     return readable.thread
@@ -862,7 +857,9 @@ export function createAgentRuntime<
         throw error instanceof AgentStorageError && error.code === "active_run_exists"
           ? new AgentRequestError(
               "active_run_exists",
-              "[Sixb] A turn is running on the computer: stop it, or let it end, first."
+              thread.runsOn === "computer"
+                ? "[Sixb] A turn is running on the computer: stop it, or let it end, first."
+                : "[Sixb] A turn is running in the cloud: stop it, or let it end, first."
             )
           : error
       })
@@ -912,7 +909,7 @@ export function createAgentRuntime<
           })
         ),
       moveToComputer: async (threadId, computer) => {
-        const thread = await ownedComputerThread(threadId)
+        const thread = await ownedMovableThread(threadId)
         const moves = movesComputerPlace(thread, computer)
         const moved = await moveThread(thread, moves, (agents) =>
           agents.threads.assignComputer({ projectId: runtime.projectId, id: threadId, computer })
@@ -922,7 +919,13 @@ export function createAgentRuntime<
         return view ?? moved
       },
       moveToCloud: async (threadId) => {
-        const thread = await ownedComputerThread(threadId)
+        const thread = await ownedMovableThread(threadId)
+        if (thread.runsOn !== "computer") {
+          throw new AgentRequestError(
+            "invalid_message",
+            `[Sixb] Agent thread '${threadId}' runs in the cloud, on no computer.`
+          )
+        }
         const { thread: moved, queued } = await moveThread(thread, true, (agents) =>
           agents.threads.moveToCloud({ projectId: runtime.projectId, id: threadId })
         )

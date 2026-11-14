@@ -415,3 +415,144 @@ describe("forking a conversation", () => {
     expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(1)
   })
 })
+
+describe("moving a conversation between cloud and local computer", () => {
+  const laptop = { id: "cmp_laptop", name: "Anthony's MacBook Pro", folder: "/Users/anthony/sixb" }
+  const desktop = { id: "cmp_desktop", name: "Mac Studio", folder: "/Users/anthony/other" }
+
+  test("moves a cloud conversation to a computer, back to the cloud, and to another computer as needed", async () => {
+    // Guard proof: require runsOn === "computer" in ownedMovableThread or assertAssignableComputer;
+    // the first moveToComputer rejects a cloud conversation.
+    const { host, storage } = setup()
+    const owner = await userScope(host, "owner")
+    const participant = await userScope(host, "participant")
+
+    const thread = await owner.agent.threads.create({ title: "Refactor" })
+    await storage.agents.threads.addParticipants({
+      projectId: host.id,
+      threadId: thread.id,
+      principals: [{ type: "user", id: "participant" }],
+      addedBy: { type: "user", id: "owner" },
+      maxParticipants: 50,
+    })
+
+    // A participant cannot move the owner's thread, nor retry a failed cloud turn once on computer.
+    const participantTurn = await participant.agent.runs.request({
+      threadId: thread.id,
+      text: "Check the logs",
+    })
+    await expect(
+      owner.agent.threads.moveToComputer(thread.id, laptop).catch((error: unknown) => error)
+    ).resolves.toMatchObject({ code: "active_run_exists" })
+    await expect(
+      participant.agent.threads.moveToComputer(thread.id, laptop).catch((error: unknown) => error)
+    ).resolves.toMatchObject({ code: "not_thread_owner" })
+
+    await storage.agents.runs.finishQueued({
+      projectId: host.id,
+      id: participantTurn.run.id,
+      status: "failed",
+    })
+
+    // Cloud -> Laptop
+    const onLaptop = await owner.agent.threads.moveToComputer(thread.id, laptop)
+    expect(onLaptop).toMatchObject({
+      id: thread.id,
+      runsOn: "computer",
+      computer: laptop,
+      movedAt: expect.any(Date),
+    })
+
+    // Guard proof: drop the owner check on computer threads in retryAgentRun; the participant queues
+    // an unclaimable turn on the owner's computer.
+    await expect(
+      participant.agent.runs.retry(participantTurn.run.id).catch((error: unknown) => error)
+    ).resolves.toMatchObject({ code: "not_thread_owner" })
+
+    // Even if the thread had an unavailable cloud sandbox state, turns run cleanly on the computer.
+    await storage.agents.threads.create({
+      projectId: host.id,
+      id: "thr_broken_sb",
+      ownerPrincipal: { type: "user", id: "owner" },
+      sandboxParams: { repo: "sixb" },
+    })
+    const brokenExec = await createTestAgentExecution(storage, {
+      projectId: host.id,
+      runId: "run_sb",
+    })
+    await storage.agents.runs.create({
+      id: "run_sb",
+      projectId: host.id,
+      executionId: brokenExec,
+      threadId: "thr_broken_sb",
+      triggerMessageId: participantTurn.run.triggerMessageId,
+      spec: { model: { provider: "test", modelId: "test-model" } },
+    })
+    await storage.agents.runs.start({
+      id: "run_sb",
+      projectId: host.id,
+      execution: { token: "tok_sb", queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+    })
+    await storage.agents.threads.transitionSandbox({
+      projectId: host.id,
+      id: "thr_broken_sb",
+      action: "acquire",
+      runId: "run_sb",
+      executionToken: "tok_sb",
+      name: "sb-1",
+      sourceFingerprint: "a".repeat(64),
+    })
+    await storage.agents.threads.transitionSandbox({
+      projectId: host.id,
+      id: "thr_broken_sb",
+      action: "settle",
+      runId: "run_sb",
+      executionToken: "tok_sb",
+      name: "sb-1",
+      status: "unavailable",
+      initialized: true,
+    })
+    await storage.agents.runs.finish({
+      id: "run_sb",
+      projectId: host.id,
+      executionToken: "tok_sb",
+      status: "failed",
+    })
+    await owner.agent.threads.moveToComputer("thr_broken_sb", laptop)
+    const recoveredTurn = await owner.agent.runs.request({
+      threadId: "thr_broken_sb",
+      text: "Run locally instead",
+    })
+    expect(recoveredTurn.run.spec).toMatchObject({
+      runsOn: "computer",
+      computer: { id: laptop.id, folder: laptop.folder },
+    })
+
+    // Laptop -> Cloud (with a queued computer turn moving into the cloud queue)
+    const queuedLocal = await owner.agent.runs.request({
+      threadId: thread.id,
+      text: "Continue in cloud",
+    })
+    expect(queuedLocal.run.spec).toMatchObject({
+      runsOn: "computer",
+      computer: { id: laptop.id, folder: laptop.folder },
+    })
+    const inCloud = await owner.agent.threads.moveToCloud(thread.id)
+    expect(inCloud).not.toHaveProperty("runsOn")
+    expect(inCloud).not.toHaveProperty("computer")
+    expect(
+      (await storage.agents.runs.getById({ projectId: host.id, id: queuedLocal.run.id }))?.spec
+    ).not.toHaveProperty("runsOn")
+    await storage.agents.runs.finishQueued({
+      projectId: host.id,
+      id: queuedLocal.run.id,
+      status: "cancelled",
+    })
+
+    // Cloud -> Desktop (another computer & folder) -> Laptop
+    const onDesktop = await owner.agent.threads.moveToComputer(thread.id, desktop)
+    expect(onDesktop).toMatchObject({ runsOn: "computer", computer: desktop })
+    const backOnLaptop = await owner.agent.threads.moveToComputer(thread.id, laptop)
+    expect(backOnLaptop).toMatchObject({ runsOn: "computer", computer: laptop })
+  })
+})

@@ -74,6 +74,12 @@ export class ComputerConnection {
           this.onEvent({ type: "error", message: errorMessage(error) })
         )
       },
+      // A conversation moved to a folder here with a turn waiting runs at once, not at renewal.
+      onThreadMoved: (event) => {
+        void this.route(event.threadId).catch((error: unknown) =>
+          this.onEvent({ type: "error", message: errorMessage(error) })
+        )
+      },
     })
   }
 
@@ -173,7 +179,7 @@ export class ComputerConnection {
   }
 
   /** Each folder's runner would read the thread to learn it isn't theirs: read it once. */
-  private async route(threadId: string, runId: string): Promise<void> {
+  private async route(threadId: string, runId?: string): Promise<void> {
     const { data: thread } = await getAgentThread({
       client: this.connection.client,
       path: { threadId },
