@@ -220,6 +220,7 @@ const shippedMigrationIds = [
   "098-connector-connection-owners",
   "099-user-suspension-source",
   "100-script-executions",
+  "101-agent-thread-inbox",
 ]
 
 afterEach(async () => {

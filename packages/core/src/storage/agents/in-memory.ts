@@ -33,18 +33,24 @@ import {
   assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
+  assertEnqueueAgentInboxItemInput,
+  assertInboxRunOwnership,
+  assertInboxThreadAcceptsItem,
   assertMovableToCloud,
   assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
   assertStartsOnComputer,
   assertSubagentThreadTakesRun,
+  assertTakeAgentInboxSteersInput,
   assertTurnInThreadPlace,
+  assertUpdateAgentInboxItemInput,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
   LIVE_AGENT_APPROVAL_STATUSES,
   movesComputerPlace,
   newAgentApprovalRecord,
+  newAgentInboxItemRecord,
   newSubagentThreadRecord,
   participantsToAdd,
   planAgentThreadFork,
@@ -53,6 +59,7 @@ import {
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
+  updatedAgentInboxItemRecord,
   withStopRequest,
 } from "./provider"
 import type {
@@ -68,6 +75,8 @@ import type {
   AgentComputerSessionStore,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
+  AgentInboxItemRecord,
+  AgentInboxStore,
   AgentMemoryChange,
   AgentMemoryRepoRecord,
   AgentMemoryRevisionRecord,
@@ -87,6 +96,7 @@ import type {
   AppendAgentMessageInput,
   AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  ConsumeClaimedAgentInboxInput,
   ConversationAgentRunRecord,
   CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
@@ -95,11 +105,14 @@ import type {
   DecideAgentApprovalInput,
   DecideAgentApprovalResult,
   DeleteAgentMessagesByRunInput,
+  EnqueueAgentInboxItemInput,
+  EnqueueAgentInboxItemResult,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
+  ListAgentInboxItemsInput,
   ListAgentMemoryRevisionsInput,
   ListAgentMemoryRevisionsResult,
   ListAgentMessagesInput,
@@ -115,6 +128,7 @@ import type {
   MoveAgentThreadToCloudInput,
   MoveAgentThreadToCloudResult,
   ReclaimAgentRunInput,
+  RemoveAgentInboxItemInput,
   RemoveAgentThreadParticipantInput,
   RequestAgentApprovalInput,
   RequestAgentApprovalResult,
@@ -126,7 +140,10 @@ import type {
   StopAgentApprovalsInput,
   StopAgentApprovalsResult,
   SubagentRunRecord,
+  TakeAgentInboxSteersInput,
+  TakeNextQueuedAgentInboxInput,
   TransitionAgentThreadSandboxInput,
+  UpdateAgentInboxItemInput,
 } from "./types"
 import { AGENT_RUN_FAILURE_CODES, AGENT_TOKEN_RATE_SAMPLES } from "./types"
 
@@ -193,6 +210,8 @@ interface AgentStoreState {
   readonly approvalModes: Map<string, AgentApprovalMode>
   /** By `[projectId, runId]`. */
   readonly tokenRates: Map<string, AgentTokenRateRecord>
+  /** By `[projectId, id]`. */
+  readonly inbox: Map<string, AgentInboxItemRecord>
 }
 
 /** A memory repo as its two SQL tables hold it: revisions, and the file versions each wrote. */
@@ -213,6 +232,7 @@ export interface InMemoryAgentStorageSnapshot {
   readonly approvals: Map<string, AgentApprovalRecord>
   readonly approvalModes: Map<string, AgentApprovalMode>
   readonly tokenRates: Map<string, AgentTokenRateRecord>
+  readonly inbox: Map<string, AgentInboxItemRecord>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -1781,6 +1801,182 @@ class InMemoryAgentTokenRateStore implements AgentTokenRateStore {
   }
 }
 
+// -- inbox ------------------------------------------------------------------------------------
+
+class InMemoryAgentInboxStore implements AgentInboxStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async enqueue(input: EnqueueAgentInboxItemInput): Promise<EnqueueAgentInboxItemResult> {
+    assertEnqueueAgentInboxItemInput(input, "Sixb")
+
+    const itemKey = key(input.projectId, input.id)
+    const existing = this.state.inbox.get(itemKey)
+    if (existing) {
+      if (existing.threadId === input.threadId) {
+        return { item: clone(existing), created: false }
+      }
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent inbox item '${input.id}' already exists on another thread in project '${input.projectId}'.`
+      )
+    }
+
+    const thread = this.state.threads.get(key(input.projectId, input.threadId)) ?? null
+    const threadItems = this.threadItems(input.projectId, input.threadId)
+    assertInboxThreadAcceptsItem(
+      thread,
+      input.threadId,
+      input.projectId,
+      threadItems.length,
+      "Sixb"
+    )
+
+    if (
+      this.state.messages.has(key(input.projectId, input.messageId)) ||
+      [...this.state.inbox.values()].some(
+        (item) => item.projectId === input.projectId && item.messageId === input.messageId
+      )
+    ) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent message '${input.messageId}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    const seq = threadItems.reduce((max, item) => Math.max(max, item.seq), 0) + 1
+    const record = newAgentInboxItemRecord(input, seq)
+    this.state.inbox.set(itemKey, clone(record))
+    return { item: clone(record), created: true }
+  }
+
+  async getById(params: { projectId: string; id: string }): Promise<AgentInboxItemRecord | null> {
+    const record = this.state.inbox.get(key(params.projectId, params.id))
+    return record ? clone(record) : null
+  }
+
+  async list(input: ListAgentInboxItemsInput): Promise<readonly AgentInboxItemRecord[]> {
+    const includeClaimed = input.includeClaimed ?? true
+    return this.threadItems(input.projectId, input.threadId)
+      .filter((item) => includeClaimed || item.claimedBy === undefined)
+      .map(clone)
+  }
+
+  async update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null> {
+    assertUpdateAgentInboxItemInput(input, "Sixb")
+    const itemKey = key(input.projectId, input.id)
+    const current = this.state.inbox.get(itemKey)
+    if (!current || current.threadId !== input.threadId) return null
+
+    const next = updatedAgentInboxItemRecord(current, input)
+    this.state.inbox.set(itemKey, clone(next))
+    return clone(next)
+  }
+
+  async remove(input: RemoveAgentInboxItemInput): Promise<AgentInboxItemRecord | null> {
+    const itemKey = key(input.projectId, input.id)
+    const current = this.state.inbox.get(itemKey)
+    if (!current || current.threadId !== input.threadId) return null
+    if (current.claimedBy !== undefined) {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[Sixb] Agent inbox item '${current.id}' was already claimed by run '${current.claimedBy.runId}'.`
+      )
+    }
+    this.state.inbox.delete(itemKey)
+    return clone(current)
+  }
+
+  async takeSteers(input: TakeAgentInboxSteersInput): Promise<readonly AgentInboxItemRecord[]> {
+    assertTakeAgentInboxSteersInput(input, "Sixb")
+    const run = this.state.runs.get(key(input.projectId, input.runId)) ?? null
+    assertInboxRunOwnership(run, input, "Sixb")
+
+    const now = new Date()
+    const claimed: AgentInboxItemRecord[] = []
+    for (const item of this.threadItems(input.projectId, input.threadId)) {
+      if (item.claimedBy !== undefined || item.mode !== "steer" || item.immediate) continue
+      const next: AgentInboxItemRecord = {
+        ...item,
+        claimedBy: {
+          runId: input.runId,
+          executionToken: input.executionToken,
+          stepIndex: input.stepIndex,
+          ...(input.afterAnswer ? { afterAnswer: true } : {}),
+        },
+        updatedAt: now,
+      }
+      this.state.inbox.set(key(item.projectId, item.id), clone(next))
+      claimed.push(clone(next))
+    }
+    return claimed
+  }
+
+  async consumeClaimed(
+    input: ConsumeClaimedAgentInboxInput
+  ): Promise<readonly AgentInboxItemRecord[]> {
+    const run = this.state.runs.get(key(input.projectId, input.runId)) ?? null
+    assertInboxRunOwnership(run, input, "Sixb")
+
+    const persisted = new Set(input.messageIds)
+    const now = new Date()
+    const consumed: AgentInboxItemRecord[] = []
+    for (const item of this.threadItems(input.projectId, input.threadId)) {
+      if (
+        item.claimedBy?.runId !== input.runId ||
+        item.claimedBy.executionToken !== input.executionToken
+      ) {
+        continue
+      }
+      const itemKey = key(item.projectId, item.id)
+      if (persisted.has(item.messageId)) {
+        this.state.inbox.delete(itemKey)
+        consumed.push(clone(item))
+      } else {
+        const { claimedBy: _claimedBy, ...rest } = item
+        this.state.inbox.set(itemKey, clone({ ...rest, updatedAt: now }))
+      }
+    }
+    return consumed
+  }
+
+  async releaseClaimed(input: { projectId: string; runId: string }): Promise<number> {
+    const now = new Date()
+    let released = 0
+    for (const [itemKey, item] of this.state.inbox) {
+      if (item.projectId !== input.projectId || item.claimedBy?.runId !== input.runId) continue
+      const { claimedBy: _claimedBy, ...rest } = item
+      this.state.inbox.set(itemKey, clone({ ...rest, updatedAt: now }))
+      released += 1
+    }
+    return released
+  }
+
+  async takeNextQueued(input: TakeNextQueuedAgentInboxInput): Promise<AgentInboxItemRecord | null> {
+    const thread = this.state.threads.get(key(input.projectId, input.threadId))
+    if (!thread || thread.status !== "active" || thread.activeRunId !== null) return null
+
+    const candidates = this.threadItems(input.projectId, input.threadId)
+      .filter((item) => item.claimedBy === undefined && (!input.onlyImmediate || item.immediate))
+      .sort((left, right) => inboxPriority(left) - inboxPriority(right) || left.seq - right.seq)
+    const winner = candidates[0]
+    if (!winner) return null
+
+    this.state.inbox.delete(key(winner.projectId, winner.id))
+    return clone(winner)
+  }
+
+  private threadItems(projectId: string, threadId: string): AgentInboxItemRecord[] {
+    return [...this.state.inbox.values()]
+      .filter((item) => item.projectId === projectId && item.threadId === threadId)
+      .sort((left, right) => left.seq - right.seq)
+  }
+}
+
+function inboxPriority(item: Pick<AgentInboxItemRecord, "immediate" | "mode">): number {
+  if (item.immediate) return 0
+  return item.mode === "steer" ? 1 : 2
+}
+
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
@@ -1792,6 +1988,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     approvals: new Map(),
     approvalModes: new Map(),
     tokenRates: new Map(),
+    inbox: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
@@ -1802,6 +1999,7 @@ export class InMemoryAgentStorage implements AgentStorage {
   readonly approvals: InMemoryAgentApprovalStore
   readonly approvalModes: InMemoryAgentApprovalModeStore
   readonly tokenRates: InMemoryAgentTokenRateStore
+  readonly inbox: InMemoryAgentInboxStore
   readonly computers = new InMemoryAgentComputerSessionStore()
 
   constructor(executions: ExecutionStorage) {
@@ -1813,6 +2011,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     this.approvals = new InMemoryAgentApprovalStore(this.state)
     this.approvalModes = new InMemoryAgentApprovalModeStore(this.state)
     this.tokenRates = new InMemoryAgentTokenRateStore(this.state)
+    this.inbox = new InMemoryAgentInboxStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -1826,6 +2025,7 @@ export class InMemoryAgentStorage implements AgentStorage {
       approvals: structuredClone(this.state.approvals),
       approvalModes: structuredClone(this.state.approvalModes),
       tokenRates: structuredClone(this.state.tokenRates),
+      inbox: structuredClone(this.state.inbox),
     }
   }
 
@@ -1839,6 +2039,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.approvals, snapshot.approvals)
     replace(this.state.approvalModes, snapshot.approvalModes)
     replace(this.state.tokenRates, snapshot.tokenRates)
+    replace(this.state.inbox, snapshot.inbox)
   }
 }
 

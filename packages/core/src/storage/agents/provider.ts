@@ -9,9 +9,9 @@ import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
-import { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX } from "./types"
+import { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX, AGENT_THREAD_INBOX_MAX_ITEMS } from "./types"
 
-export { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX }
+export { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX, AGENT_THREAD_INBOX_MAX_ITEMS }
 
 import type {
   AddAgentThreadParticipantsInput,
@@ -22,6 +22,9 @@ import type {
   AgentBackgroundCommandRef,
   AgentComputerSessionRecord,
   AgentContextCheckpointRecord,
+  AgentInboxItemRecord,
+  AgentInboxMode,
+  AgentInboxSpec,
   AgentMemoryChange,
   AgentMessageRecord,
   AgentRunRecord,
@@ -32,10 +35,12 @@ import type {
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
   AgentTokenRateRecord,
+  ConsumeClaimedAgentInboxInput,
   ConversationAgentRunRecord,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  EnqueueAgentInboxItemInput,
   FinishAgentRunInput,
   ForkAgentThreadInput,
   ListAgentApprovalsInput,
@@ -45,11 +50,14 @@ import type {
   SubagentRunFile,
   SubagentRunRecord,
   SubagentRunResult,
+  TakeAgentInboxSteersInput,
   TransitionAgentThreadSandboxInput,
+  UpdateAgentInboxItemInput,
 } from "./types"
 import {
   AGENT_APPROVAL_MODES,
   AGENT_HOLDING_APPROVAL_MODES,
+  AGENT_INBOX_MODES,
   AGENT_MEMORY_HISTORY_DAYS,
   AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
   AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
@@ -1537,4 +1545,239 @@ export function agentApprovalMatches(
     (input.reported === undefined ||
       (approval.reportedInMessageId !== undefined) === input.reported)
   )
+}
+
+// -- agent_thread_inbox: shared validation and transitions ------------------------------------
+
+function assertNonEmptyText(value: unknown, field: string, prefix: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox '${field}' must not be empty.`
+    )
+  }
+}
+
+function assertPrincipalInput(principal: Principal, field: string, prefix: string): void {
+  if (
+    !isPlainRecord(principal) ||
+    !["user", "serviceAccount", "system"].includes(principal.type) ||
+    typeof principal.id !== "string" ||
+    principal.id.trim().length === 0
+  ) {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox '${field}' is invalid.`)
+  }
+}
+
+export function assertAgentInboxMode(
+  mode: unknown,
+  prefix = "Sixb"
+): asserts mode is AgentInboxMode {
+  if (!(AGENT_INBOX_MODES as readonly unknown[]).includes(mode)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox mode must be one of: ${AGENT_INBOX_MODES.join(", ")}.`
+    )
+  }
+}
+
+export function assertAgentInboxSpec(spec: AgentInboxSpec | undefined, prefix = "Sixb"): void {
+  if (spec === undefined) return
+  if (!isPlainRecord(spec)) {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox spec must be an object.`)
+  }
+  if (spec.model !== undefined) {
+    if (
+      !isPlainRecord(spec.model) ||
+      typeof spec.model.provider !== "string" ||
+      spec.model.provider.trim().length === 0 ||
+      typeof spec.model.modelId !== "string" ||
+      spec.model.modelId.trim().length === 0
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Agent inbox model reference must have non-empty provider and modelId.`
+      )
+    }
+  }
+  if (spec.reasoning !== undefined) {
+    const validLevel = (AGENT_REASONING_LEVELS as readonly unknown[]).includes(spec.reasoning)
+    if (!validLevel && !isModelReasoning(spec.reasoning)) {
+      throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox reasoning is invalid.`)
+    }
+  }
+  if (
+    spec.approvalMode !== undefined &&
+    !(AGENT_APPROVAL_MODES as readonly unknown[]).includes(spec.approvalMode)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox approvalMode must be one of: ${AGENT_APPROVAL_MODES.join(", ")}.`
+    )
+  }
+}
+
+export function assertEnqueueAgentInboxItemInput(
+  input: EnqueueAgentInboxItemInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.id, "id", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.messageId, "messageId", prefix)
+  assertPrincipalInput(input.authorPrincipal, "authorPrincipal", prefix)
+  assertAgentInboxMode(input.mode, prefix)
+  if (!Array.isArray(input.parts) || input.parts.length === 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox 'parts' must be a non-empty array.`
+    )
+  }
+  assertAgentInboxSpec(input.spec, prefix)
+}
+
+export function assertUpdateAgentInboxItemInput(
+  input: UpdateAgentInboxItemInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.id, "id", prefix)
+  if (input.mode !== undefined) assertAgentInboxMode(input.mode, prefix)
+  if (input.parts !== undefined && (!Array.isArray(input.parts) || input.parts.length === 0)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox 'parts' must be a non-empty array.`
+    )
+  }
+  if (input.spec !== undefined && input.spec !== null) assertAgentInboxSpec(input.spec, prefix)
+}
+
+export function assertTakeAgentInboxSteersInput(
+  input: TakeAgentInboxSteersInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.runId, "runId", prefix)
+  assertNonEmptyText(input.executionToken, "executionToken", prefix)
+  if (!Number.isInteger(input.stepIndex) || input.stepIndex < 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox 'stepIndex' must be a non-negative integer.`
+    )
+  }
+}
+
+export function assertInboxThreadAcceptsItem(
+  thread: Pick<AgentThreadRecord, "id" | "kind" | "status"> | null,
+  threadId: string,
+  projectId: string,
+  existingCount: number,
+  prefix = "Sixb"
+): void {
+  if (!thread) {
+    throw new AgentStorageError(
+      "thread_not_found",
+      `[${prefix}] Agent thread '${threadId}' not found for project '${projectId}'.`
+    )
+  }
+  assertConversationThreadRow(thread, "holds inbox messages", prefix)
+  if (thread.status !== "active") {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Archived agent thread '${thread.id}' does not accept inbox messages.`
+    )
+  }
+  if (existingCount >= AGENT_THREAD_INBOX_MAX_ITEMS) {
+    throw new AgentStorageError(
+      "inbox_limit",
+      `[${prefix}] Agent thread '${thread.id}' can hold at most ${AGENT_THREAD_INBOX_MAX_ITEMS} pending inbox items.`
+    )
+  }
+}
+
+export function assertInboxRunOwnership(
+  run: Pick<AgentRunRecord, "id" | "kind" | "threadId" | "status" | "execution"> | null,
+  input: Pick<ConsumeClaimedAgentInboxInput, "projectId" | "threadId" | "runId" | "executionToken">,
+  prefix = "Sixb"
+): void {
+  if (
+    !run ||
+    run.kind !== "conversation" ||
+    run.threadId !== input.threadId ||
+    run.status !== "running" ||
+    run.execution?.token !== input.executionToken
+  ) {
+    throw new AgentStorageError(
+      "execution_lost",
+      `[${prefix}] Execution token is no longer current on agent run '${input.runId}'.`
+    )
+  }
+}
+
+export function newAgentInboxItemRecord(
+  input: EnqueueAgentInboxItemInput,
+  seq: number
+): AgentInboxItemRecord {
+  const createdAt = new Date(input.createdAt ?? new Date())
+  const normalizedSpec = normalizeInboxSpec(input.spec)
+  return {
+    id: input.id,
+    projectId: input.projectId,
+    threadId: input.threadId,
+    messageId: input.messageId,
+    seq,
+    authorPrincipal: structuredClone(input.authorPrincipal),
+    mode: input.mode,
+    parts: structuredClone(input.parts),
+    ...(normalizedSpec ? { spec: normalizedSpec } : {}),
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+    ...(input.locale ? { locale: input.locale } : {}),
+    ...(input.immediate ? { immediate: true } : {}),
+    createdAt,
+    updatedAt: new Date(createdAt),
+  }
+}
+
+export function updatedAgentInboxItemRecord(
+  current: AgentInboxItemRecord,
+  input: UpdateAgentInboxItemInput
+): AgentInboxItemRecord {
+  if (current.claimedBy !== undefined) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[Sixb] Agent inbox item '${current.id}' was already claimed by run '${current.claimedBy.runId}'.`
+    )
+  }
+  const nextSpec =
+    input.spec === undefined
+      ? current.spec
+      : input.spec === null
+        ? undefined
+        : normalizeInboxSpec(input.spec)
+  const nextImmediate = input.immediate === undefined ? current.immediate : input.immediate
+  const { spec: _oldSpec, immediate: _oldImmediate, ...base } = current
+  return {
+    ...base,
+    mode: input.mode ?? current.mode,
+    parts:
+      input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts),
+    ...(nextSpec ? { spec: structuredClone(nextSpec) } : {}),
+    ...(nextImmediate ? { immediate: true } : {}),
+    updatedAt: new Date(input.updatedAt ?? new Date()),
+  }
+}
+
+function normalizeInboxSpec(spec: AgentInboxSpec | undefined): AgentInboxSpec | undefined {
+  if (!spec) return undefined
+  const out: {
+    model?: AgentInboxSpec["model"]
+    reasoning?: AgentInboxSpec["reasoning"]
+    approvalMode?: AgentInboxSpec["approvalMode"]
+  } = {}
+  if (spec.model !== undefined) out.model = structuredClone(spec.model)
+  if (spec.reasoning !== undefined) out.reasoning = structuredClone(spec.reasoning)
+  if (spec.approvalMode !== undefined) out.approvalMode = spec.approvalMode
+  return Object.keys(out).length > 0 ? out : undefined
 }

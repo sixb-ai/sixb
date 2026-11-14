@@ -3,6 +3,7 @@ import type { PgStoreClient } from "../transactions"
 import { PgAgentApprovalStore } from "./approvals"
 import { PgAgentContextCheckpointStore } from "./checkpoints"
 import { PgAgentComputerSessionStore } from "./computers"
+import { PgAgentInboxStore } from "./inbox"
 import { PgAgentMemoryStore } from "./memory"
 import { PgAgentMessageStore } from "./messages"
 import { PgAgentRunStore } from "./runs"
@@ -31,6 +32,7 @@ export class PgAgentStorage implements AgentStorage {
   readonly approvalModes: PgAgentApprovalModeStore
   readonly computers: PgAgentComputerSessionStore
   readonly tokenRates: PgAgentTokenRateStore
+  readonly inbox: PgAgentInboxStore
 
   constructor(options: PgAgentStorageOptions) {
     this.threads = new PgAgentThreadStore(options.sql)
@@ -42,5 +44,6 @@ export class PgAgentStorage implements AgentStorage {
     this.approvalModes = new PgAgentApprovalModeStore(options.sql)
     this.computers = new PgAgentComputerSessionStore(options.sql)
     this.tokenRates = new PgAgentTokenRateStore(options.sql)
+    this.inbox = new PgAgentInboxStore(options.sql)
   }
 }
