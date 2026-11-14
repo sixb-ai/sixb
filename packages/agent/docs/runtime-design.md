@@ -372,6 +372,25 @@ its parent with `message_agent` (see [messages to a child](#messages-to-a-child)
   bytes. `session.finish` consumes the claims it wrote in the same transaction as the messages and
   the run's end; a steer no step answered is released, and reads as unread in the thread again.
 
+## Queueing a turn
+
+A message that should wait starts the next turn instead of steering the running one.
+
+- **Where it waits.** In the same thread inbox, with `mode: "queue"`, until the thread is idle
+  (`thread.activeRunId === null`). It is not in the conversation until then, so the running turn's
+  request never reads it.
+- **What starts it.** `afterAgentRunFinished` (`run-after-finish.ts`), for the turn's own requester:
+  a message they sent now (`immediate`, which is what Send now sets) starts whatever ended the
+  turn; a message queued for later starts only once the turn answered. A turn that stopped, failed,
+  or asked the requester a question starts neither, so nothing runs on top of a question or a
+  failure.
+- **How it starts.** `startQueuedAgentTurnFromInbox` (`request.ts`) pops the item in the same
+  transaction that writes its message and its run, as a sibling of the finished turn's execution:
+  the message runs under the authority of the person who sent it, with their grants as they are now.
+  The finished turn's model and reasoning carry over unless the message names others.
+- **Who starts it.** Only the finished turn's requester, because a turn runs as its requester: a
+  message another participant queued waits for a turn of theirs.
+
 ## Messages to a child
 
 The parent steers a child still at work with `message_agent({ key, text })`. The key, not a run

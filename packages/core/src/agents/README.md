@@ -28,8 +28,8 @@ rotates its token, then records it `cancelled` and `interrupted`. A worker's rep
 and so does the API server every 30 seconds, for runners with no worker behind them: a run ends
 without a queue job coming back for it.
 
-What follows a turn's end, its children still at work stopped and a turn paused on calls already
-decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
+What follows a turn's end, its children still at work stopped, its unread steers released and a turn
+paused on calls already decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
 the API's both run it.
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run

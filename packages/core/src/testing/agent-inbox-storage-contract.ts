@@ -590,6 +590,45 @@ export function runAgentInboxStorageContractSuite<
         expect(
           await storage.agents.inbox.takeNextQueued({ projectId, threadId: "thr_q" })
         ).toBeNull()
+
+        // A turn runs as its requester, so it starts only the messages they sent.
+        await storage.agents.inbox.enqueue({
+          id: "inb_bob",
+          projectId,
+          threadId: "thr_q",
+          messageId: "msg_bob",
+          authorPrincipal: bob,
+          mode: "queue",
+          parts: [{ type: "text", text: "Bob's follow-up" }],
+        })
+        await storage.agents.inbox.enqueue({
+          id: "inb_alice",
+          projectId,
+          threadId: "thr_q",
+          messageId: "msg_alice",
+          authorPrincipal: alice,
+          mode: "queue",
+          parts: [{ type: "text", text: "Alice's follow-up" }],
+        })
+        const aliceNext = await storage.agents.inbox.takeNextQueued({
+          projectId,
+          threadId: "thr_q",
+          authorPrincipal: alice,
+        })
+        expect(aliceNext?.id).toBe("inb_alice")
+        expect(
+          await storage.agents.inbox.takeNextQueued({
+            projectId,
+            threadId: "thr_q",
+            authorPrincipal: alice,
+          })
+        ).toBeNull()
+        const bobNext = await storage.agents.inbox.takeNextQueued({
+          projectId,
+          threadId: "thr_q",
+          authorPrincipal: bob,
+        })
+        expect(bobNext?.id).toBe("inb_bob")
       })
     })
   })

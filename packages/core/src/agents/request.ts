@@ -27,6 +27,7 @@ import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentApprovalMode,
   type AgentApprovalRecord,
+  type AgentInboxItemRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadComputer,
@@ -406,6 +407,139 @@ export async function retryAgentRun(
 export type AgentTurnResume =
   | { readonly status: "resumed"; readonly run: ConversationAgentRunRecord }
   | { readonly status: Exclude<AgentTurnReadiness, "ready"> }
+
+/** Where a queued turn started from: the thread moved on, nothing waited, or it started. */
+export type AgentQueuedTurnStart =
+  | { readonly status: "started"; readonly run: ConversationAgentRunRecord }
+  | { readonly status: "nothing" }
+  | { readonly status: "closed" }
+
+/**
+ * Start the next message the finished turn's requester queued for this thread, as that requester.
+ *
+ * It pops the item in the same transaction that writes its message and its run, so two turns
+ * ending at once start one between them. `onlyImmediate` starts only a message someone sent now,
+ * which is what a turn that did not answer (a stop, a failure) may follow.
+ */
+export async function startQueuedAgentTurnFromInbox(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  finishedRun: ConversationAgentRunRecord,
+  input: { readonly onlyImmediate: boolean }
+): Promise<AgentQueuedTurnStart> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+
+  // The finished turn's spec is where a queued message starts: its model and reasoning, unless the
+  // message names others. A turn too old to carry one has nothing to start from.
+  const kept = finishedRun.spec
+  if (!kept) return { status: "closed" }
+
+  const thread = await agents.threads.getById({ projectId, id: finishedRun.threadId })
+  if (!thread) return { status: "closed" }
+  assertSandboxExecutionAvailable(thread)
+  // The person whose turn ended, which is whom the queued messages are from: a turn starts the
+  // messages its own requester sent, and another participant's waits for one of theirs.
+  const principal = execution.requestedBy
+  if (!principal) return { status: "closed" }
+
+  const runId = createAgentRunId()
+  const durableExecution = await prepareResumedExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+
+  let started: ConversationAgentRunRecord | null
+  try {
+    started = await runtime.storage.transaction(async (tx) => {
+      const agents = tx.agents
+      if (!agents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+      const item = await agents.inbox.takeNextQueued({
+        projectId,
+        threadId: thread.id,
+        onlyImmediate: input.onlyImmediate,
+        authorPrincipal: principal,
+      })
+      if (!item) return null
+
+      const inherited = await resolveAgentApprovalMode(agents, {
+        projectId,
+        principal,
+        threadId: thread.id,
+      })
+      const approvalMode = item.spec?.approvalMode ?? inherited.approvalMode
+      const spec = queuedConversationRunSpec(thread, kept, item, approvalMode)
+
+      await tx.executions.create(durableExecution)
+      await agents.messages.append({
+        id: item.messageId,
+        projectId,
+        threadId: thread.id,
+        runId: null,
+        role: "user",
+        parts: item.parts,
+        authorPrincipal: item.authorPrincipal,
+        createdAt: item.createdAt,
+        ...(item.timeZone === undefined && item.locale === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(item.timeZone === undefined ? {} : { timeZone: item.timeZone }),
+                ...(item.locale === undefined ? {} : { locale: item.locale }),
+              },
+            }),
+      })
+      return agents.runs.create({
+        id: runId,
+        projectId,
+        executionId: durableExecution.id,
+        threadId: thread.id,
+        triggerMessageId: item.messageId,
+        spec,
+      })
+    })
+  } catch (error) {
+    // A turn took the thread meanwhile: its end starts this message, or its requester does.
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      return { status: "closed" }
+    }
+    throw error
+  }
+  if (!started) return { status: "nothing" }
+
+  await publishRunActivity(runtime, started)
+  await dispatchAgentRun(runtime, agents, runId)
+  return { status: "started", run: started }
+}
+
+/** A queued message's turn: the finished turn's spec, with the message's own choices over it. */
+function queuedConversationRunSpec(
+  thread: AgentThreadRecord,
+  kept: ConversationAgentRunSpec,
+  item: AgentInboxItemRecord,
+  approvalMode: AgentApprovalMode
+): ConversationAgentRunSpec {
+  const model = item.spec?.model ?? kept.model
+  const reasoning = item.spec?.reasoning ?? kept.reasoning
+  const timeZone = item.timeZone ?? kept.timeZone
+  const locale = item.locale ?? kept.locale
+  return inPlace(thread, {
+    model,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+    approvalMode,
+  })
+}
 
 /**
  * Resume a turn that paused on held calls, once its requester decided on all of them: a new turn

@@ -1472,6 +1472,11 @@ export interface TakeNextQueuedAgentInboxInput {
   readonly threadId: string
   /** When `true`, only an item marked `immediate` is popped (used after a user cancel). */
   readonly onlyImmediate?: boolean
+  /**
+   * Only an item this person sent: a turn runs as its requester, so it starts the messages they
+   * sent, and another participant's waits for a turn of theirs.
+   */
+  readonly authorPrincipal?: Principal
 }
 
 export interface AgentInboxStore {

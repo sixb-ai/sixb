@@ -325,6 +325,11 @@ export class PgAgentInboxStore implements AgentInboxStore {
           AND thread_id = ${input.threadId}
           AND claimed_by_run_id IS NULL
           AND (${!input.onlyImmediate}::boolean OR immediate = TRUE)
+          AND (
+            ${input.authorPrincipal?.id ?? null}::text IS NULL
+            OR (author_principal_type = ${input.authorPrincipal?.type ?? null}
+              AND author_principal_id = ${input.authorPrincipal?.id ?? null})
+          )
         ORDER BY
           CASE WHEN immediate = TRUE THEN 0 WHEN mode = 'steer' THEN 1 ELSE 2 END ASC,
           seq ASC
