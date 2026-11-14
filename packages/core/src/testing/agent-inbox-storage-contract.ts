@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { AgentFilePart } from "../agents/message"
 import type { Principal } from "../auth"
 import {
   AGENT_THREAD_INBOX_MAX_ITEMS,
@@ -309,6 +310,63 @@ export function runAgentInboxStorageContractSuite<
             parts: [{ type: "text", text: "Too many" }],
           }),
           "inbox_limit"
+        )
+      })
+    })
+
+    test("refuses a steer that carries a file, which a mid-turn read cannot prepare", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_file",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        const filePart: AgentFilePart = {
+          type: "file",
+          fileRef: {
+            blobId: "blob_1",
+            digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            sizeBytes: 12,
+            fileName: "chart.png",
+            mediaType: "image/png",
+          },
+        }
+
+        await expectErrorCode(
+          storage.agents.inbox.enqueue({
+            id: "inb_file_steer",
+            projectId,
+            threadId: "thr_file",
+            messageId: "msg_file_steer",
+            authorPrincipal: alice,
+            mode: "steer",
+            parts: [filePart],
+          }),
+          "invalid_input"
+        )
+
+        // The next turn prepares its attachments, so there it waits as a queued message.
+        const queued = await storage.agents.inbox.enqueue({
+          id: "inb_file_steer",
+          projectId,
+          threadId: "thr_file",
+          messageId: "msg_file_steer",
+          authorPrincipal: alice,
+          mode: "queue",
+          parts: [filePart],
+        })
+        expect(queued.created).toBe(true)
+
+        // Promoting it to a steer is refused too, before a turn could read bytes it cannot replay.
+        await expectErrorCode(
+          storage.agents.inbox.update({
+            projectId,
+            threadId: "thr_file",
+            id: "inb_file_steer",
+            mode: "steer",
+          }),
+          "invalid_input"
         )
       })
     })

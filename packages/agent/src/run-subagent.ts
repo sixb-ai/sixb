@@ -27,7 +27,6 @@ import {
   agentTraceFromModelSteps,
   agentTraceFromPartialModelLoop,
 } from "./model-adapters"
-import { markReducedSteps } from "./run-agent-turn"
 import type { SubagentAgentExecutionEnvironment } from "./run-environment"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import {
@@ -38,6 +37,7 @@ import {
 } from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import type { SubagentDelivery, SubagentInbox } from "./subagent-inbox"
+import { markReducedSteps } from "./turn-inbox"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentRunFiles, AgentTurnContext } from "./types"
 

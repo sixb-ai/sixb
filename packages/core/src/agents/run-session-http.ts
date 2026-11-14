@@ -124,6 +124,9 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       holdsRun: () => call("heldCalls.holdsRun"),
       pausesAfterStep: () => call("heldCalls.pausesAfterStep"),
     },
+    inbox: {
+      takeSteers: (input) => call("inbox.takeSteers", [input]),
+    },
     children: {
       get: (runId) => call("children.get", [runId]),
       getMany: (runIds) => call("children.getMany", [runIds]),

@@ -1,4 +1,5 @@
 import type { Principal, UserPrincipal } from "../auth/types"
+import { isPlainRecord } from "../json"
 import type {
   AgentContextCheckpointRecord,
   AgentMessageRecord,
@@ -280,6 +281,13 @@ async function readSentSettings(
   const retained = new Set(userMessages.map((message) => message.id))
   const zones: Record<string, string> = {}
   const locales: Record<string, string> = {}
+  for (const message of userMessages) {
+    // A message a turn read mid-run keeps the settings it was rendered with, so a later turn closes
+    // it with the same `<sixb_current_time>`.
+    const metadata = isPlainRecord(message.metadata) ? message.metadata : undefined
+    if (typeof metadata?.timeZone === "string") zones[message.id] = metadata.timeZone
+    if (typeof metadata?.locale === "string") locales[message.id] = metadata.locale
+  }
   for (const run of runs) {
     if (run.kind !== "conversation" || !retained.has(run.triggerMessageId)) continue
 
