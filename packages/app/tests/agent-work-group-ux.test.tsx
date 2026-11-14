@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, mock, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
+import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AssistantBody } from "../src/agent/components/message-parts"
 import type { NormalizedPart } from "../src/agent/parts"
@@ -8,22 +9,41 @@ import { ViewFileToolView } from "../src/agent/view-file/view-file-tool-view"
 import { messageFileSource } from "../src/artifacts/file-source"
 import { installDom } from "./helpers/dom"
 
-installDom([
+const browser = installDom([
   "document",
   "navigator",
   "Node",
+  "NodeFilter",
   "Element",
   "HTMLElement",
   "Event",
+  "CustomEvent",
   "EventTarget",
   "MouseEvent",
+  "KeyboardEvent",
+  "FocusEvent",
+  "PointerEvent",
   "MutationObserver",
   "ResizeObserver",
   "DOMRect",
   "getComputedStyle",
+  "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
 ])
+
+// Radix picks its layout effect when it loads, a no-op without a `document`, and its portals then
+// never mount. Give it React's own for this file and restore it after.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof import("react").useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+afterAll(() => {
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
+})
 
 function mockScrollMetrics(
   element: HTMLElement,
@@ -157,30 +177,19 @@ describe("work group UX", () => {
     // Removal proof: drop `usePhoneSheet` in WorkGroupView; mobile taps open the nested inline box
     // instead of `[data-work-sheet]`.
     const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
-    const previousMatchMedia = Reflect.get(window, "matchMedia")
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      writable: true,
-      value: (query: string) => ({
-        matches: query === "(max-width: 767px)",
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }),
-    })
+    browser.happyDOM.setViewport({ width: 375, height: 812 })
 
     try {
       const view = render(workUi(queryClient, initialSteps, true))
-      await act(async () => {
-        fireEvent.click(view.getByRole("button"))
+      fireEvent.click(view.getByRole("button"))
+      const sheet = await waitFor(() => {
+        const found = document.querySelector<HTMLElement>("[data-work-sheet]")
+        if (!found) throw new Error("No bottom sheet.")
+        return found
       })
-      expect(document.querySelector("[data-work-sheet]")).not.toBeNull()
+      expect(sheet.getAttribute("data-slot")).toBe("drawer-content")
     } finally {
-      Object.defineProperty(window, "matchMedia", {
-        configurable: true,
-        writable: true,
-        value: previousMatchMedia,
-      })
+      browser.happyDOM.setViewport({ width: 1024, height: 768 })
       queryClient.clear()
     }
   })
