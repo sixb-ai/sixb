@@ -24,6 +24,7 @@ import {
   moveAgentThreadToCloudMutation,
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
+  restoreAgentThreadSandboxMutation,
   retryAgentRunMutation,
   setAgentThreadApprovalModeMutation,
   stopAgentBackgroundCommandMutation,
@@ -479,6 +480,7 @@ export function useAgentConversation({
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
+  const restoreSandbox = useMutation(restoreAgentThreadSandboxMutation())
   const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
   const stopBackgroundCommand = useMutation(stopAgentBackgroundCommandMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
@@ -868,9 +870,10 @@ export function useAgentConversation({
     )
   }
 
-  const handleRecreateSandbox = () => {
+  /** Recover the thread's sandbox as its owner chose: fresh, or as the failed save left it. */
+  const recoverSandbox = (recovery: typeof recreateSandbox | typeof restoreSandbox) => {
     if (!thread?.sandboxState || isRunning || access !== "owner") return
-    recreateSandbox.mutate(
+    recovery.mutate(
       {
         path: { threadId: thread.id },
         body: { expectedSandboxName: thread.sandboxState.name },
@@ -1243,9 +1246,19 @@ export function useAgentConversation({
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
     ? {
-        pending: recreateSandbox.isPending,
+        pending: recreateSandbox.isPending || restoreSandbox.isPending,
         error: recreateSandbox.isError,
-        onRecreate: handleRecreateSandbox,
+        onRecreate: () => recoverSandbox(recreateSandbox),
+        // Only a workspace its run finished preparing has files to go on from.
+        ...(sandboxRecovery.status !== "unavailable" && sandboxRecovery.initialized
+          ? {
+              restore: {
+                pending: restoreSandbox.isPending,
+                error: restoreSandbox.isError,
+                onRestore: () => recoverSandbox(restoreSandbox),
+              },
+            }
+          : {}),
         canRecreate: access === "owner",
         owner: thread ? personName(threadOwner(thread)) : "",
       }

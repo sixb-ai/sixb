@@ -17,6 +17,7 @@ import type {
   AgentStorage,
   AgentThreadComputer,
   AgentThreadRecord,
+  AgentThreadSandboxState,
   ConversationAgentRunRecord,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
@@ -127,6 +128,15 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
   {
     /** Start fresh after uncertain recovery; never deletes the previous sandbox. Owner only. */
     recreateSandbox(
+      threadId: string,
+      input: { readonly expectedSandboxName: string }
+    ): Promise<AgentThreadView>
+    /**
+     * Go on in the sandbox a failed save left, with its files as they were: only one its run
+     * finished preparing. The next run resumes it if the provider kept it, or starts fresh and says
+     * so if it did not. Owner only.
+     */
+    restoreSandbox(
       threadId: string,
       input: { readonly expectedSandboxName: string }
     ): Promise<AgentThreadView>
@@ -786,6 +796,32 @@ export function createAgentRuntime<
     },
   }
 
+  /** Move a conversation's sandbox out of recovery, as its owner chose: fresh, or as it was. */
+  const recoverSandbox = async (
+    threadId: string,
+    choice: "recreate" | "restore",
+    transition: (storage: AgentStorage) => Promise<AgentThreadSandboxState>
+  ): Promise<AgentThreadView> => {
+    const readable = await rule.read(threadId)
+    if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+    assertConversationThread(readable.thread)
+    if (readable.access !== "owner") {
+      throw new AgentRequestError(
+        "not_thread_owner",
+        `[Sixb] Only the owner of Agent thread '${threadId}' can ${choice} its sandbox.`
+      )
+    }
+
+    const storage = runtime.storage.agents
+    if (!storage) {
+      throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    }
+    const thread = readable.thread
+    const sandboxState = await transition(storage)
+    const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
+    return view ?? thread
+  }
+
   const ownedComputerThread = async (threadId: string): Promise<AgentThreadRecord> => {
     const readable = await rule.read(threadId)
     if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
@@ -856,35 +892,25 @@ export function createAgentRuntime<
     approvals,
     preferences,
     threads: {
-      recreateSandbox: async (threadId, input) => {
-        const readable = await rule.read(threadId)
-        if (!readable)
-          throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
-        assertConversationThread(readable.thread)
-        if (readable.access !== "owner") {
-          throw new AgentRequestError(
-            "not_thread_owner",
-            `[Sixb] Only the owner of Agent thread '${threadId}' can recreate its sandbox.`
-          )
-        }
-
-        const thread = readable.thread
-        const storage = runtime.storage.agents
-        if (!storage)
-          throw new AgentRequestError(
-            "storage_unavailable",
-            "[Sixb] Agent storage is not configured."
-          )
-        const sandboxState = await storage.threads.transitionSandbox({
-          projectId: runtime.projectId,
-          id: threadId,
-          action: "recreate",
-          expectedSandboxName: input.expectedSandboxName,
-          name: createAgentThreadSandboxName(runtime.projectId, threadId),
-        })
-        const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
-        return view ?? thread
-      },
+      recreateSandbox: (threadId, input) =>
+        recoverSandbox(threadId, "recreate", (storage) =>
+          storage.threads.transitionSandbox({
+            projectId: runtime.projectId,
+            id: threadId,
+            action: "recreate",
+            expectedSandboxName: input.expectedSandboxName,
+            name: createAgentThreadSandboxName(runtime.projectId, threadId),
+          })
+        ),
+      restoreSandbox: (threadId, input) =>
+        recoverSandbox(threadId, "restore", (storage) =>
+          storage.threads.transitionSandbox({
+            projectId: runtime.projectId,
+            id: threadId,
+            action: "restore",
+            name: input.expectedSandboxName,
+          })
+        ),
       moveToComputer: async (threadId, computer) => {
         const thread = await ownedComputerThread(threadId)
         const moves = movesComputerPlace(thread, computer)

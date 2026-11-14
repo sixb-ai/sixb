@@ -893,6 +893,43 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+    .post(
+      "/api/agent-threads/:threadId/sandbox/restore",
+      async (context) => {
+        try {
+          const sixb = requireRequestSixb(context)
+          const thread = await sixb.agent.threads.restoreSandbox(
+            context.params.threadId,
+            context.body
+          )
+          return serializeThread(host, thread, requestActor(sixb))
+        } catch (error) {
+          if (error instanceof AgentStorageError && error.code === "invalid_state") {
+            context.set.status = 409
+            return { error: "Sandbox state changed or a run is active. Reload and try again." }
+          }
+          return handleAgentRouteError(error, context.set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        body: z.object({ expectedSandboxName: z.string().min(1) }).strict(),
+        response: {
+          200: AgentThreadSchema,
+          400: ErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+        },
+        detail: {
+          summary:
+            "Explicitly go on in the workspace a failed save left, with its files as they were",
+          operationId: "restoreAgentThreadSandbox",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
     .get(
       "/api/agent-threads/:threadId/messages",
       async (context) => {

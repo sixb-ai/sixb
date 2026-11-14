@@ -36,3 +36,40 @@ test("disables duplicate recovery requests and exposes failures", () => {
   expect(html).toContain('role="alert"')
   expect(html).toContain("Could not recreate")
 })
+
+test("offers to resume a prepared workspace beside starting fresh, without resuming during render", () => {
+  let restores = 0
+  const html = renderToStaticMarkup(
+    createElement(SandboxRecovery, {
+      pending: false,
+      error: false,
+      canRecreate: true,
+      owner: "Alice Martin",
+      onRecreate: () => {},
+      restore: {
+        pending: false,
+        error: false,
+        onRestore: () => {
+          restores++
+        },
+      },
+    })
+  )
+  expect(html).toContain("Resume previous sandbox")
+  expect(html).toContain("Start with a fresh sandbox")
+  expect(html).toContain("Its last change may be unfinished")
+  expect(restores).toBe(0)
+})
+
+test("offers no resume for a workspace that has nothing to go on from", () => {
+  const html = renderToStaticMarkup(
+    createElement(SandboxRecovery, {
+      pending: false,
+      error: false,
+      canRecreate: true,
+      owner: "Alice Martin",
+      onRecreate: () => {},
+    })
+  )
+  expect(html).not.toContain("Resume previous sandbox")
+})

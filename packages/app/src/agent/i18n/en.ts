@@ -921,6 +921,11 @@ export const en = {
     cancel: "Cancel",
     create: "Create fresh sandbox",
     ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
+    resume: "Resume previous sandbox",
+    resuming: "Resuming…",
+    resumeHint:
+      "Resume goes on with the files the last run left. Its last change may be unfinished; start fresh to discard them.",
+    resumeFailed: "Could not resume the previous sandbox. Reload and try again, or start fresh.",
   },
   /** A command the agent runs in the background, as its card and its calls read. */
   background: {

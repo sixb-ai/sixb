@@ -192,6 +192,7 @@ import {
   requestSyncRun,
   requestWorkflowRun,
   resolveArtifactComment,
+  restoreAgentThreadSandbox,
   restoreArtifact,
   retryAgentRun,
   revokeAuthAccessToken,
@@ -754,6 +755,9 @@ import type {
   ResolveArtifactCommentData,
   ResolveArtifactCommentError,
   ResolveArtifactCommentResponse,
+  RestoreAgentThreadSandboxData,
+  RestoreAgentThreadSandboxError,
+  RestoreAgentThreadSandboxResponse,
   RestoreArtifactData,
   RestoreArtifactError,
   RestoreArtifactResponse,
@@ -4851,6 +4855,33 @@ export const recreateAgentThreadSandboxMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await recreateAgentThreadSandbox({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Explicitly go on in the workspace a failed save left, with its files as they were
+ */
+export const restoreAgentThreadSandboxMutation = (
+  options?: Partial<Options<RestoreAgentThreadSandboxData>>
+): UseMutationOptions<
+  RestoreAgentThreadSandboxResponse,
+  RestoreAgentThreadSandboxError,
+  Options<RestoreAgentThreadSandboxData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RestoreAgentThreadSandboxResponse,
+    RestoreAgentThreadSandboxError,
+    Options<RestoreAgentThreadSandboxData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await restoreAgentThreadSandbox({
         ...options,
         ...fnOptions,
         throwOnError: true,

@@ -3774,6 +3774,103 @@ describe("AgentWorker", () => {
     }
   })
 
+  // The provider ended the VM's session mid-turn, at its time limit: the save's cleanup command
+  // fails and the stop is refused, as the VM stopped already. Removal proof: let a refused stop
+  // skip the settle in preserve again; the workspace stays busy, which no owner can restore.
+  test("blocks a workspace whose VM the provider stopped, and goes on in it once its owner restores it", async () => {
+    const sandbox = Object.assign(new RecordingSandbox("expired-session"), {
+      setRequestCredentials: async () => {},
+    })
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    let expired = false
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (expired) throw new Error("sandbox session stopped")
+      return runCommand(command, args, options)
+    }
+    const stop = sandbox.stop.bind(sandbox)
+    sandbox.stop = async () => {
+      if (expired) throw new Error("sandbox session already stopped")
+      await stop()
+    }
+    let resumes = 0
+    // The session ends while the first turn works: its save then finds the VM gone.
+    let expireOnModelCall = true
+    const host = buildSixb(
+      answerModel(() => {
+        if (expireOnModelCall) expired = true
+        expireOnModelCall = false
+      }),
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          return sandbox
+        },
+        resume: async () => {
+          resumes++
+          expired = false
+          return sandbox
+        },
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => ({ source: { type: "git", url: "https://example.com/repository.git" } }),
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+
+    const first = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    let worker = new AgentWorker(host, workerOptions())
+    let completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: first.run.id })
+      ).toMatchObject({ status: "failed" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+    const blocked = (await sdk.agent.threads.getById(thread.id))?.sandboxState
+    expect(blocked).toMatchObject({ status: "blocked", initialized: true })
+    expect(
+      errors.mock.calls.some(([message]) => String(message).includes("could not be saved"))
+    ).toBe(true)
+    errors.mockRestore()
+
+    const restored = await sdk.agent.threads.restoreSandbox(thread.id, {
+      expectedSandboxName: blocked!.name,
+    })
+    expect(restored.sandboxState).toMatchObject({ name: blocked!.name, status: "ready" })
+
+    const second = await requestAgent(host, { threadId: thread.id, text: "Go on" })
+    worker = new AgentWorker(host, workerOptions())
+    completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: second.run.id })
+      ).toMatchObject({ status: "succeeded" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+    expect(resumes).toBe(1)
+    expect(sandbox.destroyed).toBe(false)
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toMatchObject({
+      name: blocked!.name,
+      status: "ready",
+    })
+  })
+
   // SixbHost rejects such sandboxes at construction. A worker host is structural, so the worker
   // keeps its own guard. Regression proof: remove the check from buildAgentContext; it starts.
   test("refuses to start on sandboxes that cannot add the run token", () => {

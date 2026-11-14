@@ -13501,6 +13501,132 @@ export type RecreateAgentThreadSandboxResponses = {
 export type RecreateAgentThreadSandboxResponse =
   RecreateAgentThreadSandboxResponses[keyof RecreateAgentThreadSandboxResponses]
 
+export type RestoreAgentThreadSandboxData = {
+  body: {
+    expectedSandboxName: string
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/sandbox/restore"
+}
+
+export type RestoreAgentThreadSandboxErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+}
+
+export type RestoreAgentThreadSandboxError =
+  RestoreAgentThreadSandboxErrors[keyof RestoreAgentThreadSandboxErrors]
+
+export type RestoreAgentThreadSandboxResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sandboxState?: {
+      name: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    owner: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+      displayName?: string
+    }
+    participants: Array<{
+      principal: {
+        type: "user"
+        id: string
+        displayName?: string
+      }
+      addedAt: string
+      addedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+    title?: string
+    sandboxParams?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+    }
+    runsOn?: "computer"
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    backgroundCommands?: Array<{
+      threadId: string
+      id: string
+      command: string
+      status: "running" | "exited" | "stopped"
+      exitCode?: number
+      startedAt: string
+      endedAt?: string
+      stopping?: boolean
+    }>
+    movedAt?: string
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
+  }
+}
+
+export type RestoreAgentThreadSandboxResponse =
+  RestoreAgentThreadSandboxResponses[keyof RestoreAgentThreadSandboxResponses]
+
 export type ListAgentThreadMessagesData = {
   body?: never
   path: {

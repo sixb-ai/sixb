@@ -58,7 +58,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.db
       .transaction(() => {
         const run =
-          input.action === "recreate"
+          input.action === "recreate" || input.action === "restore"
             ? null
             : (this.db
                 .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")

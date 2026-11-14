@@ -956,6 +956,12 @@ export const fr: Translation<AgentMessages> = {
     create: "Créer un nouvel environnement",
     ownerOnly: (owner) =>
       `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
+    resume: "Reprendre l’environnement précédent",
+    resuming: "Reprise…",
+    resumeHint:
+      "La reprise continue avec les fichiers laissés par la dernière exécution. Sa dernière modification peut être inachevée ; repartez d’un nouvel environnement pour les abandonner.",
+    resumeFailed:
+      "Impossible de reprendre l’environnement précédent. Rechargez la page et réessayez, ou repartez d’un nouvel environnement.",
   },
   background: {
     card: (command) => `Commande en arrière-plan : ${command}`,

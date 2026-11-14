@@ -562,6 +562,9 @@ import type {
   ResolveArtifactCommentData,
   ResolveArtifactCommentErrors,
   ResolveArtifactCommentResponses,
+  RestoreAgentThreadSandboxData,
+  RestoreAgentThreadSandboxErrors,
+  RestoreAgentThreadSandboxResponses,
   RestoreArtifactData,
   RestoreArtifactErrors,
   RestoreArtifactResponses,
@@ -3105,6 +3108,29 @@ export const recreateAgentThreadSandbox = <ThrowOnError extends boolean = false>
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/sandbox/recreate",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Explicitly go on in the workspace a failed save left, with its files as they were
+ */
+export const restoreAgentThreadSandbox = <ThrowOnError extends boolean = false>(
+  options: Options<RestoreAgentThreadSandboxData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RestoreAgentThreadSandboxResponses,
+    RestoreAgentThreadSandboxErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/sandbox/restore",
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -1248,7 +1248,7 @@ function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
   if (thread.sandboxState && !["new", "ready"].includes(thread.sandboxState.status)) {
     throw new AgentRequestError(
       "sandbox_execution_unavailable",
-      "[Sixb] Sandbox recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
+      "[Sixb] Sandbox recovery is required before another run. Reload the thread, then resume its previous sandbox or recreate it to start fresh."
     )
   }
 }

@@ -100,6 +100,23 @@ export function transitionAgentThreadSandbox(
       resetAt: new Date().toISOString(),
     }
   }
+  if (input.action === "restore") {
+    if (thread.activeRunId !== null) return fail("cannot be restored during an active run.")
+    if (!state || state.name !== input.name) return fail("changed; reload before restoring.")
+    if (state.status !== "busy" && state.status !== "blocked") {
+      return fail("does not require recovery.")
+    }
+    // Only a workspace its run finished preparing holds anything to go on from. A provider never
+    // resumes a VM that still runs, so the next run cannot reach a late operation of the last one.
+    if (!state.initialized) return fail("was never prepared; start fresh instead.")
+    return {
+      name: state.name,
+      status: "ready",
+      initialized: true,
+      ...(state.sourceFingerprint ? { sourceFingerprint: state.sourceFingerprint } : {}),
+      ...(state.resetAt ? { resetAt: state.resetAt } : {}),
+    }
+  }
   if (
     !run ||
     run.threadId !== thread.id ||
