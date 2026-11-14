@@ -2,7 +2,7 @@
 
 Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
 model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
-Language, embedding and decision models are supported.
+Language, embedding, decision and transcription models are supported.
 
 ## Install
 
@@ -117,6 +117,46 @@ The price is Azure's retail meter "Microsoft Decision 1 1M Tokens", the same in 
 Other decision models have unknown cost, not zero: pass `rateCard` or `costEstimator` for them. Connected deployments from another resource are rejected;
 configure that resource's project URL and API key.
 
+## Transcription
+
+Deploy a transcription model in the project and register the deployment under
+`models.audio.transcription`:
+
+```ts
+export const transcriber = foundry.transcription("transcribe", { language: "en" })
+
+// In your createSixb() options:
+const models = { audio: { transcription: [transcriber] } }
+```
+
+Use it with `sixb.models.audio.transcribe()`, see
+[audio transcription](../../docs/models/configuration.md#audio-transcription).
+
+| Deployed model | Billed by | Price (GlobalStandard) |
+| --- | --- | --- |
+| `gpt-4o-transcribe` | Audio input and text output tokens | USD 6 and 10 per million |
+| `gpt-4o-mini-transcribe` | Audio input and text output tokens | USD 3 and 5 per million |
+| `gpt-4o-transcribe-diarize` | Tokens | Unknown: Azure publishes no retail meter |
+| `gpt-transcribe` | Audio duration, in whole seconds | USD 0.27 per hour |
+| `whisper` | Audio duration | USD 0.36 per hour (Standard: 0.396) |
+
+| Behavior | Rule |
+| --- | --- |
+| Deployment | Must run one of the models above; others are rejected, and `foundry.chat()` rejects transcription deployments |
+| Inference | `POST /openai/deployments/<deployment>/audio/transcriptions?api-version=2024-10-21` on the resource origin, with the project's API key; the v1 API does not route audio deployments |
+| Audio | Up to 25 MiB of FLAC, MP3, MP4/M4A, Ogg, WAV or WebM, sent as is; Sixb rejects other media types before the upload |
+| `language` | ISO-639-1 code of the spoken language; omitted, the model detects it |
+| Speakers | `gpt-4o-transcribe-diarize` returns the text only: Sixb's transcription result has no speaker segments yet ([#1142](https://github.com/sixb-ai/sixb/issues/1142)) |
+| `timeoutMs` | 120 seconds per transcription, upload and response included |
+| Retries | None: errors carry `retryable` and `retryAfterMs` |
+| Price | Azure Retail Prices for the deployment's model version and SKU: GlobalStandard, DataZoneStandard and Standard (verified 2026-11-13) |
+
+A deployment without a published price, such as `gpt-4o-transcribe-diarize` or a provisioned
+SKU, has unknown cost, not zero: pass `rateCard` or `costEstimator`. A reservation is never
+estimated, because neither tokens nor duration are known before Azure decodes the file, so a
+[cost limit](../../docs/models/usage-and-limits.md#set-a-monthly-limit) blocks these calls.
+Connected deployments from another resource are rejected.
+
 ## Stream a response
 
 ```ts
@@ -156,7 +196,7 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Supported language deployments |
+| Catalog listings | Supported language deployments; embedding, decision and transcription deployments are left out |
 | Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
@@ -269,7 +309,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
 | Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
-| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings and decisions |
+| Retries | Transient language-model HTTP failures; no replay after stream acceptance or ambiguous network failure; none for embeddings, decisions and transcriptions |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -296,5 +336,6 @@ SIXB_FOUNDRY_E2E=1 \
 | `contracts.e2e.ts` | Tools, images, durable replay, strict JSON and accounting | 16 / 16,384 |
 | `provider.e2e.ts` | Protocol controls, tools, media, cancellation and errors | 40 / 16,000 |
 | `decision.e2e.ts` | Decision questions, accounting, errors and chat tier routing | 16 decisions / — |
+| `transcription.e2e.ts` | Each transcription deployment, accounting and errors | 8 transcriptions / — |
 
 Native Messages has fixture coverage; live verification requires a deployed Claude model.

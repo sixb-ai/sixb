@@ -70,8 +70,8 @@ generation waits while projections continue updating objects.
 Calls to `sixb.models.audio.transcribe()` appear in **AI usage** with their cost and audio duration,
 when available.
 
-Vercel Gateway transcription is currently blocked when a cost limit applies, because Sixb
-cannot estimate its cost before the call.
+Vercel Gateway and Azure AI Foundry transcription are currently blocked when a cost limit applies,
+because Sixb cannot estimate their cost before the call.
 
 ## Image and speech generation
 
