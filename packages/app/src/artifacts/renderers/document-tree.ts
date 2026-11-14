@@ -22,6 +22,15 @@ const NUMERIC_CELL = /^[-+−(]?\s?[$€£¥]?\s?\d[\d,.\s]*(?:%|[kKmMbB]|bn|x)?
  * become callouts, a titled image alone in its paragraph becomes a figure with a caption, and table
  * columns of figures align right.
  */
+/** Turns `> [!NOTE]` (and TIP, IMPORTANT, WARNING, CAUTION) quotes into callout asides. */
+export function rehypeCallouts() {
+  return (tree: TreeRoot) => {
+    visitElements(tree, (element) => {
+      if (element.tagName === "blockquote") shapeCallout(element)
+    })
+  }
+}
+
 export function rehypeArtifactDocument() {
   return (tree: TreeRoot) => {
     markTitleAndLede(tree)

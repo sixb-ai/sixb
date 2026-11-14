@@ -34,7 +34,7 @@ import {
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
 import {
   type AgentApproval,
@@ -1023,7 +1023,22 @@ export function useAgentConversation({
     presentation,
   })
 
-  const turn = conversationTurn({
+  const answeringAuthor = useMemo(
+    () =>
+      answeringFor
+        ? {
+            type: answeringFor.type,
+            id: answeringFor.id,
+            ...(answeringForName === undefined ? {} : { displayName: answeringForName }),
+            isReader: false,
+          }
+        : null,
+    [answeringFor, answeringForName]
+  )
+  const continuingHere = continuingThreadId !== null && continuingThreadId === threadId
+  const waitingForComputer = computerOffline ? (thread?.computer?.name ?? null) : null
+  const streamReconnecting = live.active && reconnecting
+  const nextTurn = conversationTurn({
     presentation,
     activeRunId,
     canStop,
@@ -1031,21 +1046,17 @@ export function useAgentConversation({
     canContinue,
     stopping,
     retrying: retryRun.isPending,
-    continuing: continuingThreadId !== null && continuingThreadId === threadId,
+    continuing: continuingHere,
     waitingLonger,
-    waitingFor: computerOffline ? (thread?.computer?.name ?? null) : null,
+    waitingFor: waitingForComputer,
     compacting: live.compacting,
     contextFull: live.contextFull,
-    reconnecting: live.active && reconnecting,
-    answeringFor: answeringFor
-      ? {
-          type: answeringFor.type,
-          id: answeringFor.id,
-          ...(answeringForName === undefined ? {} : { displayName: answeringForName }),
-          isReader: false,
-        }
-      : null,
+    reconnecting: streamReconnecting,
+    answeringFor: answeringAuthor,
   })
+  const prevTurnRef = useRef(nextTurn)
+  if (!sameTurn(prevTurnRef.current, nextTurn)) prevTurnRef.current = nextTurn
+  const turn = prevTurnRef.current
 
   /**
    * Stop a turn paused on held calls, as Stop does a running one: its waiting calls are set aside,
@@ -1163,84 +1174,214 @@ export function useAgentConversation({
   const [questionSetAside, setQuestionSetAside] = useState<string | null>(null)
   const asked = threadId !== null ? openQuestion(messages, turn) : null
   const asking = asked !== null && questionSetAside !== asked.messageKey ? asked : null
-  const questionProps: QuestionComposerProps | null = asking
-    ? {
-        questions: asking.questions,
-        onAnswer: (text) => void send(text, [], []),
-        onDismiss: () => setQuestionSetAside(asking.messageKey),
-      }
-    : null
-
-  const transcriptProps: TranscriptProps = {
-    threadId,
-    messages,
-    moved,
-    turn,
-    anchorCurrentTurn,
-    onRetry: canRetry ? retry : undefined,
-    onContinue: canContinue ? continueTurn : undefined,
-    approvals: transcriptApprovals,
-    approvalOutcomes,
-    delegation: transcriptDelegation,
-    background: transcriptBackground,
+  // Stable callbacks so streaming chunks never invalidate memoized Composer or Transcript controls.
+  const actionsRef = useRef({
+    send,
+    stop,
+    retry,
+    continueTurn,
+    selectModel,
+    selectReasoning,
+    resetReasoning,
+    resetModelSelection,
+    setApprovalMode,
+  })
+  actionsRef.current = {
+    send,
+    stop,
+    retry,
+    continueTurn,
+    selectModel,
+    selectReasoning,
+    resetReasoning,
+    resetModelSelection,
+    setApprovalMode,
   }
+  const stableSend = useCallback<ComposerProps["onSend"]>(
+    (text, attachments, context, delivery) =>
+      void actionsRef.current.send(text, attachments, context, delivery),
+    []
+  )
+  const stableStop = useCallback(() => actionsRef.current.stop(), [])
+  const stableRetry = useCallback(() => actionsRef.current.retry(), [])
+  const stableContinue = useCallback(() => void actionsRef.current.continueTurn(), [])
+  const stableSelectModel = useCallback(
+    (model: LanguageModel) => actionsRef.current.selectModel(model),
+    []
+  )
+  const stableSelectReasoning = useCallback(
+    (reasoning: ModelReasoningLevel) => actionsRef.current.selectReasoning(reasoning),
+    []
+  )
+  const stableResetReasoning = useCallback(() => actionsRef.current.resetReasoning(), [])
+  const stableResetModelSelection = useCallback(() => actionsRef.current.resetModelSelection(), [])
+  const stableSetApprovalMode = useCallback(
+    (mode: AgentApprovalMode) => actionsRef.current.setApprovalMode(mode),
+    []
+  )
+  const stableAnswerQuestion = useCallback(
+    (text: string) => void actionsRef.current.send(text, [], []),
+    []
+  )
 
-  const modelControlsProps = {
-    models,
-    selectedModel,
-    selectedReasoning,
-    modelsLoading: modelsQuery.isLoading,
-    modelsError: modelsQuery.isError,
-    onSelectModel: selectModel,
-    onSelectReasoning: selectReasoning,
-    onResetReasoning: resetReasoning,
-    usingDefaultModel: modelSelection.request === undefined,
-    onResetModelSelection: resetModelSelection,
-    modelRouting: modelsQuery.data?.languageRouting,
-  }
+  const askingKey = asking?.messageKey ?? null
+  const dismissQuestion = useCallback(() => {
+    if (askingKey) setQuestionSetAside(askingKey)
+  }, [askingKey])
 
-  const composerProps: ConversationComposerProps = {
-    onSend: send,
-    ...(threadId === null && !newThreadSandbox && (newThreadPlace || newThreadPlaceWaiting)
-      ? { newThreadPlace: newThreadPlace ?? "waiting" }
-      : {}),
-    error: currentSendError
-      ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
-      : undefined,
-    // Whoever's answer is in flight, the reader writes the next message.
-    disabled: Boolean(sandboxRecovery),
-    hint: answeringName
-      ? agentMessages.sharing.answering(answeringName)
-      : othersWaiting
-        ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
-        : undefined,
-    pending: composerPending,
-    running: isRunning,
-    // Only the turn the reader asked for takes a steer; another person's takes a queued message.
-    steerable: !requestedBySomeoneElse(activeRun, user),
-    stopping,
-    onStop: canStop ? stop : undefined,
-    ...modelControlsProps,
-    draft: draftReseed.text,
-    draftAttachments: draftReseed.attachments,
-    draftContext: draftReseed.context,
-    draftNonce: draftReseed.nonce,
-    approvalMode,
-    onApprovalModeChange: setApprovalMode,
-    awaitingApproval,
-    dictation: projectDictation(modelsQuery.data),
-    contextMeter: {
-      context: threadId !== null ? contextQuery.data : undefined,
-      modelName: meteredModelName(models, contextQuery.data?.model),
+  const questionProps: QuestionComposerProps | null = useMemo(
+    () =>
+      asking
+        ? {
+            questions: asking.questions,
+            onAnswer: stableAnswerQuestion,
+            onDismiss: dismissQuestion,
+          }
+        : null,
+    [asking, stableAnswerQuestion, dismissQuestion]
+  )
+
+  const movedAfterMessageId = moved?.afterMessageId ?? null
+  const movedLabel = moved?.label ?? null
+  const stableMoved = useMemo(
+    () =>
+      movedAfterMessageId && movedLabel
+        ? { afterMessageId: movedAfterMessageId, label: movedLabel }
+        : null,
+    [movedAfterMessageId, movedLabel]
+  )
+
+  const transcriptProps: TranscriptProps = useMemo(
+    () => ({
+      threadId,
+      messages,
+      moved: stableMoved,
+      turn,
+      anchorCurrentTurn,
+      onRetry: canRetry ? stableRetry : undefined,
+      onContinue: canContinue ? stableContinue : undefined,
+      approvals: transcriptApprovals,
+      approvalOutcomes,
+      delegation: transcriptDelegation,
+      background: transcriptBackground,
+    }),
+    [
+      threadId,
+      messages,
+      stableMoved,
+      turn,
+      anchorCurrentTurn,
+      canRetry,
+      stableRetry,
+      canContinue,
+      stableContinue,
+      transcriptApprovals,
+      approvalOutcomes,
+      transcriptDelegation,
+      transcriptBackground,
+    ]
+  )
+
+  const meterContext = threadId !== null ? contextQuery.data : undefined
+  const meterModelName = meteredModelName(models, contextQuery.data?.model)
+  const contextMeter = useMemo(
+    () => ({
+      context: meterContext,
+      modelName: meterModelName,
       condensing: live.compacting,
-    },
-  }
+    }),
+    [meterContext, meterModelName, live.compacting]
+  )
 
-  const pendingProps: PendingMessagesProps = {
-    threadId,
-    steerable: composerProps.steerable,
-    read: readMessageIds,
-  }
+  const composerError = currentSendError
+    ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
+    : undefined
+  const composerHint = answeringName
+    ? agentMessages.sharing.answering(answeringName)
+    : othersWaiting
+      ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
+      : undefined
+  const resolvedNewThreadPlace =
+    threadId === null && !newThreadSandbox && (newThreadPlace || newThreadPlaceWaiting)
+      ? (newThreadPlace ?? "waiting")
+      : undefined
+  const usingDefaultModel = modelSelection.request === undefined
+  const modelRouting = modelsQuery.data?.languageRouting
+  const dictationRecognizer = projectDictation(modelsQuery.data)
+  const composerDisabled = Boolean(sandboxRecovery)
+  const steerable = !requestedBySomeoneElse(activeRun, user)
+
+  const composerProps: ConversationComposerProps = useMemo(
+    () => ({
+      onSend: stableSend,
+      ...(resolvedNewThreadPlace ? { newThreadPlace: resolvedNewThreadPlace } : {}),
+      error: composerError,
+      // Whoever's answer is in flight, the reader writes the next message.
+      disabled: composerDisabled,
+      hint: composerHint,
+      pending: composerPending,
+      running: isRunning,
+      // Only the turn the reader asked for takes a steer; another person's takes a queued message.
+      steerable,
+      stopping,
+      onStop: canStop ? stableStop : undefined,
+      models,
+      selectedModel,
+      selectedReasoning,
+      modelsLoading: modelsQuery.isLoading,
+      modelsError: modelsQuery.isError,
+      onSelectModel: stableSelectModel,
+      onSelectReasoning: stableSelectReasoning,
+      onResetReasoning: stableResetReasoning,
+      usingDefaultModel,
+      onResetModelSelection: stableResetModelSelection,
+      modelRouting,
+      draft: draftReseed.text,
+      draftAttachments: draftReseed.attachments,
+      draftContext: draftReseed.context,
+      draftNonce: draftReseed.nonce,
+      approvalMode,
+      onApprovalModeChange: stableSetApprovalMode,
+      awaitingApproval,
+      dictation: dictationRecognizer,
+      contextMeter,
+    }),
+    [
+      stableSend,
+      resolvedNewThreadPlace,
+      composerError,
+      composerDisabled,
+      composerHint,
+      composerPending,
+      isRunning,
+      steerable,
+      stopping,
+      canStop,
+      stableStop,
+      models,
+      selectedModel,
+      selectedReasoning,
+      modelsQuery.isLoading,
+      modelsQuery.isError,
+      stableSelectModel,
+      stableSelectReasoning,
+      stableResetReasoning,
+      usingDefaultModel,
+      stableResetModelSelection,
+      modelRouting,
+      draftReseed,
+      approvalMode,
+      stableSetApprovalMode,
+      awaitingApproval,
+      dictationRecognizer,
+      contextMeter,
+    ]
+  )
+
+  const pendingProps: PendingMessagesProps = useMemo(
+    () => ({ threadId, steerable, read: readMessageIds }),
+    [threadId, steerable, readMessageIds]
+  )
 
   const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
   const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
@@ -1549,4 +1690,14 @@ function useExtendedWaitingStatus(run: Pick<AgentRun, "status" | "createdAt"> | 
   }, [run])
 
   return visible
+}
+
+function sameTurn(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    if (!Object.is(a[key], b[key])) return false
+  }
+  return true
 }

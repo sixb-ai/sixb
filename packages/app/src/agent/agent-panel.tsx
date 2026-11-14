@@ -72,6 +72,11 @@ export function AgentPanel({
     [controlled, onThreadChange]
   )
 
+  const navigateHome = useCallback(() => {
+    changeThread(null)
+    onNewThread?.()
+  }, [changeThread, onNewThread])
+
   return (
     <AgentChat
       threadId={threadId}
@@ -85,10 +90,7 @@ export function AgentPanel({
       welcomeContent={welcomeContent}
       newThreadSandbox={newThreadSandbox}
       newThreadControls={newThreadControls}
-      onNavigateHome={() => {
-        changeThread(null)
-        onNewThread?.()
-      }}
+      onNavigateHome={navigateHome}
       onNavigateThread={changeThread}
       onOpenThreads={onOpenThreads}
       className={cn("min-h-0 overflow-hidden bg-background", className)}

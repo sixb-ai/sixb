@@ -91,17 +91,41 @@ export interface DelegationTurn {
 /** Earlier threads hold `wait_agent`; a `wait` or a `stop` for commands alone is left out. */
 const DELEGATION_TOOLS = new Set(["spawn_agent", "message_agent", "wait", "stop", "wait_agent"])
 
+const delegationTurnEntries = new WeakMap<
+  AgentConversationMessage,
+  { readonly turn: DelegationTurn; readonly signature: string }
+>()
+
+export function delegationTurnEntry(
+  message: AgentConversationMessage
+): { readonly turn: DelegationTurn; readonly signature: string } | null {
+  if (message.role !== "assistant") return null
+  const cached = delegationTurnEntries.get(message)
+  if (cached) return cached
+
+  const tools: NormalizedTool[] = []
+  let sig = `${message.runId ?? ""}:`
+  for (const part of message.parts) {
+    if (part.type === "tool" && DELEGATION_TOOLS.has(part.toolName)) {
+      tools.push(normalizedTool(part))
+      sig += `${part.toolName}@${part.state};`
+    }
+  }
+  const entry = { turn: { runId: message.runId, tools }, signature: sig }
+  delegationTurnEntries.set(message, entry)
+  return entry
+}
+
 /** The delegation calls of each reply, oldest first, the one streaming last. */
 export function delegationTurns(
   messages: readonly AgentConversationMessage[]
 ): readonly DelegationTurn[] {
-  return messages.flatMap((message) => {
-    if (message.role !== "assistant") return []
-    const tools = message.parts.flatMap((part) =>
-      part.type === "tool" && DELEGATION_TOOLS.has(part.toolName) ? [normalizedTool(part)] : []
-    )
-    return [{ runId: message.runId, tools }]
-  })
+  const result: DelegationTurn[] = []
+  for (const message of messages) {
+    const entry = delegationTurnEntry(message)
+    if (entry) result.push(entry.turn)
+  }
+  return result
 }
 
 /**

@@ -1,10 +1,18 @@
-import { badgeLabel, highlightCode } from "@sixb/ui/lib/shiki"
+import {
+  badgeLabel,
+  getCachedHighlight,
+  highlightCode,
+  isPlainCodeLang,
+} from "@sixb/ui/lib/shiki"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
 import {
   type ComponentProps,
+  createContext,
   isValidElement,
+  memo,
   type ReactNode,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -14,21 +22,33 @@ import ReactMarkdown, { type Components, defaultUrlTransform, type Options } fro
 import remarkGfm from "remark-gfm"
 import { useUiMessages } from "../../lib/i18n/ui"
 
-// GitHub-flavored markdown: tables, strikethrough, task lists, and autolinks — matching the docs
-// site's `Bun.markdown` options so both surfaces render the same constructs.
+// GitHub-flavored markdown: tables, strikethrough, task lists, footnotes, and autolinks — matching
+// the docs site's `Bun.markdown` options so both surfaces render the same constructs.
 const REMARK_PLUGINS = [remarkGfm]
+
+// Marks `<code>` inside a fenced or indented `<pre>` block so language-less code blocks still
+// render as `CodeBlock` rather than falling through to inline `<code>`.
+const InsidePreContext = createContext(false)
 
 // react-markdown builds a React element tree (no `dangerouslySetInnerHTML`) and never renders raw
 // HTML unless a rehype-raw plugin is added, so untrusted content cannot inject markup. URLs go
 // through react-markdown's default transform, which strips unsafe schemes like `javascript:`.
 const COMPONENTS: Components = {
-  a({ node: _node, ...props }) {
-    return <a {...props} target="_blank" rel="noreferrer noopener" />
+  a({ node: _node, href, ...props }) {
+    const external = typeof href === "string" && !href.startsWith("#")
+    return (
+      <a
+        href={href}
+        {...(external ? { target: "_blank", rel: "noreferrer noopener" } : {})}
+        {...props}
+      />
+    )
   },
-  // Fenced blocks are rendered by `CodeBlock`; `pre` is unwrapped so the block's `<figure>` isn't
-  // nested inside a `<pre>`. Inline code falls through to a plain `<code>` (styled by `.prose`).
+  // Fenced and indented blocks are rendered by `CodeBlock`; `pre` is unwrapped so the block's
+  // `<figure>` isn't nested inside a `<pre>`, while `InsidePreContext` distinguishes block code
+  // without a language tag from inline backticks.
   pre({ children }) {
-    return <>{children}</>
+    return <InsidePreContext.Provider value={true}>{children}</InsidePreContext.Provider>
   },
   // A wide table scrolls inside its own box instead of squeezing a narrow column, and a short
   // cell (an id, an amount, a date) stays on one line.
@@ -56,15 +76,16 @@ const COMPONENTS: Components = {
     )
   },
   code({ node: _node, className, children, ...props }) {
-    const match = /language-(\w+)/.exec(className ?? "")
-    if (!match) {
+    const insidePre = useContext(InsidePreContext)
+    const match = /language-([^\s]+)/.exec(className ?? "")
+    if (!insidePre && !match) {
       return (
         <code className={className} {...props}>
           {children}
         </code>
       )
     }
-    return <CodeBlock lang={match[1]} code={String(children).replace(/\n$/, "")} />
+    return <CodeBlock lang={match?.[1] ?? ""} code={codeText(children).replace(/\n$/, "")} />
   },
 }
 
@@ -78,11 +99,11 @@ function ScrollTable({ children, ...props }: ComponentProps<"table">) {
   useEffect(() => {
     const box = ref.current
     if (!box) return
-    const update = () =>
-      setHidden({
-        start: box.scrollLeft > 1,
-        end: box.scrollLeft + box.clientWidth < box.scrollWidth - 1,
-      })
+    const update = () => {
+      const start = box.scrollLeft > 1
+      const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 1
+      setHidden((prev) => (prev.start === start && prev.end === end ? prev : { start, end }))
+    }
     update()
     box.addEventListener("scroll", update, { passive: true })
     const observer = new ResizeObserver(update)
@@ -103,6 +124,14 @@ function ScrollTable({ children, ...props }: ComponentProps<"table">) {
       <table {...props}>{children}</table>
     </div>
   )
+}
+
+function codeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return ""
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(codeText).join("")
+  if (isValidElement<{ children?: ReactNode }>(node)) return codeText(node.props.children)
+  return ""
 }
 
 function textLength(node: ReactNode): number {
@@ -131,7 +160,7 @@ export interface MarkdownProps extends Omit<ComponentProps<"div">, "children"> {
  * Render a markdown string with the shared `.prose` style (see `@sixb/ui/globals.css`) and
  * Shiki-highlighted code blocks. Safe for untrusted input — no raw HTML, sanitized link targets.
  */
-function Markdown({
+const Markdown = memo(function Markdown({
   children,
   className,
   components,
@@ -155,50 +184,106 @@ function Markdown({
       </ReactMarkdown>
     </div>
   )
-}
+})
 
-function CodeBlock({ lang, code }: { lang: string; code: string }) {
+const CodeBlock = memo(function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const messages = useUiMessages()
-  const [html, setHtml] = useState<string | null>(null)
+  const plain = isPlainCodeLang(lang)
+  const cached = plain ? null : getCachedHighlight(code, lang)
+  const [asyncHtml, setAsyncHtml] = useState<string | null>(cached)
   const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestRef = useRef({ code, lang })
+  const busyRef = useRef(false)
+  latestRef.current = { code, lang }
 
-  // Re-highlight when the code changes (e.g. while a code block streams in).
+  // Coalesce rapid streaming updates so at most one Shiki pass runs at a time, always catching up
+  // to the latest code snapshot without queuing intermediate token deltas.
   useEffect(() => {
+    if (plain) {
+      setAsyncHtml(null)
+      return
+    }
+    const immediate = getCachedHighlight(code, lang)
+    if (immediate !== null) {
+      setAsyncHtml(immediate)
+      return
+    }
     let active = true
-    void highlightCode(code, lang).then((result) => {
-      if (active) setHtml(result)
-    })
+    if (busyRef.current) {
+      return () => {
+        active = false
+      }
+    }
+
+    const drain = async () => {
+      busyRef.current = true
+      try {
+        while (active) {
+          const target = latestRef.current
+          if (isPlainCodeLang(target.lang)) break
+          const result = await highlightCode(target.code, target.lang)
+          if (!active) break
+          setAsyncHtml(result)
+          if (target.code === latestRef.current.code && target.lang === latestRef.current.lang) {
+            break
+          }
+        }
+      } finally {
+        busyRef.current = false
+      }
+    }
+    void drain()
+
     return () => {
       active = false
     }
-  }, [code, lang])
+  }, [code, lang, plain])
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
+    },
+    []
+  )
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500)
     } catch {
       // Clipboard may be unavailable (e.g. insecure context); ignore.
     }
   }
 
+  const html = cached ?? (plain ? null : asyncHtml)
+  const badge = badgeLabel(lang)
+  const copyButton = (
+    <button
+      type="button"
+      className={cn("code-copy", !badge && "code-copy-floating", copied && "is-copied")}
+      onClick={copy}
+      aria-label={copied ? messages.status.copied : messages.status.copyCode}
+    >
+      <Copy className="code-copy-copy" aria-hidden="true" />
+      <Check className="code-copy-check" aria-hidden="true" />
+    </button>
+  )
+
   return (
-    <figure className="code-block">
-      <figcaption className="code-bar">
-        <span className="code-bar-left">
-          <span className="code-badge">{badgeLabel(lang)}</span>
-        </span>
-        <button
-          type="button"
-          className={cn("code-copy", copied && "is-copied")}
-          onClick={copy}
-          aria-label={copied ? messages.status.copied : messages.status.copyCode}
-        >
-          <Copy className="code-copy-copy" aria-hidden="true" />
-          <Check className="code-copy-check" aria-hidden="true" />
-        </button>
-      </figcaption>
+    <figure className={cn("code-block", !badge && "code-block-bare")}>
+      {badge ? (
+        <figcaption className="code-bar">
+          <span className="code-bar-left">
+            <span className="code-badge">{badge}</span>
+          </span>
+          {copyButton}
+        </figcaption>
+      ) : (
+        copyButton
+      )}
       {html ? (
         // Shiki output: the code text is escaped by Shiki, so this is safe to inject.
         // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Shiki-generated markup
@@ -210,6 +295,6 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       )}
     </figure>
   )
-}
+})
 
 export { defaultUrlTransform, Markdown }

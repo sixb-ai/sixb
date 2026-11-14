@@ -1,5 +1,6 @@
 import { Button } from "@sixb/ui/components"
 import { History } from "lucide-react"
+import { memo } from "react"
 import { useAgentMessages } from "../i18n"
 
 const NO_WAITING_THREADS: ReadonlySet<string> = new Set()
@@ -17,7 +18,7 @@ export interface ThreadsButtonProps {
  * The way from a thread to all of them: a button in its header. It counts the other threads
  * waiting for the reader, in amber, or shows a dot while one is at work.
  */
-export function ThreadsButton({
+export const ThreadsButton = memo(function ThreadsButton({
   currentThreadId,
   runningThreadCount = 0,
   waitingThreadIds = NO_WAITING_THREADS,
@@ -67,4 +68,4 @@ export function ThreadsButton({
       ) : null}
     </Button>
   )
-}
+})

@@ -6,7 +6,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@sixb/ui/components"
-import { Fragment, memo, type ReactNode, useMemo } from "react"
+import { Fragment, memo, type ReactNode, useCallback, useMemo, useRef } from "react"
 import {
   ApprovalCardsContext,
   type HeldCall,
@@ -20,7 +20,8 @@ import { BACKGROUND_TOOLS, readThreadBackground } from "../background/interpret"
 import type { AgentConversationMessage, AgentConversationTurn } from "../conversation"
 import { DelegationCardsContext, type TranscriptDelegation } from "../delegation/context"
 import {
-  delegationTurns,
+  type DelegationTurn,
+  delegationTurnEntry,
   readThreadDelegation,
   type ThreadDelegation,
 } from "../delegation/interpret"
@@ -87,6 +88,23 @@ const NO_OUTCOMES: ReadonlyMap<string, ReportedApprovalOutcome> = new Map()
 
 /** A reply whose questions the conversation has moved past. */
 const CLOSED_QUESTION: QuestionTurn = { open: false }
+const OPEN_ANSWERING_QUESTION: QuestionTurn = { open: true, answering: true }
+const OPEN_WAITING_QUESTION: QuestionTurn = { open: true, answering: false }
+
+const backgroundSigEntries = new WeakMap<AgentConversationMessage, string>()
+
+function messageBackgroundSignature(message: AgentConversationMessage): string {
+  const cached = backgroundSigEntries.get(message)
+  if (cached !== undefined) return cached
+  let sig = ""
+  for (const part of message.parts) {
+    if (part.type === "tool" && BACKGROUND_TOOLS.has(part.toolName)) {
+      sig += `${part.toolCallId ?? ""}@${part.state};`
+    }
+  }
+  backgroundSigEntries.set(message, sig)
+  return sig
+}
 
 /** Nothing said of where the commands run: no card claims how one ended that nobody saw. */
 const UNKNOWN_BACKGROUND: TranscriptBackground = {
@@ -101,10 +119,19 @@ export function Transcript(props: TranscriptProps) {
   )
 
   // The reply streaming now changes with every chunk; its delegation calls far less often.
-  const turns = delegationTurns(messages)
-  const signature = JSON.stringify(
-    turns.map((entry) => [entry.runId, entry.tools.map((tool) => [tool.toolName, tool.state])])
-  )
+  // Each saved message caches its delegation & background signature by object identity.
+  const turns: DelegationTurn[] = []
+  let signature = ""
+  let backgroundSignature = ""
+  for (const message of messages) {
+    const entry = delegationTurnEntry(message)
+    if (entry) {
+      turns.push(entry.turn)
+      signature += `${entry.signature}|`
+    }
+    const bgSig = messageBackgroundSignature(message)
+    if (bgSig) backgroundSignature += `${bgSig}|`
+  }
   // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the turns
   const delegation = useMemo(() => readThreadDelegation(turns), [signature])
   const liveRunId = turn.kind === "responding" ? turn.runId : null
@@ -113,16 +140,6 @@ export function Transcript(props: TranscriptProps) {
     [threadId, delegation, liveRunId, actions]
   )
 
-  // Its background commands change as their calls do, not with every chunk of the reply.
-  const backgroundSignature = JSON.stringify(
-    messages.flatMap((message) =>
-      message.parts.flatMap((part) =>
-        part.type === "tool" && BACKGROUND_TOOLS.has(part.toolName)
-          ? [[part.toolCallId, part.state]]
-          : []
-      )
-    )
-  )
   // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the calls
   const thread = useMemo(() => readThreadBackground(messages), [backgroundSignature])
   const { background = UNKNOWN_BACKGROUND } = props
@@ -182,9 +199,14 @@ function TranscriptView({
     ? currentTurnAnchor(messages, turn.kind === "responding" ? turn.runId : liveReply?.runId)
     : lastKey(messages, (message) => message.status === "pending")
   const newestSavedKey = lastKey(messages, (message) => message.id !== null)
+  const onContinueRef = useRef(onContinue)
+  onContinueRef.current = onContinue
+  const stableOnContinue = useCallback(() => onContinueRef.current?.(), [])
+  const hasOnContinue = onContinue !== undefined
+
   // The reply whose questions are the conversation's last word, which its cards answer.
   const openQuestionKey = openQuestion(messages, turn)?.messageKey ?? null
-  const asking = useMemo(() => ({ open: true, answering: onAnswer !== undefined }), [onAnswer])
+  const asking = onAnswer !== undefined ? OPEN_ANSWERING_QUESTION : OPEN_WAITING_QUESTION
 
   // A call is answered on the card under the work that made it. One whose command output does not
   // name it, such as output sent elsewhere, still gets a card, after its turn's saved answer, and
@@ -258,8 +280,8 @@ function TranscriptView({
                       continued={continuedKeys.has(message.key)}
                       scrollAnchor={message.key === anchoredKey}
                       // Only the newest answer can be continued; older ones keep their notice alone.
-                      {...(message.key === newestSavedKey && onContinue
-                        ? { onContinue, continuing: turn.continuing }
+                      {...(message.key === newestSavedKey && hasOnContinue
+                        ? { onContinue: stableOnContinue, continuing: turn.continuing }
                         : {})}
                       {...(message === liveReply
                         ? {
@@ -272,18 +294,7 @@ function TranscriptView({
                               />
                             ),
                           }
-                        : message.unfinished
-                          ? {
-                              after: (
-                                <UnfinishedMarker
-                                  unfinished={message.unfinished}
-                                  {...(message.key === newestSavedKey && onContinue
-                                    ? { onContinue, continuing: turn.continuing }
-                                    : {})}
-                                />
-                              ),
-                            }
-                          : {})}
+                        : {})}
                     />
                   </QuestionTurnContext.Provider>
                   {calls ? (
@@ -441,6 +452,15 @@ const TranscriptMessage = memo(function TranscriptMessage({
   readonly continuing?: boolean
   readonly after?: ReactNode
 }) {
+  const trailing =
+    after ??
+    (message.unfinished ? (
+      <UnfinishedMarker
+        unfinished={message.unfinished}
+        {...(onContinue ? { onContinue, continuing } : {})}
+      />
+    ) : undefined)
+
   return (
     <MessageScrollerItem messageId={message.key} scrollAnchor={scrollAnchor}>
       <MessageView
@@ -448,7 +468,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
         continued={continued}
         onContinue={onContinue}
         continuing={continuing}
-        after={after}
+        after={trailing}
       />
     </MessageScrollerItem>
   )

@@ -151,18 +151,19 @@ export function ArtifactPanelRoot({
     openerRef.current = null
   }, [scopeKey])
 
-  const show = useCallback(
-    (next: PanelTarget) => {
-      if (onRouteTargetChange && next.type === "artifact") {
-        setLocalTarget(null)
-        onRouteTargetChange(next)
-      } else {
-        setLocalTarget(next)
-        if (onRouteTargetChange && routeTarget) onRouteTargetChange(null)
-      }
-    },
-    [onRouteTargetChange, routeTarget]
-  )
+  const routeRef = useRef({ routeTarget, onRouteTargetChange })
+  routeRef.current = { routeTarget, onRouteTargetChange }
+
+  const show = useCallback((next: PanelTarget) => {
+    const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
+    if (changeRoute && next.type === "artifact") {
+      setLocalTarget(null)
+      changeRoute(next)
+    } else {
+      setLocalTarget(next)
+      if (changeRoute && currentRoute) changeRoute(null)
+    }
+  }, [])
   const open = useCallback(
     (next: PanelTarget) => {
       const active = typeof document === "undefined" ? null : document.activeElement
@@ -177,13 +178,14 @@ export function ArtifactPanelRoot({
     [show]
   )
   const close = useCallback(() => {
+    const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
     setLocalTarget(null)
     setTrail([])
-    if (onRouteTargetChange && routeTarget) onRouteTargetChange(null)
+    if (changeRoute && currentRoute) changeRoute(null)
     const opener = openerRef.current
     openerRef.current = null
     if (opener?.isConnected) queueMicrotask(() => opener.focus())
-  }, [onRouteTargetChange, routeTarget])
+  }, [])
 
   const value = useMemo<ArtifactPanelValue>(
     () => ({

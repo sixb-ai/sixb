@@ -1,7 +1,7 @@
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
-import type { ReactNode } from "react"
+import { memo, type ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
@@ -10,6 +10,8 @@ import { Composer, type ComposerProps } from "./composer"
 import { PendingMessages, type PendingMessagesProps } from "./pending-messages"
 import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
+
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
 export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
@@ -58,7 +60,7 @@ export function ConversationPanel({
   onNewChat,
   onOpenThreads,
   composerPlaceholder,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   welcomeContent,
   headerActions,
@@ -108,35 +110,17 @@ export function ConversationPanel({
       </>
     )
 
-  const threadsButton = onOpenThreads ? (
-    <ThreadsButton
-      currentThreadId={currentThread?.id ?? null}
-      runningThreadCount={runningThreadCount}
-      waitingThreadIds={waitingThreadIds}
-      onOpen={onOpenThreads}
-    />
-  ) : null
-
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-thread-id={currentThread?.id}>
-      <header
-        data-agent-conversation-header=""
-        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
-      >
-        <div className="ml-auto flex items-center gap-1">
-          {headerActions}
-          {threadsButton}
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            onClick={onNewChat}
-            aria-label={labels.threads.new}
-            className="[&_svg]:size-5"
-          >
-            <Plus />
-          </Button>
-        </div>
-      </header>
+      <ConversationHeader
+        compact={compact}
+        currentThreadId={currentThread?.id ?? null}
+        runningThreadCount={runningThreadCount}
+        waitingThreadIds={waitingThreadIds}
+        headerActions={headerActions}
+        onOpenThreads={onOpenThreads}
+        onNewChat={onNewChat}
+      />
 
       {showWelcome ? (
         <div
@@ -244,3 +228,50 @@ function LoadingInline({ label }: { label: string }) {
     </div>
   )
 }
+
+const ConversationHeader = memo(function ConversationHeader({
+  compact,
+  currentThreadId,
+  runningThreadCount,
+  waitingThreadIds,
+  headerActions,
+  onOpenThreads,
+  onNewChat,
+}: {
+  readonly compact: boolean
+  readonly currentThreadId: string | null
+  readonly runningThreadCount: number
+  readonly waitingThreadIds?: ReadonlySet<string>
+  readonly headerActions?: ReactNode
+  readonly onOpenThreads?: () => void
+  readonly onNewChat: () => void
+}) {
+  const labels = useAgentMessages()
+  return (
+    <header
+      data-agent-conversation-header=""
+      className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
+    >
+      <div className="ml-auto flex items-center gap-1">
+        {headerActions}
+        {onOpenThreads ? (
+          <ThreadsButton
+            currentThreadId={currentThreadId}
+            runningThreadCount={runningThreadCount}
+            waitingThreadIds={waitingThreadIds}
+            onOpen={onOpenThreads}
+          />
+        ) : null}
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          onClick={onNewChat}
+          aria-label={labels.threads.new}
+          className="[&_svg]:size-5"
+        >
+          <Plus />
+        </Button>
+      </div>
+    </header>
+  )
+})

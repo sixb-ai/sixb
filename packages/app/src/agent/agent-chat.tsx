@@ -3,7 +3,7 @@ import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { MessagesSquare } from "lucide-react"
-import { type ReactNode, useEffect, useId } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useMemo } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { takeAgentDraft } from "../artifacts/view-context"
@@ -24,6 +24,8 @@ import { useAgentMessages } from "./i18n"
 import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
 import { personName, threadOwner } from "./sharing"
 import type { AgentContextInput, AgentThreadSandboxParams } from "./types"
+
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -66,7 +68,7 @@ export function AgentChat({
   onNavigateThread,
   onOpenThreads,
   className,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   welcomeContent,
   artifactHost,
@@ -149,6 +151,18 @@ export function AgentChat({
       </>
     ) : null
 
+  const showNewThreadControls = threadId === null ? newThreadControls : undefined
+  const mergedComposerProps = useMemo(
+    () => ({
+      ...conversation.composerProps,
+      ...(dictation ? {} : { dictation: undefined }),
+      ...(showNewThreadControls ? { newThreadControls: showNewThreadControls } : {}),
+      ...(insertion ? { insertion } : {}),
+      onInserted: inserted,
+    }),
+    [conversation.composerProps, dictation, showNewThreadControls, insertion, inserted]
+  )
+
   let content: ReactNode
   let controlsInConversationHeader = false
   if (conversation.agentLoading) {
@@ -189,13 +203,7 @@ export function AgentChat({
       <ConversationPanel
         agent={conversation.currentAgent}
         transcript={conversation.transcriptProps}
-        composer={{
-          ...conversation.composerProps,
-          ...(dictation ? {} : { dictation: undefined }),
-          ...(threadId === null && newThreadControls ? { newThreadControls } : {}),
-          ...(insertion ? { insertion } : {}),
-          onInserted: inserted,
-        }}
+        composer={mergedComposerProps}
         question={conversation.questionProps}
         pending={conversation.pendingProps}
         messagesLoading={conversation.messagesLoading}
@@ -228,8 +236,11 @@ export function AgentChat({
   }
 
   // An artifact opened from here names who published each version, from this conversation's people.
-  const artifactPeople = (author: { readonly type: string; readonly id: string }) =>
-    knownName(author, currentThread, conversation.authors)
+  const artifactPeople = useCallback(
+    (author: { readonly type: string; readonly id: string }) =>
+      knownName(author, currentThread, conversation.authors),
+    [currentThread, conversation.authors]
+  )
 
   return (
     <ArtifactPeopleContext.Provider value={artifactPeople}>
