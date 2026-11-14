@@ -84,20 +84,31 @@ export function startLapsedRunSweeper(host: SixbHostView): () => void {
   return () => clearInterval(timer)
 }
 
+/** The part of Bun's server a session request needs: its per-request idle timeout. */
+export interface RunnerSessionServer {
+  timeout(request: Request, seconds: number): void
+}
+
 /**
  * Answer a runner's session request before the API parses it: its runner token speaks only for its
  * run's session, and any other route refuses it. Null for any other request.
  */
 export function agentRunSessionHandler(
   host: SixbHostView
-): (request: Request) => Promise<Response | null> {
+): (request: Request, server?: RunnerSessionServer | null) => Promise<Response | null> {
   let sessions: AgentRunSessionHost | null | undefined
-  return async (request) => {
+  return async (request, server) => {
     sessions ??= agentRunSessionHost(host)
-    // The session reads its runner's body within its own limit, past the server's default cap.
     const served = sessions
       ? await serveAgentRunSession(sessions, request, {
-          admitted: () => liftRequestBodyCap(request),
+          admitted: () => {
+            // The session reads its runner's body within its own limit, past the server's cap.
+            liftRequestBodyCap(request)
+            // A model call streams nothing while the model thinks, which on a long conversation
+            // outlasts Bun's 10-second idle timeout: Bun would close the socket mid-stream and the
+            // runner would read ECONNRESET. A worker calls its model in process and never meets it.
+            server?.timeout(request, 0)
+          },
         })
       : null
     if (served) return served

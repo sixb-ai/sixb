@@ -215,6 +215,7 @@ async function setup() {
   }
 
   return {
+    app,
     storage,
     host,
     send,
@@ -290,6 +291,38 @@ describe("a runner outside the worker", () => {
     await callModel(session, 2 * 1024 * 1024).catch(() => undefined)
 
     expect(reached.model).toBe(1)
+    await session.close()
+  })
+
+  // A model call streams nothing while the model thinks, which on a long conversation outlasts Bun's
+  // 10-second idle timeout: Bun closes the socket and the runner reads ECONNRESET. Bun 1.4.2 cuts a
+  // POST mid-stream this way, so no in-process fetch reproduces it; this pins the request that
+  // keeps the socket open. Removal proof: drop `server?.timeout(request, 0)` in
+  // agentRunSessionHandler.
+  test("keeps its session's sockets open past Bun's idle timeout, and no one else's", async () => {
+    const { app, person, ask, claim } = await setup()
+    const timeouts: Array<{ readonly path: string; readonly seconds: number }> = []
+    Object.assign(app, {
+      server: {
+        timeout(request: Request, seconds: number) {
+          timeouts.push({ path: new URL(request.url).pathname, seconds })
+        },
+      },
+    })
+    const ava = await person("ava")
+    const runId = await ask(ava, "Read every report in this folder.")
+    const session = await claim(ava, runId)
+    if (!session) throw new Error("Expected the claimed turn's session.")
+
+    // The model refuses every call here: the request that carried it is what counts.
+    await callModel(session, 16).catch(() => undefined)
+
+    expect(timeouts).toContainEqual({
+      path: `/api/agent-runs/${runId}/session/models.stream`,
+      seconds: 0,
+    })
+    // Neither the person's requests nor the claim reach past the session's admission.
+    expect(timeouts.every(({ path }) => path.includes("/session/"))).toBe(true)
     await session.close()
   })
 
