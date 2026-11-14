@@ -1349,7 +1349,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(history.usageAnchor?.modelCall.id).toBe(status === "succeeded" ? "usage_1" : undefined)
       next.close()
     })
- 
+
     test("drains steers through the session, consumes persisted ones, and refuses forged user messages", async () => {
       const { thread, say, turn, open, storage } = await seedConversation(claim)
       await say("msg_1", "user")
@@ -1439,9 +1439,9 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         projectId: PROJECT_ID,
         threadId: thread.id,
       })
-      expect(remaining.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual([
-        { id: "inb_2", claimed: false },
-      ])
+      expect(
+        remaining.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))
+      ).toEqual([{ id: "inb_2", claimed: false }])
     })
   })
 }
