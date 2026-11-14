@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util"
 import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../../agents/ids"
+import type { AgentMessagePart } from "../../agents/message"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
 import { isFileRef } from "../../blob-storage/validation"
@@ -1627,13 +1628,32 @@ export function assertEnqueueAgentInboxItemInput(
   assertNonEmptyText(input.messageId, "messageId", prefix)
   assertPrincipalInput(input.authorPrincipal, "authorPrincipal", prefix)
   assertAgentInboxMode(input.mode, prefix)
-  if (!Array.isArray(input.parts) || input.parts.length === 0) {
+  assertAgentInboxParts(input.parts, input.mode, prefix)
+  assertAgentInboxSpec(input.spec, prefix)
+}
+
+/**
+ * A steer is read mid-turn, where nothing prepares its files: its bytes must be the ones a later
+ * replay of the saved message sends, so it carries no file part. A message with one waits for the
+ * next turn, where the turn prepares its attachments as it does the trigger's.
+ */
+function assertAgentInboxParts(
+  parts: readonly AgentMessagePart[] | undefined,
+  mode: AgentInboxMode,
+  prefix: string
+): void {
+  if (!Array.isArray(parts) || parts.length === 0) {
     throw new AgentStorageError(
       "invalid_input",
       `[${prefix}] Agent inbox 'parts' must be a non-empty array.`
     )
   }
-  assertAgentInboxSpec(input.spec, prefix)
+  if (mode === "steer" && parts.some((part) => part.type === "file")) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] An agent inbox 'steer' carries no file: queue it for the next turn instead.`
+    )
+  }
 }
 
 export function assertUpdateAgentInboxItemInput(
@@ -1644,12 +1664,7 @@ export function assertUpdateAgentInboxItemInput(
   assertNonEmptyText(input.threadId, "threadId", prefix)
   assertNonEmptyText(input.id, "id", prefix)
   if (input.mode !== undefined) assertAgentInboxMode(input.mode, prefix)
-  if (input.parts !== undefined && (!Array.isArray(input.parts) || input.parts.length === 0)) {
-    throw new AgentStorageError(
-      "invalid_input",
-      `[${prefix}] Agent inbox 'parts' must be a non-empty array.`
-    )
-  }
+  if (input.parts !== undefined) assertAgentInboxParts(input.parts, input.mode ?? "queue", prefix)
   if (input.spec !== undefined && input.spec !== null) assertAgentInboxSpec(input.spec, prefix)
 }
 
@@ -1758,11 +1773,15 @@ export function updatedAgentInboxItemRecord(
         : normalizeInboxSpec(input.spec)
   const nextImmediate = input.immediate === undefined ? current.immediate : input.immediate
   const { spec: _oldSpec, immediate: _oldImmediate, ...base } = current
+  const mode = input.mode ?? current.mode
+  const parts =
+    input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts)
+  // Promoting a message that carries a file to a steer would read bytes a replay cannot send.
+  assertAgentInboxParts(parts, mode, "Sixb")
   return {
     ...base,
-    mode: input.mode ?? current.mode,
-    parts:
-      input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts),
+    mode,
+    parts,
     ...(nextSpec ? { spec: structuredClone(nextSpec) } : {}),
     ...(nextImmediate ? { immediate: true } : {}),
     updatedAt: new Date(input.updatedAt ?? new Date()),

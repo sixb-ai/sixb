@@ -12,6 +12,7 @@ import {
 } from "../src"
 import {
   AgentExecutionLostError,
+  AgentRunRefusedError,
   type AgentRunSession,
   type claimAgentRun,
   createSubagentRunId,
@@ -1347,6 +1348,100 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(history.usageAnchor?.modelCall.id).toBe(status === "succeeded" ? "usage_1" : undefined)
       next.close()
+    })
+ 
+    test("drains steers through the session, consumes persisted ones, and refuses forged user messages", async () => {
+      const { thread, say, turn, open, storage } = await seedConversation(claim)
+      await say("msg_1", "user")
+      const session = await open(await turn("run_1", "msg_1"))
+
+      await storage.agents.inbox.enqueue({
+        id: "inb_1",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_1",
+        authorPrincipal: { type: "user", id: "usr_ava" },
+        mode: "steer",
+        parts: [{ type: "text", text: "Steer 1" }],
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
+      await storage.agents.inbox.enqueue({
+        id: "inb_2",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_2",
+        authorPrincipal: { type: "user", id: "usr_ava" },
+        mode: "steer",
+        parts: [{ type: "text", text: "Steer 2 (unanswered)" }],
+      })
+
+      const steers = await session.inbox.takeSteers({ stepIndex: 1 })
+      expect(steers.map((item) => item.id)).toEqual(["inb_1", "inb_2"])
+
+      // Forging an unclaimed user message on finish is refused.
+      const forgedError = await session
+        .finish({ status: "succeeded" }, [
+          {
+            id: "msg_forged",
+            projectId: PROJECT_ID,
+            threadId: thread.id,
+            runId: null,
+            role: "user",
+            parts: [{ type: "text", text: "Forged" }],
+          },
+        ])
+        .catch((error: unknown) => error)
+      expect(forgedError).toBeInstanceOf(AgentRunRefusedError)
+
+      // Finishing with msg_steer_1 consumes inb_1 and releases unanswered inb_2 back to unclaimed.
+      await session.finish({ status: "succeeded" }, [
+        {
+          id: "msg_asst_1",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Step 0" }],
+        },
+        {
+          id: "msg_steer_1",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Tampered client copy ignored" }],
+        },
+        {
+          id: "msg_asst_2",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Adjusted answer" }],
+        },
+      ])
+      session.close()
+
+      const storedSteer = await storage.agents.messages.getById({
+        projectId: PROJECT_ID,
+        id: "msg_steer_1",
+      })
+      expect(storedSteer?.runId).toBeNull()
+      expect(storedSteer?.parts).toEqual([{ type: "text", text: "Steer 1" }])
+      expect(storedSteer?.authorPrincipal).toEqual({ type: "user", id: "usr_ava" })
+      expect(storedSteer?.metadata).toEqual({
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
+
+      const remaining = await storage.agents.inbox.list({
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+      })
+      expect(remaining.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual([
+        { id: "inb_2", claimed: false },
+      ])
     })
   })
 }

@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentMessagePart, AgentStepRequestSize } from "@sixb/core"
+import type { AgentStepRequestSize } from "@sixb/core"
 import {
   type AgentContextBudget,
   type AgentRunSession,
@@ -25,10 +25,10 @@ import { conversationModelMessages, conversationModelSettings } from "./conversa
 import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
-import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import type { ConversationAgentExecutionEnvironment } from "./run-environment"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
+import { TurnInbox, turnResultMessages, turnWorkMessages } from "./turn-inbox"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
@@ -69,10 +69,10 @@ export interface RunAgentTurnInput {
     readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
   }
   /**
-   * Handed the answer so far after each step that completed, as the message the turn would
-   * append: a turn that fails then records it with its failure, and keeps that work.
+   * Handed the answer so far after each step that completed, as the messages the turn would
+   * append: a turn that fails then records them with its failure, and keeps that work.
    */
-  readonly onWork?: (message: AppendAgentMessageInput) => void
+  readonly onWork?: (messages: readonly AppendAgentMessageInput[]) => void
 }
 
 /**
@@ -118,7 +118,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     sandboxReadiness.signal,
     ...(context.environmentFailureSignal ? [context.environmentFailureSignal] : []),
   ])
-  let interruptedParts: readonly AgentMessagePart[] | undefined
+  let interruptedMessages: readonly AppendAgentMessageInput[] | undefined
   const stopReason = () =>
     stoppedByWorker(signal, input.stopSignal) ? { finishReason: "interrupted" as const } : {}
 
@@ -133,7 +133,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       run,
       modelId: plan.model.modelId,
       ...stopReason(),
-      parts: interruptedParts,
+      messages: interruptedMessages,
     })
   }
 
@@ -202,10 +202,19 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         return { ...prepared, ...guarded }
       }
     : context.prepareStep
+  const turnInbox = new TurnInbox(input.session, {
+    retainedMessages: input.threadContext.retainedMessages,
+    ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
+    project: { timeZone: context.projectTimeZone, locale: context.projectLocale },
+  })
   const prepareStep = async (step: PrepareModelStepInput) => {
     const prepared = await guardedStep?.(step)
-    recordRequest(step.stepIndex, prepared?.messages ?? step.messages)
-    return prepared
+    const steers = await turnInbox.take(step.stepIndex)
+    const baseMessages = prepared?.messages ?? step.messages
+    const nextMessages = steers.length > 0 ? [...baseMessages, ...steers] : baseMessages
+    recordRequest(step.stepIndex, nextMessages)
+    if (steers.length === 0) return prepared
+    return { ...prepared, messages: nextMessages }
   }
   const recoverStep =
     guard &&
@@ -215,32 +224,24 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       return recovered
     })
 
-  // The answer so far, as one message whatever step it is at.
-  const workMessageId = createAgentMessageId()
   const finishedSteps: ModelStep[] = []
   const recordStep = (step: ModelStep) => {
     finishedSteps.push(step)
-    input.onWork?.({
-      id: workMessageId,
-      projectId,
-      threadId: run.threadId,
-      runId,
-      role: "assistant",
-      parts: recordStepRequests(
-        markReducedSteps(
-          agentTraceFromModelSteps(
-            finishedSteps,
-            { threadId: run.threadId, runId },
-            context.outputFileOf
-          ),
-          guard?.reducedFromStep()
-        ),
-        stepRequests
-      ),
+    const snapshot = turnWorkMessages({
+      steps: finishedSteps,
+      run,
+      deliveries: turnInbox.deliveries,
+      ...(guard?.reducedFromStep() === undefined
+        ? {}
+        : { reducedFromStep: guard.reducedFromStep() }),
+      stepRequests,
+      ...(context.outputFileOf === undefined ? {} : { outputFileOf: context.outputFileOf }),
       ...(context.authorPrincipal === undefined
         ? {}
         : { authorPrincipal: context.authorPrincipal }),
     })
+    interruptedMessages = snapshot
+    input.onWork?.(snapshot)
   }
 
   try {
@@ -261,17 +262,18 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         prepareStep,
         ...(recoverStep ? { recoverStep } : {}),
         onStepEnd: recordStep,
-        // A child's question the model has not read comes before its answer ends the turn.
-        ...(input.children === undefined
-          ? {}
-          : {
-              beforeComplete: async () => {
-                const unread = await input.children?.unread()
-                return unread
-                  ? [{ role: "user", content: [{ type: "text", text: unread }] }]
-                  : undefined
-              },
-            }),
+        // Mid-run steers and unread child questions arrive before the answer ends the turn.
+        beforeComplete: async (_step, stepIndex) => {
+          const steers = await turnInbox.take(stepIndex + 1, { afterAnswer: true })
+          const unread = await input.children?.unread()
+          const followUp: ModelMessage[] = [
+            ...steers,
+            ...(unread
+              ? [{ role: "user" as const, content: [{ type: "text" as const, text: unread }] }]
+              : []),
+          ]
+          return followUp.length > 0 ? followUp : undefined
+        },
         signal: abortSignal,
         onEvent: async (chunk) => {
           await input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
@@ -301,24 +303,18 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw error
     }
 
-    interruptedParts = recordStepRequests(
-      markReducedSteps(
-        result.status === "aborted"
-          ? agentTraceFromPartialModelLoop(
-              result.steps,
-              result.partialContent,
-              { threadId: run.threadId, runId },
-              context.outputFileOf
-            )
-          : agentTraceFromModelSteps(
-              result.steps,
-              { threadId: run.threadId, runId },
-              context.outputFileOf
-            ),
-        guard?.reducedFromStep()
-      ),
-      stepRequests
-    )
+    interruptedMessages = turnResultMessages(result, {
+      run,
+      deliveries: turnInbox.deliveries,
+      ...(guard?.reducedFromStep() === undefined
+        ? {}
+        : { reducedFromStep: guard.reducedFromStep() }),
+      stepRequests,
+      ...(context.outputFileOf === undefined ? {} : { outputFileOf: context.outputFileOf }),
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
+    })
 
     const interruptedAfterModel = await finalizeIfInterrupted()
     if (interruptedAfterModel) return interruptedAfterModel
@@ -329,7 +325,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         run,
         modelId: plan.model.modelId,
         ...stopReason(),
-        parts: interruptedParts,
+        messages: interruptedMessages,
       })
     }
 
@@ -354,12 +350,29 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         : result.status === "paused"
           ? "stop"
           : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
-    const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
     const diagnostics = [
       outputLimitDiagnostic(finishReason),
       finishReason === "awaiting_approval" ? undefined : stepLimitDiagnostic(result),
     ].filter((diagnostic) => diagnostic !== undefined)
-    const assistantMessageId = createAgentMessageId()
+    const committedMessages: readonly AppendAgentMessageInput[] =
+      interruptedMessages !== undefined && interruptedMessages.length > 0
+        ? interruptedMessages
+        : [
+            {
+              id: createAgentMessageId(),
+              projectId,
+              threadId: run.threadId,
+              runId,
+              role: "assistant" as const,
+              parts: [],
+              ...(context.authorPrincipal === undefined
+                ? {}
+                : { authorPrincipal: context.authorPrincipal }),
+            },
+          ]
+    const lastAssistant = [...committedMessages]
+      .reverse()
+      .find((message) => message.role === "assistant")
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
     if (interruptedBeforeCommit) return interruptedBeforeCommit
@@ -372,22 +385,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         finishReason,
         ...(diagnostics.length === 0 ? {} : { diagnostics }),
       },
-      [
-        {
-          id: assistantMessageId,
-          projectId,
-          threadId: run.threadId,
-          runId,
-          role: assistant.role,
-          parts: assistant.parts,
-          ...(context.authorPrincipal === undefined
-            ? {}
-            : { authorPrincipal: context.authorPrincipal }),
-        },
-      ]
+      committedMessages
     )
 
-    await input.session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+    if (lastAssistant) {
+      await input.session.events.publishMessageFinalized({ run, messageId: lastAssistant.id })
+    }
     await input.session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   } finally {
@@ -399,43 +402,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
  * waiting, or decided and not reported to the model yet, its children's included.
  */
-
-/**
- * Mark each step from `fromStep` on as answering a request the turn reduced, for the next turn's
- * estimate not to go by what those calls read.
- */
-export function markReducedSteps(
-  parts: readonly AgentMessagePart[],
-  fromStep: number | undefined
-): readonly AgentMessagePart[] {
-  if (fromStep === undefined) return parts
-
-  let step = -1
-  return parts.map((part) => {
-    if (part.type !== "step-start") return part
-
-    step += 1
-    return step >= fromStep ? { type: "step-start", reducedRequest: true } : part
-  })
-}
-
-/**
- * Record on each step-start what its request carried, by step: the next turn's context meter
- * reads the system prompt and tools the latest one sent.
- */
-export function recordStepRequests(
-  parts: readonly AgentMessagePart[],
-  requests: readonly (AgentStepRequestSize | undefined)[]
-): readonly AgentMessagePart[] {
-  let step = -1
-  return parts.map((part) => {
-    if (part.type !== "step-start") return part
-
-    step += 1
-    const request = requests[step]
-    return request ? { ...part, request } : part
-  })
-}
 
 /**
  * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:
@@ -481,10 +447,10 @@ async function finalizeInterruptedTurn(input: {
   readonly run: ConversationAgentRunRecord
   readonly modelId?: string
   readonly finishReason?: "interrupted"
-  readonly parts?: readonly AgentMessagePart[]
+  readonly messages?: readonly AppendAgentMessageInput[]
 }): Promise<AgentRunRecord> {
   const { session, context, run, modelId, finishReason } = input
-  const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
+  const messages = input.messages && input.messages.length > 0 ? input.messages : undefined
 
   await context.beforeFinalize?.()
 
@@ -493,27 +459,17 @@ async function finalizeInterruptedTurn(input: {
     ...(modelId === undefined ? {} : { modelId }),
     ...(finishReason === undefined ? {} : { finishReason }),
   }
-  if (!parts) {
+  if (!messages) {
     const finalizedRun = await session.finish(outcome)
     await session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   }
 
-  const assistantMessageId = createAgentMessageId()
-  const finalizedRun = await session.finish(outcome, [
-    {
-      id: assistantMessageId,
-      projectId: run.projectId,
-      threadId: run.threadId,
-      runId: run.id,
-      role: "assistant",
-      parts,
-      ...(context.authorPrincipal === undefined
-        ? {}
-        : { authorPrincipal: context.authorPrincipal }),
-    },
-  ])
-  await session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+  const finalizedRun = await session.finish(outcome, messages)
+  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
+  if (lastAssistant) {
+    await session.events.publishMessageFinalized({ run, messageId: lastAssistant.id })
+  }
   await session.events.publishRunFinished(finalizedRun)
   return finalizedRun
 }
