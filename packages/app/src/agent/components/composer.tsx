@@ -47,6 +47,7 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
+import { clearThreadDraft, readThreadDraft, writeThreadDraft } from "../thread-state"
 import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
@@ -123,6 +124,8 @@ export interface ComposerProps {
   readonly hint?: string
   /** A failed send, kept within the same width constraint as the input. */
   readonly error?: string
+  /** Key under which unsent text, attachments, and explicit @ context persist per thread. */
+  readonly draftKey?: string
   /**
    * Text to restore into the input, e.g. after a failed send so the user does not lose it.
    * Applied whenever `draftNonce` changes to a non-zero value, so re-sending the same text works.
@@ -246,6 +249,7 @@ export const Composer = memo(function Composer({
   className,
   hint,
   error,
+  draftKey,
   draft,
   draftAttachments,
   draftContext,
@@ -266,10 +270,13 @@ export const Composer = memo(function Composer({
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
   const unnamedContext = agentMessages.context.unnamed
-  const [value, setValue] = useState("")
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const [loadedDraftKey, setLoadedDraftKey] = useState(draftKey)
+  const [value, setValue] = useState(() => readInitialDraftText(draftKey))
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
+    readInitialDraftAttachments(draftKey)
+  )
   const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
-    ambientContext.map((context) => ({ context, origin: "ambient" }))
+    readInitialDraftContext(draftKey, ambientContext)
   )
   const [mention, setMention] = useState<AgentContextMention | null>(null)
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
@@ -331,10 +338,38 @@ export const Composer = memo(function Composer({
     }))
   }, [ambientContext, contextSearch.data?.items, mention, unnamedContext])
 
+  if (loadedDraftKey !== draftKey) {
+    setLoadedDraftKey(draftKey)
+    setValue(readInitialDraftText(draftKey))
+    setAttachments(readInitialDraftAttachments(draftKey))
+    setContextEntries(readInitialDraftContext(draftKey, ambientContext))
+    setMention(null)
+    setDismissedMention(null)
+    setDismissedCommand(null)
+    setActiveCommand(0)
+  }
+
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
-  const readyAttachments = attachments.flatMap((attachment) =>
-    attachment.status === "ready" ? [attachment.fileRef] : []
+  const readyAttachments = useMemo(
+    () =>
+      attachments.flatMap((attachment) =>
+        attachment.status === "ready" ? [attachment.fileRef] : []
+      ),
+    [attachments]
   )
+  const explicitContext = useMemo(
+    () => contextEntries.filter((entry) => entry.origin === "explicit"),
+    [contextEntries]
+  )
+
+  useEffect(() => {
+    if (!draftKey || loadedDraftKey !== draftKey) return
+    writeThreadDraft(draftKey, {
+      text: value,
+      attachments: readyAttachments,
+      explicitContext,
+    })
+  }, [draftKey, loadedDraftKey, value, readyAttachments, explicitContext])
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
@@ -552,6 +587,7 @@ export const Composer = memo(function Composer({
   const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
     onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
+    if (draftKey) clearThreadDraft(draftKey)
     setValue("")
     voice.reset()
     setAttachments([])
@@ -1329,4 +1365,29 @@ function contextLabel(label: string): { readonly label?: string } {
         ? `${trimmed.slice(0, MAX_AGENT_CONTEXT_LABEL_LENGTH - 1).trimEnd()}…`
         : trimmed,
   }
+}
+
+function readInitialDraftText(draftKey: string | undefined): string {
+  return draftKey ? (readThreadDraft(draftKey)?.text ?? "") : ""
+}
+
+function readInitialDraftAttachments(draftKey: string | undefined): ComposerAttachment[] {
+  if (!draftKey) return []
+  return (readThreadDraft(draftKey)?.attachments ?? []).map((fileRef) => ({
+    id: attachmentId(),
+    status: "ready",
+    fileRef,
+  }))
+}
+
+function readInitialDraftContext(
+  draftKey: string | undefined,
+  ambientContext: readonly AgentContextInput[]
+): AgentContextEntryInput[] {
+  const explicit = draftKey ? (readThreadDraft(draftKey)?.explicitContext ?? []) : []
+  const explicitIds = new Set(explicit.map((entry) => agentContextIdentity(entry.context)))
+  const ambient = ambientContext
+    .filter((context) => !explicitIds.has(agentContextIdentity(context)))
+    .map((context) => ({ context, origin: "ambient" as const }))
+  return [...ambient, ...explicit]
 }

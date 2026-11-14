@@ -46,9 +46,9 @@ export function AgentChatPage({
   // biome-ignore lint/correctness/useExhaustiveDependencies: the key stands for the parameters.
   const artifactTarget = useMemo(() => artifactTargetFromSearch(searchParams), [searchKey])
   const onArtifactTargetChange = useCallback(
-    (target: ArtifactTarget | null) => {
+    (target: ArtifactTarget | null, options?: { readonly replace?: boolean }) => {
       setSearchParams((current) => withArtifactTarget(current, target), {
-        replace: target === null,
+        replace: options?.replace ?? target === null,
       })
     },
     [setSearchParams]

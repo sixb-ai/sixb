@@ -168,6 +168,7 @@ export type ConversationComposerProps = Pick<
   | "usingDefaultModel"
   | "onResetModelSelection"
   | "modelRouting"
+  | "draftKey"
   | "draft"
   | "draftAttachments"
   | "draftContext"
@@ -1341,6 +1342,7 @@ export function useAgentConversation({
       usingDefaultModel,
       onResetModelSelection: stableResetModelSelection,
       modelRouting,
+      draftKey: threadId ?? "draft",
       draft: draftReseed.text,
       draftAttachments: draftReseed.attachments,
       draftContext: draftReseed.context,
@@ -1374,6 +1376,7 @@ export function useAgentConversation({
       usingDefaultModel,
       stableResetModelSelection,
       modelRouting,
+      threadId,
       draftReseed,
       approvalMode,
       stableSetApprovalMode,

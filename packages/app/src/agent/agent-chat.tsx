@@ -44,7 +44,10 @@ export interface AgentChatProps {
   readonly splitArtifacts?: boolean
   /** The open artifact when the host keeps it in its route; files stay local. */
   readonly artifactTarget?: ArtifactTarget | null
-  readonly onArtifactTargetChange?: (target: ArtifactTarget | null) => void
+  readonly onArtifactTargetChange?: (
+    target: ArtifactTarget | null,
+    options?: { readonly replace?: boolean }
+  ) => void
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
   /**
