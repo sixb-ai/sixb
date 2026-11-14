@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
 import {
-  afterAgentRunFinished,
   type AgentRunSessionHost,
+  afterAgentRunFinished,
   claimAgentRun,
   NOOP_STREAM_SINK,
 } from "../src/agents"
@@ -293,8 +293,8 @@ describe("what a finished turn starts", () => {
     await afterAgentRunFinished(sessionHost(host, deps), lost!)
 
     const pending = await inbox(host, thread.id)
-    expect(
-      pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))
-    ).toEqual([{ id: "inb_steer", claimed: false }])
+    expect(pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual(
+      [{ id: "inb_steer", claimed: false }]
+    )
   })
 })

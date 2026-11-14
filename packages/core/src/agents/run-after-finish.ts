@@ -51,6 +51,14 @@ async function startNextQueuedMessage(
   run: AgentRunRecord
 ): Promise<void> {
   try {
+    // Read first: most turns end with nothing queued behind them, and then read nothing else.
+    const pending = await host.storage.agents.inbox.list({
+      projectId: host.projectId,
+      threadId: run.threadId,
+      includeClaimed: false,
+    })
+    if (pending.length === 0) return
+
     const execution = await host.storage.executions.getById({
       projectId: host.projectId,
       id: run.executionId,
@@ -59,12 +67,6 @@ async function startNextQueuedMessage(
     if (!requester) return
 
     const onlyImmediate = !(await turnAnsweredEveryMessage(host, run))
-    // Read before binding a runtime: most turns end with nothing queued behind them.
-    const pending = await host.storage.agents.inbox.list({
-      projectId: host.projectId,
-      threadId: run.threadId,
-      includeClaimed: false,
-    })
     const waiting = pending.some(
       (item) =>
         (!onlyImmediate || item.immediate) && principalsEqual(item.authorPrincipal, requester)
