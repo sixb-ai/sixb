@@ -1346,6 +1346,64 @@ describe("a runner outside the worker", () => {
       await session.close()
     }
   })
+
+  // Guard proof: require runsOn === "computer" in moveToComputer; a cloud conversation refuses
+  // POST /api/agent-threads/:threadId/computer, stranding it in the cloud.
+  test("moves a cloud thread to a computer, claims turns there, and moves back to the cloud as needed", async () => {
+    const { person, ask, call, claim, post, storage } = await setup()
+    const ava = await person("ava")
+    const cloudRunId = await ask(ava, "Start in the cloud.", {})
+    const threadId =
+      (await storage.agents.runs.getById({ projectId, id: cloudRunId }))?.threadId ?? ""
+
+    // While the cloud turn is queued, moving to the computer is refused.
+    const whileQueued = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: LAPTOP,
+    })
+    expect(whileQueued.status).toBe(409)
+    await storage.agents.runs.finishQueued({
+      projectId,
+      id: cloudRunId,
+      status: "cancelled",
+    })
+
+    // Cloud -> Computer
+    const toLaptop = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: LAPTOP,
+    })
+    expect(toLaptop.status).toBe(200)
+    expect(await toLaptop.json()).toMatchObject({
+      id: threadId,
+      runsOn: "computer",
+      computer: { ...LAPTOP, online: false },
+      movedAt: expect.any(String),
+    })
+
+    const posted = (await post(ava, `/api/agent-threads/${threadId}/messages`, {
+      text: "Now inspect the local folder.",
+    })) as { readonly run: { readonly id: string; readonly runsOn?: string } }
+    expect(posted.run).toMatchObject({ runsOn: "computer" })
+    const session = await claim(ava, posted.run.id)
+    expect(session).not.toBeNull()
+    await session?.finish({ status: "succeeded" })
+    await session?.close()
+
+    // Computer -> Cloud -> Computer again
+    const backToCloud = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    expect(backToCloud.status).toBe(200)
+    expect(await backToCloud.json()).not.toHaveProperty("runsOn")
+
+    const elsewhere = { ...LAPTOP, folder: "/Users/ava/other" }
+    const backToComputer = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: elsewhere,
+    })
+    expect(backToComputer.status).toBe(200)
+    expect(await backToComputer.json()).toMatchObject({
+      id: threadId,
+      runsOn: "computer",
+      computer: { ...elsewhere, online: false },
+    })
+  })
 })
 
 /** Bob's idle thread, whose workspace needs recovering: his last turn acquired it, then ended. */

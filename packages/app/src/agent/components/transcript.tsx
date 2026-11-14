@@ -71,6 +71,8 @@ export interface TranscriptProps {
   readonly delegation?: TranscriptDelegation
   /** Where the conversation moved, after which saved message: the files from before stayed. */
   readonly moved?: { readonly afterMessageId: string; readonly label: string } | null
+  /** Every workspace transition across the conversation, keyed by the message before the move. */
+  readonly moves?: ReadonlyMap<string, string>
   /**
    * Where its background commands run and what is known of them now, each a card under the work
    * that started it. Without it, a command its turn no longer runs reads as last seen running.
@@ -153,6 +155,7 @@ function TranscriptView({
   onNewThread,
   approvals,
   moved,
+  moves,
   onAnswer,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   // Messages one person sends in a row name them once; an answer in between names them again.
@@ -288,11 +291,16 @@ function TranscriptView({
                       <ApprovalCards calls={calls} />
                     </MessageScrollerItem>
                   ) : null}
-                  {moved && message.id === moved.afterMessageId ? (
-                    <MessageScrollerItem messageId="moved">
-                      <MovedMarker label={moved.label} />
-                    </MessageScrollerItem>
-                  ) : null}
+                  {(() => {
+                    const moveLabel =
+                      (message.id ? moves?.get(message.id) : undefined) ??
+                      (moved && message.id === moved.afterMessageId ? moved.label : undefined)
+                    return moveLabel ? (
+                      <MessageScrollerItem messageId={`moved:${message.id ?? message.key}`}>
+                        <MovedMarker label={moveLabel} />
+                      </MessageScrollerItem>
+                    ) : null
+                  })()}
                 </Fragment>
               )
             })}

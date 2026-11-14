@@ -409,9 +409,6 @@ export async function createConversationAgentEnvironment(
       plan,
       runId: run.id,
       threadId: run.threadId,
-      ...(input.thread?.movedAt
-        ? { workspaceMovedAt: new Date(input.thread.movedAt).toISOString() }
-        : {}),
       callTool: (call, options) => input.session.callTool(call, options),
       webSearch: input.session.models.webSearch,
       ...(publishing ? { publishing } : {}),

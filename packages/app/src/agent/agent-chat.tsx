@@ -8,7 +8,11 @@ import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { takeAgentDraft } from "../artifacts/view-context"
 import { ArtifactPanelRoot } from "./artifact-panel"
-import { ComputerBadge, ComputerOfflineNotice } from "./components/computer-place"
+import {
+  ComputerBadge,
+  ComputerOfflineNotice,
+  ThreadPlaceControl,
+} from "./components/computer-place"
 import { ConversationPanel } from "./components/conversation-panel"
 import { SandboxRecovery } from "./components/sandbox-recovery"
 import { SharedThreadNotice } from "./components/shared-thread-notice"
@@ -135,7 +139,11 @@ export function AgentChat({
   const conversationHeaderActions =
     threadId || hostHeaderActions ? (
       <>
-        {conversation.computer ? <ComputerBadge computer={conversation.computer} /> : null}
+        {conversation.place ? (
+          <ThreadPlaceControl place={conversation.place} />
+        ) : conversation.computer ? (
+          <ComputerBadge computer={conversation.computer} />
+        ) : null}
         {threadId ? <ThreadArtifactsMenu threadId={threadId} /> : null}
         {sharingThread ? (
           <ThreadPeople

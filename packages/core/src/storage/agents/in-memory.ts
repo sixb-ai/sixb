@@ -49,10 +49,12 @@ import {
   participantsToAdd,
   planAgentThreadFork,
   queuedTurnInCloud,
+  queuedTurnOnComputer,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
+  unavailableChildSandboxState,
   withStopRequest,
 } from "./provider"
 import type {
@@ -456,8 +458,18 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       : null
     assertAssignableComputer(thread, active, input.computer, input.id)
 
+    const queued = queuedTurnOnComputer(active, input.computer)
+    if (queued) this.state.runs.set(key(input.projectId, queued.id), queued)
+    if (thread.runsOn !== "computer") {
+      for (const [childKey, child] of this.state.threads) {
+        if (child.projectId !== input.projectId || child.parent?.threadId !== input.id) continue
+        const nextState = unavailableChildSandboxState(child.sandboxState)
+        if (nextState) this.state.threads.set(childKey, { ...child, sandboxState: nextState })
+      }
+    }
     const assigned: AgentThreadRecord = {
       ...thread,
+      runsOn: "computer",
       computer: clone(input.computer),
       ...(movesComputerPlace(thread, input.computer)
         ? { movedAt: new Date(input.movedAt ?? new Date()) }

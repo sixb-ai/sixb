@@ -994,6 +994,12 @@ export const fr: Translation<AgentMessages> = {
     placeTitle: "Où cette conversation s'exécute",
     placeChip: (place) => `S'exécute dans ${place}. Changer l'emplacement`,
     cloud: "Cloud",
+    cloudDescription: "Accessible depuis tous vos appareils",
+    thisComputer: "Cet ordinateur",
+    checkingComputers: "Recherche d’ordinateurs connectés…",
+    connectComputerTitle: "Exécuter sur votre ordinateur",
+    connectComputerHint:
+      "Ouvrez sixb dans un dossier sur votre ordinateur pour y déplacer cette conversation.",
     chooseFolder: "Choisir un dossier…",
     chooseFolderShort: "Choisir un dossier",
     forgetFolder: (folder) => `Ne plus exécuter les messages dans ${folder}`,
@@ -1001,12 +1007,17 @@ export const fr: Translation<AgentMessages> = {
     continueInCloud: "Continuer dans le cloud",
     moving: "Déplacement…",
     moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
+    moveSwitchFailed: "Impossible de changer où cette conversation s’exécute. Réessayez.",
     moveBusy: "Un tour est en cours ou attend votre approbation. Arrêtez-le ou répondez d’abord.",
+    moveWhileBusy: "Terminez ou arrêtez la réponse en cours pour changer d’emplacement.",
     confirmTitle: "Continuer dans le cloud ?",
     confirmDescription:
-      "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et elle ne pourra pas revenir.",
+      "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et vous pourrez la ramener à tout moment.",
     cancel: "Annuler",
     movedToCloud: "Déplacée vers le cloud. Les fichiers d’avant sont restés sur l’ordinateur.",
+    movedToComputer: "Déplacée vers l’ordinateur. Les fichiers d’avant sont restés dans le cloud.",
+    movedToComputerFolder: (folder) =>
+      `Déplacée vers ${folder}. Les fichiers d’avant sont restés dans le cloud.`,
     movedToFolder: (folder) =>
       `Déplacée vers ${folder}. Les fichiers d’avant sont restés où ils étaient.`,
     movedElsewhere:

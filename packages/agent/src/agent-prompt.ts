@@ -313,6 +313,19 @@ function renderWorkspaceMove(movedAt: string): string {
   return `This conversation moved to this workspace at ${movedAt}. The files and paths that earlier tool calls used were in the workspace it moved from and are not here. Conversation history and attachments remain available. Inspect this workspace before relying on earlier filesystem results. Whenever you report that this workspace is empty or that a file is missing, add that files from before the move stayed in the workspace it moved from.`
 }
 
+/**
+ * Marks a user message sent after the conversation moved to another workspace (between the cloud
+ * and a computer, or between folders). Kept on the message rather than in the system prompt so
+ * cached prefixes hold across moves and later turns know which messages ran where.
+ */
+export function renderWorkspaceMovedTag(): string {
+  return [
+    "<sixb_workspace_moved>",
+    "This conversation moved to a different workspace before this message. Files, paths and local processes from before this message stayed in the workspace it moved from and are not here; conversation history, artifacts and attachments remain available. Inspect the current workspace before relying on earlier filesystem results, and when reporting a missing file from before this move, note that it stayed in the previous workspace.",
+    "</sixb_workspace_moved>",
+  ].join("\n")
+}
+
 /** What a run is told once its thread's workspace was lost and created again. */
 function renderSandboxReset(resetAt: string, mode: AgentExecutionMode): string {
   // A sub-agent's workspace is blank: only what it was handed and its out/ are given back.

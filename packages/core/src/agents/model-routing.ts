@@ -59,7 +59,11 @@ export interface TurnModelChoice {
 
 export interface TurnModelRouter {
   /** The model of a turn that names none, given the thread's previous turn. */
-  choose(text: string, previous: ConversationAgentRunRecord | undefined): Promise<TurnModelChoice>
+  choose(
+    text: string,
+    previous: ConversationAgentRunRecord | undefined,
+    options?: { readonly movedAt?: Date }
+  ): Promise<TurnModelChoice>
 }
 
 /**
@@ -86,14 +90,14 @@ export function createTurnModelRouter(
   if (!language || language.tiers.length === 0 || !models?.decision) return undefined
 
   return {
-    async choose(text, previous) {
+    async choose(text, previous, options) {
       // Files sent alone leave nothing to judge: the turn aims for standard, and the cache rule
       // keeps a warm thread on its model.
       const tierProbabilities = text.trim() ? await askTier(decision, text) : undefined
       const tier = tierProbabilities ? tierFor(tierProbabilities) : "standard"
 
       return {
-        model: turnModel(language, tier, previous),
+        model: turnModel(language, tier, previous, options?.movedAt),
         ...(tierProbabilities ? { tierProbabilities } : {}),
       }
     },
@@ -148,10 +152,11 @@ function tierFor(probabilities: LanguageModelTierProbabilities): LanguageModelTi
 function turnModel(
   language: LanguageModelCatalog,
   tier: LanguageModelTier,
-  previous: ConversationAgentRunRecord | undefined
+  previous: ConversationAgentRunRecord | undefined,
+  movedAt?: Date
 ): LanguageModelEntry {
   const target = language.getByTier(tier)
-  const last = previous && previousTurn(language, previous)
+  const last = previous && previousTurn(language, previous, movedAt)
   if (!last) return target
 
   const change = tierRank(target.tier ?? tier) - tierRank(last.tier)
@@ -170,7 +175,8 @@ interface PreviousTurn {
 /** An older run without a tier takes its model's; one without either counts as no turn at all. */
 function previousTurn(
   language: LanguageModelCatalog,
-  run: ConversationAgentRunRecord
+  run: ConversationAgentRunRecord,
+  movedAt?: Date
 ): PreviousTurn | undefined {
   if (!run.spec) return undefined
 
@@ -178,9 +184,15 @@ function previousTurn(
   const tier = run.spec.tier ?? model?.tier
   if (tier === undefined) return undefined
 
-  // A run that never recorded its end counts from its start, or from its admission.
+  // A run that never recorded its end counts from its start, or from its admission. Moving the
+  // thread changes its workspace prompt, so the previous place's cache does not hold the new one.
   const lastCallAt = run.completedAt ?? run.startedAt ?? run.createdAt
-  return { model, tier, cacheWarm: Date.now() - lastCallAt.getTime() < PROMPT_CACHE_TTL_MS }
+  const unmoved = movedAt === undefined || movedAt.getTime() <= lastCallAt.getTime()
+  return {
+    model,
+    tier,
+    cacheWarm: unmoved && Date.now() - lastCallAt.getTime() < PROMPT_CACHE_TTL_MS,
+  }
 }
 
 function tierRank(tier: LanguageModelTier): number {

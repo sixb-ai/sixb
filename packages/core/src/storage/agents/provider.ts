@@ -440,6 +440,15 @@ export function assertConversationAgentRunSpec(
   }
   assertApprovalModeField(spec.approvalMode, "Conversational Agent run", prefix)
   assertRunsOn(spec.runsOn, "Conversational Agent run", prefix)
+  if (spec.computer !== undefined) {
+    if (spec.runsOn !== "computer") {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Only a computer's turn names one.`
+      )
+    }
+    assertAgentThreadPlace(spec.computer, prefix)
+  }
 }
 
 /** Validate where a thread or turn runs: `computer`, or absent for the cloud. */
@@ -456,6 +465,29 @@ export function assertRunsOn(value: unknown, subject: string, prefix = "Sixb"): 
  * Validate where on a computer a thread runs: the CLI's id for the computer, its name, and the
  * folder there. All are shown back to its owner, so none holds a control character.
  */
+export function assertAgentThreadPlace(
+  value: unknown,
+  prefix = "Sixb"
+): asserts value is AgentThreadPlace {
+  const place = value as Partial<AgentThreadPlace> | null
+  for (const [field, text, max] of [
+    ["id", place?.id, 200],
+    ["folder", place?.folder, 4096],
+  ] as const) {
+    if (
+      typeof text !== "string" ||
+      text.trim() === "" ||
+      text.length > max ||
+      CONTROL_CHARACTER.test(text)
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] An Agent thread's computer '${field}' must be a non-blank string of at most ${max} characters, without control characters.`
+      )
+    }
+  }
+}
+
 export function assertAgentThreadComputer(
   value: unknown,
   prefix = "Sixb"
@@ -569,8 +601,8 @@ export const CONTROL_CHARACTER =
   /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
 /**
- * Refuse to assign a computer to a thread that runs in the cloud, or does not exist, or to move one
- * while a turn runs in its folder.
+ * Refuse to assign a computer to a sub-agent's thread or one that does not exist, to move a cloud
+ * thread while a turn holds it, or to move a computer's thread while a turn runs in its folder.
  */
 export function assertAssignableComputer(
   thread: AgentThreadRecord | null,
@@ -582,11 +614,20 @@ export function assertAssignableComputer(
   if (!thread) {
     throw new AgentStorageError("thread_not_found", `[${prefix}] Agent thread '${id}' not found.`)
   }
-  if (thread.runsOn !== "computer") {
+  if (thread.kind !== "conversation") {
     throw new AgentStorageError(
       "invalid_input",
-      `[${prefix}] Agent thread '${id}' runs in the cloud: no computer runs its turns.`
+      `[${prefix}] Sub-agent thread '${id}' never runs on a computer.`
     )
+  }
+  if (thread.runsOn !== "computer") {
+    if (activeRun !== null) {
+      throw new AgentStorageError(
+        "active_run_exists",
+        `[${prefix}] A turn of Agent thread '${id}' is in progress in the cloud: stop it, or let it end, first.`
+      )
+    }
+    return
   }
   if (movesComputerPlace(thread, computer)) assertNoTurnRunning(activeRun, id, prefix)
 }
@@ -677,8 +718,31 @@ export function queuedTurnInCloud(
 ): ConversationAgentRunRecord | undefined {
   if (active?.kind !== "conversation" || active.status !== "queued") return undefined
   if (active.spec?.runsOn !== "computer") return undefined
-  const { runsOn: _runsOn, ...cloud } = active.spec
+  const { runsOn: _runsOn, computer: _computer, ...cloud } = active.spec
   return { ...active, spec: cloud }
+}
+
+/** The queued turn of a computer's thread that moves to another folder, with its new place. */
+export function queuedTurnOnComputer(
+  active: AgentRunRecord | null,
+  computer: AgentThreadPlace
+): ConversationAgentRunRecord | undefined {
+  if (active?.kind !== "conversation" || active.status !== "queued") return undefined
+  if (active.spec?.runsOn !== "computer" || active.spec.computer === undefined) return undefined
+  const place = { id: computer.id, folder: computer.folder }
+  if (sameComputerPlace(active.spec.computer, place)) return undefined
+  return { ...active, spec: { ...active.spec, computer: place } }
+}
+
+/**
+ * Mark a paused sub-agent's saved cloud workspace unavailable when its conversation leaves the
+ * cloud: a continuation on the computer updates out/, so a later return to the cloud starts fresh.
+ */
+export function unavailableChildSandboxState(
+  state: AgentThreadSandboxState | undefined
+): AgentThreadSandboxState | undefined {
+  if (!state || (state.status !== "ready" && state.status !== "new")) return undefined
+  return { ...state, status: "unavailable" }
 }
 
 /** Whether two places are the same folder of the same computer, whatever they call it. */

@@ -447,6 +447,11 @@ export interface ConversationAgentRunSpec {
   readonly approvalMode?: AgentApprovalMode
   /** Its thread's `runsOn` when it was asked for: a computer's turn never reaches the agent queue. */
   readonly runsOn?: "computer"
+  /**
+   * Which computer and folder the turn ran in: captured with `runsOn: "computer"` and updated if a
+   * queued turn moves to another folder before starting.
+   */
+  readonly computer?: AgentThreadPlace
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
@@ -791,8 +796,9 @@ export interface AgentThreadStore {
   /** Whether the user took part until now. */
   removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
   /**
-   * Move a computer's thread to another computer or folder, and return the thread after. A cloud
-   * thread runs on none, and is refused.
+   * Move a conversation thread to a computer and folder, from the cloud or from another computer or
+   * folder, and return the thread after. Refused while a turn holds a cloud thread or runs on its
+   * computer.
    */
   assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord>
   /**
