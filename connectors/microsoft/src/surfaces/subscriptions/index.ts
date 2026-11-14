@@ -1,4 +1,5 @@
 import type { RestRequestInit } from "@sixb/connector-rest"
+import type { ClientStateSource } from "../../client-state"
 import { MicrosoftApiError, MicrosoftAuthError, MicrosoftProtocolError } from "../../errors"
 import { checkEmpty, type MicrosoftHttp, readJson } from "../../http"
 import { allPages, page } from "../../pagination"
@@ -13,6 +14,10 @@ import { query, resource, segment } from "../../validation"
 import { validateCreate, validateUpdate } from "./validation"
 
 export interface MicrosoftSubscriptionsResource {
+  /**
+   * Sends the connector's own clientState when `input` has none, so the built-in receiver accepts
+   * the subscription's notifications.
+   */
   create(
     input: SubscriptionCreate,
     options?: SubscriptionCreateOptions
@@ -76,16 +81,23 @@ async function mutate<T>(
 const subscription = async (response: Response): Promise<MicrosoftSubscription> =>
   resource(await readJson(response))
 
-export function subscriptionsResource(http: MicrosoftHttp): MicrosoftSubscriptionsResource {
+export function subscriptionsResource(
+  http: MicrosoftHttp,
+  clientState?: ClientStateSource
+): MicrosoftSubscriptionsResource {
   const api: MicrosoftSubscriptionsResource = {
     create(input, options) {
       validateCreate(input)
+      const body =
+        input.clientState === undefined && clientState !== undefined
+          ? { ...input, clientState: clientState() }
+          : input
       return mutate(
         http,
         "subscriptions",
         {
           method: "POST",
-          body: JSON.stringify(input),
+          body: JSON.stringify(body),
           signal: options?.signal,
           headers: {
             "Content-Type": "application/json",

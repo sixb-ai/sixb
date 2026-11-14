@@ -1,3 +1,4 @@
+import type { ClientStateSource } from "../../client-state"
 import { MicrosoftConfigurationError } from "../../errors"
 import type { MicrosoftHttp } from "../../http"
 import type {
@@ -6,7 +7,6 @@ import type {
   SubscriptionChangeTypes,
 } from "../../types/subscriptions"
 import { subscriptionsResource } from "."
-import { validateWebhookSecret } from "./validation"
 
 export interface OutlookSubscribeOptions {
   readonly signal?: AbortSignal
@@ -19,16 +19,15 @@ export interface OutlookSubscribeOptions {
 /** Basic subscription to an Outlook resource, delivered to the connector's own webhook receiver. */
 export async function subscribeOutlook(
   http: MicrosoftHttp,
-  secret: string | undefined,
+  clientState: ClientStateSource | undefined,
   kind: "mail" | "contact",
   resource: string,
   options: OutlookSubscribeOptions
 ): Promise<MicrosoftSubscription> {
-  if (secret === undefined)
+  if (clientState === undefined)
     throw new MicrosoftConfigurationError(
       `webhookSecret is required to subscribe to ${kind} notifications.`
     )
-  validateWebhookSecret(secret)
   if (
     !Array.isArray(options.changeTypes) ||
     !options.changeTypes.length ||
@@ -47,7 +46,7 @@ export async function subscribeOutlook(
       notificationUrl: options.notificationUrl,
       lifecycleNotificationUrl: options.lifecycleNotificationUrl ?? options.notificationUrl,
       expirationDateTime: options.expirationDateTime,
-      clientState: secret,
+      clientState: clientState(),
       includeResourceData: false,
     },
     { signal: options.signal, immutableIds: true }
