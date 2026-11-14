@@ -13,6 +13,7 @@ export type FoundryKind =
   | "transcription"
   | "reranking"
   | "speech"
+  | "image"
 
 export const KIND_BINDINGS: Readonly<Record<FoundryKind, string>> = {
   language: "foundry() or foundry.chat()",
@@ -21,6 +22,7 @@ export const KIND_BINDINGS: Readonly<Record<FoundryKind, string>> = {
   transcription: "foundry.transcription()",
   reranking: "foundry.reranking()",
   speech: "foundry.speech()",
+  image: "foundry.image()",
 }
 
 export function deploymentKind(deployment: AzureAIFoundryDeployment): FoundryKind {
@@ -35,6 +37,12 @@ export function deploymentKind(deployment: AzureAIFoundryDeployment): FoundryKin
     /^(gpt-4o-mini-tts|tts|tts-hd)$/i.test(deployment.modelName)
   )
     return "speech"
+  // FLUX.2 and DALL-E are image models too, which foundry.image() rejects with the reason.
+  if (
+    deployment.capabilities.imageGenerations === "true" ||
+    /^(gpt-image-|flux[-.]|dall-e-)/i.test(deployment.modelName)
+  )
+    return "image"
   return "language"
 }
 
@@ -47,16 +55,25 @@ export function assertDeploymentKind(
   const actual = deploymentKind(deployment)
   if (actual !== kind)
     throw new UnsupportedModelFeatureError(
-      `${PREFIX} Deployment '${deploymentName}' runs ${deployment.modelName}, not a ${kind} model. Use ${KIND_BINDINGS[actual]}.`
+      `${PREFIX} Deployment '${deploymentName}' runs ${deployment.modelName}, not ${article(kind)} ${kind} model. Use ${KIND_BINDINGS[actual]}.`
     )
   // A connection's deployment lives on another resource, which its record does not name.
   if (deployment.connectionName)
     throw new UnsupportedModelFeatureError(
-      `${PREFIX} A ${kind} deployment from a project connection cannot be routed; use the owning resource's project URL and API key.`
+      `${PREFIX} ${capitalize(article(kind))} ${kind} deployment from a project connection cannot be routed; use the owning resource's project URL and API key.`
     )
 }
 
-export function isEmbeddingDeployment(deployment: AzureAIFoundryDeployment): boolean {
+/** "an image", "a speech": the article a kind's name takes. */
+export function article(kind: FoundryKind): string {
+  return /^[aeiou]/.test(kind) ? "an" : "a"
+}
+
+function capitalize(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
+function isEmbeddingDeployment(deployment: AzureAIFoundryDeployment): boolean {
   return (
     deployment.capabilities.embeddings === "true" ||
     deployment.capabilities.embedding === "true" ||

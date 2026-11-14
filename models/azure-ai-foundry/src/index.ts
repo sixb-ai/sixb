@@ -10,6 +10,7 @@ export type {
   AzureAIFoundryEmbeddingOptions,
   AzureAIFoundryEmbeddingTransportOptions,
 } from "./embedding"
+export type { AzureAIFoundryImageModel, AzureAIFoundryImageOptions } from "./image"
 export type {
   AzureAIFoundryChatOptions,
   AzureAIFoundryMessagesOptions,
