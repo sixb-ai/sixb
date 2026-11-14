@@ -332,12 +332,20 @@ export class SqliteAgentInboxStore implements AgentInboxStore {
            WHERE project_id = ? AND thread_id = ?
              AND claimed_by_run_id IS NULL
              AND (? = 0 OR immediate = 1)
+             AND (? IS NULL OR (author_principal_type = ? AND author_principal_id = ?))
            ORDER BY
              CASE WHEN immediate = 1 THEN 0 WHEN mode = 'steer' THEN 1 ELSE 2 END ASC,
              seq ASC
            LIMIT 1`
         )
-        .get(input.projectId, input.threadId, input.onlyImmediate ? 1 : 0) as AgentInboxRow | null
+        .get(
+          input.projectId,
+          input.threadId,
+          input.onlyImmediate ? 1 : 0,
+          input.authorPrincipal?.type ?? null,
+          input.authorPrincipal?.type ?? null,
+          input.authorPrincipal?.id ?? null
+        ) as AgentInboxRow | null
       if (!winner) return null
 
       this.db

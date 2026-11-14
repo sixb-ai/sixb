@@ -1963,7 +1963,13 @@ class InMemoryAgentInboxStore implements AgentInboxStore {
     if (!thread || thread.status !== "active" || thread.activeRunId !== null) return null
 
     const candidates = this.threadItems(input.projectId, input.threadId)
-      .filter((item) => item.claimedBy === undefined && (!input.onlyImmediate || item.immediate))
+      .filter(
+        (item) =>
+          item.claimedBy === undefined &&
+          (!input.onlyImmediate || item.immediate) &&
+          (input.authorPrincipal === undefined ||
+            principalsEqual(item.authorPrincipal, input.authorPrincipal))
+      )
       .sort((left, right) => inboxPriority(left) - inboxPriority(right) || left.seq - right.seq)
     const winner = candidates[0]
     if (!winner) return null
