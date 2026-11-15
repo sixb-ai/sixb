@@ -18,6 +18,13 @@ const IDENTITY = {
   GIT_COMMITTER_EMAIL: "987+sixb-agent[bot]@users.noreply.github.com",
 }
 
+/**
+ * What `GH_TOKEN` and `GITHUB_TOKEN` hold inside a sandbox. The host replaces the value in the
+ * Authorization header, so the real token never enters; the `ghp_` prefix only satisfies a `gh`
+ * that reads one before it uploads an attachment.
+ */
+const PLACEHOLDER = "ghp_placeholder-replaced-outside-the-sandbox"
+
 function fixture(
   options: {
     access?: "read" | "write"
@@ -162,12 +169,18 @@ describe("GitHub App workspace auth", () => {
         method: ["GET", "POST", "PUT", "PATCH", "DELETE"],
         headers: { Authorization: "Bearer test-installation-token" },
       },
+      // Regression proof: drop the upload rule; a sandbox cannot post an attachment.
+      {
+        origin: "https://uploads.github.com",
+        path: "/user-attachments/assets",
+        method: "POST",
+        headers: { Authorization: "Bearer test-installation-token" },
+      },
     ])
 
     // GitHub clients read either variable. The host replaces the header, so the real token
     // never enters. Regression proof: drop GITHUB_TOKEN from the write env; this fails.
-    const placeholder = "placeholder-replaced-outside-the-sandbox"
-    expect(grant.env).toEqual({ ...IDENTITY, GH_TOKEN: placeholder, GITHUB_TOKEN: placeholder })
+    expect(grant.env).toEqual({ ...IDENTITY, GH_TOKEN: PLACEHOLDER, GITHUB_TOKEN: PLACEHOLDER })
     expect(JSON.stringify(grant.env)).not.toContain("test-installation-token")
     await grant.revoke()
   })
@@ -524,8 +537,8 @@ describe("GitHub OAuth workspace auth", () => {
     })
     expect(grant.env).toEqual({
       ...USER_IDENTITY,
-      GH_TOKEN: "placeholder-replaced-outside-the-sandbox",
-      GITHUB_TOKEN: "placeholder-replaced-outside-the-sandbox",
+      GH_TOKEN: PLACEHOLDER,
+      GITHUB_TOKEN: PLACEHOLDER,
     })
     expect(grant.requests.map(({ origin, path, method }) => ({ origin, path, method }))).toEqual([
       { origin: "https://github.com", path: "/acme/website.git/info/refs", method: "GET" },
@@ -536,6 +549,7 @@ describe("GitHub OAuth workspace auth", () => {
         path: { prefix: "/" },
         method: ["GET", "POST", "PUT", "PATCH", "DELETE"],
       },
+      { origin: "https://uploads.github.com", path: "/user-attachments/assets", method: "POST" },
     ])
     expect(JSON.stringify(f.auth)).not.toContain("super-secret-value")
 
@@ -547,6 +561,24 @@ describe("GitHub OAuth workspace auth", () => {
     expect(JSON.parse(String(f.calls[1]?.init?.body))).toEqual({
       access_token: "ghu_scoped_token",
     })
+  })
+
+  // Removal proof: drop the upload rule from gitRequests; a sandbox cannot post an asset. Put the
+  // parent token in that rule; the scoped-token assertion fails on the first run that uploads.
+  test("write access can attach a file, with the scoped token and never the parent", async () => {
+    const write = await oauthFixture({ access: "write" }).authorize()
+
+    expect(write.requests.find(({ origin }) => origin === "https://uploads.github.com")).toEqual({
+      origin: "https://uploads.github.com",
+      path: "/user-attachments/assets",
+      method: "POST",
+      headers: { Authorization: "Bearer ghu_scoped_token" },
+    })
+    expect(JSON.stringify(write.requests)).not.toContain("ghu_parent_1")
+    expect(JSON.stringify(write.env)).not.toContain("ghu_scoped_token")
+
+    const read = await oauthFixture({ access: "read" }).authorize()
+    expect(read.requests.some(({ origin }) => origin === "https://uploads.github.com")).toBe(false)
   })
 
   test("read access sets the user's Git identity without API access or token placeholders, and treats 404 revoke as idempotent", async () => {

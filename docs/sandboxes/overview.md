@@ -184,6 +184,11 @@ Each run narrows the user's OAuth token to that single repository and requested 
 permissions, sets their Git author and committer identity, and revokes only the scoped token when
 the run ends.
 
+Write access also lets the agent attach files to issues and pull requests: uploads to
+`uploads.github.com` carry the same scoped token, so a screenshot taken in the sandbox lands in a
+pull request description as the person who asked. GitHub refuses an App installation token on that
+endpoint, so attaching files needs the OAuth connection.
+
 ## Keep files across conversation runs
 
 Opt in when creating a thread:

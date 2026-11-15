@@ -93,7 +93,7 @@ membership visibility depends on the authenticated user's organization access.
 `@sixb/connector-github/sandbox` provides two `auth` helpers for sandbox factories (see [repository authentication](../../docs/sandboxes/overview.md#repository-authentication)):
 
 - `githubApp({ appId, privateKey })`: mints repository-scoped App installation tokens and attributes commits to the App's bot account.
-- `githubOAuth({ connector, clientId, clientSecret, slot?, owner?, fallback? })`: mints repository-scoped user tokens from the requester's GitHub App OAuth connection and attributes commits and pull requests to that user.
+- `githubOAuth({ connector, clientId, clientSecret, slot?, owner?, fallback? })`: mints repository-scoped user tokens from the requester's GitHub App OAuth connection and attributes commits and pull requests to that user. With write access it can also attach files to issues and pull requests, which GitHub refuses an App installation token for.
 
 ```ts
 import { githubApp, githubOAuth } from "@sixb/connector-github/sandbox"
@@ -124,10 +124,10 @@ Set up the GitHub App once:
 With `source.access: "write"`, the agent can use `git` and GitHub API clients such as `gh` for
 that repository, for example to push and open pull requests. Each run receives a repository-scoped installation token,
 injected outside the VM only into Git fetch/push requests and, with write access, GitHub API
-requests. The sandbox gets a placeholder in `GH_TOKEN` and `GITHUB_TOKEN` and the Git identity of
-the App's bot, so commits are attributed to it. SSH, Git LFS and cross-repository submodule
-credentials are not provided. Private keys remain host-side; the App does not replace your
-application's access checks.
+requests and attachment uploads. The sandbox gets a placeholder in `GH_TOKEN` and `GITHUB_TOKEN`
+and the Git identity of the App's bot, so commits are attributed to it. SSH, Git LFS and
+cross-repository submodule credentials are not provided. Private keys remain host-side; the App
+does not replace your application's access checks.
 
 If the installation lacks a permission the workspace needs, the run fails: the cause of the error
 reported to `onError` names the permissions to grant.

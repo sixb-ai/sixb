@@ -52,8 +52,11 @@ const REQUEST_TIMEOUT_MS = 30_000
  * Value of GH_TOKEN and GITHUB_TOKEN inside the sandbox. GitHub tools refuse to start without a
  * token, but the real one never enters the sandbox: the host replaces this value in the
  * Authorization header of requests to the GitHub API. Anywhere else, GitHub rejects it.
+ *
+ * The `ghp_` shape is for a sandbox whose `gh` still reads a credential's prefix before it
+ * uploads an attachment; v2.103.2 left that to the server. The prefix never reaches GitHub.
  */
-const TOKEN_PLACEHOLDER = "placeholder-replaced-outside-the-sandbox"
+const TOKEN_PLACEHOLDER = "ghp_placeholder-replaced-outside-the-sandbox"
 
 /**
  * What each source access may do. `permissions` is requested for the scoped token and
@@ -403,9 +406,9 @@ function parseFallback(value: SandboxSourceAuth | undefined): SandboxSourceAuth 
 }
 
 /**
- * The requests the host injects the token into: Git fetch, plus push and the whole API with write
- * access. GitHub limits the token to this repository and to the permissions above, so no list of
- * API endpoints is needed, whatever client the agent uses.
+ * The requests the host injects the token into: Git fetch, plus push, the whole API and attachment
+ * uploads with write access. GitHub limits the token to this repository and to the permissions
+ * above, so no list of API endpoints is needed, whatever client the agent uses.
  */
 function gitRequests(path: string, token: string, access: Access): SandboxRequestCredential[] {
   const headers = {
@@ -424,6 +427,14 @@ function gitRequests(path: string, token: string, access: Access): SandboxReques
       origin: API,
       path: { prefix: "/" },
       method: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      headers: { Authorization: `Bearer ${token}` },
+    },
+    // Attachments post to their own host, not the API, so naming it here is also what opens the
+    // origin in the run's network. This lets a client put a file in an issue or pull request.
+    {
+      origin: "https://uploads.github.com",
+      path: "/user-attachments/assets",
+      method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     },
   ]
