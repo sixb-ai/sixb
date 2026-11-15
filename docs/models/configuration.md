@@ -443,6 +443,25 @@ export const sixb = createSixb({
 })
 ```
 
+To keep audio in your Azure tenant, deploy a transcription model such as `gpt-4o-transcribe` in
+Azure AI Foundry and register the deployment with `@sixb/azure-ai-foundry`:
+
+```ts
+import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
+
+const foundry = createAzureAIFoundry({
+  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
+})
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    audio: { transcription: [foundry.transcription("transcribe")] }, // Your deployment's name.
+  },
+})
+```
+
 Use an ordinary workflow step or an action's writeback/effects handler:
 
 ```ts

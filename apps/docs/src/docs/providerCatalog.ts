@@ -18,7 +18,8 @@ export const providerCatalog: Record<"models" | "sandboxes", readonly ProviderEn
     },
     {
       name: "Azure AI Foundry",
-      description: "Use language, embedding and decision models deployed through Azure AI Foundry.",
+      description:
+        "Use language, embedding, decision and transcription models deployed through Azure AI Foundry.",
       package: "@sixb/azure-ai-foundry",
       href: "https://github.com/sixb-ai/sixb/tree/main/models/azure-ai-foundry#readme",
       icon: "azure.svg",

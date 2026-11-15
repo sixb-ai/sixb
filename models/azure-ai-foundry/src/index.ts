@@ -20,4 +20,8 @@ export type {
   AzureAIFoundryProvider,
 } from "./provider"
 export { createAzureAIFoundry } from "./provider"
+export type {
+  AzureAIFoundryTranscriptionModel,
+  AzureAIFoundryTranscriptionOptions,
+} from "./transcription"
 export type { FoundryProtocol } from "./transport"
