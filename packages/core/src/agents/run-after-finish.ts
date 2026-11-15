@@ -116,8 +116,11 @@ async function readInbox(
   readonly claimed: boolean
   readonly waiting: readonly AgentInboxItemRecord[]
 } | null> {
+  // A storage without an inbox holds nothing to read, release or start.
+  const inbox = host.storage.agents.inbox
+  if (typeof inbox?.list !== "function") return null
   try {
-    const items = await host.storage.agents.inbox.list({
+    const items = await inbox.list({
       projectId: host.projectId,
       threadId: run.threadId,
       includeClaimed: true,

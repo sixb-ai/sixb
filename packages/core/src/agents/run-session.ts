@@ -927,6 +927,8 @@ async function reconcileClaimedSteers(
   executionToken: string,
   messages: readonly AppendAgentMessageInput[]
 ): Promise<readonly AppendAgentMessageInput[]> {
+  // A storage without an inbox claims nothing, so every message is the turn's own.
+  if (typeof agents.inbox?.consumeClaimed !== "function") return messages
   const userIds = messages.filter((message) => message.role === "user").map((message) => message.id)
   const consumed = await agents.inbox.consumeClaimed({
     projectId: run.projectId,
