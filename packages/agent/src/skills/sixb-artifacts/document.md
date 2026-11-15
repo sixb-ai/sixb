@@ -1,8 +1,7 @@
 # Documents
 
 A document is Markdown in `document.md`, with its images beside it. The app renders it as a page:
-a title and lede, a measured column, an outline of its sections, and figures, callouts, and tables
-set for reading.
+a title and lede, a measured column, and figures, callouts, and tables set for reading.
 
 A document that needs a design of its own, such as a proposal, a contract, a letter on letterhead,
 or a report in a company's style, is HTML in `document.html` instead: see Designed documents below.
@@ -22,6 +21,9 @@ Everything else is Markdown.
 
 GitHub-flavored Markdown: tables, task lists, strikethrough, autolinks, footnotes (`[^1]`), and
 fenced code blocks with a language. Raw HTML is not rendered.
+
+Once people edit a document in the app, it is written back as its editor writes Markdown: `-`
+bullets, `*emphasis*`, `**bold**`, `#` headings. Read it again before you change words in place.
 
 | Write | It renders as |
 | --- | --- |

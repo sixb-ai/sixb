@@ -1,6 +1,6 @@
 # Live artifacts
 
-`/ws/artifacts` lets several people edit a canvas, or a designed document, at once. Every connected
+`/ws/artifacts` lets several people edit a canvas, or a document, Markdown or designed, at once. Every connected
 client holds the artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). Each
 server holding the artifact keeps one copy, and writes it back into storage as an ordinary artifact
 write.
@@ -38,7 +38,8 @@ whose content it holds, replaced with every content write (see
 
 - On `join`, the server reads the person's access to the artifact. `owner` and `update` edit,
   `read` watches, and anything else is refused with `left`.
-- The first join opens the room from the stored document. Other kinds are refused as `not_live`.
+- The first join opens the room from the stored document. A sheet, a page, a deck or a file is
+  refused as `not_live`.
 - `joined` says who the connection is (`user`: id, name and color, read once per connection). A
   shared link's guest is read at each join instead, from its session: `guest:<sessionId>`, the
   name they gave, and `guest: true`. Once they give a name, their socket reads it from the session
@@ -87,7 +88,8 @@ The server vouches for every awareness state it shares:
 - A failure leaves the room dirty, reports `status: failed` with the error, and retries:
   - `artifact_not_found`: the room closes and every member gets `left`.
   - An access error: the author is demoted, and another editor is tried at once.
-  - `invalid_artifact`: waits for the next change while someone is connected.
+  - `invalid_artifact`: waits for the next change while someone is connected, and says so with
+    `refused`, since nothing tries it again.
   - Anything else: retries with backoff from 2 s doubling to 30 s, for as long as the server runs,
     whether or not anyone still holds the room.
 - Changes are lost only when nobody can write them: the server stops first, or storage refuses

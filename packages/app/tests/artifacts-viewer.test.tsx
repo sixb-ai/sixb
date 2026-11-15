@@ -279,7 +279,8 @@ describe("the viewer", () => {
     )
     expect(html).toMatch(/data-sixb-artifact="" class="[^"]* dark"/)
     expect(html).toContain('style="--primary:#0f766e"')
-    expect(html).toContain('<nav aria-label="On this page"')
+    // Only the document: no outline beside it.
+    expect(html).not.toContain("<nav")
     expect(html).toContain('aria-label="Copy a link to “Revenue”"')
   })
 

@@ -67,7 +67,7 @@ export async function mergeArtifactWrite(
     ...(write.baseRevision === undefined ? {} : { baseRevision: write.baseRevision }),
     merged: false,
   }
-  if (!keepsDocument(write.kind, write.files)) return unmerged
+  if (!keepsDocument(write.kind)) return unmerged
 
   const { projectId, storage, blobStorage } = context
   const artifact = await storage.get({ projectId, id: write.artifactId })
@@ -141,11 +141,7 @@ export async function withMergedWrite<T>(
     try {
       return await store(merged)
     } catch (error) {
-      if (
-        !isMoved(error) ||
-        !keepsDocument(write.kind, write.files) ||
-        attempt === MERGE_ATTEMPTS
-      ) {
+      if (!isMoved(error) || !keepsDocument(write.kind) || attempt === MERGE_ATTEMPTS) {
         throw error
       }
     }
@@ -166,7 +162,7 @@ export async function documentHolding(
 ): Promise<{ readonly document: FileRef; readonly baseRevision: number } | null> {
   const { projectId, storage, blobStorage } = context
   const artifact = await storage.get({ projectId, id: artifactId })
-  if (!artifact || !keepsDocument(artifact.kind, files)) return null
+  if (!artifact || !keepsDocument(artifact.kind)) return null
   const latest = await storage.getVersion({
     projectId,
     artifactId,
@@ -230,8 +226,7 @@ export async function undoneTurnDocuments(
   for (const write of await storage.listTurnWrites({ projectId, turnRunId })) {
     if (write.created) continue
     const artifact = await storage.get({ projectId, id: write.artifactId })
-    // Only a canvas's or a document's files are held in a live document.
-    if (!artifact || (artifact.kind !== "canvas" && artifact.kind !== "document")) continue
+    if (!artifact || !keepsDocument(artifact.kind)) continue
 
     // Undone by the rule the undo applies, at the revision it will find.
     const points = await storage.listRestorePoints({ projectId, id: artifact.id })
@@ -245,7 +240,7 @@ export async function undoneTurnDocuments(
       ...(point ? { point } : {}),
       ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
     })
-    if (!point || !undoable || !keepsDocument(artifact.kind, point.files)) continue
+    if (!point || !undoable || !keepsDocument(artifact.kind)) continue
 
     const held = await documentHolding(context, artifact.id, point.files)
     if (held?.baseRevision === artifact.revision) documents[artifact.id] = held.document

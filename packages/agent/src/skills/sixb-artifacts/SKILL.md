@@ -80,8 +80,8 @@ edit in the app, such as a sheet's cells or columns or a canvas's notes and layo
 another conversation or the project's code. Start from it as it is, and keep its changes in yours
 unless the user asks you to undo them; say what you built on when you reply.
 
-When others changed a canvas while you worked, the update merges your changes with theirs
-and writes the merged result into the folder you updated from: keep editing it.
+When others changed a canvas or a document while you worked, the update merges your changes with
+theirs and writes the merged result into the folder you updated from: keep editing it.
 
 If another kind of artifact changes while you work, the update refuses rather than write
 over what it never saw, says who changed it, and installs it in place of your copy and in the

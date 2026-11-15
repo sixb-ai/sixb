@@ -60,6 +60,11 @@ export type ArtifactLiveServerMessage =
        */
       readonly snapshot: string
       readonly error?: string
+      /**
+       * Publishing refused what the document holds: nothing tries it again until someone changes
+       * it.
+       */
+      readonly refused?: true
     }
   /** The connection may now only watch: the person lost the right to change the artifact. */
   | { readonly type: "access"; readonly artifactId: string; readonly access: ArtifactLiveAccess }

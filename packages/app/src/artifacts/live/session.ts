@@ -39,6 +39,8 @@ export interface LiveSave {
   readonly state: ArtifactLiveSaveState
   readonly revision: number
   readonly error?: string
+  /** Publishing refused what the document holds: it is not tried again until it changes. */
+  readonly refused?: true
 }
 
 export interface LiveArtifactState {
@@ -270,11 +272,11 @@ export class LiveArtifact {
         return
       }
       case "status": {
-        const { state, revision, error } = message
+        const { state, revision, error, refused } = message
         const written = message.snapshot ? readSnapshot(message.snapshot) : null
         if (written) this.forget(written)
         this.update({
-          save: { state, revision, ...(error ? { error } : {}) },
+          save: { state, revision, ...(error ? { error } : {}), ...(refused ? { refused } : {}) },
           pending: state !== "saved",
         })
         return
