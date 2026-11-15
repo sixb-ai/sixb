@@ -3,6 +3,7 @@ import {
   getAgentRunQueryKey,
   getAgentThreadContextQueryKey,
   getAgentThreadQueryKey,
+  listAgentThreadInboxQueryKey,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
@@ -68,6 +69,15 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
       queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
     })
   }, [live.finalizedMessageId, threadId, queryClient])
+
+  // A message the turn read is no longer the inbox's: the tray reads what still waits.
+  const reads = live.inboxReads.length
+  useEffect(() => {
+    if (reads === 0 || !threadId) return
+    void queryClient.invalidateQueries({
+      queryKey: listAgentThreadInboxQueryKey({ path: { threadId } }),
+    })
+  }, [reads, threadId, queryClient])
 
   // Refresh run/thread state once the run reaches a terminal status.
   const finishHandledRef = useRef<string | null>(null)

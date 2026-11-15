@@ -5,6 +5,7 @@ export type {
   AgentApprovalActivityEvent,
   AgentCompactionFailureCode,
   AgentComputerActivityEvent,
+  AgentInboxReadMessage,
   AgentRunActivityEvent,
   AgentRunControlStreamId,
   AgentRunFailure,

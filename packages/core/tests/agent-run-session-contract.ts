@@ -18,6 +18,7 @@ import {
   createSubagentRunId,
   createSubagentThreadId,
   NOOP_STREAM_SINK,
+  type StreamSink,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import type { UserPrincipal } from "../src/auth"
@@ -219,17 +220,39 @@ const SECURITY = {
   ],
 } as unknown as SecurityDefinitionCatalog
 
+/** A sink that keeps what reaches it, in order: the method, and what it was given. */
+function recordingSink() {
+  const records: { readonly method: keyof StreamSink; readonly input: unknown }[] = []
+  const record =
+    (method: keyof StreamSink) =>
+    async (input: unknown): Promise<void> => {
+      records.push({ method, input })
+    }
+  const sink: StreamSink = {
+    publishStarted: record("publishStarted"),
+    publishCompactionStarted: record("publishCompactionStarted"),
+    publishCompactionCompleted: record("publishCompactionCompleted"),
+    publishCompactionFailed: record("publishCompactionFailed"),
+    publishUiChunk: record("publishUiChunk"),
+    publishInboxRead: record("publishInboxRead"),
+    publishMessageFinalized: record("publishMessageFinalized"),
+    publishRunFinished: record("publishRunFinished"),
+  }
+  return { sink, records }
+}
+
 /** A conversation owned by Alice, with turns to claim. */
 async function seedConversation(claim: ClaimAgentRunSession) {
   const storage = new InMemoryStorage()
   const broker = new InMemoryBroker()
   const { session, blobs } = projectOver(storage, broker)
+  const published = recordingSink()
   const host = {
     projectId: PROJECT_ID,
     storage,
     broker,
     recoverAiModelCall: async () => {},
-    events: NOOP_STREAM_SINK,
+    events: published.sink,
     security: SECURITY,
     ...session,
   }
@@ -299,7 +322,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       }),
     },
   ]
-  return { storage, thread, say, turn, open, documentFile }
+  return { storage, thread, say, turn, open, documentFile, published: published.records }
 }
 
 export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): void {
@@ -1454,6 +1477,51 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(
         remaining.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))
       ).toEqual([{ id: "inb_2", claimed: false }])
+    })
+
+    // Removal proof: drop publishInboxRead from the in-process takeSteers, and the read never
+    // reaches the stream; drop the flush from the HTTP session's takeSteers, and over HTTP it lands
+    // before the chunk the runner streamed first.
+    test("tells the stream what a step read, after what streamed before it, from what was stored", async () => {
+      const { thread, say, turn, open, storage, published } = await seedConversation(claim)
+      await say("msg_1", "user")
+      const session = await open(await turn("run_1", "msg_1", { requestedBy: alice }))
+      await storage.agents.inbox.enqueue({
+        id: "inb_1",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_1",
+        authorPrincipal: alice,
+        mode: "steer",
+        parts: [{ type: "text", text: "Use the Q3 numbers" }],
+        createdAt: new Date("2026-11-15T09:00:00.000Z"),
+      })
+
+      await session.events.publishUiChunk({
+        run: session.run,
+        chunkIndex: 0,
+        chunk: { type: "text-delta", id: "t1", delta: "Q2 says" },
+      })
+      await session.inbox.takeSteers({ stepIndex: 1 })
+      // Nothing more to read at the next boundary: nothing more to tell.
+      await session.inbox.takeSteers({ stepIndex: 2 })
+      session.close()
+
+      expect(published.map((record) => record.method)).toEqual([
+        "publishUiChunk",
+        "publishInboxRead",
+      ])
+      expect(published[1]?.input).toMatchObject({
+        run: { id: "run_1" },
+        messages: [
+          {
+            id: "msg_steer_1",
+            authorPrincipal: alice,
+            parts: [{ type: "text", text: "Use the Q3 numbers" }],
+            createdAt: "2026-11-15T09:00:00.000Z",
+          },
+        ],
+      })
     })
   })
 }

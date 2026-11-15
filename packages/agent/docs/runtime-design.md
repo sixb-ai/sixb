@@ -374,6 +374,10 @@ its parent with `message_agent` (see [messages to a child](#messages-to-a-child)
   `agent_messages` holds `[assistant, user, assistant]`, and the next turn's request sends those
   bytes. `session.finish` consumes the claims it wrote in the same transaction as the messages and
   the run's end; a steer no step answered is released, and reads as unread in the thread again.
+- **What a viewer sees meanwhile.** The session publishes `agent.inbox.read` on the run's stream
+  as it claims the steers, from the stored items, after what the run streamed before them (over
+  HTTP, the runner's queued records are sent first). The app draws each message there, between
+  the reply before and the reply after, with the keys their saved copies take at the end.
 
 ## Queueing a turn
 

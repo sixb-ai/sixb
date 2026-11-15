@@ -49,6 +49,7 @@ import {
 import type { TranscriptBackground } from "../background/context"
 import type { ComposerProps } from "../components/composer"
 import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
+import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
 import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
@@ -415,6 +416,11 @@ export function useAgentConversation({
       ? selectActiveRunId({ pendingRun, threadActiveRunId: thread?.activeRunId ?? null, latestRun })
       : null
   const { live, run: streamRun, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  // What the turn read as it answered leaves the tray: the transcript shows it where it was read.
+  const readMessageIds = useMemo(
+    () => new Set(live.inboxReads.flatMap((read) => read.messages.map((message) => message.id))),
+    [live.inboxReads]
+  )
   // A compaction that ended changed what the conversation weighs: measure it again.
   const wasCompactingRef = useRef(false)
   useEffect(() => {
@@ -1200,6 +1206,12 @@ export function useAgentConversation({
     },
   }
 
+  const pendingProps: PendingMessagesProps = {
+    threadId,
+    steerable: composerProps.steerable,
+    read: readMessageIds,
+  }
+
   const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
   const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
     ? {
@@ -1305,6 +1317,8 @@ export function useAgentConversation({
      * until the reader answers it or sets it aside.
      */
     questionProps,
+    /** Spread into `<PendingMessages>`, above the composer: what waits beside the running turn. */
+    pendingProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
     /** Where the reader's own conversation runs on their computer, for its badge. */

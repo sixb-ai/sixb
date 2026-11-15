@@ -194,6 +194,35 @@ describe("agent run stream records", () => {
     expect(Object.hasOwn(completed, "summary")).toBe(false)
   })
 
+  // Removal proof: drop the `agent.inbox.read` case from isAgentRunStreamEvent; a client then
+  // skips the record, and the message shows only once the turn ends.
+  test("validates the messages a step read from the inbox", () => {
+    const read = {
+      schemaVersion: 1 as const,
+      type: "agent.inbox.read" as const,
+      projectId: "stream-records-tests",
+      runId: "agt_run_1",
+      threadId: "agt_thr_1",
+      attempt: 0,
+      occurredAt: OCCURRED_AT.toISOString(),
+      messages: [
+        {
+          id: "agt_msg_7",
+          authorPrincipal: { type: "user" as const, id: "usr_mina" },
+          parts: [{ type: "text" as const, text: "Use the Q3 numbers" }],
+          createdAt: OCCURRED_AT.toISOString(),
+        },
+      ],
+    }
+
+    expect(isAgentRunStreamEvent(read)).toBe(true)
+    expect(agentRunStreamIdempotencyKey(read)).toBe("agt_run_1:0:inbox:agt_msg_7:read")
+    expect(isAgentRunStreamEvent({ ...read, messages: [] })).toBe(false)
+    expect(
+      isAgentRunStreamEvent({ ...read, messages: [{ ...read.messages[0], authorPrincipal: "x" }] })
+    ).toBe(false)
+  })
+
   test("validates each UI chunk variant by the fields it requires", () => {
     const base = {
       schemaVersion: 1 as const,

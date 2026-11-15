@@ -7,7 +7,7 @@ import { useAgentMessages } from "../i18n"
 import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
-import { PendingMessages } from "./pending-messages"
+import { PendingMessages, type PendingMessagesProps } from "./pending-messages"
 import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
 
@@ -23,6 +23,8 @@ export interface ConversationPanelProps {
   readonly composer: ConversationComposerProps & Pick<ComposerProps, "newThreadControls">
   /** The Agent's question, which takes the composer's place while set. */
   readonly question?: QuestionComposerProps | null
+  /** What waits beside the running turn, above the composer. */
+  readonly pending?: PendingMessagesProps
   readonly messagesLoading: boolean
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */
@@ -47,6 +49,7 @@ export function ConversationPanel({
   transcript,
   composer,
   question = null,
+  pending,
   messagesLoading,
   messagesError,
   currentThread,
@@ -91,7 +94,7 @@ export function ConversationPanel({
         <div className={asking ? "hidden" : "contents"}>
           <PendingMessages
             threadId={currentThread?.id ?? null}
-            steerable={composer.steerable}
+            {...pending}
             className={compact ? "px-4 pb-2" : cn("pb-2", wideClassName)}
           />
           <Composer
