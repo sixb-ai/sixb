@@ -36,6 +36,7 @@ function context(grants: {
   agentThreads?: boolean
   users?: boolean
   memory?: boolean
+  connectors?: readonly string[]
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -56,6 +57,7 @@ function context(grants: {
       "observe:agentThreads": grants.agentThreads ?? false,
       "view:users": grants.users ?? false,
       "manage:agentMemory": grants.memory ?? false,
+      "manage:connector": new Set(grants.connectors ?? []),
     },
   }
 }
@@ -383,6 +385,25 @@ const memberEvent: Extract<StoredDomainEvent, { type: "user.invited" }> = {
   },
 }
 
+const connectionEvent = (owner: { type: "project" } | { type: "user"; id: string }) =>
+  ({
+    ...envelope,
+    type: "connector.connection.connected",
+    topic: "connectors",
+    partitionKey: "ccn_1",
+    payload: {
+      connectorId: "outlook",
+      connection: {
+        id: "ccn_1",
+        connectorId: "outlook",
+        owner,
+        slot: "default",
+        account: { id: "account-a", label: "ada@example.com" },
+      },
+      reason: "connected",
+    },
+  }) satisfies Extract<StoredDomainEvent, { type: "connector.connection.connected" }>
+
 const scheduleEvent: StoredScheduleTriggeredEvent = {
   ...envelope,
   type: "schedule.triggered",
@@ -411,6 +432,20 @@ describe("canViewEvent", () => {
   ] as const)("%s events require the grant that governs their subject", (_kind, event, grants) => {
     expect(canViewEvent(context(grants), event)).toBe(true)
     expect(canViewEvent(context({}), event)).toBe(false)
+  })
+
+  // Countercheck: return true for the "connectors" topic in canViewEvent; the last two fail.
+  test("connection events reach the connector's managers and the person who owns the connection", () => {
+    const own = connectionEvent({ type: "user", id: "u1" })
+    const someoneElses = connectionEvent({ type: "user", id: "u2" })
+    const project = connectionEvent({ type: "project" })
+    const manager = context({ connectors: ["outlook"] })
+
+    for (const event of [own, someoneElses, project])
+      expect(canViewEvent(manager, event)).toBe(true)
+    expect(canViewEvent(context({}), own)).toBe(true)
+    expect(canViewEvent(context({ connectors: ["calendar"] }), someoneElses)).toBe(false)
+    expect(canViewEvent(context({}), project)).toBe(false)
   })
 
   test("link events require viewing BOTH the source and the target type", () => {

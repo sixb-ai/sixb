@@ -1,6 +1,6 @@
 import {
+  type ConnectorConnectionHandle,
   defineWebhook,
-  type WebhookConnection,
   type WebhookDefinition,
   type WebhookHandlerContext,
 } from "@sixb/core"
@@ -180,7 +180,7 @@ export function microsoftOAuthEventsWebhook(
     },
     async (batch, { sixb, logger, connections }) => {
       // One lookup per account per batch; a batch can hold many notifications for one mailbox.
-      const resolved = new Map<string, readonly WebhookConnection<MicrosoftClient>[]>()
+      const resolved = new Map<string, readonly ConnectorConnectionHandle<MicrosoftClient>[]>()
       for (const { event, sender: accountId } of batch) {
         let targets = resolved.get(accountId)
         if (targets === undefined) {

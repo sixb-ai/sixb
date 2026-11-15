@@ -67884,7 +67884,8 @@
                 "datasets",
                 "rules",
                 "users",
-                "artifacts"
+                "artifacts",
+                "connectors"
               ]
             }
           },
@@ -67929,7 +67930,9 @@
                 "user.invited",
                 "user.profile.updated",
                 "artifact.updated",
-                "artifact.commented"
+                "artifact.commented",
+                "connector.connection.connected",
+                "connector.connection.disconnected"
               ]
             }
           },
@@ -71550,7 +71553,9 @@
                                   "user.invited",
                                   "user.profile.updated",
                                   "artifact.updated",
-                                  "artifact.commented"
+                                  "artifact.commented",
+                                  "connector.connection.connected",
+                                  "connector.connection.disconnected"
                                 ]
                               },
                               "topic": {
@@ -71566,7 +71571,8 @@
                                   "datasets",
                                   "rules",
                                   "users",
-                                  "artifacts"
+                                  "artifacts",
+                                  "connectors"
                                 ]
                               },
                               "payload": {

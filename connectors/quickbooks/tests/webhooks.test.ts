@@ -60,6 +60,9 @@ test("handler gets the whole batch once, its response or a default 200 after com
     logger: noopLogger,
     sixb: {} as never,
     connections: {
+      async list() {
+        return []
+      },
       async forAccount() {
         return []
       },

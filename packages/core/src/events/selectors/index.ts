@@ -1,4 +1,5 @@
 export type {
+  ConnectorEventSelectorBuilder,
   DatasetEventSelectorBuilder,
   EventPropertySelector,
   EventSelectors,
@@ -12,6 +13,10 @@ export type {
 export { events } from "./builder"
 export { buildEventSelectorPredicate, eventSelectorSpec } from "./predicate"
 export type {
+  ConnectorEventSelectorContext,
+  ConnectorEventSelectorEvent,
+  ConnectorEventSelectorOperation,
+  ConnectorEventToken,
   DatasetEventSelectorContext,
   DatasetEventSelectorEvent,
   DatasetEventToken,
