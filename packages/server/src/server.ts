@@ -306,7 +306,9 @@ export function createSixbApi(server: SixbServer) {
   )
   // A runner's session requests, before anything parses them: a runner token speaks only there.
   const serveRunnerSession = agentRunSessionHandler(host)
-  app.onRequest(async ({ request }) => (await serveRunnerSession(request)) ?? undefined)
+  app.onRequest(
+    async ({ request, server }) => (await serveRunnerSession(request, server)) ?? undefined
+  )
   app.onRequest(async ({ request }) => {
     // An Agent's commands, as their run: decided before Elysia parses the body, which the approval
     // gate reads from a copy. No session, share or cookie speaks for such a request.
