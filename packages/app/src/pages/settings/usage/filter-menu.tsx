@@ -54,7 +54,7 @@ export function useFilterLabels(overview: Overview | undefined, range: SpendRang
     value(key: FilterKey, value: string, filters: SpendFilters): string {
       switch (key) {
         case "day":
-          return bucketLabel(value, range.bucket, locale)
+          return bucketLabel(value, range.bucket, locale, range.timeZone)
         case "model":
           return value
         case "provider":

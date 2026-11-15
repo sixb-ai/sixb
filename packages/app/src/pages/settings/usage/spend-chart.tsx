@@ -264,7 +264,7 @@ export function SpendChart({
               const isHover = hover === index
               const values = series.map((entry) => entry.values[index] ?? 0)
               const last = values.reduce((top, value, at) => (value > 0 ? at : top), -1)
-              const label = bucketLabel(period.start, range.bucket, locale)
+              const label = bucketLabel(period.start, range.bucket, locale, range.timeZone)
               const segmentIndex = series.findIndex((entry) => entry.key === hoverSeries)
               const hoveredSegment = segmentIndex >= 0 ? segmentIndex : undefined
               return (
@@ -358,7 +358,7 @@ export function SpendChart({
             )}
           >
             {index % every === 0 || picked === index || hover === index
-              ? bucketLabel(start, range.bucket, locale)
+              ? bucketLabel(start, range.bucket, locale, range.timeZone)
               : ""}
           </span>
         ))}

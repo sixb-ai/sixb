@@ -40,6 +40,7 @@ import {
   spendRanges,
   splitMoney,
   unpricedCalls,
+  viewerTimeZone,
 } from "./spend-model"
 
 type UsageTab = "spend" | "limits"
@@ -48,14 +49,19 @@ type UsageTab = "spend" | "limits"
  * Settings › Usage: what models were called, what it cost and who asked, narrowed by the filters
  * any number on the page sets, down to how one call was priced. Limits sit on their own tab.
  */
-export function SettingsUsagePage() {
+export function SettingsUsagePage({
+  timeZone = viewerTimeZone(),
+}: {
+  /** The zone the page's days follow; the reader's own unless a caller pins one. */
+  readonly timeZone?: string
+} = {}) {
   const messages = useAiUsageMessages()
   const locale = useLocale()
   const [params, setParams] = useSearchParams()
   const tab: UsageTab = params.get("tab") === "limits" ? "limits" : "spend"
   const rangeId = params.get("range")
   // The range ends with the current period; choosing a range again moves it to now.
-  const range = useMemo(() => spendRange(rangeId), [rangeId])
+  const range = useMemo(() => spendRange(rangeId, timeZone), [rangeId, timeZone])
   const filters = useMemo(() => readFilters(params), [params])
 
   const update = (change: (next: URLSearchParams) => void) => {
@@ -94,7 +100,7 @@ export function SettingsUsagePage() {
       page="usage"
       width="wide"
       title={messages.title}
-      description={messages.subtitle(rangeLabel(range, locale))}
+      description={messages.subtitle(rangeLabel(range, locale, range.timeZone))}
       actions={
         <>
           <Segmented
@@ -159,28 +165,32 @@ function Spend({ range, filters, onFilter, onModel, onClear, limitsHref }: Spend
   const active = activeRange(range, filters)
   const query = apiFilters(filters)
   const bucket = range.bucket
+  const timeZone = range.timeZone
+  const earlier = priorRange(active, bucket, timeZone)
 
   const overview = useQuery({
-    ...getAiAccountingOverviewOptions({ query: { ...active, bucket, ...query } }),
+    ...getAiAccountingOverviewOptions({ query: { ...active, bucket, timeZone, ...query } }),
     retry: false,
   })
   const chart = useQuery({
     ...getAiAccountingOverviewOptions({
-      query: { from: range.from, to: range.to, bucket, ...query },
+      query: { from: range.from, to: range.to, bucket, timeZone, ...query },
     }),
     retry: false,
   })
   const prior = useQuery({
-    ...getAiAccountingOverviewOptions({ query: { ...priorRange(active), bucket, ...query } }),
+    ...getAiAccountingOverviewOptions({ query: { ...earlier, bucket, timeZone, ...query } }),
     retry: false,
   })
   // Unfiltered, for each model's color and for what share of all spend a filter keeps.
   const everything = useQuery({
-    ...getAiAccountingOverviewOptions({ query: { from: range.from, to: range.to, bucket } }),
+    ...getAiAccountingOverviewOptions({
+      query: { from: range.from, to: range.to, bucket, timeZone },
+    }),
     retry: false,
   })
   const everythingActive = useQuery({
-    ...getAiAccountingOverviewOptions({ query: { ...active, bucket } }),
+    ...getAiAccountingOverviewOptions({ query: { ...active, bucket, timeZone } }),
     enabled: narrowed,
     retry: false,
   })
@@ -306,8 +316,8 @@ function Spend({ range, filters, onFilter, onModel, onClear, limitsHref }: Spend
             currency={currency}
             priorLabel={
               filters.day
-                ? bucketLabel(priorRange(active).from, bucket, locale)
-                : rangeLabel(priorRange(active), locale)
+                ? bucketLabel(earlier.from, bucket, locale, timeZone)
+                : rangeLabel(earlier, locale, timeZone)
             }
             limitsHref={limitsHref}
             runsQuery={{ ...active, ...query }}
@@ -570,7 +580,13 @@ function ExportButton({ range, filters }: { range: SpendRange; filters: SpendFil
   const messages = useAiUsageMessages()
   const { data } = useQuery({
     ...getAiAccountingOverviewOptions({
-      query: { from: range.from, to: range.to, bucket: range.bucket, ...apiFilters(filters) },
+      query: {
+        from: range.from,
+        to: range.to,
+        bucket: range.bucket,
+        timeZone: range.timeZone,
+        ...apiFilters(filters),
+      },
     }),
     retry: false,
   })

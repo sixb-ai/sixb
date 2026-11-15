@@ -1,3 +1,4 @@
+import type { CalendarPeriod } from "../../calendar"
 import type {
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
@@ -127,7 +128,8 @@ export interface AiCostSummary {
   readonly unvaluedCallCount: number
 }
 
-export type AiAccountingBucket = "hour" | "day" | "week"
+/** The width of a series period: the calendar period a chart is drawn in. */
+export type AiAccountingBucket = CalendarPeriod
 
 /** Inclusive start and exclusive end for project accounting reads. */
 export interface AiAccountingRange {
@@ -165,6 +167,8 @@ export interface AiAccountingFilters {
 export interface QueryAiAccountingOverviewInput extends AiAccountingRange, AiAccountingFilters {
   readonly projectId: string
   readonly bucket: AiAccountingBucket
+  /** The IANA zone whose calendar the buckets follow; UTC when absent. */
+  readonly timeZone?: string
 }
 
 export interface ListAiModelCallAccountingInput extends AiAccountingRange, AiAccountingFilters {

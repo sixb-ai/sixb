@@ -21,6 +21,7 @@ import { limitStatusQuery } from "../src/pages/settings/usage/limits"
 import { SettingsUsagePage } from "../src/pages/settings/usage/page"
 import {
   activeRange,
+  bucketLabel,
   colorOf,
   modelColors,
   modelPalette,
@@ -102,11 +103,19 @@ const now = "2026-10-30T18:00:00.000Z"
 const week = { from: "2026-10-24T00:00:00.000Z", to: "2026-10-31T00:00:00.000Z" }
 const weekBefore = { from: "2026-10-17T00:00:00.000Z", to: "2026-10-24T00:00:00.000Z" }
 
+// The page reads its days in the reader's zone, UTC here unless a test pins another.
 const overviewKey = (query: Record<string, string>) =>
-  getAiAccountingOverviewOptions({ query: { bucket: "day", ...query } as never }).queryKey
+  getAiAccountingOverviewOptions({
+    query: { bucket: "day", timeZone: "UTC", ...query } as never,
+  }).queryKey
 
-function usagePage(address: string, data: readonly (readonly [readonly unknown[], unknown])[]) {
-  setSystemTime(new Date(now))
+function usagePage(
+  address: string,
+  data: readonly (readonly [readonly unknown[], unknown])[],
+  at = now,
+  timeZone = "UTC"
+) {
+  setSystemTime(new Date(at))
   const cache = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } })
   cache.setQueryData(getAuthSessionQueryKey(), settingsManagerSession)
   for (const [key, value] of data) cache.setQueryData(key, value)
@@ -115,7 +124,7 @@ function usagePage(address: string, data: readonly (readonly [readonly unknown[]
       <QueryClientProvider client={cache}>
         <SectionsProvider>
           <MemoryRouter initialEntries={[address]}>
-            <SettingsUsagePage />
+            <SettingsUsagePage timeZone={timeZone} />
           </MemoryRouter>
         </SectionsProvider>
       </QueryClientProvider>
@@ -133,39 +142,70 @@ const text = (html: string) =>
     .replace(/\s+/g, " ")
 
 describe("Usage › Spend", () => {
-  test("ranges end with the current period, in whole UTC days or hours", () => {
-    expect(spendRange("7d", Date.parse(now))).toMatchObject({ ...week, bucket: "day" })
-    expect(spendRange("24h", Date.parse(now))).toMatchObject({
+  test("ranges end with the current period, in whole days or hours of the reader's zone", () => {
+    expect(spendRange("7d", "UTC", Date.parse(now))).toMatchObject({ ...week, bucket: "day" })
+    expect(spendRange("24h", "UTC", Date.parse(now))).toMatchObject({
       from: "2026-10-29T19:00:00.000Z",
       to: "2026-10-30T19:00:00.000Z",
       bucket: "hour",
     })
-    expect(spendRange("90d", Date.parse(now)).bucket).toBe("week")
+    expect(spendRange("90d", "UTC", Date.parse(now)).bucket).toBe("week")
     // An unknown range opens the week.
-    expect(spendRange("1y", Date.parse(now)).id).toBe("7d")
+    expect(spendRange("1y", "UTC", Date.parse(now)).id).toBe("7d")
+  })
+
+  // Removal proof: bucket the days in UTC again; the last bar of the evening below is Nov 15, a
+  // day the reader has not reached, and the day they are in is split across two bars.
+  test("a day is the reader's, not UTC's", () => {
+    const range = spendRange("7d", "America/New_York", Date.parse("2026-11-15T00:10:00.000Z"))
+    expect(range).toEqual({
+      id: "7d",
+      from: "2026-11-08T05:00:00.000Z",
+      to: "2026-11-15T05:00:00.000Z",
+      bucket: "day",
+      period: "week",
+      timeZone: "America/New_York",
+    })
+    expect(
+      rangePeriods(range).map((start) => bucketLabel(start, "day", "en", range.timeZone))
+    ).toEqual(["Nov 8", "Nov 9", "Nov 10", "Nov 11", "Nov 12", "Nov 13", "Nov 14"])
   })
 
   test("lays out a range's bars where the server buckets them", () => {
-    const days = rangePeriods(spendRange("7d", Date.parse(now)))
+    const days = rangePeriods(spendRange("7d", "UTC", Date.parse(now)))
     expect(days).toHaveLength(7)
     expect(days[0]).toBe(week.from)
-    expect(rangePeriods(spendRange("24h", Date.parse(now)))).toHaveLength(24)
-    // Weeks start on Monday, so the first holds the range's start, Saturday, August 1.
-    const weeks = rangePeriods(spendRange("90d", Date.parse(now)))
-    expect(weeks[0]).toBe("2026-07-27T00:00:00.000Z")
+    expect(rangePeriods(spendRange("24h", "UTC", Date.parse(now)))).toHaveLength(24)
+    // Weeks start on Monday, so the range opens with the Monday before its first day.
+    const weeks = rangePeriods(spendRange("90d", "UTC", Date.parse(now)))
+    expect(weeks[0]).toBe("2026-08-03T00:00:00.000Z")
     expect(weeks.at(-1)).toBe("2026-10-26T00:00:00.000Z")
-    expect(weeks).toHaveLength(14)
+    expect(weeks).toHaveLength(13)
   })
 
   test("a picked day narrows the range to it, and compares it with the day before", () => {
-    const range = spendRange("7d", Date.parse(now))
+    const range = spendRange("7d", "UTC", Date.parse(now))
     const day = activeRange(range, { day: "2026-10-28T00:00:00.000Z" })
     expect(day).toEqual({ from: "2026-10-28T00:00:00.000Z", to: "2026-10-29T00:00:00.000Z" })
-    expect(priorRange(day)).toEqual({
+    expect(priorRange(day, range.bucket, range.timeZone)).toEqual({
       from: "2026-10-27T00:00:00.000Z",
       to: "2026-10-28T00:00:00.000Z",
     })
-    expect(priorRange(activeRange(range, {}))).toEqual(weekBefore)
+    expect(priorRange(activeRange(range, {}), range.bucket, range.timeZone)).toEqual(weekBefore)
+  })
+
+  // Removal proof: subtract the range's milliseconds; the week before a change of clocks starts
+  // and ends an hour off, and the days under it stop being whole days.
+  test("a week before a change of clocks is the same days, not the same hours", () => {
+    const range = spendRange("7d", "America/New_York", Date.parse("2026-11-05T17:00:00.000Z"))
+    expect(range).toMatchObject({
+      from: "2026-10-30T04:00:00.000Z",
+      to: "2026-11-06T05:00:00.000Z",
+    })
+    expect(priorRange(range, range.bucket, range.timeZone)).toEqual({
+      from: "2026-10-23T04:00:00.000Z",
+      to: "2026-10-30T04:00:00.000Z",
+    })
   })
 
   test("the address keeps only filters it can read", () => {
@@ -268,6 +308,23 @@ describe("Usage › Spend", () => {
     expect(html).toContain("$26.40 of October's $100 limit")
     expect(html).toContain("75% read from cache")
     expect(html).toContain("Conversations and runs 8")
+  })
+
+  // Removal proof: take the range in UTC again; the page read at 7:10 pm on Nov 14 in New York
+  // names its week Nov 9 to 15, with tomorrow in it.
+  test("the page's days are the reader's, not UTC's", () => {
+    const evening = "2026-11-15T00:10:00.000Z"
+    const { from, to, timeZone } = spendRange("7d", "America/New_York", Date.parse(evening))
+    const html = text(
+      usagePage(
+        "/settings/usage",
+        [[overviewKey({ from, to, timeZone }), overview({ from, to }, aggregate(3, 0.42))]],
+        evening,
+        "America/New_York"
+      )
+    )
+    expect(html).toContain("Nov 8 – 14 · Every model call")
+    expect(html).not.toContain("Nov 15")
   })
 
   test("a filter in the address narrows the page and names itself", () => {

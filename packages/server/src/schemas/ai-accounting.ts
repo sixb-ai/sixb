@@ -1,3 +1,4 @@
+import { canonicalTimeZone } from "@sixb/core/calendar"
 import { z } from "zod"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { ModelReasoningSchema } from "./models"
@@ -48,8 +49,19 @@ export const AiAccountingRangeQuerySchema = z.object({
   kind: ModelKindSchema.optional().describe("Calls to one kind of model"),
 })
 
+const TimeZoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => canonicalTimeZone(value) !== undefined, {
+    message: "Use an IANA time zone such as America/New_York",
+  })
+
 export const AiAccountingOverviewQuerySchema = AiAccountingRangeQuerySchema.extend({
   bucket: AiAccountingBucketSchema,
+  timeZone: TimeZoneSchema.optional().describe(
+    "The IANA time zone whose days, weeks or hours the periods follow, such as America/New_York; UTC when absent"
+  ),
 })
 
 export const AiModelCallAccountingListQuerySchema = AiAccountingRangeQuerySchema.extend({

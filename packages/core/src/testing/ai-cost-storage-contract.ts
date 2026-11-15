@@ -404,6 +404,43 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
       }
     })
 
+    test("buckets a series on the calendar of the query's time zone", async () => {
+      // Removal proof: truncate in UTC again, in the providers and in the shared helpers; the call
+      // of August 3rd never leaves the first bar, and November 1st is not the 25-hour day it is in
+      // New York.
+      const storage = await fixture()
+      try {
+        const august = {
+          from: new Date("2026-08-03T00:00:00.000Z"),
+          to: new Date("2026-08-05T00:00:00.000Z"),
+        }
+        const callsIn = async (query: { readonly timeZone?: string }): Promise<readonly number[]> =>
+          (
+            await storage.queryProjectOverview({ projectId, ...august, bucket: "day", ...query })
+          ).series.map((period) => period.modelCallCount)
+
+        expect(await callsIn({})).toEqual([1, 0])
+        // Fourteen hours ahead of UTC, the same call falls at 2 am on the 4th: the second bar.
+        expect(await callsIn({ timeZone: "Pacific/Kiritimati" })).toEqual([0, 1, 0])
+
+        const november = await storage.queryProjectOverview({
+          projectId,
+          from: new Date("2026-11-01T04:00:00.000Z"),
+          to: new Date("2026-11-03T05:00:00.000Z"),
+          bucket: "day",
+          timeZone: "America/New_York",
+        })
+        expect(
+          november.series.map((period) => [period.start.toISOString(), period.modelCallCount])
+        ).toEqual([
+          ["2026-11-01T04:00:00.000Z", 1],
+          ["2026-11-02T05:00:00.000Z", 1],
+        ])
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("rejects missing usage and mismatched billed quantities", async () => {
       const storage = await fixture()
       try {
@@ -529,6 +566,27 @@ export async function seedAiCostStorageContractUsage(
     occurredAt: new Date("2026-08-03T12:00:00.000Z"),
     recordedAt: new Date("2026-08-03T12:00:00.100Z"),
   })
+
+  // A call either side of a change of clocks, for the calendar a series buckets by.
+  for (const [index, occurredAt] of [
+    "2026-11-01T12:00:00.000Z",
+    "2026-11-02T12:00:00.000Z",
+  ].entries()) {
+    await usage.recordModelCall({
+      id: `clock_${index}`,
+      projectId,
+      executionId: otherExecutionId,
+      attempt: 1,
+      callId: `clock_${index}`,
+      responseId: `response_clock_${index}`,
+      requesterGroupIds: [],
+      providerId: "gateway",
+      requestedModelId: "clock/model",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      occurredAt: new Date(occurredAt),
+      recordedAt: new Date(occurredAt),
+    })
+  }
 
   for (const [day, calls, complete, tokens] of [
     [16, 87, 84, 4_013_782],

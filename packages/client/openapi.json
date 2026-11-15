@@ -6613,6 +6613,16 @@
               "type": "string",
               "enum": ["hour", "day", "week"]
             }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The IANA time zone whose days, weeks or hours the periods follow, such as America/New_York; UTC when absent"
+            }
           }
         ],
         "responses": {

@@ -1,3 +1,4 @@
+import { wallClockInstant } from "@sixb/core/calendar"
 import {
   type AiAccountingAggregateFragment,
   type AiAccountingRecordSetItem,
@@ -101,6 +102,7 @@ export class PgAiCostStorage implements AiCostStorage {
     const query = normalizeAiAccountingQuery(input)
     const providerId = query.providerId ?? null
     const modelId = query.modelId ?? null
+    const timeZone = query.timeZone
     const filter = pgAccountingFilterValues(query)
     const rows = await this.sql<AggregateRow[]>`
       WITH filtered AS (
@@ -187,29 +189,31 @@ export class PgAiCostStorage implements AiCostStorage {
           NULL::text AS key_1,
           NULL::text AS key_2,
           NULL::text AS key_3,
-          NULL::timestamptz AS bucket_start,
+          NULL::text AS bucket_start,
           classified.*
         FROM classified
         UNION ALL
         SELECT 'series', NULL, NULL, NULL,
-          CASE ${input.bucket}::text
-            WHEN 'hour' THEN
-              date_trunc('hour', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-            WHEN 'day' THEN
-              date_trunc('day', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-            ELSE date_trunc('week', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-          END,
+          to_char(
+            CASE ${input.bucket}::text
+              WHEN 'hour' THEN date_trunc('hour', occurred_at AT TIME ZONE ${timeZone})
+              WHEN 'day' THEN date_trunc('day', occurred_at AT TIME ZONE ${timeZone})
+              ELSE date_trunc('week', occurred_at AT TIME ZONE ${timeZone})
+            END,
+            'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+          ),
           classified.*
         FROM classified
         UNION ALL
         SELECT 'modelSeries', provider_id, requested_model_id, NULL,
-          CASE ${input.bucket}::text
-            WHEN 'hour' THEN
-              date_trunc('hour', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-            WHEN 'day' THEN
-              date_trunc('day', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-            ELSE date_trunc('week', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-          END,
+          to_char(
+            CASE ${input.bucket}::text
+              WHEN 'hour' THEN date_trunc('hour', occurred_at AT TIME ZONE ${timeZone})
+              WHEN 'day' THEN date_trunc('day', occurred_at AT TIME ZONE ${timeZone})
+              ELSE date_trunc('week', occurred_at AT TIME ZONE ${timeZone})
+            END,
+            'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+          ),
           classified.*
         FROM classified
         UNION ALL
@@ -275,7 +279,10 @@ export class PgAiCostStorage implements AiCostStorage {
       FROM expanded
       GROUP BY dimension, key_1, key_2, key_3, bucket_start, amount_currency
     `
-    return buildAiAccountingOverviewFromFragments(input, rows.map(aggregateFragmentFromRow))
+    return buildAiAccountingOverviewFromFragments(
+      input,
+      rows.map((row) => aggregateFragmentFromRow(row, timeZone))
+    )
   }
 
   async listModelCalls(
@@ -496,7 +503,7 @@ interface AggregateRow {
   readonly key_1: string | null
   readonly key_2: string | null
   readonly key_3: string | null
-  readonly bucket_start: Date | string | null
+  readonly bucket_start: string | null
   readonly amount_currency: string | null
   readonly model_call_count: string
   readonly reported_usage_call_count: string
@@ -565,7 +572,15 @@ async function findUsage(
   return row ? usageFromRow(row, []) : null
 }
 
-function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragment {
+/**
+ * One aggregated row as a fragment. A series row names its period as the zone's wall clock, which
+ * is resolved here: PostgreSQL's own reading of a repeated or skipped wall clock differs from the
+ * calendar the page draws its bars on.
+ */
+function aggregateFragmentFromRow(
+  row: AggregateRow,
+  timeZone: string
+): AiAccountingAggregateFragment {
   const dimensionKeys =
     row.dimension === "model"
       ? { providerId: required(row.key_1), modelId: required(row.key_2) }
@@ -573,7 +588,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
         ? {
             providerId: required(row.key_1),
             modelId: required(row.key_2),
-            start: new Date(required(row.bucket_start)),
+            start: wallClockInstant(required(row.bucket_start), timeZone),
           }
         : row.dimension === "person"
           ? row.key_1 && row.key_2
@@ -591,7 +606,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
               : row.dimension === "workflow"
                 ? { workflowId: required(row.key_1) }
                 : row.dimension === "series"
-                  ? { start: new Date(required(row.bucket_start)) }
+                  ? { start: wallClockInstant(required(row.bucket_start), timeZone) }
                   : {}
   return {
     dimension: row.dimension,

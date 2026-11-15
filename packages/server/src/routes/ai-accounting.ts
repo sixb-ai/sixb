@@ -348,6 +348,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
           from: new Date(parsed.from),
           to: new Date(parsed.to),
           bucket: parsed.bucket,
+          ...(parsed.timeZone === undefined ? {} : { timeZone: parsed.timeZone }),
           providerId: parsed.providerId,
           modelId: parsed.modelId,
           ...accountingFilters(parsed),
