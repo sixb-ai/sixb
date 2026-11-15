@@ -400,7 +400,7 @@ describe("workspace access OAuth token forwarding", () => {
       expect(access.requestCredentials[1]?.headers.Authorization).toBe("ghu_rev_2")
       const updates: (readonly SandboxRequestCredential[])[] = []
       access.attach({
-        setRequestCredentials: async (value) => {
+        setRequestCredentials: async (value: readonly SandboxRequestCredential[]) => {
           updates.push(value)
         },
       } as unknown as Parameters<typeof access.attach>[0])
