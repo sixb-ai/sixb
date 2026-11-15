@@ -6,7 +6,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name, create one from a branch, tag or commit, delete one
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
 - **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
-- **Pull requests** — list a repository's pull requests, get one with its merge state and size, merge one, list its reviews
+- **Pull requests** — list a repository's pull requests, get one with its merge state and size, merge one, review it, and read or write the inline comments on its diff
 - **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
@@ -83,7 +83,7 @@ export const githubConnector = defineConnector(
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
 need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests
-need `Pull requests: read`, or `Pull requests: read & write` to merge one. Branches and commits
+need `Pull requests: read`, or `Pull requests: read & write` to merge, review or comment on one. Branches and commits
 need `Contents: read`, or `Contents: read & write` to create or delete a branch. Check runs and
 commit statuses need `Checks: read`. Releases need `Contents: read`, or `Contents: read & write`
 to create, update or delete them and their assets. GitHub Actions need `Actions: read`, or
@@ -162,6 +162,10 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
 | `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).pulls.reviews.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).pulls.comments.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/comments` |
+| `gh.repo({ owner, repo }).pulls.comments.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/comments` |
+| `gh.repo({ owner, repo }).pulls.comments.reply(commentId)` | `POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies` |
 | `gh.repo({ owner, repo }).checks.list(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` |
 | `gh.repo({ owner, repo }).checks.status(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/status` |
 | `gh.repo({ owner, repo }).stacks.list()` | `GET /repos/{owner}/{repo}/stacks`            |
@@ -335,6 +339,29 @@ with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while Git
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
+
+**Reviewing.** `pulls.reviews.create(number, { event })` submits a review: `APPROVE`,
+`REQUEST_CHANGES` or `COMMENT`. GitHub requires a summary for the last two, and refuses an `event`
+it does not know, so the client refuses both before requesting. `commitId` reviews one commit, and
+`comments` posts inline comments as part of the same review, which is how a reviewer leaves several
+line comments with one verdict. `DISMISSED` and `PENDING` are states GitHub reports, not events it
+accepts.
+
+```ts
+await repo.pulls.reviews.create(1086, {
+  event: "REQUEST_CHANGES",
+  body: "One fix before this goes in.",
+  comments: [{ path: "src/login.ts", line: 42, side: "RIGHT", body: "This drops the error." }],
+})
+```
+
+**Inline comments.** `pulls.comments.list(number)` returns the comments on the diff, with the
+`path` and `line` each is on, the `diff_hunk` it quotes, the `commit_id` it was left on and
+`in_reply_to_id` for a thread's answers; `since` narrows it to what changed, `sort` and `direction`
+order it. `pulls.comments.create(number, { path, body })` comments on a line outside a review, and
+needs `line` with an optional `side` (`RIGHT`, the file as changed, by default) or `position`, a
+line counted in the diff. `pulls.comments.reply(commentId, { body })` answers a comment in its
+thread.
 
 **Opening one.** `pulls.create({ title, head, base })` opens a pull request from `head` into
 `base`, with `body`, `draft`, `maintainerCanModify` and `issue` to turn an issue into one.

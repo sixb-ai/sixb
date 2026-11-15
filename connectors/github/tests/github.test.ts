@@ -1957,3 +1957,131 @@ describe("branch and pull request writes", () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe("reviews and inline comments", () => {
+  test("submits a review with its verdict, summary and inline comments", async () => {
+    const calls = record(() => json({ id: 11, state: "CHANGES_REQUESTED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    const review = await reviews.create(7, {
+      event: "REQUEST_CHANGES",
+      body: "One fix before this goes in.",
+      commitId: "abc",
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "This drops the error.",
+          line: 42,
+          side: "RIGHT",
+          startLine: 40,
+          startSide: "LEFT",
+        },
+      ],
+    })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/reviews",
+    ])
+    expect(calls[0]?.body).toEqual({
+      commit_id: "abc",
+      body: "One fix before this goes in.",
+      event: "REQUEST_CHANGES",
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "This drops the error.",
+          line: 42,
+          side: "RIGHT",
+          start_line: 40,
+          start_side: "LEFT",
+          position: undefined,
+        },
+      ],
+    })
+    expect(review.state).toBe("CHANGES_REQUESTED")
+  })
+
+  // A summary is required for a comment or a change request, and GitHub answers a bare 422 without.
+  test("approves without a summary, and refuses a review GitHub would", async () => {
+    const calls = record(() => json({ id: 11, state: "APPROVED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    await reviews.create(7, { event: "APPROVE" })
+
+    expect(calls[0]?.body).toEqual({
+      commit_id: undefined,
+      body: undefined,
+      event: "APPROVE",
+      comments: undefined,
+    })
+    await expect(reviews.create(7, { event: "COMMENT" })).rejects.toThrow("body")
+    await expect(reviews.create(7, { event: "DISMISS" as never })).rejects.toThrow("event")
+    await expect(
+      reviews.create(7, { event: "COMMENT", body: "x", comments: [{ path: "a.ts", body: "y" }] })
+    ).rejects.toThrow("line or position")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("lists, writes and answers inline comments", async () => {
+    const calls = record(() => json({ id: 5, body: "x" }))
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    await comments.list(7, {
+      sort: "updated",
+      direction: "desc",
+      since: "2026-11-01T00:00:00Z",
+      pageSize: 50,
+    })
+    await comments.create(7, {
+      path: "src/login.ts",
+      body: "Here",
+      line: 42,
+      side: "LEFT",
+      startLine: 40,
+      startSide: "RIGHT",
+      commitId: "abc",
+      position: 3,
+    })
+    await comments.reply(5, { body: "Answer" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/comments")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      sort: "updated",
+      direction: "desc",
+      since: "2026-11-01T00:00:00Z",
+      per_page: "50",
+    })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/comments",
+    ])
+    expect(calls[1]?.body).toEqual({
+      body: "Here",
+      path: "src/login.ts",
+      commit_id: "abc",
+      line: 42,
+      side: "LEFT",
+      start_line: 40,
+      start_side: "RIGHT",
+      position: 3,
+    })
+    expect([calls[2]?.method, calls[2]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/comments/5/replies",
+    ])
+    expect(calls[2]?.body).toEqual({ body: "Answer" })
+  })
+
+  test("refuses a comment with nowhere to go, and an id that is not one", async () => {
+    const calls = record()
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    await expect(comments.create(7, { path: "src/a.ts", body: "x" })).rejects.toThrow(
+      "line or position"
+    )
+    await expect(comments.create(7, { path: "", body: "x", line: 1 })).rejects.toThrow("path")
+    await expect(comments.reply(0, { body: "x" })).rejects.toThrow("commentId")
+    expect(calls).toHaveLength(0)
+  })
+})

@@ -13,16 +13,23 @@ import {
 } from "../http"
 import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
+  CreatePullRequestCommentInput,
   CreatePullRequestInput,
+  CreatePullRequestReviewInput,
   GetPullRequestOptions,
   GitHubPullRequest,
+  GitHubPullRequestComment,
   GitHubPullRequestDetail,
   GitHubPullRequestMergeRefusal,
   GitHubPullRequestMergeResult,
   GitHubPullRequestReview,
+  GitHubPullRequestReviewEvent,
+  ListPullRequestCommentsOptions,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
   MergePullRequestInput,
+  ReplyToPullRequestCommentInput,
+  RepositoryPullRequestCommentsApi,
   RepositoryPullRequestsApi,
   RequestReviewersInput,
 } from "../types/pulls"
@@ -50,7 +57,22 @@ export function createRepositoryPullRequestsApi(
           context.apiBaseUrl
         )
       },
+
+      async create(
+        pullNumber: number,
+        input: CreatePullRequestReviewInput,
+        options?: GitHubRequestOptions
+      ): Promise<GitHubPullRequestReview> {
+        assertReviewInput(input)
+        return readJson<GitHubPullRequestReview>(
+          await context.http.post(`${pullPath(pullNumber)}/reviews`, reviewBody(input), {
+            signal: options?.signal,
+          })
+        )
+      },
     },
+
+    comments: createRepositoryPullRequestCommentsApi(context, target),
 
     async list(options?: ListPullRequestsOptions): Promise<GitHubPage<GitHubPullRequest>> {
       const params = new URLSearchParams()
@@ -133,6 +155,53 @@ export function createRepositoryPullRequestsApi(
   }
 }
 
+/** The part of a comment that says where it goes. */
+type CommentTarget = Pick<CreatePullRequestCommentInput, "path" | "body" | "line" | "position">
+
+const REVIEW_EVENTS: readonly GitHubPullRequestReviewEvent[] = [
+  "APPROVE",
+  "REQUEST_CHANGES",
+  "COMMENT",
+]
+
+/**
+ * Refuse a review GitHub would refuse, before the request: an `event` it does not know, a summary
+ * it requires, and an inline comment without the line it is on all come back as a bare 422.
+ */
+function assertReviewInput(input: CreatePullRequestReviewInput): void {
+  if (!REVIEW_EVENTS.includes(input.event)) {
+    throw new Error(`[SixbGitHub] event must be one of ${REVIEW_EVENTS.join(", ")}.`)
+  }
+  if (input.event !== "APPROVE") assertNonEmpty(input.body ?? "", "body")
+  for (const comment of input.comments ?? []) assertCommentTarget(comment)
+}
+
+/** GitHub takes a comment on a line, counted in the file or in the diff, and nowhere else. */
+function assertCommentTarget(comment: CommentTarget): void {
+  assertNonEmpty(comment.body, "body")
+  assertNonEmpty(comment.path, "path")
+  if (comment.line === undefined && comment.position === undefined) {
+    throw new Error("[SixbGitHub] a review comment needs line or position.")
+  }
+}
+
+function reviewBody(input: CreatePullRequestReviewInput): Record<string, unknown> {
+  return {
+    commit_id: input.commitId,
+    body: input.body,
+    event: input.event,
+    comments: input.comments?.map((comment) => ({
+      path: comment.path,
+      body: comment.body,
+      line: comment.line,
+      side: comment.side,
+      start_line: comment.startLine,
+      start_side: comment.startSide,
+      position: comment.position,
+    })),
+  }
+}
+
 function pullRequestBody(input: CreatePullRequestInput): Record<string, unknown> {
   return {
     title: input.title,
@@ -183,5 +252,75 @@ function parseMergeBody(text: string): { merged?: boolean; sha?: string; message
     return typeof body === "object" && body !== null ? (body as Record<string, never>) : {}
   } catch {
     return {}
+  }
+}
+
+function createRepositoryPullRequestCommentsApi(
+  context: GitHubHttpContext,
+  target: GitHubRepositoryTarget
+): RepositoryPullRequestCommentsApi {
+  const repo = repositoryPath(target)
+  const commentsPath = (pullNumber: number) =>
+    `${repo}/pulls/${pathId(pullNumber, "pullNumber")}/comments`
+
+  return {
+    async list(
+      pullNumber: number,
+      options?: ListPullRequestCommentsOptions
+    ): Promise<GitHubPage<GitHubPullRequestComment>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      if (options?.sort) params.set("sort", options.sort)
+      if (options?.direction) params.set("direction", options.direction)
+      if (options?.since) params.set("since", options.since)
+      return readPage<GitHubPullRequestComment>(
+        await context.http.get(
+          resolvePagePath(withQuery(commentsPath(pullNumber), params), options),
+          {
+            signal: options?.signal,
+          }
+        ),
+        context.apiBaseUrl
+      )
+    },
+
+    async create(
+      pullNumber: number,
+      input: CreatePullRequestCommentInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequestComment> {
+      assertCommentTarget(input)
+      return readJson<GitHubPullRequestComment>(
+        await context.http.post(
+          commentsPath(pullNumber),
+          {
+            body: input.body,
+            path: input.path,
+            commit_id: input.commitId,
+            line: input.line,
+            side: input.side,
+            start_line: input.startLine,
+            start_side: input.startSide,
+            position: input.position,
+          },
+          { signal: options?.signal }
+        )
+      )
+    },
+
+    async reply(
+      commentId: number,
+      input: ReplyToPullRequestCommentInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequestComment> {
+      assertNonEmpty(input.body, "body")
+      return readJson<GitHubPullRequestComment>(
+        await context.http.post(
+          `${repo}/pulls/comments/${pathId(commentId, "commentId")}/replies`,
+          { body: input.body },
+          { signal: options?.signal }
+        )
+      )
+    },
   }
 }

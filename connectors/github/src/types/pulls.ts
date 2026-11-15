@@ -117,6 +117,111 @@ export interface ListPullRequestReviewsOptions
   extends GitHubPaginationOptions,
     GitHubRequestOptions {}
 
+/** How a review is submitted. */
+export type GitHubPullRequestReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+
+/** Which side of the diff a review comment sits on: the file as changed, or as it was. */
+export type GitHubPullRequestCommentSide = "LEFT" | "RIGHT"
+
+/** One inline comment to post with a review. */
+export interface CreatePullRequestReviewCommentInput {
+  /** The file the comment is on, from the repository root. */
+  readonly path: string
+  readonly body: string
+  /** The line in the file, on `side`. */
+  readonly line?: number
+  /** Which side of the diff `line` counts on; `RIGHT`, the file as changed, when empty. */
+  readonly side?: GitHubPullRequestCommentSide
+  /** The first line of a comment spanning a range that ends at `line`. */
+  readonly startLine?: number
+  readonly startSide?: GitHubPullRequestCommentSide
+  /** A line counted in the diff; an alternative to `line`. */
+  readonly position?: number
+}
+
+export interface CreatePullRequestReviewInput {
+  readonly event: GitHubPullRequestReviewEvent
+  /** The review's summary. GitHub requires it for `REQUEST_CHANGES` and `COMMENT`. */
+  readonly body?: string
+  /** The commit to review; GitHub uses the pull request's latest when empty. */
+  readonly commitId?: string
+  /** Inline comments to post with the review. */
+  readonly comments?: readonly CreatePullRequestReviewCommentInput[]
+}
+
+/** One inline comment on a pull request's diff. */
+export interface GitHubPullRequestComment {
+  readonly id: number
+  readonly node_id: string
+  readonly body: string
+  /** The file the comment is on, from the repository root. */
+  readonly path: string
+  /** The line in the file; `null` for a comment on the whole file. */
+  readonly line: number | null
+  readonly original_line: number | null
+  readonly side: GitHubPullRequestCommentSide | null
+  /** The last lines of the hunk the comment sits on, as the diff shows them. */
+  readonly diff_hunk: string
+  readonly commit_id: string
+  readonly original_commit_id: string
+  /** The comment this one answers; empty for the first in a thread. */
+  readonly in_reply_to_id?: number
+  readonly subject_type?: "line" | "file"
+  /** `null` when the account was deleted. */
+  readonly user: GitHubUser | null
+  readonly created_at: string
+  readonly updated_at: string
+  readonly html_url: string
+  readonly pull_request_url: string
+}
+
+export interface ListPullRequestCommentsOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions {
+  readonly sort?: "created" | "updated"
+  readonly direction?: GitHubSortDirection
+  /** Only comments updated after this time, so a sync reads just what changed. */
+  readonly since?: string
+}
+
+export interface CreatePullRequestCommentInput {
+  readonly body: string
+  /** The file the comment is on, from the repository root. */
+  readonly path: string
+  /** The commit to comment on; GitHub uses the pull request's latest when empty. */
+  readonly commitId?: string
+  readonly line?: number
+  readonly side?: GitHubPullRequestCommentSide
+  readonly startLine?: number
+  readonly startSide?: GitHubPullRequestCommentSide
+  /** A line counted in the diff; an alternative to `line`. */
+  readonly position?: number
+}
+
+export interface ReplyToPullRequestCommentInput {
+  readonly body: string
+}
+
+export interface RepositoryPullRequestCommentsApi {
+  /** List one page of a pull request's inline comments, oldest first. */
+  list(
+    pullNumber: number,
+    options?: ListPullRequestCommentsOptions
+  ): Promise<GitHubPage<GitHubPullRequestComment>>
+  /** Comment on a line of the diff, outside a review. One of `line` and `position` is required. */
+  create(
+    pullNumber: number,
+    input: CreatePullRequestCommentInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestComment>
+  /** Answer a comment in its thread. */
+  reply(
+    commentId: number,
+    input: ReplyToPullRequestCommentInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestComment>
+}
+
 export interface CreatePullRequestInput {
   readonly title: string
   /** The branch the changes come from, as `branch`, or `owner:branch` for a fork. */
@@ -191,19 +296,27 @@ export interface RepositoryPullRequestReviewsApi {
     pullNumber: number,
     options?: ListPullRequestReviewsOptions
   ): Promise<GitHubPage<GitHubPullRequestReview>>
+  /**
+   * Submit a review, with its inline comments if it has any. Approving and requesting changes need
+   * write access to the repository: a fine-grained token needs `Pull requests: read & write`.
+   */
+  create(
+    pullNumber: number,
+    input: CreatePullRequestReviewInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestReview>
 }
 
 export interface RepositoryPullRequestsApi {
   readonly reviews: RepositoryPullRequestReviewsApi
+  /** The inline comments on its diff, where a review's comments land too. */
+  readonly comments: RepositoryPullRequestCommentsApi
   /** List one page of this repository's pull requests. */
   list(options?: ListPullRequestsOptions): Promise<GitHubPage<GitHubPullRequest>>
   get(pullNumber: number, options?: GetPullRequestOptions): Promise<GitHubPullRequestDetail>
   /** Open a pull request between two branches, or from an issue. */
   create(input: CreatePullRequestInput, options?: GitHubRequestOptions): Promise<GitHubPullRequest>
-  /**
-   * Ask users or teams to review. GitHub replaces the request when a pull request is edited with
-   * `requested_reviewers`, so ask again after that rather than assuming it stands.
-   */
+  /** Ask users or teams to review. GitHub keeps one pending request per reviewer. */
   requestReviewers(
     pullNumber: number,
     input: RequestReviewersInput,
