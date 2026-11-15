@@ -1,3 +1,4 @@
+import { isSixbApiError } from "@sixb/client"
 import {
   listAgentThreadInboxOptions,
   listAgentThreadInboxQueryKey,
@@ -7,6 +8,7 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CornerDownRight, ListEnd, Send, X } from "lucide-react"
+import { useState } from "react"
 import { useCurrentUser } from "../../session"
 import { useAgentMessages } from "../i18n"
 import { samePrincipal, userPrincipal } from "../sharing"
@@ -18,14 +20,22 @@ import type { AgentInboxItem } from "../types"
  */
 export function PendingMessages({
   threadId,
+  steerable = true,
   className,
 }: {
   readonly threadId: string | null
+  /**
+   * The running turn is the reader's own, as the composer's `steerable` says. Another person's
+   * turn takes no steer and no Send now from the reader: their messages wait for their own turn.
+   */
+  readonly steerable?: boolean
   readonly className?: string
 }) {
   const labels = useAgentMessages().composer
   const me = userPrincipal(useCurrentUser())
   const queryClient = useQueryClient()
+  // Why the last change did not go through, until the next one is asked for.
+  const [failure, setFailure] = useState<string | null>(null)
   const inbox = useQuery({
     ...listAgentThreadInboxOptions({ path: { threadId: threadId ?? "" } }),
     enabled: threadId !== null,
@@ -38,13 +48,24 @@ export function PendingMessages({
       queryKey: listAgentThreadInboxQueryKey({ path: { threadId: threadId ?? "" } }),
     })
 
-  // Settled either way: a refusal most often means a turn read the message first.
+  // Read again either way. A message a turn already read has left the tray for the conversation,
+  // which needs no word; any other refusal says why nothing changed.
+  const failed = (message: string) => (error: unknown) => {
+    if (isSixbApiError(error) && error.code === "invalid_state") return
+    setFailure(
+      isSixbApiError(error) && error.code === "not_run_requester" ? labels.notYourAnswer : message
+    )
+  }
   const promote = useMutation({
     ...updateAgentThreadInboxItemMutation(),
+    onMutate: () => setFailure(null),
+    onError: failed(labels.changeFailed),
     onSettled: refresh,
   })
   const withdraw = useMutation({
     ...withdrawAgentThreadInboxItemMutation(),
+    onMutate: () => setFailure(null),
+    onError: failed(labels.withdrawFailed),
     onSettled: refresh,
   })
 
@@ -60,6 +81,7 @@ export function PendingMessages({
             key={item.id}
             item={item}
             mine={samePrincipal(item.authorPrincipal, me)}
+            steerable={steerable}
             labels={labels}
             busy={promote.isPending || withdraw.isPending}
             onSteer={() =>
@@ -75,6 +97,11 @@ export function PendingMessages({
             }
           />
         ))}
+        {failure ? (
+          <p role="alert" className="px-3 pt-1 pb-1.5 text-[13px] text-destructive">
+            {failure}
+          </p>
+        ) : null}
       </div>
     </div>
   )
@@ -83,6 +110,7 @@ export function PendingMessages({
 function PendingMessage({
   item,
   mine,
+  steerable: turnSteerable,
   labels,
   busy,
   onSteer,
@@ -92,6 +120,7 @@ function PendingMessage({
   readonly item: AgentInboxItem
   /** Only the person who sent it may change it: another participant's shows without actions. */
   readonly mine: boolean
+  readonly steerable: boolean
   readonly labels: ReturnType<typeof useAgentMessages>["composer"]
   readonly busy: boolean
   readonly onSteer: () => void
@@ -104,6 +133,7 @@ function PendingMessage({
     .trim()
   // A steer is read mid-turn, which prepares no file: one that carries a file stays queued.
   const steerable =
+    turnSteerable &&
     item.mode === "queue" &&
     item.immediate !== true &&
     !item.parts.some((part) => part.type === "file")
@@ -138,16 +168,19 @@ function PendingMessage({
               <CornerDownRight className="size-3.5" />
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={onSendNow}
-            disabled={busy}
-            title={labels.sendNow}
-            aria-label={labels.sendNow}
-            className={ACTION_CLASS}
-          >
-            <Send className="size-3.5" />
-          </button>
+          {/* Sending now stops the answer in flight: only whoever asked for it may. */}
+          {turnSteerable ? (
+            <button
+              type="button"
+              onClick={onSendNow}
+              disabled={busy}
+              title={labels.sendNow}
+              aria-label={labels.sendNow}
+              className={ACTION_CLASS}
+            >
+              <Send className="size-3.5" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onWithdraw}

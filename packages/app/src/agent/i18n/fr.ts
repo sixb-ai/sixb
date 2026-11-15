@@ -83,6 +83,10 @@ export const fr: Translation<AgentMessages> = {
     steer: "Orienter cette réponse",
     sendNow: "Envoyer maintenant",
     withdraw: "Retirer ce message",
+    changeFailed: "Impossible de modifier ce message. Réessayez.",
+    withdrawFailed: "Impossible de retirer ce message. Réessayez.",
+    notYourAnswer:
+      "Seule la personne qui a demandé cette réponse peut la modifier ou l’arrêter. Le vôtre partira après.",
   },
   commands: {
     list: "Commandes",

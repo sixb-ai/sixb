@@ -88,6 +88,10 @@ export const en = {
     steer: "Steer this turn",
     sendNow: "Send now",
     withdraw: "Withdraw this message",
+    changeFailed: "Couldn't change this message. Try again.",
+    withdrawFailed: "Couldn't withdraw this message. Try again.",
+    notYourAnswer:
+      "Only the person who asked for this answer can change or stop it. Yours goes after it.",
   },
   /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
   commands: {

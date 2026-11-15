@@ -91,6 +91,7 @@ export function ConversationPanel({
         <div className={asking ? "hidden" : "contents"}>
           <PendingMessages
             threadId={currentThread?.id ?? null}
+            steerable={composer.steerable}
             className={compact ? "px-4 pb-2" : cn("pb-2", wideClassName)}
           />
           <Composer

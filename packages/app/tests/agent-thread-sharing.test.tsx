@@ -185,6 +185,22 @@ const screenshotRef = {
   mediaType: "image/png",
 }
 
+function inboxItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "inb_1",
+    projectId: "proj",
+    threadId: "thr_1",
+    messageId: "msg_9",
+    seq: 1,
+    authorPrincipal: bob,
+    mode: "queue",
+    parts: [{ type: "text", text: "Add the Halden renewal" }],
+    createdAt: at,
+    updatedAt: at,
+    ...overrides,
+  }
+}
+
 function run(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
@@ -225,6 +241,10 @@ interface Scenario {
   postGate?: Promise<void>
   /** The members `GET /api/users` lists; without them the reader may not read the directory. */
   directory?: readonly Record<string, unknown>[]
+  /** What waits in the thread's inbox beside the running turn. */
+  inbox?: readonly Record<string, unknown>[]
+  /** How a change to a waiting message is refused. */
+  inboxRefusal?: { readonly status: number; readonly code: string }
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -300,6 +320,17 @@ function api(scenario: Scenario, requests: string[]) {
       return Response.json(
         { error: "[Sixb] refused", code: scenario.postError.code },
         { status: scenario.postError.status }
+      )
+    }
+
+    if (url.pathname === "/api/agent-threads/thr_1/inbox") {
+      return Response.json({ items: scenario.inbox ?? [] })
+    }
+    if (url.pathname.startsWith("/api/agent-threads/thr_1/inbox/")) {
+      const refusal = scenario.inboxRefusal ?? { status: 404, code: "invalid_message" }
+      return Response.json(
+        { error: "[Sixb] refused", code: refusal.code },
+        { status: refusal.status }
       )
     }
 
@@ -1109,6 +1140,41 @@ describe("who acts on a turn", () => {
     expect(
       await view.findByText("This conversation's sandbox must be recovered before another answer.")
     ).toBeDefined()
+  })
+
+  // Removal proof: drop `steerable` from the PendingMessages that ConversationPanel renders; Bob's
+  // waiting message offers to steer Alice's answer and to send now, which the server refuses.
+  test("in someone else's answer, the reader's waiting message can only be withdrawn", async () => {
+    const { view } = renderChat("bob", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: bob, mode: "queue" })],
+    })
+
+    expect(await view.findByRole("button", { name: "Withdraw this message" })).toBeDefined()
+    expect(view.queryByRole("button", { name: "Steer this turn" })).toBeNull()
+    expect(view.queryByRole("button", { name: "Send now" })).toBeNull()
+  })
+
+  // Removal proof: drop `onError` from the tray's mutations; the click changes nothing and the tray
+  // says nothing.
+  test("a change the server refuses says why nothing changed", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "queue" })],
+      inboxRefusal: { status: 403, code: "not_run_requester" },
+    })
+
+    fireEvent.click(await view.findByRole("button", { name: "Send now" }))
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "Only the person who asked for this answer can change or stop it. Yours goes after it."
+    )
   })
 })
 
