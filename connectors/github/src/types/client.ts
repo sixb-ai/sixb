@@ -1,3 +1,4 @@
+import type { RepositoryActionsApi } from "./actions"
 import type { RepositoryAssigneesApi } from "./assignees"
 import type { GitHubAttachmentsApi } from "./attachments"
 import type { RepositoryBranchesApi } from "./branches"
@@ -38,6 +39,8 @@ export interface GitHubClient {
 }
 
 export interface GitHubRepositoryScope {
+  /** Workflows, their runs and jobs, logs and artifacts. Reading needs `Actions: read`. */
+  readonly actions: RepositoryActionsApi
   readonly assignees: RepositoryAssigneesApi
   readonly branches: RepositoryBranchesApi
   readonly commits: RepositoryCommitsApi

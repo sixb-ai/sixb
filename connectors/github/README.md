@@ -83,7 +83,8 @@ export const githubConnector = defineConnector(
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
 need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`. Branches and commits need
 `Contents: read`. Releases need `Contents: read`, or
-`Contents: read & write` to create, update or delete them and their assets. Organization people
+`Contents: read & write` to create, update or delete them and their assets. GitHub Actions need
+`Actions: read`, or `Actions: read & write` to re-run or cancel runs. Organization people
 APIs require `Members: read`. Public user profiles
 and public organization membership can be queried without that organization permission, but private
 membership visibility depends on the authenticated user's organization access.
@@ -200,6 +201,18 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).releases.reactions.list(releaseId)` | `GET /repos/{owner}/{repo}/releases/{id}/reactions` |
 | `gh.repo({ owner, repo }).releases.reactions.create(releaseId)` | `POST /repos/{owner}/{repo}/releases/{id}/reactions` |
 | `gh.repo({ owner, repo }).releases.reactions.delete(releaseId, id)` | `DELETE /repos/{owner}/{repo}/releases/{id}/reactions/{reaction_id}` |
+| `gh.repo({ owner, repo }).actions.workflows.list()` | `GET /repos/{owner}/{repo}/actions/workflows` |
+| `gh.repo({ owner, repo }).actions.workflows.get(idOrFile)` | `GET /repos/{owner}/{repo}/actions/workflows/{id}` |
+| `gh.repo({ owner, repo }).actions.runs.list()` | `GET /repos/{owner}/{repo}/actions/runs`, or `…/workflows/{id}/runs` with `workflow` |
+| `gh.repo({ owner, repo }).actions.runs.get(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}`, or `…/attempts/{n}` |
+| `gh.repo({ owner, repo }).actions.runs.jobs(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs` |
+| `gh.repo({ owner, repo }).actions.runs.artifacts(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts` |
+| `gh.repo({ owner, repo }).actions.runs.logs(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/logs` |
+| `gh.repo({ owner, repo }).actions.runs.rerun(runId)` | `POST /repos/{owner}/{repo}/actions/runs/{id}/rerun`, or `…/rerun-failed-jobs` |
+| `gh.repo({ owner, repo }).actions.runs.cancel(runId)` | `POST /repos/{owner}/{repo}/actions/runs/{id}/cancel` |
+| `gh.repo({ owner, repo }).actions.jobs.get(jobId)` | `GET /repos/{owner}/{repo}/actions/jobs/{id}` |
+| `gh.repo({ owner, repo }).actions.jobs.logs(jobId)` | `GET /repos/{owner}/{repo}/actions/jobs/{id}/logs` |
+| `gh.repo({ owner, repo }).actions.artifacts.download(id)` | `GET /repos/{owner}/{repo}/actions/artifacts/{id}/zip` |
 | `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
 | `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
 | `gh.users.getAuthenticated()`             | `GET /user`                                      |
@@ -305,6 +318,36 @@ with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while Git
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
+
+### Actions
+
+Workflow runs, their jobs and steps, logs and artifacts. Each run names the branch and commit it ran
+on, and the pull requests GitHub matched it to: link it to your own objects from those.
+
+```ts
+const actions = gh.repo({ owner: "acme", repo: "web" }).actions
+
+// Backfill a week of CI runs, page by page.
+let pageToken: string | undefined
+do {
+  const page = await actions.runs.list({ workflow: "ci.yml", created: ">=2026-11-08", pageToken })
+  for (const run of page.items) {
+    // `pull_requests` is empty for a run from a fork: match it by head_branch or head_sha.
+    console.log(run.id, run.status, run.conclusion, run.head_branch, run.head_sha, run.pull_requests)
+  }
+  pageToken = page.nextPageToken
+} while (pageToken)
+
+const { items: jobs } = await actions.runs.jobs(runId, { filter: "latest" })
+const log = await (await actions.jobs.logs(jobs[0].id)).text()
+await actions.runs.rerun(runId, { failedOnly: true })
+```
+
+Lists come back as pages like every other list, though GitHub wraps Actions lists in an object.
+Logs and artifacts are downloads (`Response`): GitHub redirects them to storage signed for that one
+download, which is fetched without the token. `runs.logs` is a zip of every job's log; `jobs.logs` is
+one job's, as text. To follow runs as they happen, handle the `workflow_run` and `workflow_job`
+webhook events (see [Webhooks](#webhooks)).
 
 ### Stacks
 

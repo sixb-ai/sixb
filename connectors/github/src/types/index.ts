@@ -1,3 +1,26 @@
+export type {
+  GitHubWorkflow,
+  GitHubWorkflowArtifact,
+  GitHubWorkflowConclusion,
+  GitHubWorkflowJob,
+  GitHubWorkflowJobStep,
+  GitHubWorkflowRef,
+  GitHubWorkflowRun,
+  GitHubWorkflowRunPullRequest,
+  GitHubWorkflowRunPullRequestRef,
+  GitHubWorkflowRunRepository,
+  GitHubWorkflowRunStatus,
+  ListWorkflowArtifactsOptions,
+  ListWorkflowJobsOptions,
+  ListWorkflowRunsOptions,
+  RepositoryActionsApi,
+  RepositoryWorkflowArtifactsApi,
+  RepositoryWorkflowJobsApi,
+  RepositoryWorkflowRunsApi,
+  RepositoryWorkflowsApi,
+  RerunWorkflowRunOptions,
+  WorkflowRunAttemptOptions,
+} from "./actions"
 export type { ListAssigneesOptions, RepositoryAssigneesApi } from "./assignees"
 export type {
   GitHubAttachment,

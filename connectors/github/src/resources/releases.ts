@@ -4,7 +4,7 @@ import {
   assertNonEmpty,
   pathId,
   pathPart,
-  readContent,
+  readDownload,
   readJson,
   readNoContent,
   readPage,
@@ -197,22 +197,10 @@ function createRepositoryReleaseAssetsApi(
     },
 
     async download(assetId: number, options?: GitHubRequestOptions): Promise<Response> {
-      const response = await context.http.get(assetPath(assetsPath, assetId), {
-        headers: { accept: "application/octet-stream" },
-        redirect: "manual",
+      return readDownload(context, assetPath(assetsPath, assetId), {
+        accept: "application/octet-stream",
         signal: options?.signal,
       })
-
-      const location = isRedirect(response.status) ? response.headers.get("location") : null
-      if (!location) return readContent(response)
-
-      // The redirect points to storage signed for this one download. It goes through plain fetch
-      // so the token is not sent with it: the storage would reject a second credential, and the
-      // token has no business leaving GitHub.
-      await response.body?.cancel()
-      return readContent(
-        await fetch(new URL(location, context.apiBaseUrl), { signal: options?.signal })
-      )
     },
   }
 }
@@ -284,10 +272,6 @@ function releasePath(releasesPath: string, releaseId: number): string {
 
 function assetPath(assetsPath: string, assetId: number): string {
   return `${assetsPath}/${pathId(assetId, "assetId")}`
-}
-
-function isRedirect(status: number): boolean {
-  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
 }
 
 /**

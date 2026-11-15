@@ -81,6 +81,56 @@ export async function readPage<T>(response: Response, apiBaseUrl: URL): Promise<
   }
 }
 
+/**
+ * One page of a list GitHub wraps in an object, such as `{ total_count, workflow_runs: [...] }` for
+ * Actions, as the same page every other list returns.
+ */
+export async function readWrappedPage<T>(
+  response: Response,
+  apiBaseUrl: URL,
+  key: string
+): Promise<GitHubPage<T>> {
+  const body = await readJson<Record<string, unknown>>(response)
+  const items = body[key]
+  if (!Array.isArray(items)) {
+    throw new GitHubApiError(response.status, `Expected '${key}' in the response.`)
+  }
+  const links = parseLinkHeader(response.headers.get("link"))
+  return {
+    items: items as T[],
+    hasMore: links.next !== undefined,
+    nextPageToken: links.next ? encodePageToken(links.next, apiBaseUrl) : undefined,
+    previousPageToken: links.prev ? encodePageToken(links.prev, apiBaseUrl) : undefined,
+  }
+}
+
+/**
+ * Download what GitHub serves at `path`, or from the storage it redirects to. The redirect points
+ * to storage signed for this one download: it goes through plain fetch so the token is not sent
+ * with it, as the storage would reject a second credential and the token has no business leaving
+ * GitHub.
+ */
+export async function readDownload(
+  context: GitHubHttpContext,
+  path: string,
+  options: { readonly accept?: string; readonly signal?: AbortSignal } = {}
+): Promise<Response> {
+  const response = await context.http.get(path, {
+    ...(options.accept ? { headers: { accept: options.accept } } : {}),
+    redirect: "manual",
+    signal: options.signal,
+  })
+  const location = isRedirect(response.status) ? response.headers.get("location") : null
+  if (!location) return readContent(response)
+
+  await response.body?.cancel()
+  return readContent(await fetch(new URL(location, context.apiBaseUrl), { signal: options.signal }))
+}
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
 export function resolvePagePath(path: string, options?: { readonly pageToken?: string }): string {
   return options?.pageToken ? decodePageToken(options.pageToken) : path
 }

@@ -1551,3 +1551,193 @@ function captureWarnings(run: () => void): string[] {
   }
   return warnings
 }
+
+describe("GitHub Actions", () => {
+  const run = { id: 5, head_branch: "feature/login", head_sha: "abc", pull_requests: [] }
+
+  // A sync backfills runs page by page, filtered as GitHub filters them. Removal proof: drop a
+  // filter from runFilters, or read the page with readPage; the query or the items go missing.
+  test("lists runs with every filter, unwrapping GitHub's page and following its next link", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json(
+            { total_count: 2, workflow_runs: [run] },
+            nextLink("https://api.github.com/repos/acme/web/actions/runs?page=2")
+          )
+        : json({ total_count: 2, workflow_runs: [{ ...run, id: 6 }] })
+    )
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    const first = await runs.list({
+      branch: "feature/login",
+      event: "pull_request",
+      status: "failure",
+      actor: "octocat",
+      headSha: "abc",
+      created: ">=2026-11-01",
+      checkSuiteId: 42,
+      excludePullRequests: true,
+      pageSize: 100,
+    })
+    const second = await runs.list({ pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/actions/runs")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      branch: "feature/login",
+      event: "pull_request",
+      status: "failure",
+      actor: "octocat",
+      head_sha: "abc",
+      created: ">=2026-11-01",
+      check_suite_id: "42",
+      exclude_pull_requests: "true",
+      per_page: "100",
+    })
+    expect(first).toMatchObject({ items: [run], hasMore: true })
+    expect(first.nextPageToken).toBe(pageToken("/repos/acme/web/actions/runs?page=2"))
+    expect(calls[1]?.url.href).toBe("https://api.github.com/repos/acme/web/actions/runs?page=2")
+    expect(second).toMatchObject({ items: [{ id: 6 }], hasMore: false })
+  })
+
+  test("lists one workflow's runs, by file name or id", async () => {
+    const calls = record(() => json({ total_count: 0, workflow_runs: [] }))
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    await runs.list({ workflow: "ci.yml" })
+    await runs.list({ workflow: 161335 })
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/actions/workflows/ci.yml/runs",
+      "/repos/acme/web/actions/workflows/161335/runs",
+    ])
+  })
+
+  test("reads workflows, a run at an attempt, its jobs and its artifacts", async () => {
+    const calls = record((request) => {
+      const path = request.url.pathname
+      if (path.endsWith("/workflows")) return json({ total_count: 1, workflows: [{ id: 1 }] })
+      if (path.endsWith("/jobs")) return json({ total_count: 1, jobs: [{ id: 9, steps: [] }] })
+      if (path.endsWith("/artifacts")) return json({ total_count: 1, artifacts: [{ id: 3 }] })
+      return json({ id: 1 })
+    })
+    const actions = (await connect()).repo(webRepo).actions
+
+    expect((await actions.workflows.list()).items).toEqual([{ id: 1 }] as never)
+    await actions.workflows.get("release.yml")
+    await actions.runs.get(5)
+    await actions.runs.get(5, { attempt: 2 })
+    expect((await actions.runs.jobs(5, { filter: "all" })).items).toEqual([
+      { id: 9, steps: [] },
+    ] as never)
+    // An attempt names its jobs exactly, so `filter` does not apply.
+    await actions.runs.jobs(5, { attempt: 2, filter: "all" })
+    expect((await actions.runs.artifacts(5, { name: "coverage" })).items).toEqual([
+      { id: 3 },
+    ] as never)
+    await actions.jobs.get(9)
+
+    expect(calls.map((call) => `${call.url.pathname}${call.url.search}`)).toEqual([
+      "/repos/acme/web/actions/workflows",
+      "/repos/acme/web/actions/workflows/release.yml",
+      "/repos/acme/web/actions/runs/5",
+      "/repos/acme/web/actions/runs/5/attempts/2",
+      "/repos/acme/web/actions/runs/5/jobs?filter=all",
+      "/repos/acme/web/actions/runs/5/attempts/2/jobs",
+      "/repos/acme/web/actions/runs/5/artifacts?name=coverage",
+      "/repos/acme/web/actions/jobs/9",
+    ])
+  })
+
+  // Removal proof: always post to /rerun; a failed-only re-run then repeats every job.
+  test("re-runs all jobs or only the failed ones, and cancels", async () => {
+    const calls = record(
+      (request) =>
+        new Response(null, { status: request.url.pathname.endsWith("/cancel") ? 202 : 201 })
+    )
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    await runs.rerun(5)
+    await runs.rerun(5, { failedOnly: true, enableDebugLogging: true })
+    await runs.cancel(5)
+
+    expect(calls.map((call) => [call.method, call.url.pathname, call.body])).toEqual([
+      ["POST", "/repos/acme/web/actions/runs/5/rerun", {}],
+      ["POST", "/repos/acme/web/actions/runs/5/rerun-failed-jobs", { enable_debug_logging: true }],
+      ["POST", "/repos/acme/web/actions/runs/5/cancel", {}],
+    ])
+  })
+
+  // GitHub redirects every log and artifact to storage signed for that one download. Removal
+  // proof: fetch the redirect through context.http; the second request then carries the token.
+  test.each([
+    [
+      "a job's log",
+      (c: GitHubClient) => c.repo(webRepo).actions.jobs.logs(9),
+      "/actions/jobs/9/logs",
+    ],
+    [
+      "a run's logs",
+      (c: GitHubClient) => c.repo(webRepo).actions.runs.logs(5),
+      "/actions/runs/5/logs",
+    ],
+    [
+      "an attempt's logs",
+      (c: GitHubClient) => c.repo(webRepo).actions.runs.logs(5, { attempt: 2 }),
+      "/actions/runs/5/attempts/2/logs",
+    ],
+    [
+      "an artifact",
+      (c: GitHubClient) => c.repo(webRepo).actions.artifacts.download(3),
+      "/actions/artifacts/3/zip",
+    ],
+  ] as const)("downloads %s from GitHub's storage redirect without the token", async (_label, download, path) => {
+    const storage = "https://pipelines.actions.githubusercontent.com/logs?sig=abc"
+    const calls = record((_, index) =>
+      index === 1
+        ? new Response(null, { status: 302, headers: { location: storage } })
+        : new Response("2026-11-15T00:00:00Z Run bun test")
+    )
+
+    const response = await download(await connect())
+
+    expect(calls[0]?.url.pathname).toBe(`/repos/acme/web${path}`)
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer t")
+    expect(calls[1]?.url.href).toBe(storage)
+    expect(calls[1]?.headers.get("authorization")).toBeNull()
+    expect(await response.text()).toBe("2026-11-15T00:00:00Z Run bun test")
+  })
+
+  test("refuses a page without its list, and ids that are not ids", async () => {
+    record(() => json({ total_count: 0 }))
+    const actions = (await connect()).repo(webRepo).actions
+
+    expect(await actions.runs.list().catch((caught: unknown) => caught)).toBeInstanceOf(
+      GitHubApiError
+    )
+    await expect(actions.runs.get(1.5)).rejects.toThrow("runId")
+    await expect(actions.workflows.get("")).rejects.toThrow("workflow")
+  })
+
+  test("narrows workflow_run and workflow_job deliveries to their payloads", () => {
+    const seen: string[] = []
+    const onEvent = ({ event }: GitHubEventContext) => {
+      if (event.name === "workflow_run") {
+        seen.push(
+          `${event.payload.workflow_run.head_branch}@${event.payload.workflow_run.head_sha}`
+        )
+      }
+      if (event.name === "workflow_job") seen.push(event.payload.workflow_job.name)
+    }
+
+    onEvent({
+      event: {
+        name: "workflow_run",
+        deliveryId: "d1",
+        action: "completed",
+        payload: { workflow_run: { head_branch: "main", head_sha: "abc" } } as never,
+      },
+    } as unknown as GitHubEventContext)
+
+    expect(seen).toEqual(["main@abc"])
+  })
+})
