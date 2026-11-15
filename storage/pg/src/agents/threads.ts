@@ -218,6 +218,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             status,
             last_message_at,
             message_count,
+            last_message_seq,
             moved_at,
             created_at,
             updated_at
@@ -232,12 +233,41 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ${thread.status},
             ${thread.lastMessageAt ?? null},
             ${thread.messageCount},
+            ${thread.lastMessageSeq},
             ${thread.movedAt ?? null},
             ${thread.createdAt},
             ${thread.updatedAt}
           )
           RETURNING *
         `
+
+        // The owner of the copy keeps their place: copied messages keep their seq, so what they
+        // had not read in the source is what they have not read here. Only a user reads.
+        if (input.ownerPrincipal.type === "user") {
+          await tx`
+            INSERT INTO agent_thread_reads (
+              project_id,
+              thread_id,
+              principal_type,
+              principal_id,
+              through_seq,
+              read_at
+            )
+            SELECT
+              ${input.projectId},
+              ${input.id},
+              'user',
+              ${input.ownerPrincipal.id},
+              LEAST(source.through_seq, ${thread.lastMessageSeq}),
+              source.read_at
+            FROM agent_thread_reads AS source
+            WHERE source.project_id = ${input.projectId}
+              AND source.thread_id = ${input.sourceThreadId}
+              AND source.principal_type = 'user'
+              AND source.principal_id = ${input.ownerPrincipal.id}
+            ON CONFLICT DO NOTHING
+          `
+        }
 
         if (plan.messages.length > 0) {
           await tx`
@@ -409,8 +439,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     return runPgTransaction(this.sql, async (tx) => {
       // Concurrent adds to one thread queue on its row, so the limit counts every participant.
-      const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind">[]>`
-        SELECT id, kind FROM agent_threads
+      const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind" | "last_message_seq">[]>`
+        SELECT id, kind, last_message_seq FROM agent_threads
         WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         FOR UPDATE
       `
@@ -448,6 +478,28 @@ export class PgAgentThreadStore implements AgentThreadStore {
         `
       }
 
+      // Someone who joins starts caught up: what came before is not new to them.
+      for (const principal of added) {
+        await tx`
+          INSERT INTO agent_thread_reads (
+            project_id,
+            thread_id,
+            principal_type,
+            principal_id,
+            through_seq,
+            read_at
+          ) VALUES (
+            ${input.projectId},
+            ${input.threadId},
+            ${principal.type},
+            ${principal.id},
+            ${Number(thread.last_message_seq)},
+            ${addedAt}
+          )
+          ON CONFLICT DO NOTHING
+        `
+      }
+
       return added.length === 0
         ? existing
         : selectParticipants(tx, input.projectId, [input.threadId])
@@ -455,16 +507,26 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
-    const rows = await this.sql<{ principal_id: string }[]>`
-      DELETE FROM agent_thread_participants
-      WHERE project_id = ${input.projectId}
-        AND thread_id = ${input.threadId}
-        AND principal_type = ${input.principal.type}
-        AND principal_id = ${input.principal.id}
-      RETURNING principal_id
-    `
+    return runPgTransaction(this.sql, async (tx) => {
+      const rows = await tx<{ principal_id: string }[]>`
+        DELETE FROM agent_thread_participants
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND principal_type = ${input.principal.type}
+          AND principal_id = ${input.principal.id}
+        RETURNING principal_id
+      `
 
-    return rows.length > 0
+      await tx`
+        DELETE FROM agent_thread_reads
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND principal_type = ${input.principal.type}
+          AND principal_id = ${input.principal.id}
+      `
+
+      return rows.length > 0
+    })
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {

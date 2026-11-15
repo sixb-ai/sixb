@@ -381,6 +381,7 @@ export function planAgentThreadFork(
     // No `lastMessageAt` until the fork's first new message: threads sort by it, else by their
     // creation, so a fork of an old conversation sorts with what its owner just did.
     messageCount: copied.filter((message) => message.counted !== false).length,
+    lastMessageSeq: lastCopiedSeq,
     createdAt,
     updatedAt: createdAt,
   }
@@ -1022,6 +1023,7 @@ export function newSubagentThreadRecord(
     activeRunId: input.id,
     lastMessageAt: createdAt,
     messageCount: 1,
+    lastMessageSeq: 1,
     createdAt,
     updatedAt: createdAt,
   }

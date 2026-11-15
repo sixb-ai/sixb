@@ -28,6 +28,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListLatestAgentRunsInput,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type RequestAgentRunCancelInput,
@@ -225,8 +226,8 @@ export class PgAgentRunStore implements AgentRunStore {
             created_at
           ) VALUES (
             ${input.projectId}, ${input.trigger.id}, ${input.thread.id}, ${input.id}, ${"user"},
-            (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
-              WHERE project_id = ${input.projectId} AND thread_id = ${input.thread.id}),
+            (SELECT last_message_seq FROM agent_threads
+              WHERE project_id = ${input.projectId} AND id = ${input.thread.id}),
             ${JSON.stringify(input.trigger.parts)}::text::jsonb,
             ${input.trigger.metadata === undefined ? null : JSON.stringify(input.trigger.metadata)}::text::jsonb,
             ${AGENT_MESSAGE_CONTENT_VERSION}, ${createdAt}
@@ -492,6 +493,20 @@ export class PgAgentRunStore implements AgentRunStore {
     })
   }
 
+  async latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]> {
+    if (input.threadIds.length === 0) return []
+
+    const rows = await this.sql<AgentRunRow[]>`
+      SELECT DISTINCT ON (thread_id) *
+      FROM agent_runs
+      WHERE project_id = ${input.projectId}
+        AND thread_id = ANY(${this.sql.array([...input.threadIds])}::text[])
+      ORDER BY thread_id, created_at DESC, id DESC
+    `
+
+    return rows.map(rowToRunRecord)
+  }
+
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {
     if (hasEmptyStatuses(input) || input.kinds?.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
@@ -610,7 +625,8 @@ async function claimChildThread(
     await tx`
       UPDATE agent_threads
       SET active_run_id = ${input.id}, message_count = message_count + 1,
-        last_message_at = ${createdAt}, updated_at = ${createdAt}
+        last_message_at = ${createdAt}, last_message_seq = last_message_seq + 1,
+        updated_at = ${createdAt}
       WHERE project_id = ${input.projectId} AND id = ${input.thread.id}
     `
     return
@@ -630,13 +646,13 @@ async function claimChildThread(
   await tx`
     INSERT INTO agent_threads (
       project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-      owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
-      updated_at
+      owner_principal_id, status, active_run_id, last_message_at, message_count,
+      last_message_seq, created_at, updated_at
     ) VALUES (
       ${thread.projectId}, ${thread.id}, ${"subagent"}, ${conversation.id}, ${input.parentRunId},
       ${input.spawnKey}, ${thread.ownerPrincipal.type}, ${thread.ownerPrincipal.id},
-      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount}, ${createdAt},
-      ${createdAt}
+      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount},
+      ${thread.lastMessageSeq}, ${createdAt}, ${createdAt}
     )
   `
 }

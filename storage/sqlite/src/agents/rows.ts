@@ -9,6 +9,7 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentThreadParticipantRecord,
+  type AgentThreadReadRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type ConversationAgentRunSpec,
@@ -41,6 +42,7 @@ export interface AgentThreadRow {
   active_run_id: string | null
   last_message_at: string | null
   message_count: number
+  last_message_seq: number
   created_at: string
   updated_at: string
 }
@@ -53,6 +55,15 @@ export interface AgentThreadParticipantRow {
   added_at: string
   added_by_type: Principal["type"]
   added_by_id: string
+}
+
+export interface AgentThreadReadRow {
+  project_id: string
+  thread_id: string
+  principal_type: "user"
+  principal_id: string
+  through_seq: number
+  read_at: string
 }
 
 export interface AgentRunRow {
@@ -150,6 +161,7 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,
     messageCount: row.message_count,
+    lastMessageSeq: row.last_message_seq,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   }
@@ -268,6 +280,16 @@ export function rowToParticipantRecord(
     principal: { type: "user", id: row.principal_id },
     addedAt: new Date(row.added_at),
     addedBy: { type: row.added_by_type, id: row.added_by_id },
+  }
+}
+
+export function rowToThreadReadRecord(row: AgentThreadReadRow): AgentThreadReadRecord {
+  return {
+    projectId: row.project_id,
+    threadId: row.thread_id,
+    principal: { type: "user", id: row.principal_id },
+    throughSeq: row.through_seq,
+    readAt: new Date(row.read_at),
   }
 }
 

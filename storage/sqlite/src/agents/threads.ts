@@ -213,6 +213,38 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
 
         this.insertForkedThread(plan.thread)
 
+        // The owner of the copy keeps their place: copied messages keep their seq, so what they
+        // had not read in the source is what they have not read here. Only a user reads.
+        const sourceRead =
+          input.ownerPrincipal.type !== "user"
+            ? null
+            : (this.db
+                .query(
+                  `SELECT through_seq, read_at FROM agent_thread_reads
+             WHERE project_id = ? AND thread_id = ?
+               AND principal_type = 'user' AND principal_id = ?`
+                )
+                .get(input.projectId, input.sourceThreadId, input.ownerPrincipal.id) as {
+                through_seq: number
+                read_at: string
+              } | null)
+        if (sourceRead) {
+          this.db
+            .query(
+              `INSERT INTO agent_thread_reads (
+                 project_id, thread_id, principal_type, principal_id, through_seq, read_at
+               ) VALUES (?, ?, 'user', ?, ?, ?)
+               ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO NOTHING`
+            )
+            .run(
+              input.projectId,
+              input.id,
+              input.ownerPrincipal.id,
+              Math.min(sourceRead.through_seq, plan.thread.lastMessageSeq),
+              sourceRead.read_at
+            )
+        }
+
         this.db
           .query(
             `
@@ -383,8 +415,13 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.db
       .transaction(() => {
         const thread = this.db
-          .query("SELECT id, kind FROM agent_threads WHERE project_id = ? AND id = ?")
-          .get(input.projectId, input.threadId) as Pick<AgentThreadRow, "id" | "kind"> | null
+          .query(
+            "SELECT id, kind, last_message_seq FROM agent_threads WHERE project_id = ? AND id = ?"
+          )
+          .get(input.projectId, input.threadId) as Pick<
+          AgentThreadRow,
+          "id" | "kind" | "last_message_seq"
+        > | null
         if (!thread) {
           throw new AgentStorageError(
             "thread_not_found",
@@ -420,6 +457,29 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           )
         }
 
+        // Someone who joins starts caught up: what came before is not new to them.
+        const startRead = this.db.query(`
+          INSERT INTO agent_thread_reads (
+            project_id,
+            thread_id,
+            principal_type,
+            principal_id,
+            through_seq,
+            read_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO NOTHING
+        `)
+        for (const principal of added) {
+          startRead.run(
+            input.projectId,
+            input.threadId,
+            principal.type,
+            principal.id,
+            thread.last_message_seq,
+            addedAt
+          )
+        }
+
         return added.length === 0
           ? existing
           : this.selectParticipants(input.projectId, [input.threadId])
@@ -428,14 +488,25 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
-    const result = this.db
-      .query(`
-        DELETE FROM agent_thread_participants
-        WHERE project_id = ? AND thread_id = ? AND principal_type = ? AND principal_id = ?
-      `)
-      .run(input.projectId, input.threadId, input.principal.type, input.principal.id)
+    return this.db
+      .transaction(() => {
+        const result = this.db
+          .query(`
+            DELETE FROM agent_thread_participants
+            WHERE project_id = ? AND thread_id = ? AND principal_type = ? AND principal_id = ?
+          `)
+          .run(input.projectId, input.threadId, input.principal.type, input.principal.id)
 
-    return result.changes > 0
+        this.db
+          .query(`
+            DELETE FROM agent_thread_reads
+            WHERE project_id = ? AND thread_id = ? AND principal_type = ? AND principal_id = ?
+          `)
+          .run(input.projectId, input.threadId, input.principal.type, input.principal.id)
+
+        return result.changes > 0
+      })
+      .immediate()
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
@@ -571,10 +642,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             active_run_id,
             last_message_at,
             message_count,
+            last_message_seq,
             moved_at,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -588,6 +660,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           thread.status,
           thread.lastMessageAt?.toISOString() ?? null,
           thread.messageCount,
+          thread.lastMessageSeq,
           thread.movedAt?.toISOString() ?? null,
           thread.createdAt.toISOString(),
           thread.updatedAt.toISOString()

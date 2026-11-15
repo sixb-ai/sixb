@@ -129,6 +129,12 @@ export interface AgentThreadRecord {
   readonly activeRunId: string | null
   readonly lastMessageAt?: Date
   readonly messageCount: number
+  /**
+   * The highest message `seq` ever assigned in this thread. Monotonic: a retry that deletes its
+   * failed turn's messages does not lower it, and its next message continues past it. A reader's
+   * position is measured against this, so a reused number can never hide a new message.
+   */
+  readonly lastMessageSeq: number
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -304,6 +310,50 @@ export interface RemoveAgentThreadParticipantInput {
 export interface ListAgentThreadParticipantsInput {
   readonly projectId: string
   readonly threadIds: readonly string[]
+}
+
+// ── agent_thread_reads — how far each person has read a conversation ──────────────────────────
+
+/**
+ * How far one person's reading of a conversation has reached, as the `seq` of its last message.
+ *
+ * A watermark, not a flag: nothing writes here when activity happens. New activity moves the
+ * thread's `lastMessageSeq` past this, and only the reader advances it. It never moves backwards,
+ * so two devices converge on the later position and a stale one cannot rewind the other.
+ */
+export interface AgentThreadReadRecord {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+  /** The highest message `seq` this person's reading has reached. 0 when none has. */
+  readonly throughSeq: number
+  readonly readAt: Date
+}
+
+export interface MarkAgentThreadReadInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+  /** Clamped to the thread's `lastMessageSeq`. A lower one than stored is ignored. */
+  readonly throughSeq: number
+  readonly readAt?: Date
+}
+
+export interface ListAgentThreadReadsInput {
+  readonly projectId: string
+  readonly threadIds: readonly string[]
+  readonly principal: UserPrincipal
+}
+
+export interface AgentThreadReadStore {
+  /**
+   * Record that this person's reading reached `throughSeq`, never moving it back, in one upsert.
+   * Everyone who reads a thread has a row: created when they join it, and backfilled for the
+   * threads that existed before. Answers the row afterwards.
+   */
+  mark(input: MarkAgentThreadReadInput): Promise<AgentThreadReadRecord>
+  /** These threads' rows for one person; a thread they never read is absent. */
+  list(input: ListAgentThreadReadsInput): Promise<readonly AgentThreadReadRecord[]>
 }
 
 // ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
@@ -655,6 +705,11 @@ export interface ListAgentRunsResult {
   readonly total: number
 }
 
+export interface ListLatestAgentRunsInput {
+  readonly projectId: string
+  readonly threadIds: readonly string[]
+}
+
 // ── agent_messages — one message (assistant messages inserted only once finalized) ─────────────
 
 export type { AgentMessageRole }
@@ -872,6 +927,8 @@ export interface AgentRunStore {
    * within a turn the latest admitted first. Read by key (one per turn) or by finish reason.
    */
   listThreadSubagents(input: ListThreadSubagentsInput): Promise<readonly SubagentRunRecord[]>
+  /** The newest run of each thread, by creation and id; a thread without one is absent. */
+  latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]>
   list(input: ListAgentRunsInput): Promise<ListAgentRunsResult>
 }
 
@@ -1591,6 +1648,7 @@ export interface AgentInboxStore {
 
 export interface AgentStorage {
   readonly threads: AgentThreadStore
+  readonly reads: AgentThreadReadStore
   readonly runs: AgentRunStore
   readonly messages: AgentMessageStore
   readonly checkpoints: AgentContextCheckpointStore

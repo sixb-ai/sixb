@@ -108,6 +108,10 @@ function participant(userId: string, addedAt: Date): AgentThreadParticipantRecor
   }
 }
 
+function user(id: string): { readonly type: "user"; readonly id: string } {
+  return { type: "user", id }
+}
+
 function execution(
   token: string,
   queueLeaseExpiresAt = at("2026-06-23T10:05:00.000Z")
@@ -1775,6 +1779,202 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // ── read state ─────────────────────────────────────────────────────────────────────────────
+
+    test("marks how far one person has read, never backwards, clamped to the head", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        for (const id of ["m1", "m2", "m3"]) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role: "user",
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+            createdAt: at("2026-06-23T10:00:00.000Z"),
+          })
+        }
+
+        const first = await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_1"),
+          throughSeq: 2,
+          readAt: at("2026-06-23T11:00:00.000Z"),
+        })
+        expect(first).toEqual({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_1"),
+          throughSeq: 2,
+          readAt: at("2026-06-23T11:00:00.000Z"),
+        })
+
+        // Regression proof: replace the GREATEST/MAX with a plain assignment; the stale mark
+        // rewinds the phone that read further.
+        const back = await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_1"),
+          throughSeq: 1,
+          readAt: at("2026-06-23T12:00:00.000Z"),
+        })
+        expect(back).toMatchObject({
+          throughSeq: 2,
+          readAt: at("2026-06-23T11:00:00.000Z"),
+        })
+
+        const past = await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_1"),
+          throughSeq: 99,
+        })
+        expect(past.throughSeq).toBe(3)
+
+        const other = await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_2"),
+          throughSeq: 1,
+        })
+        expect(other.throughSeq).toBe(1)
+
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: user("usr_1") })
+        ).toHaveLength(1)
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: user("usr_2") })
+        ).toMatchObject([{ throughSeq: 1 }])
+      })
+    })
+
+    test("starts a participant caught up and drops their row when they leave", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        for (const id of ["m1", "m2"]) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role: "user",
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+            createdAt: at("2026-06-23T10:00:00.000Z"),
+          })
+        }
+
+        await storage.threads.addParticipants(
+          participantsInput(["usr_bob"], at("2026-06-23T11:00:00.000Z"))
+        )
+        expect(
+          await storage.reads.list({
+            projectId,
+            threadIds: ["thr_1"],
+            principal: user("usr_bob"),
+          })
+        ).toEqual([
+          {
+            projectId,
+            threadId: "thr_1",
+            principal: user("usr_bob"),
+            throughSeq: 2,
+            readAt: at("2026-06-23T11:00:00.000Z"),
+          },
+        ])
+
+        await storage.threads.removeParticipant({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_bob"),
+        })
+        expect(
+          await storage.reads.list({
+            projectId,
+            threadIds: ["thr_1"],
+            principal: user("usr_bob"),
+          })
+        ).toEqual([])
+      })
+    })
+
+    test("a fork keeps its owner's place, clamped to what it copied", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_2"),
+          throughSeq: 5,
+        })
+
+        await storage.threads.fork(forkInput())
+
+        expect(
+          await storage.reads.list({
+            projectId,
+            threadIds: ["thr_fork"],
+            principal: user("usr_2"),
+          })
+        ).toMatchObject([{ throughSeq: 4 }])
+      })
+    })
+
+    test("never reuses a seq a deleted turn held", async () => {
+      await withStorage(async (storage, fixture) => {
+        // Regression proof: take the next seq from MAX(seq); retry reuses 2 and a reader at 2
+        // never sees the retried answer.
+        await storage.threads.create(threadInput())
+        await storage.messages.append({
+          id: "m1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "first" }],
+          createdAt: at("2026-06-23T10:00:00.000Z"),
+        })
+        await createAndStartRun(storage, fixture, runInput({ triggerMessageId: "m1" }))
+        await storage.messages.append({
+          id: "m2",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          role: "assistant",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "failed answer" }],
+          createdAt: at("2026-06-23T10:00:01.000Z"),
+        })
+        await storage.runs.finish({
+          id: "run_1",
+          projectId,
+          executionToken: "exec_1",
+          status: "succeeded",
+        })
+        await storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+
+        const retried = await storage.messages.append({
+          id: "m3",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "assistant",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "retried answer" }],
+          createdAt: at("2026-06-23T10:00:02.000Z"),
+        })
+
+        expect(retried.seq).toBe(3)
+        expect(await storage.threads.getById({ projectId, id: "thr_1" })).toMatchObject({
+          lastMessageSeq: 3,
+        })
+      })
+    })
+
     // ── durable queued runs ────────────────────────────────────────────────────────────────────
 
     test("creates a queued run before execution and claims the thread", async () => {
@@ -1948,6 +2148,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             activeRunId: "child_1",
             lastMessageAt: at("2026-06-23T10:01:00.000Z"),
             messageCount: 1,
+            lastMessageSeq: 1,
             createdAt: at("2026-06-23T10:01:00.000Z"),
             updatedAt: at("2026-06-23T10:01:00.000Z"),
           }
@@ -3530,6 +3731,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           status: "active",
           activeRunId: null,
           messageCount: 4,
+          lastMessageSeq: 4,
           createdAt: at("2026-06-23T11:00:00.000Z"),
           updatedAt: at("2026-06-23T11:00:00.000Z"),
         })

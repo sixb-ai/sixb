@@ -43,8 +43,8 @@ export class PgAgentMessageStore implements AgentMessageStore {
           }
         }
 
-        const [thread] = await tx<{ id: string }[]>`
-          SELECT id FROM agent_threads
+        const [thread] = await tx<{ id: string; last_message_seq: number | string }[]>`
+          SELECT id, last_message_seq FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
@@ -56,10 +56,8 @@ export class PgAgentMessageStore implements AgentMessageStore {
           )
         }
 
-        const [seqRow] = await tx<{ next: number | string }[]>`
-          SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM agent_messages
-          WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
-        `
+        // Past every number the thread ever assigned: a deleted turn's numbers are not reused.
+        const seq = Number(thread.last_message_seq) + 1
 
         const [row] = await tx<AgentMessageRow[]>`
           INSERT INTO agent_messages (
@@ -84,7 +82,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
             ${input.role},
             ${input.authorPrincipal?.type ?? null},
             ${input.authorPrincipal?.id ?? null},
-            ${Number(seqRow.next)},
+            ${seq},
             ${JSON.stringify(input.parts)}::text::jsonb,
             ${input.metadata === undefined ? null : JSON.stringify(input.metadata)}::text::jsonb,
             ${AGENT_MESSAGE_CONTENT_VERSION},
@@ -99,6 +97,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
           SET
             message_count = message_count + ${countsAsThreadMessage(input) ? 1 : 0},
             last_message_at = ${createdAt},
+            last_message_seq = ${seq},
             updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `

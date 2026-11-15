@@ -29,6 +29,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListLatestAgentRunsInput,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type RequestAgentRunCancelInput,
@@ -237,8 +238,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
               created_at
             ) VALUES (
               ?, ?, ?, ?, 'user',
-              (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
-                WHERE project_id = ? AND thread_id = ?),
+              (SELECT last_message_seq FROM agent_threads
+                WHERE project_id = ? AND id = ?),
               ?, ?, ?, ?
             )
           `
@@ -586,6 +587,26 @@ export class SqliteAgentRunStore implements AgentRunStore {
     })
   }
 
+  async latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]> {
+    if (input.threadIds.length === 0) return []
+
+    const rows = this.db
+      .query(`
+        SELECT * FROM (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY thread_id
+            ORDER BY created_at DESC, id DESC
+          ) AS thread_rank
+          FROM agent_runs
+          WHERE project_id = ? AND thread_id IN (SELECT value FROM json_each(?))
+        )
+        WHERE thread_rank = 1
+      `)
+      .all(input.projectId, JSON.stringify(input.threadIds)) as AgentRunRow[]
+
+    return rows.map(rowToRunRecord)
+  }
+
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {
     if (hasEmptyStatuses(input) || input.kinds?.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
@@ -682,7 +703,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `
           UPDATE agent_threads
           SET active_run_id = ?, message_count = message_count + 1, last_message_at = ?,
-            updated_at = ?
+            last_message_seq = last_message_seq + 1, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -712,9 +733,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         INSERT INTO agent_threads (
           project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-          owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
-          updated_at
-        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          owner_principal_id, status, active_run_id, last_message_at, message_count,
+          last_message_seq, created_at, updated_at
+        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -729,6 +750,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
         input.id,
         createdAt.toISOString(),
         thread.messageCount,
+        thread.lastMessageSeq,
         createdAt.toISOString(),
         createdAt.toISOString()
       )

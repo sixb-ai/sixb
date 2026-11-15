@@ -26,8 +26,8 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
     return this.db.transaction(() => {
       const thread = this.db
-        .query("SELECT 1 AS present FROM agent_threads WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.threadId) as { present: number } | null
+        .query("SELECT last_message_seq FROM agent_threads WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.threadId) as { last_message_seq: number } | null
 
       if (!thread) {
         throw new AgentStorageError(
@@ -49,11 +49,8 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         }
       }
 
-      const seqRow = this.db
-        .query(
-          "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM agent_messages WHERE project_id = ? AND thread_id = ?"
-        )
-        .get(input.projectId, input.threadId) as { next: number }
+      // Past every number the thread ever assigned: a deleted turn's numbers are not reused.
+      const seq = thread.last_message_seq + 1
 
       try {
         this.db
@@ -84,7 +81,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
             input.role,
             input.authorPrincipal?.type ?? null,
             input.authorPrincipal?.id ?? null,
-            seqRow.next,
+            seq,
             JSON.stringify(input.parts),
             input.metadata === undefined ? null : JSON.stringify(input.metadata),
             AGENT_MESSAGE_CONTENT_VERSION,
@@ -106,13 +103,15 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         .query(
           `
           UPDATE agent_threads
-          SET message_count = message_count + ?, last_message_at = ?, updated_at = ?
+          SET message_count = message_count + ?, last_message_at = ?,
+            last_message_seq = ?, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
         .run(
           countsAsThreadMessage(input) ? 1 : 0,
           createdAt.toISOString(),
+          seq,
           createdAt.toISOString(),
           input.projectId,
           input.threadId

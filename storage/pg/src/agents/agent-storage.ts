@@ -6,6 +6,7 @@ import { PgAgentComputerSessionStore } from "./computers"
 import { PgAgentInboxStore } from "./inbox"
 import { PgAgentMemoryStore } from "./memory"
 import { PgAgentMessageStore } from "./messages"
+import { PgAgentThreadReadStore } from "./reads"
 import { PgAgentRunStore } from "./runs"
 import { PgAgentApprovalModeStore } from "./settings"
 import { PgAgentThreadStore } from "./threads"
@@ -24,6 +25,7 @@ export interface PgAgentStorageOptions {
  */
 export class PgAgentStorage implements AgentStorage {
   readonly threads: PgAgentThreadStore
+  readonly reads: PgAgentThreadReadStore
   readonly runs: PgAgentRunStore
   readonly messages: PgAgentMessageStore
   readonly checkpoints: PgAgentContextCheckpointStore
@@ -36,6 +38,7 @@ export class PgAgentStorage implements AgentStorage {
 
   constructor(options: PgAgentStorageOptions) {
     this.threads = new PgAgentThreadStore(options.sql)
+    this.reads = new PgAgentThreadReadStore(options.sql)
     this.runs = new PgAgentRunStore(options.sql, options.executions)
     this.messages = new PgAgentMessageStore(options.sql)
     this.checkpoints = new PgAgentContextCheckpointStore(options.sql)

@@ -10,6 +10,7 @@ import { SqliteAgentComputerSessionStore } from "./computers"
 import { SqliteAgentInboxStore } from "./inbox"
 import { SqliteAgentMemoryStore } from "./memory"
 import { SqliteAgentMessageStore } from "./messages"
+import { SqliteAgentThreadReadStore } from "./reads"
 import { SqliteAgentRunStore } from "./runs"
 import { SqliteAgentApprovalModeStore } from "./settings"
 import { SqliteAgentThreadStore } from "./threads"
@@ -32,6 +33,7 @@ export interface SqliteAgentStorageOptions {
  */
 export class SqliteAgentStorage implements AgentStorage {
   readonly threads: SqliteAgentThreadStore
+  readonly reads: SqliteAgentThreadReadStore
   readonly runs: SqliteAgentRunStore
   readonly messages: SqliteAgentMessageStore
   readonly checkpoints: SqliteAgentContextCheckpointStore
@@ -48,6 +50,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.connection = openSqliteStoreConnection(options)
 
     this.threads = new SqliteAgentThreadStore(this.connection.db)
+    this.reads = new SqliteAgentThreadReadStore(this.connection.db)
     this.runs = new SqliteAgentRunStore(this.connection.db, options.executions)
     this.messages = new SqliteAgentMessageStore(this.connection.db)
     this.checkpoints = new SqliteAgentContextCheckpointStore(this.connection.db)
