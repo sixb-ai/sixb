@@ -167,6 +167,44 @@ describe("reading a shared conversation", () => {
     expect((await owner.agent.threads.list({ sharedWithMe: true })).total).toBe(0)
   })
 
+  test("each reader keeps their own place, and joining starts caught up", async () => {
+    const { host } = setup()
+    const { owner, participant, thread } = await sharedThread(host)
+
+    // Alice asked and its turn failed before answering: one message, a retry waiting.
+    expect((await owner.agent.threads.getById(thread.id))?.read).toMatchObject({
+      throughSeq: 0,
+      headSeq: 1,
+      unread: 1,
+    })
+    expect((await owner.agent.threads.getById(thread.id))?.lastRun).toMatchObject({
+      status: "failed",
+    })
+
+    // Bob joined after that message, so it is not new to him.
+    expect((await participant.agent.threads.getById(thread.id))?.read).toMatchObject({
+      throughSeq: 1,
+      headSeq: 1,
+      unread: 0,
+    })
+
+    expect(await owner.agent.threads.markRead(thread.id)).toMatchObject({
+      throughSeq: 1,
+      headSeq: 1,
+      unread: 0,
+    })
+    // Regression proof: assign throughSeq instead of taking the greater; this rewinds Alice.
+    expect(await owner.agent.threads.markRead(thread.id, { throughSeq: 0 })).toMatchObject({
+      throughSeq: 1,
+      unread: 0,
+    })
+
+    expect((await owner.agent.threads.list()).threads[0]?.read).toMatchObject({
+      throughSeq: 1,
+      unread: 0,
+    })
+  })
+
   test("anyone else reads nothing, and a participant without can.run(agent) neither", async () => {
     const { host } = setup()
     const { other, thread, run } = await sharedThread(host)

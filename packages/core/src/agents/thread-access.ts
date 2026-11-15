@@ -2,7 +2,12 @@ import { type Principal, principalsEqual, SYSTEM_PRINCIPAL, type UserPrincipal }
 import { isRuntimeAllowed } from "../authorization"
 import type { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
+import type {
+  AgentRunFinishReason,
+  AgentRunStatus,
+  AgentStorage,
+  AgentThreadRecord,
+} from "../storage/agents"
 import { AgentRequestError } from "./errors"
 
 /** How the caller takes part in a conversation: its owner, or a user its owner added. */
@@ -15,9 +20,38 @@ export interface AgentThreadParticipant {
   readonly addedBy: Principal
 }
 
-/** A thread as the runtime returns it: the stored record with the users taking part in it. */
+/**
+ * How far the caller's reading of a thread has reached, and what is left. `headSeq` is the
+ * thread's high-water mark, so `unread` is what arrived since `throughSeq`; reading on one device
+ * clears it on every other.
+ */
+export interface AgentThreadReadView {
+  readonly threadId: string
+  /** 0 when they have not read any of it. */
+  readonly throughSeq: number
+  /** The thread's newest message seq, which never goes back. */
+  readonly headSeq: number
+  /** `headSeq - throughSeq`, never below 0. */
+  readonly unread: number
+  readonly readAt?: Date
+}
+
+/** The thread's newest run, enough for a client to offer Continue or Retry without reading it. */
+export interface AgentThreadLastRunView {
+  readonly id: string
+  readonly status: AgentRunStatus
+  readonly finishReason?: AgentRunFinishReason
+}
+
+/**
+ * A thread as the runtime returns it: the stored record with the users taking part in it, the
+ * caller's place in it, and its newest run. `read` is absent for an observer, and for system code,
+ * which is nobody's reading.
+ */
 export interface AgentThreadView extends AgentThreadRecord {
   readonly participants: readonly AgentThreadParticipant[]
+  readonly read?: AgentThreadReadView
+  readonly lastRun?: AgentThreadLastRunView
 }
 
 /** A thread the caller can read, and how it takes part in it. */

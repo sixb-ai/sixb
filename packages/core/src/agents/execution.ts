@@ -90,6 +90,8 @@ import { normalizeSandboxBinding } from "./sandbox"
 import { publishAgentThreadMoved } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import {
+  type AgentThreadLastRunView,
+  type AgentThreadReadView,
   type AgentThreadView,
   agentThreadViews,
   assertConversationThread,
@@ -164,6 +166,15 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
+    /**
+     * Record that the caller's reading of a thread reached a message, or its newest when omitted,
+     * which is what a Done button sends. It never moves backwards, so another device that read
+     * further keeps its place. Answers the caller's place afterwards.
+     */
+    markRead(
+      threadId: string,
+      input?: { readonly throughSeq?: number }
+    ): Promise<AgentThreadReadView>
     /**
      * The sub-agents a conversation's turns spawned, oldest first, each the thread it works in with
      * every run it took; `null` when the caller cannot read the conversation. `runId` keeps those
@@ -827,7 +838,10 @@ export function createAgentRuntime<
     }
     const thread = readable.thread
     const sandboxState = await transition(storage)
-    const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
+    const [view] = await withThreadState(
+      await agentThreadViews(runtime, [{ ...thread, sandboxState }]),
+      readViewer()
+    )
     return view ?? thread
   }
 
@@ -892,6 +906,55 @@ export function createAgentRuntime<
     })
   }
 
+  /** The caller, when there is a person: system code and shared links have no reading. */
+  const readViewer = (): UserPrincipal | undefined =>
+    principal.type === "user" ? principal : undefined
+
+  /**
+   * The caller's place in each thread and its newest run, in one batched read each. Only the
+   * paths that hand a thread to a person call this: an access check does not pay for it.
+   */
+  const withThreadState = async (
+    threads: readonly AgentThreadView[],
+    viewer: UserPrincipal | undefined
+  ): Promise<readonly AgentThreadView[]> => {
+    const agents = runtime.storage.agents
+    if (!viewer || !agents || threads.length === 0) return threads
+
+    const threadIds = threads.map((thread) => thread.id)
+    const [reads, runs] = await Promise.all([
+      agents.reads.list({ projectId: runtime.projectId, threadIds, principal: viewer }),
+      agents.runs.latestByThread({ projectId: runtime.projectId, threadIds }),
+    ])
+    const readOf = new Map(reads.map((read) => [read.threadId, read]))
+    const runOf = new Map(runs.map((run) => [run.threadId, run]))
+
+    return threads.map((thread) => {
+      const read = readOf.get(thread.id)
+      const headSeq = thread.lastMessageSeq
+      const throughSeq = Math.min(read?.throughSeq ?? 0, headSeq)
+      const latest = runOf.get(thread.id)
+      const lastRun: AgentThreadLastRunView | undefined = latest
+        ? {
+            id: latest.id,
+            status: latest.status,
+            ...(latest.finishReason === undefined ? {} : { finishReason: latest.finishReason }),
+          }
+        : undefined
+      return {
+        ...thread,
+        read: {
+          threadId: thread.id,
+          throughSeq,
+          headSeq,
+          unread: Math.max(0, headSeq - throughSeq),
+          ...(read === undefined ? {} : { readAt: read.readAt }),
+        },
+        ...(lastRun === undefined ? {} : { lastRun }),
+      }
+    })
+  }
+
   const agentRuntime: AgentRuntime<TParams> = {
     get: getAgent,
     memory: createAgentMemoryRuntime(runtime),
@@ -924,7 +987,7 @@ export function createAgentRuntime<
           agents.threads.assignComputer({ projectId: runtime.projectId, id: threadId, computer })
         )
         if (moves) await announceThreadMoved(thread)
-        const [view] = await agentThreadViews(runtime, [moved])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [moved]), readViewer())
         return view ?? moved
       },
       moveToCloud: async (threadId) => {
@@ -940,7 +1003,7 @@ export function createAgentRuntime<
         )
         if (queued) await dispatchAgentRun(runtime, requireAgents(), queued.id)
         await announceThreadMoved(thread)
-        const [view] = await agentThreadViews(runtime, [moved])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [moved]), readViewer())
         return view ?? moved
       },
       create: async (input) => {
@@ -988,7 +1051,8 @@ export function createAgentRuntime<
           ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
           ...(input.computer === undefined ? {} : { computer: input.computer }),
         })
-        return { ...created, participants: [] }
+        const [view] = await withThreadState([{ ...created, participants: [] }], readViewer())
+        return view ?? { ...created, participants: [] }
       },
       listChildren: async (threadId, { runId } = {}) => {
         const thread = await getVisibleThreadRecord(threadId)
@@ -1027,10 +1091,50 @@ export function createAgentRuntime<
           ownerPrincipal: principal,
           sandbox,
         })
-        const [view] = await agentThreadViews(runtime, [fork])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [fork]), readViewer())
         return view ?? { ...fork, participants: [] }
       },
-      getById: getVisibleThreadRecord,
+      getById: async (threadId) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread) return null
+        const [view] = await withThreadState([thread], readViewer())
+        return view ?? null
+      },
+      markRead: async (threadId, input = {}) => {
+        const readable = await rule.read(threadId)
+        if (!readable) {
+          throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+        }
+        assertConversationThread(readable.thread)
+        const reader = settingsPrincipal()
+        if (reader.type !== "user") {
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+        }
+        if (
+          input.throughSeq !== undefined &&
+          (!Number.isSafeInteger(input.throughSeq) || input.throughSeq < 0)
+        ) {
+          throw new AgentRequestError(
+            "invalid_message",
+            "[Sixb] 'throughSeq' must be a non-negative integer."
+          )
+        }
+
+        const record = await requireAgents().reads.mark({
+          projectId: runtime.projectId,
+          threadId,
+          principal: reader,
+          throughSeq: input.throughSeq ?? readable.thread.lastMessageSeq,
+        })
+        const headSeq = Math.max(readable.thread.lastMessageSeq, record.throughSeq)
+        return {
+          threadId,
+          throughSeq: record.throughSeq,
+          headSeq,
+          unread: Math.max(0, headSeq - record.throughSeq),
+          readAt: record.readAt,
+        }
+      },
       list: async ({ sharedWithMe, ...input } = {}) => {
         assertNoAgentSelector(input)
         const none = { threads: [], hasMore: false, total: 0 }
@@ -1050,7 +1154,8 @@ export function createAgentRuntime<
             ? { participantPrincipal: caller }
             : { ownerPrincipal: caller }),
         })
-        return { ...result, threads: await agentThreadViews(runtime, result.threads) }
+        const views = await agentThreadViews(runtime, result.threads)
+        return { ...result, threads: await withThreadState(views, readViewer()) }
       },
       participants: {
         add: (threadId, users) =>

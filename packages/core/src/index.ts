@@ -985,7 +985,12 @@ export type {
   SaveAgentMemoryRuntimeResult,
 } from "./agents/memory-execution"
 export type { AgentThreadParticipantInput } from "./agents/participants"
-export type { AgentThreadParticipant, AgentThreadView } from "./agents/thread-access"
+export type {
+  AgentThreadLastRunView,
+  AgentThreadParticipant,
+  AgentThreadReadView,
+  AgentThreadView,
+} from "./agents/thread-access"
 export type { ArtifactAccess } from "./artifacts/access"
 export type { ArtifactCommentInput } from "./artifacts/comments"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
