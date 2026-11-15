@@ -306,7 +306,7 @@ describe("SixbServer start", () => {
     await started.promise
 
     const stopping = server.stop({ timeoutMs: 5_000 })
-    expect(await wsClosed).toBe(1001)
+    expect(await wsClosed).toBe(1012)
 
     release.resolve()
     const response = await inFlight

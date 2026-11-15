@@ -222,6 +222,10 @@ export class LiveArtifact {
   connected(): void {
     if (this.state.left) return
     this.joined = false
+    const others = [...this.awareness.getStates().keys()].filter(
+      (client) => client !== this.doc.clientID
+    )
+    awarenessProtocol.removeAwarenessStates(this.awareness, others, FROM_SERVER)
     this.send({ type: "join", artifactId: this.artifactId })
     this.update({ connection: "online" })
   }
@@ -515,6 +519,7 @@ function openLiveSocket(handlers: Parameters<LiveSocketFactory>[0]): ArtifactLiv
     onMessage: handlers.onMessage,
     onStateChange: (state) => {
       if (state.connected || !connected) return
+      if (!state.reconnecting && !state.error) return
       connected = false
       handlers.onClosed()
     },

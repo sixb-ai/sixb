@@ -142,6 +142,26 @@ describe("the live artifacts socket", () => {
     jest.advanceTimersByTime(500)
     expect(FakeWebSocket.instances).toHaveLength(4)
   })
+
+  test("hands off within 150ms without reporting reconnecting on 1012 Service Restart", () => {
+    const connected: number[] = []
+    const reconnectingStates: boolean[] = []
+    socket = createArtifactLiveSocket({
+      onConnected: () => connected.push(FakeWebSocket.instances.length),
+      onMessage: () => {},
+      onStateChange: (state) => reconnectingStates.push(state.reconnecting),
+    })
+    latest().accept()
+
+    const close = latest().onclose as ((event: { code: number }) => void) | null
+    close?.({ code: 1012 })
+    jest.advanceTimersByTime(150)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    latest().accept()
+    expect(connected).toEqual([1, 2])
+    expect(reconnectingStates.some(Boolean)).toBe(false)
+  })
 })
 
 /** The packages a module's runtime imports reach, following the repo's own files. */
