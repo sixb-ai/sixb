@@ -63,6 +63,9 @@ export async function runnerContext(
   return {
     ...run.context,
     sandboxes: context.sandboxes,
+    ...(context.sandboxConnectionTokens === undefined
+      ? {}
+      : { sandboxConnectionTokens: context.sandboxConnectionTokens }),
     sixb: bindDurableAgentExecution(host, {
       execution: run.execution,
       runId: run.session.run.id,

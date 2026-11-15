@@ -1,13 +1,19 @@
 import type { AgentWorkspacePromptContext } from "@sixb/agent"
 import type {
+  AuthorizablePrincipal,
+  ConnectorConnectionSelector,
+  ConnectorTokenSource,
   Sandbox,
+  SandboxConnectionTokenResolver,
   SandboxEnvironment,
   SandboxFactory,
+  SandboxOAuthConnector,
   SandboxRequestCredential,
   SandboxSessionOptions,
   SandboxSourceAuth,
 } from "@sixb/core"
 import { sandboxCredentialIssue } from "@sixb/core/internal/agents"
+import type { SandboxConnectionTokenAccess } from "@sixb/core/internal/connector-connections"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import { WorkspaceAuthSession, type WorkspaceGrant } from "./workspace-auth"
@@ -17,6 +23,8 @@ interface WorkspaceAccessInput {
   readonly recipe: SandboxEnvironment
   /** The factory's source authentication, when it declares one. */
   readonly auth?: SandboxSourceAuth
+  readonly requestedBy?: AuthorizablePrincipal
+  readonly sandboxConnectionTokens?: SandboxConnectionTokenAccess
   readonly factory: Pick<SandboxFactory, "supportsRequestCredentials">
   readonly apiOrigin: string
   /** The run's credential for the Sixb API, added outside the guest. */
@@ -65,7 +73,16 @@ export class WorkspaceAccess {
    * come from `SixbHost`, and `resolve` returns recipes startup never saw.
    */
   async authorize(): Promise<void> {
-    const { recipe, auth, factory, signal, assertOwner, onAuthFailure } = this.input
+    const {
+      recipe,
+      auth,
+      requestedBy,
+      sandboxConnectionTokens,
+      factory,
+      signal,
+      assertOwner,
+      onAuthFailure,
+    } = this.input
     const issue = sandboxCredentialIssue({
       supportsRequestCredentials: factory.supportsRequestCredentials,
       auth,
@@ -74,9 +91,15 @@ export class WorkspaceAccess {
     if (issue) throw createSixbError("agent.execution_failed", `[SixbAgentWorker] ${issue}`)
     if (!recipe.source || !auth) return
 
+    const connectionToken = sandboxConnectionTokens
+      ? createSessionConnectionTokenResolver(sandboxConnectionTokens, requestedBy)
+      : undefined
+
     this.auth = new WorkspaceAuthSession({
       auth,
       source: recipe.source,
+      ...(requestedBy === undefined ? {} : { requestedBy }),
+      ...(connectionToken === undefined ? {} : { connectionToken }),
       alongside: [this.input.apiCredential],
       signal,
       assertOwner,
@@ -150,5 +173,35 @@ export class WorkspaceAccess {
       this.sourceUrl?.origin,
       this.credentialOrigins
     )
+  }
+}
+
+function createSessionConnectionTokenResolver(
+  access: SandboxConnectionTokenAccess,
+  requestedBy: AuthorizablePrincipal | undefined
+): SandboxConnectionTokenResolver {
+  const sources = new WeakMap<SandboxOAuthConnector, Map<string, ConnectorTokenSource>>()
+
+  return async (connector: SandboxOAuthConnector, selector: ConnectorConnectionSelector) => {
+    let bySelector = sources.get(connector)
+    if (!bySelector) {
+      bySelector = new Map()
+      sources.set(connector, bySelector)
+    }
+    const key = JSON.stringify([
+      selector.owner?.type,
+      selector.owner?.type === "user" ? selector.owner.id : "",
+      selector.slot,
+    ])
+    let source = bySelector.get(key)
+    if (!source) {
+      source = access({
+        connector,
+        selector,
+        ...(requestedBy === undefined ? {} : { requestedBy }),
+      })
+      bySelector.set(key, source)
+    }
+    return source.get()
   }
 }

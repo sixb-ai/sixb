@@ -1,5 +1,5 @@
 import type { GitHubHttpContext } from "../http"
-import { readContent } from "../http"
+import { githubWebHost, readContent } from "../http"
 import type {
   GitHubAttachment,
   GitHubAttachmentSource,
@@ -171,15 +171,3 @@ function fileName(segment: string): string {
   }
 }
 
-/**
- * The web host serving attachments for the configured API: github.com for api.github.com,
- * `<name>.ghe.com` for GitHub Enterprise Cloud's `api.<name>.ghe.com`, and an Enterprise Server's
- * own host, port included.
- */
-function githubWebHost(apiBaseUrl: URL): string {
-  if (apiBaseUrl.host === "api.github.com") return GITHUB_COM
-  if (apiBaseUrl.hostname.startsWith("api.") && apiBaseUrl.hostname.endsWith(".ghe.com")) {
-    return apiBaseUrl.host.slice("api.".length)
-  }
-  return apiBaseUrl.host
-}

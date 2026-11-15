@@ -1,5 +1,19 @@
+export type {
+  ConnectorAccessToken,
+  ConnectorConnectionOwner,
+  ConnectorConnectionSelector,
+  ProjectConnectorConnectionOwner,
+  UserConnectorConnectionOwner,
+} from "../connectors/types"
+export type { AuthorizablePrincipal } from "../execution/types"
 export type { InferParams, ParamsConfig } from "../shared/params/types"
-export type { SandboxSourceAuth, SandboxSourceCredentials } from "./auth"
+export type {
+  SandboxConnectionTokenResolver,
+  SandboxOAuthConnector,
+  SandboxSourceAuth,
+  SandboxSourceAuthInput,
+  SandboxSourceCredentials,
+} from "./auth"
 export { sandboxConfig } from "./config"
 export type {
   SandboxConfig,

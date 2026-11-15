@@ -1,4 +1,4 @@
-export type { GitHubConnector } from "./github"
+export type { GitHubConnector, GitHubOAuthConnector } from "./github"
 export { github } from "./github"
 export { GitHubApiError } from "./http"
 export type * from "./types/index"

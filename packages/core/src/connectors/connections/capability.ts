@@ -1,8 +1,22 @@
+import type { AuthorizablePrincipal } from "../../execution/types"
+import type { SandboxOAuthConnector } from "../../sandboxes/auth"
+import type { ConnectorConnectionSelector, ConnectorTokenSource } from "../types"
 import type { ConnectorConnectionCallbackProcess } from "./contracts"
 import type { ConnectorConnectionsRuntime } from "./execution"
 
+export interface SandboxConnectionTokenAccessInput {
+  readonly connector: SandboxOAuthConnector
+  readonly selector: ConnectorConnectionSelector
+  readonly requestedBy?: AuthorizablePrincipal
+}
+
+export type SandboxConnectionTokenAccess = (
+  input: SandboxConnectionTokenAccessInput
+) => ConnectorTokenSource
+
 const connectorConnectionsRuntimeKey: unique symbol = Symbol("sixb.connectorConnectionsRuntime")
 const connectorConnectionCallbackKey: unique symbol = Symbol("sixb.connectorConnectionCallback")
+const sandboxConnectionTokenAccessKey: unique symbol = Symbol("sixb.sandboxConnectionTokenAccess")
 
 interface ConnectorConnectionsRuntimeOwner {
   readonly [connectorConnectionsRuntimeKey]?: ConnectorConnectionsRuntime
@@ -10,6 +24,10 @@ interface ConnectorConnectionsRuntimeOwner {
 
 interface ConnectorConnectionCallbackOwner {
   readonly [connectorConnectionCallbackKey]?: ConnectorConnectionCallbackProcess
+}
+
+interface SandboxConnectionTokenAccessOwner {
+  readonly [sandboxConnectionTokenAccessKey]?: SandboxConnectionTokenAccess
 }
 
 export function registerConnectorConnectionsRuntime(
@@ -56,4 +74,26 @@ export function getConnectorConnectionCallbackProcess(
   const process = (owner as ConnectorConnectionCallbackOwner)[connectorConnectionCallbackKey]
   if (process) return process
   throw new Error("[Sixb] Connector callback process is not registered for this host.")
+}
+
+export function registerSandboxConnectionTokenAccess(
+  owner: object,
+  access: SandboxConnectionTokenAccess
+): void {
+  const registered = (owner as SandboxConnectionTokenAccessOwner)[sandboxConnectionTokenAccessKey]
+  if (registered && registered !== access) {
+    throw new Error("[Sixb] Sandbox connection token access is already registered for this host.")
+  }
+  Object.defineProperty(owner, sandboxConnectionTokenAccessKey, {
+    configurable: false,
+    enumerable: false,
+    value: access,
+    writable: false,
+  })
+}
+
+export function getSandboxConnectionTokenAccess(
+  owner: object
+): SandboxConnectionTokenAccess | undefined {
+  return (owner as SandboxConnectionTokenAccessOwner)[sandboxConnectionTokenAccessKey]
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AuthorizationError, defineConnector, type Sixb, SixbHost } from "../src"
+import { getSandboxConnectionTokenAccess } from "../src/connectors/connections/internal"
 import { ConnectorService } from "../src/connectors/service"
 import type { AuthorizablePrincipal, TrustedPrimitiveRef } from "../src/execution"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
@@ -350,6 +351,9 @@ describe("personal connections in actions and workflows", () => {
     let runs = 0
 
     return {
+      host,
+      harness,
+      storage: dependencies.storage,
       connector: harness.connector,
       /** An action run on behalf of `requestedBy`, or of no one. */
       async action(requestedBy?: AuthorizablePrincipal) {
@@ -554,5 +558,47 @@ describe("personal connections in actions and workflows", () => {
     expect((error as AggregateError).message).toBe(
       "[Sixb] 1 connector grants of user 'user-a' could not be revoked."
     )
+  })
+
+  test("sandbox connection token access enforces personal ownership, suspension, and revision invalidation", async () => {
+    // Removal proof: skip assertPersonalConnectionRequester in registerSandboxConnectionTokenAccess,
+    // or create a fresh ConnectorTokenSource per get() so invalidate() loses its rejected revision.
+    const { host, harness, storage, connector } = await personalHost()
+    const tokens = getSandboxConnectionTokenAccess(host)!
+
+    for (const requestedBy of [
+      userOwner("user-b"),
+      { type: "serviceAccount", id: "service-a" } as const,
+    ]) {
+      expect(() =>
+        tokens({
+          connector,
+          selector: { owner: userOwner("user-a"), slot: "default" },
+          requestedBy,
+        })
+      ).toThrow(AuthorizationError)
+    }
+
+    const adaSource = tokens({
+      connector,
+      selector: { owner: userOwner("user-a"), slot: "default" },
+      requestedBy: userOwner("user-a"),
+    })
+    const first = await adaSource.get()
+    expect(first.accessToken).toContain("access")
+    const refreshesAfterInitialRead = harness.counts().refreshCount
+
+    first.invalidate()
+    const refreshed = await adaSource.get()
+    expect(harness.counts().refreshCount).toBe(refreshesAfterInitialRead + 1)
+    expect(refreshed.accessToken).not.toBe(first.accessToken)
+
+    await storage.auth.suspendUserAndRevokeSessions({
+      projectId,
+      userId: "user-a",
+      suspendedAt: harness.now(),
+    })
+    const suspended = expectSixbError(await rejectionOf(adaSource.get()), "connector.not_found")
+    expect(suspended.message).toContain("suspended member")
   })
 })

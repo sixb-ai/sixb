@@ -202,6 +202,7 @@ export async function executeWorkflowAgentNode(
         context,
         session,
         run: reserved,
+        ...(requestedBy === undefined ? {} : { requestedBy }),
         ...(node.agentStep.sandbox === undefined ? {} : { stepSandbox: node.agentStep.sandbox }),
       }),
       context: executionContext,

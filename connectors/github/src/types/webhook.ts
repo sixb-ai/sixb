@@ -2,7 +2,7 @@ import type {
   WebhookEventMap as GitHubWebhookEventMap,
   WebhookEventName as GitHubWebhookEventName,
 } from "@octokit/webhooks-types"
-import type { Logger, Sixb } from "@sixb/core"
+import type { ConnectorConnections, Logger, Sixb } from "@sixb/core"
 import type { GitHubClient } from "./client"
 
 export type { GitHubWebhookEventMap, GitHubWebhookEventName }
@@ -33,14 +33,14 @@ export type GitHubWebhookEvent<Name extends GitHubWebhookEventName = GitHubWebho
 /**
  * Context passed to `onEvent` for each verified inbound delivery.
  *
- * `sixb` is the live runtime — use it to upsert objects, append telemetry, or
- * request actions. `client()` lazily resolves the GitHub client so the handler
- * can call back (e.g. comment on or update the issue) only when it needs to.
+ * `sixb` is the live runtime; `client()` lazily resolves a static connector's GitHub client,
+ * and `connections` resolves connected OAuth accounts by GitHub user ID.
  */
 export interface GitHubEventContext<Name extends GitHubWebhookEventName = GitHubWebhookEventName> {
   readonly event: GitHubWebhookEvent<Name>
   readonly sixb: Sixb
   readonly logger: Logger
+  readonly connections: ConnectorConnections<GitHubClient>
   client(): Promise<GitHubClient>
 }
 

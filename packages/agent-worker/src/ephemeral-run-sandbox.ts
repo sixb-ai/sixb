@@ -1,5 +1,6 @@
 import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "@sixb/agent"
 import type {
+  AuthorizablePrincipal,
   Sandbox,
   SandboxEnvironment,
   SandboxFactory,
@@ -30,7 +31,7 @@ interface BlankRunSandboxInput {
 
 interface WorkspaceRunSandboxInput {
   /** The run's context: the workspace reaches its Sixb API. */
-  readonly context: Pick<AgentRunnerContext, "apiBaseUrl">
+  readonly context: Pick<AgentRunnerContext, "apiBaseUrl" | "sandboxConnectionTokens">
   /**
    * Cancels creation, with its clone and setup, and stops credential renewal. As for a blank
    * sandbox, it must never fire because the run completed.
@@ -48,6 +49,7 @@ interface EphemeralWorkspaceInput {
   readonly recipe: SandboxEnvironment
   /** The factory's source authentication: it issues the source's credentials host-side. */
   readonly auth?: SandboxSourceAuth
+  readonly requestedBy?: AuthorizablePrincipal
   /** Fences each provider action on the run's ownership. */
   readonly assertOwner: () => Promise<void>
   /** The source credentials were lost: the run must stop. */
@@ -108,6 +110,10 @@ class EphemeralWorkspace implements RunSandbox {
     this.access = new WorkspaceAccess({
       recipe: workspace.recipe,
       auth: workspace.auth,
+      ...(workspace.requestedBy === undefined ? {} : { requestedBy: workspace.requestedBy }),
+      ...(input.context.sandboxConnectionTokens === undefined
+        ? {}
+        : { sandboxConnectionTokens: input.context.sandboxConnectionTokens }),
       factory: workspace.factory,
       apiOrigin,
       apiCredential,

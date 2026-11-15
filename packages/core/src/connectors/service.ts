@@ -1,3 +1,4 @@
+import type { SandboxOAuthConnector } from "../sandboxes/auth"
 import type { ConnectorConnectionRecord } from "../storage"
 import type { ConnectorConnectionProcess } from "./connections/contracts"
 import {
@@ -10,6 +11,7 @@ import type {
   ConnectorClient,
   ConnectorConnectionSelector,
   ConnectorDefinition,
+  ConnectorTokenSource,
   OAuthConnectorAdapter,
 } from "./types"
 import { isOAuthConnectorDefinition } from "./types"
@@ -75,6 +77,20 @@ export class ConnectorService {
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>> {
     return this.requireConnections().connectConnection(definition, selector)
+  }
+
+  createConnectionTokenSource(
+    connector: SandboxOAuthConnector,
+    selector: ConnectorConnectionSelector
+  ): ConnectorTokenSource {
+    const definition = connector as unknown as ConnectorDefinition
+    if (!isOAuthConnectorDefinition(definition)) {
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        `[Sixb] Connector '${connector.id}' does not use persistent OAuth connections.`
+      )
+    }
+    return this.requireConnections().createConnectionTokenSource(definition, selector)
   }
 
   listExecutionConnections<TAdapter extends OAuthConnectorAdapter>(

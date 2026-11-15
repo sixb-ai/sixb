@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import type { SandboxRequestCredential, SandboxSourceCredentials } from "@sixb/core"
+import type {
+  SandboxOAuthConnector,
+  SandboxRequestCredential,
+  SandboxSourceAuthInput,
+  SandboxSourceCredentials,
+} from "@sixb/core"
+import { WorkspaceAccess } from "../src/workspace-access"
 import { WorkspaceAuthSession } from "../src/workspace-auth"
 
 function grant(token: string, lifetime = 3_600_000) {
@@ -313,3 +319,101 @@ function causes(error: unknown): unknown[] {
 
   return chain
 }
+
+
+describe("workspace access OAuth token forwarding", () => {
+  test("forwards requestedBy and reuses one token source across invalidation and renewal", async () => {
+    // Regression proof: instantiate a new ConnectorTokenSource on every connectionToken() call in
+    // WorkspaceAccess; token.invalidate() does not advance the revision on the next read.
+    jest.useFakeTimers()
+    const connector: SandboxOAuthConnector = {
+      kind: "connector",
+      id: "github",
+      adapter: { authentication: { type: "oauth2" } },
+    }
+    let sourceCreations = 0
+    let revision = 0
+    let rejected = -1
+    const seenInputs: Pick<SandboxSourceAuthInput, "requestedBy">[] = []
+    let renewed!: () => void
+    const renewal = new Promise<void>((resolve) => {
+      renewed = resolve
+    })
+    let calls = 0
+
+    const access = new WorkspaceAccess({
+      recipe: {
+        source: { type: "git", url: "https://github.com/acme/repo.git", access: "write" },
+      },
+      requestedBy: { type: "user", id: "usr_ada" },
+      sandboxConnectionTokens: ({ requestedBy, selector }) => {
+        sourceCreations++
+        expect(requestedBy).toEqual({ type: "user", id: "usr_ada" })
+        expect(selector).toEqual({ owner: { type: "user", id: "usr_ada" }, slot: "default" })
+        return {
+          async get() {
+            if (rejected >= revision) revision++
+            else if (revision === 0) revision = 1
+            const currentRevision = revision
+            return {
+              accessToken: `ghu_rev_${currentRevision}`,
+              invalidate() {
+                rejected = Math.max(rejected, currentRevision)
+              },
+            }
+          },
+        }
+      },
+      auth: {
+        async authorize(input) {
+          seenInputs.push({ requestedBy: input.requestedBy })
+          let token = await input.connectionToken!(connector, {
+            owner: { type: "user", id: "usr_ada" },
+            slot: "default",
+          })
+          if (++calls === 1) {
+            token.invalidate()
+            token = await input.connectionToken!(connector, {
+              owner: { type: "user", id: "usr_ada" },
+              slot: "default",
+            })
+          }
+          const issued = grant(token.accessToken, calls === 1 ? 61_000 : 3_600_000)
+          if (calls === 2) renewed()
+          return issued.value
+        },
+      },
+      factory: { supportsRequestCredentials: true },
+      apiOrigin: "https://api.sixb.test",
+      apiCredential: {
+        origin: "https://api.sixb.test",
+        path: { prefix: "/" },
+        method: ["GET"],
+        headers: { Authorization: "Bearer run" },
+      },
+      signal: new AbortController().signal,
+      assertOwner: async () => {},
+      onAuthFailure: () => {},
+    })
+
+    try {
+      await access.authorize()
+      expect(access.requestCredentials[1]?.headers.Authorization).toBe("ghu_rev_2")
+      const updates: (readonly SandboxRequestCredential[])[] = []
+      access.attach({
+        setRequestCredentials: async (value) => {
+          updates.push(value)
+        },
+      })
+      jest.advanceTimersByTime(1_000)
+      await renewal
+      expect(sourceCreations).toBe(1)
+      expect(seenInputs).toEqual([
+        { requestedBy: { type: "user", id: "usr_ada" } },
+        { requestedBy: { type: "user", id: "usr_ada" } },
+      ])
+    } finally {
+      await access.close()
+    }
+  })
+})

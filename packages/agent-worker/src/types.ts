@@ -11,6 +11,7 @@ import type {
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { StreamSink } from "@sixb/core/internal/agents"
+import type { SandboxConnectionTokenAccess } from "@sixb/core/internal/connector-connections"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import type {
@@ -60,6 +61,7 @@ export interface AgentWorkerHost extends AgentExecutionHost {
 export interface AgentWorkerContext extends AgentRunSettings {
   readonly storage: AgentWorkerStorage
   readonly sandboxes: SandboxFactory
+  readonly sandboxConnectionTokens?: SandboxConnectionTokenAccess
   readonly streamSink: StreamSink
   /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
   readonly recoverAiModelCall: RecoverAiModelCall
@@ -101,4 +103,4 @@ export interface AgentWorkerOptions {
  * neither.
  */
 export type AgentRunnerContext = AgentExecutionContext &
-  Pick<AgentWorkerContext, "sandboxes"> & { readonly sixb: Sixb }
+  Pick<AgentWorkerContext, "sandboxes" | "sandboxConnectionTokens"> & { readonly sixb: Sixb }
