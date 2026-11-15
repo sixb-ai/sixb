@@ -327,7 +327,8 @@ function api(scenario: Scenario, requests: string[]) {
       return Response.json({ items: scenario.inbox ?? [] })
     }
     if (url.pathname.startsWith("/api/agent-threads/thr_1/inbox/")) {
-      const refusal = scenario.inboxRefusal ?? { status: 404, code: "invalid_message" }
+      const refusal = scenario.inboxRefusal
+      if (!refusal) return Response.json({ item: scenario.inbox?.[0] })
       return Response.json(
         { error: "[Sixb] refused", code: refusal.code },
         { status: refusal.status }
@@ -1154,8 +1155,29 @@ describe("who acts on a turn", () => {
     })
 
     expect(await view.findByRole("button", { name: "Withdraw this message" })).toBeDefined()
-    expect(view.queryByRole("button", { name: "Steer this turn" })).toBeNull()
-    expect(view.queryByRole("button", { name: "Send now" })).toBeNull()
+    expect(view.queryByRole("button", { name: "Add to this answer" })).toBeNull()
+    expect(view.queryByRole("button", { name: "Stop this answer and send now" })).toBeNull()
+  })
+
+  // Removal proof: drop the queue action from PendingMessage; a steer cannot be put off until the
+  // answer ends, and by touch, where nothing hovers, the menu offers nothing but icons' meanings.
+  test("by touch, a waiting message's menu names where it goes and moves it after the answer", async () => {
+    const { view, requests } = renderChat("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "steer" })],
+    })
+
+    const menu = await view.findByRole("button", { name: "Change this message" })
+    fireEvent.pointerDown(menu, { button: 0, ctrlKey: false })
+    const sheet = within(await view.findByRole("menu"))
+    expect(sheet.getByText("Adds to this answer")).toBeDefined()
+    fireEvent.click(sheet.getByRole("menuitem", { name: "Send once this answer ends" }))
+
+    const body = await posted(requests, "PATCH /api/agent-threads/thr_1/inbox/inb_1")
+    expect(body).toEqual({ delivery: "queue" })
   })
 
   // Removal proof: drop `onError` from the tray's mutations; the click changes nothing and the tray
@@ -1170,7 +1192,7 @@ describe("who acts on a turn", () => {
       inboxRefusal: { status: 403, code: "not_run_requester" },
     })
 
-    fireEvent.click(await view.findByRole("button", { name: "Send now" }))
+    fireEvent.click(await view.findByRole("button", { name: "Stop this answer and send now" }))
 
     expect((await view.findByRole("alert")).textContent).toBe(
       "Only the person who asked for this answer can change or stop it. Yours goes after it."

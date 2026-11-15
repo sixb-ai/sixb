@@ -506,11 +506,17 @@ export function Composer({
     }
   }, [])
 
+  // While a turn runs, a message goes somewhere: the send button does what Enter does. A file
+  // never goes into the answer in flight, which reads text at its next step: it goes after it.
+  const deliveryOf = (delivery: AgentMessageDelivery): AgentMessageDelivery => {
+    if (!running) return "auto"
+    const where = delivery === "auto" ? (steerable ? "steer" : "queue") : delivery
+    return where === "steer" && readyAttachments.length > 0 ? "queue" : where
+  }
+
   const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
-    // While a turn runs, a message goes somewhere: the send button does what Enter does.
-    const where = running && delivery === "auto" ? (steerable ? "steer" : "queue") : delivery
-    onSend(value.trim(), readyAttachments, contextEntries, running ? where : "auto")
+    onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
     setValue("")
     voice.reset()
     setAttachments([])
@@ -1106,6 +1112,14 @@ export function Composer({
                     onClick={() => submit()}
                     disabled={!canSend}
                     aria-label={messages.send}
+                    // While an answer runs, where the message goes.
+                    title={
+                      running
+                        ? deliveryOf("auto") === "steer"
+                          ? messages.steer
+                          : messages.queue
+                        : undefined
+                    }
                     className={SEND_BUTTON_CLASS_NAME}
                   >
                     {pending || uploading ? (

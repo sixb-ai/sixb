@@ -5,9 +5,24 @@ import {
   updateAgentThreadInboxItemMutation,
   withdrawAgentThreadInboxItemMutation,
 } from "@sixb/client/hooks"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CornerDownRight, ListEnd, Send, X } from "lucide-react"
+import {
+  CornerDownRight,
+  Ellipsis,
+  ListEnd,
+  type LucideIcon,
+  Paperclip,
+  Send,
+  X,
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
 import { useAgentMessages } from "../i18n"
@@ -128,12 +143,9 @@ export function PendingMessages({
                 steerable={steerable}
                 labels={labels}
                 busy={promote.isPending || withdraw.isPending}
-                onSteer={() =>
+                onMove={(delivery) =>
                   threadId !== null &&
-                  promote.mutate({
-                    path: { threadId, itemId: item.id },
-                    body: { delivery: "steer" },
-                  })
+                  promote.mutate({ path: { threadId, itemId: item.id }, body: { delivery } })
                 }
                 onSendNow={() =>
                   threadId !== null &&
@@ -178,7 +190,7 @@ function PendingMessage({
   steerable: turnSteerable,
   labels,
   busy,
-  onSteer,
+  onMove,
   onSendNow,
   onWithdraw,
 }: {
@@ -191,7 +203,8 @@ function PendingMessage({
   readonly steerable: boolean
   readonly labels: ReturnType<typeof useAgentMessages>["composer"]
   readonly busy: boolean
-  readonly onSteer: () => void
+  /** Into the answer in flight, or after it. */
+  readonly onMove: (delivery: "steer" | "queue") => void
   readonly onSendNow: () => void
   readonly onWithdraw: () => void
 }) {
@@ -199,12 +212,7 @@ function PendingMessage({
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join(" ")
     .trim()
-  // A steer is read mid-turn, which prepares no file: one that carries a file stays queued.
-  const steerable =
-    turnSteerable &&
-    item.mode === "queue" &&
-    item.immediate !== true &&
-    !item.parts.some((part) => part.type === "file")
+  const files = item.parts.flatMap((part) => (part.type === "file" ? [part.fileRef] : []))
   const status =
     item.immediate === true
       ? labels.sendNowPending
@@ -213,6 +221,21 @@ function PendingMessage({
         : labels.queuePending
   const Status = item.immediate === true ? Send : item.mode === "steer" ? CornerDownRight : ListEnd
   const opened = useOpened(true)
+
+  // What can still be done with it. A steer is read mid-turn, which prepares no file: one that
+  // carries a file stays queued. Only whoever asked for the answer in flight steers it or stops it
+  // to send now; anyone takes their own message back.
+  const actions: PendingAction[] = []
+  if (turnSteerable && item.immediate !== true) {
+    if (item.mode === "queue" && files.length === 0) {
+      actions.push({ label: labels.steer, Icon: CornerDownRight, run: () => onMove("steer") })
+    }
+    if (item.mode === "steer") {
+      actions.push({ label: labels.queue, Icon: ListEnd, run: () => onMove("queue") })
+    }
+    actions.push({ label: labels.sendNow, Icon: Send, run: onSendNow })
+  }
+  actions.push({ label: labels.withdraw, Icon: X, run: onWithdraw })
 
   // The chat draws again with every chunk of the answer: the fold's end is not put off by it.
   const left = useRef(onLeft)
@@ -236,62 +259,76 @@ function PendingMessage({
       aria-hidden={leaving || undefined}
     >
       <div className="min-h-0 overflow-hidden">
-        {/* One quiet line: where it goes, what it says, and, on hover, what can still be done with it. */}
+        {/* One quiet line: where it goes, what it says, and what can still be done with it. */}
         <div
           title={status}
-          className="group flex h-9 items-center gap-2.5 rounded-xl pr-1 pl-3 text-[14px] tracking-[-0.006em] transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          className="group flex h-9 items-center gap-2.5 rounded-xl pr-1 pl-3 text-[14px] tracking-[-0.006em] transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04] [@media(hover:none)]:h-11"
         >
           <Status aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="sr-only">{status}: </span>
+          {files.length > 0 ? (
+            <Paperclip aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : null}
           <p
             className="min-w-0 flex-1 truncate text-foreground/75"
             {...{ [TRAY_MESSAGE_ATTRIBUTE]: trayMessageKey(item.messageId) }}
           >
-            {text || labels.waitingFile}
+            {text || files.map((file) => file.fileName ?? labels.waitingFile).join(", ")}
           </p>
           {mine ? (
-            <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
-              {steerable ? (
-                <button
-                  type="button"
-                  onClick={onSteer}
-                  disabled={busy}
-                  title={labels.steer}
-                  aria-label={labels.steer}
-                  className={ACTION_CLASS}
-                >
-                  <CornerDownRight className="size-3.5" />
-                </button>
-              ) : null}
-              {/* Sending now stops the answer in flight: only whoever asked for it may. */}
-              {turnSteerable ? (
-                <button
-                  type="button"
-                  onClick={onSendNow}
-                  disabled={busy}
-                  title={labels.sendNow}
-                  aria-label={labels.sendNow}
-                  className={ACTION_CLASS}
-                >
-                  <Send className="size-3.5" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={onWithdraw}
-                disabled={busy}
-                title={labels.withdraw}
-                aria-label={labels.withdraw}
-                className={ACTION_CLASS}
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
+            <>
+              {/* With a pointer: each action as an icon, named on hover. */}
+              <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:none)]:hidden">
+                {actions.map(({ label, Icon, run }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={run}
+                    disabled={busy}
+                    title={label}
+                    aria-label={label}
+                    className={ACTION_CLASS}
+                  >
+                    <Icon className="size-3.5" />
+                  </button>
+                ))}
+              </div>
+              {/* By touch, where nothing hovers: one button, and the actions named in a menu. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={labels.messageActions}
+                    className={cn(ACTION_CLASS, "size-9 [@media(hover:hover)]:hidden")}
+                  >
+                    <Ellipsis className="size-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-56">
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    {status}
+                  </DropdownMenuLabel>
+                  {actions.map(({ label, Icon, run }) => (
+                    <DropdownMenuItem key={label} onSelect={run} className="gap-2.5 py-2.5">
+                      <Icon className="size-4 text-muted-foreground" />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           ) : null}
         </div>
       </div>
     </div>
   )
+}
+
+interface PendingAction {
+  readonly label: string
+  readonly Icon: LucideIcon
+  readonly run: () => void
 }
 
 const ACTION_CLASS = cn(
