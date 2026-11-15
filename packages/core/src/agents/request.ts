@@ -54,11 +54,17 @@ import {
   resolveAgentApprovalMode,
   turnResumeReadiness,
 } from "./approvals"
+import { cancelAgentRun } from "./cancel"
 import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
-import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import {
+  createAgentInboxItemId,
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentThreadId,
+} from "./ids"
 import type { AgentMessagePart } from "./message"
 import type { TurnModelRouter } from "./model-routing"
 import { assertNoAgentSelector } from "./retired-config"
@@ -407,6 +413,304 @@ export async function retryAgentRun(
 export type AgentTurnResume =
   | { readonly status: "resumed"; readonly run: ConversationAgentRunRecord }
   | { readonly status: Exclude<AgentTurnReadiness, "ready"> }
+
+/** How a message sent to a thread is delivered while a turn runs. */
+export const AGENT_MESSAGE_DELIVERIES = ["auto", "steer", "queue", "send_now"] as const
+export type AgentMessageDelivery = (typeof AGENT_MESSAGE_DELIVERIES)[number]
+
+export interface SendAgentMessageInput
+  extends Omit<RequestAgentRunInput, "principal" | "continue"> {
+  readonly threadId: string
+  /**
+   * `auto` (the default) starts a turn, and refuses while another one runs. `steer` reaches the
+   * running turn at its next step. `queue` starts a turn once the running one ends. `send_now` stops
+   * the running turn and starts this message after it.
+   */
+  readonly delivery?: AgentMessageDelivery
+}
+
+/** What a message became: the turn it started, or the inbox item that waits for one. */
+export type SendAgentMessageResult =
+  | {
+      readonly kind: "turn"
+      readonly run: ConversationAgentRunRecord
+      readonly createdThread: boolean
+    }
+  | { readonly kind: "inbox"; readonly item: AgentInboxItemRecord }
+
+/**
+ * Send a message to a conversation, delivered as asked.
+ *
+ * A steer or a send-now reaches only the turn its requester asked for: it runs as them. Any reader
+ * may queue a message, which starts when they have a turn of their own.
+ */
+export async function sendAgentMessage(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  models: AgentRequestModels,
+  input: SendAgentMessageInput
+): Promise<SendAgentMessageResult> {
+  const delivery = input.delivery ?? "auto"
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+
+  const startTurn = async (): Promise<SendAgentMessageResult> => {
+    const { delivery: _delivery, ...request } = input
+    const result = await requestAgentRun(runtime, execution, models, request)
+    return { kind: "turn", run: result.run, createdThread: result.createdThread }
+  }
+
+  // Nothing runs, so there is nothing to steer or wait behind.
+  const activeId = thread.activeRunId
+  if (delivery === "auto" || activeId === null) return startTurn()
+
+  const active = await agents.runs.getById({ projectId, id: activeId })
+  const requester = active
+    ? (await runtime.storage.executions.getById({ projectId, id: active.executionId }))?.requestedBy
+    : undefined
+  const principal = messageAuthor(runtime, execution)
+  const requesterOfTurn = requester !== undefined && principalsEqual(requester, principal)
+
+  if (!requesterOfTurn && delivery !== "queue") {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they can steer it or send now. Queue the message for your own turn.`
+    )
+  }
+
+  const settings = requesterSettings(input)
+  const contextParts = await resolveAgentContextParts(runtime, input.context)
+  const trigger = deliveredParts(input, delivery)
+  const spec = {
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
+  }
+  const { item } = await agents.inbox.enqueue({
+    id: createAgentInboxItemId(),
+    projectId,
+    threadId: thread.id,
+    messageId: input.messageId ?? createAgentMessageId(),
+    authorPrincipal: principal,
+    mode: delivery === "steer" ? "steer" : "queue",
+    parts: [...contextParts, ...trigger],
+    ...(Object.keys(spec).length === 0 ? {} : { spec }),
+    ...settings,
+    ...(delivery === "send_now" ? { immediate: true } : {}),
+  })
+
+  if (delivery !== "send_now") return { kind: "inbox", item }
+  await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+  return { kind: "inbox", item }
+}
+
+/** What a message the caller sent may become once it waits in a thread's inbox. */
+export interface PromoteAgentInboxItemInput {
+  readonly threadId: string
+  readonly itemId: string
+  /** Edit what it says; its context and files stay as they are. */
+  readonly text?: string
+  readonly model?: LanguageModelRef
+  readonly reasoning?: AgentReasoning
+  readonly approvalMode?: AgentApprovalMode
+  /** Steer the running turn with it, or keep it for the next turn. */
+  readonly delivery?: "steer" | "queue"
+  /** Stop the turn it waits behind, and start it now. */
+  readonly immediate?: boolean
+}
+
+/**
+ * Change a message waiting in a thread's inbox, before a turn reads it: what it says, the model it
+ * asks for, where it goes, or that it goes now.
+ *
+ * Only the person who sent it may change it, and a message that steers or goes now reaches only the
+ * turn its own requester asked for.
+ */
+export async function promoteAgentInboxItem(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: PromoteAgentInboxItemInput
+): Promise<AgentInboxItemRecord> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+
+  const item = await agents.inbox.getById({ projectId, id: input.itemId })
+  if (!item || item.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${input.itemId}' is not waiting in thread '${thread.id}'.`
+    )
+  }
+  const principal = messageAuthor(runtime, execution)
+  if (!principalsEqual(item.authorPrincipal, principal)) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent inbox item '${item.id}' was sent by someone else: only they can change it.`
+    )
+  }
+
+  const active = thread.activeRunId
+    ? await agents.runs.getById({ projectId, id: thread.activeRunId })
+    : null
+  const delivery = input.delivery ?? item.mode
+  const turn = active?.kind === "conversation" ? active : null
+  if ((delivery === "steer" || input.immediate === true) && turn) {
+    if (!(await askedForTurn(runtime, turn, principal))) {
+      throw new AgentRequestError(
+        "not_run_requester",
+        `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they can steer it or send now. Keep the message queued for your own turn.`
+      )
+    }
+  }
+
+  const spec = {
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
+  }
+  const updated = await agents.inbox.update({
+    projectId,
+    threadId: thread.id,
+    id: item.id,
+    ...(input.delivery === undefined ? {} : { mode: input.delivery }),
+    ...(input.text === undefined
+      ? {}
+      : {
+          parts: [
+            { type: "text" as const, text: input.text },
+            ...item.parts.filter((part) => part.type !== "text"),
+          ],
+        }),
+    ...(Object.keys(spec).length === 0 ? {} : { spec }),
+    ...(input.immediate === true ? { immediate: true } : {}),
+  })
+  if (!updated) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${item.id}' is no longer waiting in thread '${thread.id}'.`
+    )
+  }
+  if (input.immediate === true && turn) {
+    await stopTurnBefore(runtime, execution, turn)
+  }
+  return updated
+}
+
+/**
+ * Take back a message waiting in a thread's inbox, before a turn reads it. Only the person who sent
+ * it may withdraw it.
+ */
+export async function withdrawAgentInboxItem(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: { readonly threadId: string; readonly itemId: string }
+): Promise<void> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+  const item = await agents.inbox.getById({ projectId, id: input.itemId })
+  if (!item || item.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${input.itemId}' is not waiting in thread '${thread.id}'.`
+    )
+  }
+  if (!principalsEqual(item.authorPrincipal, messageAuthor(runtime, execution))) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent inbox item '${item.id}' was sent by someone else: only they can withdraw it.`
+    )
+  }
+  await agents.inbox.remove({ projectId, threadId: thread.id, id: item.id })
+}
+
+/** The person a message this request sends is from. */
+function messageAuthor(runtime: SixbRuntimeContext, execution: ExecutionContext): Principal {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  return authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
+}
+
+/** Whether the person asked for this turn, which alone may steer it or send now. */
+async function askedForTurn(
+  runtime: SixbRuntimeContext,
+  run: ConversationAgentRunRecord,
+  principal: Principal
+): Promise<boolean> {
+  const requester = (
+    await runtime.storage.executions.getById({ projectId: runtime.projectId, id: run.executionId })
+  )?.requestedBy
+  return requester !== undefined && principalsEqual(requester, principal)
+}
+
+/**
+ * Stop the turn a message waits behind, so the message starts now. A turn still running ends first,
+ * and its end starts the message (see afterAgentRunFinished); one that never started has no end to
+ * wait for, so it starts here.
+ */
+async function stopTurnBefore(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  active: ConversationAgentRunRecord
+): Promise<void> {
+  if (active.status === "running") {
+    await cancelAgentRun(runtime, active)
+    return
+  }
+  await cancelAgentRun(runtime, active).catch(() => undefined)
+  await startQueuedAgentTurnFromInbox(runtime, execution, active, { onlyImmediate: true })
+}
+
+/** The parts a message of its own carries: what it says, then the files it brings. */
+function deliveredParts(
+  input: Pick<SendAgentMessageInput, "text" | "attachments">,
+  delivery: AgentMessageDelivery
+): readonly AgentMessagePart[] {
+  if (delivery === "steer" && (input.attachments?.length ?? 0) > 0) {
+    throw new AgentRequestError(
+      "invalid_attachment",
+      "[Sixb] A message that steers a running turn carries no file: queue it for the next turn instead."
+    )
+  }
+  assertAttachments(input.attachments)
+  const text =
+    typeof input.text === "string" && input.text.trim().length > 0
+      ? [{ type: "text" as const, text: input.text }]
+      : []
+  const files = (input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef }))
+  if (text.length === 0 && files.length === 0) {
+    throw new AgentRequestError(
+      "invalid_message",
+      "[Sixb] An Agent message needs text or attachments."
+    )
+  }
+  return [...text, ...files]
+}
 
 /** Where a queued turn started from: the thread moved on, nothing waited, or it started. */
 export type AgentQueuedTurnStart =

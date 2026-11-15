@@ -12,6 +12,7 @@ import type { SecurityDefinitionCatalog } from "../security"
 import type {
   AgentApprovalMode,
   AgentApprovalRecord,
+  AgentInboxItemRecord,
   AgentRunRecord,
   AgentStorage,
   AgentThreadComputer,
@@ -69,12 +70,17 @@ import {
   type AgentQueuedTurnStart,
   assertComputerPlaceRequest,
   dispatchAgentRun,
+  type PromoteAgentInboxItemInput,
+  promoteAgentInboxItem,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
   resumeAgentTurn,
   retryAgentRun,
+  type SendAgentMessageInput,
+  sendAgentMessage,
   startQueuedAgentTurnFromInbox,
+  withdrawAgentInboxItem,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
@@ -276,8 +282,35 @@ export interface ObservedAgentThreadsRuntime {
   getChild(threadId: string): Promise<AgentChildView | null>
 }
 
+/** What a message sent to a thread became: the turn it started, or the inbox item that waits. */
+export type ExecutionAgentSendResult =
+  | ({ readonly kind: "turn" } & ExecutionAgentRunResult)
+  | { readonly kind: "inbox"; readonly item: AgentInboxItemRecord }
+
+/** A message waiting in a thread's inbox, changed before a turn reads it. */
+export type AgentInboxMessageUpdate = Omit<PromoteAgentInboxItemInput, "threadId" | "itemId">
+
+/** The thread's messages that wait for a turn. */
+export interface AgentInboxRuntime {
+  /** Its unclaimed messages, oldest first. */
+  list(threadId: string): Promise<readonly AgentInboxItemRecord[]>
+  /** Edit, promote or send now one the caller sent. */
+  update(
+    threadId: string,
+    itemId: string,
+    input: AgentInboxMessageUpdate
+  ): Promise<AgentInboxItemRecord>
+  /** Take back one the caller sent, before a turn reads it. */
+  remove(threadId: string, itemId: string): Promise<void>
+}
+
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
+  /**
+   * Send a message delivered as asked: it starts a turn, steers the running one, waits for the next,
+   * or stops the running one and starts now.
+   */
+  send(input: SendAgentMessageInput): Promise<ExecutionAgentSendResult>
   /**
    * Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights.
    * A sub-agent's run is never retried: its turn decides whether to spawn it again.
@@ -347,6 +380,7 @@ export type AgentRuntime<TParams extends Record<string, unknown> = Record<string
   get(): AgentDescriptor | null
   readonly threads: AgentThreadsRuntime<TParams>
   readonly runs: AgentRunsRuntime
+  readonly inbox: AgentInboxRuntime
   /** Other users' conversations, read-only, with `can.observe(agent.threads)`. */
   readonly observed: ObservedAgentThreadsRuntime
   readonly memory: AgentMemoryRuntime
@@ -997,7 +1031,58 @@ export function createAgentRuntime<
       getApprovalMode: getThreadApprovalMode,
       setApprovalMode: setThreadApprovalMode,
     },
+    inbox: {
+      list: async (threadId) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        return requireAgents().inbox.list({
+          projectId: runtime.projectId,
+          threadId: thread.id,
+          includeClaimed: false,
+        })
+      },
+      update: async (threadId, itemId, input) => {
+        if (!(await getVisibleThreadRecord(threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        return promoteAgentInboxItem(runtime, execution, { ...input, threadId, itemId })
+      },
+      remove: async (threadId, itemId) => {
+        if (!(await getVisibleThreadRecord(threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        await withdrawAgentInboxItem(runtime, execution, { threadId, itemId })
+      },
+    },
     runs: {
+      send: async (input) => {
+        assertNoAgentSelector(input)
+        if (!getAgent()) {
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+        }
+        assertAuthorized(runtime, { kind: "agent.run" })
+        if (!(await getVisibleThreadRecord(input.threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${input.threadId}' not found.`
+          )
+        }
+        const result = await sendAgentMessage(runtime, execution, turnModels, input)
+        return result.kind === "turn"
+          ? { ...result, run: await attachRunView(runtime, result.run) }
+          : result
+      },
       request: async (input) => {
         assertNoAgentSelector(input)
         const agent = getAgent()

@@ -191,13 +191,21 @@ export { runModelLoop } from "./model-loop"
 export { registerAgentQueuedTurn, startQueuedAgentTurn } from "./queued-turn"
 export { agent } from "./reference"
 export {
+  AGENT_MESSAGE_DELIVERIES,
+  type AgentMessageDelivery,
   type AgentQueuedTurnStart,
   isRetryableAgentRun,
+  type PromoteAgentInboxItemInput,
+  promoteAgentInboxItem,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
   retryAgentRun,
+  type SendAgentMessageInput,
+  type SendAgentMessageResult,
+  sendAgentMessage,
   startQueuedAgentTurnFromInbox,
+  withdrawAgentInboxItem,
 } from "./request"
 export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
 export type {

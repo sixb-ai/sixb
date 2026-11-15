@@ -1,4 +1,4 @@
-import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
+import { AGENT_MESSAGE_DELIVERIES, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { MAX_AGENT_CONTEXT_LABEL_LENGTH } from "@sixb/core/agents/context"
 import { CONTROL_CHARACTER } from "@sixb/core/internal/agent-run-storage-provider"
 import { LANGUAGE_MODEL_TIERS } from "@sixb/core/models"
@@ -48,6 +48,9 @@ export const AgentAuthorizablePrincipalSchema = z.object({
   type: z.enum(["user", "serviceAccount"]),
   id: z.string().min(1),
 })
+
+/** How a message sent to a thread is delivered while a turn runs. */
+export const AgentMessageDeliverySchema = z.enum(AGENT_MESSAGE_DELIVERIES)
 
 export const AgentObjectContextSchema = z.object({
   kind: z.literal("object"),
@@ -502,6 +505,11 @@ export const PostAgentMessageBodySchema = z
     attachments: z.array(FileRefSchema).optional(),
     context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
     messageId: z.string().trim().min(1).optional(),
+    /**
+     * Where the message goes while a turn runs: `auto` starts a turn and refuses while one runs,
+     * `steer` reaches it, `queue` waits for the next, and `send_now` stops it and goes.
+     */
+    delivery: AgentMessageDeliverySchema.optional(),
   })
   .strict()
 
@@ -561,8 +569,66 @@ export const AgentRunSchema = z.object({
   completedAt: z.string().optional(),
 })
 
+/** A message waiting in a thread's inbox: the steer or the queued turn it becomes. */
+export const AgentInboxItemSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  threadId: z.string(),
+  /** The id its message takes once a turn writes it. */
+  messageId: z.string(),
+  seq: z.number(),
+  authorPrincipal: AgentPrincipalSchema,
+  mode: z.enum(["steer", "queue"]),
+  parts: z.array(AgentMessagePartSchema),
+  spec: z
+    .object({
+      model: LanguageModelRefSchema.optional(),
+      reasoning: ModelReasoningSchema.optional(),
+      approvalMode: AgentApprovalModeSchema.optional(),
+    })
+    .optional(),
+  /** The time zone and locale its message was sent in, which its time renders in. */
+  timeZone: z.string().optional(),
+  locale: z.string().optional(),
+  /** Sent now: it starts even when the turn it waited for ended without answering. */
+  immediate: z.boolean().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export const AgentInboxListResponseSchema = z.object({
+  items: z.array(AgentInboxItemSchema),
+})
+
+export const AgentThreadInboxParamsSchema = AgentThreadParamsSchema.extend({
+  itemId: z.string().min(1),
+})
+
+/** What the person who sent a waiting message may change about it. */
+export const UpdateAgentInboxItemBodySchema = z
+  .object({
+    text: z.string().trim().min(1).optional(),
+    model: LanguageModelRefSchema.optional(),
+    reasoning: ModelReasoningSchema.optional(),
+    approvalMode: AgentApprovalModeSchema.optional(),
+    /** Steer the running turn with it, or keep it for the next one. */
+    delivery: z.enum(["steer", "queue"]).optional(),
+    /** Stop the turn it waits behind and start it now. */
+    immediate: z.literal(true).optional(),
+  })
+  .strict()
+
+export const UpdateAgentInboxItemResponseSchema = z.object({
+  item: AgentInboxItemSchema,
+})
+
+/**
+ * What a sent message became: the turn it started, or the inbox item that waits beside the turn
+ * that runs. A message that starts a turn carries `run`, as it always has.
+ */
 export const PostAgentMessageResponseSchema = z.object({
-  run: AgentRunSchema,
+  run: AgentRunSchema.optional(),
+  item: AgentInboxItemSchema.optional(),
 })
 
 export const CancelAgentRunResponseSchema = z.object({

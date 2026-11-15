@@ -381,6 +381,9 @@ import type {
   ListAgentThreadChildrenData,
   ListAgentThreadChildrenErrors,
   ListAgentThreadChildrenResponses,
+  ListAgentThreadInboxData,
+  ListAgentThreadInboxErrors,
+  ListAgentThreadInboxResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -625,6 +628,9 @@ import type {
   UpdateAgentPreferencesData,
   UpdateAgentPreferencesErrors,
   UpdateAgentPreferencesResponses,
+  UpdateAgentThreadInboxItemData,
+  UpdateAgentThreadInboxItemErrors,
+  UpdateAgentThreadInboxItemResponses,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyErrors,
   UpdateAiLimitPolicyResponses,
@@ -643,6 +649,9 @@ import type {
   UploadFileRawData,
   UploadFileRawErrors,
   UploadFileRawResponses,
+  WithdrawAgentThreadInboxItemData,
+  WithdrawAgentThreadInboxItemErrors,
+  WithdrawAgentThreadInboxItemResponses,
 } from "./types.gen"
 
 export type Options<
@@ -3175,6 +3184,67 @@ export const headAgentMessageFileContent = <ThrowOnError extends boolean = false
     ],
     url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
     ...options,
+  })
+
+/**
+ * List agent thread inbox messages
+ */
+export const listAgentThreadInbox = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadInboxData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadInboxResponses,
+    ListAgentThreadInboxErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox",
+    ...options,
+  })
+
+/**
+ * Withdraw a waiting agent thread message
+ */
+export const withdrawAgentThreadInboxItem = <ThrowOnError extends boolean = false>(
+  options: Options<WithdrawAgentThreadInboxItemData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    WithdrawAgentThreadInboxItemResponses,
+    WithdrawAgentThreadInboxItemErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox/{itemId}",
+    ...options,
+  })
+
+/**
+ * Update a waiting agent thread message
+ */
+export const updateAgentThreadInboxItem = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAgentThreadInboxItemData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateAgentThreadInboxItemResponses,
+    UpdateAgentThreadInboxItemErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox/{itemId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

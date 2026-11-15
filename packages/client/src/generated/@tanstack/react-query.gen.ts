@@ -128,6 +128,7 @@ import {
   listAgentMemoryRevisions,
   listAgentThreadApprovals,
   listAgentThreadChildren,
+  listAgentThreadInbox,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -213,12 +214,14 @@ import {
   suspendAuthMember,
   transcribeAudio,
   updateAgentPreferences,
+  updateAgentThreadInboxItem,
   updateAiLimitPolicy,
   updateArtifact,
   updateAuthMemberGroups,
   updateAuthProfile,
   uploadFileContent,
   uploadFileRaw,
+  withdrawAgentThreadInboxItem,
 } from "../sdk.gen"
 import type {
   AbortFileUploadData,
@@ -570,6 +573,9 @@ import type {
   ListAgentThreadChildrenData,
   ListAgentThreadChildrenError,
   ListAgentThreadChildrenResponse,
+  ListAgentThreadInboxData,
+  ListAgentThreadInboxError,
+  ListAgentThreadInboxResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -812,6 +818,9 @@ import type {
   UpdateAgentPreferencesData,
   UpdateAgentPreferencesError,
   UpdateAgentPreferencesResponse,
+  UpdateAgentThreadInboxItemData,
+  UpdateAgentThreadInboxItemError,
+  UpdateAgentThreadInboxItemResponse,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
@@ -830,6 +839,8 @@ import type {
   UploadFileRawData,
   UploadFileRawError,
   UploadFileRawResponse,
+  WithdrawAgentThreadInboxItemData,
+  WithdrawAgentThreadInboxItemError,
 } from "../types.gen"
 
 /**
@@ -4968,6 +4979,85 @@ export const getAgentMessageFileContentOptions = (
     },
     queryKey: getAgentMessageFileContentQueryKey(options),
   })
+
+export const listAgentThreadInboxQueryKey = (options: Options<ListAgentThreadInboxData>) =>
+  createQueryKey("listAgentThreadInbox", options)
+
+/**
+ * List agent thread inbox messages
+ */
+export const listAgentThreadInboxOptions = (options: Options<ListAgentThreadInboxData>) =>
+  queryOptions<
+    ListAgentThreadInboxResponse,
+    ListAgentThreadInboxError,
+    ListAgentThreadInboxResponse,
+    ReturnType<typeof listAgentThreadInboxQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreadInbox({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadInboxQueryKey(options),
+  })
+
+/**
+ * Withdraw a waiting agent thread message
+ */
+export const withdrawAgentThreadInboxItemMutation = (
+  options?: Partial<Options<WithdrawAgentThreadInboxItemData>>
+): UseMutationOptions<
+  unknown,
+  WithdrawAgentThreadInboxItemError,
+  Options<WithdrawAgentThreadInboxItemData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    unknown,
+    WithdrawAgentThreadInboxItemError,
+    Options<WithdrawAgentThreadInboxItemData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await withdrawAgentThreadInboxItem({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Update a waiting agent thread message
+ */
+export const updateAgentThreadInboxItemMutation = (
+  options?: Partial<Options<UpdateAgentThreadInboxItemData>>
+): UseMutationOptions<
+  UpdateAgentThreadInboxItemResponse,
+  UpdateAgentThreadInboxItemError,
+  Options<UpdateAgentThreadInboxItemData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAgentThreadInboxItemResponse,
+    UpdateAgentThreadInboxItemError,
+    Options<UpdateAgentThreadInboxItemData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAgentThreadInboxItem({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 /**
  * Cancel an agent thread's active run
