@@ -403,7 +403,7 @@ describe("workspace access OAuth token forwarding", () => {
         setRequestCredentials: async (value) => {
           updates.push(value)
         },
-      })
+      } as unknown as Parameters<typeof access.attach>[0])
       jest.advanceTimersByTime(1_000)
       await renewal
       expect(sourceCreations).toBe(1)
