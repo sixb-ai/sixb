@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  assertNonEmpty,
   bodyFormatHeaders,
   GitHubApiError,
   pathId,
@@ -12,6 +13,7 @@ import {
 } from "../http"
 import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
+  CreatePullRequestInput,
   GetPullRequestOptions,
   GitHubPullRequest,
   GitHubPullRequestDetail,
@@ -22,6 +24,7 @@ import type {
   ListPullRequestsOptions,
   MergePullRequestInput,
   RepositoryPullRequestsApi,
+  RequestReviewersInput,
 } from "../types/pulls"
 
 export function createRepositoryPullRequestsApi(
@@ -78,6 +81,37 @@ export function createRepositoryPullRequestsApi(
       )
     },
 
+    async create(
+      input: CreatePullRequestInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequest> {
+      assertNonEmpty(input.title, "title")
+      assertNonEmpty(input.head, "head")
+      assertNonEmpty(input.base, "base")
+      return readJson<GitHubPullRequest>(
+        await context.http.post(path, pullRequestBody(input), { signal: options?.signal })
+      )
+    },
+
+    async requestReviewers(
+      pullNumber: number,
+      input: RequestReviewersInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequest> {
+      if (!input.reviewers?.length && !input.teamReviewers?.length) {
+        throw new Error("[SixbGitHub] requestReviewers needs reviewers or teamReviewers.")
+      }
+      for (const reviewer of input.reviewers ?? []) assertNonEmpty(reviewer, "reviewers")
+      for (const team of input.teamReviewers ?? []) assertNonEmpty(team, "teamReviewers")
+      return readJson<GitHubPullRequest>(
+        await context.http.post(
+          `${pullPath(pullNumber)}/requested_reviewers`,
+          { reviewers: input.reviewers, team_reviewers: input.teamReviewers },
+          { signal: options?.signal }
+        )
+      )
+    },
+
     async merge(
       pullNumber: number,
       input?: MergePullRequestInput,
@@ -96,6 +130,18 @@ export function createRepositoryPullRequestsApi(
         })
       )
     },
+  }
+}
+
+function pullRequestBody(input: CreatePullRequestInput): Record<string, unknown> {
+  return {
+    title: input.title,
+    head: input.head,
+    base: input.base,
+    body: input.body,
+    draft: input.draft,
+    maintainer_can_modify: input.maintainerCanModify,
+    issue: input.issue,
   }
 }
 

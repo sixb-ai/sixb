@@ -3,7 +3,7 @@
 A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
-- **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
+- **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name, create one from a branch, tag or commit, delete one
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
 - **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
 - **Pull requests** — list a repository's pull requests, get one with its merge state and size, merge one, list its reviews
@@ -82,13 +82,15 @@ export const githubConnector = defineConnector(
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
-need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`, or `Pull requests: read & write` to merge one. Branches and commits need
-`Contents: read`. Check runs and commit statuses need `Checks: read`. Releases need `Contents: read`, or
-`Contents: read & write` to create, update or delete them and their assets. GitHub Actions need
-`Actions: read`, or `Actions: read & write` to re-run or cancel runs. Organization people
-APIs require `Members: read`. Public user profiles
-and public organization membership can be queried without that organization permission, but private
-membership visibility depends on the authenticated user's organization access.
+need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests
+need `Pull requests: read`, or `Pull requests: read & write` to merge one. Branches and commits
+need `Contents: read`, or `Contents: read & write` to create or delete a branch. Check runs and
+commit statuses need `Checks: read`. Releases need `Contents: read`, or `Contents: read & write`
+to create, update or delete them and their assets. GitHub Actions need `Actions: read`, or
+`Actions: read & write` to re-run or cancel runs. Organization people APIs require
+`Members: read`. Public user profiles and public organization membership can be queried without
+that organization permission, but private membership visibility depends on the authenticated
+user's organization access.
 
 ## Sandbox access
 
@@ -152,7 +154,11 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).get()`         | `GET /repos/{owner}/{repo}`                   |
 | `gh.repo({ owner, repo }).branches.list()` | `GET /repos/{owner}/{repo}/branches`        |
 | `gh.repo({ owner, repo }).branches.get(branch)` | `GET /repos/{owner}/{repo}/branches/{branch}` |
+| `gh.repo({ owner, repo }).branches.create({ name, from })` | `POST /repos/{owner}/{repo}/git/refs` |
+| `gh.repo({ owner, repo }).branches.delete(branch)` | `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}` |
 | `gh.repo({ owner, repo }).pulls.list()` | `GET /repos/{owner}/{repo}/pulls`             |
+| `gh.repo({ owner, repo }).pulls.create()` | `POST /repos/{owner}/{repo}/pulls`         |
+| `gh.repo({ owner, repo }).pulls.requestReviewers(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` |
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
 | `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
@@ -314,6 +320,13 @@ or rulesets, `false` only the others. Each item carries the branch `name`, the t
 `commit.sha` and `protected`. `branches.get()` accepts names containing `/` and adds
 `_links.html`, the branch's web page.
 
+`branches.create({ name, from })` creates a branch at the commit `from` names, which may be a
+branch, a tag or a SHA. GitHub creates a ref from a commit SHA, so the client resolves `from` to
+one first and the call costs two requests. `branches.delete(name)` removes a branch; GitHub
+refuses the default branch. A name containing `/` is sent as its own path segments, so the slash
+stays a slash. Both refuse a name Git would before requesting it: a full ref, whitespace, `..`,
+`@{`, a leading `/` or `-`, a trailing `/` or `.lock`, or any of `~ ^ : ? * [ \ |`.
+
 Pull request calls accept a `signal` to abort the request. `pulls.list()` returns open pull
 requests unless `state` is `closed` or `all`; filter by `head` (`owner:branch`) or `base`, and
 sort by `created`, `updated`, `popularity` or `long-running`. A merged pull request is `closed`
@@ -322,6 +335,11 @@ with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while Git
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
+
+**Opening one.** `pulls.create({ title, head, base })` opens a pull request from `head` into
+`base`, with `body`, `draft`, `maintainerCanModify` and `issue` to turn an issue into one.
+`requestReviewers(number, { reviewers })` asks users to review, and `teamReviewers` asks teams by
+slug; GitHub answers with the pull request.
 
 **Merging.** `pulls.merge(number, { method })` merges with `merge` (the default), `squash` or
 `rebase`, and takes `commitTitle`, `commitMessage` and `sha`, the last of which merges only while

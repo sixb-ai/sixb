@@ -1860,3 +1860,100 @@ describe("checks", () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe("branch and pull request writes", () => {
+  // Removal proof: post the branch or tag name as the ref's sha; GitHub then answers 422, because
+  // a ref is created from a commit.
+  test("creates a branch at the commit a branch, tag or SHA names", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json({ sha: "commit-sha" })
+        : json({ ref: "refs/heads/feature/login", object: { sha: "commit-sha", type: "commit" } })
+    )
+    const branches = (await connect()).repo(webRepo).branches
+
+    const ref = await branches.create({ name: "feature/login", from: "release/1.2" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/release%2F1.2")
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual(["POST", "/repos/acme/web/git/refs"])
+    expect(calls[1]?.body).toEqual({ ref: "refs/heads/feature/login", sha: "commit-sha" })
+    expect(ref.ref).toBe("refs/heads/feature/login")
+  })
+
+  // A ref's slash is a path separator, so the name's own slashes are sent as segments.
+  test("deletes a branch, keeping a slash in its name a slash", async () => {
+    const calls = record(() => new Response(null, { status: 204 }))
+
+    await (await connect()).repo(webRepo).branches.delete("feature/login")
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "DELETE",
+      "/repos/acme/web/git/refs/heads/feature/login",
+    ])
+  })
+
+  // GitHub answers a bad ref with a 422 that names nothing a caller can act on.
+  test("refuses a branch name Git would, before requesting", async () => {
+    const calls = record()
+    const branches = (await connect()).repo(webRepo).branches
+
+    for (const name of ["refs/heads/x", "feature login", "a..b", "-dash", "trail.lock", "br~1"]) {
+      expect(await branches.create({ name, from: "main" }).catch((e: unknown) => e)).toBeInstanceOf(
+        Error
+      )
+      await expect(branches.delete(name)).rejects.toThrow("branch name")
+    }
+    await expect(branches.create({ name: "  ", from: "main" })).rejects.toThrow("name")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("opens a pull request, and asks users and teams to review it", async () => {
+    const calls = record(() => json({ id: 7, number: 7 }))
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    const created = await pulls.create({
+      title: "Fix the login",
+      head: "feature/login",
+      base: "main",
+      body: "It was broken.",
+      draft: true,
+      maintainerCanModify: true,
+      issue: 42,
+    })
+    const reviewed = await pulls.requestReviewers(7, {
+      reviewers: ["octocat"],
+      teamReviewers: ["platform"],
+    })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual(["POST", "/repos/acme/web/pulls"])
+    expect(calls[0]?.body).toEqual({
+      title: "Fix the login",
+      head: "feature/login",
+      base: "main",
+      body: "It was broken.",
+      draft: true,
+      maintainer_can_modify: true,
+      issue: 42,
+    })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/requested_reviewers",
+    ])
+    expect(calls[1]?.body).toEqual({ reviewers: ["octocat"], team_reviewers: ["platform"] })
+    expect(created.number).toBe(7)
+    expect(reviewed.number).toBe(7)
+  })
+
+  test("refuses a pull request without its branches, or reviewers with nobody to ask", async () => {
+    const calls = record()
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    await expect(pulls.create({ title: "Fix", head: "", base: "main" })).rejects.toThrow("head")
+    await expect(pulls.create({ title: "", head: "feature", base: "main" })).rejects.toThrow(
+      "title"
+    )
+    await expect(pulls.requestReviewers(7, {})).rejects.toThrow("reviewers or teamReviewers")
+    await expect(pulls.requestReviewers(7, { reviewers: [""] })).rejects.toThrow("reviewers")
+    expect(calls).toHaveLength(0)
+  })
+})

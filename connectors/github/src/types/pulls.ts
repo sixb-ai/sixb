@@ -117,6 +117,28 @@ export interface ListPullRequestReviewsOptions
   extends GitHubPaginationOptions,
     GitHubRequestOptions {}
 
+export interface CreatePullRequestInput {
+  readonly title: string
+  /** The branch the changes come from, as `branch`, or `owner:branch` for a fork. */
+  readonly head: string
+  /** The branch they go into. */
+  readonly base: string
+  readonly body?: string
+  /** Opens it as a draft, which cannot be merged until it is marked ready. */
+  readonly draft?: boolean
+  /** Lets maintainers of the base repository push to the head branch. */
+  readonly maintainerCanModify?: boolean
+  /** The issue to turn into a pull request, in a repository that enables it. */
+  readonly issue?: number
+}
+
+export interface RequestReviewersInput {
+  /** Usernames to ask. */
+  readonly reviewers?: readonly string[]
+  /** Team slugs to ask, such as `platform`. */
+  readonly teamReviewers?: readonly string[]
+}
+
 /** How GitHub may combine the commits it merges. */
 export type GitHubPullRequestMergeMethod = "merge" | "squash" | "rebase"
 
@@ -176,6 +198,17 @@ export interface RepositoryPullRequestsApi {
   /** List one page of this repository's pull requests. */
   list(options?: ListPullRequestsOptions): Promise<GitHubPage<GitHubPullRequest>>
   get(pullNumber: number, options?: GetPullRequestOptions): Promise<GitHubPullRequestDetail>
+  /** Open a pull request between two branches, or from an issue. */
+  create(input: CreatePullRequestInput, options?: GitHubRequestOptions): Promise<GitHubPullRequest>
+  /**
+   * Ask users or teams to review. GitHub replaces the request when a pull request is edited with
+   * `requested_reviewers`, so ask again after that rather than assuming it stands.
+   */
+  requestReviewers(
+    pullNumber: number,
+    input: RequestReviewersInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequest>
   /**
    * Merge a pull request, with `merge`, `squash` or `rebase`. The repository's own settings decide
    * which methods it allows, and branch protection decides whether this one may be merged.
