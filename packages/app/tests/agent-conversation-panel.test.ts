@@ -29,6 +29,7 @@ function thread(id: string, title: string): AgentThread {
     status: "active",
     activeRunId: null,
     messageCount: 1,
+    lastMessageSeq: 1,
     createdAt: "2026-09-01T12:00:00.000Z",
     updatedAt: "2026-09-01T12:00:00.000Z",
   }

@@ -167,6 +167,38 @@ export const AgentThreadParticipantSchema = z.object({
   addedBy: AgentPrincipalSchema,
 })
 
+export const AgentRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+
+export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
+
+/** Your place in a conversation: how far your reading reached, and what is new. */
+export const AgentThreadReadSchema = z.object({
+  threadId: z.string(),
+  throughSeq: z.number(),
+  headSeq: z.number(),
+  unread: z.number(),
+  readAt: z.string().optional(),
+})
+
+/** The newest run of a thread, enough to offer Continue or Retry without reading it. */
+export const AgentThreadLastRunSchema = z.object({
+  id: z.string(),
+  status: AgentRunStatusSchema,
+  finishReason: AgentRunFinishReasonSchema.optional(),
+})
+
+export const MarkAgentThreadReadBodySchema = z
+  .object({ throughSeq: z.number().int().min(0).optional() })
+  .strict()
+
+export const MarkAgentThreadReadResponseSchema = z.object({ read: AgentThreadReadSchema })
+
 export const AgentThreadSchema = z.object({
   sandboxState: z
     .object({
@@ -222,8 +254,14 @@ export const AgentThreadSchema = z.object({
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),
   messageCount: z.number(),
+  /** The highest message seq the thread ever assigned: what your place is measured against. */
+  lastMessageSeq: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Your place in it: absent for an observer, and for code that is not a person. */
+  read: AgentThreadReadSchema.optional(),
+  /** Its newest run, so a client can offer Continue or Retry without reading it. */
+  lastRun: AgentThreadLastRunSchema.optional(),
   /** Your mode in this thread, when the thread is read alone. */
   approvalMode: AgentApprovalModeSchema.optional(),
   /**
@@ -540,16 +578,6 @@ export const AgentRequestErrorResponseSchema = ErrorResponseSchema.extend({
 export const CancelAgentRunBodySchema = z.object({
   runId: z.string().trim().min(1),
 })
-
-export const AgentRunStatusSchema = z.enum([
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-])
-
-export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 
 export const AgentRunSchema = z.object({
   id: z.string(),

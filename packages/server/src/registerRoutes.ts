@@ -10,6 +10,7 @@ import { registerAgentChildRoutes } from "./routes/agent-children"
 import { registerAgentComputerRoutes } from "./routes/agent-computers"
 import { registerAgentMemoryRoutes } from "./routes/agent-memory"
 import { registerAgentRunnerRoutes } from "./routes/agent-runners"
+import { registerAgentThreadReadRoutes } from "./routes/agent-thread-reads"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerAiAccountingRoutes } from "./routes/ai-accounting"
 import { registerArtifactFrameRoutes } from "./routes/artifact-frames"
@@ -78,6 +79,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerFileDownloadRoutes(app, host)
   registerActionRunRoutes(app, host)
   registerAgentRoutes(app, host)
+  registerAgentThreadReadRoutes(app, host)
   registerAgentChildRoutes(app, host)
   registerAgentRunnerRoutes(app, host)
   registerAgentComputerRoutes(app, host)

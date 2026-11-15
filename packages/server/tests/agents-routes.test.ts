@@ -2409,3 +2409,58 @@ describe("a shared conversation's artifacts over HTTP", () => {
     expect(runs.length).toBe(4)
   })
 })
+
+describe("thread read routes", () => {
+  test("marks the caller's place, never backwards, and hides another user's", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const owner = await seedSession(storage, "reader-owner")
+    const stranger = await seedSession(storage, "reader-stranger")
+
+    const created = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { title: "Read" }, owner.csrfHeaders)
+    )
+    expect(created.status).toBe(201)
+    const thread = ((await created.json()) as { thread: { id: string } }).thread
+
+    await storage.agents.messages.append({
+      id: "read-message",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: null,
+      role: "user",
+      authorPrincipal: { type: "user", id: "reader-owner" },
+      parts: [{ type: "text", text: "Where are we?" }],
+      createdAt: new Date("2026-06-27T10:00:01.000Z"),
+    })
+
+    const listed = await app.fetch(
+      new Request("http://localhost/api/agent-threads", { headers: owner.headers })
+    )
+    expect(await listed.json()).toMatchObject({
+      threads: [{ read: { throughSeq: 0, headSeq: 1, unread: 1 } }],
+    })
+
+    const mark = (headers: Record<string, string>, body: unknown) =>
+      app.fetch(
+        new Request(`http://localhost/api/agent/thread-reads/${thread.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(body),
+        })
+      )
+
+    const marked = await mark(owner.csrfHeaders, { throughSeq: 1 })
+    expect(marked.status).toBe(200)
+    expect(await marked.json()).toMatchObject({
+      read: { threadId: thread.id, throughSeq: 1, headSeq: 1, unread: 0 },
+    })
+
+    // Done sends no seq: the thread's newest.
+    expect(await (await mark(owner.csrfHeaders, {})).json()).toMatchObject({
+      read: { throughSeq: 1, unread: 0 },
+    })
+
+    expect((await mark(owner.csrfHeaders, { throughSeq: -1 })).status).toBe(422)
+    expect((await mark(stranger.csrfHeaders, {})).status).toBe(404)
+  })
+})
