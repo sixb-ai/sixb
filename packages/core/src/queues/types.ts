@@ -219,32 +219,6 @@ export interface AgentAiUsageRecordRequestedQueueJob
   > {}
 
 /**
- * A canvas version's boards miss pictures: the agent worker renders them in a blank sandbox of
- * the project, with the data the version's author can see. One job per artifact, which each write
- * that asks replaces: it names the latest revision asked for.
- */
-export interface AgentArtifactPreviewsRequestedQueueJob
-  extends QueueJob<
-    "agent.artifact-previews.requested",
-    {
-      readonly artifactId: string
-      readonly version: number
-      /**
-       * When the version's content was last written as it was asked for, its `updatedAt` as ISO:
-       * once its content is written again, the job renders nothing, and the write that asks for
-       * it replaces it. Creating the version leaves its content, so its job still renders it.
-       * Absent on jobs asked for before.
-       */
-      readonly updatedAt?: string
-      /**
-       * The version's query answers as its publisher read them when publishing, by name: a JSON
-       * blob the boards read their queries from. Absent for a version without queries.
-       */
-      readonly queries?: FileRef
-    }
-  > {}
-
-/**
  * Someone asked for a designed document's PDF: the render worker prints the version in a blank
  * sandbox of the project. One job per PDF, by its render key.
  */
@@ -271,7 +245,6 @@ export type AgentQueueJob =
   | AgentRunRequestedQueueJob
   | AgentWorkflowNodeRequestedQueueJob
   | AgentAiUsageRecordRequestedQueueJob
-  | AgentArtifactPreviewsRequestedQueueJob
 
 /** Internal lane hosted by ProjectionWorker. */
 export type VectorIndexingQueueJob = QueueJob<
@@ -299,8 +272,34 @@ export interface DatasetIngestFlushRequestedQueueJob
 
 export type LakeQueueJob = LakeRetentionRequestedQueueJob | DatasetIngestFlushRequestedQueueJob
 
+/**
+ * A canvas version's boards miss pictures: the render worker renders them in a blank sandbox of
+ * the project, with the data the version's author can see. One job per artifact, which each write
+ * that asks replaces: it names the latest revision asked for.
+ */
+export interface ArtifactPreviewsRequestedQueueJob
+  extends QueueJob<
+    "artifact.previews.requested",
+    {
+      readonly artifactId: string
+      readonly version: number
+      /**
+       * When the version's content was last written as it was asked for, its `updatedAt` as ISO:
+       * once its content is written again, the job renders nothing, and the write that asks for
+       * it replaces it. Creating the version leaves its content, so its job still renders it.
+       * Absent on jobs asked for before.
+       */
+      readonly updatedAt?: string
+      /**
+       * The version's query answers as its publisher read them when publishing, by name: a JSON
+       * blob the boards read their queries from. Absent for a version without queries.
+       */
+      readonly queries?: FileRef
+    }
+  > {}
+
 /** What renders in a browser, in a sandbox of the project: RenderWorker consumes it. */
-export type RenderQueueJob = ArtifactPdfRequestedQueueJob
+export type RenderQueueJob = ArtifactPdfRequestedQueueJob | ArtifactPreviewsRequestedQueueJob
 
 export interface Queues {
   readonly vectorIndexing: Queue<
@@ -315,7 +314,7 @@ export interface Queues {
   readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   /**
    * What the framework renders in a browser, in a sandbox of the project: a designed document's
-   * PDF. RenderWorker consumes this lane, so a render never waits behind an agent's run or takes
+   * PDF, and the pictures of a canvas's boards. RenderWorker consumes this lane, so a render never waits behind an agent's run or takes
    * its slot.
    */
   readonly renders: Queue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">

@@ -34,16 +34,14 @@ export function canvasShapeFontSize(width: number, height: number): number {
 export const SMALL_BOARD_PREVIEW_WIDTH = 480
 
 /**
- * How the agent worker renders the previews nobody else rendered: `settleMs` after the last write
- * that asked, or `graceMs` when the publisher renders its own, as the Agent's layout check does
- * within its 120 seconds; each attempt within `timeoutMs`, up to `attempts`, `backoffMs` apart.
+ * How the render worker renders a canvas's missing previews: `settleMs` after the last write that
+ * asked; each attempt within `timeoutMs`, up to `attempts`, `backoffMs` apart.
  *
  * `settleMs` is longer than a live canvas waits between two write-backs (`SAVE_MAX_MS` in the
  * server's live rooms), so someone typing in a board is rendered once they pause.
  */
 export const BOARD_PREVIEW_JOB = {
   settleMs: 15_000,
-  graceMs: 180_000,
   timeoutMs: 5 * 60_000,
   attempts: 3,
   backoffMs: 60_000,
@@ -51,11 +49,11 @@ export const BOARD_PREVIEW_JOB = {
 
 /**
  * How long after a canvas version is published a missing board preview is still worth waiting
- * for: the job's grace, then every one of its attempts and the waits between them. Past it,
+ * for: the job's settling, then every one of its attempts and the waits between them. Past it,
  * nothing more will come, so the server says so and a viewer stops asking.
  */
 export const BOARD_PREVIEW_WAIT_MS =
-  BOARD_PREVIEW_JOB.graceMs +
+  BOARD_PREVIEW_JOB.settleMs +
   BOARD_PREVIEW_JOB.attempts * BOARD_PREVIEW_JOB.timeoutMs +
   (BOARD_PREVIEW_JOB.attempts - 1) * BOARD_PREVIEW_JOB.backoffMs
 

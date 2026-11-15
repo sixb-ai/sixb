@@ -1,4 +1,5 @@
 import { printArtifactPdf } from "@sixb/client"
+import { DOCUMENT_PDF_WAIT_MS } from "@sixb/core/artifacts"
 import { documentPdfUrl } from "./file-source"
 import type { ArtifactVersion } from "./queries"
 
@@ -7,15 +8,13 @@ import type { ArtifactVersion } from "./queries"
 // then saves it. Asking again while it prints asks nothing more. When it could not be printed,
 // the download stops there.
 
-/** How long a download waits for its PDF before it gives up. */
-const PRINT_WAIT_MS = 2 * 60_000
 const FIRST_CHECK_MS = 1_000
 const LONGEST_CHECK_MS = 5_000
 
 /**
  * Asks for the version's PDF, printing it again when it failed before, waits until it is printed,
- * then saves it as the browser downloads a file. Throws when it could not be printed, or takes
- * longer than two minutes.
+ * then saves it as the browser downloads a file. Throws when it could not be printed, or is not
+ * printed within every attempt the render worker makes.
  */
 export async function downloadDocumentPdf(
   version: Pick<ArtifactVersion, "artifactId" | "version">
@@ -28,14 +27,14 @@ export async function downloadDocumentPdf(
   // with the key of the values it prints, which the rest ask for, though the values change.
   let answer = await ask({ retry: "true" })
   const key = answer.key
-  const deadline = Date.now() + PRINT_WAIT_MS
+  const deadline = Date.now() + DOCUMENT_PDF_WAIT_MS
   let wait = FIRST_CHECK_MS
   while (answer.status !== "ready") {
     if (answer.status === "failed") {
       throw new Error(`[SixbApp] The PDF could not be printed: ${answer.reason}`)
     }
     if (Date.now() + wait > deadline) {
-      throw new Error("[SixbApp] The PDF was not printed within two minutes.")
+      throw new Error("[SixbApp] The PDF was not printed in time.")
     }
     await new Promise((resolve) => setTimeout(resolve, wait))
     wait = Math.min(wait * 1.5, LONGEST_CHECK_MS)
