@@ -17,6 +17,25 @@ const ArtifactFileSchema = z.object({
 const DocumentOutlineSchema = z.object({
   kind: z.literal("document"),
   headings: z.array(z.object({ depth: z.number().int(), text: z.string(), slug: z.string() })),
+  format: z
+    .literal("html")
+    .optional()
+    .describe("html for a designed document, document.html with its own stylesheets"),
+  paper: z
+    .object({
+      width: z.number(),
+      height: z.number(),
+      margin: z.object({
+        top: z.number(),
+        right: z.number(),
+        bottom: z.number(),
+        left: z.number(),
+      }),
+    })
+    .optional()
+    .describe(
+      "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
+    ),
 })
 
 const SheetOutlineSchema = z.object({

@@ -15,6 +15,7 @@ export {
   FRAME_REFERENCE_PATH,
   FRAME_REFERENCE_PREFIX,
   injectFrameAssets,
+  markDocumentSections,
   rewriteFrameReferences,
 } from "./assets"
 export { type FrameLayout, frameEntries, frameLayout } from "./entries"

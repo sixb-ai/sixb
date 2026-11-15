@@ -92,6 +92,41 @@ describe("layout warnings", () => {
     ])
   })
 
+  test("name a designed document's problems on its sheet, or on a phone when only there", () => {
+    const colors: [string, string] = ["#c86f3d", "#ffffff"]
+    const contrast = { code: "contrast", slide: undefined, selector: "span.number" } as const
+    const warnings = layoutWarnings(
+      [
+        problem({ ...contrast, text: "01", ratio: 3.62, colors }),
+        problem({ ...contrast, view: "phone", text: "01", ratio: 3.62, colors }),
+        problem({
+          code: "wide",
+          slide: undefined,
+          view: "phone",
+          selector: "img",
+          text: "img",
+          rect: { x: 249, y: 171, width: 210, height: 210 },
+        }),
+      ],
+      "document"
+    )
+    // Reproduce by dropping `checked`: the phone's problem reads as a web page's, and the sheet's
+    // contrast as only a phone's.
+    expect(warnings).toEqual([
+      {
+        code: "layout_wide",
+        part: "phone",
+        message:
+          "On a phone (390px): img “img” runs past the screen's right edge at 249,171 (210×210), so the document scrolls sideways; let it wrap, or stack it in an @media (max-width: 600px) rule.",
+      },
+      {
+        code: "layout_contrast",
+        message:
+          "In the document: span.number “01” has a contrast of 3.62:1 (#c86f3d on #ffffff), under WCAG AA in light mode.",
+      },
+    ])
+  })
+
   test("stop at twelve, and say how many more the screenshots show", () => {
     const warnings = layoutWarnings(
       Array.from({ length: 15 }, (_, index) =>
@@ -215,7 +250,7 @@ describe("the layout check", () => {
       dark: false,
       tokens: { "--foreground": "#2b2b2b", "--background": "#fafafa" },
     })
-    expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
+    expect(written.filter((path) => path.startsWith(library))).toHaveLength(6)
     expect(written.filter((path) => path.endsWith("/entries/index.html"))).toHaveLength(2)
   })
 

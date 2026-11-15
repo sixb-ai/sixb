@@ -23,14 +23,20 @@ export type DeckMode = "slide" | "overview" | "present"
 export interface FrameStart {
   readonly slide?: number
   readonly fill?: boolean
+  /** A designed document shown as the pages its paper cuts it into, not as one sheet. */
+  readonly pages?: boolean
+  /** A designed document opened at a section, by its heading's slug. */
+  readonly section?: string
 }
 
-/** The fragment that carries a frame's start: `#sixb-slide=3&sixb-fill`. */
+/** The fragment that carries a frame's start: `#sixb-slide=3&sixb-fill`, `#sixb-pages`. */
 export function frameStartHash(start: FrameStart): string {
   const params: string[] = []
   if (start.slide !== undefined && start.slide > 1)
     params.push(`sixb-slide=${Math.round(start.slide)}`)
   if (start.fill) params.push("sixb-fill")
+  if (start.pages) params.push("sixb-pages")
+  if (start.section) params.push(`sixb-section=${encodeURIComponent(start.section)}`)
   return params.length > 0 ? `#${params.join("&")}` : ""
 }
 

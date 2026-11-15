@@ -248,7 +248,7 @@ describe("publishing a canvas", () => {
     ])
 
     // Each board opens in a frame laid out as a page, under the version's one link.
-    expect(frameLayout("canvas")).toBe("page")
+    expect(frameLayout(published.version)).toBe("page")
     expect(frameEntries(published.version)).toEqual(["boards/home.html", "boards/pricing.html"])
 
     // An address names a board or a section by its id.

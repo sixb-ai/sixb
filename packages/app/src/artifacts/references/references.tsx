@@ -39,6 +39,7 @@ import {
   useFileText,
   versionFileSource,
 } from "../queries"
+import { isDesignedDocument } from "../renderers/designed-document"
 import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
 import { usePageEvents } from "../renderers/page"
@@ -356,7 +357,12 @@ function EmbedBody({
     case "chart":
       return <ChartEmbed version={version} chart={part.chart} fill={fill} />
     case "section":
-      return <SectionEmbed version={version} slug={part.slug} />
+      // A designed document's section is laid out by its whole design: it opens from a card.
+      return isDesignedDocument(version) ? (
+        <CardEmbed version={version} address={address} />
+      ) : (
+        <SectionEmbed version={version} slug={part.slug} />
+      )
     case "file":
       return (
         <FileEmbed

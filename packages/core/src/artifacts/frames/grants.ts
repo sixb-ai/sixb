@@ -43,7 +43,7 @@ export async function createArtifactFrame(input: {
   readonly now?: Date
 }): Promise<ArtifactFrame> {
   const { version } = input
-  if (!frameLayout(version.outline.kind)) {
+  if (!frameLayout(version)) {
     throw new ArtifactRequestError(
       "artifact_kind_mismatch",
       `[Sixb] '${version.artifactId}' is a ${version.outline.kind}, which does not open in a frame. Read its files instead.`
@@ -125,7 +125,7 @@ export async function resolveArtifactFrame(input: {
   })
   if (!version || frameFilesDigest(version) !== grant.filesDigest) return null
 
-  return frameLayout(version.outline.kind) ? { version, targets: grant.targets } : null
+  return frameLayout(version) ? { version, targets: grant.targets } : null
 }
 
 /**

@@ -70,6 +70,7 @@ import {
 } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
 import { CanvasRenderer } from "./renderers/canvas/renderer"
+import { DesignedDocumentRenderer, isDesignedDocument } from "./renderers/designed-document"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
@@ -588,7 +589,11 @@ function ArtifactBody({
   const messages = useArtifactMessages()
   switch (kind) {
     case "document":
-      return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+      return isDesignedDocument(version) ? (
+        <DesignedDocumentRenderer version={version} {...(part ? { part } : {})} />
+      ) : (
+        <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+      )
     case "sheet":
       return <SheetRenderer version={version} part={part} />
     case "slides":

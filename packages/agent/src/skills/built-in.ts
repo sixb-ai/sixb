@@ -27,6 +27,18 @@ import operationsReview from "./sixb-artifacts/examples/document/operations-revi
 import restorationsFigure from "./sixb-artifacts/examples/document/operations-review/figures/restorations.svg" with {
   type: "text",
 }
+import proposalDesign from "./sixb-artifacts/examples/document/service-proposal/design.css" with {
+  type: "text",
+}
+import proposalDocument from "./sixb-artifacts/examples/document/service-proposal/document.html" with {
+  type: "text",
+}
+import proposalLogo from "./sixb-artifacts/examples/document/service-proposal/images/fieldwise.svg" with {
+  type: "text",
+}
+import proposalClientLogo from "./sixb-artifacts/examples/document/service-proposal/images/harbor-pine.svg" with {
+  type: "text",
+}
 import collectionsDeskPage from "./sixb-artifacts/examples/page/collections-desk/index.html" with {
   type: "text",
 }
@@ -102,6 +114,10 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/document/operations-review/document.md": operationsReview,
     "examples/document/operations-review/figures/restorations.svg": restorationsFigure,
     "examples/document/incident-report/document.md": incidentReport,
+    "examples/document/service-proposal/document.html": text(proposalDocument),
+    "examples/document/service-proposal/design.css": text(proposalDesign),
+    "examples/document/service-proposal/images/fieldwise.svg": proposalLogo,
+    "examples/document/service-proposal/images/harbor-pine.svg": proposalClientLogo,
     "sheet.md": sheetGuide,
     "references.md": referencesGuide,
     "slides.md": slidesGuide,

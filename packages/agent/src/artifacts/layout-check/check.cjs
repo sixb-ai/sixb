@@ -8,15 +8,20 @@
 // each other theme, as boards/<id>.<theme>.png, and each of its pictures for readers also at most
 // `smallWidth` wide, as boards/<id>.<theme>.small.webp; a board whose page did not load whole is
 // not pictured, but listed in `unpictured`, as a broken picture would stay. With overview.html, the
-// whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
-// { layout, slides, problems, errors, screenshots, previews, unpictured, oversized, stalls,
-// overview?, stopped? } or
+// whole canvas as it opens is screenshot as overview.png. A designed document loads as one sheet
+// at its paper's width, and is measured whole, as a page is, but not for what only a screen has,
+// small text and small controls; without paper, that sheet is screenshot as document.png. It is
+// measured the same way at a phone's 390px, as the app shows it there, and screenshot as
+// phone.png. With paper, it is then cut into its pages, each checked for what runs past its edge,
+// and screenshot as page-NN.png. It writes one line of JSON:
+// { layout, slides, pages?, problems, errors, screenshots, previews, unpictured, oversized,
+// stalls, overview?, stopped? } or
 // { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
 //
-// The library holds what the worker installs beside this script: deck.css, page.css, runtime.js,
-// probe.js. The output directory holds entries.json, each page the check opens by its path, with
+// The library holds what the worker installs beside this script: deck.css, page.css,
+// document.css, runtime.js, probe.js. The output directory holds entries.json, each page the check opens by its path, with
 // the kit and runtime in it; boards.json, a canvas's boards and their sizes; overview.html and
 // overview.json, a canvas's page of itself and the window it opens in; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
@@ -42,16 +47,25 @@ const DEADLINE_MS = Number(deadline) || 100_000
 const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
 /** The frame's own files, served from the library as the API serves them beside a version's. */
-const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/page.css", "/__sixb/runtime.js"])
+const FRAME_FILES = new Set([
+  "/__sixb/deck.css",
+  "/__sixb/page.css",
+  "/__sixb/document.css",
+  "/__sixb/runtime.js",
+])
 /** Where the runtime reads a query when it is opened on its own. */
 const QUERY_PATH = /^\/__sixb\/queries\/([a-z0-9][a-z0-9-]{0,63})\.json$/
+/** A phone's screen, where pages and designed documents are checked too. */
+const PHONE = { name: "phone", width: 390, height: 844 }
 /** The widths a page is checked at: a laptop's, and a phone's. */
-const VIEWS = [
-  { name: "desktop", width: 1280, height: 800 },
-  { name: "phone", width: 390, height: 844 },
-]
+const VIEWS = [{ name: "desktop", width: 1280, height: 800 }, PHONE]
 /** How much of a page the check measures and shows, from its top. */
 const PAGE_HEIGHT = 4000
+/** How much of a designed document the check measures as one sheet, and how many pages it shoots. */
+const DOCUMENT_HEIGHT = 16_000
+const MAX_PAGES = 40
+/** What the probe judges of a screen, which paper does not have. */
+const SCREEN_ONLY = new Set(["small_text", "small_target"])
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -99,7 +113,7 @@ const PAGE_OPTIONS = {
   deviceScaleFactor: 1,
   reducedMotion: "reduce",
 }
-const NOUN = { canvas: "the canvas", page: "the page" }[layout] ?? "the deck"
+const NOUN = { canvas: "the canvas", page: "the page", document: "the document" }[layout] ?? "the deck"
 
 /** What the check has found so far, which a check that stops early reports. */
 const found = {
@@ -461,6 +475,10 @@ async function main() {
       () => step
     )
     const { problems, screenshots } = found
+    if (layout === "document") {
+      await checkDocument({ page, load, settle, send }, port, probe, themes, (next) => (step = next))
+      return findings()
+    }
     if (layout === "page") {
       for (const view of VIEWS) {
         step = `the page at ${view.width}px`
@@ -538,6 +556,141 @@ async function main() {
     if (!stalled) await within("the browser", browser.close(), 5_000).catch(() => {})
     server.close()
   }
+}
+
+/**
+ * A designed document: as one sheet at its paper's width and at a phone's, measured whole up to its
+ * cut, then, with paper, as its pages, each checked for what runs past its edge and screenshot. In
+ * the first theme: the paper is white in any.
+ */
+async function checkDocument({ page, load, settle, send }, port, probe, themes, at) {
+  const { problems, screenshots } = found
+  const theme = Object.keys(themes)[0]
+  at(NOUN)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await load(`http://127.0.0.1:${port}/document.html`)
+  const paper = await within(
+    NOUN,
+    page.evaluate(() =>
+      (document.querySelector("script[data-sixb-paper]")?.getAttribute("data-sixb-paper") ?? "")
+        .split(" ")
+        .map(Number)
+    )
+  )
+  const sheet = paper[0] > 0 ? paper[0] : 0
+  // The sheet and the stage around it, wider than a phone's layout.
+  const width = Math.max(Math.ceil(sheet || 816) + 64, 760)
+  await page.setViewportSize({ width, height: 900 })
+  await send("theme", themes[theme])
+  await settle()
+  const height = await within(NOUN, page.evaluate(() => document.documentElement.scrollHeight))
+  await page.setViewportSize({ width, height: Math.max(900, Math.min(DOCUMENT_HEIGHT, height)) })
+  await settle()
+  for (const problem of await within(NOUN, page.evaluate(`(${probe})("page")`))) {
+    if (!SCREEN_ONLY.has(problem.code)) problems.push({ ...problem, theme })
+  }
+  if (!sheet) {
+    const file = path.join(out, "document.png")
+    await page.screenshot({ path: file, timeout: STEP_MS })
+    screenshots.push(file)
+  }
+
+  // On a phone the app shows it as one sheet at the screen's width, where a fixed grid column
+  // or a wide table runs off the side.
+  at(`${NOUN} on a phone`)
+  await page.setViewportSize({ width: PHONE.width, height: PHONE.height })
+  await settle()
+  const tall = await within(NOUN, page.evaluate(() => document.documentElement.scrollHeight))
+  await page.setViewportSize({
+    width: PHONE.width,
+    height: Math.max(PHONE.height, Math.min(PAGE_HEIGHT, tall)),
+  })
+  await settle()
+  for (const problem of await within(NOUN, page.evaluate(`(${probe})("page")`))) {
+    if (!SCREEN_ONLY.has(problem.code)) problems.push({ ...problem, view: "phone", theme })
+  }
+  const phone = path.join(out, "phone.png")
+  await page.screenshot({ path: phone, timeout: STEP_MS })
+  screenshots.push(phone)
+  if (!sheet) return
+
+  at(`${NOUN}'s pages`)
+  await page.setViewportSize({ width, height: 1200 })
+  await load(`http://127.0.0.1:${port}/document.html?pages#sixb-pages`)
+  await send("theme", themes[theme])
+  await page.waitForSelector("html[data-sixb-pages]", { timeout: STEP_MS })
+  await settle()
+  found.pages = await within(
+    `${NOUN}'s pages`,
+    page.evaluate(() => Number(document.documentElement.dataset.sixbPages) || 0)
+  )
+  for (const problem of await within(`${NOUN}'s pages`, page.evaluate(pastPageEdges))) {
+    problems.push({ ...problem, theme })
+  }
+  const sheets = await page.$$(".sixb-paper")
+  for (const [index, each] of sheets.slice(0, MAX_PAGES).entries()) {
+    const file = path.join(out, `page-${String(index + 1).padStart(2, "0")}.png`)
+    // A sheet shows its page once it is in view.
+    await each.scrollIntoViewIfNeeded({ timeout: STEP_MS })
+    await each.waitForSelector(".sixb-flow", { state: "attached", timeout: STEP_MS })
+    await each.screenshot({ path: file, timeout: STEP_MS })
+    screenshots.push(file)
+  }
+}
+
+/**
+ * What runs past a page's content box, which cuts it off: on each page, each fragment of an element
+ * that sits on the page and reaches past its right or bottom edge, such as a table too wide or an
+ * image too tall for the page. Only the outermost of what nests: what it holds runs past with it,
+ * and the box that runs past is the one to fit. Run in the page, on the first sheet's flow, which
+ * lays out every page side by side, each its column.
+ */
+function pastPageEdges() {
+  const problems = []
+  const flow = document.querySelector(".sixb-paper .sixb-flow")
+  const box = flow?.parentElement?.getBoundingClientRect()
+  if (!flow || !box) return problems
+  // In CSS pixels, and as the sheets are zoomed to fit.
+  const style = getComputedStyle(flow)
+  const scale = box.width / Number.parseFloat(style.width) || 1
+  const stride = box.width + (Number.parseFloat(style.columnGap) || 0) * scale
+  const pages = new Map()
+  for (const element of flow.querySelectorAll("*")) {
+    for (const rect of element.getClientRects()) {
+      if (rect.width < 1 || rect.height < 1) continue
+      const index = Math.max(0, Math.floor((rect.left - box.left + 1) / stride))
+      const left = box.left + index * stride
+      if (rect.right > left + box.width + 1 || rect.bottom > box.bottom + 1) {
+        const past = pages.get(index) ?? []
+        pages.set(index, past)
+        past.push({ element, rect, left })
+        break
+      }
+    }
+  }
+  for (const [index, past] of [...pages].sort(([a], [b]) => a - b)) {
+    const outermost = past.filter(
+      ({ element }) => !past.some((other) => other.element !== element && other.element.contains(element))
+    )
+    for (const { element, rect, left } of outermost.slice(0, 5)) {
+      const classes = Array.from(element.classList)
+      problems.push({
+        code: "outside",
+        page: index + 1,
+        rect: {
+          x: Math.round(rect.left - left),
+          y: Math.round(rect.top - box.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+        text:
+          (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60) ||
+          element.tagName.toLowerCase(),
+        selector: `${element.tagName.toLowerCase()}${classes.length > 0 ? `.${classes.join(".")}` : ""}`,
+      })
+    }
+  }
+  return problems.slice(0, 30)
 }
 
 /**
