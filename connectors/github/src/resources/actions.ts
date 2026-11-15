@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  assertNonEmpty,
   pathId,
   pathPart,
   readDownload,
@@ -71,6 +72,24 @@ export function createRepositoryActionsApi(
       async get(workflow, options) {
         return readJson<GitHubWorkflow>(
           await context.http.get(workflowPath(actions, workflow), { signal: options?.signal })
+        )
+      },
+
+      async dispatch(workflow, input, options) {
+        assertNonEmpty(input.ref, "ref")
+        for (const [name, value] of Object.entries(input.inputs ?? {})) {
+          if (typeof value !== "string") {
+            throw new Error(
+              `[SixbGitHub] inputs.${name} must be a string: GitHub takes every workflow input as one.`
+            )
+          }
+        }
+        await readNoContent(
+          await context.http.post(
+            `${workflowPath(actions, workflow)}/dispatches`,
+            { ref: input.ref, inputs: input.inputs },
+            { signal: options?.signal }
+          )
         )
       },
     },

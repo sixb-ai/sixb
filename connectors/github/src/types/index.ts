@@ -1,4 +1,5 @@
 export type {
+  DispatchWorkflowInput,
   GitHubWorkflow,
   GitHubWorkflowArtifact,
   GitHubWorkflowConclusion,

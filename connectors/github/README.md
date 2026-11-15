@@ -12,6 +12,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
+- **Actions** — read workflows, runs, their jobs, logs and artifacts, re-run or cancel a run, and start one by hand
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
 
@@ -217,6 +218,7 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).releases.reactions.delete(releaseId, id)` | `DELETE /repos/{owner}/{repo}/releases/{id}/reactions/{reaction_id}` |
 | `gh.repo({ owner, repo }).actions.workflows.list()` | `GET /repos/{owner}/{repo}/actions/workflows` |
 | `gh.repo({ owner, repo }).actions.workflows.get(idOrFile)` | `GET /repos/{owner}/{repo}/actions/workflows/{id}` |
+| `gh.repo({ owner, repo }).actions.workflows.dispatch(idOrFile)` | `POST /repos/{owner}/{repo}/actions/workflows/{id}/dispatches` |
 | `gh.repo({ owner, repo }).actions.runs.list()` | `GET /repos/{owner}/{repo}/actions/runs`, or `…/workflows/{id}/runs` with `workflow` |
 | `gh.repo({ owner, repo }).actions.runs.get(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}`, or `…/attempts/{n}` |
 | `gh.repo({ owner, repo }).actions.runs.jobs(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs` |
@@ -427,6 +429,18 @@ await actions.runs.rerun(runId, { failedOnly: true })
 ```
 
 Lists come back as pages like every other list, though GitHub wraps Actions lists in an object.
+`workflows.dispatch(workflow, { ref })` starts a manual run on `ref`, a branch or tag, with the
+`inputs` the workflow declares. GitHub takes every input value as a string, so the client refuses
+anything else before requesting. GitHub answers with nothing, so read the run back from
+`runs.list({ branch: ref, event: "workflow_dispatch" })`.
+
+```ts
+await actions.workflows.dispatch("deploy.yml", {
+  ref: "main",
+  inputs: { environment: "production" },
+})
+```
+
 Logs and artifacts are downloads (`Response`): GitHub redirects them to storage signed for that one
 download, which is fetched without the token. `runs.logs` is a zip of every job's log; `jobs.logs` is
 one job's, as text. To follow runs as they happen, handle the `workflow_run` and `workflow_job`

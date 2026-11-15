@@ -202,12 +202,29 @@ export interface RerunWorkflowRunOptions extends GitHubRequestOptions {
   readonly enableDebugLogging?: boolean
 }
 
+/** What a `workflow_dispatch` run starts with. */
+export interface DispatchWorkflowInput {
+  /** The branch or tag whose copy of the workflow file runs. */
+  readonly ref: string
+  /** The inputs the workflow declares. GitHub takes every value as a string. */
+  readonly inputs?: Readonly<Record<string, string>>
+}
+
 export interface RepositoryWorkflowsApi {
   /** List one page of this repository's workflows. */
   list(
     options?: GitHubPaginationOptions & GitHubRequestOptions
   ): Promise<GitHubPage<GitHubWorkflow>>
   get(workflow: GitHubWorkflowRef, options?: GitHubRequestOptions): Promise<GitHubWorkflow>
+  /**
+   * Start a manual run, for a workflow that declares `workflow_dispatch`. GitHub starts the run
+   * and answers with nothing, so read it back from `runs.list()` by branch and event.
+   */
+  dispatch(
+    workflow: GitHubWorkflowRef,
+    input: DispatchWorkflowInput,
+    options?: GitHubRequestOptions
+  ): Promise<void>
 }
 
 export interface RepositoryWorkflowRunsApi {

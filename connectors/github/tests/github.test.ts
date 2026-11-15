@@ -1707,6 +1707,36 @@ describe("GitHub Actions", () => {
     expect(await response.text()).toBe("2026-11-15T00:00:00Z Run bun test")
   })
 
+  // GitHub answers a dispatch with 204 and no run, so the caller reads it back from runs.list().
+  test("starts a workflow on a branch or tag with its inputs", async () => {
+    const calls = record(() => new Response(null, { status: 204 }))
+    const workflows = (await connect()).repo(webRepo).actions.workflows
+
+    await workflows.dispatch("deploy.yml", { ref: "main", inputs: { environment: "production" } })
+    await workflows.dispatch(161335, { ref: "v1.2.0" })
+
+    expect(calls.map((call) => [call.method, call.url.pathname, call.body])).toEqual([
+      [
+        "POST",
+        "/repos/acme/web/actions/workflows/deploy.yml/dispatches",
+        { ref: "main", inputs: { environment: "production" } },
+      ],
+      ["POST", "/repos/acme/web/actions/workflows/161335/dispatches", { ref: "v1.2.0" }],
+    ])
+  })
+
+  // A number reaches GitHub as a JSON number and the dispatch fails, so the client refuses it first.
+  test("refuses a dispatch without a ref, or with an input that is not a string", async () => {
+    const calls = record()
+    const workflows = (await connect()).repo(webRepo).actions.workflows
+
+    await expect(workflows.dispatch("ci.yml", { ref: " " })).rejects.toThrow("ref")
+    await expect(
+      workflows.dispatch("ci.yml", { ref: "main", inputs: { count: 3 } as never })
+    ).rejects.toThrow("inputs.count")
+    expect(calls).toHaveLength(0)
+  })
+
   test("refuses a page without its list, and ids that are not ids", async () => {
     record(() => json({ total_count: 0 }))
     const actions = (await connect()).repo(webRepo).actions
