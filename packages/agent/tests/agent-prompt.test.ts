@@ -649,6 +649,100 @@ describe("agent system prompt", () => {
     ).not.toContain("sixb models")
   })
 
+  test("names the running model in the prompt and marks its line in the model list with (you)", () => {
+    // Removal proof: omit runningModel or (you) in renderLanguageModelCommand; these fail.
+    const listed = (provider: string, modelId: string, name?: string, description?: string) =>
+      ({
+        kind: "language",
+        provider,
+        modelId,
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
+      }) as const
+
+    const runningModel = {
+      provider: "azure-ai-foundry",
+      modelId: "deepseek-v4.1-flash",
+      name: "DeepSeek V4.1 Flash",
+    }
+
+    const prompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel,
+      sandboxModels: [
+        listed(
+          "azure-ai-foundry",
+          "kimi-k3.1",
+          "Kimi K3.1 Pro",
+          "Default. Strong at multi-step work."
+        ),
+        listed(
+          "azure-ai-foundry",
+          "deepseek-v4.1-flash",
+          "DeepSeek V4.1 Flash",
+          "Fast and inexpensive."
+        ),
+      ],
+    })
+
+    expect(prompt).toContain(
+      "You are running on DeepSeek V4.1 Flash (azure-ai-foundry/deepseek-v4.1-flash)."
+    )
+    expect(prompt).toContain(
+      [
+        "- kimi-k3.1 Kimi K3.1 Pro: Default. Strong at multi-step work.",
+        "- deepseek-v4.1-flash DeepSeek V4.1 Flash (you): Fast and inexpensive.",
+        "Pass the model whose description fits the task.",
+      ].join("\n")
+    )
+
+    // A tiered list marks the running model's line under its tier.
+    const tieredPrompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel,
+      sandboxModels: [
+        {
+          kind: "language",
+          provider: "azure-ai-foundry",
+          modelId: "deepseek-v4.1-flash",
+          name: "DeepSeek V4.1 Flash",
+          tier: "light",
+        },
+        {
+          kind: "language",
+          provider: "azure-ai-foundry",
+          modelId: "claude-sonnet-5.5",
+          name: "Claude Sonnet 5.5",
+          tier: "standard",
+        },
+      ],
+    })
+    expect(tieredPrompt).toContain("light     deepseek-v4.1-flash DeepSeek V4.1 Flash (you)")
+    expect(tieredPrompt).toContain("standard  claude-sonnet-5.5 Claude Sonnet 5.5")
+
+    // A project with a single model has no other model to ask, but still names the running model.
+    const singleModelPrompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel,
+      sandboxModels: [listed("azure-ai-foundry", "deepseek-v4.1-flash", "DeepSeek V4.1 Flash")],
+    })
+    expect(singleModelPrompt).toContain(
+      "You are running on DeepSeek V4.1 Flash (azure-ai-foundry/deepseek-v4.1-flash)."
+    )
+    expect(singleModelPrompt).not.toContain("sixb models")
+
+    // A model without a display name falls back to provider/modelId.
+    const unnamedModelPrompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel: { provider: "azure-ai-foundry", modelId: "deepseek-v4.1-flash" },
+    })
+    expect(unnamedModelPrompt).toContain("You are running on azure-ai-foundry/deepseek-v4.1-flash.")
+  })
+
   // Guard proof: write any of these paths as `.sixb/agent/...` again; the last expectation fails.
   test("names the run's files in its context directory, wherever it is", () => {
     const prompt = renderAgentSystemPrompt({

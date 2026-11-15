@@ -107,7 +107,16 @@ export interface RenderAgentSystemPromptInput {
   readonly conversation?: string
   /** Models the sandbox CLI can call; omitted, the prompt does not mention them. */
   readonly sandboxModels?: readonly SandboxModel[]
+  /** The model this run executes on, as the prompt identifies itself to the user and itself. */
+  readonly runningModel?: RunningAgentModelPromptContext
   readonly memory?: AgentMemoryPromptContext
+}
+
+/** The model this run executes on, as the system prompt names it. */
+export interface RunningAgentModelPromptContext {
+  readonly provider: string
+  readonly modelId: string
+  readonly name?: string
 }
 
 /** The Agent's memory as the prompt shows it. */
@@ -212,7 +221,8 @@ function renderAgentSystemPromptSections(
     input.contextDirectory,
     input.skills,
     input.ontologyIndex,
-    input.sandboxModels
+    input.sandboxModels,
+    input.runningModel
   )
   const memory = input.memory && renderMemory(input.memory, input.mode, input.contextDirectory)
   const system = (text: string | undefined): PromptSection[] =>
@@ -340,7 +350,8 @@ function renderRuntimeContext(
   contextDirectory: string,
   skills: readonly AgentSkillDefinition[],
   ontologyIndex: readonly OntologyDocsIndexEntry[] = [],
-  sandboxModels: readonly SandboxModel[] = []
+  sandboxModels: readonly SandboxModel[] = [],
+  runningModel?: RunningAgentModelPromptContext
 ): { readonly base: string[]; readonly skills: string[]; readonly ontology: string[] } {
   const skillCatalog =
     skills.length === 0
@@ -398,7 +409,7 @@ function renderRuntimeContext(
     'When an Action id is provided, inspect it directly with `sixb actions get <action-id>`; its `inputSchema` is the exact JSON shape accepted by the Action. An object-reference parameter is an object such as `{"objectTypeId":"Type","primaryId":"opaque:id"}`, never a bare id.',
     "Send Action params as one JSON object through standard input with `sixb actions request <action-id> --file -`; it runs the Action and prints the finished run, with its status and any error. Never inspect the environment to infer identifiers.",
     "Do not use ontology or Action listings, broad object inspection, or environment inspection when exact references and commands are already known. Use `--run-id` only for a request-specific idempotency key.",
-    ...renderModelCommands(sandboxModels),
+    ...renderModelCommands(sandboxModels, runningModel),
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",
     "Find files with glob and text with grep before you read them. Read a file before you change it, and change files with edit and write rather than shell commands; a memory save stays one bash command that edits and saves.",
@@ -419,12 +430,20 @@ const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string
  * The commands that call the project's models, each followed by its models with what each is for,
  * so the agent picks one without listing them. Each call is billed.
  */
-function renderModelCommands(models: readonly SandboxModel[]): string[] {
-  const language = renderLanguageModelCommand(models.filter((model) => model.kind === "language"))
+function renderModelCommands(
+  models: readonly SandboxModel[],
+  runningModel?: RunningAgentModelPromptContext
+): string[] {
+  const language = renderLanguageModelCommand(
+    models.filter((model) => model.kind === "language"),
+    runningModel
+  )
   const media = renderMediaModelCommands(models.filter((model) => model.kind !== "language"))
-  if (language.length === 0 && media.length === 0) return []
+  const running = runningModel ? [`You are running on ${formatRunningModel(runningModel)}.`] : []
+  if (language.length === 0 && media.length === 0) return running
 
   return [
+    ...running,
     "The project's models are yours to call through `sixb models`.",
     ...language,
     ...media,
@@ -432,23 +451,37 @@ function renderModelCommands(models: readonly SandboxModel[]): string[] {
   ]
 }
 
+/** How the prompt identifies the model running the current turn. */
+function formatRunningModel(model: RunningAgentModelPromptContext): string {
+  const reference = `${model.provider}/${model.modelId}`
+  return model.name ? `${model.name} (${reference})` : reference
+}
+
 /**
  * Another model's answer, without a child agent: one generation from the prompt alone. Listed only
  * when the project has several language models, since otherwise there is no other to ask.
  */
-function renderLanguageModelCommand(models: readonly SandboxModel[]): string[] {
+function renderLanguageModelCommand(
+  models: readonly SandboxModel[],
+  runningModel?: RunningAgentModelPromptContext
+): string[] {
   if (models.length < 2) return []
 
   const tiers = [...new Set(models.flatMap((model) => (model.tier ? [model.tier] : [])))]
   const reference = tiers.length > 0 ? "<tier or model>" : "<model>"
-  const lines = models.map((model) =>
-    renderModelLine({
+  const lines = models.map((model) => {
+    const isRunning =
+      runningModel !== undefined &&
+      model.provider === runningModel.provider &&
+      model.modelId === runningModel.modelId
+    return renderModelLine({
       ...(model.tier === undefined ? {} : { tier: model.tier }),
       reference: cliModelReference(model, models),
       ...(model.name === undefined ? {} : { name: model.name }),
+      ...(isRunning ? { details: "(you)" } : {}),
       ...(model.description === undefined ? {} : { description: model.description }),
     })
-  )
+  })
 
   return [
     `Ask another model for a second opinion or a quick generation: \`sixb models text "<prompt>" --model ${reference}\`, or \`--file -\` to send a long prompt on standard input. It answers once from the prompt alone, without the project's data or tools, so put everything it needs in the prompt.`,

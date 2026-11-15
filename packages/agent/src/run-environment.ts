@@ -1152,6 +1152,11 @@ function measureEnvironmentSystemPrompt(input: {
     ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
     ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
     ...(input.memory ? { memory: input.memory.prompt } : {}),
+    runningModel: {
+      provider: plan.model.providerId,
+      modelId: plan.model.modelId,
+      ...(plan.model.definition.name ? { name: plan.model.definition.name } : {}),
+    },
   })
 }
 
