@@ -21,8 +21,9 @@ export interface ResolvedModelSelection {
 }
 
 /**
- * With tiers, the chat starts on Auto: a decision model picks each message's model, and without
- * one every message runs on `standard`. Choosing a model pins it.
+ * With tiers, a conversation starts on Auto: a decision model picks each message's model, and
+ * without one every message runs on `standard`. A model chosen in any conversation becomes the one
+ * the next conversation starts on, and each conversation pins its own.
  */
 export function hasTiers(models: readonly LanguageModel[]): boolean {
   return models.some((model) => model.tier !== undefined)

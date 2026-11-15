@@ -347,17 +347,31 @@ describe("the model chip with tiers", () => {
     )
   })
 
-  // Removal proof: drop the effect that clears newThreadPin; the next new conversation is on Flash.
-  test("a model pinned in a new conversation is not pinned in the next one", async () => {
-    const { view, open } = renderChat({ threadId: null })
-    await pin(view, "Flash")
+  // Removal proof: drop the choice between the composer and the thread; the next new conversation
+  // is on Auto. Read a thread's model from the browser's choice instead of its own pin; thr_1 is
+  // on Flash.
+  test("the next conversation starts on the last choice, and a thread keeps its own", async () => {
+    const first = renderChat({ threadId: null })
+    await pin(first.view, "Flash")
+    first.view.unmount()
 
-    open("thr_1")
-    await view.findByRole("button", { name: settingsChip("Auto") })
-    open(null)
+    const next = renderChat({ threadId: null })
+    expect(await next.view.findByRole("button", { name: settingsChip("Flash") })).toBeDefined()
+    next.view.unmount()
 
-    expect(await view.findByRole("button", { name: settingsChip("Auto") })).toBeDefined()
+    const opened = renderChat({ threadId: "thr_1" })
+    expect(await opened.view.findByRole("button", { name: settingsChip("Auto") })).toBeDefined()
     expect(storedPins()).toEqual({})
+  })
+
+  // Removal proof: write the choice only with no thread open, as newThreadPin did in memory; the
+  // next new conversation is on Auto instead of the model chosen in the thread.
+  test("a model chosen in a thread is what the next new conversation starts on", async () => {
+    const { view, open } = renderChat()
+    await pin(view, "Opus")
+
+    open(null)
+    expect(await view.findByRole("button", { name: settingsChip("Opus") })).toBeDefined()
   })
 
   // Removal proof: write from the pins in memory instead of the stored ones, thr_2's pin is lost;
