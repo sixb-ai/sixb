@@ -5,6 +5,7 @@ import { createGitHubAttachmentsApi } from "./resources/attachments"
 import { createRepositoryBranchesApi } from "./resources/branches"
 import { createRepositoryChecksApi } from "./resources/checks"
 import { createRepositoryCommitsApi } from "./resources/commits"
+import { createRepositoryCompareApi } from "./resources/compare"
 import {
   createAuthenticatedUserIssuesApi,
   createOrganizationIssuesApi,
@@ -44,6 +45,7 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
       branches: createRepositoryBranchesApi(context, target),
       checks: createRepositoryChecksApi(context, target),
       commits: createRepositoryCommitsApi(context, target),
+      ...createRepositoryCompareApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
       labels: createRepositoryLabelsApi(context, target),
       milestones: createRepositoryMilestonesApi(context, target),

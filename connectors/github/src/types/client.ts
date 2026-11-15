@@ -5,6 +5,7 @@ import type { RepositoryBranchesApi } from "./branches"
 import type { RepositoryChecksApi } from "./checks"
 import type { RepositoryCommitsApi } from "./commits"
 import type { GitHubRepositoryTarget } from "./common"
+import type { CompareOptions, CompareRefs, GitHubCompare } from "./compare"
 import type {
   AuthenticatedUserIssuesApi,
   OrganizationIssuesApi,
@@ -47,6 +48,8 @@ export interface GitHubRepositoryScope {
   /** A commit's check runs and its combined commit status. */
   readonly checks: RepositoryChecksApi
   readonly commits: RepositoryCommitsApi
+  /** Compare two refs: the commits between them and the files they change. */
+  compare(refs: CompareRefs, options?: CompareOptions): Promise<GitHubCompare>
   readonly issues: RepositoryIssuesApi
   readonly labels: RepositoryLabelsApi
   readonly milestones: RepositoryMilestonesApi

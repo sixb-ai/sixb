@@ -2213,3 +2213,51 @@ describe("the diff a review reads", () => {
     expect(calls[0]?.headers.get("accept")).toBe("application/vnd.github.html+json")
   })
 })
+
+describe("comparing two refs", () => {
+  const compare = {
+    status: "ahead",
+    ahead_by: 2,
+    behind_by: 0,
+    total_commits: 2,
+    commits: [{ sha: "abc" }],
+    files: [{ filename: "src/login.ts", status: "modified", patch: "@@ -1 +1 @@" }],
+  }
+
+  // A pull request shows the three-dot diff, so that is what a caller gets unless it asks otherwise.
+  test("counts from the merge base by default, and from the base itself when asked", async () => {
+    const calls = record(() => json(compare))
+    const repo = (await connect()).repo(webRepo)
+
+    const threeDot = await repo.compare({ base: "main", head: "feature/login" })
+    await repo.compare({ base: "main", head: "feature/login" }, { diff: "two-dot" })
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/compare/main...feature/login",
+      "/repos/acme/web/compare/main..feature/login",
+    ])
+    expect(threeDot).toMatchObject({ status: "ahead", ahead_by: 2 })
+    expect(threeDot.files[0]?.patch).toBe("@@ -1 +1 @@")
+  })
+
+  test("reads one side of the comparison and its merge base", async () => {
+    record(() =>
+      json({ base_commit: { sha: "base-sha" }, merge_base_commit: { sha: "merge-sha" } })
+    )
+
+    const result = await (await connect()).repo(webRepo).compare({ base: "v1.0.0", head: "v1.1.0" })
+
+    expect(result.base_commit.sha).toBe("base-sha")
+    expect(result.merge_base_commit.sha).toBe("merge-sha")
+  })
+
+  // A ref that walks up the path would ask GitHub for another repository's files.
+  test("refuses an empty ref, and a segment that walks up the path", async () => {
+    const calls = record()
+    const repo = (await connect()).repo(webRepo)
+
+    await expect(repo.compare({ base: "", head: "main" })).rejects.toThrow("base")
+    await expect(repo.compare({ base: "main", head: "../acme/other" })).rejects.toThrow("segment")
+    expect(calls).toHaveLength(0)
+  })
+})

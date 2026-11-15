@@ -6,6 +6,7 @@ import {
   readJson,
   readNoContent,
   readPage,
+  refPath,
   repositoryPath,
   resolvePagePath,
   withQuery,
@@ -70,10 +71,7 @@ export function createRepositoryBranchesApi(
     },
 
     async delete(branch: string, options?: GitHubRequestOptions): Promise<void> {
-      // The name is a path of its own segments, so a slash in it stays a slash.
-      const ref = ["heads", ...assertBranchName(branch).split("/")]
-        .map((segment) => pathPart(segment, "branch"))
-        .join("/")
+      const ref = `heads/${refPath(assertBranchName(branch), "branch")}`
       return readNoContent(
         await context.http.request(`${repo}/git/refs/${ref}`, {
           method: "DELETE",

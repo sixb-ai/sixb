@@ -9,7 +9,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Pull requests** — list a repository's pull requests, get one with its merge state and size, read the files it changes with their patches and the commits on its branch, merge one, review it, and read or write the inline comments on its diff
 - **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
-- **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
+- **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files, compare two refs
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **Actions** — read workflows, runs, their jobs, logs and artifacts, re-run or cancel a run, and start one by hand
@@ -175,6 +175,7 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).stacks.get(number)` | `GET /repos/{owner}/{repo}/stacks/{number}` |
 | `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
 | `gh.repo({ owner, repo }).commits.get(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}` |
+| `gh.repo({ owner, repo }).compare({ base, head })` | `GET /repos/{owner}/{repo}/compare/{base}...{head}` |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
 | `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
 | `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
@@ -549,6 +550,17 @@ the default branch, or from `sha` (a branch or commit), and filters by `path`, `
 committer as Git recorded them) and the matching GitHub accounts in `author` and `committer`,
 which are `null` when no account has that email. `commits.get()` accepts a SHA, branch or tag,
 names containing `/` included, and adds `stats` and the changed `files` with their patches.
+
+`compare({ base, head })` reads two refs against each other: their `status` (`ahead`, `behind`,
+`diverged`, `identical`), `ahead_by` and `behind_by`, the commits between them, and up to 300 files
+with their patches. It counts the diff from the two refs' merge base unless `diff` is `two-dot`,
+which counts from `base` itself; a pull request shows the three-dot one. Refs may contain `/`, such
+as `feature/login`.
+
+```ts
+// What landed since a review started.
+const since = await repo.compare({ base: reviewSha, head: pull.head.sha })
+```
 
 Release calls accept a `signal` to abort the request. `releases.list()` returns
 newest first and includes drafts only when the token can push to the repository;

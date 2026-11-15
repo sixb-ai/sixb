@@ -69,6 +69,13 @@ export type {
   GitHubRequestOptions,
   GitHubUser,
 } from "./common"
+export type {
+  CompareOptions,
+  CompareRefs,
+  GitHubCompare,
+  GitHubCompareStatus,
+  RepositoryCompareApi,
+} from "./compare"
 export type { GitHubDiffEntry, GitHubDiffStatus } from "./diff"
 export type {
   CreateIssueCommentInput,

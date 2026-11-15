@@ -153,6 +153,19 @@ export function pathId(value: number, field: string): string {
   return String(value)
 }
 
+/**
+ * A ref or a file's path as the path of its own segments, each encoded, so a slash in a branch name
+ * stays a slash instead of becoming `%2F`.
+ */
+export function refPath(value: string, field: string): string {
+  assertNonEmpty(value, field)
+  const segments = value.split("/")
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error(`[SixbGitHub] ${field} must not contain an empty, "." or ".." segment.`)
+  }
+  return segments.map((segment) => encodeURIComponent(segment)).join("/")
+}
+
 export function repositoryPath(target: GitHubRepositoryTarget): string {
   return `/repos/${pathPart(target.owner, "owner")}/${pathPart(target.repo, "repo")}`
 }
