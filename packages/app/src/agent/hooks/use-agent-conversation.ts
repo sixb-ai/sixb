@@ -551,14 +551,18 @@ export function useAgentConversation({
     let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
-        setPendingUser({
-          key,
-          threadId: targetThreadId,
-          text,
-          attachments,
-          context,
-          messageId: null,
-        })
+        // A message for the running turn waits in the inbox, which the tray shows: only one that
+        // starts a turn is the transcript's next message.
+        if (delivery === "auto") {
+          setPendingUser({
+            key,
+            threadId: targetThreadId,
+            text,
+            attachments,
+            context,
+            messageId: null,
+          })
+        }
         const response = await sendWithRequesterSettings((settings) =>
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
@@ -713,6 +717,10 @@ export function useAgentConversation({
       }),
       queryClient.invalidateQueries({
         queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
+      }),
+      // A turn that ended read its steers, or started what was queued behind it.
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadInboxQueryKey({ path: { threadId } }),
       }),
     ])
 

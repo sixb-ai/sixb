@@ -156,6 +156,24 @@ describe("slash commands", () => {
   })
 })
 
+describe("while a turn runs", () => {
+  // Removal proof: pass `delivery` through as given in the composer's submit; the send button sends
+  // "auto", which the conversation drops while a turn runs, after the draft was already cleared.
+  test("the send button sends where Enter would, when the reader cannot stop the turn", () => {
+    const sent: string[] = []
+    const view = renderComposer({
+      running: true,
+      steerable: false,
+      onSend: (text, _attachments, _context, delivery) => sent.push(`${delivery}: ${text}`),
+    })
+
+    type(view.input(), "And the fixtures")
+    fireEvent.click(view.getByRole("button", { name: "Send message" }))
+
+    expect(sent).toEqual(["queue: And the fixtures"])
+  })
+})
+
 describe("the composer's layout", () => {
   // Removal proof: drop `value.includes("\n")` from `expanded`; a two-line draft stays in the row.
   test("a draft on more than one line gets a row of its own, above the controls", () => {

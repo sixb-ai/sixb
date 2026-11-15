@@ -508,7 +508,9 @@ export function Composer({
 
   const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
-    onSend(value.trim(), readyAttachments, contextEntries, running ? delivery : "auto")
+    // While a turn runs, a message goes somewhere: the send button does what Enter does.
+    const where = running && delivery === "auto" ? (steerable ? "steer" : "queue") : delivery
+    onSend(value.trim(), readyAttachments, contextEntries, running ? where : "auto")
     setValue("")
     voice.reset()
     setAttachments([])

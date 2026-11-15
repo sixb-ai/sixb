@@ -7,7 +7,9 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowUp, Send, X } from "lucide-react"
+import { useCurrentUser } from "../../session"
 import { useAgentMessages } from "../i18n"
+import { samePrincipal, userPrincipal } from "../sharing"
 import type { AgentInboxItem } from "../types"
 
 /**
@@ -22,23 +24,28 @@ export function PendingMessages({
   readonly className?: string
 }) {
   const labels = useAgentMessages().composer
+  const me = userPrincipal(useCurrentUser())
   const queryClient = useQueryClient()
   const inbox = useQuery({
     ...listAgentThreadInboxOptions({ path: { threadId: threadId ?? "" } }),
     enabled: threadId !== null,
+    // No event says a step read a steer, so while anything waits the tray reads again: a message a
+    // turn took leaves it.
+    refetchInterval: (query) => ((query.state.data?.items.length ?? 0) > 0 ? 5_000 : false),
   })
   const refresh = () =>
     queryClient.invalidateQueries({
       queryKey: listAgentThreadInboxQueryKey({ path: { threadId: threadId ?? "" } }),
     })
 
+  // Settled either way: a refusal most often means a turn read the message first.
   const promote = useMutation({
     ...updateAgentThreadInboxItemMutation(),
-    onSuccess: refresh,
+    onSettled: refresh,
   })
   const withdraw = useMutation({
     ...withdrawAgentThreadInboxItemMutation(),
-    onSuccess: refresh,
+    onSettled: refresh,
   })
 
   const items = threadId === null ? [] : (inbox.data?.items ?? [])
@@ -50,6 +57,7 @@ export function PendingMessages({
         <PendingMessage
           key={item.id}
           item={item}
+          mine={samePrincipal(item.authorPrincipal, me)}
           labels={labels}
           busy={promote.isPending || withdraw.isPending}
           onSteer={() =>
@@ -71,6 +79,7 @@ export function PendingMessages({
 
 function PendingMessage({
   item,
+  mine,
   labels,
   busy,
   onSteer,
@@ -78,6 +87,8 @@ function PendingMessage({
   onWithdraw,
 }: {
   readonly item: AgentInboxItem
+  /** Only the person who sent it may change it: another participant's shows without actions. */
+  readonly mine: boolean
   readonly labels: ReturnType<typeof useAgentMessages>["composer"]
   readonly busy: boolean
   readonly onSteer: () => void
@@ -88,7 +99,11 @@ function PendingMessage({
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join(" ")
     .trim()
-  const queued = item.mode === "queue" && item.immediate !== true
+  // A steer is read mid-turn, which prepares no file: one that carries a file stays queued.
+  const steerable =
+    item.mode === "queue" &&
+    item.immediate !== true &&
+    !item.parts.some((part) => part.type === "file")
 
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
@@ -102,40 +117,42 @@ function PendingMessage({
               : labels.queuePending}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {queued ? (
+      {mine ? (
+        <div className="flex shrink-0 items-center gap-1">
+          {steerable ? (
+            <button
+              type="button"
+              onClick={onSteer}
+              disabled={busy}
+              title={labels.steer}
+              aria-label={labels.steer}
+              className={ACTION_CLASS}
+            >
+              <ArrowUp className="size-3.5" />
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={onSteer}
+            onClick={onSendNow}
             disabled={busy}
-            title={labels.steer}
-            aria-label={labels.steer}
+            title={labels.sendNow}
+            aria-label={labels.sendNow}
             className={ACTION_CLASS}
           >
-            <ArrowUp className="size-3.5" />
+            <Send className="size-3.5" />
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={onSendNow}
-          disabled={busy}
-          title={labels.sendNow}
-          aria-label={labels.sendNow}
-          className={ACTION_CLASS}
-        >
-          <Send className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={onWithdraw}
-          disabled={busy}
-          title={labels.withdraw}
-          aria-label={labels.withdraw}
-          className={ACTION_CLASS}
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={onWithdraw}
+            disabled={busy}
+            title={labels.withdraw}
+            aria-label={labels.withdraw}
+            className={ACTION_CLASS}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
