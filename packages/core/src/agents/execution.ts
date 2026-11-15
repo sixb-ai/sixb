@@ -741,8 +741,9 @@ export function createAgentRuntime<
   }
 
   /**
-   * Start the next message the run's requester queued for its thread, as that requester. It never
-   * throws: what keeps the message from starting comes back as `closed`, and the message waits.
+   * Start the next message the caller queued for the run's thread, as the caller, once the run
+   * ended. It never throws: what keeps the message from starting comes back as `closed`, and the
+   * message waits.
    */
   const startQueuedTurn = async (
     runId: string,
@@ -752,18 +753,8 @@ export function createAgentRuntime<
     const run = await agents.runs.getById({ projectId: runtime.projectId, id: runId })
     if (run?.kind !== "conversation") return { status: "closed" }
 
-    const requester = (
-      await runtime.storage.executions.getById({
-        projectId: runtime.projectId,
-        id: run.executionId,
-      })
-    )?.requestedBy
-    if (authority.type === "principal" && !(requester && principalsEqual(requester, principal))) {
-      return { status: "closed" }
-    }
-
     try {
-      // A requester who left the thread no longer starts turns in it.
+      // Someone who left the thread no longer starts turns in it.
       if (!(await rule.read(run.threadId))) return { status: "closed" }
       return await startQueuedAgentTurnFromInbox(runtime, execution, run, options)
     } catch (error) {

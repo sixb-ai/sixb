@@ -443,7 +443,7 @@ export type SendAgentMessageResult =
  * Send a message to a conversation, delivered as asked.
  *
  * A steer or a send-now reaches only the turn its requester asked for: it runs as them. Any reader
- * may queue a message, which starts when they have a turn of their own.
+ * may queue a message, which starts as a turn of their own.
  */
 export async function sendAgentMessage(
   runtime: SixbRuntimeContext,
@@ -495,6 +495,16 @@ export async function sendAgentMessage(
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
     ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
   }
+  // The request that sends it is recorded with it: a turn that starts it once this request is gone
+  // runs as that request's child, as a turn this request started would have.
+  assertRequestAuthorityCanRunAgent(runtime)
+  const request = await ensureExecutionRecord(
+    runtime.storage.executions,
+    executionRecordInputFromRuntime({
+      execution,
+      runtimeAuthorization: runtime.runtimeAuthorization,
+    })
+  )
   const { item } = await agents.inbox.enqueue({
     id: createAgentInboxItemId(),
     projectId,
@@ -506,6 +516,7 @@ export async function sendAgentMessage(
     ...(Object.keys(spec).length === 0 ? {} : { spec }),
     ...settings,
     ...(delivery === "send_now" ? { immediate: true } : {}),
+    executionId: request.id,
   })
 
   if (delivery === "send_now") {
@@ -699,9 +710,10 @@ async function stopTurnBefore(
 
 /**
  * Start what the caller left waiting once no turn holds the thread: the turn it waited behind ended
- * before the message reached the inbox, or before a stop reached it, so that end read none of it.
- * It applies the rules a turn's end applies, and only to the caller's own turn. A failure leaves the
- * message waiting for the repair pass.
+ * before the message reached the inbox, or before a stop reached it, so that end read none of it,
+ * or it was someone else's, whose end starts their own messages first. It starts the caller's own
+ * turn, as them, by the rules a turn's end applies. A failure leaves the message waiting for the
+ * repair pass.
  */
 async function startIfThreadIdle(
   runtime: SixbRuntimeContext,
@@ -724,7 +736,6 @@ async function startIfThreadIdle(
       limit: 1,
     })
     if (last?.kind !== "conversation") return
-    if (!(await askedForTurn(runtime, last, messageAuthor(runtime, execution)))) return
     const onlyImmediate = !(await turnAnsweredEveryMessage(agents, last))
     await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
   } catch (error) {
@@ -768,7 +779,8 @@ export type AgentQueuedTurnStart =
   | { readonly status: "closed" }
 
 /**
- * Start the next message the finished turn's requester queued for this thread, as that requester.
+ * Start the next message the execution's requester queued for this thread, as them, from
+ * `finishedRun`: a turn of the thread, whose model and reasoning carry over.
  *
  * It pops the item in the same transaction that writes its message and its run, so two turns
  * ending at once start one between them. `onlyImmediate` starts only a message someone sent now,
@@ -797,10 +809,13 @@ export async function startQueuedAgentTurnFromInbox(
   const thread = await agents.threads.getById({ projectId, id: finishedRun.threadId })
   if (!thread) return { status: "closed" }
   assertSandboxExecutionAvailable(thread)
-  // The person whose turn ended, which is whom the queued messages are from: a turn starts the
-  // messages its own requester sent, and another participant's waits for one of theirs.
+  // Whom the turn runs as, and whose messages it starts: a turn starts only its requester's.
   const principal = execution.requestedBy
   if (!principal) return { status: "closed" }
+  // Its owner's computer runs its turns as its owner: another's message waits for one of theirs.
+  if (thread.runsOn === "computer" && !principalsEqual(principal, thread.ownerPrincipal)) {
+    return { status: "closed" }
+  }
 
   const runId = createAgentRunId()
   const durableExecution = await prepareResumedExecution(runtime, execution, runId)

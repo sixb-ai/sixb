@@ -382,17 +382,19 @@ A message that should wait starts the next turn instead of steering the running 
 - **Where it waits.** In the same thread inbox, with `mode: "queue"`, until the thread is idle
   (`thread.activeRunId === null`). It is not in the conversation until then, so the running turn's
   request never reads it.
-- **What starts it.** `afterAgentRunFinished` (`run-after-finish.ts`), for the turn's own requester:
-  a message they sent now (`immediate`, which is what Send now sets) starts whatever ended the
-  turn; a message queued for later starts only once the turn answered. A turn that stopped, failed,
-  or asked the requester a question starts neither, so nothing runs on top of a question or a
-  failure.
+- **What starts it.** `afterAgentRunFinished` (`run-after-finish.ts`), once a turn ends: a message
+  sent now (`immediate`, which is what Send now sets) starts whatever ended the turn; a message
+  queued for later starts only once the turn answered. A turn that stopped, failed, or asked the
+  requester a question starts neither, so nothing runs on top of a question or a failure.
 - **How it starts.** `startQueuedAgentTurnFromInbox` (`request.ts`) pops the item in the same
-  transaction that writes its message and its run, as a sibling of the finished turn's execution:
-  the message runs under the authority of the person who sent it, with their grants as they are now.
-  The finished turn's model and reasoning carry over unless the message names others.
-- **Who starts it.** Only the finished turn's requester, because a turn runs as its requester: a
-  message another participant queued waits for a turn of theirs.
+  transaction that writes its message and its run. The finished turn's model and reasoning carry
+  over unless the message names others.
+- **Who starts it.** Each message starts as a turn of its sender's own. The item records the
+  request that sent it (`executionId`), and the turn runs as that request's child, with the
+  sender's grants as they are now: what the request would have started on an idle thread. The
+  finished turn's requester goes first, then each other participant by their oldest message. One
+  whose credential ended, or who can no longer run turns in the thread, waits for a request of
+  theirs: on an idle thread, an action on their own message (Send now, a steer, an edit) starts it.
 
 ## Messages to a child
 

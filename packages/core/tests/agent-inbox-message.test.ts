@@ -308,4 +308,72 @@ describe("a message whose turn ended first", () => {
 
     expect(await startedTurns(host, threadId)).toEqual([queued.item.messageId])
   })
+
+  // Guard proof: put back the askedForTurn check in startIfThreadIdle; Send now marks the
+  // participant's message and starts nothing, as the turn it waited behind was the owner's.
+  test("starts a participant's message as their own turn when they send it now", async () => {
+    const { host, ...deps } = setup()
+    const owner = await userScope(host, "owner")
+    const guest = await userScope(host, "guest")
+    const { threadId, session } = await runningTurn(host, deps, owner)
+    await owner.agent.threads.participants.add(threadId, [{ type: "user", id: "guest" }])
+    const queued = await guest.agent.runs.send({ threadId, text: "And Halden.", delivery: "queue" })
+    if (queued.kind !== "inbox") throw new Error("Expected an inbox item.")
+    // The owner's turn ends, and its end never runs: its process stopped first.
+    await session.finish({ status: "succeeded", finishReason: "stop" })
+    await session.close()
+
+    await guest.agent.inbox.update(threadId, queued.item.id, { immediate: true })
+
+    const { runs } = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId,
+      statuses: ["queued"],
+    })
+    expect(runs.map((run) => run.triggerMessageId)).toEqual([queued.item.messageId])
+    const execution = await host.storage.executions.getById({
+      projectId: host.id,
+      id: runs[0]!.executionId,
+    })
+    expect(execution?.requestedBy).toEqual({ type: "user", id: "guest" })
+  })
+
+  // Guard proof: drop the computer check from startQueuedAgentTurnFromInbox; the participant's
+  // message starts a turn on the owner's computer, as the participant.
+  test("waits on its owner's computer, which runs only the owner's turns", async () => {
+    const { host } = setup()
+    const owner = await userScope(host, "owner")
+    const guest = await userScope(host, "guest")
+    const thread = await owner.agent.threads.create({
+      title: "On the laptop",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
+    })
+    await owner.agent.threads.participants.add(thread.id, [{ type: "user", id: "guest" }])
+    const { run } = await owner.agent.runs.request({ threadId: thread.id, text: "Read the book." })
+    await host.storage.agents!.inbox.enqueue({
+      id: "inb_guest",
+      projectId: host.id,
+      threadId: thread.id,
+      messageId: "msg_inb_guest",
+      authorPrincipal: { type: "user", id: "guest" },
+      mode: "queue",
+      parts: [{ type: "text", text: "And Halden." }],
+    })
+    await host.storage.agents!.runs.finishQueued({
+      projectId: host.id,
+      id: run.id,
+      status: "cancelled",
+    })
+
+    await guest.agent.inbox.update(thread.id, "inb_guest", { immediate: true })
+
+    const { runs } = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId: thread.id,
+      statuses: ["queued"],
+    })
+    expect(runs).toEqual([])
+    expect((await guest.agent.inbox.list(thread.id)).map((item) => item.id)).toEqual(["inb_guest"])
+  })
 })

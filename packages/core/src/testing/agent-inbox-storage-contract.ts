@@ -137,10 +137,15 @@ export function runAgentInboxStorageContractSuite<
             reasoning: "high",
             approvalMode: "accept-edits",
           },
+          executionId: "exec_bob_request",
           createdAt: new Date(t0.getTime() + 1_000),
         })
         expect(second.created).toBe(true)
         expect(second.item.seq).toBe(2)
+        // The request that sent it stays with it, for the turn that starts it to run as its child.
+        const stored = await storage.agents.inbox.getById({ projectId, id: "inb_2" })
+        expect(stored?.executionId).toBe("exec_bob_request")
+        expect(first.item.executionId).toBeUndefined()
 
         const listed = await storage.agents.inbox.list({ projectId, threadId: "thr_1" })
         expect(listed.map((item) => item.id)).toEqual(["inb_1", "inb_2"])

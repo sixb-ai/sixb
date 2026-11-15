@@ -13,9 +13,9 @@ interface QueuedTurnOwner {
 }
 
 /**
- * Let code without a request start the next message a finished turn's requester queued for its
- * thread: the worker's session host, the API's, and the repair pass. The SDK it is given is bound
- * to the finished turn's execution, so the message runs as the person who sent it.
+ * Let code without a request start the next message someone queued for a thread: the worker's
+ * session host, the API's, and the repair pass. The SDK it is given is bound to the request that
+ * sent the message, so the message runs as the person who sent it.
  */
 export function registerAgentQueuedTurn(
   agent: object,
@@ -32,7 +32,7 @@ export function registerAgentQueuedTurn(
   })
 }
 
-/** Start the next queued message of `run`'s thread, as the bound SDK's principal, its requester. */
+/** Start the bound SDK's principal's next queued message in `run`'s thread, once `run` ended. */
 export function startQueuedAgentTurn(
   sixb: Sixb,
   runId: string,

@@ -1,6 +1,9 @@
-import { principalsEqual } from "../auth"
-import { captureSixbFailure, createSixbError } from "../errors/internal"
+import { type Principal, principalsEqual } from "../auth"
+import { captureSixbFailure, createSixbError, isSixbError } from "../errors/internal"
 import { bindDurableAgentExecution } from "../execution/agent"
+import { createPrincipalRuntimeAuthorization } from "../execution/authorization"
+import type { ExecutionContext } from "../execution/types"
+import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import {
   AGENT_RUN_FAILURE_CODES,
   type AgentInboxItemRecord,
@@ -10,6 +13,10 @@ import {
 } from "../storage/agents"
 import { resumeDecidedAgentTurn } from "./approval-continuation"
 import { isAwaitingApprovalRun } from "./approvals"
+import {
+  type AgentExecutionAuthorization,
+  resolveInheritedAgentExecutionAuthorization,
+} from "./authority"
 import { requestAgentRunCancel } from "./cancel"
 import { startQueuedAgentTurn } from "./queued-turn"
 import { resolveAgentRunExecutionScope } from "./run-scope"
@@ -53,9 +60,10 @@ const INBOX_REPAIR_GRACE_MS = 30_000
 
 /**
  * The repair pass for thread inboxes: what a turn's end did not start, because its process stopped
- * first, a read failed, or an AI limit refused it, starts by the same rules the end applies, as
- * that turn's requester. Claims a finished turn left behind go back first. A message those rules
- * keep waiting (another participant's, or one queued behind a turn that stopped) is left alone.
+ * first, a read failed, or an AI limit refused it, starts by the same rules the end applies, each
+ * as a turn of its sender's own. Claims a finished turn left behind go back first. A message those
+ * rules keep waiting (one queued behind a turn that stopped, or whose sender's credential ended)
+ * is left alone.
  */
 export async function repairAgentInboxes(
   host: AgentRunSessionHost,
@@ -144,9 +152,10 @@ async function readInbox(
 }
 
 /**
- * Start the next message its requester queued for the thread: always one they sent now, and a
- * message queued for later only once the turn answered, so nothing runs after a turn that stopped
- * or failed, or one that asked the requester a question.
+ * Start the next message queued for the thread: always one sent now, and a message queued for later
+ * only once the turn answered, so nothing runs after a turn that stopped or failed, or one that
+ * asked the requester a question. The turn's requester goes first, then each other author by their
+ * oldest message, each as a turn of their own.
  */
 async function startNextQueuedMessage(
   host: AgentRunSessionHost,
@@ -161,21 +170,17 @@ async function startNextQueuedMessage(
     const requester = execution?.requestedBy
     if (!requester) return
 
-    // Only the turn's requester starts their own messages: a turn runs as its requester.
     const onlyImmediate = !(await turnAnsweredEveryMessage(host.storage.agents, run))
-    const next = waiting.some(
-      (item) =>
-        (!onlyImmediate || item.immediate) && principalsEqual(item.authorPrincipal, requester)
-    )
-    if (!next) return
+    const startable = waiting.filter((item) => !onlyImmediate || item.immediate)
 
-    const scope = await resolveAgentRunExecutionScope(
-      { id: host.projectId, storage: host.storage, definitions: { security: host.security } },
-      { runId: run.id, executionId: run.executionId, authority: { type: "inherited" } }
-    )
-    await startQueuedAgentTurn(bindDurableAgentExecution(host.sdk, scope), run.id, {
-      onlyImmediate,
-    })
+    for (const next of nextOfEachAuthor(startable, requester)) {
+      // One whose sender can no longer run turns waits for a request of theirs.
+      const sender = await boundSender(host, next)
+      if (!sender) continue
+
+      const started = await startQueuedAgentTurn(sender, run.id, { onlyImmediate })
+      if (started.status === "started") return
+    }
   } catch (error) {
     // Its turn is recorded: the message waits in the thread, and the repair pass catches up.
     console.error(
@@ -183,6 +188,89 @@ async function startNextQueuedMessage(
       error
     )
   }
+}
+
+/**
+ * Each author's next message, in the order a turn's end tries them: the requester's first, then
+ * the others by their oldest. Within an author, the one their turn takes (see `takeNextQueued`):
+ * sent now, then a steer, then the oldest.
+ */
+function nextOfEachAuthor(
+  items: readonly AgentInboxItemRecord[],
+  requester: Principal
+): readonly AgentInboxItemRecord[] {
+  const byAuthor: AgentInboxItemRecord[][] = []
+  for (const item of [...items].sort((left, right) => left.seq - right.seq)) {
+    const own = byAuthor.find((each) =>
+      principalsEqual(each[0]!.authorPrincipal, item.authorPrincipal)
+    )
+    if (own) own.push(item)
+    else byAuthor.push([item])
+  }
+
+  const order = (each: readonly AgentInboxItemRecord[]) =>
+    principalsEqual(each[0]!.authorPrincipal, requester) ? 0 : 1
+  return byAuthor
+    .sort((left, right) => order(left) - order(right))
+    .map((own) => [...own].sort((left, right) => priority(left) - priority(right))[0]!)
+}
+
+function priority(item: AgentInboxItemRecord): number {
+  if (item.immediate) return 0
+  return item.mode === "steer" ? 1 : 2
+}
+
+/**
+ * The SDK of the request that sent the message, with its sender's grants as they are now, which the
+ * turn that starts it runs as a child of: what that request would have started itself. Null when
+ * the message names no request, or the credential it came with has ended or was revoked.
+ */
+async function boundSender(
+  host: AgentRunSessionHost,
+  item: AgentInboxItemRecord
+): Promise<Sixb | null> {
+  if (item.executionId === undefined) return null
+  const request = await host.storage.executions.getById({
+    projectId: host.projectId,
+    id: item.executionId,
+  })
+  const ref = request?.authorizationRef
+  if (request?.executor.type !== "request" || ref?.type !== "principal") return null
+
+  let authorization: AgentExecutionAuthorization
+  try {
+    authorization = await resolveInheritedAgentExecutionAuthorization({
+      auth: host.storage.auth,
+      projectId: host.projectId,
+      authorizationRef: ref,
+      security: host.security,
+    })
+  } catch (error) {
+    if (isSixbError(error) && error.code === "agent.execution_failed") return null
+    throw error
+  }
+  if (authorization.type !== "principal") return null
+
+  const execution: ExecutionContext = Object.freeze({
+    id: request.id,
+    projectId: request.projectId,
+    ...(request.requestedBy === undefined ? {} : { requestedBy: request.requestedBy }),
+    executor: request.executor,
+    source: request.source,
+    correlationId: request.correlationId,
+  })
+  const sixb = host.sdk.withScope({
+    execution,
+    authorization: createPrincipalRuntimeAuthorization({
+      execution,
+      context: authorization.context,
+      ...(ref.credential === undefined ? {} : { credential: ref.credential }),
+    }),
+  })
+  if (!isBoundSixb(sixb)) {
+    throw new Error("[Sixb] Agent session host returned an invalid bound SDK.")
+  }
+  return sixb
 }
 
 /** Whatever a run stopped writing goes back to the thread's inbox, to be read again. */

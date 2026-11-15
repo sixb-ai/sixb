@@ -1400,6 +1400,11 @@ export interface AgentInboxItemRecord {
   readonly locale?: string
   /** Marked by Send now so `afterAgentRunFinished` dispatches it across a user cancel. */
   readonly immediate?: boolean
+  /**
+   * The execution of the request that sent it. A turn that starts it without a request of its
+   * sender's runs as a child of this one, with the sender's grants as they are then.
+   */
+  readonly executionId?: string
   readonly claimedBy?: AgentInboxClaim
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -1417,6 +1422,7 @@ export interface EnqueueAgentInboxItemInput {
   readonly timeZone?: string
   readonly locale?: string
   readonly immediate?: boolean
+  readonly executionId?: string
   readonly createdAt?: Date
 }
 
