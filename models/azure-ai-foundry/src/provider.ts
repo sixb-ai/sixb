@@ -28,6 +28,12 @@ import {
 import { foundryChatEstimator, foundryChatUsage } from "./chat-accounting"
 import { type ChatRequestOptions, foundryChatRequest, validateChatOptions } from "./chat-request"
 import {
+  type AzureAIFoundryDecisionModel,
+  type AzureAIFoundryDecisionOptions,
+  createFoundryDecision,
+  isDecisionDeployment,
+} from "./decision"
+import {
   type AzureAIFoundryCatalog,
   type AzureAIFoundryDeployment,
   type AzureAIFoundryDiscoveryOptions,
@@ -131,6 +137,11 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
     deploymentName: string,
     options: AzureAIFoundryEmbeddingOptions
   ): AzureAIFoundryEmbeddingModel
+  /** A deployment of a decision model, such as Microsoft-Decision-1, for `models.decision`. */
+  decision(
+    deploymentName: string,
+    options?: AzureAIFoundryDecisionOptions
+  ): AzureAIFoundryDecisionModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -183,6 +194,8 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     model("messages", name, options)
   const chat = (name: string, options: AzureAIFoundryChatOptions = {}) =>
     model("chat", name, options)
+  const decision = (name: string, options: AzureAIFoundryDecisionOptions = {}) =>
+    createFoundryDecision(providerId, name, options, transport, deployments)
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
@@ -192,6 +205,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
       const name = deployment.name
       if (
         isEmbeddingDeployment(deployment) ||
+        isDecisionDeployment(deployment) ||
         (await modelCatalog.getEmbedding(deployment.modelName, true))
       )
         continue
@@ -227,7 +241,15 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   }
   const auto = (name: string, options: AzureAIFoundryModelOptions = {}) =>
     model(undefined, name, options)
-  return Object.assign(auto, { providerId, catalog, responses, messages, chat, embedding })
+  return Object.assign(auto, {
+    providerId,
+    catalog,
+    responses,
+    messages,
+    chat,
+    embedding,
+    decision,
+  })
 }
 
 class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryModel<Protocol> {
@@ -334,6 +356,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
     if (isEmbeddingDeployment(resolution.deployment))
       throw new UnsupportedModelFeatureError(
         `${PREFIX} Use foundry.embedding() for an embedding deployment.`
+      )
+    if (isDecisionDeployment(resolution.deployment))
+      throw new UnsupportedModelFeatureError(
+        `${PREFIX} Use foundry.decision() for a decision deployment.`
       )
     let catalogModel: CatalogModel | undefined
     try {

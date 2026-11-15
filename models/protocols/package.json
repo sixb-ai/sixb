@@ -34,6 +34,12 @@
       "import": "./dist/responses.js",
       "default": "./dist/responses.js"
     },
+    "./systemone": {
+      "types": "./dist/systemone.d.ts",
+      "bun": "./src/systemone.ts",
+      "import": "./dist/systemone.js",
+      "default": "./dist/systemone.js"
+    },
     "./models-dev": {
       "types": "./dist/models-dev.d.ts",
       "bun": "./src/models-dev.ts",

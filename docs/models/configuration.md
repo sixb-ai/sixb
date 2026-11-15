@@ -327,6 +327,25 @@ export const sixb = createSixb({
 })
 ```
 
+To keep model traffic in your Azure tenant, deploy `Microsoft-Decision-1` in Azure AI Foundry and
+register the deployment with `@sixb/azure-ai-foundry`:
+
+```ts
+import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
+
+const foundry = createAzureAIFoundry({
+  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
+})
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    decision: [foundry.decision("decision-1")], // Your deployment's name.
+  },
+})
+```
+
 The first decision model is the default; pass `model` to `evaluate()` to run another one, listed or
 not. Decision models need neither a language model nor a sandbox.
 

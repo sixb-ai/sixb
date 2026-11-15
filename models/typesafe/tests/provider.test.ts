@@ -166,7 +166,7 @@ describe("TypeSafe provider", () => {
 })
 
 test("a pinned version cannot silently return another Jev model", async () => {
-  // Removal proof: remove the pinned-model comparison in response.ts.
+  // Removal proof: remove the pinned-model comparison in transport.ts.
   const model = createTypesafe({
     apiKey: "secret",
     fetch: async () => Response.json({ ...payload, model: "jev-2.0.0" }),

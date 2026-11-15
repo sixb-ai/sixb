@@ -1,4 +1,5 @@
 export type { AzureAIFoundryCatalogOptions } from "./catalog"
+export type { AzureAIFoundryDecisionModel, AzureAIFoundryDecisionOptions } from "./decision"
 export type {
   AzureAIFoundryCatalog,
   AzureAIFoundryDeployment,

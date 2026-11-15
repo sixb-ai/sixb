@@ -691,6 +691,7 @@
       "version": "0.2.0",
       "dependencies": {
         "@sixb/core": "workspace:^",
+        "@sixb/model-protocols": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
