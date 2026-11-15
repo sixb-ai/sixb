@@ -1,4 +1,5 @@
 import {
+  type AgentMessagePart,
   AgentRequestError,
   type AgentRequestErrorCode,
   type AgentRunView,
@@ -53,7 +54,7 @@ import {
   AgentInboxListResponseSchema,
   AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
-  AgentMessageSchema,
+  type AgentMessageSchema,
   AgentMessagesQuerySchema,
   AgentRequestErrorResponseSchema,
   AgentRunListQuerySchema,
@@ -230,12 +231,16 @@ export function sameBackgroundCommand(
   )
 }
 
+/**
+ * A message as the API returns it, unchecked: the route's response schema checks it once, and drops
+ * what the schema does not name. Parsed here too, a thread's messages were checked three times.
+ */
 function serializeMessage(
   message: AgentMessageRecord,
   annotations: readonly AgentRunDiagnostic[] = [],
   checkpoint?: AgentContextCheckpointRecord
-): ReturnType<typeof AgentMessageSchema.parse> {
-  return AgentMessageSchema.parse({
+): z.infer<typeof AgentMessageSchema> {
+  return {
     id: message.id,
     projectId: message.projectId,
     threadId: message.threadId,
@@ -243,7 +248,7 @@ function serializeMessage(
     role: message.role,
     authorPrincipal: message.authorPrincipal,
     seq: message.seq,
-    parts: message.parts,
+    parts: message.parts.map(withoutReplayState),
     annotations,
     compaction: checkpoint
       ? {
@@ -257,7 +262,20 @@ function serializeMessage(
     contentVersion: message.contentVersion,
     createdAt: toIsoString(message.createdAt),
     completedAt: message.completedAt ? toIsoString(message.completedAt) : undefined,
-  })
+  } as z.infer<typeof AgentMessageSchema>
+}
+
+/**
+ * A part without what only replays the conversation to its model: a provider's opaque state and
+ * metadata, such as encrypted reasoning, which no reader shows and which made up some 40% of a long
+ * thread's messages. A provider-state part stays, with no data, so each part keeps its index for
+ * the `/parts/<index>/...` paths files are read at.
+ */
+function withoutReplayState(part: AgentMessagePart): AgentMessagePart {
+  if (part.type === "provider-state") return { ...part, data: null }
+  if (!("providerMetadata" in part) || part.providerMetadata === undefined) return part
+  const { providerMetadata: _replay, ...shown } = part
+  return shown as AgentMessagePart
 }
 
 export function serializeAgentInboxItem(
@@ -972,9 +990,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const parsed = AgentMessagesQuerySchema.parse(query)
-          return AgentMessageListResponseSchema.parse(
-            await readThreadMessages(host, storage, thread, parsed)
-          )
+          // The response schema checks the page once, as it leaves.
+          return await readThreadMessages(host, storage, thread, parsed)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

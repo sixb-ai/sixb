@@ -32,15 +32,21 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
-export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.null(),
-    z.array(JsonValueSchema),
-    z.record(JsonValueSchema),
-  ])
+// Zod calls a lazy schema's getter at every value it checks: built there, the union and its array
+// and record would be built again at each node of every JSON value, which cost a thread's messages
+// seconds of CPU. Built once, each check only walks the value.
+let jsonValueUnion: z.ZodType<JsonValue> | undefined
+
+export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(
+  () =>
+    (jsonValueUnion ??= z.union([
+      z.string(),
+      z.number().finite(),
+      z.boolean(),
+      z.null(),
+      z.array(JsonValueSchema),
+      z.record(JsonValueSchema),
+    ]))
 )
 
 /** A JSON null with an explicit runtime and generated-client type. */

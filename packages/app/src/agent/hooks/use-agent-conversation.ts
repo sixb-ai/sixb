@@ -227,6 +227,10 @@ const MESSAGES_LOAD_ERROR: AgentConversationMessagesError = { code: "load" }
  * both render it, by spreading `transcriptProps` and `composerProps` or by drawing `messages` and
  * `turn` themselves.
  */
+
+/** How often an open thread's messages are read again while the activity feed is away. */
+const MESSAGES_RECOVERY_POLL_MS = 30_000
+
 export function useAgentConversation({
   threadId,
   onThreadCreated,
@@ -294,6 +298,9 @@ export function useAgentConversation({
   // The project activity feed is primary. Poll only as a focus-aware recovery path while the
   // socket is unavailable, rather than opening one connection per background thread.
   const recoveryPollMs = !activityStream.connected || activityStream.error ? 10_000 : false
+  // A thread's messages are its heaviest read, so they follow less often while the feed is away;
+  // its runs and the thread still poll at the faster rate.
+  const messagesRecoveryPollMs = recoveryPollMs === false ? false : MESSAGES_RECOVERY_POLL_MS
   const { threads, sharedThreads, waitingThreadIds } = useAgentThreadLists({
     refetchInterval: recoveryPollMs,
   })
@@ -345,7 +352,7 @@ export function useAgentConversation({
       query: { order: "asc" },
     }),
     enabled: threadId !== null,
-    refetchInterval: recoveryPollMs,
+    refetchInterval: messagesRecoveryPollMs,
   })
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
