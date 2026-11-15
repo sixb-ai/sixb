@@ -17,8 +17,13 @@ import {
   remove,
   turnInto,
 } from "../src/artifacts/frame-editor/commands"
+import { startFrameEditor } from "../src/artifacts/frame-editor/frame"
 import { PageKeys } from "../src/artifacts/frame-editor/keys"
-import { FRAME_EDITOR_GLOBAL } from "../src/artifacts/frame-editor/protocol"
+import {
+  type AppToEditor,
+  type EditorToApp,
+  FRAME_EDITOR_GLOBAL,
+} from "../src/artifacts/frame-editor/protocol"
 import { drawnTag, pageSchemaExtensions, sanitize } from "../src/artifacts/frame-editor/schema"
 import { installDom } from "./helpers/dom"
 
@@ -42,6 +47,7 @@ installDom([
   "Range",
   "DOMRect",
   "KeyboardEvent",
+  "ClipboardEvent",
   "Event",
 ])
 
@@ -387,6 +393,47 @@ describe("a designed document's editor", () => {
     const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })
     const handled = editor.view.someProp("handleKeyDown", (handle) => handle(editor.view, event))
     expect(handled).toBeFalsy()
+    editor.destroy()
+  })
+
+  // Reproduce by dropping transformPasted from the frame's editor: the web page's logo is kept,
+  // and publishing refuses every save of the document from then on.
+  test("keeps only the artifact's own pictures of a page pasted from elsewhere", () => {
+    const page = live(PAGE)
+    page.doc.getMap("files").set("images/depot.png", { blobId: "blob_depot", sizeBytes: 4 })
+
+    // The frame's editor, as the app starts it, its changes taken into the app's document.
+    const port = {
+      onmessage: null as ((event: { data: AppToEditor }) => void) | null,
+      postMessage: (message: EditorToApp) => {
+        if (message.type === "update") Y.applyUpdate(page.doc, message.update)
+      },
+    }
+    const body = document.createElement("div")
+    startFrameEditor({ port: port as unknown as MessagePort, body })
+    port.onmessage?.({
+      data: {
+        type: "start",
+        state: Y.encodeStateAsUpdate(page.doc),
+        path: "document.html",
+        editable: true,
+        blocks: [],
+        words: { placeholder: "", listItem: "", headings: [], pageBreak: "" },
+      },
+    })
+    // The body is the editor, as in the frame.
+    const { editor } = body as HTMLElement & { editor?: Editor }
+    if (!editor) throw new Error("The frame's editor did not start.")
+
+    endOf(editor, "A fixed fee")
+    editor.view.pasteHTML(
+      '<p>Acme ships the parts.</p><img src="https://acme.com/logo.png" alt="Acme"><img src="images/depot.png" alt="Depot">'
+    )
+
+    const html = pageEntryHtml(page.entry)
+    expect(html).toContain("Acme ships the parts.")
+    expect(html).toContain('src="images/depot.png"')
+    expect(html).not.toContain("acme.com")
     editor.destroy()
   })
 

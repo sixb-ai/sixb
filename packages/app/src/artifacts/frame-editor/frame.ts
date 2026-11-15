@@ -1,9 +1,10 @@
+import { isArtifactAddress } from "@sixb/core/artifacts"
 import { isPageEntry, LIVE_FILES, PAGE_BODY } from "@sixb/core/artifacts/live"
 import { Editor, Extension } from "@tiptap/core"
 import { Collaboration } from "@tiptap/extension-collaboration"
 import { CollaborationCaret } from "@tiptap/extension-collaboration-caret"
 import { Placeholder } from "@tiptap/extensions"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { Fragment, type Node as ProseMirrorNode, Slice } from "@tiptap/pm/model"
 import { NodeSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state"
 import type { Mappable } from "@tiptap/pm/transform"
 import { Decoration, DecorationSet, type EditorView, type NodeView } from "@tiptap/pm/view"
@@ -542,6 +543,19 @@ export function startFrameEditor({
         },
         // What is pasted from elsewhere brings its words and structure, not its styles.
         transformPastedHTML: (html) => (html.includes("data-pm-slice") ? html : plainHtml(html)),
+        // And of its pictures, only the artifact's own: the page could not be saved with any
+        // other.
+        transformPasted: (slice) => {
+          const files = doc.getMap<unknown>(LIVE_FILES)
+          const content = withOwnImages(slice.content, (src) => isOwnImage(src, files))
+          if (content === slice.content) return slice
+          const open = Slice.maxOpen(content)
+          return new Slice(
+            content,
+            Math.min(slice.openStart, open.openStart),
+            Math.min(slice.openEnd, open.openEnd)
+          )
+        },
       },
       // The live blocks replace the empty page the editor starts with, and the caret it had there
       // lands in a box: it starts at the first words instead.
@@ -762,6 +776,61 @@ function placeholder(node: ProseMirrorNode, text: EditorWords): string {
 
 function imagesOf(data: DataTransfer | null | undefined): File[] {
   return Array.from(data?.files ?? []).filter((file) => file.type.startsWith("image/"))
+}
+
+/**
+ * `content` without the pictures `own` does not take, nor the markup kept as written that shows
+ * one; the same fragment when it holds none. A box they leave empty gets what it must hold.
+ */
+function withOwnImages(content: Fragment, own: (src: string) => boolean): Fragment {
+  let changed = false
+  const kept: ProseMirrorNode[] = []
+  content.forEach((node) => {
+    const source = node.attrs.source
+    if (node.isAtom && typeof source === "string" && !imageSources(source).every(own)) {
+      changed = true
+      return
+    }
+
+    const inner = node.isLeaf ? node.content : withOwnImages(node.content, own)
+    if (inner === node.content) {
+      kept.push(node)
+      return
+    }
+    changed = true
+    // Words that were pictures alone go with them.
+    if (node.isTextblock && inner.size === 0) return
+    const rebuilt = node.type.createAndFill(node.attrs, inner, node.marks)
+    if (rebuilt) kept.push(rebuilt)
+  })
+  return changed ? Fragment.from(kept) : content
+}
+
+/** Where the pictures of markup point. */
+function imageSources(source: string): string[] {
+  const template = document.createElement("template")
+  template.innerHTML = source
+  return Array.from(template.content.querySelectorAll("img[src]"), (image) =>
+    (image.getAttribute("src") ?? "").trim()
+  )
+}
+
+/** Whether publishing takes a picture: another artifact's, or one of `files` by its path. */
+function isOwnImage(src: string, files: Y.Map<unknown>): boolean {
+  if (isArtifactAddress(src)) return true
+  if (src === "" || src.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(src)) return false
+  let path = src.split(/[?#]/)[0] ?? ""
+  try {
+    path = decodeURI(path)
+  } catch {
+    // Kept as written: it simply names no file.
+  }
+  const segments: string[] = []
+  for (const segment of path.split("/")) {
+    if (segment === "..") segments.pop()
+    else if (segment !== "" && segment !== ".") segments.push(segment)
+  }
+  return files.has(segments.join("/"))
 }
 
 /** Markup pasted from elsewhere without its attributes, but for where a link or picture points. */
