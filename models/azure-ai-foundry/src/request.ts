@@ -72,7 +72,8 @@ export function responsesRequest(
   deployment?: AzureAIFoundryDeployment
 ): JsonObject {
   const max = prepareRequest(request, definition, options, scope)
-  const input = responsesInput(request.messages, definition.providerId).map((item) => {
+  const replayed = responsesInput(request.messages, definition.providerId, definition.modelId)
+  const input = replayed.map((item) => {
     if (!isJsonObject(item)) return item
     const content = Array.isArray(item.content)
       ? item.content.map((part) => {

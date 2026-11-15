@@ -84,6 +84,11 @@ class ResponseState {
     return this.options.providerId
   }
 
+  /** A native item kept for replay, with the model that produced it. */
+  private replayData(item: JsonObject): JsonObject {
+    return { item, modelId: this.options.modelId }
+  }
+
   private providerIds(response: JsonObject | undefined): ModelProviderIds {
     const { requestId } = this.options
     if (this.options.providerIds) return this.options.providerIds(response, requestId)
@@ -233,7 +238,7 @@ class ResponseState {
       events.push({
         type: "tool-input-end",
         id: callId,
-        providerData: providerItemData(this.providerId, {
+        providerData: providerItemData(this.providerId, this.options.modelId, {
           ...(item ?? {}),
           type: "function_call",
           call_id: callId,
@@ -276,7 +281,7 @@ class ResponseState {
         }
       }
       if (item.type !== "message" && item.type !== "function_call") {
-        events.push({ type: "provider-state", providerId: this.providerId, data: { item } })
+        events.push({ type: "provider-state", providerId: this.providerId, data: this.replayData(item) })
       }
       if (item.type === "function_call") {
         const callId = string(item.call_id) || string(item.id) || key
@@ -292,7 +297,7 @@ class ResponseState {
           events.push({
             type: "tool-input-end",
             id: callId,
-            providerData: providerItemData(this.providerId, { ...item, arguments: argumentsText }),
+            providerData: providerItemData(this.providerId, this.options.modelId, { ...item, arguments: argumentsText }),
           })
         }
       }
@@ -432,7 +437,7 @@ class ResponseState {
     }
     events.push(...this.closeReasoningSpans(key))
     // Keep the native item (including encrypted content) for tool-loop/history replay.
-    events.push({ type: "provider-state", providerId: this.providerId, data: { item } })
+    events.push({ type: "provider-state", providerId: this.providerId, data: this.replayData(item) })
     return events
   }
 
@@ -472,8 +477,12 @@ class ResponseState {
   }
 }
 
-function providerItemData(providerId: string, item: JsonObject): ProviderData {
-  return { [providerId]: { item } }
+/**
+ * A native item to replay, with the model that produced it: an item, such as encrypted reasoning,
+ * replays only to that model (see `responsesInput`).
+ */
+function providerItemData(providerId: string, modelId: string, item: JsonObject): ProviderData {
+  return { [providerId]: { item, modelId } }
 }
 
 function finishReason(response: JsonObject, sawToolCall: boolean): ModelFinishReason {

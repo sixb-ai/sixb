@@ -1979,7 +1979,7 @@ function getPropertiesForResult(
         ctx,
         path,
         "unknown_property",
-        `Property '${propertyId}' does not exist on object type '${objectType.id}'`
+        `Property '${propertyId}' does not exist on object type '${objectType.id}'${knownProperties(objectType)}`
       )
       continue
     }
@@ -1987,6 +1987,24 @@ function getPropertiesForResult(
   }
 
   return results
+}
+
+/** How many property names an unknown-property issue lists. */
+const KNOWN_PROPERTIES_LISTED = 25
+
+/**
+ * The properties the caller may have meant, so a guessed name is fixed on the next try. Marked
+ * properties stay unnamed: a caller without clearance learns nothing of them here.
+ */
+function knownProperties(objectType: ObjectType): string {
+  const ids = objectType.properties
+    .filter((property) => !property.markings?.length)
+    .map((property) => property.id)
+  if (ids.length === 0) return ""
+  const listed = ids.slice(0, KNOWN_PROPERTIES_LISTED).join(", ")
+  const more =
+    ids.length > KNOWN_PROPERTIES_LISTED ? `, and ${ids.length - KNOWN_PROPERTIES_LISTED} more` : ""
+  return `; its properties are ${listed}${more}`
 }
 
 function getProperty(objectType: ObjectType, propertyId: string): Property | undefined {

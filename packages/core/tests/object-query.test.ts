@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   decimal,
+  defineMarking,
   defineObjectType,
   InMemoryStorage,
   link,
@@ -846,6 +847,37 @@ describe("object query explain", () => {
     expect(formatted).toContain("ObjectQuery valid result=Order")
     expect(formatted).toContain("traverse outgoing orders")
     expect(formatted).toContain('text "acme"')
+  })
+
+  // An agent guessed property names (contractNumber, updatedAt) and failed one query in six.
+  // Removal proof: drop knownProperties from the unknown_property issue; the names go missing.
+  test("names the type's properties when a query reads one it lacks, but no marked one", () => {
+    const secret = defineMarking("secret")
+    const Ledger = defineObjectType({
+      id: "Ledger",
+      name: "Ledger",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("title", "string"),
+        prop("payroll", "double", { markings: [secret] }),
+        ...Array.from({ length: 30 }, (_, index) => prop(`field${index}`, "string")),
+      ],
+    })
+    const explanation = explainObjectQuery(
+      {
+        kind: "project",
+        properties: ["updatedAt"],
+        input: { kind: "start", objectTypeId: "Ledger" },
+      },
+      { ontology: new OntologyRegistry({ sources: [Ledger] }) }
+    )
+
+    const message = explanation.issues.find((issue) => issue.code === "unknown_property")?.message
+    expect(message).toStartWith(
+      "Property 'updatedAt' does not exist on object type 'Ledger'; its properties are id, title, field0,"
+    )
+    expect(message).toEndWith("field22, and 7 more")
+    expect(message).not.toContain("payroll")
   })
 
   test("formats validation issues, honoring the configured refs bound", () => {

@@ -1627,9 +1627,90 @@ describe("Vercel AI Gateway provider", () => {
       providerId: "vercel-ai-gateway",
       data: {
         item: { type: "web_search_call", id: "search-1", status: "completed" },
+        modelId: "tool-model",
       },
     })
     expect(events.at(-1)).toMatchObject({ type: "finish", finishReason: "tool-calls" })
+  })
+
+  // A thread moved from an OpenAI model to Gemini through the gateway failed every turn with
+  // "Corrupted thought signature". Removal proof: stop passing this.modelId to responsesInput.
+  test("replays reasoning only to the model that produced it", async () => {
+    const bodies: Record<string, unknown>[] = []
+    const provider = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([
+          { type: "response.created", response: { id: "resp", status: "in_progress" } },
+          { type: "response.completed", response: { id: "resp", status: "completed", usage: {} } },
+        ])
+      },
+    })
+    const history = request({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "provider-state",
+              providerId: "vercel-ai-gateway",
+              data: {
+                item: { type: "reasoning", id: "rs-1", encrypted_content: "openai-signed" },
+                modelId: "openai/gpt-6.1-sol",
+              },
+            },
+            { type: "text", text: "Done." },
+          ],
+        },
+      ],
+    })
+
+    await collect((await provider("openai/gpt-6.1-sol").stream(history)).events)
+    await collect((await provider("google/gemini-4-carbon").stream(history)).events)
+
+    expect(bodies[0]?.input).toContainEqual({
+      type: "reasoning",
+      id: "rs-1",
+      encrypted_content: "openai-signed",
+    })
+    expect(bodies[1]?.input).toEqual([
+      { role: "assistant", content: [{ type: "output_text", text: "Done." }] },
+    ])
+  })
+
+  // A 1M-token window let a conversation grow to ~980k input tokens before it compacted.
+  // Removal proof: drop the maxInputTokens spread from the definition; it stays undefined. Apply it
+  // before the catalog answers instead, and the model resolves offline with no window or prices.
+  test("caps a model's input below its window, once the catalog has answered", async () => {
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async (url) => {
+        if (String(url).endsWith("/models")) {
+          return Response.json({
+            data: [
+              {
+                id: "google/gemini-4-carbon",
+                type: "language",
+                context_window: 1_000_000,
+                max_tokens: 64_000,
+                pricing: { input: "0.000002", output: "0.000012" },
+              },
+            ],
+          })
+        }
+        throw new Error("No model call here.")
+      },
+    })
+    const binding = provider("google/gemini-4-carbon", { maxInputTokens: 250_000 })
+
+    expect(binding.definition.maxInputTokens).toBeUndefined()
+    const model = await resolveLanguageModel(binding)
+    expect(model.definition).toMatchObject({ contextWindow: 1_000_000, maxInputTokens: 250_000 })
+    expect(model.rateCard).toBeDefined()
+    expect(() => provider("google/gemini-4-carbon", { maxInputTokens: 0 })).toThrow(
+      "maxInputTokens must be a positive safe integer"
+    )
   })
 
   test("sanitizes provider HTTP failures and validates convenience defaults", async () => {

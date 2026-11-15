@@ -118,6 +118,11 @@ export interface VercelGatewayModelOptions extends LanguageModelLabel {
   readonly reasoning?: ModelReasoningLevel
   /** Default output ceiling; individual calls may request less. */
   readonly maxOutputTokens?: number
+  /**
+   * The most input this model is sent, below its window: the Agent compacts a conversation that
+   * grows past it. A smaller ceiling keeps long conversations faster and cheaper to call.
+   */
+  readonly maxInputTokens?: number
   readonly request?: JsonObject
   /** AI Gateway routing, fallback, caching, and provider-specific options. */
   readonly providerOptions?: JsonObject
@@ -1190,10 +1195,27 @@ class VercelGatewayLanguageModel implements LanguageModel {
       typeof tool.name === "string" ? [tool.name] : []
     )
     if (providerToolNames.length > 0) this.providerToolNames = providerToolNames
+    if (
+      options.maxInputTokens !== undefined &&
+      (!Number.isSafeInteger(options.maxInputTokens) || options.maxInputTokens <= 0)
+    ) {
+      throw new TypeError("[SixbVercelGateway] maxInputTokens must be a positive safe integer.")
+    }
+    const base = configuredDefinition ?? fallbackDefinition(modelId)
     this.definition = defineLanguageModel({
-      ...(configuredDefinition ?? fallbackDefinition(modelId)),
+      ...base,
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
       ...defineLanguageModelLabel(options, "[SixbVercelGateway]"),
+      // Only once the catalog answered: a model that already names its input limit is resolved
+      // offline, and would never learn its window, prices or capabilities.
+      ...(metadataResolved && options.maxInputTokens !== undefined
+        ? {
+            maxInputTokens: Math.min(
+              options.maxInputTokens,
+              base.maxInputTokens ?? Number.POSITIVE_INFINITY
+            ),
+          }
+        : {}),
     })
     if (
       options.maxOutputTokens !== undefined &&
@@ -1359,7 +1381,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
         ...extra,
         ...caching,
         model: this.modelId,
-        input: responsesInput(request.messages, this.providerId),
+        input: responsesInput(request.messages, this.providerId, this.modelId),
         stream: true,
         ...(providerOptions === undefined ? {} : { providerOptions }),
         ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),

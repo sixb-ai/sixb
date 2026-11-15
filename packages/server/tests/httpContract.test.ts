@@ -2526,7 +2526,8 @@ describe("SixbServer HTTP contract", () => {
       })
       expect(missingSubjectResponse.status).toBe(400)
       expect(await missingSubjectResponse.json()).toEqual({
-        error: "Action 'setSpeed' requires an object subject.",
+        error:
+          "Action 'setSpeed' requires an object subject: name the device it acts on, by its object type and primary id.",
       })
 
       const latestTelemetryResponse = await fetch(

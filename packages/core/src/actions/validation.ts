@@ -89,7 +89,9 @@ export function resolveObjectActionSubject(params: {
   const { runtime, action, subject } = params
 
   if (subject.kind !== "object") {
-    throw new OntologyValidationError(`Action '${action.id}' requires an object subject.`)
+    throw new OntologyValidationError(
+      `Action '${action.id}' requires an object subject: name the ${action.binding.objectType.id} it acts on, by its object type and primary id.`
+    )
   }
 
   const objectType = runtime.ontology.resolveObjectType(subject.objectTypeId)
