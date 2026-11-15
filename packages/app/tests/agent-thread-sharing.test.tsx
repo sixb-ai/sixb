@@ -950,20 +950,23 @@ describe("a conversation on its owner's computer", () => {
 describe("who acts on a turn", () => {
   // Removal proof: disable the composer on every running turn in useAgentConversation; the field
   // is disabled.
-  test("while someone else's answer streams, the reader keeps typing but cannot send yet", async () => {
-    const { view } = renderChat("bob", {
+  test("while someone else's answer streams, the reader's message queues for their own turn", async () => {
+    const { view, requests } = renderChat("bob", {
       thread: thread({ activeRunId: "run_2" }),
       runs: [run({ id: "run_2", status: "running", triggerMessageId: "msg_3" })],
     })
 
-    expect(await view.findByText("Alice Martin is getting an answer…")).toBeDefined()
+    expect(await view.findByText(/Alice Martin is getting an answer/)).toBeDefined()
     const composer = view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
     expect(composer.disabled).toBe(false)
 
     type(composer, "And Globex?")
-    expect((view.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(
-      true
-    )
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "Enter" })
+    })
+    // A turn someone else asked for takes no steer: the message waits for their own turn.
+    const body = await posted(requests, "POST /api/agent-threads/thr_1/messages")
+    expect(body).toMatchObject({ text: "And Globex?", delivery: "queue" })
   })
 
   // Removal proof: disable the composer again while the reader's own answer runs.

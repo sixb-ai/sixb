@@ -7,6 +7,7 @@ import { useAgentMessages } from "../i18n"
 import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
+import { PendingMessages } from "./pending-messages"
 import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
 
@@ -88,6 +89,10 @@ export function ConversationPanel({
         ) : null}
         {/* Kept while the question asks, so a draft written before it is still there after. */}
         <div className={asking ? "hidden" : "contents"}>
+          <PendingMessages
+            threadId={currentThread?.id ?? null}
+            className={compact ? "px-4 pb-2" : cn("pb-2", wideClassName)}
+          />
           <Composer
             {...composer}
             placeholder={composerPlaceholder}

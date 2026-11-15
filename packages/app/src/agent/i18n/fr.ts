@@ -75,6 +75,16 @@ export const fr: Translation<AgentMessages> = {
     add: "Ajouter des fichiers et plus",
     mention: "Mentionner un enregistrement",
     commands: "Commandes",
+    /** The messages waiting beside a running turn. */
+    steerPending: "Oriente cette réponse",
+    queuePending: "En attente du prochain tour",
+    sendNowPending: "Envoyé maintenant",
+    waitingFile: "Un fichier accompagne ce message",
+    steer: "Orienter cette réponse",
+    sendNow: "Envoyer maintenant",
+    withdraw: "Retirer ce message",
+    runningHint: "Entrée oriente cette réponse · Tab la met en attente du prochain tour",
+    queuedHint: "Entrée la met en attente de votre propre tour",
   },
   commands: {
     list: "Commandes",

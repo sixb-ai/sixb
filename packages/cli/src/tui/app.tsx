@@ -1006,10 +1006,6 @@ function ThreadView(
       props.say("It works in another folder: press ctrl+f to move it here first.")
       return false
     }
-    if (activeRunId) {
-      props.say("The agent is still working. Press esc twice to stop it.")
-      return false
-    }
     const { data, error } = await postAgentThreadMessage({
       client,
       path: { threadId },
@@ -1021,6 +1017,8 @@ function ThreadView(
           : {}),
         ...requesterSettings(),
         ...messageSelection(models, settings),
+        // Enter steers the turn that runs; a message it cannot steer is refused with why.
+        ...(activeRunId ? { delivery: "steer" as const } : {}),
       },
     })
     if (error || !data) {
