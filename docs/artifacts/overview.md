@@ -320,8 +320,11 @@ them. Name the object's type, then mark each value, with the text it shows until
 - Publishing warns `field_unknown` for a field that reads nothing the type holds, and refuses a
   document whose author can't read the type.
 - [Creating a version](#versions-and-restore-points) writes the values in, as whoever creates it
-  reads them, and leaves plain HTML: everyone who reads that version sees those values, including
-  ones they could not read live. Its PDF shows the values whoever asks reads.
+  reads them: everyone who reads or prints that version sees those values, including ones they
+  could not read live. Its fields stay marked, so the next version shows live data again, with
+  those values as its written text. A repeated element is written once per item, and its copies,
+  one after the other, read as one.
+- An open version's PDF shows the values whoever asks reads.
 - Fields can't go on `<style>`, `<title>`, `<textarea>` and other elements whose text isn't markup.
 - `sixb.artifacts.query(id, "holder")` reads the object, with what the links its fields read
   through reach.

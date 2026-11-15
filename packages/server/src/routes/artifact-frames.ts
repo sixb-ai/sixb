@@ -8,6 +8,7 @@ import {
   FRAME_REFERENCE_PREFIX,
   frameEntries,
   frameLayout,
+  frozenDocumentHtml,
   injectFrameAssets,
   markDocumentSections,
   resolveArtifactFrame,
@@ -127,10 +128,14 @@ async function frameResponse(
       (outline.kind === "canvas" || outline.kind === "document") &&
       new URL(request.url).searchParams.has("sixb-edit")
     const marked = editing ? annotateBoard(text) : text
+    // A frozen designed document shows the values written in when it was frozen: its fields are
+    // served unmarked, so its frame reads none again.
+    const shown =
+      outline.kind === "document" && version.frozenAt ? frozenDocumentHtml(marked) : marked
     // A designed document's headings carry their sections' slugs, to open it at one, and its
     // runtime gets its paper, to cut it into pages.
     const source =
-      outline.kind === "document" ? markDocumentSections(marked, outline.headings) : marked
+      outline.kind === "document" ? markDocumentSections(shown, outline.headings) : shown
     return new Response(
       injectFrameAssets(
         rewriteFrameReferences(source, frame.targets, file.path),

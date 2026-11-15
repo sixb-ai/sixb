@@ -127,7 +127,11 @@ edited:
   `percent` (0.25 reads 25%), or `date`, formatted for `<html lang>`. A total or an instalment is
   a property the object keeps: a document computes nothing.
 - Publishing warns `field_unknown` for a path the type doesn't hold. Freezing the version writes
-  the values in, as plain HTML; its PDF shows them as whoever asks reads them.
+  the values in and keeps the fields, so the next version is live again; its PDF shows them as
+  whoever asks reads them.
+- After a freeze, a `data-sixb-each` element appears once per item, one after the other: they are
+  one element, copied from the first, so change the first. One marked `data-sixb-empty` is a list
+  that was empty: keep it.
 
 After publishing, open each `page-NN.png` the check returns: look at where each page breaks, for
 anything cut off at a page's edge, and for a page left nearly empty. Open `phone.png` too, for

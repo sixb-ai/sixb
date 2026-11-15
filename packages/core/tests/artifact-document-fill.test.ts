@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { fillDocumentHtml } from "../src/artifacts/document-fill"
+import { fillDocumentHtml, frozenDocumentHtml } from "../src/artifacts/document-fill"
 
 // A designed document's markup with a reader's values written in, as a frozen or printed version
 // keeps it, on the server.
@@ -57,5 +57,63 @@ describe("a designed document written in plain", () => {
     )
 
     expect(written).toContain('<p data-format="money">$3,260</p>')
+  })
+})
+
+describe("a designed document written in for a frozen version", () => {
+  const rows = (...names: string[]) => ({
+    objects: names.map((name) => ({ primaryId: name, properties: { name } })),
+  })
+  const proposal = html(
+    `<h1 data-sixb-field="title">Title</h1>
+<p data-sixb-field="amount">$0</p>
+<ul><li data-sixb-each="query:open"><span data-sixb-field="name">SC-1</span></li></ul>
+<ol><li data-sixb-each="query:closed"><span data-sixb-field="name">SC-2</span></li></ol>`
+  )
+
+  // Reproduce by writing a frozen version's values in plain: the next version holds no field. Or
+  // by removing copies' data-sixb-each in documentData's fill: its rows read the object that holds
+  // it, not their item.
+  test("keeps every field marked, each item's copy, and a list that was empty", () => {
+    const kept = fillDocumentHtml(
+      proposal,
+      {
+        holder: { primaryId: "c1", properties: { title: "Repair" }, redactions: { amount: {} } },
+        queries: { open: rows("SC-7", "SC-8"), closed: rows() },
+      },
+      { keep: true }
+    )
+
+    expect(kept).toContain('<h1 data-sixb-field="title">Repair</h1>')
+    // Hidden, and not locked for whoever reads the next version.
+    expect(kept).toContain('<p data-sixb-field="amount">•••</p>')
+    expect(kept).toContain(
+      '<li data-sixb-each="query:open"><span data-sixb-field="name">SC-7</span></li><li data-sixb-each="query:open"><span data-sixb-field="name">SC-8</span></li>'
+    )
+    expect(kept).toContain('<li data-sixb-each="query:closed" data-sixb-empty="">')
+  })
+
+  // Reproduce by copying each of a repeated element's copies in documentData's fill: the next
+  // version shows its rows twice. Or by leaving data-sixb-empty in plain HTML: the frozen version
+  // shows the empty list's template.
+  test("reads its copies as one repeated element, and shows its own values in plain", () => {
+    const kept = fillDocumentHtml(
+      proposal,
+      { holder, queries: { open: rows("SC-7", "SC-8"), closed: rows() } },
+      { keep: true }
+    )
+
+    const next = fillDocumentHtml(
+      kept,
+      { holder, queries: { open: rows("SC-9"), closed: rows("SC-3") } },
+      { plain: true }
+    )
+    expect(next).toContain("<ul><li><span>SC-9</span></li></ul>")
+    expect(next).toContain("<ol><li><span>SC-3</span></li></ol>")
+
+    const frozen = frozenDocumentHtml(kept)
+    expect(frozen).not.toContain("data-sixb-")
+    expect(frozen).toContain("<ul><li><span>SC-7</span></li><li><span>SC-8</span></li></ul>")
+    expect(frozen).toContain("<ol></ol>")
   })
 })

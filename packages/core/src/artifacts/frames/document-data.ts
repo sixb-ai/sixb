@@ -22,6 +22,8 @@ export function documentData(): DocumentData {
   const CURRENCY = "data-currency"
   const CURRENCY_FIELD = "data-currency-field"
   const LOCKED = "data-sixb-locked"
+  /** A repeated element kept with no item, as a frozen version keeps a list that was empty. */
+  const EMPTY = "data-sixb-empty"
   const QUERY = /^query:([a-z0-9][a-z0-9-]{0,63})(?:\.(.*))?$/
   const STEP = /^([A-Za-z_][\w-]*)(?:\[([^\]]+)\])?$/
   /** A value whose source the reader has none of: the written text stays. */
@@ -145,26 +147,44 @@ export function documentData(): DocumentData {
   const fill = <TNode>(root: TNode, tree: DocumentTree<TNode>, options: DocumentFill): void => {
     const lang = options.lang || "en"
     const visit = (node: TNode, scope: Scope) => {
-      for (const child of tree.children(node)) {
+      const children = tree.children(node)
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index] as TNode
         const each = tree.attribute(child, EACH)
         if (each !== null) {
+          // The copies a frozen version wrote in follow it, marked as it is: the first is copied.
+          const written = [child]
+          while (index + 1 < children.length) {
+            const next = children[index + 1] as TNode
+            if (tree.attribute(next, EACH) !== each) break
+            written.push(next)
+            index += 1
+          }
+
           const path = parse(each)
           const items = path ? read(path, scope) : UNREAD
           if (items === UNREAD || items === HIDDEN) {
             // Its written text stays: plain, as written, never to be filled again.
-            if (options.plain) unmark(child)
+            if (options.plain) for (const copy of written) unmark(copy)
             continue
           }
+
           const list = Array.isArray(items) ? items : items == null ? [] : [items]
-          tree.replace(
-            child,
-            list.map((item) => {
-              const copy = tree.clone(child)
-              tree.removeAttribute(copy, EACH)
-              visit(copy, { sources: scope.sources, item })
-              return copy
-            })
-          )
+          const copies = list.map((item) => {
+            const copy = tree.clone(child)
+            // Kept, each copy is read again from the next version.
+            if (!options.keep) tree.removeAttribute(copy, EACH)
+            tree.removeAttribute(copy, EMPTY)
+            visit(copy, { sources: scope.sources, item })
+            return copy
+          })
+          for (const copy of written.slice(1)) tree.replace(copy, [])
+          if (options.keep && copies.length === 0) {
+            // Kept for the next version to copy, shown as no item.
+            tree.setAttribute(child, EMPTY, "")
+          } else {
+            tree.replace(child, copies)
+          }
           continue
         }
 
@@ -183,7 +203,7 @@ export function documentData(): DocumentData {
         if (value === UNREAD) continue
         if (value === HIDDEN) {
           tree.setText(child, "•••")
-          if (!options.plain) tree.setAttribute(child, LOCKED, "")
+          if (!options.plain && !options.keep) tree.setAttribute(child, LOCKED, "")
           continue
         }
 
@@ -198,8 +218,9 @@ export function documentData(): DocumentData {
         )
       }
     }
-    /** No longer marked, nor anything in it, as a frozen version keeps it. */
+    /** No longer marked, nor anything in it, as plain HTML is; a list that was empty is gone. */
     const unmark = (node: TNode) => {
+      if (tree.attribute(node, EMPTY) !== null) return tree.replace(node, [])
       for (const name of [FIELD, EACH, CURRENCY_FIELD]) tree.removeAttribute(node, name)
       for (const child of tree.children(node)) unmark(child)
     }
@@ -285,8 +306,13 @@ export interface DocumentFill {
   readonly sources: DocumentSources
   /** `<html lang>`, which the values are formatted for. */
   readonly lang?: string
-  /** Writes plain HTML, as a frozen version keeps it: no field stays marked. */
+  /** Writes plain HTML, as a version prints and a frozen one shows: no field stays marked. */
   readonly plain?: boolean
+  /**
+   * Writes the values in and keeps every field marked, as a frozen version keeps them: it shows
+   * what is written, and the next version, opened from it, reads them again.
+   */
+  readonly keep?: boolean
 }
 
 /** A field or a repeated element, with the paths of the repeated elements around it. */

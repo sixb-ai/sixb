@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import * as Y from "yjs"
 import type { ArtifactFile, AuthorizationContext, SandboxFactory } from "../src"
 import { artifactRef, defineObjectType, link, prop, ref, SixbHost } from "../src"
+import { writeLiveArtifact } from "../src/artifacts/execution"
+import { documentFiles, LIVE_FILES } from "../src/artifacts/live/document"
+import { storeLiveFiles } from "../src/artifacts/live/files"
+import { loadArtifactDocument } from "../src/artifacts/live/state"
 import { documentPdfKey } from "../src/artifacts/publish/pdf"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -88,7 +93,7 @@ function setup() {
     }
     return claims.map(({ job }) => job)
   }
-  return { ...deps, host, as, proposal, text, printJobs, system: createTestSixb(host) }
+  return { ...deps, host, as, put, proposal, text, printJobs, system: createTestSixb(host) }
 }
 
 /** A proposal held by contract c1, whose client is Harbor Co. */
@@ -109,6 +114,40 @@ async function heldProposal(fixture: ReturnType<typeof setup>) {
     .upsert({ properties: { id: "c1", document: artifactRef(artifact.id) } })
   await system.objects(Contract).byId("c1").link(Contract.l.client, harbor)
   return artifact
+}
+
+/** A held proposal, frozen by alice, then its client renamed Harbor Marine. */
+async function renamedAfterFreeze(fixture: ReturnType<typeof setup>) {
+  const artifact = await heldProposal(fixture)
+  const { version: frozen } = await fixture.as("alice").artifacts.freeze(artifact.id)
+  await fixture.system
+    .objects(Organization)
+    .upsert({ properties: { id: "o1", name: "Harbor Marine" } })
+  return { artifact, frozen }
+}
+
+async function documentHtml(fixture: ReturnType<typeof setup>, files: readonly ArtifactFile[]) {
+  const entry = files.find((file) => file.path === "document.html")
+  if (!entry) throw new Error("Expected document.html.")
+  return fixture.text(entry.file)
+}
+
+/** The version keeps its fields, and prints the client as it is called now, and the word added. */
+async function expectLive(fixture: ReturnType<typeof setup>, artifactId: string, version: number) {
+  const alice = fixture.as("alice")
+  const read = await alice.artifacts.getVersion(artifactId, version)
+  if (!read) throw new Error(`Expected version ${version}.`)
+  const html = await documentHtml(fixture, read.files)
+  expect(html).toContain('<h1 data-sixb-field="client.name">')
+  expect(html).toContain('<li data-sixb-each="query:client">')
+
+  await alice.artifacts.pdf(artifactId, { version })
+  const [job] = await fixture.printJobs()
+  if (!job?.payload.document) throw new Error("Expected the document it prints.")
+  const printed = await fixture.text(job.payload.document)
+  expect(printed).toContain("<h1>Harbor Marine</h1>")
+  // One item, as the list holds: the frozen version's copy is copied, not kept beside it.
+  expect(printed).toContain("<ul><li><span>Harbor Marine</span></li></ul><p>Signed.</p>")
 }
 
 const refused = (promise: Promise<unknown>) => promise.catch((error: unknown) => error)
@@ -228,7 +267,8 @@ describe("a designed document's live data", () => {
   })
 
   // Reproduce by dropping writtenIn from ArtifactsRuntime.freeze: the frozen version keeps its
-  // fields, which show whatever the objects hold later.
+  // fields, which show whatever the objects hold later. Or by reading a frozen version's fields
+  // again in writtenIn: its PDF prints Harbor Marine.
   test("is written in when the version is frozen, as whoever freezes it reads it", async () => {
     const fixture = setup()
     const artifact = await heldProposal(fixture)
@@ -241,9 +281,69 @@ describe("a designed document's live data", () => {
     const entry = frozen.version.files.find((file) => file.path === "document.html")
     if (!entry) throw new Error("Expected document.html.")
     const html = await fixture.text(entry.file)
-    expect(html).toContain("<h1>Harbor Co</h1>")
-    expect(html).toContain("<li><span>Harbor Co</span></li>")
-    expect(html).not.toContain("data-sixb-")
+    expect(html).toContain('<h1 data-sixb-field="client.name">Harbor Co</h1>')
+    expect(html).toContain('<span data-sixb-field="name">Harbor Co</span>')
+
+    // It prints those values, whatever the objects hold later: they are not read again.
+    await fixture.system
+      .objects(Organization)
+      .upsert({ properties: { id: "o1", name: "Harbor Marine" } })
+    await alice.artifacts.pdf(artifact.id, { version: frozen.version.version })
+    const [job] = await fixture.printJobs()
+    if (!job?.payload.document) throw new Error("Expected the document it prints.")
+    const printed = await fixture.text(job.payload.document)
+    expect(printed).toContain("<h1>Harbor Co</h1>")
+    expect(printed).toContain("<li><span>Harbor Co</span></li>")
+    expect(printed).not.toContain("data-sixb-")
+  })
+
+  // Reproduce by writing the values in plain in ArtifactsRuntime.freeze: the next version, opened
+  // from the frozen one, holds no field, and still shows Harbor Co once it is renamed.
+  test("opens the next version, as the Agent writes it, still showing live data", async () => {
+    const fixture = setup()
+    const { artifact, frozen } = await renamedAfterFreeze(fixture)
+
+    // As the Agent writes: the frozen version's files, a word added.
+    const html = await documentHtml(fixture, frozen.files)
+    const wrote = await fixture.as("alice").artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Proposal",
+      baseRevision: frozen.revision,
+      files: await Promise.all(
+        frozen.files.map(async (file) =>
+          file.path === "document.html"
+            ? fixture.put(file.path, html.replace("</ul>", "</ul><p>Signed.</p>"))
+            : file
+        )
+      ),
+    })
+
+    expect(wrote.version.version).toBe(frozen.version + 1)
+    await expectLive(fixture, artifact.id, wrote.version.version)
+  })
+
+  // Reproduce as the test above: the live room opens the next version from plain HTML.
+  test("opens the next version, as a live room writes it back, still showing live data", async () => {
+    const fixture = setup()
+    const { artifact, frozen } = await renamedAfterFreeze(fixture)
+
+    // As a live room does: its document loaded from what storage holds, edited, and written back.
+    const stored = await fixture.storage.artifacts?.get({ projectId, id: artifact.id })
+    if (!stored) throw new Error("Expected the artifact.")
+    const doc = await loadArtifactDocument(fixture.blobStorage, stored, frozen.files)
+    const text = doc.getMap<unknown>(LIVE_FILES).get("document.html")
+    if (!(text instanceof Y.Text)) throw new Error("Expected document.html as text.")
+    text.insert(text.toString().indexOf("</ul>") + "</ul>".length, "<p>Signed.</p>")
+    const wrote = await writeLiveArtifact(fixture.as("alice").artifacts, artifact.id, {
+      title: "Proposal",
+      baseTitle: "Proposal",
+      baseRevision: stored.revision,
+      files: await storeLiveFiles(fixture.blobStorage, documentFiles(doc), frozen.files),
+      update: Y.encodeStateAsUpdate(doc),
+    })
+
+    expect(wrote.version.version).toBe(frozen.version + 1)
+    await expectLive(fixture, artifact.id, wrote.version.version)
   })
 
   // Reproduce by printing the version's own document.html in ArtifactsRuntime.pdf: the job carries

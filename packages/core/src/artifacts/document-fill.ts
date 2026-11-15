@@ -12,9 +12,9 @@ import {
 } from "./frames/document-data"
 
 // A designed document's live data on the server, over parse5: the fields and repeated elements of
-// its `document.html`, and that markup with the values a reader read written in, as a frozen or
-// printed version keeps it. The frame shows the same values the same way: both walk the markup
-// with `documentData`.
+// its `document.html`, and that markup with the values a reader read written in, as a frozen
+// version keeps it or a version prints. The frame shows the same values the same way: both walk
+// the markup with `documentData`.
 
 type Element = DefaultTreeAdapterTypes.Element
 type ChildNode = DefaultTreeAdapterTypes.ChildNode
@@ -73,13 +73,13 @@ export function documentMarks(html: string): DocumentMark[] {
 
 /**
  * A designed document's markup with the values `sources` hold written in. `plain` leaves no field
- * marked, as a frozen version is plain HTML. Markup with no field or repeated element is returned
- * as it is.
+ * marked, as a version prints; `keep` leaves every one marked, as a frozen version keeps them.
+ * Markup with no field or repeated element is returned as it is.
  */
 export function fillDocumentHtml(
   html: string,
   sources: DocumentSources,
-  options: { readonly plain?: boolean } = {}
+  options: { readonly plain?: boolean; readonly keep?: boolean } = {}
 ): string {
   const { document, root, body } = bodyOf(html)
   if (!body || documentData().marks(body, tree).length === 0) return html
@@ -89,6 +89,15 @@ export function fillDocumentHtml(
     sources,
     ...(lang ? { lang } : {}),
     ...(options.plain ? { plain: true } : {}),
+    ...(options.keep ? { keep: true } : {}),
   })
   return serialize(document)
+}
+
+/**
+ * A frozen version's markup as it shows and prints: the values written in when it was frozen, and
+ * no field marked, so none is read again.
+ */
+export function frozenDocumentHtml(html: string): string {
+  return fillDocumentHtml(html, { queries: {} }, { plain: true })
 }

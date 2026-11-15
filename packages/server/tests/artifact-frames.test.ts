@@ -262,6 +262,32 @@ describe("a deck's frame", () => {
     expect(editing).toContain('data-sixb-section="pricing">Pricing</h2>')
   })
 
+  test("serves a frozen designed document with the values written in, and no field to read again", async () => {
+    // Reproduce by serving a frozen version's entry as stored in routes/artifact-frames.ts: its
+    // frame reads its fields again, and shows what the objects hold now.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const proposal = await publish(fixture, alice, "document", [
+      await fixture.put(
+        "document.html",
+        '<!doctype html><html><body><p data-sixb-field="number">Q-1</p><ul><li data-sixb-each="milestones">Kickoff</li></ul></body></html>',
+        "text/html"
+      ),
+    ])
+    const served = async () => {
+      const minted = await mint(fixture, alice, proposal.artifact.id)
+      const { path } = (await minted.json()) as { path: string }
+      return (await fixture.app.fetch(new Request(url(`${path}document.html`)))).text()
+    }
+    expect(await served()).toContain('<p data-sixb-field="number">Q-1</p>')
+
+    await freeze(fixture, alice, proposal.artifact.id, proposal.artifact.revision)
+    const frozen = await served()
+    expect(frozen).toContain("<p>Q-1</p><ul><li>Kickoff</li></ul>")
+    expect(frozen).not.toContain("data-sixb-field")
+    expect(frozen).not.toContain("data-sixb-each")
+  })
+
   test("serves each of a canvas's boards as a page under one link, and its shared files as they are", async () => {
     // Reproduce by listing only a version's entry in frames/entries.ts: a canvas's entry is its
     // canvas.json, so its boards are served without the kit and the runtime.

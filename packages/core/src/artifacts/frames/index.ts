@@ -3,6 +3,8 @@
  * and the Agent's layout check lays a version out in them.
  */
 
+// A frozen designed document as its frame shows it: the values written in, none read again.
+export { frozenDocumentHtml } from "../document-fill"
 export { HTML_ENTRY } from "../publish/validate/html"
 // What a frame's `sixb.query` reads: the route serves it, and the layout check serves it too.
 export {

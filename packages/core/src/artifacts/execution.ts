@@ -31,7 +31,7 @@ import {
   type HolderAccess,
 } from "./access"
 import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
-import { documentMarks, fillDocumentHtml } from "./document-fill"
+import { documentMarks, fillDocumentHtml, frozenDocumentHtml } from "./document-fill"
 import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
 import { type DocumentQueryResult, documentData } from "./frames/document-data"
@@ -574,13 +574,17 @@ export function createArtifactsRuntime(
 
   /**
    * A designed document's markup with the values its fields read written in, as the caller reads
-   * them, and no field left marked; null when it shows no live data. What the caller cannot read
-   * keeps its written text.
+   * them, and no field left marked, or every one with `keep`; null when it shows no live data. What
+   * the caller cannot read keeps its written text. A frozen version's are those written in when it
+   * was frozen, which are not read again.
    */
-  const writtenIn = async (read: {
-    readonly artifact: ArtifactRecord
-    readonly version: ArtifactVersionRecord
-  }): Promise<string | null> => {
+  const writtenIn = async (
+    read: {
+      readonly artifact: ArtifactRecord
+      readonly version: ArtifactVersionRecord
+    },
+    options: { readonly keep?: boolean } = {}
+  ): Promise<string | null> => {
     const { version } = read
     const entry = version.files.find((file) => file.path === DOCUMENT_HTML_ENTRY)
     if (version.outline.kind !== "document" || !entry) return null
@@ -588,6 +592,7 @@ export function createArtifactsRuntime(
     const html = await readArtifactText(blobStorage, entry, ARTIFACT_LIMITS.maxDocumentBytes)
     const reads = documentData().reads(documentMarks(html))
     if (!reads.holder && reads.queries.length === 0) return null
+    if (version.frozenAt) return frozenDocumentHtml(html)
 
     // What the caller may not read, or no one object holds, keeps its written text; anything
     // else that fails is thrown, never written in as text that stays.
@@ -611,7 +616,11 @@ export function createArtifactsRuntime(
       if (result) queries[name] = result
     })
     const row = holder?.objects?.[0]
-    return fillDocumentHtml(html, { ...(row ? { holder: row } : {}), queries }, { plain: true })
+    return fillDocumentHtml(
+      html,
+      { ...(row ? { holder: row } : {}), queries },
+      options.keep ? { keep: true } : { plain: true }
+    )
   }
 
   /**
@@ -866,11 +875,12 @@ export function createArtifactsRuntime(
     },
 
     async freeze(artifactId, input = {}) {
-      // A designed document's fields are written in first, as the person freezing reads them: the
-      // version it closes is plain HTML that never changes.
+      // A designed document's fields are written in first, as the person freezing reads them, and
+      // stay marked: the version it closes shows those values, which are never read again, and
+      // the next version, opened from it, reads them anew.
       let baseRevision = input.baseRevision
       const open = await readVersion(artifactId, "latest")
-      const filled = open && !open.version.frozenAt ? await writtenIn(open) : null
+      const filled = open && !open.version.frozenAt ? await writtenIn(open, { keep: true }) : null
       if (open && filled !== null) {
         await requireUpdatable(artifactId)
         const document = await blobStorage.put({
@@ -1016,10 +1026,10 @@ export function createArtifactsRuntime(
         )
       }
       // A document that shows live data prints the values the caller reads, written in, and its
-      // key names them; a frozen one holds them already. Asked with its key, it is the PDF of
-      // those values, and they are not read again.
+      // key names them; a frozen one prints those written in when it was frozen. Asked with its
+      // key, it is the PDF of those values, and they are not read again.
       const { key } = pdfOptions
-      const filled = key !== undefined || version.frozenAt ? null : await writtenIn(read)
+      const filled = key !== undefined ? null : await writtenIn(read)
       const printed = filled === null ? null : new TextEncoder().encode(filled)
       const digest = key ?? (printed ? computeBlobDigest(printed) : undefined)
       const keyed = digest ? { key: digest } : {}
