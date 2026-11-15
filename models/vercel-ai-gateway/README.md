@@ -48,9 +48,6 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
   conversation's opaque key as `x-session-affinity`, which keeps them on the upstream holding their
   cache. A `cache_ttl` in `request`, or an `x-session-affinity` in `headers`, wins.
 - **Output limits:** the strictest per-call, configured, or model limit wins, for agents too.
-- **Input limit:** `maxInputTokens` caps what the model is sent, below its window. The Agent
-  compacts a conversation that grows past it, so a long conversation on a 1M-token model stays fast
-  and cheap to call. It applies once the live catalog has answered.
 - **Reasoning replay:** a model's encrypted reasoning replays only to that model. A conversation
   that moves to another model behind the Gateway keeps its text and tool calls, without the
   reasoning the new model would reject.

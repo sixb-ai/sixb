@@ -1679,40 +1679,6 @@ describe("Vercel AI Gateway provider", () => {
     ])
   })
 
-  // A 1M-token window let a conversation grow to ~980k input tokens before it compacted.
-  // Removal proof: drop the maxInputTokens spread from the definition; it stays undefined. Apply it
-  // before the catalog answers instead, and the model resolves offline with no window or prices.
-  test("caps a model's input below its window, once the catalog has answered", async () => {
-    const provider = createVercelGateway({
-      apiKey: "test",
-      fetch: async (url) => {
-        if (String(url).endsWith("/models")) {
-          return Response.json({
-            data: [
-              {
-                id: "google/gemini-4-carbon",
-                type: "language",
-                context_window: 1_000_000,
-                max_tokens: 64_000,
-                pricing: { input: "0.000002", output: "0.000012" },
-              },
-            ],
-          })
-        }
-        throw new Error("No model call here.")
-      },
-    })
-    const binding = provider("google/gemini-4-carbon", { maxInputTokens: 250_000 })
-
-    expect(binding.definition.maxInputTokens).toBeUndefined()
-    const model = await resolveLanguageModel(binding)
-    expect(model.definition).toMatchObject({ contextWindow: 1_000_000, maxInputTokens: 250_000 })
-    expect(model.rateCard).toBeDefined()
-    expect(() => provider("google/gemini-4-carbon", { maxInputTokens: 0 })).toThrow(
-      "maxInputTokens must be a positive safe integer"
-    )
-  })
-
   test("sanitizes provider HTTP failures and validates convenience defaults", async () => {
     const gateway = createVercelGateway({ apiKey: "key" })
     expect(gateway.providerId).toBe("vercel-ai-gateway")

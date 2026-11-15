@@ -281,7 +281,11 @@ class ResponseState {
         }
       }
       if (item.type !== "message" && item.type !== "function_call") {
-        events.push({ type: "provider-state", providerId: this.providerId, data: this.replayData(item) })
+        events.push({
+          type: "provider-state",
+          providerId: this.providerId,
+          data: this.replayData(item),
+        })
       }
       if (item.type === "function_call") {
         const callId = string(item.call_id) || string(item.id) || key
@@ -297,7 +301,10 @@ class ResponseState {
           events.push({
             type: "tool-input-end",
             id: callId,
-            providerData: providerItemData(this.providerId, this.options.modelId, { ...item, arguments: argumentsText }),
+            providerData: providerItemData(this.providerId, this.options.modelId, {
+              ...item,
+              arguments: argumentsText,
+            }),
           })
         }
       }
@@ -437,7 +444,11 @@ class ResponseState {
     }
     events.push(...this.closeReasoningSpans(key))
     // Keep the native item (including encrypted content) for tool-loop/history replay.
-    events.push({ type: "provider-state", providerId: this.providerId, data: this.replayData(item) })
+    events.push({
+      type: "provider-state",
+      providerId: this.providerId,
+      data: this.replayData(item),
+    })
     return events
   }
 
