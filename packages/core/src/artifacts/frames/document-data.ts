@@ -175,6 +175,10 @@ export function documentData(): DocumentData {
         }
         const path = parse(field)
         const value = path ? read(path, scope) : UNREAD
+        // Read before plain HTML unmarks the field, which its currency's path is a mark of.
+        const currencyField = tree.attribute(child, CURRENCY_FIELD)
+        const currencyPath = currencyField === null ? null : parse(currencyField)
+        const currency = currencyPath ? read(currencyPath, scope) : tree.attribute(child, CURRENCY)
         if (options.plain) unmark(child)
         if (value === UNREAD) continue
         if (value === HIDDEN) {
@@ -182,9 +186,7 @@ export function documentData(): DocumentData {
           if (!options.plain) tree.setAttribute(child, LOCKED, "")
           continue
         }
-        const currencyField = tree.attribute(child, CURRENCY_FIELD)
-        const currencyPath = currencyField === null ? null : parse(currencyField)
-        const currency = currencyPath ? read(currencyPath, scope) : tree.attribute(child, CURRENCY)
+
         tree.setText(
           child,
           format(

@@ -46,4 +46,16 @@ describe("a designed document written in plain", () => {
     expect(written).toContain(">1.23</p>")
     expect(written).toContain('data-format="number"></p>')
   })
+
+  // Reproduce by unmarking the field before documentData's fill reads its data-currency-field: the
+  // amount prints without its currency, "3,260".
+  test("prints money in the currency its field reads", () => {
+    const written = fillDocumentHtml(
+      html(`<p data-sixb-field="total" data-format="money" data-currency-field="currency">$0</p>`),
+      { holder: { primaryId: "c1", properties: { total: 3260, currency: "USD" } }, queries: {} },
+      { plain: true }
+    )
+
+    expect(written).toContain('<p data-format="money">$3,260</p>')
+  })
 })
