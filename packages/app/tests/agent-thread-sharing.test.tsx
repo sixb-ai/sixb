@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
+import { Composer, PendingMessages } from "../src"
 import { AgentChat } from "../src/agent/agent-chat"
 import { AgentThreads } from "../src/agent/components/agent-threads"
 import { useAgentConversation } from "../src/agent/hooks/use-agent-conversation"
@@ -1180,6 +1181,36 @@ describe("who acts on a turn", () => {
     expect(body).toEqual({ delivery: "queue" })
   })
 
+  // Removal proof: return early again in useAgentConversation's send on `auto` while a turn runs;
+  // the wrapper written before the composer said where a message goes loses it, its draft cleared.
+  test("a chat of its own shows what waits, and a send that leaves out where still goes", async () => {
+    const { requests, queryClient } = serve("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "queue" })],
+    })
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <OwnChat />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(await view.findByText("Add the Halden renewal")).toBeDefined()
+    expect(await view.findByRole("button", { name: "Stop generating" })).toBeDefined()
+    const composer = view.getByRole("textbox", { name: "Message" })
+    type(composer, "And Globex?")
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "Enter" })
+    })
+
+    const body = await posted(requests, "POST /api/agent-threads/thr_1/messages")
+    expect(body).toMatchObject({ text: "And Globex?", delivery: "steer" })
+  })
+
   // Removal proof: drop `onError` from the tray's mutations; the click changes nothing and the tray
   // says nothing.
   test("a change the server refuses says why nothing changed", async () => {
@@ -1248,6 +1279,24 @@ async function posted(
   const sent = () => requests.find((entry) => entry.startsWith(`${route} {`))
   await waitFor(() => expect(sent()).toBeDefined())
   return JSON.parse(sent()!.slice(route.length + 1))
+}
+
+/**
+ * A chat built from `@sixb/app` as the public docs show, whose send was wrapped before the composer
+ * said where a message goes: it passes on three arguments.
+ */
+function OwnChat() {
+  const conversation = useAgentConversation({ threadId: "thr_1", onThreadCreated: () => {} })
+  const { onSend } = conversation.composerProps
+  return (
+    <>
+      <PendingMessages {...conversation.pendingProps} />
+      <Composer
+        {...conversation.composerProps}
+        onSend={(text, attachments, context) => onSend(text, attachments, context)}
+      />
+    </>
+  )
 }
 
 /** A chat of the reader's own, which reads the conversation's turn and errors as data. */

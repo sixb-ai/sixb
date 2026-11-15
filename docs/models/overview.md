@@ -487,6 +487,7 @@ File: `app/_components/assistant.tsx`
 import {
   ArtifactPanelRoot,
   Composer,
+  PendingMessages,
   QuestionComposer,
   SandboxRecovery,
   Transcript,
@@ -512,6 +513,7 @@ export function Assistant() {
         )}
         {conversation.questionProps && <QuestionComposer {...conversation.questionProps} />}
         <div hidden={conversation.questionProps !== null}>
+          <PendingMessages {...conversation.pendingProps} />
           <Composer
             {...conversation.composerProps}
             ambientContext={pageContext}
@@ -532,6 +534,13 @@ answer is their next message. Escape brings the composer back, its draft still t
 `onAnswer` to `Transcript` so the reply leaves the question to it; without it, the reply shows the
 question.
 
+While an answer runs, the person can keep writing. Enter adds the message to their own answer, or
+sends it once someone else's answer ends; a message with a file always waits for the end.
+`PendingMessages` shows what waits, and lets its author move it, send it now or withdraw it. Once
+the answer reads a message, it appears in the transcript where it was read. `onSend` receives where
+the message goes as its fourth argument; a wrapper that leaves it out still sends it where Enter
+would.
+
 Before showing the conversation, handle `conversation.agentLoading`, `conversation.agentError`, no
 `conversation.currentAgent` once loaded (the project has no agent), and
 `conversation.threadUnavailable` (the thread was deleted or is not theirs).
@@ -544,6 +553,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
 | `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, the [dictation](#dictation) microphone, and the context meter: how much of the model's limit the conversation uses (`contextMeter`, which `useAgentConversation` fills) |
 | `QuestionComposer` | The agent's question in the composer's place, from `questionProps` while it is set: a choice to pick or an answer to type, sent as the next message |
+| `PendingMessages` | The messages sent while an answer runs, from `pendingProps`, until the answer reads them or the next one starts |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
@@ -556,8 +566,8 @@ pins a model, and `selectedModel` is unset; `resetModelSelection()` returns to A
 `conversation.modelRouting` says whether a decision model picks on Auto. `Composer` and
 `ComposerSettings` show all this as Auto when given `onResetModelSelection`.
 
-Types such as `AgentThread`, `AgentConversationMessage` and `AgentFileRef` are exported alongside
-them.
+Types such as `AgentThread`, `AgentConversationMessage`, `AgentFileRef`, `AgentInboxItem` and
+`AgentMessageDelivery` are exported alongside them.
 
 #### Slash commands
 

@@ -76,13 +76,14 @@ import { DictationBar } from "./dictation-bar"
 export interface ComposerProps {
   /**
    * `delivery` says where the message goes while a turn runs: into it, behind it, or after stopping
-   * it. It is `auto` when nothing runs.
+   * it. It is `auto` when nothing runs; passed on as `auto` or left out while a turn runs,
+   * `useAgentConversation` sends it where Enter would.
    */
   readonly onSend: (
     text: string,
     attachments: readonly AgentFileRef[],
     context: readonly AgentContextEntryInput[],
-    delivery: AgentMessageDelivery
+    delivery?: AgentMessageDelivery
   ) => void
   readonly disabled?: boolean
   readonly pending?: boolean

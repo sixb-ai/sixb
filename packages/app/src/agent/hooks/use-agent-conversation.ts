@@ -548,9 +548,16 @@ export function useAgentConversation({
     context: readonly AgentContextEntryInput[],
     delivery: AgentMessageDelivery = "auto"
   ) => {
-    // A running turn takes the message as a steer, a queued turn, or one that stops it. The thread
-    // that a message starts is always a turn, whatever the composer said.
-    if (isRunning && delivery === "auto") return
+    // A running turn takes the message as a steer, a queued turn, or one that stops it. A chat that
+    // does not say where it goes sends it where Enter would: into the reader's own answer, or after
+    // the answer in flight when it is someone else's or carries a file, which no step reads.
+    // The thread that a message starts is always a turn, whatever the composer said.
+    const where: AgentMessageDelivery =
+      isRunning && delivery === "auto"
+        ? attachments.length === 0 && !requestedBySomeoneElse(activeRun, user)
+          ? "steer"
+          : "queue"
+        : delivery
     setSendError(null)
     const targetThreadId = threadId
     const key = `sent:${++sentMessageCount}`
@@ -559,7 +566,7 @@ export function useAgentConversation({
       if (targetThreadId !== null) {
         // A message for the running turn waits in the inbox, which the tray shows: only one that
         // starts a turn is the transcript's next message.
-        if (delivery === "auto") {
+        if (where === "auto") {
           setPendingUser({
             key,
             threadId: targetThreadId,
@@ -575,7 +582,7 @@ export function useAgentConversation({
             body: {
               ...messageBody(text, attachments, context, modelSelection.request, settings),
               ...turnApprovalMode,
-              ...(delivery === "auto" ? {} : { delivery }),
+              ...(where === "auto" ? {} : { delivery: where }),
             },
           })
         )
