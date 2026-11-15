@@ -328,6 +328,27 @@ async function getAgentMessageFileContentThread(params: {
   return params.authState.sixb.agent.threads.getById(params.threadId)
 }
 
+/**
+ * An inbox route's error: a message a turn already read, or an inbox already full, is a conflict.
+ * The provider's message names the run, so it stays out of the answer.
+ */
+function handleAgentInboxRouteError(
+  error: unknown,
+  set: { status?: number | string; headers?: unknown }
+):
+  | ReturnType<typeof handleAgentRouteError>
+  | { readonly error: string; readonly code: "invalid_state" | "inbox_limit" } {
+  if (error instanceof AgentStorageError && error.code === "invalid_state") {
+    set.status = 409
+    return { error: "A turn already read this message", code: error.code }
+  }
+  if (error instanceof AgentStorageError && error.code === "inbox_limit") {
+    set.status = 409
+    return { error: "Too many messages are waiting in this conversation", code: error.code }
+  }
+  return handleAgentRouteError(error, set)
+}
+
 export function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string; headers?: unknown }
@@ -998,7 +1019,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
               : { item: serializeAgentInboxItem(sent.item) }
           )
         } catch (error) {
-          return handleAgentRouteError(error, set)
+          return handleAgentInboxRouteError(error, set)
         }
       },
       {
@@ -1072,7 +1093,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             item: serializeAgentInboxItem(item),
           })
         } catch (error) {
-          return handleAgentRouteError(error, set)
+          return handleAgentInboxRouteError(error, set)
         }
       },
       {
@@ -1109,7 +1130,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           set.status = 204
           return
         } catch (error) {
-          return handleAgentRouteError(error, set)
+          return handleAgentInboxRouteError(error, set)
         }
       },
       {

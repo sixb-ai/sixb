@@ -14,7 +14,6 @@ import {
 } from "@sixb/core"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestAgentExecution } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -100,7 +99,7 @@ async function runningThread(
   app: ReturnType<typeof createApp>["app"],
   storage: InMemoryStorage,
   headers: { readonly cookie: string; readonly csrf: Record<string, string> }
-): Promise<string> {
+): Promise<{ readonly threadId: string; readonly runId: string; readonly token: string }> {
   const created = await app.handle(
     request("/api/agent-threads", "POST", { title: "Inbox" }, headers.csrf)
   )
@@ -115,15 +114,13 @@ async function runningThread(
     )
   )
   const runId = ((await sent.json()) as { run: { id: string } }).run.id
+  const token = createAgentRunExecutionToken()
   await storage.agents.runs.start({
     id: runId,
     projectId,
-    execution: {
-      token: createAgentRunExecutionToken(),
-      queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-    },
+    execution: { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
   })
-  return threadId
+  return { threadId, runId, token }
 }
 
 function request(path: string, method: string, body: unknown, headers: Record<string, string>) {
@@ -138,7 +135,7 @@ describe("agent thread inbox routes", () => {
   test("a steered message waits, changes, and is withdrawn by the person who sent it", async () => {
     const { app, storage } = createApp()
     const owner = await seedSession(storage, "owner")
-    const threadId = await runningThread(app, storage, owner)
+    const { threadId } = await runningThread(app, storage, owner)
 
     const sent = await app.handle(
       request(
@@ -193,7 +190,7 @@ describe("agent thread inbox routes", () => {
     const { app, storage } = createApp()
     const owner = await seedSession(storage, "owner")
     const guest = await seedSession(storage, "guest")
-    const threadId = await runningThread(app, storage, owner)
+    const { threadId } = await runningThread(app, storage, owner)
     await storage.agents.threads.addParticipants({
       projectId,
       threadId,
@@ -229,5 +226,43 @@ describe("agent thread inbox routes", () => {
       item: { mode: "queue" },
     })
     expect(owner.cookie).toContain("sixb_session_app=")
+  })
+
+  // Guard proof: answer the inbox routes' errors with handleAgentRouteError alone; a message a turn
+  // already read answers 400, and its message names the run.
+  test("answers a conflict when a turn read the message first", async () => {
+    const { app, storage } = createApp()
+    const owner = await seedSession(storage, "owner")
+    const { threadId, runId, token } = await runningThread(app, storage, owner)
+    const sent = await app.handle(
+      request(
+        `/api/agent-threads/${threadId}/messages`,
+        "POST",
+        { text: "Check src/v2 instead.", delivery: "steer" },
+        owner.csrf
+      )
+    )
+    const itemId = ((await sent.json()) as { item: { id: string } }).item.id
+    await storage.agents.inbox.takeSteers({
+      projectId,
+      threadId,
+      runId,
+      executionToken: token,
+      authorPrincipal: { type: "user", id: "owner" },
+      stepIndex: 1,
+    })
+
+    for (const [method, body] of [
+      ["PATCH", { text: "Too late." }],
+      ["DELETE", undefined],
+    ] as const) {
+      const refused = await app.handle(
+        request(`/api/agent-threads/${threadId}/inbox/${itemId}`, method, body, owner.csrf)
+      )
+      expect(refused.status).toBe(409)
+      const answer = (await refused.json()) as { error: string; code?: string }
+      expect(answer.code).toBe("invalid_state")
+      expect(answer.error).not.toContain(runId)
+    }
   })
 })
