@@ -1,3 +1,5 @@
+import { posix } from "node:path"
+
 /**
  * Runs a script in a bash that is not a login shell, once a login shell has loaded the profile:
  * the profile's exports reach the script, and its `exit` leaves the login shell alone.
@@ -12,7 +14,31 @@
  */
 export const LOGIN_SHELL_SCRIPT = 'exec "$BASH" -c "$1" bash'
 
-/** `bash` arguments that run `script` as {@link LOGIN_SHELL_SCRIPT} does. */
-export function loginShellArgs(script: string): string[] {
-  return ["-lc", LOGIN_SHELL_SCRIPT, "bash", script]
+/**
+ * {@link LOGIN_SHELL_SCRIPT}, in a directory the shell changes to itself. A directory that does not
+ * exist fails the command with bash's own message, which the model can read and correct. Given
+ * to the sandbox instead, it would refuse to start the command, and a refused command leaves the
+ * workspace unconfirmed. Falling off the end, unlike `exit`, does not run `~/.bash_logout`.
+ *
+ * Arguments: the directory, then the script.
+ */
+export const LOGIN_SHELL_SCRIPT_IN_DIRECTORY = 'cd -- "$1" && exec "$BASH" -c "$2" bash'
+
+/** `bash` arguments that run `script` as {@link LOGIN_SHELL_SCRIPT} does, in `directory` if given. */
+export function loginShellArgs(script: string, directory?: string): string[] {
+  return directory === undefined
+    ? ["-lc", LOGIN_SHELL_SCRIPT, "bash", script]
+    : ["-lc", LOGIN_SHELL_SCRIPT_IN_DIRECTORY, "bash", directory, script]
+}
+
+/**
+ * The absolute directory a command's `cwd` names, resolved as a provider resolves it, for the
+ * shell to change to. A model's `cwd` never reaches the provider: see
+ * {@link LOGIN_SHELL_SCRIPT_IN_DIRECTORY}.
+ */
+export function commandDirectory(
+  workingDirectory: string,
+  cwd: string | undefined
+): string | undefined {
+  return cwd === undefined ? undefined : posix.resolve(workingDirectory, cwd)
 }
