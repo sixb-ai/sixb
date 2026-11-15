@@ -229,4 +229,83 @@ describe("a message sent while a turn runs", () => {
     expect(await sixb.agent.inbox.list(threadId)).toEqual([])
     await session.close()
   })
+
+  // Guard proof: pass the edit's spec to inbox.update as it came; the item loses its model.
+  test("keeps the model it asked for when only its reasoning changes", async () => {
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { threadId, session } = await runningTurn(host, deps, sixb)
+    const model = { provider: "test", modelId: "test-model" }
+
+    const queued = await sixb.agent.runs.send({
+      threadId,
+      text: "Then sum it.",
+      delivery: "queue",
+      model,
+    })
+    if (queued.kind !== "inbox") throw new Error("Expected an inbox item.")
+    const edited = await sixb.agent.inbox.update(threadId, queued.item.id, { reasoning: "high" })
+
+    expect(edited.spec).toEqual({ model, reasoning: "high" })
+    await session.close()
+  })
+})
+
+describe("a message whose turn ended first", () => {
+  /** Queued messages the thread started as turns: their trigger messages. */
+  async function startedTurns(host: SixbHost, threadId: string) {
+    const { runs } = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId,
+      statuses: ["queued"],
+    })
+    return runs.map((run) => run.triggerMessageId)
+  }
+
+  // Guard proof: drop startIfThreadIdle from sendAgentMessage; the turn's end read an empty inbox,
+  // and the message waits on an idle thread.
+  test("starts when the turn ended before the message reached the inbox", async () => {
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { threadId, session } = await runningTurn(host, deps, sixb)
+
+    // The turn answers and ends just after the send read the thread as running.
+    const running = await host.storage.agents!.threads.getById({ projectId: host.id, id: threadId })
+    await session.finish({ status: "succeeded", finishReason: "stop" })
+    const { threads, inbox } = host.storage.agents!
+    const getById = threads.getById.bind(threads)
+    const enqueue = inbox.enqueue.bind(inbox)
+    let stale = true
+    threads.getById = async (input) => (stale && input.id === threadId ? running : getById(input))
+    inbox.enqueue = async (input) => {
+      stale = false
+      return enqueue(input)
+    }
+    const queued = await sixb.agent.runs.send({ threadId, text: "Then sum it.", delivery: "queue" })
+    threads.getById = getById
+    inbox.enqueue = enqueue
+    if (queued.kind !== "inbox") throw new Error("Expected an inbox item.")
+
+    expect(await startedTurns(host, threadId)).toEqual([queued.item.messageId])
+    expect(await sixb.agent.inbox.list(threadId)).toEqual([])
+    await session.close()
+  })
+
+  // Guard proof: drop startIfThreadIdle from promoteAgentInboxItem; with no turn to stop, Send now
+  // marks the message and starts nothing.
+  test("starts when it is sent now and no turn holds the thread", async () => {
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { threadId, session } = await runningTurn(host, deps, sixb)
+    const queued = await sixb.agent.runs.send({ threadId, text: "Then sum it.", delivery: "queue" })
+    if (queued.kind !== "inbox") throw new Error("Expected an inbox item.")
+    // The turn was stopped: a message queued for later waits behind it.
+    await session.finish({ status: "cancelled" })
+    await session.close()
+    expect(await startedTurns(host, threadId)).toEqual([])
+
+    await sixb.agent.inbox.update(threadId, queued.item.id, { immediate: true })
+
+    expect(await startedTurns(host, threadId)).toEqual([queued.item.messageId])
+  })
 })

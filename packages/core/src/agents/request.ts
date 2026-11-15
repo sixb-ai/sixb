@@ -70,6 +70,7 @@ import type { TurnModelRouter } from "./model-routing"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
 import { assertConversationThread } from "./thread-access"
+import { turnAnsweredEveryMessage } from "./turn-answered"
 import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
 
 export interface RequestAgentRunInput {
@@ -507,8 +508,10 @@ export async function sendAgentMessage(
     ...(delivery === "send_now" ? { immediate: true } : {}),
   })
 
-  if (delivery !== "send_now") return { kind: "inbox", item }
-  await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+  if (delivery === "send_now") {
+    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+  }
+  await startIfThreadIdle(runtime, execution, thread.id)
   return { kind: "inbox", item }
 }
 
@@ -597,7 +600,8 @@ export async function promoteAgentInboxItem(
             ...item.parts.filter((part) => part.type !== "text"),
           ],
         }),
-    ...(Object.keys(spec).length === 0 ? {} : { spec }),
+    // What it does not name stays as it asked: a new reasoning keeps its model.
+    ...(Object.keys(spec).length === 0 ? {} : { spec: { ...item.spec, ...spec } }),
     ...(input.immediate === true ? { immediate: true } : {}),
   })
   if (!updated) {
@@ -609,6 +613,7 @@ export async function promoteAgentInboxItem(
   if (input.immediate === true && turn) {
     await stopTurnBefore(runtime, execution, turn)
   }
+  await startIfThreadIdle(runtime, execution, thread.id)
   return updated
 }
 
@@ -644,7 +649,13 @@ export async function withdrawAgentInboxItem(
       `[Sixb] Agent inbox item '${item.id}' was sent by someone else: only they can withdraw it.`
     )
   }
-  await agents.inbox.remove({ projectId, threadId: thread.id, id: item.id })
+  const removed = await agents.inbox.remove({ projectId, threadId: thread.id, id: item.id })
+  if (!removed) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${item.id}' is no longer waiting in thread '${thread.id}': a turn read it.`
+    )
+  }
 }
 
 /** The person a message this request sends is from. */
@@ -684,6 +695,44 @@ async function stopTurnBefore(
   }
   await cancelAgentRun(runtime, active).catch(() => undefined)
   await startQueuedAgentTurnFromInbox(runtime, execution, active, { onlyImmediate: true })
+}
+
+/**
+ * Start what the caller left waiting once no turn holds the thread: the turn it waited behind ended
+ * before the message reached the inbox, or before a stop reached it, so that end read none of it.
+ * It applies the rules a turn's end applies, and only to the caller's own turn. A failure leaves the
+ * message waiting for the repair pass.
+ */
+async function startIfThreadIdle(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  threadId: string
+): Promise<void> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  try {
+    const thread = await agents.threads.getById({ projectId, id: threadId })
+    // A turn holds it: that turn's end starts the message.
+    if (!thread || thread.activeRunId !== null) return
+    const {
+      runs: [last],
+    } = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 1,
+    })
+    if (last?.kind !== "conversation") return
+    if (!(await askedForTurn(runtime, last, messageAuthor(runtime, execution)))) return
+    const onlyImmediate = !(await turnAnsweredEveryMessage(agents, last))
+    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
+  } catch (error) {
+    console.error(
+      `[Sixb] Could not start what waits in Agent thread '${threadId}'; the repair pass retries.`,
+      error
+    )
+  }
 }
 
 /** The parts a message of its own carries: what it says, then the files it brings. */
