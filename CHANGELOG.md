@@ -26,6 +26,10 @@ Sixb packages are versioned independently. Each release entry names the packages
 - Generate speech with an Azure AI Foundry `gpt-4o-mini-tts` deployment in `models.audio.speech`
   through `@sixb/azure-ai-foundry`'s `foundry.speech("tts")`, in MP3, Opus, AAC, FLAC or WAV,
   priced at Azure's USD 0.60 per million text tokens and USD 12 per million audio tokens.
+- Generate and edit images with an Azure AI Foundry GPT Image, FLUX.1 Kontext [pro] or FLUX1.1 [pro]
+  deployment in `models.image` through `@sixb/azure-ai-foundry`'s `foundry.image("image")`.
+  Generations are priced at Azure's retail rates, per token or per image; GPT Image edits run at
+  unknown cost.
 
 ### Upgrade notes
 

@@ -7,17 +7,29 @@ export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
 type FoundryRoute = FoundryProtocol | OneShotRoute
 /** Routes that answer in one body. A failure is never replayed: the call may have been billed. */
-type OneShotRoute = "embeddings" | "decision" | "transcription" | "reranking" | "speech"
+type OneShotRoute =
+  | "embeddings"
+  | "decision"
+  | "transcription"
+  | "reranking"
+  | "speech"
+  | "image"
+  | "image-edit"
 const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
   "embeddings",
   "decision",
   "transcription",
   "reranking",
   "speech",
+  "image",
+  "image-edit",
 ])
 
 /** The GA data-plane version: the v1 API does not route audio deployments. */
 const AUDIO_API_VERSION = "2024-10-21"
+
+/** The first version with GPT Image; v1 does not route FLUX.1 Kontext edits. */
+const IMAGE_API_VERSION = "2025-04-01-preview"
 
 export interface TransportOptions {
   readonly endpoint: string
@@ -183,6 +195,9 @@ export class FoundryTransport {
     // Decision models answer on the resource origin; the project path does not route them.
     if (protocol === "decision")
       return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
+    // Image deployments answer on the resource origin, by deployment path.
+    if (protocol === "image" || protocol === "image-edit")
+      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/images/${protocol === "image" ? "generations" : "edits"}?api-version=${IMAGE_API_VERSION}`
     // Cohere rerankers answer Cohere's v2 API on the resource origin.
     if (protocol === "reranking")
       return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
