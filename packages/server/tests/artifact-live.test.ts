@@ -858,7 +858,8 @@ describe("an artifact edited live", () => {
   })
 
   // Guard proof: clear `dirty` before the publish in LiveRoom.flush and leave it on failure; the
-  // note's words are lost once storage refuses the first write-back.
+  // note's words are lost once storage refuses the first write-back. Leave `refused` out of
+  // LiveRoom.status: what publishing refuses reads as tried again, though nothing tries it.
   test("says when a write-back fails, keeps the changes, and tries again", async () => {
     jest.useFakeTimers()
     const context = await setup()
@@ -883,6 +884,7 @@ describe("an artifact edited live", () => {
         state: "failed",
         error: "blob storage is unavailable",
       })
+      expect(marie.statuses().at(-1)).not.toHaveProperty("refused")
       expect((await context.latest()).revision).toBe(context.revision)
 
       jest.advanceTimersByTime(2_000)
@@ -900,6 +902,7 @@ describe("an artifact edited live", () => {
       expect(marie.statuses().at(-1)).toMatchObject({
         state: "failed",
         error: expect.stringContaining("note 'hi'"),
+        refused: true,
       })
       ;(marie.canvas.items.get("hi")?.get("text") as Y.Text).delete(0, 2_000)
       await marie.settle()

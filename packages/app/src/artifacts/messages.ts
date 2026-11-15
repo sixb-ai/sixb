@@ -100,6 +100,8 @@ export const en = {
     saved: "Saved",
     saving: "Saving…",
     failed: "Couldn't save — retrying",
+    /** Publishing refused the latest change: nothing tries it again until someone changes it. */
+    refused: "Couldn't save this change — undo it",
     offline: "Offline — your changes are kept here",
     reconnecting: "Offline — reconnecting",
     connecting: "Connecting…",
@@ -820,6 +822,7 @@ export const fr: Translation<ArtifactMessages> = {
     saved: "Enregistré",
     saving: "Enregistrement…",
     failed: "Échec de l’enregistrement — nouvel essai",
+    refused: "Impossible d’enregistrer cette modification — annulez-la",
     offline: "Hors ligne — vos modifications sont gardées ici",
     reconnecting: "Hors ligne — reconnexion",
     connecting: "Connexion…",

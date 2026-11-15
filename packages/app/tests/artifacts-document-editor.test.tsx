@@ -27,6 +27,7 @@ installDom([
   "Range",
   "DOMRect",
   "KeyboardEvent",
+  "ClipboardEvent",
   "Event",
 ])
 
@@ -249,6 +250,46 @@ describe("what is pasted and copied", () => {
     })
     expect(pasteText(editor, " with **bold** words")).toBe(true)
     expect(fragmentMarkdown(fragment)).toContain("Three weeks in North with **bold** words.")
+  })
+
+  // Reproduce by dropping transformPasted from the editor's props: the web page's logo is kept,
+  // and publishing refuses every save of the document from then on.
+  test("keeps only the artifact's own pictures of a page pasted from elsewhere", async () => {
+    const { editor, fragment, doc } = await open()
+    doc.getMap("files").set("images/depot.png", { blobId: "blob_depot", sizeBytes: 4 })
+    act(() => {
+      editor.commands.setTextSelection(endOf(editor, "Three weeks in North."))
+      editor.view.pasteHTML(
+        '<p>Acme ships the parts.</p><img src="https://acme.com/logo.png" alt="Acme"><img src="images/depot.png" alt="Depot">'
+      )
+    })
+
+    const markdown = fragmentMarkdown(fragment)
+    expect(markdown).toContain("Acme ships the parts.")
+    expect(markdown).toContain("![Depot](images/depot.png)")
+    expect(markdown).not.toContain("acme.com")
+  })
+
+  // Reproduce by leaving withOwnImages out of handlePaste's Markdown case: the badge and the logo
+  // a README shows are kept.
+  test("keeps only the artifact's own pictures of Markdown pasted as text", async () => {
+    const { editor, fragment } = await open()
+    act(() => {
+      editor.commands.setTextSelection(endOf(editor, "Three weeks in North."))
+    })
+    const readme = `## Acme
+
+[![Build](https://ci.acme.com/badge.svg)](https://ci.acme.com)
+
+Ships the parts.
+
+![Logo](https://acme.com/logo.png)
+`
+    expect(pasteText(editor, readme)).toBe(true)
+
+    const markdown = fragmentMarkdown(fragment)
+    expect(markdown).toContain("Acme\n\nShips the parts.\n\n## Steps")
+    expect(markdown).not.toContain("acme.com")
   })
 
   // Reproduce by dropping the code check from handlePaste: a pasted comment becomes a heading.

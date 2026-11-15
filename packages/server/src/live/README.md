@@ -88,7 +88,8 @@ The server vouches for every awareness state it shares:
 - A failure leaves the room dirty, reports `status: failed` with the error, and retries:
   - `artifact_not_found`: the room closes and every member gets `left`.
   - An access error: the author is demoted, and another editor is tried at once.
-  - `invalid_artifact`: waits for the next change while someone is connected.
+  - `invalid_artifact`: waits for the next change while someone is connected, and says so with
+    `refused`, since nothing tries it again.
   - Anything else: retries with backoff from 2 s doubling to 30 s, for as long as the server runs,
     whether or not anyone still holds the room.
 - Changes are lost only when nobody can write them: the server stops first, or storage refuses

@@ -224,7 +224,26 @@ describe("who is on a live canvas", () => {
     expect(liveSaveLabel({ ...state, save: { state: "failed", revision: 4, error: "x" } })).toBe(
       "failed"
     )
+    // Reproduce by reading `refused` nowhere in liveSaveLabel: a change publishing refuses reads
+    // as tried again, though nothing tries it until someone changes it.
+    expect(
+      liveSaveLabel({ ...state, save: { state: "failed", revision: 4, error: "x", refused: true } })
+    ).toBe("refused")
     expect(liveSaveLabel({ ...state, connection: "offline", pending: true })).toBe("offline")
+
+    // As the server says it.
+    const live = new LiveArtifact("art_c4nv4s0000", () => false)
+    live.receive({
+      type: "status",
+      artifactId: "art_c4nv4s0000",
+      state: "failed",
+      revision: 4,
+      snapshot: "",
+      error: "x",
+      refused: true,
+    })
+    expect(liveSaveLabel({ ...live.getState(), connection: "online" })).toBe("refused")
+    live.destroy()
   })
 
   test("folds the save state into an icon, its words read out", () => {
@@ -241,6 +260,14 @@ describe("who is on a live canvas", () => {
     const status = view.getByRole("status")
     expect(status.getAttribute("data-save")).toBe("failed")
     expect(status.textContent).toBe("Couldn't save — retrying")
+
+    // A refusal says what to do, since nothing tries it again.
+    view.rerender(
+      <LiveSaveStatus
+        state={{ ...state, save: { state: "failed", revision: 4, error: "x", refused: true } }}
+      />
+    )
+    expect(view.getByRole("status").textContent).toBe("Couldn't save this change — undo it")
 
     // Saving and saved come and go with every change: they are shown, never announced.
     // Reproduce by giving LiveSaveStatus role="status" whatever its state.

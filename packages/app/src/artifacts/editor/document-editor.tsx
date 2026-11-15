@@ -1,5 +1,5 @@
-import { createHeadingSlugger } from "@sixb/core/artifacts"
-import { blocksToMarkdown, markdownToBlocks } from "@sixb/core/artifacts/live"
+import { createHeadingSlugger, isArtifactAddress } from "@sixb/core/artifacts"
+import { blocksToMarkdown, LIVE_FILES, markdownToBlocks } from "@sixb/core/artifacts/live"
 import { toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { type Editor, Extension } from "@tiptap/core"
@@ -99,6 +99,14 @@ export function DocumentEditor({
   const slash = useMemo(() => new SlashMenuStore(), [])
   const [linkRequest, setLinkRequest] = useState(0)
 
+  // A picture publishing takes: another artifact's, or one of this artifact's files.
+  const isOwnImage = (src: string) => {
+    const files = fragment.doc?.getMap<unknown>(LIVE_FILES)
+    if (isArtifactAddress(src)) return true
+    const path = artifactPath(src)
+    return path !== null && files?.has(path) === true
+  }
+
   const editor = useEditor(
     {
       editable,
@@ -149,6 +157,18 @@ export function DocumentEditor({
           void addImages(files, at?.pos)
           return true
         },
+        // What is pasted or dropped from elsewhere keeps only the artifact's own pictures: the
+        // document could not be saved with any other.
+        transformPasted: (slice) => {
+          const content = withOwnImages(slice.content, isOwnImage)
+          if (content === slice.content) return slice
+          const open = Slice.maxOpen(content)
+          return new Slice(
+            content,
+            Math.min(slice.openStart, open.openStart),
+            Math.min(slice.openEnd, open.openEnd)
+          )
+        },
         // Markdown pasted as text becomes its blocks; copied, blocks are Markdown again.
         handlePaste: (view, event) => {
           const files = imagesOf(event.clipboardData)
@@ -175,7 +195,7 @@ export function DocumentEditor({
               ]
             : content
           try {
-            const fragment = Fragment.fromJSON(view.state.schema, nodes)
+            const fragment = withOwnImages(Fragment.fromJSON(view.state.schema, nodes), isOwnImage)
             view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(fragment)).scrollIntoView())
             return true
           } catch {
@@ -268,6 +288,68 @@ export function DocumentEditor({
 /** The images among the files a drop or a paste carries. */
 function imagesOf(data: DataTransfer | null | undefined): File[] {
   return [...(data?.files ?? [])].filter((file) => file.type.startsWith("image/"))
+}
+
+/**
+ * `content` without the pictures `own` does not take, nor the Markdown kept as written that shows
+ * one; the same fragment when it holds none. A block of blocks they leave empty gets what it must
+ * hold.
+ */
+function withOwnImages(content: Fragment, own: (src: string) => boolean): Fragment {
+  let changed = false
+  const kept: ProseMirrorNode[] = []
+  content.forEach((node) => {
+    const shown =
+      node.type.name === "image"
+        ? [String(node.attrs.src ?? "")]
+        : node.type.name === "markdown" || node.type.name === "markdownInline"
+          ? imageSources(String(node.attrs.source ?? ""))
+          : []
+    if (!shown.every(own)) {
+      changed = true
+      return
+    }
+
+    const inner = node.isLeaf ? node.content : withOwnImages(node.content, own)
+    if (inner === node.content) {
+      kept.push(node)
+      return
+    }
+    changed = true
+    // Words that were pictures alone go with them.
+    if (node.isTextblock && inner.size === 0) return
+    const rebuilt = node.type.createAndFill(node.attrs, inner, node.marks)
+    if (rebuilt) kept.push(rebuilt)
+  })
+  return changed ? Fragment.from(kept) : content
+}
+
+/** The pictures Markdown or HTML written as it was shows: `![…](src)` and `<img src>`. */
+function imageSources(source: string): string[] {
+  const pictures = source.matchAll(
+    /!\[[^\]]*\]\(\s*<?([^\s)>]*)|<img\b[^>]*?\bsrc\s*=\s*["']?([^"'\s>]*)/gi
+  )
+  return [...pictures].map((match) => match[1] ?? match[2] ?? "")
+}
+
+/**
+ * The file of the artifact a picture's path names, as publishing reads it; null for a path that
+ * cannot name one: an address elsewhere, a `data:` image, or a path from the root.
+ */
+function artifactPath(src: string): string | null {
+  if (src === "" || src.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(src)) return null
+  let path = src.split(/[?#]/)[0] ?? ""
+  try {
+    path = decodeURI(path)
+  } catch {
+    // Kept as written: it simply names no file.
+  }
+  const segments: string[] = []
+  for (const segment of path.split("/")) {
+    if (segment === "..") segments.pop()
+    else if (segment !== "" && segment !== ".") segments.push(segment)
+  }
+  return segments.join("/")
 }
 
 /** Another editor's caret: a line in their color, their name above it. */
