@@ -430,6 +430,11 @@
   line-height: 1.55;
 }
 
+/* A line break within a paragraph's Markdown reads as a space, as it does on the page. */
+.sixb-editor .sixb-soft-break {
+  white-space: normal;
+}
+
 .sixb-editor ::selection {
   background: color-mix(in oklab, var(--primary) 22%, transparent);
 }

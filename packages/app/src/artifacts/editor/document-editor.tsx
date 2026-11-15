@@ -7,7 +7,8 @@ import { Collaboration } from "@tiptap/extension-collaboration"
 import { CollaborationCaret } from "@tiptap/extension-collaboration-caret"
 import { Placeholder } from "@tiptap/extensions"
 import { Fragment, type Node as ProseMirrorNode, Slice } from "@tiptap/pm/model"
-import type { Transaction } from "@tiptap/pm/state"
+import { Plugin, type Transaction } from "@tiptap/pm/state"
+import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { Awareness } from "y-protocols/awareness"
@@ -130,6 +131,7 @@ export function DocumentEditor({
         }),
         SlashCommand(slash, () => types),
         BlockShortcuts.configure({ onLink: () => setLinkRequest((count) => count + 1) }),
+        SoftBreaks,
       ],
       editorProps: {
         attributes: {
@@ -304,6 +306,45 @@ function looksLikeMarkdown(text: string): boolean {
     /^(#{1,6} |[-*+] |\d+\. |> |```|\|.+\|$|- \[[ x]\] )/m.test(text) ||
     /\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\n]+\)/.test(text)
   )
+}
+
+/**
+ * A line break within a paragraph's Markdown, as the Agent writes them: the document page reads
+ * it as a space, and so does the editor, while the text keeps it, so the Markdown written back
+ * is the same. Code keeps its lines.
+ */
+const SoftBreaks = Extension.create({
+  name: "softBreaks",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<DecorationSet>({
+        state: {
+          init: (_, state) => softBreaks(state.doc),
+          apply: (transaction, set) => (transaction.docChanged ? softBreaks(transaction.doc) : set),
+        },
+        props: {
+          decorations(state) {
+            return this.getState(state)
+          },
+        },
+      }),
+    ]
+  },
+})
+
+function softBreaks(doc: ProseMirrorNode): DecorationSet {
+  const breaks: Decoration[] = []
+  doc.descendants((node, pos) => {
+    if (node.type.spec.code) return false
+    if (!node.isText) return true
+
+    for (const match of (node.text ?? "").matchAll(/\r?\n|\r/g)) {
+      const at = pos + match.index
+      breaks.push(Decoration.inline(at, at + match[0].length, { class: "sixb-soft-break" }))
+    }
+    return false
+  })
+  return DecorationSet.create(doc, breaks)
 }
 
 /**

@@ -49,11 +49,12 @@ function live(markdown = MARKDOWN) {
 
 async function open(
   options: {
+    readonly markdown?: string
     readonly editable?: boolean
     readonly uploadImage?: (file: File) => Promise<{ src: string; alt: string }>
   } = {}
 ) {
-  const document = live()
+  const document = live(options.markdown)
   const view = render(
     <DocumentEditor
       fragment={document.fragment}
@@ -114,6 +115,39 @@ Three weeks in North. Then Harbor.
 - Load the jobs
 - Run the first job
 `)
+  })
+
+  // Reproduce by leaving SoftBreaks out of the editor's extensions: the paragraph's line break is
+  // drawn as one, cutting its sentence where the page reads it whole.
+  test("reads a paragraph written on several lines as one, as the page does, and writes its lines back", async () => {
+    const markdown = `# Q3 operations review
+
+Fill rate held at 91%, up from 88%,
+while parts costs rose.
+
+\`\`\`sh
+make
+make test
+\`\`\`
+`
+    const { editor, element, fragment } = await open({ markdown })
+
+    const paragraph = element.querySelector("p") as HTMLElement
+    expect(paragraph.textContent).toBe(
+      "Fill rate held at 91%, up from 88%,\nwhile parts costs rose."
+    )
+    const breaks = [...paragraph.querySelectorAll(".sixb-soft-break")]
+    expect(breaks.map((each) => each.textContent)).toEqual(["\n"])
+    expect(element.querySelector("pre .sixb-soft-break")).toBeNull()
+
+    act(() => {
+      editor
+        .chain()
+        .setTextSelection(endOf(editor, "Q3 operations review"))
+        .insertContent(", North")
+        .run()
+    })
+    expect(fragmentMarkdown(fragment)).toBe(markdown.replace("review", "review, North"))
   })
 
   // Reproduce by dropping the `editable` prop from the editor: a reader who only watches can type
