@@ -20,6 +20,7 @@ export type {
   AzureAIFoundryProvider,
 } from "./provider"
 export { createAzureAIFoundry } from "./provider"
+export type { AzureAIFoundryRerankingModel, AzureAIFoundryRerankingOptions } from "./reranking"
 export type {
   AzureAIFoundryTranscriptionModel,
   AzureAIFoundryTranscriptionOptions,
