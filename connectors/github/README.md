@@ -167,9 +167,12 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
 | `gh.repo({ owner, repo }).pulls.reviews.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).pulls.reviews.submit(number, reviewId)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events` |
 | `gh.repo({ owner, repo }).pulls.comments.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/comments` |
 | `gh.repo({ owner, repo }).pulls.comments.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/comments` |
 | `gh.repo({ owner, repo }).pulls.comments.reply(commentId)` | `POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies` |
+| `gh.repo({ owner, repo }).pulls.comments.update(commentId)` | `PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}` |
+| `gh.repo({ owner, repo }).pulls.comments.delete(commentId)` | `DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}` |
 | `gh.repo({ owner, repo }).checks.list(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` |
 | `gh.repo({ owner, repo }).checks.status(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/status` |
 | `gh.repo({ owner, repo }).stacks.list()` | `GET /repos/{owner}/{repo}/stacks`            |
@@ -352,11 +355,15 @@ each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DIS
 pull request bodies too.
 
 **Reviewing.** `pulls.reviews.create(number, { event })` submits a review: `APPROVE`,
-`REQUEST_CHANGES` or `COMMENT`. GitHub requires a summary for the last two, and refuses an `event`
-it does not know, so the client refuses both before requesting. `commitId` reviews one commit, and
+`REQUEST_CHANGES` or `COMMENT`. GitHub requires a summary for the last two and refuses an `event` it
+does not know, so the client refuses both before requesting. `commitId` reviews one commit, and
 `comments` posts inline comments as part of the same review, which is how a reviewer leaves several
 line comments with one verdict. `DISMISSED` and `PENDING` are states GitHub reports, not events it
 accepts.
+
+Leave `event` out and the review stays pending instead, so comments can be collected while reading
+the diff. `pulls.reviews.submit(number, reviewId, { event })` submits it afterwards, and the client
+refuses a submit without a verdict, which GitHub answers with a 422.
 
 ```ts
 await repo.pulls.reviews.create(1086, {
@@ -376,7 +383,7 @@ what changed, `sort` and `direction` order it, and `bodyFormat` asks for the bod
 it. `pulls.comments.create(number, { path, body })` comments on a line outside a review, and
 needs `line` with an optional `side` (`RIGHT`, the file as changed, by default) or `position`, a
 line counted in the diff. `pulls.comments.reply(commentId, { body })` answers a comment in its
-thread.
+thread, `update(commentId, { body })` changes one and `delete(commentId)` removes it.
 
 **Reading the diff.** `pulls.files(number)` returns the files the pull request changes, each with
 its `status` (`added`, `removed`, `modified`, `renamed`, `copied`, `changed` or `unchanged`), its

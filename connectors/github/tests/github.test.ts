@@ -2319,3 +2319,92 @@ describe("reading a file at a ref", () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe("a review that stays open until it is submitted", () => {
+  // Removal proof: require an event on create; a reviewer can then only post a verdict, never
+  // collect comments and decide after reading the whole diff.
+  test("keeps a review pending when it carries no verdict", async () => {
+    const calls = record(() => json({ id: 11, state: "PENDING", body: "Note to self" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    const review = await reviews.create(7, {
+      body: "Note to self",
+      comments: [{ path: "src/login.ts", body: "Check this", line: 42 }],
+    })
+
+    expect(calls[0]?.body).toEqual({
+      commit_id: undefined,
+      body: "Note to self",
+      event: undefined,
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "Check this",
+          line: 42,
+          side: undefined,
+          start_line: undefined,
+          start_side: undefined,
+          position: undefined,
+        },
+      ],
+    })
+    expect(review.state).toBe("PENDING")
+  })
+
+  test("submits a pending review with the verdict GitHub requires", async () => {
+    const calls = record(() => json({ id: 11, state: "CHANGES_REQUESTED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    // The event is REQUEST_CHANGES; CHANGES_REQUESTED is the state the review then reads as.
+    const review = await reviews.submit(7, 11, { event: "REQUEST_CHANGES", body: "One fix." })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/reviews/11/events",
+    ])
+    expect(calls[0]?.body).toEqual({ event: "REQUEST_CHANGES", body: "One fix." })
+    expect(review.state).toBe("CHANGES_REQUESTED")
+  })
+
+  // A pending review is submitted with a verdict, so a submit without one is refused before the
+  // request rather than answered with a 422.
+  test("refuses a submit without a verdict, or with one GitHub does not know", async () => {
+    const calls = record()
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    await expect(reviews.submit(7, 11, {} as never)).rejects.toThrow("event")
+    await expect(reviews.submit(7, 11, { event: "DISMISS" as never })).rejects.toThrow("event")
+    await expect(reviews.submit(7, 0, { event: "COMMENT", body: "x" })).rejects.toThrow("reviewId")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("edits and deletes a comment", async () => {
+    const calls = record((_, index) =>
+      index === 1 ? json({ id: 5, body: "Fixed." }) : new Response(null, { status: 204 })
+    )
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    const updated = await comments.update(5, { body: "Fixed." })
+    await comments.delete(5)
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "PATCH",
+      "/repos/acme/web/pulls/comments/5",
+    ])
+    expect(calls[0]?.body).toEqual({ body: "Fixed." })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "DELETE",
+      "/repos/acme/web/pulls/comments/5",
+    ])
+    expect(updated.body).toBe("Fixed.")
+  })
+
+  test("refuses to empty a comment's body", async () => {
+    const calls = record()
+
+    await expect(
+      (await connect()).repo(webRepo).pulls.comments.update(5, { body: "  " })
+    ).rejects.toThrow("body")
+    expect(calls).toHaveLength(0)
+  })
+})
