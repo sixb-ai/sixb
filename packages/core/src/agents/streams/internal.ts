@@ -6,11 +6,14 @@ export {
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
   agentRunFinishedEvent,
+  agentRunStepsStreamDefinition,
+  agentRunStepsStreamId,
   agentRunStreamDefinition,
   agentRunStreamEventBase,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
   DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION,
+  DEFAULT_AGENT_RUN_STEPS_RETENTION,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   publishAgentComputerActivity,
   publishAgentRunActivity,
@@ -19,3 +22,12 @@ export {
   publishAgentThreadMoved,
   subscribeAgentRunCancel,
 } from "./protocol"
+export {
+  appendCompacted,
+  continuesDelta,
+  coveredBySteps,
+  type DeltaChunk,
+  isDeltaChunk,
+  mergeDeltas,
+  readAgentRunSteps,
+} from "./steps"

@@ -10,6 +10,8 @@ export type {
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
+  AgentRunStepsEvent,
+  AgentRunStepsRead,
   AgentRunStreamEvent,
   AgentRunStreamId,
   AgentThreadMovedEvent,

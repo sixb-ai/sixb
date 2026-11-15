@@ -22,6 +22,16 @@ export const DEFAULT_AGENT_RUN_STREAM_RETENTION = {
   maxRecords: 5_000,
 } as const
 
+/**
+ * A run's finished steps, kept apart from its live stream: the live stream drops its oldest records,
+ * and a long turn outgrows it, so whoever opens a turn late reads what it did here. Records last as
+ * long as the longest turn, and the run's whole answer fits well within the byte limit.
+ */
+export const DEFAULT_AGENT_RUN_STEPS_RETENTION = {
+  maxAgeMs: 24 * 60 * 60 * 1000, // 24 hours
+  maxBytes: 64 * 1024 * 1024,
+} as const
+
 export const AGENT_ACTIVITY_STREAM_SCHEMA_VERSION = 1 as const
 export const AGENT_ACTIVITY_STREAM_ID = "agents.activity" as const
 export const DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION = {
@@ -323,6 +333,16 @@ export function agentRunStreamDefinition(runId: string): BrokerStreamDefinition 
   }
 }
 
+export type AgentRunStepsStreamId = `agents.runs.${string}.steps`
+
+export function agentRunStepsStreamId(runId: string): AgentRunStepsStreamId {
+  return `agents.runs.${runId}.steps`
+}
+
+export function agentRunStepsStreamDefinition(runId: string): BrokerStreamDefinition {
+  return { id: agentRunStepsStreamId(runId), retention: DEFAULT_AGENT_RUN_STEPS_RETENTION }
+}
+
 type AgentRunStreamEventBase = {
   readonly schemaVersion: typeof AGENT_RUN_STREAM_SCHEMA_VERSION
   readonly projectId: string
@@ -436,6 +456,12 @@ export interface AgentInboxReadMessage {
   readonly createdAt: string
 }
 
+/** Messages a turn read in its finished steps, after the first `at` of their chunks. */
+export interface AgentRunStepsRead {
+  readonly at: number
+  readonly messages: readonly AgentInboxReadMessage[]
+}
+
 export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.run.started"
@@ -466,6 +492,24 @@ export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.inbox.read"
       readonly messages: readonly AgentInboxReadMessage[]
+      /**
+       * The last live chunk published before the turn read them, absent before the first: the
+       * finished steps that cover it hold this read too, where it happened.
+       */
+      readonly afterChunkIndex?: number
+    })
+  | (AgentRunStreamEventBase & {
+      /**
+       * The turn's finished steps, as the chunks that rebuild them. Never a live record: the server
+       * sends it first to a reader who opens the turn late, and that reader then skips the live
+       * records it covers. It replaces whatever the reader rebuilt before.
+       */
+      readonly type: "agent.ui.steps"
+      /** The last live chunk it covers. */
+      readonly throughChunkIndex: number
+      readonly chunks: readonly ModelUiChunk[]
+      /** What the turn read from its inbox in those steps, each after the first `at` chunks. */
+      readonly reads?: readonly AgentRunStepsRead[]
     })
   | (AgentRunStreamEventBase & {
       readonly type: "agent.message.finalized"
@@ -479,6 +523,7 @@ export type AgentRunStreamEvent =
     })
 
 export type AgentRunFinishedEvent = Extract<AgentRunStreamEvent, { type: "agent.run.finished" }>
+export type AgentRunStepsEvent = Extract<AgentRunStreamEvent, { type: "agent.ui.steps" }>
 
 // ── Record construction ──────────────────────────────────────────────────────────────────────────
 //
@@ -568,7 +613,17 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
       return (
         Array.isArray(value.messages) &&
         value.messages.length > 0 &&
-        value.messages.every(isAgentInboxReadMessage)
+        value.messages.every(isAgentInboxReadMessage) &&
+        (value.afterChunkIndex === undefined || Number.isInteger(value.afterChunkIndex))
+      )
+    case "agent.ui.steps":
+      // As for one chunk: steps holding a chunk this reader does not know are skipped whole.
+      return (
+        Number.isInteger(value.throughChunkIndex) &&
+        Array.isArray(value.chunks) &&
+        value.chunks.every(isModelUiChunk) &&
+        (value.reads === undefined ||
+          (Array.isArray(value.reads) && value.reads.every(isAgentRunStepsRead)))
       )
     case "agent.message.finalized":
       return typeof value.messageId === "string"
@@ -594,6 +649,17 @@ function isAgentInboxReadMessage(value: unknown): value is AgentInboxReadMessage
     value.parts.every((part) => isPlainRecord(part) && typeof part.type === "string") &&
     isJsonValue(value.parts) &&
     typeof value.createdAt === "string"
+  )
+}
+
+function isAgentRunStepsRead(value: unknown): value is AgentRunStepsRead {
+  return (
+    isPlainRecord(value) &&
+    Number.isInteger(value.at) &&
+    (value.at as number) >= 0 &&
+    Array.isArray(value.messages) &&
+    value.messages.length > 0 &&
+    value.messages.every(isAgentInboxReadMessage)
   )
 }
 
@@ -638,6 +704,8 @@ export function agentRunStreamIdempotencyKey(event: AgentRunStreamEvent): string
       return `${event.runId}:${event.attempt}:chunk:${event.chunkIndex}`
     case "agent.inbox.read":
       return `${event.runId}:${event.attempt}:inbox:${event.messages.map((message) => message.id).join(",")}:read`
+    case "agent.ui.steps":
+      return `${event.runId}:${event.attempt}:steps:${event.throughChunkIndex}`
     case "agent.message.finalized":
       return `${event.runId}:${event.attempt}:message:${event.messageId}:finalized`
     case "agent.run.finished":

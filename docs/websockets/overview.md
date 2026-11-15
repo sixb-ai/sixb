@@ -113,6 +113,8 @@ Subscribe to one run:
 
 The server sends retained output followed by live `record` frames, plus a `run.snapshot` frame with the current run. Supply `afterCursor` to resume. If retained output no longer covers that cursor, the server resumes from the earliest available output and acknowledges a null cursor.
 
+A run keeps only its newest records, so a long turn outgrows them. Without a cursor, or when its cursor expired, a reader of a running turn first receives a `run.steps` frame: an `agent.ui.steps` event holding the turn's finished steps as UI chunks, and in `reads` the messages it read from its inbox and where, which replaces whatever the reader rebuilt so far. The `record` frames after it skip what it covers: chunks up to its `throughChunkIndex`, and the inbox reads before them. Deltas of one span streamed within 50 ms arrive as one chunk.
+
 A sub-agent's run streams the same way to the owner and participants of its conversation, its `run.snapshot` with `kind: "subagent"` and the `parentRunId` of the turn it works under. Observers poll instead.
 
 Send `replay` with a run ID, optional cursor, and `limit` to read a bounded page. `subscribe.activity` selects project agent activity instead of an individual run. A socket has one active subscription.

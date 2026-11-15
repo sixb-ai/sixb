@@ -122,6 +122,33 @@ describe("a live run", () => {
     ])
   })
 
+  test("rebuilds a turn opened late from its finished steps, then streams the current step", () => {
+    let live = liveRun(RUN)
+    for (const payload of [
+      { type: "agent.ui.chunk", chunk: { type: "text-delta", id: "a", delta: "an old tail" } },
+      {
+        type: "agent.ui.steps",
+        throughChunkIndex: 4,
+        chunks: [
+          { type: "start-step" },
+          { type: "text-delta", id: "a", delta: "Reading." },
+          { type: "start-step" },
+          { type: "text-delta", id: "a", delta: "Planning." },
+        ],
+      },
+      // The current step's start was dropped: its text is still a part of its own.
+      { type: "agent.ui.chunk", chunk: { type: "text-delta", id: "a", delta: "Writing." } },
+    ]) {
+      live = reduceLive(live, event(payload))
+    }
+
+    expect(live.parts).toEqual([
+      { kind: "text", text: "Reading." },
+      { kind: "text", text: "Planning." },
+      { kind: "text", text: "Writing." },
+    ])
+  })
+
   // Reproduce: leave `contextFull` false when a compaction starts; a turn the provider refused
   // reads "Condensing earlier turns" like any other.
   test("tells a compaction after a refused request from one at the limit", () => {
