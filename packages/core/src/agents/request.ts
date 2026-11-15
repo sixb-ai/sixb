@@ -736,7 +736,10 @@ async function startIfThreadIdle(
       limit: 1,
     })
     if (last?.kind !== "conversation") return
-    const onlyImmediate = !(await turnAnsweredEveryMessage(agents, last))
+    // A paused turn resumes first, and its end starts what waits: only a message sent now passes
+    // it, setting its held calls aside as a message typed in the chat would.
+    const onlyImmediate =
+      isAwaitingApprovalRun(last) || !(await turnAnsweredEveryMessage(agents, last))
     await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
   } catch (error) {
     console.error(
@@ -822,6 +825,7 @@ export async function startQueuedAgentTurnFromInbox(
   await assertAiLimitPreflight(runtime, durableExecution)
 
   let started: ConversationAgentRunRecord | null
+  let superseded: readonly AgentApprovalRecord[] = []
   try {
     started = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
@@ -848,13 +852,21 @@ export async function startQueuedAgentTurnFromInbox(
       const spec = queuedConversationRunSpec(thread, kept, item, approvalMode)
 
       await tx.executions.create(durableExecution)
+      // Like any message that starts a turn, it tells the model how its earlier calls ended, and
+      // sets aside the ones still waiting.
+      const reported = await reportAgentApprovals(agents, {
+        projectId,
+        threadId: thread.id,
+        messageId: item.messageId,
+      })
+      superseded = reported.superseded
       await agents.messages.append({
         id: item.messageId,
         projectId,
         threadId: thread.id,
         runId: null,
         role: "user",
-        parts: item.parts,
+        parts: [...reported.parts, ...item.parts],
         authorPrincipal: item.authorPrincipal,
         createdAt: item.createdAt,
         ...(item.timeZone === undefined && item.locale === undefined
@@ -884,6 +896,7 @@ export async function startQueuedAgentTurnFromInbox(
   }
   if (!started) return { status: "nothing" }
 
+  await announceAgentApprovals(runtime.broker, superseded)
   await publishRunActivity(runtime, started)
   await dispatchAgentRun(runtime, agents, runId)
   return { status: "started", run: started }

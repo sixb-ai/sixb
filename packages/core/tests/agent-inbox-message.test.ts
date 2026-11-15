@@ -377,3 +377,84 @@ describe("a message whose turn ended first", () => {
     expect((await guest.agent.inbox.list(thread.id)).map((item) => item.id)).toEqual(["inb_guest"])
   })
 })
+
+describe("a message waiting behind a turn paused on held calls", () => {
+  /** The owner's turn held a call and paused on it, with a message the owner queued meanwhile. */
+  async function pausedTurn(host: SixbHost, deps: ReturnType<typeof createTestRuntimeDeps>) {
+    const owner = await userScope(host, "owner")
+    const { threadId, session } = await runningTurn(host, deps, owner)
+    const queued = await owner.agent.runs.send({
+      threadId,
+      text: "Then write to Halden.",
+      delivery: "queue",
+    })
+    if (queued.kind !== "inbox") throw new Error("Expected an inbox item.")
+
+    const running = await host.storage.agents!.runs.getById({
+      projectId: host.id,
+      id: session.run.id,
+    })
+    const { approval } = await host.storage.agents!.approvals.request({
+      id: "apr_1",
+      projectId: host.id,
+      runId: session.run.id,
+      callerRunId: session.run.id,
+      executionToken: running?.execution?.token ?? "",
+      requestedBy: { type: "user", id: "owner" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "mark-paid",
+        subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-1" },
+        params: {},
+        actionRunId: "act_mark_paid",
+        effect: "ontology",
+      },
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    await session.finish({ status: "succeeded", finishReason: "awaiting_approval" })
+    await session.close()
+    return { owner, threadId, item: queued.item, approval }
+  }
+
+  async function startedTurns(host: SixbHost, threadId: string) {
+    const { runs } = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId,
+      statuses: ["queued"],
+    })
+    return runs.map((run) => run.triggerMessageId)
+  }
+
+  // Guard proof: drop isAwaitingApprovalRun from startIfThreadIdle; the steer starts a turn on top
+  // of the pause, and the held call stays open.
+  test("steering it keeps it for the turn, which resumes first", async () => {
+    const { host, ...deps } = setup()
+    const { owner, threadId, item, approval } = await pausedTurn(host, deps)
+
+    await owner.agent.inbox.update(threadId, item.id, { delivery: "steer" })
+
+    expect(await startedTurns(host, threadId)).toEqual([])
+    expect(await owner.agent.approvals.getById(approval.id)).toMatchObject({ status: "pending" })
+  })
+
+  // Guard proof: drop reportAgentApprovals from startQueuedAgentTurnFromInbox; the turn starts and
+  // the held call stays pending, to be approved after the conversation moved on.
+  test("sending it now sets the held calls aside, as a message typed in the chat does", async () => {
+    const { host, ...deps } = setup()
+    const { owner, threadId, item, approval } = await pausedTurn(host, deps)
+
+    await owner.agent.inbox.update(threadId, item.id, { immediate: true })
+
+    expect(await startedTurns(host, threadId)).toEqual([item.messageId])
+    expect(await owner.agent.approvals.getById(approval.id)).toMatchObject({
+      status: "superseded",
+      reportedInMessageId: item.messageId,
+    })
+    const trigger = await host.storage.agents!.messages.getById({
+      projectId: host.id,
+      id: item.messageId,
+    })
+    expect(trigger?.parts.map((part) => part.type)).toEqual(["approval-outcome", "text"])
+  })
+})

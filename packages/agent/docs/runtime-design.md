@@ -385,7 +385,9 @@ A message that should wait starts the next turn instead of steering the running 
 - **What starts it.** `afterAgentRunFinished` (`run-after-finish.ts`), once a turn ends: a message
   sent now (`immediate`, which is what Send now sets) starts whatever ended the turn; a message
   queued for later starts only once the turn answered. A turn that stopped, failed, or asked the
-  requester a question starts neither, so nothing runs on top of a question or a failure.
+  requester a question starts neither, so nothing runs on top of a question or a failure. A turn
+  paused on held calls resumes first, and its end starts what waits; only a message sent now passes
+  it, and sets its held calls aside as a message typed in the chat does.
 - **How it starts.** `startQueuedAgentTurnFromInbox` (`request.ts`) pops the item in the same
   transaction that writes its message and its run. The finished turn's model and reasoning carry
   over unless the message names others.
