@@ -1,5 +1,6 @@
 import { agentServiceAccountId } from "../agents/authority"
-import { SYSTEM_PRINCIPAL } from "../auth"
+import { SYSTEM_PRINCIPAL, type UserPrincipal } from "../auth"
+import type { AuthorizationRef } from "../execution"
 import type { AuthStorage } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
 import type { ExecutionStorage } from "../storage/executions"
@@ -16,6 +17,8 @@ export async function createTestAgentExecution(
     readonly requesterGroupIds?: readonly string[]
     /** Conversational runs inherit authority; workflow fixtures use managed authority. */
     readonly authority?: "managed" | "inherited"
+    /** The person the run's request came from, signed in with a session; none by default. */
+    readonly requestedBy?: UserPrincipal
   }
 ): Promise<string> {
   const authority = input.authority ?? (input.actorId === undefined ? "inherited" : "managed")
@@ -64,14 +67,24 @@ export async function createTestAgentExecution(
     id: sourceExecutionId,
   })
   if (!parent) {
+    const requestedBy = input.requestedBy
+    const authorizationRef: AuthorizationRef = requestedBy
+      ? {
+          type: "principal",
+          principal: requestedBy,
+          credential: { type: "session", id: await ensureTestSession(storage, input, requestedBy) },
+        }
+      : { type: "disabled" }
+
     parent = await storage.executions.create({
       id: sourceExecutionId,
       requesterGroupIds: input.requesterGroupIds ?? [],
       projectId: input.projectId,
+      ...(requestedBy ? { requestedBy } : {}),
       executor: { type: "request", requestId: `test_request:${input.runId}` },
       source: { type: "http", requestId: `test_request:${input.runId}` },
       correlationId: `test_correlation:${input.runId}`,
-      authorizationRef: { type: "disabled" },
+      authorizationRef,
     })
   }
   await storage.executions.create({
@@ -93,4 +106,34 @@ export async function createTestAgentExecution(
           },
   })
   return executionId
+}
+
+/** The user and a session of theirs, created once, that a signed-in request's execution names. */
+async function ensureTestSession(
+  storage: { readonly auth?: AuthStorage },
+  input: { readonly projectId: string },
+  user: UserPrincipal
+): Promise<string> {
+  const auth = storage.auth
+  if (!auth) throw new Error("Requested Agent execution fixtures require auth storage.")
+
+  const projectId = input.projectId
+  if (!(await auth.users.getById({ projectId, id: user.id }))) {
+    await auth.users.create({ projectId, id: user.id, email: `${user.id}@example.com` })
+  }
+
+  const id = `test_session:${user.id}`
+  if (!(await auth.sessions.getById({ projectId, id }))) {
+    const now = new Date()
+    await auth.sessions.create({
+      id,
+      projectId,
+      userId: user.id,
+      strategyId: "test",
+      tokenHash: id,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 60 * 60_000),
+    })
+  }
+  return id
 }

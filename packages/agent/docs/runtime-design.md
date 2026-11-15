@@ -364,6 +364,9 @@ its parent with `message_agent` (see [messages to a child](#messages-to-a-child)
   `beforeComplete` claims the ones that came while the model answered, which the loop follows with
   one more step (`afterAnswer`). The claim records the run, its execution token and the step, so a
   step that reads twice reads once.
+- **Whose steers it reads.** A turn runs as its requester, so it claims only the steers they sent,
+  whatever was checked when each was sent. Another participant's steer, one a stopped turn left or
+  one made on an idle thread, waits for a turn of its author.
 - **What the model reads.** Each steer is one user message, closed with when it was sent and who
   wrote it, projected from the item alone: a steer carries text and context, never a file, whose
   text a later turn would derive from the attachments it prepares.

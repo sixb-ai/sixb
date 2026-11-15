@@ -22,7 +22,7 @@ import {
   type LanguageModelStreamEvent,
   type ModelTool,
 } from "@sixb/core/models"
-import type { ConversationAgentRunRecord, Principal } from "@sixb/core/storage"
+import type { ConversationAgentRunRecord, UserPrincipal } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { conversationModelMessages } from "../src/conversation-messages"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -35,7 +35,8 @@ import { WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "turn-steering"
 const threadId = "thr_1"
-const ava: Principal = { type: "user", id: "usr_ava" }
+const ava: UserPrincipal = { type: "user", id: "usr_ava" }
+const theo: UserPrincipal = { type: "user", id: "usr_theo" }
 const LEASE = () => new Date(Date.now() + 60_000).toISOString()
 
 function createHost(model: WorkerTestModel) {
@@ -61,8 +62,8 @@ function createHost(model: WorkerTestModel) {
   return { storage, host }
 }
 
-/** A conversation with one message from Ava, and a queued turn waiting to run. */
-async function seedTurn(storage: InMemoryStorage, runId: string) {
+/** A conversation with one message from its requester, Ava unless told, and a queued turn. */
+async function seedTurn(storage: InMemoryStorage, runId: string, requester: UserPrincipal = ava) {
   const thread = await storage.agents.threads.getById({ projectId, id: threadId })
   if (!thread) {
     await storage.agents.threads.create({
@@ -79,11 +80,15 @@ async function seedTurn(storage: InMemoryStorage, runId: string) {
     threadId,
     runId: null,
     role: "user",
-    authorPrincipal: ava,
+    authorPrincipal: requester,
     parts: [{ type: "text", text: "Check the build." }],
     createdAt: new Date("2026-11-14T16:01:00.000Z"),
   })
-  const executionId = await createTestAgentExecution(storage, { projectId, runId })
+  const executionId = await createTestAgentExecution(storage, {
+    projectId,
+    runId,
+    requestedBy: requester,
+  })
   const run = await storage.agents.runs.create({
     id: runId,
     projectId,
@@ -437,6 +442,58 @@ describe("a turn's mid-run steers", () => {
     const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
     expect(messages.map((message) => message.id)).toEqual(["msg_trigger_run_stop", messages[1]!.id])
     expect(messages[1]!.role).toBe("assistant")
+  })
+
+  // A turn runs as its requester. Guard proof: drop the author filter from the store's takeSteers;
+  // Theo's turn then reads Ava's steer at its first step and answers it with his rights.
+  test.each([
+    "in-process",
+    "http",
+  ] as const)("wait for a turn of their author when another person's turn runs (%s)", async (mode) => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        requests.push(request)
+        return {
+          events: (async function* () {
+            yield* answer("The build passes.")
+          })(),
+        }
+      },
+    })
+
+    // Ava's turn read her steer and stopped before answering it: the steer waits again.
+    const { storage, host } = createHost(model)
+    const stopped = await seedTurn(storage, "run_ava")
+    await storage.agents.inbox.enqueue({
+      id: "inb_ava",
+      projectId,
+      threadId,
+      messageId: "msg_steer_ava",
+      authorPrincipal: ava,
+      mode: "steer",
+      parts: [{ type: "text", text: "Delete the test invoices." }],
+      createdAt: new Date("2026-11-14T16:02:00.000Z"),
+    })
+    const avaSession = await openSession("in-process", host, stopped)
+    expect((await avaSession.inbox.takeSteers({ stepIndex: 1 })).map((item) => item.id)).toEqual([
+      "inb_ava",
+    ])
+    await avaSession.finish({ status: "cancelled" })
+    await avaSession.close()
+
+    // Theo asks next: his turn answers him alone.
+    const run = await seedTurn(storage, "run_theo", theo)
+    const finished = await runTurn(await openSession(mode, host, run), [])
+
+    expect(finished.status).toBe("succeeded")
+    expect(requests).toHaveLength(1)
+    const pending = await storage.agents.inbox.list({ projectId, threadId })
+    expect(pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual(
+      [{ id: "inb_ava", claimed: false }]
+    )
+    const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
+    expect(messages.map((message) => message.id)).not.toContain("msg_steer_ava")
   })
 
   test("cannot carry a file, which a mid-turn read cannot prepare", async () => {

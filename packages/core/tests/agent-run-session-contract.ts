@@ -20,6 +20,7 @@ import {
   NOOP_STREAM_SINK,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
+import type { UserPrincipal } from "../src/auth"
 import { emptyGrantIndex } from "../src/authorization/types"
 import type {
   LanguageModel,
@@ -254,10 +255,19 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       parts: [{ type: "text", text: id }],
     })
   /** A turn of the thread, answering `trigger`; claimed, it opens its session. */
-  const turn = async (id: string, trigger: string, timeZone?: string, locale?: string) => {
+  const turn = async (
+    id: string,
+    trigger: string,
+    {
+      timeZone,
+      locale,
+      requestedBy,
+    }: { timeZone?: string; locale?: string; requestedBy?: UserPrincipal } = {}
+  ) => {
     const executionId = await createTestAgentExecution(storage, {
       projectId: PROJECT_ID,
       runId: id,
+      ...(requestedBy ? { requestedBy } : {}),
     })
     return storage.agents.runs.create({
       id,
@@ -1245,7 +1255,9 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     test("anchors its history on the latest answer after the checkpoint, with its settings", async () => {
       const { storage, thread, say, turn, open } = await seedConversation(claim)
       await say("msg_1", "user")
-      const first = await open(await turn("run_1", "msg_1", "Europe/Paris", "fr-FR"))
+      const first = await open(
+        await turn("run_1", "msg_1", { timeZone: "Europe/Paris", locale: "fr-FR" })
+      )
       await say("msg_2", "assistant", "run_1")
       await storage.aiUsage.recordModelCall({
         id: "usage_1",
@@ -1353,14 +1365,14 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     test("drains steers through the session, consumes persisted ones, and refuses forged user messages", async () => {
       const { thread, say, turn, open, storage } = await seedConversation(claim)
       await say("msg_1", "user")
-      const session = await open(await turn("run_1", "msg_1"))
+      const session = await open(await turn("run_1", "msg_1", { requestedBy: alice }))
 
       await storage.agents.inbox.enqueue({
         id: "inb_1",
         projectId: PROJECT_ID,
         threadId: thread.id,
         messageId: "msg_steer_1",
-        authorPrincipal: { type: "user", id: "usr_ava" },
+        authorPrincipal: alice,
         mode: "steer",
         parts: [{ type: "text", text: "Steer 1" }],
         timeZone: "America/New_York",
@@ -1371,7 +1383,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         projectId: PROJECT_ID,
         threadId: thread.id,
         messageId: "msg_steer_2",
-        authorPrincipal: { type: "user", id: "usr_ava" },
+        authorPrincipal: alice,
         mode: "steer",
         parts: [{ type: "text", text: "Steer 2 (unanswered)" }],
       })
@@ -1429,7 +1441,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       })
       expect(storedSteer?.runId).toBeNull()
       expect(storedSteer?.parts).toEqual([{ type: "text", text: "Steer 1" }])
-      expect(storedSteer?.authorPrincipal).toEqual({ type: "user", id: "usr_ava" })
+      expect(storedSteer?.authorPrincipal).toEqual(alice)
       expect(storedSteer?.metadata).toEqual({
         timeZone: "America/New_York",
         locale: "en-US",

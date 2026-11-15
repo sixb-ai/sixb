@@ -247,6 +247,8 @@ export class PgAgentInboxStore implements AgentInboxStore {
           )
           AND mode = 'steer'
           AND immediate = FALSE
+          AND author_principal_type = ${input.authorPrincipal.type}
+          AND author_principal_id = ${input.authorPrincipal.id}
         RETURNING *
       `
       return rows.map(rowToInboxItem).sort((left, right) => left.seq - right.seq)

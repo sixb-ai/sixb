@@ -1895,6 +1895,7 @@ class InMemoryAgentInboxStore implements AgentInboxStore {
     const claimed: AgentInboxItemRecord[] = []
     for (const item of this.threadItems(input.projectId, input.threadId)) {
       if (item.mode !== "steer" || item.immediate) continue
+      if (!principalsEqual(item.authorPrincipal, input.authorPrincipal)) continue
       if (
         item.claimedBy?.runId === input.runId &&
         item.claimedBy.executionToken === input.executionToken

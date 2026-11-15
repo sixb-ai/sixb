@@ -2,7 +2,7 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createSixbError } from "../errors/internal"
 import type { DomainEventLog } from "../events/service"
-import type { AuthorizationRef } from "../execution"
+import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
 import {
   type AgentExecutionHost,
   bindAgentModelExecution,
@@ -264,8 +264,9 @@ export interface AgentRunHeldCalls {
 
 export interface AgentRunInbox {
   /**
-   * Claim unclaimed non-immediate `steer` items of a conversation turn's thread at `stepIndex`.
-   * Answers `[]` on a sub-agent's session, whose parent steers it through `FamilyMailbox`.
+   * Claim unclaimed non-immediate `steer` items of a conversation turn's thread at `stepIndex`:
+   * those its requester sent, since the turn runs as them. Answers `[]` on a sub-agent's session,
+   * whose parent steers it through `FamilyMailbox`.
    */
   takeSteers(input: {
     readonly stepIndex: number
@@ -377,6 +378,27 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     return bound
   }
   const runSdk = async () => (await bind()).sixb
+
+  // Who the turn runs as, read once from its execution, which never changes.
+  let requestedBy: Promise<AuthorizablePrincipal | undefined> | undefined
+  const requester = () => {
+    requestedBy ??= host.storage.executions
+      .getById({ projectId: host.projectId, id: run.executionId })
+      .then((execution) => {
+        if (!execution) {
+          throw new Error(
+            `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+          )
+        }
+        return execution.requestedBy
+      })
+      .catch((error: unknown) => {
+        requestedBy = undefined
+        throw error
+      })
+    return requestedBy
+  }
+
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
   // each renewal of its lease.
@@ -475,6 +497,12 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     inbox: {
       async takeSteers({ stepIndex, afterAnswer }) {
         if (run.kind !== "conversation") return []
+
+        // The turn runs as its requester, so it reads only what they sent: another participant's
+        // steer waits for a turn of theirs. A turn nobody requested has no one to steer it.
+        const authorPrincipal = await requester()
+        if (!authorPrincipal) return []
+
         return fenced(run.id, () =>
           agents.inbox.takeSteers({
             projectId: host.projectId,
@@ -483,6 +511,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
             executionToken,
             stepIndex,
             ...(afterAnswer ? { afterAnswer: true } : {}),
+            authorPrincipal,
           })
         )
       },

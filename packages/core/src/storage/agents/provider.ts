@@ -1682,6 +1682,7 @@ export function assertTakeAgentInboxSteersInput(
       `[${prefix}] Agent inbox 'stepIndex' must be a non-negative integer.`
     )
   }
+  assertPrincipalInput(input.authorPrincipal, "authorPrincipal", prefix)
 }
 
 export function assertInboxThreadAcceptsItem(
