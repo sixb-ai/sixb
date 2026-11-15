@@ -1482,7 +1482,11 @@ export interface AgentInboxStore {
   update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
   /** Remove an unclaimed inbox item; throws `invalid_state` when already claimed. */
   remove(input: RemoveAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
-  /** Fenced by `(runId, executionToken)`: claim unclaimed non-immediate steers in FIFO order. */
+  /**
+   * Fenced by `(runId, executionToken)`: claim non-immediate steers in FIFO order. The thread's
+   * running turn holds it, so a claim any other execution left behind (one this run replaced, or
+   * a turn whose release failed) was never written, and is taken over.
+   */
   takeSteers(input: TakeAgentInboxSteersInput): Promise<readonly AgentInboxItemRecord[]>
   /** Consume persisted claims of `(runId, executionToken)` and release any unwritten ones. */
   consumeClaimed(input: ConsumeClaimedAgentInboxInput): Promise<readonly AgentInboxItemRecord[]>

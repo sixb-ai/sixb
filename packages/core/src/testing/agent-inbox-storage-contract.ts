@@ -510,6 +510,64 @@ export function runAgentInboxStorageContractSuite<
       })
     })
 
+    // Guard proof: keep takeSteers to unclaimed rows only; the run's new execution reads nothing,
+    // and the steer stays claimed by the execution it replaced.
+    test("hands a run taken over the steers its replaced execution claimed", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_reclaim",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        await startConversationRun(storage, "thr_reclaim", "run_r", "tok_first")
+        await storage.agents.inbox.enqueue({
+          id: "inb_r1",
+          projectId,
+          threadId: "thr_reclaim",
+          messageId: "msg_r1",
+          authorPrincipal: alice,
+          mode: "steer",
+          parts: [{ type: "text", text: "Use the Q3 numbers" }],
+        })
+        const first = await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_reclaim",
+          runId: "run_r",
+          executionToken: "tok_first",
+          stepIndex: 1,
+        })
+        expect(first.map((item) => item.id)).toEqual(["inb_r1"])
+
+        await storage.agents.runs.reclaim({
+          projectId,
+          id: "run_r",
+          execution: { token: "tok_second", queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+        })
+        const second = await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_reclaim",
+          runId: "run_r",
+          executionToken: "tok_second",
+          stepIndex: 1,
+        })
+        expect(second.map((item) => item.claimedBy)).toEqual([
+          { runId: "run_r", executionToken: "tok_second", stepIndex: 1 },
+        ])
+
+        // Its own claims are not taken twice.
+        expect(
+          await storage.agents.inbox.takeSteers({
+            projectId,
+            threadId: "thr_reclaim",
+            runId: "run_r",
+            executionToken: "tok_second",
+            stepIndex: 2,
+          })
+        ).toEqual([])
+      })
+    })
+
     test("takeNextQueued waits for idle and orders immediate, steer, then queue", async () => {
       await withStorage(async (storage) => {
         await storage.agents.threads.create({

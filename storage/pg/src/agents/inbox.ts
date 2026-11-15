@@ -240,7 +240,11 @@ export class PgAgentInboxStore implements AgentInboxStore {
           updated_at = ${updatedAt}
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
-          AND claimed_by_run_id IS NULL
+          AND (
+            claimed_by_run_id IS NULL
+            OR claimed_by_run_id <> ${input.runId}
+            OR claimed_by_token <> ${input.executionToken}
+          )
           AND mode = 'steer'
           AND immediate = FALSE
         RETURNING *

@@ -1894,7 +1894,13 @@ class InMemoryAgentInboxStore implements AgentInboxStore {
     const now = new Date()
     const claimed: AgentInboxItemRecord[] = []
     for (const item of this.threadItems(input.projectId, input.threadId)) {
-      if (item.claimedBy !== undefined || item.mode !== "steer" || item.immediate) continue
+      if (item.mode !== "steer" || item.immediate) continue
+      if (
+        item.claimedBy?.runId === input.runId &&
+        item.claimedBy.executionToken === input.executionToken
+      ) {
+        continue
+      }
       const next: AgentInboxItemRecord = {
         ...item,
         claimedBy: {
