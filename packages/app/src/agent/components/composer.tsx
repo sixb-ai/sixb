@@ -46,7 +46,7 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
-import type { AgentFileRef, LanguageModel } from "../types"
+import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
   type AgentContextMention,
@@ -74,10 +74,15 @@ import { ContextPicker } from "./context-picker"
 import { DictationBar } from "./dictation-bar"
 
 export interface ComposerProps {
+  /**
+   * `delivery` says where the message goes while a turn runs: into it, behind it, or after stopping
+   * it. It is `auto` when nothing runs.
+   */
   readonly onSend: (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery: AgentMessageDelivery
   ) => void
   readonly disabled?: boolean
   readonly pending?: boolean
@@ -89,6 +94,11 @@ export interface ComposerProps {
   readonly running?: boolean
   /** A stop has been requested and we're waiting for the run to end. */
   readonly stopping?: boolean
+  /**
+   * The running turn is the reader's own, so a message sent into it steers it. Another person's
+   * turn takes no steer: the message queues for the reader's own turn instead.
+   */
+  readonly steerable?: boolean
   readonly onStop?: () => void
   readonly models?: readonly LanguageModel[]
   readonly selectedModel?: LanguageModel
@@ -216,6 +226,7 @@ export function Composer({
   pending,
   running,
   stopping,
+  steerable = true,
   onStop,
   models = [],
   selectedModel,
@@ -331,13 +342,14 @@ export function Composer({
       : matchCommands(allCommands(), commandText).slice(0, 6)
   const commandsOpen = commandMatches.length > 0
   // Files alone are a message too.
+  // A message sent while a turn runs steers it, so the input stays usable: the reader corrects the
+  // answer they are watching rather than waiting for it.
   const canSend =
     (value.trim().length > 0 || readyAttachments.length > 0) &&
     mention === null &&
     !commandsOpen &&
     !disabled &&
     !pending &&
-    !running &&
     !uploading &&
     !voice.isActive &&
     failedCount === 0
@@ -494,9 +506,9 @@ export function Composer({
     }
   }, [])
 
-  const submit = () => {
+  const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
-    onSend(value.trim(), readyAttachments, contextEntries)
+    onSend(value.trim(), readyAttachments, contextEntries, running ? delivery : "auto")
     setValue("")
     voice.reset()
     setAttachments([])
@@ -846,6 +858,26 @@ export function Composer({
         return
       }
     }
+    // While a turn runs the keys say where the message goes: Enter steers it, Tab queues it for the
+    // next turn, and the modifier sends it now.
+    if (running) {
+      if (event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault()
+        submit("queue")
+        return
+      }
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        submit(steerable ? "send_now" : "queue")
+        return
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault()
+        submit(steerable ? "steer" : "queue")
+        return
+      }
+      return
+    }
     if (event.key !== "Enter") return
     if (event.shiftKey) return
     event.preventDefault()
@@ -1067,7 +1099,7 @@ export function Composer({
                 ) : showSend ? (
                   <button
                     type="button"
-                    onClick={submit}
+                    onClick={() => submit()}
                     disabled={!canSend}
                     aria-label={messages.send}
                     className={SEND_BUTTON_CLASS_NAME}

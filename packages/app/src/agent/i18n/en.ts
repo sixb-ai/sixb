@@ -80,6 +80,16 @@ export const en = {
     add: "Add files and more",
     mention: "Mention a record",
     commands: "Commands",
+    /** The messages waiting beside a running turn. */
+    steerPending: "Steers this turn",
+    queuePending: "Queued for the next turn",
+    sendNowPending: "Sends now",
+    waitingFile: "A file waits with this message",
+    steer: "Steer this turn",
+    sendNow: "Send now",
+    withdraw: "Withdraw this message",
+    runningHint: "Enter steers this turn · Tab queues for the next one",
+    queuedHint: "Enter queues for your own turn",
   },
   /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
   commands: {

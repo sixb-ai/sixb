@@ -14,6 +14,7 @@ import {
   listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
+  listAgentThreadInboxQueryKey,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
@@ -89,6 +90,7 @@ import {
 import type {
   AgentContextEntryInput,
   AgentFileRef,
+  AgentMessageDelivery,
   AgentRun,
   AgentThreadSandboxParams,
   LanguageModel,
@@ -144,6 +146,7 @@ export type ConversationComposerProps = Pick<
   | "disabled"
   | "pending"
   | "running"
+  | "steerable"
   | "stopping"
   | "onStop"
   | "hint"
@@ -536,9 +539,12 @@ export function useAgentConversation({
   const send = async (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery: AgentMessageDelivery = "auto"
   ) => {
-    if (isRunning) return
+    // A running turn takes the message as a steer, a queued turn, or one that stops it. The thread
+    // that a message starts is always a turn, whatever the composer said.
+    if (isRunning && delivery === "auto") return
     setSendError(null)
     const targetThreadId = threadId
     const key = `sent:${++sentMessageCount}`
@@ -559,6 +565,7 @@ export function useAgentConversation({
             body: {
               ...messageBody(text, attachments, context, modelSelection.request, settings),
               ...turnApprovalMode,
+              ...(delivery === "auto" ? {} : { delivery }),
             },
           })
         )
@@ -568,6 +575,11 @@ export function useAgentConversation({
             queryKey: listAgentThreadMessagesQueryKey({ path: { threadId: targetThreadId } }),
           }),
           queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+          // A message that waits beside the running turn is in the thread's inbox, not its
+          // transcript: the tray reads it from there.
+          queryClient.invalidateQueries({
+            queryKey: listAgentThreadInboxQueryKey({ path: { threadId: targetThreadId } }),
+          }),
         ])
         return
       }
@@ -1151,15 +1163,21 @@ export function useAgentConversation({
     error: currentSendError
       ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
       : undefined,
-    // Whoever's answer is in flight, the reader writes the next message, and sends it once it ends.
+    // Whoever's answer is in flight, the reader writes the next message: Enter steers that answer,
+    // Tab queues the message for the turn after it.
     disabled: Boolean(sandboxRecovery),
+    // Who is answering, and where a message the reader types now goes.
     hint: answeringName
-      ? agentMessages.sharing.answering(answeringName)
-      : othersWaiting
-        ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
-        : undefined,
+      ? `${agentMessages.sharing.answering(answeringName)} · ${agentMessages.composer.queuedHint}`
+      : isRunning
+        ? agentMessages.composer.runningHint
+        : othersWaiting
+          ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
+          : undefined,
     pending: composerPending,
     running: isRunning,
+    // Only the turn the reader asked for takes a steer; another person's takes a queued message.
+    steerable: !requestedBySomeoneElse(activeRun, user),
     stopping,
     onStop: canStop ? stop : undefined,
     ...modelControlsProps,
