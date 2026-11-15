@@ -1,5 +1,5 @@
 import type { GraphPage, ListOptions, RequestOptions, SelectOptions } from "./common"
-import type { MailSubscribeOptions } from "./subscriptions"
+import type { MailEnsureSubscriptionOptions, MailSubscribeOptions } from "./subscriptions"
 
 export interface ContactEmailAddress {
   readonly address?: string | null
@@ -196,3 +196,4 @@ export interface ContactDeltaPage<T> extends GraphPage<ContactDeltaItem<T>> {
 }
 /** Watches every personal contact in the mailbox; Graph has no folder-scoped contact resource. */
 export type ContactSubscribeOptions = Omit<MailSubscribeOptions, "folderId">
+export type ContactEnsureSubscriptionOptions = Omit<MailEnsureSubscriptionOptions, "folderId">
