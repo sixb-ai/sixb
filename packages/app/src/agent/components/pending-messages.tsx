@@ -52,27 +52,30 @@ export function PendingMessages({
   if (items.length === 0) return null
 
   return (
-    <div className={cn("flex flex-col gap-1.5", className)} data-pending-messages="">
-      {items.map((item) => (
-        <PendingMessage
-          key={item.id}
-          item={item}
-          mine={samePrincipal(item.authorPrincipal, me)}
-          labels={labels}
-          busy={promote.isPending || withdraw.isPending}
-          onSteer={() =>
-            threadId !== null &&
-            promote.mutate({ path: { threadId, itemId: item.id }, body: { delivery: "steer" } })
-          }
-          onSendNow={() =>
-            threadId !== null &&
-            promote.mutate({ path: { threadId, itemId: item.id }, body: { immediate: true } })
-          }
-          onWithdraw={() =>
-            threadId !== null && withdraw.mutate({ path: { threadId, itemId: item.id } })
-          }
-        />
-      ))}
+    // The composer's own column: the tray lines up with the input it waits above.
+    <div className={cn("px-4", className)} data-pending-messages="">
+      <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-1.5">
+        {items.map((item) => (
+          <PendingMessage
+            key={item.id}
+            item={item}
+            mine={samePrincipal(item.authorPrincipal, me)}
+            labels={labels}
+            busy={promote.isPending || withdraw.isPending}
+            onSteer={() =>
+              threadId !== null &&
+              promote.mutate({ path: { threadId, itemId: item.id }, body: { delivery: "steer" } })
+            }
+            onSendNow={() =>
+              threadId !== null &&
+              promote.mutate({ path: { threadId, itemId: item.id }, body: { immediate: true } })
+            }
+            onWithdraw={() =>
+              threadId !== null && withdraw.mutate({ path: { threadId, itemId: item.id } })
+            }
+          />
+        ))}
+      </div>
     </div>
   )
 }
