@@ -9,7 +9,6 @@ import {
   getAgentPreferencesQueryKey,
   getAgentThreadContextOptions,
   getAgentThreadContextQueryKey,
-  getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
   listAgentComputersOptions,
@@ -18,9 +17,7 @@ import {
   listAgentThreadApprovalsQueryKey,
   listAgentThreadInboxOptions,
   listAgentThreadInboxQueryKey,
-  listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
-  listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
   listModelsOptions,
@@ -108,6 +105,7 @@ import type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "../types"
+import { THREAD_MESSAGES_CACHE_MS, threadQueryOptions } from "./thread-queries"
 import {
   ComputerUnavailableError,
   type NewThreadPlaceBody,
@@ -318,8 +316,9 @@ export function useAgentConversation({
   )
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
+  const reads = threadQueryOptions(threadId ?? "")
   const threadQuery = useQuery({
-    ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
+    ...reads.thread,
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
     // A shared thread can lose its reader without an event, and a computer's sixb can stop
@@ -347,22 +346,17 @@ export function useAgentConversation({
     access === "owner" && thread?.runsOn === "computer" && thread.computer?.online !== true
 
   const messagesQuery = useQuery({
-    ...listAgentThreadMessagesOptions({
-      path: { threadId: threadId ?? "" },
-      query: { order: "asc" },
-    }),
+    ...reads.messages,
     enabled: threadId !== null,
     refetchInterval: messagesRecoveryPollMs,
+    gcTime: THREAD_MESSAGES_CACHE_MS,
   })
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
   const authors = messagesQuery.data?.authors
   // Every run, as every message is read: the transcript marks each move from the runs either side.
   const runsQuery = useQuery({
-    ...listAgentThreadRunsOptions({
-      path: { threadId: threadId ?? "" },
-      query: { order: "desc" },
-    }),
+    ...reads.runs,
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
   })
