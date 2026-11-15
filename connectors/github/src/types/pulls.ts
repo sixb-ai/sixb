@@ -117,6 +117,52 @@ export interface ListPullRequestReviewsOptions
   extends GitHubPaginationOptions,
     GitHubRequestOptions {}
 
+/** How GitHub may combine the commits it merges. */
+export type GitHubPullRequestMergeMethod = "merge" | "squash" | "rebase"
+
+export interface MergePullRequestInput {
+  readonly method?: GitHubPullRequestMergeMethod
+  /** The merge commit's title; GitHub writes its own when this is empty. */
+  readonly commitTitle?: string
+  /** The merge commit's body, appended to the title. */
+  readonly commitMessage?: string
+  /** Merge only while the head branch is still at this commit. */
+  readonly sha?: string
+}
+
+/** Why GitHub refused a merge, one value per answer it documents. */
+export type GitHubPullRequestMergeRefusal =
+  /** 405: a required review or check is missing, or the branches conflict. */
+  | "not_mergeable"
+  /** 409: the head branch moved since the caller read it. */
+  | "head_changed"
+  /** 403: a branch protection rule or ruleset, or a token without write access. */
+  | "forbidden"
+  /** 404: no such pull request, or the token cannot see it. */
+  | "not_found"
+  /** 422: GitHub refused the input, such as a merge method the repository forbids. */
+  | "invalid"
+
+/**
+ * How a merge ended. A refusal is one of GitHub's own answers, so it comes back as a result rather
+ * than as a thrown error: a caller deciding whether to merge reads the reason, and only an answer
+ * GitHub does not document throws.
+ */
+export type GitHubPullRequestMergeResult =
+  | {
+      readonly merged: true
+      /** The merge commit. */
+      readonly sha: string
+      /** GitHub's confirmation, such as `Pull Request successfully merged`. */
+      readonly message: string
+    }
+  | {
+      readonly merged: false
+      readonly reason: GitHubPullRequestMergeRefusal
+      /** GitHub's explanation, which is all it gives a refusal. */
+      readonly message: string
+    }
+
 export interface RepositoryPullRequestReviewsApi {
   /** List one page of a pull request's reviews, oldest first. */
   list(
@@ -130,4 +176,13 @@ export interface RepositoryPullRequestsApi {
   /** List one page of this repository's pull requests. */
   list(options?: ListPullRequestsOptions): Promise<GitHubPage<GitHubPullRequest>>
   get(pullNumber: number, options?: GetPullRequestOptions): Promise<GitHubPullRequestDetail>
+  /**
+   * Merge a pull request, with `merge`, `squash` or `rebase`. The repository's own settings decide
+   * which methods it allows, and branch protection decides whether this one may be merged.
+   */
+  merge(
+    pullNumber: number,
+    input?: MergePullRequestInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestMergeResult>
 }

@@ -36,6 +36,21 @@ export type {
   ListBranchesOptions,
   RepositoryBranchesApi,
 } from "./branches"
+export type {
+  GitHubCheckRun,
+  GitHubCheckRunApp,
+  GitHubCheckRunConclusion,
+  GitHubCheckRunOutput,
+  GitHubCheckRunPullRequest,
+  GitHubCheckRunStatus,
+  GitHubCheckRunStatusFilter,
+  GitHubCheckRunSuiteRef,
+  GitHubCombinedStatus,
+  GitHubCommitStatus,
+  GitHubCommitStatusState,
+  ListCheckRunsOptions,
+  RepositoryChecksApi,
+} from "./checks"
 export type { GitHubClient, GitHubOrganizationScope, GitHubRepositoryScope } from "./client"
 export type {
   GitHubCommit,
@@ -122,12 +137,16 @@ export type {
   GitHubPullRequest,
   GitHubPullRequestBranch,
   GitHubPullRequestDetail,
+  GitHubPullRequestMergeMethod,
+  GitHubPullRequestMergeRefusal,
+  GitHubPullRequestMergeResult,
   GitHubPullRequestReview,
   GitHubPullRequestReviewState,
   GitHubPullRequestSort,
   GitHubPullRequestState,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
+  MergePullRequestInput,
   RepositoryPullRequestReviewsApi,
   RepositoryPullRequestsApi,
 } from "./pulls"

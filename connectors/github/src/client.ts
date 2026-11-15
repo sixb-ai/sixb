@@ -3,6 +3,7 @@ import { createRepositoryActionsApi } from "./resources/actions"
 import { createRepositoryAssigneesApi } from "./resources/assignees"
 import { createGitHubAttachmentsApi } from "./resources/attachments"
 import { createRepositoryBranchesApi } from "./resources/branches"
+import { createRepositoryChecksApi } from "./resources/checks"
 import { createRepositoryCommitsApi } from "./resources/commits"
 import {
   createAuthenticatedUserIssuesApi,
@@ -41,6 +42,7 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
       actions: createRepositoryActionsApi(context, target),
       assignees: createRepositoryAssigneesApi(context, target),
       branches: createRepositoryBranchesApi(context, target),
+      checks: createRepositoryChecksApi(context, target),
       commits: createRepositoryCommitsApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
       labels: createRepositoryLabelsApi(context, target),

@@ -1741,3 +1741,122 @@ describe("GitHub Actions", () => {
     expect(seen).toEqual(["main@abc"])
   })
 })
+
+describe("pull request merges", () => {
+  // Removal proof: throw on 405 and 409 instead of reading them as answers; a merge gate then has
+  // to catch to learn why it did not merge.
+  test("merges with the body it was given, and reads each refusal as an answer", async () => {
+    const calls = record((_, index) => {
+      if (index === 1) {
+        return json({ sha: "merge-sha", merged: true, message: "Pull Request successfully merged" })
+      }
+      return json(
+        { message: `refused ${index}` },
+        { status: [0, 0, 405, 409, 403, 404, 422][index] }
+      )
+    })
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    expect(
+      await pulls.merge(7, {
+        method: "squash",
+        commitTitle: "Fix the login",
+        commitMessage: "It was broken.",
+        sha: "abc",
+      })
+    ).toEqual({ merged: true, sha: "merge-sha", message: "Pull Request successfully merged" })
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "PUT",
+      "/repos/acme/web/pulls/7/merge",
+    ])
+    expect(calls[0]?.body).toEqual({
+      commit_title: "Fix the login",
+      commit_message: "It was broken.",
+      sha: "abc",
+      merge_method: "squash",
+    })
+
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "not_mergeable" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "head_changed" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "forbidden" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "not_found" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "invalid" })
+    expect(calls[1]?.body).toEqual({
+      commit_title: undefined,
+      commit_message: undefined,
+      sha: undefined,
+      merge_method: undefined,
+    })
+  })
+
+  test("reads a 200 that did not merge as a refusal, and throws on a status it cannot name", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json({ merged: false, message: "Not mergeable" })
+        : json({ message: "Server Error" }, { status: 500 })
+    )
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    expect(await pulls.merge(7)).toEqual({
+      merged: false,
+      reason: "not_mergeable",
+      message: "Not mergeable",
+    })
+    expect(await pulls.merge(7).catch((caught: unknown) => caught)).toBeInstanceOf(GitHubApiError)
+    expect(calls).toHaveLength(2)
+  })
+})
+
+describe("checks", () => {
+  const run = { id: 9, name: "ci / test", status: "completed", conclusion: "failure" }
+
+  // Removal proof: drop a filter, or read the page with readPage; the query or the items go missing.
+  test("lists a commit's check runs with every filter, unwrapping the page and following its next link", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json(
+            { total_count: 2, check_runs: [run] },
+            nextLink("https://api.github.com/repos/acme/web/commits/abc/check-runs?page=2")
+          )
+        : json({ total_count: 2, check_runs: [{ ...run, id: 10 }] })
+    )
+    const checks = (await connect()).repo(webRepo).checks
+
+    const first = await checks.list("abc", {
+      checkName: "ci / test",
+      status: "completed",
+      filter: "all",
+      pageSize: 100,
+    })
+    const second = await checks.list("abc", { pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/abc/check-runs")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      check_name: "ci / test",
+      status: "completed",
+      filter: "all",
+      per_page: "100",
+    })
+    expect(first).toMatchObject({ items: [run], hasMore: true })
+    expect(second).toMatchObject({ items: [{ id: 10 }], hasMore: false })
+  })
+
+  test("reads the combined commit status, for a ref that contains a slash too", async () => {
+    const calls = record(() => json({ state: "failure", sha: "abc", total_count: 1, statuses: [] }))
+    const checks = (await connect()).repo(webRepo).checks
+
+    const status = await checks.status("feature/login")
+
+    expect(status.state).toBe("failure")
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/feature%2Flogin/status")
+  })
+
+  test("refuses an empty ref before requesting", async () => {
+    const calls = record()
+    const checks = (await connect()).repo(webRepo).checks
+
+    await expect(checks.list("")).rejects.toThrow("ref")
+    await expect(checks.status("  ")).rejects.toThrow("ref")
+    expect(calls).toHaveLength(0)
+  })
+})

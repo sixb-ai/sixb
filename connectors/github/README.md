@@ -6,7 +6,8 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
 - **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
-- **Pull requests** — list a repository's pull requests, get one with its merge state and size, list its reviews
+- **Pull requests** — list a repository's pull requests, get one with its merge state and size, merge one, list its reviews
+- **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
@@ -81,8 +82,8 @@ export const githubConnector = defineConnector(
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
-need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`. Branches and commits need
-`Contents: read`. Releases need `Contents: read`, or
+need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`, or `Pull requests: read & write` to merge one. Branches and commits need
+`Contents: read`. Check runs and commit statuses need `Checks: read`. Releases need `Contents: read`, or
 `Contents: read & write` to create, update or delete them and their assets. GitHub Actions need
 `Actions: read`, or `Actions: read & write` to re-run or cancel runs. Organization people
 APIs require `Members: read`. Public user profiles
@@ -153,7 +154,10 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).branches.get(branch)` | `GET /repos/{owner}/{repo}/branches/{branch}` |
 | `gh.repo({ owner, repo }).pulls.list()` | `GET /repos/{owner}/{repo}/pulls`             |
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
+| `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).checks.list(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` |
+| `gh.repo({ owner, repo }).checks.status(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/status` |
 | `gh.repo({ owner, repo }).stacks.list()` | `GET /repos/{owner}/{repo}/stacks`            |
 | `gh.repo({ owner, repo }).stacks.get(number)` | `GET /repos/{owner}/{repo}/stacks/{number}` |
 | `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
@@ -318,6 +322,40 @@ with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while Git
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
+
+**Merging.** `pulls.merge(number, { method })` merges with `merge` (the default), `squash` or
+`rebase`, and takes `commitTitle`, `commitMessage` and `sha`, the last of which merges only while
+the head branch is still at that commit. GitHub's refusals are answers rather than failures, so
+they come back as a result and only a status GitHub does not document for a merge throws:
+
+| Status | `reason`         | Means                                                              |
+| ------ | ---------------- | ------------------------------------------------------------------ |
+| 405    | `not_mergeable`  | a required review or check is missing, or the branches conflict     |
+| 409    | `head_changed`   | the head branch moved since it was read                             |
+| 403    | `forbidden`      | a branch protection rule or ruleset, or a token without write access |
+| 404    | `not_found`      | no such pull request, or the token cannot see it                    |
+| 422    | `invalid`        | GitHub refused the input, such as a merge method the repository forbids |
+
+```ts
+const merge = await repo.pulls.merge(1086, { method: "squash" })
+if (merge.merged) console.log("merged as", merge.sha)
+else if (merge.reason === "not_mergeable") console.log("waiting:", merge.message)
+```
+
+**Checks.** `checks.list(ref)` returns a commit's check runs, which is where a workflow's jobs
+appear, with `checkName`, `status` (`queued`, `in_progress`, `completed`) and `filter` (`latest`
+for the newest run of each name, `all` for every attempt) narrowing them. Each run names its
+`status`, its `conclusion` once complete, its `output`, the `app` that ran it and the pull requests
+it belongs to. `checks.status(ref)` returns the older Commit Status API's rollup: its `state` is
+`failure` when any context reports an error or a failure, `pending` when one is pending or none was
+ever posted, and `success` when all are. `ref` is a commit SHA, a branch or a tag, and names
+containing `/` work.
+
+```ts
+const { items: runs } = await repo.checks.list("feature/login")
+const failing = runs.filter((run) => run.conclusion === "failure").map((run) => run.name)
+const status = await repo.checks.status("feature/login")
+```
 
 ### Actions
 

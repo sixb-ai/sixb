@@ -2,6 +2,7 @@ import type { RepositoryActionsApi } from "./actions"
 import type { RepositoryAssigneesApi } from "./assignees"
 import type { GitHubAttachmentsApi } from "./attachments"
 import type { RepositoryBranchesApi } from "./branches"
+import type { RepositoryChecksApi } from "./checks"
 import type { RepositoryCommitsApi } from "./commits"
 import type { GitHubRepositoryTarget } from "./common"
 import type {
@@ -43,6 +44,8 @@ export interface GitHubRepositoryScope {
   readonly actions: RepositoryActionsApi
   readonly assignees: RepositoryAssigneesApi
   readonly branches: RepositoryBranchesApi
+  /** A commit's check runs and its combined commit status. */
+  readonly checks: RepositoryChecksApi
   readonly commits: RepositoryCommitsApi
   readonly issues: RepositoryIssuesApi
   readonly labels: RepositoryLabelsApi

@@ -2,6 +2,7 @@ import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
   bodyFormatHeaders,
+  GitHubApiError,
   pathId,
   readJson,
   readPage,
@@ -9,14 +10,17 @@ import {
   resolvePagePath,
   withQuery,
 } from "../http"
-import type { GitHubPage, GitHubRepositoryTarget } from "../types/common"
+import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
   GetPullRequestOptions,
   GitHubPullRequest,
   GitHubPullRequestDetail,
+  GitHubPullRequestMergeRefusal,
+  GitHubPullRequestMergeResult,
   GitHubPullRequestReview,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
+  MergePullRequestInput,
   RepositoryPullRequestsApi,
 } from "../types/pulls"
 
@@ -73,5 +77,65 @@ export function createRepositoryPullRequestsApi(
         })
       )
     },
+
+    async merge(
+      pullNumber: number,
+      input?: MergePullRequestInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequestMergeResult> {
+      return readMerge(
+        await context.http.request(`${pullPath(pullNumber)}/merge`, {
+          method: "PUT",
+          body: {
+            commit_title: input?.commitTitle,
+            commit_message: input?.commitMessage,
+            sha: input?.sha,
+            merge_method: input?.method,
+          },
+          signal: options?.signal,
+        })
+      )
+    },
+  }
+}
+
+/** GitHub's answer to a merge attempt, one per status it documents. */
+const MERGE_REFUSALS: Readonly<Record<number, GitHubPullRequestMergeRefusal>> = {
+  403: "forbidden",
+  404: "not_found",
+  405: "not_mergeable",
+  409: "head_changed",
+  422: "invalid",
+}
+
+/**
+ * Read the merge endpoint's answer. Its refusals are answers, not failures: 405 means the pull
+ * request cannot be merged right now, 409 that the head branch moved, and a caller telling them
+ * apart is the whole point, so they come back as a result. Any other status is an error.
+ */
+async function readMerge(response: Response): Promise<GitHubPullRequestMergeResult> {
+  const text = await response.text().catch(() => "")
+  const body = parseMergeBody(text)
+  const message = body.message ?? text
+
+  if (response.ok && body.merged && body.sha) {
+    return { merged: true, sha: body.sha, message }
+  }
+
+  const reason = MERGE_REFUSALS[response.status]
+  if (reason) return { merged: false, reason, message }
+
+  // A 200 without `merged` narrows to the one refusal a caller can act on, by re-reading the pull
+  // request. Anything else is a status GitHub does not document for a merge.
+  if (response.ok) return { merged: false, reason: "not_mergeable", message }
+  throw new GitHubApiError(response.status, text)
+}
+
+function parseMergeBody(text: string): { merged?: boolean; sha?: string; message?: string } {
+  try {
+    const body = JSON.parse(text) as unknown
+    return typeof body === "object" && body !== null ? (body as Record<string, never>) : {}
+  } catch {
+    return {}
   }
 }
