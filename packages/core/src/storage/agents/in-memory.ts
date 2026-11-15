@@ -33,6 +33,8 @@ import {
   assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
+  assertDeleteAgentContextCheckpointsAfterSeqInput,
+  assertDeleteAgentMessagesFromSeqInput,
   assertEnqueueAgentInboxItemInput,
   assertInboxRunOwnership,
   assertInboxThreadAcceptsItem,
@@ -106,7 +108,9 @@ import type {
   CreateSubagentRunInput,
   DecideAgentApprovalInput,
   DecideAgentApprovalResult,
+  DeleteAgentContextCheckpointsAfterSeqInput,
   DeleteAgentMessagesByRunInput,
+  DeleteAgentMessagesFromSeqInput,
   EnqueueAgentInboxItemInput,
   EnqueueAgentInboxItemResult,
   FinishAgentRunInput,
@@ -136,6 +140,8 @@ import type {
   RequestAgentApprovalInput,
   RequestAgentApprovalResult,
   RequestAgentRunCancelInput,
+  RewindAgentApprovalsInput,
+  RewindAgentApprovalsResult,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,
@@ -895,9 +901,17 @@ class InMemoryAgentRunStore implements AgentRunStore {
   ): Promise<readonly SubagentRunRecord[]> {
     const runs = [...this.state.runs.values()].filter((run) => run.projectId === input.projectId)
     const turns = new Map(
-      runs.flatMap((run) =>
-        run.kind === "conversation" && run.threadId === input.threadId ? [[run.id, run]] : []
-      )
+      runs.flatMap((run) => {
+        if (run.kind !== "conversation" || run.threadId !== input.threadId) return []
+        if (
+          input.retainedTurnsOnly &&
+          this.state.messages.get(key(run.projectId, run.triggerMessageId))?.threadId !==
+            run.threadId
+        ) {
+          return []
+        }
+        return [[run.id, run]]
+      })
     )
     const children = runs
       .filter((run): run is SubagentRunRecord => run.kind === "subagent")
@@ -1137,6 +1151,49 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     return messages.length
   }
 
+  async deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number> {
+    assertDeleteAgentMessagesFromSeqInput(input)
+    const threadKey = key(input.projectId, input.threadId)
+    const thread = this.state.threads.get(threadKey)
+    if (!thread) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const toDelete = [...this.state.messages.entries()].filter(
+      ([, message]) =>
+        message.projectId === input.projectId &&
+        message.threadId === input.threadId &&
+        message.seq >= input.fromSeq
+    )
+    if (toDelete.length === 0) return 0
+
+    for (const [messageKey] of toDelete) {
+      this.state.messages.delete(messageKey)
+    }
+
+    const remainingMessages = [...this.state.messages.values()]
+      .filter(
+        (message) => message.projectId === input.projectId && message.threadId === input.threadId
+      )
+      .sort((left, right) => right.seq - left.seq)
+    const latestMessage = remainingMessages[0]
+    const updatedAt = new Date()
+    this.state.threads.set(
+      threadKey,
+      clone({
+        ...thread,
+        messageCount: remainingMessages.filter(countsAsThreadMessage).length,
+        lastMessageAt: latestMessage?.createdAt,
+        updatedAt,
+      })
+    )
+
+    return toDelete.length
+  }
+
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {
     const record = this.state.messages.get(key(params.projectId, params.id))
     return record ? clone(record) : null
@@ -1255,6 +1312,20 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
   }): Promise<AgentContextCheckpointRecord | null> {
     const record = this.findLatest(input.projectId, input.threadId)
     return record ? clone(record) : null
+  }
+
+  async deleteAfterSeq(input: DeleteAgentContextCheckpointsAfterSeqInput): Promise<number> {
+    assertDeleteAgentContextCheckpointsAfterSeqInput(input)
+    const matching = [...this.state.checkpoints.entries()].filter(
+      ([, checkpoint]) =>
+        checkpoint.projectId === input.projectId &&
+        checkpoint.threadId === input.threadId &&
+        checkpoint.observedHeadSeq > input.afterSeq
+    )
+    for (const [checkpointKey] of matching) {
+      this.state.checkpoints.delete(checkpointKey)
+    }
+    return matching.length
   }
 
   async getByRunIds(input: {
@@ -1538,6 +1609,38 @@ class InMemoryAgentApprovalStore implements AgentApprovalStore {
       if (stop) stopped += 1
     }
     return { cancelled: cancelled.sort(compareApprovals).map(clone), stopped }
+  }
+
+  async rewind(input: RewindAgentApprovalsInput): Promise<RewindAgentApprovalsResult> {
+    const runIds = new Set(input.runIds)
+    const clearedIds = new Set(input.clearedMessageIds ?? [])
+    const cancelledAt = new Date(input.cancelledAt ?? new Date())
+    const cancelled: AgentApprovalRecord[] = []
+    let deleted = 0
+
+    for (const [approvalKey, approval] of [...this.state.approvals.entries()]) {
+      if (approval.projectId !== input.projectId || approval.threadId !== input.threadId) continue
+
+      if (runIds.has(approval.runId)) {
+        this.state.approvals.delete(approvalKey)
+        deleted += 1
+        if (approval.status === "pending") {
+          cancelled.push({
+            ...approval,
+            status: "cancelled",
+            turnStoppedAt: approval.turnStoppedAt ?? cancelledAt,
+          })
+        }
+        continue
+      }
+
+      if (approval.reportedInMessageId && clearedIds.has(approval.reportedInMessageId)) {
+        const { reportedInMessageId: _reported, ...unreported } = approval
+        this.state.approvals.set(approvalKey, clone(unreported))
+      }
+    }
+
+    return { cancelled: cancelled.sort(compareApprovals).map(clone), deleted }
   }
 
   async holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean> {

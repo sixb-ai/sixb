@@ -24,6 +24,7 @@ export type {
   AgentRunView,
   AgentThreadsRuntime,
   CreateExecutionAgentThreadInput,
+  ExecutionAgentEditMessageInput,
   ExecutionAgentRequestInput,
   ExecutionAgentRunResult,
   ListExecutionAgentThreadsInput,

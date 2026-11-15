@@ -21,6 +21,8 @@ import {
   type MarkAgentApprovalsReportedInput,
   type RequestAgentApprovalInput,
   type RequestAgentApprovalResult,
+  type RewindAgentApprovalsInput,
+  type RewindAgentApprovalsResult,
   type SettleAgentApprovalsInput,
   type StopAgentApprovalsInput,
   type StopAgentApprovalsResult,
@@ -213,6 +215,50 @@ export class SqliteAgentApprovalStore implements AgentApprovalStore {
         .map((row) => this.require(input.projectId, row.id))
       const stopped = matched.filter((row) => row.turn_stopped_at === null).length
       return { cancelled: cancelled.sort(compareApprovals), stopped }
+    })
+  }
+
+  async rewind(input: RewindAgentApprovalsInput): Promise<RewindAgentApprovalsResult> {
+    const runIds = [...new Set(input.runIds)]
+    const clearedIds = [...new Set(input.clearedMessageIds ?? [])]
+    const cancelledAt = new Date(input.cancelledAt ?? new Date())
+
+    return runImmediateTransaction(this.db, () => {
+      if (clearedIds.length > 0) {
+        const placeholders = clearedIds.map(() => "?").join(", ")
+        this.db
+          .query(
+            `UPDATE agent_approvals SET reported_in_message_id = NULL
+             WHERE project_id = ? AND thread_id = ?
+               AND reported_in_message_id IN (${placeholders})`
+          )
+          .run(input.projectId, input.threadId, ...clearedIds)
+      }
+
+      if (runIds.length === 0) return { cancelled: [], deleted: 0 }
+
+      const runPlaceholders = runIds.map(() => "?").join(", ")
+      const removed = this.db
+        .query(
+          `DELETE FROM agent_approvals
+           WHERE project_id = ? AND thread_id = ? AND run_id IN (${runPlaceholders})
+           RETURNING *`
+        )
+        .all(input.projectId, input.threadId, ...runIds) as AgentApprovalRow[]
+
+      const cancelled = removed
+        .filter((row) => row.status === "pending")
+        .map((row): AgentApprovalRecord => {
+          const parsed = rowToApproval(row)
+          return {
+            ...parsed,
+            status: "cancelled",
+            turnStoppedAt: parsed.turnStoppedAt ?? cancelledAt,
+          }
+        })
+        .sort(compareApprovals)
+
+      return { cancelled, deleted: removed.length }
     })
   }
 

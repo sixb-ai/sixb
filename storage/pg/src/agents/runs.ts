@@ -472,6 +472,16 @@ export class PgAgentRunStore implements AgentRunStore {
         AND child.kind = 'subagent'
         ${input.spawnKey === undefined ? this.sql`` : this.sql`AND child.spawn_key = ${input.spawnKey}`}
         ${input.finishReason === undefined ? this.sql`` : this.sql`AND child.finish_reason = ${input.finishReason}`}
+        ${
+          input.retainedTurnsOnly
+            ? this.sql`AND EXISTS (
+                SELECT 1 FROM agent_messages m
+                WHERE m.project_id = turn.project_id
+                  AND m.thread_id = turn.thread_id
+                  AND m.id = turn.trigger_message_id
+              )`
+            : this.sql``
+        }
       ORDER BY COALESCE(turn.started_at, turn.created_at) DESC, turn.id DESC,
         child.created_at DESC, child.id DESC
       LIMIT ${input.limit ?? 100}

@@ -29,6 +29,7 @@ import {
   type AgentApprovalMode,
   type AgentApprovalRecord,
   type AgentInboxItemRecord,
+  type AgentMessageRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadComputer,
@@ -36,7 +37,7 @@ import {
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
 } from "../storage/agents"
-import { type AgentTurnPlace, turnPlace } from "../storage/agents/provider"
+import { type AgentTurnPlace, countsAsThreadMessage, turnPlace } from "../storage/agents/provider"
 import {
   aiLimitSubjectsFromAttribution,
   aiUsageLimitExceededError,
@@ -124,6 +125,30 @@ export interface RequestAgentRunInput {
 }
 
 /** What a turn's model is chosen from. */
+export interface EditAgentMessageInput {
+  /** The conversation thread containing the message to edit. */
+  readonly threadId: string
+  /** The existing user message to replace and rewind from. */
+  readonly messageId: string
+  /** Updated user text. Omitted when attachments are the whole message. */
+  readonly text?: string
+  /** Blob-backed files attached to the edited message. */
+  readonly attachments?: readonly FileRef[]
+  /** Structured page/object context snapshotted onto the edited user message. */
+  readonly context?: readonly AgentContextEntryInput[]
+  /** Configured language model selected for the re-run. Omitted uses routing or the agent default. */
+  readonly model?: LanguageModelRef
+  /** Reasoning effort or token budget for the re-run. Omitted uses the model's default. */
+  readonly reasoning?: AgentReasoning
+  readonly timeZone?: string
+  readonly locale?: string
+  readonly approvalMode?: AgentApprovalMode
+  /** Explicit id for the replacement user message. Defaults to a generated id. */
+  readonly nextMessageId?: string
+  /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
+  readonly principal?: Principal
+}
+
 export interface AgentRequestModels {
   readonly language?: LanguageModelCatalog
   /** Picks the model of a turn that names none; absent without tiers and `models.decision`. */
@@ -299,6 +324,411 @@ export async function requestAgentRun(
     run,
     ...(jobId ? { jobId } : {}),
     createdThread,
+  }
+}
+
+/** Whether a stored message is a user-authored prompt that can be edited in place. */
+export function isEditableAgentMessage(
+  message: Pick<AgentMessageRecord, "role" | "parts">
+): boolean {
+  if (message.role !== "user") return false
+  if (message.parts.some((part) => part.type === "continuation")) return false
+  return countsAsThreadMessage(message)
+}
+
+/**
+ * Edit an earlier user message in place, truncating that message and everything after it, and
+ * trigger a new turn from the edited prompt.
+ *
+ * Historical `agent_runs` and `executions` remain intact for AI usage and cost accounting, while
+ * messages, checkpoints, and unreported approvals from the rewound tail are cleaned up in one
+ * transaction so the new turn sees only the prefix before the edited message.
+ */
+export async function editAgentMessage(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  models: AgentRequestModels,
+  input: EditAgentMessageInput,
+  blobStorage?: Pick<BlobStorage, "open" | "put">
+): Promise<RequestAgentRunResult> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertNoAgentSelector(input)
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+
+  const trigger = triggerParts(input)
+  const selection = { model: input.model, reasoning: input.reasoning }
+  const settings = requesterSettings(input)
+  if (input.approvalMode !== undefined) assertAgentApprovalMode(input.approvalMode)
+
+  const routed = routedTurn(models.router, selection, input)
+  const requested =
+    routed ?? (await resolveConversationRunSpec({ models: models.language, selection, settings }))
+  assertAttachments(input.attachments)
+
+  const contextParts = await resolveAgentContextParts(runtime, input.context)
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const principal =
+    authority.type === "principal"
+      ? authority.context.principal
+      : (input.principal ?? SYSTEM_PRINCIPAL)
+
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' not found.`
+    )
+  }
+  assertThreadAcceptsRun(thread, principal)
+
+  const target = await agents.messages.getById({ projectId, id: input.messageId })
+  if (!target || target.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "message_not_found",
+      `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
+    )
+  }
+  assertEditableMessageAuthority(thread, target, principal)
+
+  const tailBefore = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  assertParticipantCanRewindTail(thread, tailBefore, principal)
+
+  const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+
+  const approvalMode =
+    input.approvalMode ??
+    (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: thread.id }))
+      .approvalMode
+
+  const selected =
+    "router" in requested
+      ? await routedEditRunSpec(agents, {
+          ...requested,
+          projectId,
+          threadId: thread.id,
+          beforeSeq: target.seq,
+          settings,
+          language: models.language,
+        })
+      : requested
+  const spec: ConversationAgentRunSpec = Object.freeze({
+    ...selected,
+    approvalMode,
+    ...(thread.runsOn === undefined ? {} : { runsOn: thread.runsOn }),
+  })
+
+  // Prepare restore documents for any canvas artifacts touched by turns being rewound.
+  const preRewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tailBefore)
+  const artifacts = runtime.storage.artifacts
+  const documentsByRun = new Map<string, Record<string, FileRef>>()
+  if (artifacts && blobStorage) {
+    for (const rewound of preRewoundRuns) {
+      documentsByRun.set(
+        rewound.id,
+        await undoneTurnDocuments({ projectId, storage: artifacts, blobStorage }, rewound.id)
+      )
+    }
+  }
+
+  const replacementMessageId = input.nextMessageId ?? createAgentMessageId()
+  let run: ConversationAgentRunRecord
+  let cancelledApprovals: readonly AgentApprovalRecord[] = []
+  let supersededApprovals: readonly AgentApprovalRecord[] = []
+  const restoredVersions = new Map<
+    string,
+    import("../storage/artifacts/types").PublishedArtifactVersion["version"]
+  >()
+
+  try {
+    run = await runtime.storage.transaction(async (tx) => {
+      const txAgents = tx.agents
+      if (!txAgents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+
+      const currentTarget = await txAgents.messages.getById({ projectId, id: input.messageId })
+      if (!currentTarget || currentTarget.threadId !== thread.id) {
+        throw new AgentRequestError(
+          "message_not_found",
+          `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
+        )
+      }
+      assertEditableMessageAuthority(thread, currentTarget, principal)
+
+      const tail = await listAllThreadMessagesFromSeq(
+        txAgents,
+        projectId,
+        thread.id,
+        currentTarget.seq
+      )
+      assertParticipantCanRewindTail(thread, tail, principal)
+
+      const removedMessageIds = tail.map((message) => message.id)
+      const rewoundRuns = await listRewoundConversationRuns(txAgents, projectId, thread.id, tail)
+      const rewoundRunIds = rewoundRuns.map((entry) => entry.id)
+
+      // Undo untouched artifact writes from newest rewound turn back to oldest.
+      if (tx.artifacts) {
+        for (const rewound of rewoundRuns) {
+          const triggerMsg = tail.find((message) => message.id === rewound.triggerMessageId)
+          const undone = await tx.artifacts.undoTurnWrites({
+            projectId,
+            turnRunId: rewound.id,
+            documents: documentsByRun.get(rewound.id) ?? {},
+            ...(triggerMsg?.authorPrincipal ? { requester: triggerMsg.authorPrincipal } : {}),
+          })
+          for (const entry of undone.restored) {
+            restoredVersions.set(entry.artifact.id, entry.version)
+          }
+          for (const deletedId of undone.deleted) {
+            restoredVersions.delete(deletedId)
+          }
+        }
+      }
+
+      const rewoundApprovals = await txAgents.approvals.rewind({
+        projectId,
+        threadId: thread.id,
+        runIds: rewoundRunIds,
+        clearedMessageIds: removedMessageIds,
+      })
+      cancelledApprovals = rewoundApprovals.cancelled
+
+      await txAgents.checkpoints.deleteAfterSeq({
+        projectId,
+        threadId: thread.id,
+        afterSeq: currentTarget.seq - 1,
+      })
+      await txAgents.messages.deleteFromSeq({
+        projectId,
+        threadId: thread.id,
+        fromSeq: currentTarget.seq,
+      })
+
+      await tx.executions.create(durableExecution)
+      const reported = await reportAgentApprovals(txAgents, {
+        projectId,
+        threadId: thread.id,
+        messageId: replacementMessageId,
+      })
+      supersededApprovals = reported.superseded
+
+      await txAgents.messages.append({
+        id: replacementMessageId,
+        projectId,
+        threadId: thread.id,
+        runId: null,
+        role: "user",
+        parts: [
+          ...reported.parts,
+          ...contextParts,
+          ...trigger,
+          ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
+        ],
+        authorPrincipal: principal,
+      })
+
+      return txAgents.runs.create({
+        id: runId,
+        projectId,
+        executionId: durableExecution.id,
+        threadId: thread.id,
+        triggerMessageId: replacementMessageId,
+        spec,
+      })
+    })
+  } catch (error) {
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      throw new AgentRequestError("active_run_exists", error.message)
+    }
+    throw error
+  }
+
+  await announceArtifactUpdates(runtime.events, [...restoredVersions.values()])
+  await announceAgentApprovals(runtime.broker, [...cancelledApprovals, ...supersededApprovals])
+  await publishRunActivity(runtime, run)
+  const jobId = await dispatchAgentRun(runtime, agents, runId)
+
+  return {
+    run,
+    ...(jobId ? { jobId } : {}),
+    createdThread: false,
+  }
+}
+
+function assertEditableMessageAuthority(
+  _thread: AgentThreadRecord,
+  target: AgentMessageRecord,
+  principal: Principal
+): void {
+  if (!isEditableAgentMessage(target)) {
+    throw new AgentRequestError(
+      "message_not_editable",
+      `[Sixb] Only user-authored messages can be edited.`
+    )
+  }
+  if (
+    principal.type === "user" &&
+    (!target.authorPrincipal || !principalsEqual(target.authorPrincipal, principal))
+  ) {
+    throw new AgentRequestError(
+      "not_message_author",
+      `[Sixb] Only the author of message '${target.id}' can edit it.`
+    )
+  }
+}
+
+function assertParticipantCanRewindTail(
+  thread: AgentThreadRecord,
+  tail: readonly AgentMessageRecord[],
+  principal: Principal
+): void {
+  if (principal.type !== "user" || principalsEqual(principal, thread.ownerPrincipal)) return
+
+  const erasesOthers = tail.some(
+    (message) =>
+      message.role === "user" &&
+      countsAsThreadMessage(message) &&
+      message.authorPrincipal !== undefined &&
+      !principalsEqual(message.authorPrincipal, principal)
+  )
+  if (erasesOthers) {
+    throw new AgentRequestError(
+      "not_thread_owner",
+      "[Sixb] Only the thread's owner can rewind past another person's messages."
+    )
+  }
+}
+
+async function listAllThreadMessagesFromSeq(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  fromSeq: number
+): Promise<readonly AgentMessageRecord[]> {
+  const messages: AgentMessageRecord[] = []
+  const afterSeq = fromSeq - 1
+  for (;;) {
+    const page = await agents.messages.list({
+      projectId,
+      threadId,
+      afterSeq,
+      order: "asc",
+      limit: 200,
+      offset: messages.length,
+    })
+    messages.push(...page.messages)
+    if (!page.hasMore || page.messages.length === 0) return messages
+  }
+}
+
+/** Conversation runs triggered at or after the rewound message, newest first. */
+async function listRewoundConversationRuns(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  tail: readonly AgentMessageRecord[]
+): Promise<readonly ConversationAgentRunRecord[]> {
+  const removedMessageIds = new Set(tail.map((message) => message.id))
+  const removedRunIds = new Set(
+    tail.flatMap((message) => (message.runId === null ? [] : [message.runId]))
+  )
+  const found: ConversationAgentRunRecord[] = []
+  for (let offset = 0; ; ) {
+    const page = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 100,
+      offset,
+    })
+    for (const run of page.runs) {
+      if (
+        run.kind === "conversation" &&
+        (removedMessageIds.has(run.triggerMessageId) || removedRunIds.has(run.id))
+      ) {
+        found.push(run)
+      }
+    }
+    offset += page.runs.length
+    if (!page.hasMore || page.runs.length === 0) return found
+  }
+}
+
+async function routedEditRunSpec(
+  agents: AgentStorage,
+  input: RoutedTurn & {
+    readonly projectId: string
+    readonly threadId: string
+    readonly beforeSeq: number
+    readonly settings: RequesterSettings
+    readonly language: LanguageModelCatalog | undefined
+  }
+): Promise<ConversationAgentRunSpec> {
+  const previous =
+    input.beforeSeq <= 1
+      ? undefined
+      : await latestRetainedConversationRun(
+          agents,
+          input.projectId,
+          input.threadId,
+          input.beforeSeq
+        )
+  const choice = await input.router.choose(input.text, previous)
+
+  return resolveConversationRunSpec({
+    models: input.language,
+    selection: { model: choice.model },
+    settings: input.settings,
+    tierProbabilities: choice.tierProbabilities,
+  })
+}
+
+async function latestRetainedConversationRun(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  beforeSeq: number
+): Promise<ConversationAgentRunRecord | undefined> {
+  const { messages } = await agents.messages.list({
+    projectId,
+    threadId,
+    roles: ["user"],
+    order: "desc",
+    limit: 200,
+  })
+  const retainedTriggerIds = new Set(
+    messages.filter((message) => message.seq < beforeSeq).map((message) => message.id)
+  )
+  if (retainedTriggerIds.size === 0) return undefined
+
+  for (let offset = 0; ; ) {
+    const page = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 50,
+      offset,
+    })
+    const match = page.runs.find(
+      (run): run is ConversationAgentRunRecord =>
+        run.kind === "conversation" && retainedTriggerIds.has(run.triggerMessageId)
+    )
+    if (match) return match
+    offset += page.runs.length
+    if (!page.hasMore || page.runs.length === 0) return undefined
   }
 }
 

@@ -42,6 +42,7 @@ export const fr: Translation<AgentMessages> = {
     threadsLoadFailed: "Impossible de charger les fils.",
     sharedThreadsLoadFailed: "Impossible de charger les fils partagés avec vous.",
     sendFailed: "Le message n’a pas pu être envoyé. Réessayez.",
+    editFailed: "Impossible de modifier ce message. Réessayez.",
     busy: "Une réponse est déjà en cours. Envoyez votre message quand elle sera terminée.",
     busyOther:
       "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",
@@ -250,6 +251,12 @@ export const fr: Translation<AgentMessages> = {
     ago: (time) => `il y a ${time}`,
   },
   transcript: {
+    editMessage: "Modifier le message",
+    copyMessage: "Copier le message",
+    copiedMessage: "Copié",
+    editInfo: "Modifier ce message reprend la conversation à partir d’ici.",
+    cancelEdit: "Annuler",
+    saveEdit: "Enregistrer",
     condensed: "Conversation condensée",
     condensing: "Condensation de la conversation précédente…",
     condensingLabel: "L’agent condense la conversation précédente",

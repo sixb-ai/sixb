@@ -3,6 +3,7 @@ import {
   cancelAgentRunMutation,
   createAgentThreadMutation,
   decideAgentApprovalMutation,
+  editAgentThreadMessageMutation,
   getAgentOptions,
   getAgentPreferencesOptions,
   getAgentPreferencesQueryKey,
@@ -185,9 +186,19 @@ export type ConversationComposerProps = Pick<
   | "contextMeter"
 >
 
+/** Draft state for an earlier user message open in the inline editor. */
+export interface AgentMessageEditDraft {
+  readonly messageId: string
+  readonly text: string
+  readonly attachments: readonly AgentFileRef[]
+  readonly context: readonly AgentContextEntryInput[]
+  /** Incremented when a failed edit restores this draft, so the editor reseeds. */
+  readonly nonce: number
+}
+
 export type AgentConversation = ReturnType<typeof useAgentConversation>
 
-/** Why a message, a retry or a stop did not go through, or the approval mode did not change. */
+/** Why a message, an edit, a retry or a stop did not go through, or the approval mode did not change. */
 export type AgentConversationSendError =
   /** Another answer holds the conversation; `someoneElse` when another person asked for it. */
   | { readonly code: "busy"; readonly someoneElse: boolean }
@@ -195,7 +206,7 @@ export type AgentConversationSendError =
   | { readonly code: "sandbox" }
   /** It's to run on this computer, and what runs it there can't start. */
   | { readonly code: "computer" }
-  | { readonly code: "send" | "retry" | "stop" | "approvalMode" }
+  | { readonly code: "send" | "edit" | "retry" | "stop" | "approvalMode" }
 
 /** The conversation's messages could not be read. */
 export interface AgentConversationMessagesError {
@@ -393,6 +404,7 @@ export function useAgentConversation({
 
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUserMessage | null>(null)
+  const [editingMessage, setEditingMessage] = useState<AgentMessageEditDraft | null>(null)
   const [sentKeys, setSentKeys] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [sendError, setSendError] = useState<{
     threadId: string | null
@@ -477,8 +489,12 @@ export function useAgentConversation({
       setPendingUser(null)
       return
     }
+    const replacedGone =
+      pendingUser.replacesMessageId === undefined ||
+      !savedMessages.some((message) => message.id === pendingUser.replacesMessageId)
     if (
       pendingUser.messageId &&
+      replacedGone &&
       savedMessages.some((message) => message.id === pendingUser.messageId)
     ) {
       setPendingUser(null)
@@ -487,10 +503,12 @@ export function useAgentConversation({
 
   useEffect(() => {
     setSendError((current) => (current && current.threadId === threadId ? current : null))
+    setEditingMessage(null)
   }, [threadId])
 
   const createThread = useMutation(createAgentThreadMutation())
   const postMessage = useMutation(postAgentThreadMessageMutation())
+  const editThreadMessage = useMutation(editAgentThreadMessageMutation())
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
@@ -517,15 +535,28 @@ export function useAgentConversation({
   const approvalMode: AgentApprovalMode | undefined =
     chosenHere ?? (threadId !== null ? threadQuery.data?.approvalMode : defaultApprovalMode)
 
-  const presentation = presentActiveTurn({
-    activeRunId,
+  const activePending = pendingUser && pendingUser.threadId === threadId ? pendingUser : null
+  const visibleSavedMessages = useMemo(() => {
+    if (!activePending?.replacesMessageId) return savedMessages
+    const cut = savedMessages.findIndex((entry) => entry.id === activePending.replacesMessageId)
+    return cut === -1 ? savedMessages : savedMessages.slice(0, cut)
+  }, [activePending?.replacesMessageId, savedMessages])
+
+  const editInFlight = Boolean(
+    activePending?.replacesMessageId !== undefined && activePending.messageId === null
+  )
+  const basePresentation = presentActiveTurn({
+    activeRunId: editInFlight ? null : activeRunId,
     pendingRun,
-    streamRun,
+    streamRun: editInFlight ? null : streamRun,
     live,
     runs,
-    messages: savedMessages,
+    messages: visibleSavedMessages,
     messagesLoading: messagesQuery.isFetching,
   })
+  const presentation = editInFlight
+    ? ({ kind: "responding", queuedRun: null } as const)
+    : basePresentation
   const isRunning = presentation.kind === "responding"
   const waitingLonger = useExtendedWaitingStatus(
     presentation.kind === "responding" ? presentation.queuedRun : null
@@ -961,7 +992,8 @@ export function useAgentConversation({
   const anchorCurrentTurn = Boolean(
     (pendingUser && pendingUser.threadId === threadId) || (pendingRun && pendingSend?.anchor)
   )
-  const composerPending = postMessage.isPending || createThread.isPending || resolvingPlace
+  const composerPending =
+    postMessage.isPending || editThreadMessage.isPending || createThread.isPending || resolvingPlace
   const currentSendError: AgentConversationSendError | null =
     sendError && sendError.threadId === threadId
       ? sendError.failure === "busy"
@@ -1020,12 +1052,189 @@ export function useAgentConversation({
     authors,
     thread,
     reader,
-    pending: pendingUser && pendingUser.threadId === threadId ? pendingUser : null,
+    pending: activePending,
     sentKeys,
     runs,
     live,
     presentation,
   })
+
+  const editableMessageIds = useMemo((): ReadonlySet<string> => {
+    if (
+      threadId === null ||
+      sandboxRecovery ||
+      editInFlight ||
+      (thread?.runsOn === "computer" && access !== "owner") ||
+      (isRunning && !canStop)
+    ) {
+      return new Set()
+    }
+    const allowed = new Set<string>()
+    let seenOtherUser = false
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const entry = messages[index]
+      if (!entry || entry.role !== "user") continue
+      const ownMessage = !user || !entry.author || entry.author.isReader
+      if (
+        entry.id !== null &&
+        entry.status === "complete" &&
+        ownMessage &&
+        (access === "owner" || !seenOtherUser)
+      ) {
+        allowed.add(entry.id)
+      }
+      if (!ownMessage) seenOtherUser = true
+    }
+    return allowed
+  }, [
+    threadId,
+    sandboxRecovery,
+    editInFlight,
+    thread?.runsOn,
+    access,
+    isRunning,
+    canStop,
+    messages,
+    user,
+  ])
+
+  const startEditMessage = useCallback(
+    (messageId: string) => {
+      if (!editableMessageIds.has(messageId)) return
+      const target = messages.find((entry) => entry.id === messageId && entry.role === "user")
+      if (!target) return
+      const text = target.parts
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("")
+        .trim()
+      const attachments = target.parts.flatMap((part) =>
+        part.type === "file" ? [part.fileRef] : []
+      )
+      setEditingMessage((current) => ({
+        messageId,
+        text,
+        attachments,
+        context: target.context,
+        nonce: (current?.nonce ?? 0) + 1,
+      }))
+    },
+    [editableMessageIds, messages]
+  )
+
+  const cancelEditMessage = useCallback(() => {
+    setEditingMessage(null)
+  }, [])
+
+  const editStateRef = useRef({
+    threadId,
+    editableMessageIds,
+    messages,
+    isRunning,
+    activeRunId,
+    canStop,
+    modelRequest: modelSelection.request,
+    turnApprovalMode,
+    recordAcceptedSend,
+    refreshThread,
+  })
+  editStateRef.current = {
+    threadId,
+    editableMessageIds,
+    messages,
+    isRunning,
+    activeRunId,
+    canStop,
+    modelRequest: modelSelection.request,
+    turnApprovalMode,
+    recordAcceptedSend,
+    refreshThread,
+  }
+
+  const editMessage = useCallback(
+    async (
+      messageId: string,
+      text: string,
+      attachments: readonly AgentFileRef[],
+      context: readonly AgentContextEntryInput[]
+    ) => {
+      const current = editStateRef.current
+      const targetThreadId = current.threadId
+      if (targetThreadId === null || !current.editableMessageIds.has(messageId)) return
+
+      setSendError(null)
+      setEditingMessage(null)
+      const existing = current.messages.find((entry) => entry.id === messageId)
+      const key = existing?.key ?? `sent:${++sentMessageCount}`
+      setPendingUser({
+        key,
+        threadId: targetThreadId,
+        text,
+        attachments,
+        context,
+        messageId: null,
+        replacesMessageId: messageId,
+      })
+
+      const stoppedActive = current.isRunning && current.activeRunId !== null && current.canStop
+      try {
+        if (stoppedActive && current.activeRunId !== null) {
+          setStoppingRunId(current.activeRunId)
+          await cancelRun.mutateAsync({
+            path: { threadId: targetThreadId },
+            body: { runId: current.activeRunId },
+          })
+        }
+
+        const submitEdit = () =>
+          sendWithRequesterSettings((settings) =>
+            editThreadMessage.mutateAsync({
+              path: { threadId: targetThreadId, messageId },
+              body: {
+                ...messageBody(text, attachments, context, current.modelRequest, settings),
+                ...current.turnApprovalMode,
+              },
+            })
+          )
+
+        let response: Awaited<ReturnType<typeof submitEdit>> | undefined
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            response = await submitEdit()
+            break
+          } catch (error) {
+            const settlingStop =
+              stoppedActive &&
+              attempt < 20 &&
+              isSixbApiError(error) &&
+              error.status === 409 &&
+              error.code === "active_run_exists"
+            if (!settlingStop) throw error
+            await new Promise((resolve) => setTimeout(resolve, 75))
+          }
+        }
+
+        setStoppingRunId(null)
+        current.recordAcceptedSend(response.run, key)
+        await current.refreshThread(targetThreadId)
+      } catch (error) {
+        setStoppingRunId(null)
+        setPendingUser(null)
+        setEditingMessage((prev) => ({
+          messageId,
+          text,
+          attachments,
+          context,
+          nonce: (prev?.nonce ?? 0) + 1,
+        }))
+        setSendError({
+          threadId: targetThreadId,
+          failure: editFailure(error),
+        })
+        void current.refreshThread(targetThreadId)
+      }
+    },
+    [cancelRun, editThreadMessage]
+  )
 
   const answeringAuthor = useMemo(
     () =>
@@ -1205,6 +1414,7 @@ export function useAgentConversation({
     resetReasoning,
     resetModelSelection,
     setApprovalMode,
+    editMessage,
   })
   actionsRef.current = {
     send,
@@ -1216,6 +1426,7 @@ export function useAgentConversation({
     resetReasoning,
     resetModelSelection,
     setApprovalMode,
+    editMessage,
   }
   const stableSend = useCallback<ComposerProps["onSend"]>(
     (text, attachments, context, delivery) =>
@@ -1237,6 +1448,11 @@ export function useAgentConversation({
   const stableResetModelSelection = useCallback(() => actionsRef.current.resetModelSelection(), [])
   const stableSetApprovalMode = useCallback(
     (mode: AgentApprovalMode) => actionsRef.current.setApprovalMode(mode),
+    []
+  )
+  const stableSubmitEdit = useCallback<NonNullable<TranscriptProps["onSubmitEditMessage"]>>(
+    (messageId, text, attachments, context) =>
+      void actionsRef.current.editMessage(messageId, text, attachments, context),
     []
   )
   const stableAnswerQuestion = useCallback(
@@ -1281,6 +1497,11 @@ export function useAgentConversation({
       anchorCurrentTurn,
       onRetry: canRetry ? stableRetry : undefined,
       onContinue: canContinue ? stableContinue : undefined,
+      editableMessageIds,
+      editingMessage,
+      onStartEditMessage: startEditMessage,
+      onCancelEditMessage: cancelEditMessage,
+      onSubmitEditMessage: stableSubmitEdit,
       approvals: transcriptApprovals,
       approvalOutcomes,
       delegation: transcriptDelegation,
@@ -1297,6 +1518,11 @@ export function useAgentConversation({
       stableRetry,
       canContinue,
       stableContinue,
+      editableMessageIds,
+      editingMessage,
+      startEditMessage,
+      cancelEditMessage,
+      stableSubmitEdit,
       transcriptApprovals,
       approvalOutcomes,
       transcriptDelegation,
@@ -1492,6 +1718,14 @@ export function useAgentConversation({
     draftReseed,
     composerPending,
     send,
+    /** Saved user message ids the reader may edit in place. */
+    editableMessageIds,
+    /** The message currently open in the inline editor, or null. */
+    editingMessage,
+    startEditMessage,
+    cancelEditMessage,
+    /** Edit an earlier user message in place and restart the thread from there. */
+    editMessage,
     /** Stop the answer in flight, when `turn.canStop`. */
     stop,
     /** Run again the turn that never answered, when `turn.canRetry`. */
@@ -1566,6 +1800,15 @@ function sendFailure(error: unknown): TurnFailure {
   return "send"
 }
 
+function editFailure(error: unknown): TurnFailure {
+  if (error instanceof ComputerUnavailableError) return "computer"
+  if (!isSixbApiError(error) || error.status !== 409) return "edit"
+  if (error.code === "active_run_exists") return "busy"
+  if (error.code === "sandbox_execution_unavailable") return "sandbox"
+
+  return "edit"
+}
+
 /**
  * Said once the thread is read again, so a busy thread names whose answer holds it when the reader
  * can tell.
@@ -1582,6 +1825,8 @@ function failureMessage(
       return labels.sandboxUnavailable
     case "computer":
       return labels.computerUnavailable
+    case "edit":
+      return labels.editFailed
     case "retry":
       return labels.retryFailed
     case "stop":

@@ -98,6 +98,9 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionErrors,
   DisconnectConnectorConnectionResponses,
+  EditAgentThreadMessageData,
+  EditAgentThreadMessageErrors,
+  EditAgentThreadMessageResponses,
   ExchangeDeviceAuthorizationData,
   ExchangeDeviceAuthorizationResponses,
   ExchangeSharedAccessData,
@@ -3272,6 +3275,31 @@ export const updateAgentThreadInboxItem = <ThrowOnError extends boolean = false>
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/inbox/{itemId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Edit an agent thread message and restart from that turn
+ *
+ * Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message.
+ */
+export const editAgentThreadMessage = <ThrowOnError extends boolean = false>(
+  options: Options<EditAgentThreadMessageData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    EditAgentThreadMessageResponses,
+    EditAgentThreadMessageErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/messages/{messageId}/edit",
     ...options,
     headers: {
       "Content-Type": "application/json",

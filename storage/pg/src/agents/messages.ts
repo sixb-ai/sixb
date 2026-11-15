@@ -1,4 +1,7 @@
-import { countsAsThreadMessage } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  assertDeleteAgentMessagesFromSeqInput,
+  countsAsThreadMessage,
+} from "@sixb/core/internal/agent-run-storage-provider"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
@@ -6,6 +9,7 @@ import {
   AgentStorageError,
   type AppendAgentMessageInput,
   type DeleteAgentMessagesByRunInput,
+  type DeleteAgentMessagesFromSeqInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -154,6 +158,57 @@ export class PgAgentMessageStore implements AgentMessageStore {
         return 0
       }
       // The thread counts only the messages the conversation shows: take back the ones it counted.
+      const counted = deleted.filter((row) =>
+        countsAsThreadMessage({
+          parts: typeof row.parts === "string" ? JSON.parse(row.parts) : row.parts,
+        })
+      ).length
+
+      const updatedAt = new Date()
+      await tx`
+        UPDATE agent_threads
+        SET
+          message_count = GREATEST(message_count - ${counted}, 0),
+          last_message_at = (
+            SELECT created_at FROM agent_messages
+            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+            ORDER BY seq DESC
+            LIMIT 1
+          ),
+          updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+      `
+
+      return deleted.length
+    })
+  }
+
+  async deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number> {
+    assertDeleteAgentMessagesFromSeqInput(input, "SixbPg")
+
+    return runPgTransaction(this.sql, async (tx) => {
+      const [thread] = await tx<{ id: string }[]>`
+        SELECT id FROM agent_threads
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+        FOR UPDATE
+      `
+
+      if (!thread) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const deleted = await tx<{ id: string; parts: AgentMessageRecord["parts"] | string }[]>`
+        DELETE FROM agent_messages
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND seq >= ${input.fromSeq}
+        RETURNING id, parts
+      `
+      if (deleted.length === 0) return 0
+
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({
           parts: typeof row.parts === "string" ? JSON.parse(row.parts) : row.parts,

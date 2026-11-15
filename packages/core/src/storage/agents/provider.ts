@@ -41,6 +41,8 @@ import type {
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  DeleteAgentContextCheckpointsAfterSeqInput,
+  DeleteAgentMessagesFromSeqInput,
   EnqueueAgentInboxItemInput,
   FinishAgentRunInput,
   ForkAgentThreadInput,
@@ -310,6 +312,30 @@ export interface AgentThreadForkPlan {
  * shows. The message Sixb writes to resume a paused turn carries only how its calls ended, which the
  * chat shows on their cards: it is not counted.
  */
+export function assertDeleteAgentMessagesFromSeqInput(
+  input: DeleteAgentMessagesFromSeqInput,
+  prefix = "Sixb"
+): void {
+  if (!Number.isSafeInteger(input.fromSeq) || input.fromSeq < 1) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent message 'fromSeq' must be a positive safe integer.`
+    )
+  }
+}
+
+export function assertDeleteAgentContextCheckpointsAfterSeqInput(
+  input: DeleteAgentContextCheckpointsAfterSeqInput,
+  prefix = "Sixb"
+): void {
+  if (!Number.isSafeInteger(input.afterSeq) || input.afterSeq < 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent context checkpoint 'afterSeq' must be a non-negative safe integer.`
+    )
+  }
+}
+
 export function countsAsThreadMessage(message: Pick<AgentMessageRecord, "parts">): boolean {
   return !(
     message.parts.length > 0 && message.parts.every((part) => part.type === "approval-outcome")

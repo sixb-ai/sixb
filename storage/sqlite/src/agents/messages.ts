@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite"
-import { countsAsThreadMessage } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  assertDeleteAgentMessagesFromSeqInput,
+  countsAsThreadMessage,
+} from "@sixb/core/internal/agent-run-storage-provider"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
@@ -7,6 +10,7 @@ import {
   AgentStorageError,
   type AppendAgentMessageInput,
   type DeleteAgentMessagesByRunInput,
+  type DeleteAgentMessagesFromSeqInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -153,6 +157,55 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         return 0
       }
       // The thread counts only the messages the conversation shows: take back the ones it counted.
+      const counted = deleted.filter((row) =>
+        countsAsThreadMessage({ parts: JSON.parse(row.parts) })
+      ).length
+
+      const updatedAt = new Date().toISOString()
+      this.db
+        .query(
+          `
+          UPDATE agent_threads
+          SET
+            message_count = MAX(message_count - ?, 0),
+            last_message_at = (
+              SELECT created_at FROM agent_messages
+              WHERE project_id = ? AND thread_id = ?
+              ORDER BY seq DESC
+              LIMIT 1
+            ),
+            updated_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(counted, input.projectId, input.threadId, updatedAt, input.projectId, input.threadId)
+
+      return deleted.length
+    })()
+  }
+
+  async deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number> {
+    assertDeleteAgentMessagesFromSeqInput(input, "SixbSqlite")
+
+    return this.db.transaction(() => {
+      const thread = this.db
+        .query("SELECT 1 AS present FROM agent_threads WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.threadId) as { present: number } | null
+
+      if (!thread) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const deleted = this.db
+        .query(
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND seq >= ? RETURNING parts"
+        )
+        .all(input.projectId, input.threadId, input.fromSeq) as { parts: string }[]
+      if (deleted.length === 0) return 0
+
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
       ).length

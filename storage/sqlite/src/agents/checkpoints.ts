@@ -5,12 +5,14 @@ import {
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertCreateAgentContextCheckpointInput,
+  assertDeleteAgentContextCheckpointsAfterSeqInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentContextCheckpointRecord,
   type AgentContextCheckpointStore,
   AgentStorageError,
   type CreateAgentContextCheckpointInput,
+  type DeleteAgentContextCheckpointsAfterSeqInput,
 } from "@sixb/core/storage"
 import {
   type AgentContextCheckpointRow,
@@ -150,6 +152,31 @@ export class SqliteAgentContextCheckpointStore implements AgentContextCheckpoint
     readonly threadId: string
   }): Promise<AgentContextCheckpointRecord | null> {
     return this.findLatest(input.projectId, input.threadId)
+  }
+
+  async deleteAfterSeq(input: DeleteAgentContextCheckpointsAfterSeqInput): Promise<number> {
+    assertDeleteAgentContextCheckpointsAfterSeqInput(input, "SixbSqlite")
+
+    return this.db.transaction(() => {
+      const rows = this.db
+        .query(
+          `
+            SELECT id FROM agent_context_checkpoints
+            WHERE project_id = ? AND thread_id = ? AND observed_head_seq > ?
+            ORDER BY summarized_through_seq DESC, created_at DESC, id DESC
+          `
+        )
+        .all(input.projectId, input.threadId, input.afterSeq) as { id: string }[]
+      if (rows.length === 0) return 0
+
+      const del = this.db.query(
+        "DELETE FROM agent_context_checkpoints WHERE project_id = ? AND id = ?"
+      )
+      for (const row of rows) {
+        del.run(input.projectId, row.id)
+      }
+      return rows.length
+    })()
   }
 
   async getByRunIds(input: {

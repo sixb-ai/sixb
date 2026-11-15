@@ -20,6 +20,8 @@ import {
   type MarkAgentApprovalsReportedInput,
   type RequestAgentApprovalInput,
   type RequestAgentApprovalResult,
+  type RewindAgentApprovalsInput,
+  type RewindAgentApprovalsResult,
   type SettleAgentApprovalsInput,
   type StopAgentApprovalsInput,
   type StopAgentApprovalsResult,
@@ -185,6 +187,48 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
     const cancelled = rows.filter((row) => row.was_pending).map(rowToApproval)
     const stopped = rows.filter((row) => row.newly_stopped).length
     return { cancelled: cancelled.sort(compareApprovals), stopped }
+  }
+
+  async rewind(input: RewindAgentApprovalsInput): Promise<RewindAgentApprovalsResult> {
+    const runIds = [...new Set(input.runIds)]
+    const clearedIds = [...new Set(input.clearedMessageIds ?? [])]
+    const cancelledAt = new Date(input.cancelledAt ?? new Date())
+
+    return runPgTransaction(this.sql, async (tx) => {
+      if (clearedIds.length > 0) {
+        await tx`
+          UPDATE agent_approvals
+          SET reported_in_message_id = NULL
+          WHERE project_id = ${input.projectId}
+            AND thread_id = ${input.threadId}
+            AND reported_in_message_id = ANY(${tx.array(clearedIds)}::text[])
+        `
+      }
+
+      if (runIds.length === 0) return { cancelled: [], deleted: 0 }
+
+      const removed = await tx<AgentApprovalRow[]>`
+        DELETE FROM agent_approvals
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND run_id = ANY(${tx.array(runIds)}::text[])
+        RETURNING *
+      `
+
+      const cancelled = removed
+        .filter((row) => row.status === "pending")
+        .map((row): AgentApprovalRecord => {
+          const parsed = rowToApproval(row)
+          return {
+            ...parsed,
+            status: "cancelled",
+            turnStoppedAt: parsed.turnStoppedAt ?? cancelledAt,
+          }
+        })
+        .sort(compareApprovals)
+
+      return { cancelled, deleted: removed.length }
+    })
   }
 
   async holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean> {

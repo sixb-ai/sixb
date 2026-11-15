@@ -643,6 +643,8 @@ export interface ListThreadSubagentsInput {
   readonly threadId: string
   readonly spawnKey?: string
   readonly finishReason?: AgentRunFinishReason
+  /** Only children spawned by turns whose trigger message is still in the thread. */
+  readonly retainedTurnsOnly?: boolean
   /** At most this many, 100 by default. */
   readonly limit?: number
 }
@@ -691,6 +693,13 @@ export interface AppendAgentMessageInput extends AgentMessage {
   readonly authorPrincipal?: Principal
   readonly createdAt?: Date
   readonly completedAt?: Date
+}
+
+export interface DeleteAgentMessagesFromSeqInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Delete every message whose per-thread sequence is greater than or equal to this boundary. */
+  readonly fromSeq: number
 }
 
 export interface DeleteAgentMessagesByRunInput {
@@ -871,8 +880,17 @@ export interface AgentMessageStore {
   append(input: AppendAgentMessageInput): Promise<AgentMessageRecord>
   /** Delete every message produced by one run and repair the thread's message stats. */
   deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number>
+  /** Delete every message at or after `fromSeq` and repair the thread's message stats. */
+  deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
+}
+
+export interface DeleteAgentContextCheckpointsAfterSeqInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Delete checkpoints whose observed head exceeds this retained sequence boundary. */
+  readonly afterSeq: number
 }
 
 export interface AgentContextCheckpointStore {
@@ -891,6 +909,8 @@ export interface AgentContextCheckpointStore {
     readonly projectId: string
     readonly threadId: string
   }): Promise<AgentContextCheckpointRecord | null>
+  /** Delete checkpoints that observed messages past `afterSeq`, newest first. */
+  deleteAfterSeq(input: DeleteAgentContextCheckpointsAfterSeqInput): Promise<number>
 }
 
 // ── agent_approvals — calls of the Agent that wait for whoever asked ───────────────────────────
@@ -1058,6 +1078,26 @@ export interface StopAgentApprovalsResult {
   readonly stopped: number
 }
 
+export interface RewindAgentApprovalsInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Conversation runs removed from the thread: their approvals leave with them. */
+  readonly runIds: readonly string[]
+  /**
+   * Message ids removed by the rewind: an earlier turn's approval reported in one becomes
+   * unreported again so the replacement message carries its outcome.
+   */
+  readonly clearedMessageIds?: readonly string[]
+  readonly cancelledAt?: Date
+}
+
+export interface RewindAgentApprovalsResult {
+  /** Pending approvals of the rewound runs, as `cancelled` records to announce. */
+  readonly cancelled: readonly AgentApprovalRecord[]
+  /** Total approvals deleted for the rewound runs. */
+  readonly deleted: number
+}
+
 /** Where a keyset listing resumes: after this approval, in the order approvals are listed. */
 export interface AgentApprovalCursor {
   readonly createdAt: Date
@@ -1124,6 +1164,11 @@ export interface AgentApprovalStore {
    * stopped: their turn never resumes on them.
    */
   stop(input: StopAgentApprovalsInput): Promise<StopAgentApprovalsResult>
+  /**
+   * Remove approvals belonging to rewound turns and unmark earlier turns' approvals whose
+   * reporting message was removed.
+   */
+  rewind(input: RewindAgentApprovalsInput): Promise<RewindAgentApprovalsResult>
   /** Mark the ones no message reported yet, and return their ids. */
   markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]>
   /**

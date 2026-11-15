@@ -72,6 +72,8 @@ import {
   CancelAgentRunResponseSchema,
   CreateAgentThreadBodySchema,
   CreateAgentThreadResponseSchema,
+  EditAgentMessageBodySchema,
+  EditAgentMessageResponseSchema,
   PostAgentMessageBodySchema,
   PostAgentMessageResponseSchema,
   RetryAgentRunResponseSchema,
@@ -382,12 +384,14 @@ export function handleAgentRouteError(
     // Core performs visibility checks before workspace state transitions.
     switch (error.code) {
       case "agent_not_found":
+      case "message_not_found":
       case "run_not_found":
       case "thread_not_found":
       case "approval_not_found":
         set.status = 404
         break
       case "active_run_exists":
+      case "message_not_editable":
       case "thread_not_conversation":
       case "run_not_retryable":
       case "run_not_active":
@@ -397,6 +401,7 @@ export function handleAgentRouteError(
         set.status = 409
         break
       case "authority_not_inheritable":
+      case "not_message_author":
       case "not_thread_owner":
       case "not_run_requester":
         set.status = 403
@@ -1192,6 +1197,62 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Withdraw a waiting agent thread message",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "withdrawAgentThreadInboxItem",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/agent-threads/:threadId/messages/:messageId/edit",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          const storage = host.storage.agents
+          if (!storage) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const parsed = EditAgentMessageBodySchema.parse(body)
+          const result = await sixb.agent.runs.editMessage({
+            threadId: params.threadId,
+            messageId: params.messageId,
+            text: parsed.text,
+            model: parsed.model,
+            reasoning: parsed.reasoning,
+            timeZone: parsed.timeZone,
+            locale: parsed.locale,
+            approvalMode: parsed.approvalMode,
+            attachments: parsed.attachments as readonly FileRef[] | undefined,
+            context: parsed.context,
+            nextMessageId: parsed.nextMessageId,
+          })
+
+          set.status = 202
+          return EditAgentMessageResponseSchema.parse({
+            run: serializeAgentRun(result.run),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentMessageFileContentParamsSchema,
+        body: EditAgentMessageBodySchema,
+        response: {
+          202: EditAgentMessageResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+          429: AiUsageLimitErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Edit an agent thread message and restart from that turn",
+          description:
+            "Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "editAgentThreadMessage",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }

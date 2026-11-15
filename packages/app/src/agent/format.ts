@@ -70,6 +70,58 @@ export function relativeTime(
   return null
 }
 
+/**
+ * Spoken relative age for a message's hover bar ("just now", "5 minutes ago", "3 days ago"),
+ * falling back to a short date after 30 days.
+ */
+export function formatMessageTimeAgo(
+  iso: string | undefined,
+  locale = "en",
+  justNow = en.contextMeter.justNow
+): string {
+  if (!iso) return ""
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ""
+
+  const diffSeconds = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (diffSeconds < 45) return justNow
+
+  try {
+    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "long" })
+    const minutes = Math.round(diffSeconds / 60)
+    if (minutes < 60) return rtf.format(-Math.max(1, minutes), "minute")
+    const hours = Math.round(minutes / 60)
+    if (hours < 24) return rtf.format(-Math.max(1, hours), "hour")
+    const days = Math.round(hours / 24)
+    if (days < 30) return rtf.format(-Math.max(1, days), "day")
+  } catch {
+    // Fall back to a calendar date if the runtime rejects the locale tag.
+  }
+
+  const date = new Date(then)
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleDateString(locale, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  })
+}
+
+/** Exact local timestamp for a message's tooltip, e.g. "Nov 14, 7:55 PM". */
+export function formatMessageTimestamp(iso: string | undefined, locale = "en"): string {
+  if (!iso) return ""
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
 /** A token count as a context meter shows it: `950`, `9.5k`, `38k`, `984k`, `1.2M`. */
 export function formatTokenCount(tokens: number, locale = "en"): string {
   const decimal = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 1 })
