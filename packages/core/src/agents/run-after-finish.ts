@@ -4,6 +4,7 @@ import { bindDurableAgentExecution } from "../execution/agent"
 import { isJsonObject } from "../json"
 import {
   AGENT_RUN_FAILURE_CODES,
+  type AgentInboxItemRecord,
   type AgentRunRecord,
   AgentStorageError,
   type SubagentRunRecord,
@@ -32,13 +33,51 @@ export async function afterAgentRunFinished(
         ? "has finished"
         : `was ${run.status}`
   await stopActiveChildren(host, run.id, `The parent Agent run ${ended}.`)
-  // A steer the turn never wrote waits again, whatever ended it.
-  await releaseInboxClaims(host, run)
+
+  // One read for both: a steer the turn never wrote waits again, whatever ended it, and what it
+  // leaves behind is what a turn that answered may start. Most turns end with an empty inbox, and
+  // then read nothing else and write nothing.
+  const inbox = await readInbox(host, run)
+  if (inbox?.claimed) await releaseInboxClaims(host, run)
   if (isAwaitingApprovalRun(run)) {
     await resumeDecidedTurn(host, run)
     return
   }
-  await startNextQueuedMessage(host, run)
+  if (!inbox || inbox.waiting.length === 0) return
+  await startNextQueuedMessage(host, run, inbox.waiting)
+}
+
+/**
+ * The thread's inbox as a finished turn leaves it: what it still holds claimed, and what a turn may
+ * start once those are released. Null when it cannot be read, which the repair pass catches up on.
+ */
+async function readInbox(
+  host: AgentRunSessionHost,
+  run: AgentRunRecord
+): Promise<{
+  readonly claimed: boolean
+  readonly waiting: readonly AgentInboxItemRecord[]
+} | null> {
+  try {
+    const items = await host.storage.agents.inbox.list({
+      projectId: host.projectId,
+      threadId: run.threadId,
+      includeClaimed: true,
+    })
+    const claimed = items.some((item) => item.claimedBy?.runId === run.id)
+    return {
+      claimed,
+      waiting: items.filter(
+        (item) => item.claimedBy === undefined || item.claimedBy.runId === run.id
+      ),
+    }
+  } catch (error) {
+    console.error(
+      `[Sixb] Could not read the inbox of Agent run '${run.id}'; repair retries it.`,
+      error
+    )
+    return null
+  }
 }
 
 /**
@@ -48,17 +87,10 @@ export async function afterAgentRunFinished(
  */
 async function startNextQueuedMessage(
   host: AgentRunSessionHost,
-  run: AgentRunRecord
+  run: AgentRunRecord,
+  waiting: readonly AgentInboxItemRecord[]
 ): Promise<void> {
   try {
-    // Read first: most turns end with nothing queued behind them, and then read nothing else.
-    const pending = await host.storage.agents.inbox.list({
-      projectId: host.projectId,
-      threadId: run.threadId,
-      includeClaimed: false,
-    })
-    if (pending.length === 0) return
-
     const execution = await host.storage.executions.getById({
       projectId: host.projectId,
       id: run.executionId,
@@ -66,12 +98,13 @@ async function startNextQueuedMessage(
     const requester = execution?.requestedBy
     if (!requester) return
 
+    // Only the turn's requester starts their own messages: a turn runs as its requester.
     const onlyImmediate = !(await turnAnsweredEveryMessage(host, run))
-    const waiting = pending.some(
+    const next = waiting.some(
       (item) =>
         (!onlyImmediate || item.immediate) && principalsEqual(item.authorPrincipal, requester)
     )
-    if (!waiting) return
+    if (!next) return
 
     const scope = await resolveAgentRunExecutionScope(
       { id: host.projectId, storage: host.storage, definitions: { security: host.security } },
