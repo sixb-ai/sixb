@@ -557,6 +557,41 @@ export function frameRuntime(): void {
     return next
   }
 
+  /**
+   * Collapses the whitespace in a text element's words as CSS showed it, in place: a browser lays
+   * out what takes typing as `pre-wrap`, where the line breaks and indents of its source would
+   * show. Each run is replaced on its own, from the end, so the caret the click placed stays where
+   * it was. What the reader types is merged into the source, which keeps its own whitespace.
+   */
+  const collapseSpaces = (element: Element) => {
+    // 4 is NodeFilter.SHOW_TEXT: text nodes alone.
+    const walker = document.createTreeWalker(element, 4)
+    const nodes: Text[] = []
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+    // At the start of the block, whitespace shows as nothing, as after a space.
+    let after = true
+    const runs: { node: Text; start: number; length: number; with: string }[] = []
+    for (const node of nodes) {
+      for (const run of node.data.matchAll(/[ \t\n\r\f]+|[^ \t\n\r\f]+/g)) {
+        const index = run.index ?? 0
+        if (!/^[ \t\n\r\f]/.test(run[0])) {
+          after = false
+          continue
+        }
+        const shown = after ? "" : " "
+        if (run[0] !== shown) runs.push({ node, start: index, length: run[0].length, with: shown })
+        after = true
+      }
+    }
+    // At its end, whitespace shows as nothing either.
+    const last = runs.at(-1)
+    if (last && last.with === " " && last.start + last.length === last.node.data.length) {
+      const trailing = nodes.slice(nodes.indexOf(last.node) + 1).every((node) => node.data === "")
+      if (trailing) last.with = ""
+    }
+    for (const run of runs.reverse()) run.node.replaceData(run.start, run.length, run.with)
+  }
+
   const stopTyping = () => {
     const element = typing
     if (!element) return
@@ -623,6 +658,12 @@ export function frameRuntime(): void {
       postPort({ event: "edit.select", params: { target, at } })
       if (typable && element instanceof HTMLElement && target.kind === "text") {
         typing = element
+        // Unless the page keeps its whitespace, as `pre`, `pre-wrap` and `break-spaces` do. Its
+        // words are still the source's, only spaced as they show: it still takes typing.
+        if (!/^(pre|pre-wrap|break-spaces)$/.test(getComputedStyle(element).whiteSpace)) {
+          collapseSpaces(element)
+          element.setAttribute(WORDS, wordsHash(element.textContent ?? ""))
+        }
         typedFrom = element.textContent ?? ""
         element.setAttribute("contenteditable", "plaintext-only")
         element.focus()

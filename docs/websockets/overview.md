@@ -120,8 +120,8 @@ React apps can use `useAgentRunStream` from `@sixb/client/hooks` instead of hand
 
 ## Live artifacts
 
-`/ws/artifacts` keeps a canvas's current version in step between everyone editing it. Each
-connection holds the version as a Yjs document and exchanges
+`/ws/artifacts` keeps the current version of a canvas, or a designed document, in step between
+everyone editing it. Each connection holds the version as a Yjs document and exchanges
 [y-protocols](https://github.com/yjs/y-protocols) sync and awareness messages, base64-encoded.
 
 | You send | |
