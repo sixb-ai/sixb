@@ -373,9 +373,15 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
         claim.authorization,
         async (executing, signal) => {
           if (definition.adapter.authentication.revoke && credentials) {
+            const connectedAccountIds = await this.accountsConnectedElsewhere(
+              definition.id,
+              claim.authorization.id
+            )
+
             await definition.adapter.authentication.revoke(
               this.adapterContext(definition.id, signal),
-              credentials
+              credentials,
+              { connectedAccountIds }
             )
           }
           return this.mutations.stageCredentialMutationRevocation(executing, signal)
@@ -590,6 +596,28 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
           )
       )
     )
+  }
+
+  /**
+   * The accounts another grant still keeps connected. A provider files some state under the
+   * account rather than the grant (a Graph subscription, for one), so the revoke hook leaves it
+   * to the connections still using it.
+   */
+  private async accountsConnectedElsewhere(
+    connectorId: string,
+    authorizationId: string
+  ): Promise<readonly string[]> {
+    const connections = await withConnectorStorageBoundary(
+      "Connector connections could not be read before revocation.",
+      () => this.storage.listConnections({ projectId: this.projectId, connectorId })
+    )
+
+    const accountIds = connections
+      .filter((connection) => connection.status === "connected")
+      .filter((connection) => connection.authorizationId !== authorizationId)
+      .map((connection) => connection.account.id)
+
+    return [...new Set(accountIds)].sort()
   }
 
   private adapterContext(connectorId: string, signal: AbortSignal) {

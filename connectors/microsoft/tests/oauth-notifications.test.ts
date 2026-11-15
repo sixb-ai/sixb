@@ -329,6 +329,20 @@ describe("revoking a person's connection", () => {
     expect(requests.every((r) => r.headers.get("authorization") === "Bearer token-ada")).toBe(true)
   })
 
+  // Countercheck: drop the connectedAccountIds check in deleteSubscriptionsOnRevoke; Ada's other
+  // slot loses the subscription it shares with this one.
+  test("keeps the subscriptions while the same account stays connected through another grant", async () => {
+    const requests = graph([{ id: "shared", creatorId: ADA, notificationUrl: ROUTE }])
+
+    await revoke(SECRET)?.(context, credentials(), { connectedAccountIds: [GRACE, ADA] })
+    expect(requests).toEqual([])
+
+    await revoke(SECRET)?.(context, credentials(), { connectedAccountIds: [GRACE] })
+    expect(
+      requests.filter((r) => r.method === "DELETE").map((r) => r.url.split("/").pop())
+    ).toEqual(["shared"])
+  })
+
   test("refreshes an expired token first, and needs no secret to have nothing to clean up", async () => {
     const requests = graph([{ id: "mine", creatorId: ADA, notificationUrl: ROUTE }])
     await revoke(SECRET)?.(context, credentials(new Date("2000-01-01")))

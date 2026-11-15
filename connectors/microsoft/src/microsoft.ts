@@ -81,9 +81,10 @@ function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuth
         ? authentication
         : {
             ...authentication,
-            revoke: (context, credentials) =>
+            revoke: (context, credentials, revocation) =>
               deleteSubscriptionsOnRevoke(context, credentials, {
                 accountId: () => discoverAccounts(context, credentials)[0]?.id,
+                connectedAccountIds: revocation?.connectedAccountIds ?? [],
                 refresh: authentication.refresh,
                 options,
                 timeoutMs,
@@ -124,12 +125,16 @@ function microsoftOAuth(options: MicrosoftOAuthConnectorOptions): MicrosoftOAuth
  * connector made for them can still go. Graph accepts only their own token for that, and Sixb is
  * about to drop it. Best effort: a subscription left behind expires within seven days, and until
  * then its notifications reach `onEvent` with no connections.
+ *
+ * Graph files a subscription under the person, not the grant. While the same account stays
+ * connected through another grant (a second slot), its subscriptions still serve that connection.
  */
 async function deleteSubscriptionsOnRevoke(
   context: ConnectorContext,
   credentials: ConnectorOAuthCredentials,
   using: {
     readonly accountId: () => string | undefined
+    readonly connectedAccountIds: readonly string[]
     readonly refresh: ConnectorOAuth2Authentication["refresh"]
     readonly options: MicrosoftOAuthConnectorOptions
     readonly timeoutMs: number
@@ -138,6 +143,8 @@ async function deleteSubscriptionsOnRevoke(
   try {
     const accountId = using.accountId()
     if (accountId === undefined) return
+    if (using.connectedAccountIds.includes(accountId)) return
+
     const { accessToken } =
       credentials.expiresAt === undefined || credentials.expiresAt.getTime() > Date.now() + 60_000
         ? credentials

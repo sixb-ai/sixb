@@ -27,12 +27,16 @@ type PersonalConnector = ReturnType<typeof createHarness>["connector"]
 const member = (id: User) => managementCommand(sessions[id], { principalId: id, manage: false })
 const manager = () => managementCommand("another-session", { principalId: "user-a" })
 
-/** One person authorizes with their own account and fills their own `default` slot. */
-async function connectOwn(harness: ReturnType<typeof createHarness>, userId: User) {
+/** One person authorizes with their own account and fills one of their slots. */
+async function connectOwn(
+  harness: ReturnType<typeof createHarness>,
+  userId: User,
+  slot = "default"
+) {
   const command = member(userId)
   const started = await harness.process.startAuthorization(command, connectorId, {
     owner: userOwner(userId),
-    slot: "default",
+    slot,
     redirectUri: callbackUrl,
   })
   const { authorizationId } = await harness.process.completeAuthorization(command, connectorId, {
@@ -44,7 +48,7 @@ async function connectOwn(harness: ReturnType<typeof createHarness>, userId: Use
     authorizationId,
     accountId: "account-a",
     owner: userOwner(userId),
-    slot: "default",
+    slot,
   })
 }
 
@@ -227,6 +231,22 @@ describe("personal connector connections", () => {
     expect(await harness.process.disconnect(member("user-a"), connectorId, ada.id)).toMatchObject({
       status: "disconnected",
     })
+  })
+
+  // Removal proof: pass an empty list from accountsConnectedElsewhere; the first revocation is
+  // told the account is gone, and Microsoft deletes the subscription the other slot still uses.
+  test("revoking one grant tells the connector which accounts other grants keep connected", async () => {
+    const harness = createHarness({ owners: ["user"] })
+    const work = await connectOwn(harness, "user-a", "work")
+    const home = await connectOwn(harness, "user-a", "default")
+
+    await harness.process.revokeConnection(member("user-a"), connectorId, work.id)
+    await harness.process.revokeConnection(member("user-a"), connectorId, home.id)
+
+    expect(harness.revocations()).toEqual([
+      { connectedAccountIds: ["account-a"] },
+      { connectedAccountIds: [] },
+    ])
   })
 
   test("a project-only connector still requires can.manage", async () => {

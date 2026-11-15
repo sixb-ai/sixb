@@ -18,6 +18,7 @@ export type {
   ConnectorDefinitionOptions,
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
+  ConnectorOAuthRevocation,
   ConnectorTokenSource,
   OAuthConnectorAdapter,
   OAuthConnectorAuthorizationContext,

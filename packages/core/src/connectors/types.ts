@@ -169,7 +169,20 @@ export interface ConnectorOAuth2Authentication {
    * Revokes the grant idempotently. An already revoked or invalid grant must resolve successfully
    * so Sixb can converge after losing an earlier provider response.
    */
-  revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
+  revoke?(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials,
+    revocation?: ConnectorOAuthRevocation
+  ): Promise<void> | void
+}
+
+/** What the connector still reaches once one grant is revoked. */
+export interface ConnectorOAuthRevocation {
+  /**
+   * Accounts still connected through another grant, such as the same account in a second slot.
+   * Provider state those accounts share with the revoked grant is still in use.
+   */
+  readonly connectedAccountIds: readonly string[]
 }
 
 export interface OAuthConnectorAdapter<TType extends string = string, TClient = unknown> {

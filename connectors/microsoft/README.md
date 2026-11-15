@@ -200,7 +200,8 @@ const subscription = await graph.mail.subscribe(connection.account.id, {
 - **Rotating `webhookSecret`** invalidates every existing subscription. Recreate them.
 - **When a person disconnects**, is revoked or is suspended, their subscriptions to this connector are
   deleted while their token still works. Any that remain expire within seven days, and their
-  notifications reach `onEvent` with no connections.
+  notifications reach `onEvent` with no connections. A subscription belongs to the account, so
+  while the same account stays connected in another slot, its subscriptions stay.
 
 ## Authentication
 
