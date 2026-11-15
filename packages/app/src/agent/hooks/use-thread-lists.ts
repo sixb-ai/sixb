@@ -36,10 +36,12 @@ const PENDING_APPROVALS_QUERY = { status: "pending" as const, limit: "200" }
  * thread's header counts and the threads page lists. One read for both, so opening the page from a
  * thread shows what the thread already had.
  */
-export function useAgentThreadLists(options: {
-  /** How often to read again while nothing announces changes; off by default. */
-  readonly refetchInterval?: number | false
-}) {
+export function useAgentThreadLists(
+  options: {
+    /** How often to read again while nothing announces changes; off by default. */
+    readonly refetchInterval?: number | false
+  } = {}
+) {
   const refetchInterval = options.refetchInterval ?? false
   const threadsQuery = useInfiniteQuery({
     ...listAgentThreadsInfiniteOptions({ query: THREAD_LIST_QUERY }),
