@@ -1453,6 +1453,7 @@ describe("bound Sixb surface", () => {
     expect(Object.keys(scoped.agent).sort()).toEqual([
       "approvals",
       "get",
+      "inbox",
       "memory",
       "observed",
       "preferences",
