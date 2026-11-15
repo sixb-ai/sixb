@@ -1,10 +1,12 @@
 import type { GitHubBodyFormatOptions } from "./attachments"
+import type { GitHubCommit } from "./commits"
 import type {
   GitHubPage,
   GitHubPaginationOptions,
   GitHubRequestOptions,
   GitHubUser,
 } from "./common"
+import type { GitHubDiffEntry } from "./diff"
 import type { GitHubLabel, GitHubMilestone } from "./issues"
 import type { GitHubRepository, GitHubSortDirection } from "./repos"
 import type { GitHubPullRequestStackPosition } from "./stacks"
@@ -39,6 +41,33 @@ export interface GitHubPullRequestBranch {
   readonly repo: GitHubRepository | null
 }
 
+/** A team asked to review a pull request. */
+export interface GitHubPullRequestRequestedTeam {
+  readonly id: number
+  readonly node_id: string
+  readonly name: string
+  /** What a review request takes, and what `teamReviewers` names. */
+  readonly slug: string
+  readonly description: string | null
+  readonly privacy: string
+  readonly notification_setting?: string
+  readonly html_url: string
+}
+
+/**
+ * GitHub's own verdict on merging a pull request: `clean` when it can be, `dirty` with a conflict,
+ * `blocked` by a rule, `behind` its base, `unstable` with a failing check, `draft` while it is one,
+ * and `unknown` while GitHub computes it.
+ */
+export type GitHubPullRequestMergeableState =
+  | "clean"
+  | "dirty"
+  | "blocked"
+  | "behind"
+  | "unstable"
+  | "draft"
+  | "unknown"
+
 export interface GitHubPullRequest {
   readonly id: number
   readonly node_id: string
@@ -57,6 +86,8 @@ export interface GitHubPullRequest {
   readonly labels: readonly GitHubLabel[]
   readonly assignees: readonly GitHubUser[]
   readonly requested_reviewers: readonly GitHubUser[]
+  /** Teams asked to review, by name and slug. */
+  readonly requested_teams: readonly GitHubPullRequestRequestedTeam[]
   readonly milestone: GitHubMilestone | null
   readonly head: GitHubPullRequestBranch
   readonly base: GitHubPullRequestBranch
@@ -80,6 +111,7 @@ export interface GitHubPullRequestDetail extends GitHubPullRequest {
   readonly merged: boolean
   /** `null` while GitHub is still computing it. */
   readonly mergeable: boolean | null
+  readonly mergeable_state: GitHubPullRequestMergeableState
   readonly merged_by: GitHubUser | null
   /** Conversation comments. */
   readonly comments: number
@@ -140,13 +172,23 @@ export interface CreatePullRequestReviewCommentInput {
 }
 
 export interface CreatePullRequestReviewInput {
-  readonly event: GitHubPullRequestReviewEvent
+  /**
+   * `APPROVE`, `REQUEST_CHANGES` or `COMMENT`. Leaving it out keeps the review pending, so comments
+   * can be added before it is submitted with `reviews.submit()`.
+   */
+  readonly event?: GitHubPullRequestReviewEvent
   /** The review's summary. GitHub requires it for `REQUEST_CHANGES` and `COMMENT`. */
   readonly body?: string
   /** The commit to review; GitHub uses the pull request's latest when empty. */
   readonly commitId?: string
   /** Inline comments to post with the review. */
   readonly comments?: readonly CreatePullRequestReviewCommentInput[]
+}
+
+export interface SubmitPullRequestReviewInput {
+  readonly event: GitHubPullRequestReviewEvent
+  /** The summary posted with the verdict, replacing the pending review's own. */
+  readonly body?: string
 }
 
 /** One inline comment on a pull request's diff. */
@@ -158,14 +200,23 @@ export interface GitHubPullRequestComment {
   readonly path: string
   /** The line in the file; `null` for a comment on the whole file. */
   readonly line: number | null
+  /** The first line of a comment spanning a range, or `null` for a single line. */
+  readonly start_line?: number | null
+  readonly original_start_line?: number | null
   readonly original_line: number | null
   readonly side: GitHubPullRequestCommentSide | null
+  readonly start_side?: GitHubPullRequestCommentSide | null
+  /** The line counted in the diff as the comment was left, which is how it keeps its place after a push. */
+  readonly position?: number
+  readonly original_position?: number
   /** The last lines of the hunk the comment sits on, as the diff shows them. */
   readonly diff_hunk: string
   readonly commit_id: string
   readonly original_commit_id: string
   /** The comment this one answers; empty for the first in a thread. */
   readonly in_reply_to_id?: number
+  /** The review it was posted with; `null` for a comment on its own. */
+  readonly pull_request_review_id: number | null
   readonly subject_type?: "line" | "file"
   /** `null` when the account was deleted. */
   readonly user: GitHubUser | null
@@ -175,9 +226,18 @@ export interface GitHubPullRequestComment {
   readonly pull_request_url: string
 }
 
+export interface ListPullRequestFilesOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions {}
+
+export interface ListPullRequestCommitsOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions {}
+
 export interface ListPullRequestCommentsOptions
   extends GitHubPaginationOptions,
-    GitHubRequestOptions {
+    GitHubRequestOptions,
+    GitHubBodyFormatOptions {
   readonly sort?: "created" | "updated"
   readonly direction?: GitHubSortDirection
   /** Only comments updated after this time, so a sync reads just what changed. */
@@ -202,6 +262,10 @@ export interface ReplyToPullRequestCommentInput {
   readonly body: string
 }
 
+export interface UpdatePullRequestCommentInput {
+  readonly body: string
+}
+
 export interface RepositoryPullRequestCommentsApi {
   /** List one page of a pull request's inline comments, oldest first. */
   list(
@@ -220,6 +284,13 @@ export interface RepositoryPullRequestCommentsApi {
     input: ReplyToPullRequestCommentInput,
     options?: GitHubRequestOptions
   ): Promise<GitHubPullRequestComment>
+  /** Edit a comment's body. Only its author, or someone with write access, may. */
+  update(
+    commentId: number,
+    input: UpdatePullRequestCommentInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestComment>
+  delete(commentId: number, options?: GitHubRequestOptions): Promise<void>
 }
 
 export interface CreatePullRequestInput {
@@ -305,6 +376,13 @@ export interface RepositoryPullRequestReviewsApi {
     input: CreatePullRequestReviewInput,
     options?: GitHubRequestOptions
   ): Promise<GitHubPullRequestReview>
+  /** Submit a review left pending by `create()` without an event. */
+  submit(
+    pullNumber: number,
+    reviewId: number,
+    input: SubmitPullRequestReviewInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubPullRequestReview>
 }
 
 export interface RepositoryPullRequestsApi {
@@ -313,6 +391,19 @@ export interface RepositoryPullRequestsApi {
   readonly comments: RepositoryPullRequestCommentsApi
   /** List one page of this repository's pull requests. */
   list(options?: ListPullRequestsOptions): Promise<GitHubPage<GitHubPullRequest>>
+  /**
+   * List one page of the files it changes, each with the patch GitHub renders, which is the diff a
+   * review reads. GitHub answers 3000 files at most, 30 a page unless `pageSize` says otherwise.
+   */
+  files(
+    pullNumber: number,
+    options?: ListPullRequestFilesOptions
+  ): Promise<GitHubPage<GitHubDiffEntry>>
+  /** List one page of the commits on the branch it comes from, oldest first. */
+  commits(
+    pullNumber: number,
+    options?: ListPullRequestCommitsOptions
+  ): Promise<GitHubPage<GitHubCommit>>
   get(pullNumber: number, options?: GetPullRequestOptions): Promise<GitHubPullRequestDetail>
   /** Open a pull request between two branches, or from an issue. */
   create(input: CreatePullRequestInput, options?: GitHubRequestOptions): Promise<GitHubPullRequest>

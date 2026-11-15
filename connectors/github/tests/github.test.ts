@@ -2115,3 +2115,101 @@ describe("reviews and inline comments", () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe("the diff a review reads", () => {
+  // Removal proof: read the pull request's commits for its files; each commit's patch is only that
+  // commit's change, and a file changed twice would appear twice.
+  test("lists the files a pull request changes, with each patch, a page at a time", async () => {
+    const file = {
+      sha: "blob-sha",
+      filename: "src/login.ts",
+      status: "modified",
+      additions: 2,
+      deletions: 1,
+      changes: 3,
+      blob_url: "https://github.com/acme/web/blob/abc/src/login.ts",
+      raw_url: "https://github.com/acme/web/raw/abc/src/login.ts",
+      contents_url: "https://api.github.com/repos/acme/web/contents/src/login.ts?ref=abc",
+      patch: "@@ -40,3 +40,4 @@\n const a = 1\n-const b = 2\n+const b = 3\n+const c = 4",
+    }
+    const calls = record((_, index) =>
+      index === 1
+        ? json([file], nextLink("https://api.github.com/repos/acme/web/pulls/7/files?page=2"))
+        : json([{ ...file, filename: "src/router.ts" }])
+    )
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    const first = await pulls.files(7, { pageSize: 100 })
+    const second = await pulls.files(7, { pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/files")
+    expect(calls[0]?.url.searchParams.get("per_page")).toBe("100")
+    expect(first).toMatchObject({ items: [file], hasMore: true })
+    expect(second).toMatchObject({ items: [{ filename: "src/router.ts" }], hasMore: false })
+  })
+
+  // GitHub leaves `patch` out for a binary file, so a caller has to be able to see that it is gone.
+  test("keeps a file whose patch GitHub left out, and its previous name", async () => {
+    const calls = record(() =>
+      json([
+        { sha: "s", filename: "logo.png", status: "added", additions: 0, deletions: 0, changes: 0 },
+        { sha: "s", filename: "src/app.ts", status: "renamed", previous_filename: "src/main.ts" },
+      ])
+    )
+
+    const page = await (await connect()).repo(webRepo).pulls.files(7)
+
+    expect(page.items[0]?.patch).toBeUndefined()
+    expect(page.items[0]?.status).toBe("added")
+    expect(page.items[1]?.previous_filename).toBe("src/main.ts")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("lists a pull request's commits, oldest first", async () => {
+    const calls = record(() => json([{ sha: "abc", commit: { message: "Fix" } }]))
+
+    const page = await (await connect()).repo(webRepo).pulls.commits(7, { pageSize: 50 })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/commits")
+    expect(calls[0]?.url.searchParams.get("per_page")).toBe("50")
+    expect(page.items[0]?.sha).toBe("abc")
+  })
+
+  test("reads where a comment sits in the diff, and the review it came with", async () => {
+    record(() =>
+      json([
+        {
+          id: 5,
+          path: "src/login.ts",
+          line: null,
+          original_line: 42,
+          side: "RIGHT",
+          start_line: 40,
+          position: 3,
+          original_position: 3,
+          in_reply_to_id: 4,
+          pull_request_review_id: 11,
+          diff_hunk: "@@ -40,3 +40,4 @@",
+        },
+      ])
+    )
+
+    const page = await (await connect()).repo(webRepo).pulls.comments.list(7)
+
+    expect(page.items[0]).toMatchObject({
+      original_line: 42,
+      start_line: 40,
+      position: 3,
+      pull_request_review_id: 11,
+      in_reply_to_id: 4,
+    })
+  })
+
+  test("asks for a comment's body in the requested format", async () => {
+    const calls = record(() => json([]))
+
+    await (await connect()).repo(webRepo).pulls.comments.list(7, { bodyFormat: "html" })
+
+    expect(calls[0]?.headers.get("accept")).toBe("application/vnd.github.html+json")
+  })
+})

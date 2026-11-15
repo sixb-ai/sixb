@@ -69,6 +69,7 @@ export type {
   GitHubRequestOptions,
   GitHubUser,
 } from "./common"
+export type { GitHubDiffEntry, GitHubDiffStatus } from "./diff"
 export type {
   CreateIssueCommentInput,
   GitHubIssueComment,
@@ -144,15 +145,19 @@ export type {
   GitHubPullRequestComment,
   GitHubPullRequestCommentSide,
   GitHubPullRequestDetail,
+  GitHubPullRequestMergeableState,
   GitHubPullRequestMergeMethod,
   GitHubPullRequestMergeRefusal,
   GitHubPullRequestMergeResult,
+  GitHubPullRequestRequestedTeam,
   GitHubPullRequestReview,
   GitHubPullRequestReviewEvent,
   GitHubPullRequestReviewState,
   GitHubPullRequestSort,
   GitHubPullRequestState,
   ListPullRequestCommentsOptions,
+  ListPullRequestCommitsOptions,
+  ListPullRequestFilesOptions,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
   MergePullRequestInput,
@@ -161,6 +166,8 @@ export type {
   RepositoryPullRequestReviewsApi,
   RepositoryPullRequestsApi,
   RequestReviewersInput,
+  SubmitPullRequestReviewInput,
+  UpdatePullRequestCommentInput,
 } from "./pulls"
 export type {
   CreateReleaseInput,

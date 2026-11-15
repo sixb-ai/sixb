@@ -6,7 +6,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name, create one from a branch, tag or commit, delete one
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
 - **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
-- **Pull requests** — list a repository's pull requests, get one with its merge state and size, merge one, review it, and read or write the inline comments on its diff
+- **Pull requests** — list a repository's pull requests, get one with its merge state and size, read the files it changes with their patches and the commits on its branch, merge one, review it, and read or write the inline comments on its diff
 - **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
@@ -161,6 +161,8 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).pulls.create()` | `POST /repos/{owner}/{repo}/pulls`         |
 | `gh.repo({ owner, repo }).pulls.requestReviewers(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` |
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
+| `gh.repo({ owner, repo }).pulls.files(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/files` |
+| `gh.repo({ owner, repo }).pulls.commits(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/commits` |
 | `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
 | `gh.repo({ owner, repo }).pulls.reviews.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews` |
@@ -337,7 +339,10 @@ Pull request calls accept a `signal` to abort the request. `pulls.list()` return
 requests unless `state` is `closed` or `all`; filter by `head` (`owner:branch`) or `base`, and
 sort by `created`, `updated`, `popularity` or `long-running`. A merged pull request is `closed`
 with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while GitHub computes it),
-`merged_by`, comment and commit counts, and line and file counts. `pulls.reviews.list()` returns
+`merged_by`, comment and commit counts, and line and file counts. `mergeable_state` is GitHub's own
+verdict: `clean`, `dirty` for a conflict, `blocked` by a rule, `behind` its base, `unstable` with a
+failing check, `draft`, or `unknown` while it computes. `requested_reviewers` names the people asked
+to review and `requested_teams` the teams. `pulls.reviews.list()` returns
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
@@ -358,12 +363,29 @@ await repo.pulls.reviews.create(1086, {
 ```
 
 **Inline comments.** `pulls.comments.list(number)` returns the comments on the diff, with the
-`path` and `line` each is on, the `diff_hunk` it quotes, the `commit_id` it was left on and
-`in_reply_to_id` for a thread's answers; `since` narrows it to what changed, `sort` and `direction`
-order it. `pulls.comments.create(number, { path, body })` comments on a line outside a review, and
+`path` and `line` each is on and the `side` that line counts on (`RIGHT` for the file as changed,
+`LEFT` for it as it was), `start_line` when it spans a range, the `diff_hunk` it quotes, the
+`commit_id` it was left on, `in_reply_to_id` for a thread's answers and `pull_request_review_id` for
+the review it was posted with. `position` and `original_position` count the line in the diff as it
+was left, which is how an outdated comment keeps its place after a push. `since` narrows the list to
+what changed, `sort` and `direction` order it, and `bodyFormat` asks for the body as GitHub rendered
+it. `pulls.comments.create(number, { path, body })` comments on a line outside a review, and
 needs `line` with an optional `side` (`RIGHT`, the file as changed, by default) or `position`, a
 line counted in the diff. `pulls.comments.reply(commentId, { body })` answers a comment in its
 thread.
+
+**Reading the diff.** `pulls.files(number)` returns the files the pull request changes, each with
+its `status` (`added`, `removed`, `modified`, `renamed`, `copied`, `changed` or `unchanged`), its
+`additions`, `deletions` and `changes`, the `previous_filename` of a rename, and `patch`: the
+unified diff with its hunk headers, which is what a review reads. GitHub leaves `patch` out when it
+will not render one, as it does for a binary file, so read the file itself then. One response holds
+3000 files at most, 30 a page unless `pageSize` says otherwise. `pulls.commits(number)` lists the
+commits on its branch, oldest first.
+
+```ts
+const files = await repo.pulls.files(1086, { pageSize: 100 })
+const changed = files.items.filter((file) => file.status !== "unchanged")
+```
 
 **Opening one.** `pulls.create({ title, head, base })` opens a pull request from `head` into
 `base`, with `body`, `draft`, `maintainerCanModify` and `issue` to turn an issue into one.

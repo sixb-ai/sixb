@@ -6,12 +6,15 @@ import {
   GitHubApiError,
   pathId,
   readJson,
+  readNoContent,
   readPage,
   repositoryPath,
   resolvePagePath,
   withQuery,
 } from "../http"
+import type { GitHubCommit } from "../types/commits"
 import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
+import type { GitHubDiffEntry } from "../types/diff"
 import type {
   CreatePullRequestCommentInput,
   CreatePullRequestInput,
@@ -25,6 +28,8 @@ import type {
   GitHubPullRequestReview,
   GitHubPullRequestReviewEvent,
   ListPullRequestCommentsOptions,
+  ListPullRequestCommitsOptions,
+  ListPullRequestFilesOptions,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
   MergePullRequestInput,
@@ -32,6 +37,8 @@ import type {
   RepositoryPullRequestCommentsApi,
   RepositoryPullRequestsApi,
   RequestReviewersInput,
+  SubmitPullRequestReviewInput,
+  UpdatePullRequestCommentInput,
 } from "../types/pulls"
 
 export function createRepositoryPullRequestsApi(
@@ -70,6 +77,23 @@ export function createRepositoryPullRequestsApi(
           })
         )
       },
+
+      async submit(
+        pullNumber: number,
+        reviewId: number,
+        input: SubmitPullRequestReviewInput,
+        options?: GitHubRequestOptions
+      ): Promise<GitHubPullRequestReview> {
+        // A pending review is submitted with a verdict: GitHub answers 422 without one.
+        assertReviewEvent(input.event)
+        return readJson<GitHubPullRequestReview>(
+          await context.http.post(
+            `${reviewPath(pullPath(pullNumber), reviewId)}/events`,
+            { event: input.event, body: input.body },
+            { signal: options?.signal }
+          )
+        )
+      },
     },
 
     comments: createRepositoryPullRequestCommentsApi(context, target),
@@ -87,6 +111,36 @@ export function createRepositoryPullRequestsApi(
           headers: bodyFormatHeaders(options?.bodyFormat),
           signal: options?.signal,
         }),
+        context.apiBaseUrl
+      )
+    },
+
+    async files(
+      pullNumber: number,
+      options?: ListPullRequestFilesOptions
+    ): Promise<GitHubPage<GitHubDiffEntry>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      return readPage<GitHubDiffEntry>(
+        await context.http.get(
+          resolvePagePath(withQuery(`${pullPath(pullNumber)}/files`, params), options),
+          { signal: options?.signal }
+        ),
+        context.apiBaseUrl
+      )
+    },
+
+    async commits(
+      pullNumber: number,
+      options?: ListPullRequestCommitsOptions
+    ): Promise<GitHubPage<GitHubCommit>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      return readPage<GitHubCommit>(
+        await context.http.get(
+          resolvePagePath(withQuery(`${pullPath(pullNumber)}/commits`, params), options),
+          { signal: options?.signal }
+        ),
         context.apiBaseUrl
       )
     },
@@ -155,6 +209,10 @@ export function createRepositoryPullRequestsApi(
   }
 }
 
+function reviewPath(pullsPath: string, reviewId: number): string {
+  return `${pullsPath}/reviews/${pathId(reviewId, "reviewId")}`
+}
+
 /** The part of a comment that says where it goes. */
 type CommentTarget = Pick<CreatePullRequestCommentInput, "path" | "body" | "line" | "position">
 
@@ -169,11 +227,18 @@ const REVIEW_EVENTS: readonly GitHubPullRequestReviewEvent[] = [
  * it requires, and an inline comment without the line it is on all come back as a bare 422.
  */
 function assertReviewInput(input: CreatePullRequestReviewInput): void {
-  if (!REVIEW_EVENTS.includes(input.event)) {
+  // No event keeps the review pending, which GitHub accepts, so only a verdict it knows is checked.
+  if (input.event !== undefined) assertReviewEvent(input.event)
+  if (input.event !== undefined && input.event !== "APPROVE") {
+    assertNonEmpty(input.body ?? "", "body")
+  }
+  for (const comment of input.comments ?? []) assertCommentTarget(comment)
+}
+
+function assertReviewEvent(event: GitHubPullRequestReviewEvent): void {
+  if (!REVIEW_EVENTS.includes(event)) {
     throw new Error(`[SixbGitHub] event must be one of ${REVIEW_EVENTS.join(", ")}.`)
   }
-  if (input.event !== "APPROVE") assertNonEmpty(input.body ?? "", "body")
-  for (const comment of input.comments ?? []) assertCommentTarget(comment)
 }
 
 /** GitHub takes a comment on a line, counted in the file or in the diff, and nowhere else. */
@@ -277,6 +342,7 @@ function createRepositoryPullRequestCommentsApi(
         await context.http.get(
           resolvePagePath(withQuery(commentsPath(pullNumber), params), options),
           {
+            headers: bodyFormatHeaders(options?.bodyFormat),
             signal: options?.signal,
           }
         ),
@@ -320,6 +386,30 @@ function createRepositoryPullRequestCommentsApi(
           { body: input.body },
           { signal: options?.signal }
         )
+      )
+    },
+
+    async update(
+      commentId: number,
+      input: UpdatePullRequestCommentInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubPullRequestComment> {
+      assertNonEmpty(input.body, "body")
+      return readJson<GitHubPullRequestComment>(
+        await context.http.request(`${repo}/pulls/comments/${pathId(commentId, "commentId")}`, {
+          method: "PATCH",
+          body: { body: input.body },
+          signal: options?.signal,
+        })
+      )
+    },
+
+    async delete(commentId: number, options?: GitHubRequestOptions): Promise<void> {
+      return readNoContent(
+        await context.http.request(`${repo}/pulls/comments/${pathId(commentId, "commentId")}`, {
+          method: "DELETE",
+          signal: options?.signal,
+        })
       )
     },
   }

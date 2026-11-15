@@ -4,6 +4,7 @@ import type {
   GitHubRequestOptions,
   GitHubUser,
 } from "./common"
+import type { GitHubDiffEntry } from "./diff"
 
 export interface ListCommitsOptions extends GitHubPaginationOptions, GitHubRequestOptions {
   /** A branch name or commit SHA to list from. Defaults to the default branch. */
@@ -50,17 +51,8 @@ export interface GitHubCommit {
   readonly parents: readonly GitHubCommitParent[]
 }
 
-export interface GitHubCommitFile {
-  readonly filename: string
-  readonly status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged"
-  readonly additions: number
-  readonly deletions: number
-  readonly changes: number
-  /** Absent for binary files and very large diffs. */
-  readonly patch?: string
-  /** Set when the file was renamed. */
-  readonly previous_filename?: string
-}
+/** A file a commit changes: the same diff entry a pull request and a comparison describe. */
+export type GitHubCommitFile = GitHubDiffEntry
 
 /** A commit as `commits.get()` returns it, with its size and changed files. */
 export interface GitHubCommitDetail extends GitHubCommit {
