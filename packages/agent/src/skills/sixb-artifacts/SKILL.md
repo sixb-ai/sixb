@@ -76,8 +76,8 @@ publish_artifact({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 oper
 ```
 
 An entry with `"edited": true` was last written outside this conversation: most often a person's
-edit in the app, such as a sheet's cells or columns or a canvas's notes and layout, but also
-another conversation or the project's code. Start from it as it is, and keep its changes in yours
+edit in the app, such as a sheet's cells or columns, a canvas's notes and layout, or a document's
+blocks, designed or not, but also another conversation or the project's code. Start from it as it is, and keep its changes in yours
 unless the user asks you to undo them; say what you built on when you reply.
 
 When others changed a canvas or a document while you worked, the update merges your changes with

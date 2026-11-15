@@ -5,6 +5,7 @@ import { artifactRef, defineObjectType, link, prop, ref, SixbHost } from "../src
 import { writeLiveArtifact } from "../src/artifacts/execution"
 import { documentFiles, LIVE_FILES } from "../src/artifacts/live/document"
 import { storeLiveFiles } from "../src/artifacts/live/files"
+import { isPageEntry, PAGE_BODY } from "../src/artifacts/live/page"
 import { loadArtifactDocument } from "../src/artifacts/live/state"
 import { documentPdfKey } from "../src/artifacts/publish/pdf"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -146,8 +147,9 @@ async function expectLive(fixture: ReturnType<typeof setup>, artifactId: string,
   if (!job?.payload.document) throw new Error("Expected the document it prints.")
   const printed = await fixture.text(job.payload.document)
   expect(printed).toContain("<h1>Harbor Marine</h1>")
-  // One item, as the list holds: the frozen version's copy is copied, not kept beside it.
-  expect(printed).toContain("<ul><li><span>Harbor Marine</span></li></ul><p>Signed.</p>")
+  // One item, as the list holds: the frozen version's copy is copied, not kept beside it. An
+  // editor spaces the paragraph it adds as its neighbors.
+  expect(printed).toMatch(/<ul><li><span>Harbor Marine<\/span><\/li><\/ul>\s*<p>Signed\.<\/p>/)
 }
 
 const refused = (promise: Promise<unknown>) => promise.catch((error: unknown) => error)
@@ -331,9 +333,16 @@ describe("a designed document's live data", () => {
     const stored = await fixture.storage.artifacts?.get({ projectId, id: artifact.id })
     if (!stored) throw new Error("Expected the artifact.")
     const doc = await loadArtifactDocument(fixture.blobStorage, stored, frozen.files)
-    const text = doc.getMap<unknown>(LIVE_FILES).get("document.html")
-    if (!(text instanceof Y.Text)) throw new Error("Expected document.html as text.")
-    text.insert(text.toString().indexOf("</ul>") + "</ul>".length, "<p>Signed.</p>")
+    const page = doc.getMap<unknown>(LIVE_FILES).get("document.html")
+    if (!isPageEntry(page)) throw new Error("Expected document.html held as a page.")
+
+    // Its fields are blocks kept whole; a paragraph is added after the list, as its editor adds one.
+    const body = page.get(PAGE_BODY) as Y.XmlFragment
+    const signed = new Y.XmlElement("textBlock")
+    signed.setAttribute("tag", "p")
+    signed.insert(0, [new Y.XmlText("Signed.")])
+    body.insert(body.length, [signed])
+
     const wrote = await writeLiveArtifact(fixture.as("alice").artifacts, artifact.id, {
       title: "Proposal",
       baseTitle: "Proposal",
