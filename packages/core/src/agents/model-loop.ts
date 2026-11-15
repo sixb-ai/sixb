@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto"
+import { withFailureMessage } from "../errors/failure-message"
+import { createSixbError } from "../errors/internal"
 import {
   assertJsonObject,
   assertJsonValue,
@@ -34,6 +36,7 @@ import type {
 } from "../models/messages"
 import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
+import { SandboxNotRunningError } from "../sandboxes/errors"
 import { coerceToolInput } from "./tool-input-coercion"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -381,12 +384,18 @@ export async function runModelLoop(
       return { status: "completed", output, steps, finishReason: response.finishReason }
     }
 
+    const sandbox: { stopped?: SandboxNotRunningError } = {}
     const toolResults = await Promise.all(
-      localCalls.map((call) => executeToolCall(call, tools, callId, input.signal, input.onEvent))
+      localCalls.map((call) =>
+        executeToolCall(call, tools, callId, input.signal, input.onEvent, sandbox)
+      )
     )
     const step = modelStep(response, responseId, [...response.content, ...toolResults], cost)
     steps.push(step)
     await input.onStepEnd?.(step)
+    // A stopped sandbox runs nothing more: the turn ends here, its failed call recorded, instead of
+    // the model retrying in it.
+    if (sandbox.stopped) throw sandboxStoppedError(sandbox.stopped)
 
     if (input.signal.aborted) {
       return {
@@ -427,6 +436,21 @@ export async function runModelLoop(
   }
 
   throw new ModelStreamError("[SixbModels] Model loop exited without a terminal result.")
+}
+
+/** Why a run whose sandbox stopped ends, as its run and the person read it. */
+export const SANDBOX_STOPPED_MESSAGE =
+  "The sandbox stopped, so this turn ended here. Its work so far is kept: send a message to go on."
+
+function sandboxStoppedError(cause: SandboxNotRunningError): Error {
+  return withFailureMessage(
+    createSixbError(
+      "agent.execution_failed",
+      "[SixbModels] The run's sandbox stopped; nothing more can run in it.",
+      { cause }
+    ),
+    SANDBOX_STOPPED_MESSAGE
+  )
 }
 
 /**
@@ -616,7 +640,9 @@ async function executeToolCall(
   tools: ReadonlyMap<string, ModelTool>,
   callId: string,
   signal: AbortSignal,
-  onEvent: RunModelLoopInput["onEvent"]
+  onEvent: RunModelLoopInput["onEvent"],
+  /** Where a call that found its sandbox stopped leaves that, for the loop to end after the step. */
+  sandbox: { stopped?: SandboxNotRunningError }
 ): Promise<ModelToolResultPart> {
   const { part } = call
   if (call.inputError) {
@@ -682,6 +708,7 @@ async function executeToolCall(
       toolName: part.toolName,
       errorText,
     })
+    if (error instanceof SandboxNotRunningError) sandbox.stopped ??= error
     return toolErrorResult(part, errorText)
   }
   // Publication failures belong to the caller, not the tool's recoverable error channel.

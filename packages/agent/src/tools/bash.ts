@@ -1,7 +1,8 @@
-import { AgentToolPublicError, type CommandResult } from "@sixb/core"
+import type { CommandResult } from "@sixb/core"
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import type { BackgroundCommandState, BackgroundCommands } from "../background-commands"
 import { loginShellArgs } from "../login-shell"
+import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 /** Long enough for a build or a test suite; the model asks for more when it expects longer. */
@@ -100,8 +101,7 @@ export function createBashTool(
       return output as unknown as JsonValue
     },
     // A background start says why it refused, such as too many running already.
-    errorText: (error) =>
-      error instanceof AgentToolPublicError ? error.message : "The command failed.",
+    errorText: (error) => agentToolErrorText(error, "The command failed."),
   }
 }
 

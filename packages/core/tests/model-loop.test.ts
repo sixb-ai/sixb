@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
-import { runModelLoop } from "../src/agents/model-loop"
+import { runModelLoop, SANDBOX_STOPPED_MESSAGE } from "../src/agents/model-loop"
+import { captureSixbFailure } from "../src/errors/internal"
 import type {
   LanguageModelRequest,
   LanguageModelStreamEvent,
@@ -13,6 +14,8 @@ import type {
 import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
 import { ModelUsageRecordingError } from "../src/models/execution/errors"
 import { MODEL_CALL_IDLE_MS, reportModelCalls } from "../src/models/language-call"
+import { SandboxNotRunningError } from "../src/sandboxes/errors"
+import { AGENT_RUN_FAILURE_CODES } from "../src/storage"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const USAGE = {
@@ -458,6 +461,72 @@ describe("runModelLoop", () => {
     expect(chunks.filter((chunk) => chunk.type.startsWith("tool-output-"))).toEqual([
       { type: "tool-output-error", toolCallId: "echo-1", toolName: "echo", errorText },
     ])
+  })
+
+  // A sandbox its provider stopped, at its session's time limit for one, runs nothing more: the
+  // model once retried `echo` thirty times in a dead one. Removal proof: drop the
+  // SandboxNotRunningError rethrow in executeToolCall; the loop calls the model again.
+  test("ends the loop when a tool finds its sandbox stopped, after recording the failed call", async () => {
+    let calls = 0
+    const chunks: ModelUiChunk[] = []
+    const recorded: string[][] = []
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls++
+        return streamFromArray([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `echo-${calls}`,
+            toolName: "echo",
+            input: '{"value":"ok"}',
+          },
+          finish("tool-calls"),
+        ])
+      },
+    })
+
+    const ended = await runModelLoop({
+      model,
+      messages: [],
+      tools: [
+        {
+          ...echo,
+          async execute() {
+            throw new SandboxNotRunningError(
+              "[Sandbox] sandbox s stopped: Vercel ended its session."
+            )
+          },
+          errorText: () => "The sandbox stopped.",
+        },
+      ],
+      maxSteps: 5,
+      signal: new AbortController().signal,
+      onEvent(chunk) {
+        chunks.push(chunk)
+      },
+      onStepEnd(step) {
+        recorded.push(step.content.map((part) => part.type))
+      },
+    }).catch((error: unknown) => error)
+
+    expect(calls).toBe(1)
+    // The step that found the sandbox stopped is recorded before the loop ends.
+    expect(recorded).toEqual([["tool-call", "tool-result"]])
+    expect(chunks.filter((chunk) => chunk.type === "tool-output-error")).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "echo-1",
+        toolName: "echo",
+        errorText: "The sandbox stopped.",
+      },
+    ])
+    expect(
+      captureSixbFailure(ended, {
+        allowedCodes: AGENT_RUN_FAILURE_CODES,
+        defaultCode: "agent.execution_failed",
+      }).message
+    ).toContain(SANDBOX_STOPPED_MESSAGE)
   })
 
   // Regression proof: remove the finishReason guard before structured-output parsing.

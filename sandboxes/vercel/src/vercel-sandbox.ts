@@ -10,7 +10,7 @@ import {
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
-import type { NetworkPolicy } from "@vercel/sandbox"
+import { APIError, type NetworkPolicy } from "@vercel/sandbox"
 import { withRequestCredentials } from "./network"
 
 const DEFAULT_WORKING_DIRECTORY = "/vercel/sandbox"
@@ -174,6 +174,7 @@ export class VercelSandbox implements Sandbox {
         ...(timeoutMs !== undefined && timeoutMs > 0 ? { timeoutMs } : {}),
       })
     } catch (error) {
+      if (isSessionStopped(error)) throw this.sessionStopped()
       throw new SandboxError(
         `[Sandbox] vercel runCommand failed for ${this.id}: ${errorMessage(error)}`
       )
@@ -248,6 +249,7 @@ export class VercelSandbox implements Sandbox {
       }
     } catch (error) {
       if (timedOut || aborted) return killedResult()
+      if (isSessionStopped(error)) throw this.sessionStopped()
 
       throw new SandboxError(
         `[Sandbox] vercel command failed for ${this.id}: ${errorMessage(error)}`
@@ -298,6 +300,7 @@ export class VercelSandbox implements Sandbox {
     try {
       await this.client.writeFiles(mapped)
     } catch (error) {
+      if (isSessionStopped(error)) throw this.sessionStopped()
       throw new SandboxError(
         `[Sandbox] vercel writeFiles failed for ${this.id}: ${errorMessage(error)}`
       )
@@ -352,6 +355,18 @@ export class VercelSandbox implements Sandbox {
     }
   }
 
+  /**
+   * Vercel ended this sandbox's session, at its time limit for one: nothing more runs in it, and a
+   * persistent sandbox already saved its files as the session stopped. Its handle stops with it.
+   */
+  private sessionStopped(): SandboxNotRunningError {
+    this.currentStatus = "stopped"
+    this.inFlight.clear()
+    return new SandboxNotRunningError(
+      `[Sandbox] sandbox ${this.id} stopped: Vercel ended its session.`
+    )
+  }
+
   private assertRunning(action: string): void {
     const status = this.status
     if (status !== "running") {
@@ -377,6 +392,22 @@ function normalizeWorkingDirectory(value: string | undefined): string {
 }
 
 const GIVEN_UP = Symbol("given up")
+
+/** Vercel's answer once a sandbox's session has ended: HTTP 410 with code `sandbox_stopped`. */
+function isSessionStopped(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.response.status !== 410) return false
+  const data: unknown = error.json
+  const code =
+    typeof data === "object" &&
+    data !== null &&
+    "error" in data &&
+    typeof data.error === "object" &&
+    data.error !== null &&
+    "code" in data.error
+      ? data.error.code
+      : undefined
+  return code === "sandbox_stopped"
+}
 
 function normalizeExitCode(exitCode: number | null | undefined, killed: boolean): number {
   if (typeof exitCode === "number") {

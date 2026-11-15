@@ -119,6 +119,7 @@ import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   exec,
   initializeSandboxEnvironment,
+  SandboxNotRunningError,
   SandboxStateUnavailableError,
   sandboxConfig,
 } from "@sixb/core/sandboxes"
@@ -3869,6 +3870,71 @@ describe("AgentWorker", () => {
       name: blocked!.name,
       status: "ready",
     })
+  })
+
+  // The provider stopped the sandbox mid-turn, at its session's time limit for one. The model once
+  // retried `echo` thirty times in a dead sandbox, and the turn still read succeeded. Removal
+  // proof: drop the SandboxNotRunningError rethrow in the model loop; the model is called again.
+  test("ends a turn whose sandbox stopped, saying so, without calling the model again", async () => {
+    const sandbox = new RecordingSandbox("stopped-mid-turn")
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (args.some((arg) => arg.includes("npm test"))) {
+        sandbox.status = "stopped"
+        throw new SandboxNotRunningError("[Sandbox] sandbox stopped-mid-turn stopped.")
+      }
+      return runCommand(command, args, options)
+    }
+    let modelCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        modelCalls++
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: `bash-${modelCalls}`,
+            toolName: "bash",
+            input: JSON.stringify({ command: "npm test" }),
+          },
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const host = buildSixb(model, new InMemoryBroker(), {
+      supportsRequestCredentials: true,
+      create: async () => sandbox,
+    })
+    attachSixbErrorReporter(host, () => {})
+    const requested = await requestAgent(host, { text: "Run the tests" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+
+    expect(modelCalls).toBe(1)
+    const run = await agentStorageOf(host).runs.getById({
+      projectId: PROJECT_ID,
+      id: requested.run.id,
+    })
+    expect(run).toMatchObject({ status: "failed", error: { code: "agent.execution_failed" } })
+    expect(run?.error?.message).toContain("The sandbox stopped")
+    const messages = await listMessages(agentStorageOf(host), requested.run.threadId)
+    const parts = messages.flatMap((message) => (message.role === "assistant" ? message.parts : []))
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: "tool-call",
+        toolName: "bash",
+        state: "output-error",
+        errorText: "The sandbox stopped: commands and files are no longer available in it.",
+      })
+    )
   })
 
   // SixbHost rejects such sandboxes at construction. A worker host is structural, so the worker

@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from "bun:test"
-import { SandboxNotRunningError } from "@sixb/core"
+import { SandboxError, SandboxNotRunningError } from "@sixb/core"
+import { APIError } from "@vercel/sandbox"
 import type {
   VercelCommandClient,
   VercelCommandFinishedClient,
@@ -75,6 +76,8 @@ class FakeVercelClient implements VercelSandboxClient {
   status = "running"
   nextCommandWaitsForKill = false
   nextCommandOutlivesKill = false
+  /** What the next runCommand and writeFiles throw, as Vercel answers a sandbox it stopped. */
+  failWith: unknown
 
   constructor(
     readonly name = "vercel-sandbox-1",
@@ -83,6 +86,7 @@ class FakeVercelClient implements VercelSandboxClient {
 
   async runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient> {
     this.commands.push(params)
+    if (this.failWith) throw this.failWith
     const command = new FakeCommand(this.nextCommandWaitsForKill, !this.nextCommandOutlivesKill)
     this.nextCommandWaitsForKill = false
     this.nextCommandOutlivesKill = false
@@ -97,6 +101,7 @@ class FakeVercelClient implements VercelSandboxClient {
       readonly mode?: number
     }[]
   ): Promise<void> {
+    if (this.failWith) throw this.failWith
     this.writes.push([...files])
   }
 
@@ -255,6 +260,50 @@ describe("VercelSandbox", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  // Vercel stopped the session, at its time limit: the handle still reads running and each call
+  // answers 410. Removal proof: drop isSessionStopped from runCommand; the error stays a generic
+  // SandboxError that nothing upstream can tell from a failed command.
+  test("a command Vercel refuses with sandbox_stopped stops the sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "sandbox_stopped", message: "Sandbox has stopped execution" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(SandboxNotRunningError)
+    expect(sandbox.status).toBe("stopped")
+    await expect(sandbox.writeFiles([{ path: "a.txt", contents: "a" }])).rejects.toBeInstanceOf(
+      SandboxNotRunningError
+    )
+    expect(client.commands).toHaveLength(1)
+  })
+
+  test("a file write Vercel refuses with sandbox_stopped stops the sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "sandbox_stopped" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    await expect(sandbox.writeFiles([{ path: "a.txt", contents: "a" }])).rejects.toBeInstanceOf(
+      SandboxNotRunningError
+    )
+    expect(sandbox.status).toBe("stopped")
+  })
+
+  test("any other refusal stays a failed call on a running sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "snapshot_not_found" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    const error = await sandbox.runCommand("echo", ["hi"]).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(error).not.toBeInstanceOf(SandboxNotRunningError)
+    expect(sandbox.status).toBe("running")
   })
 
   test("stop and destroy are idempotent and reject further work", async () => {
