@@ -948,11 +948,12 @@ describe("a runner outside the worker", () => {
     const session = await claim(ava, runId)
     await holdCall(storage, runId)
 
-    // The turn pauses at the last moment a move could have missed it.
+    // The turn pauses at the last moment a move could have missed it. The original comes back
+    // before the turn finishes: a conversation turn finishes in a transaction of its own.
     const transaction = host.storage.transaction.bind(host.storage)
     host.storage.transaction = (async (...input: Parameters<typeof transaction>) => {
-      await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
       host.storage.transaction = transaction
+      await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
       return transaction(...input)
     }) as typeof host.storage.transaction
 
