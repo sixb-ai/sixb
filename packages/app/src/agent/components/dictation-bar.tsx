@@ -34,7 +34,7 @@ export function DictationBar({ dictation, buttonClassName, doneClassName }: Dict
   return (
     // Escape is a shortcut: both buttons stay reachable with the keyboard.
     <div
-      className="flex h-10 min-w-0 flex-1 items-center gap-2 group-data-[expanded]/composer:basis-full"
+      className="flex h-10 min-w-0 flex-1 items-center gap-2 group-data-[expanded]/composer:basis-full @max-[30rem]/composer-row:basis-full"
       onKeyDown={cancelOnEscape}
     >
       <button
