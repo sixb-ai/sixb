@@ -564,6 +564,9 @@ const { file, cost } = await sixb.models.audio.speak({
 })
 ```
 
+To generate speech inside your Azure tenant, deploy `gpt-4o-mini-tts` in Azure AI Foundry and
+register it with `@sixb/azure-ai-foundry`'s `foundry.speech("tts", { voice: "coral" })`.
+
 `file` is the generated audio as a `FileRef` in the project's blob storage. A request without a `voice` uses the voice
 the binding sets, so you can switch models without changing calls. Pass `model` to run another
 one, listed or not. You can also pass `instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
