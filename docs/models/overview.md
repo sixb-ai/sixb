@@ -11,6 +11,9 @@ agent a sandbox where it can read files, run commands, and work through a task.
 
 Think of the sandbox as the agent's computer. Sixb equips it with the [Sixb CLI](../cli/overview.md),
 which lets the agent inspect your ontology, query live data, request actions, and start workflows.
+When the sandbox holds a Sixb project, such as a repository the conversation started in, project
+commands like `sixb dev`, `sixb env pull` and `bun run check` run the project's own `sixb`, at the
+version it pins, as they would on your machine.
 Your domain definitions give the agent a way to discover what exists and what it can do.
 
 Before working with a type, the agent reads a reference file that Sixb writes from your ontology

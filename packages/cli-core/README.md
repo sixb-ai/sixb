@@ -9,6 +9,12 @@ the sandbox's sixb these commands plus status, context and memory, built from sr
                    into one file the agent worker installs in every sandbox
 ```
 
+In a sandbox that holds a Sixb project, the sandbox's launcher (`src/bin/sixb`) hands any other
+command (`dev`, `env`, `check`...) to the nearest `node_modules/.bin/sixb`, so project commands run
+at the version the project pins. Its own commands keep talking to the instance the run belongs to.
+The launcher's list of its own commands has to match `src/main.ts`; `tests/sandbox-cli.test.ts`
+checks it.
+
 If you want the `sixb` command, install [`@sixb/cli`](https://www.npmjs.com/package/@sixb/cli):
 
 ```bash
