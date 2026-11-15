@@ -51,6 +51,11 @@ export function createAgentMessageId(): string {
   return `agt_msg_${randomUUID()}`
 }
 
+/** A message waiting in a thread's inbox, before it is a message of the conversation. */
+export function createAgentInboxItemId(): string {
+  return `agt_inb_${randomUUID()}`
+}
+
 /** One deterministic context-checkpoint identity per conversational run. */
 export function agentContextCheckpointId(runId: string): string {
   return `agt_ctx_${runId}`

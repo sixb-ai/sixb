@@ -444,6 +444,29 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // What waits beside the turn that runs: the messages it is about to read, and those queued for
+  // the next one. A run token reads them too, so the Agent sees what it is about to be sent.
+  {
+    operationId: "listAgentThreadInbox",
+    method: "GET",
+    path: "/api/agent-threads/:threadId/inbox",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "updateAgentThreadInboxItem",
+    method: "PATCH",
+    path: "/api/agent-threads/:threadId/inbox/:itemId",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "withdrawAgentThreadInboxItem",
+    method: "DELETE",
+    path: "/api/agent-threads/:threadId/inbox/:itemId",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "getAgentMessageFileContent",
     method: "GET",

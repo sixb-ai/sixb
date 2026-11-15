@@ -562,7 +562,7 @@ export function useAgentConversation({
             },
           })
         )
-        recordAcceptedSend(response.run, key)
+        if (response.run) recordAcceptedSend(response.run, key)
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: listAgentThreadMessagesQueryKey({ path: { threadId: targetThreadId } }),
@@ -614,7 +614,7 @@ export function useAgentConversation({
           },
         })
       )
-      recordAcceptedSend(response.run, key)
+      if (response.run) recordAcceptedSend(response.run, key)
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -807,8 +807,10 @@ export function useAgentConversation({
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
       setContinuingThreadId(null)
-      watchRun(response.run)
-      setPendingSend({ run: response.run, anchor: true })
+      if (response.run) {
+        watchRun(response.run)
+        setPendingSend({ run: response.run, anchor: true })
+      }
       await refreshThread(threadId)
     } catch (error) {
       setContinuingThreadId(null)

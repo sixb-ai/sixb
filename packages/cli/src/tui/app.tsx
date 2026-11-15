@@ -667,7 +667,7 @@ function Home(
         },
         throwOnError: true,
       })
-      if (created.thread.runsOn === "computer") void runner.claim(posted.run.id)
+      if (created.thread.runsOn === "computer" && posted.run) void runner.claim(posted.run.id)
       props.onOpen(created.thread.id)
       return true
     } catch (error) {
@@ -1026,6 +1026,11 @@ function ThreadView(
     if (error || !data) {
       props.say(errorText(error), "error")
       return false
+    }
+    // A message sent while a turn runs waits in the thread's inbox instead of starting one.
+    if (!data.run) {
+      void reload()
+      return true
     }
     if (runsHere) void runner.claim(data.run.id)
     setLive(liveRun(data.run.id))
