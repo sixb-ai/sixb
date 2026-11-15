@@ -49,9 +49,14 @@ export interface SshTargetOptions {
    * projects share a server, so that each has its own. Defaults: app 3001, api 3002.
    */
   readonly ports?: Readonly<Partial<Record<DeployHttpServiceName, number>>>
+  /**
+   * Second local port pair for blue-green cutovers while the active slot keeps serving. Defaults
+   * to `ports` plus 10 (app 3011, api 3012).
+   */
+  readonly standbyPorts?: Readonly<Partial<Record<DeployHttpServiceName, number>>>
 }
 
-const OPTIONS = ["host", "user", "ports"] as const
+const OPTIONS = ["host", "user", "ports", "standbyPorts"] as const
 
 const DEFAULT_USER = "sixb"
 
@@ -73,6 +78,7 @@ export class SshTarget implements DeployTarget {
   readonly user: string
   readonly location: string
   readonly #ports: Readonly<Record<DeployHttpServiceName, number>>
+  readonly #standbyPorts: Readonly<Record<DeployHttpServiceName, number>>
 
   constructor(options: SshTargetOptions) {
     if (typeof options !== "object" || options === null) {
@@ -89,15 +95,32 @@ export class SshTarget implements DeployTarget {
     this.host = validateHost(options.host)
     this.user = validateUser(options.user ?? DEFAULT_USER)
     this.location = `${this.user}@${this.host}`
-    this.#ports = { ...DEFAULT_PORTS, ...validatePorts(options.ports) }
+    const primary = { ...DEFAULT_PORTS, ...validatePorts(options.ports, "ports") }
+    const standbyDefaults: Record<DeployHttpServiceName, number> = {
+      app: defaultStandbyPort(primary.app),
+      api: defaultStandbyPort(primary.api),
+    }
+    const standby = { ...standbyDefaults, ...validatePorts(options.standbyPorts, "standbyPorts") }
+    assertDistinctPorts(primary, standby)
+    this.#ports = primary
+    this.#standbyPorts = standby
   }
 
   listenAddress(service: DeployHttpServiceName): DeployListenAddress {
     return { host: LISTEN_HOST, port: this.#ports[service] }
   }
 
+  standbyListenAddress(service: DeployHttpServiceName): DeployListenAddress {
+    return { host: LISTEN_HOST, port: this.#standbyPorts[service] }
+  }
+
   deploy(release: DeployRelease, source: DeploySource, context: DeployContext): Promise<void> {
-    return this.#connected((shell) => deployRelease(shell, this.user, release, source, context))
+    return this.#connected((shell) =>
+      deployRelease(shell, this.user, release, source, context, {
+        blue: this.#ports,
+        green: this.#standbyPorts,
+      })
+    )
   }
 
   status(context: DeployOperationContext): Promise<DeployStatus> {
@@ -132,9 +155,13 @@ export class SshTarget implements DeployTarget {
         ...(await runChecks(shell, {
           name: context.name,
           projectPath: context.projectPath,
-          ports: release.services.flatMap((service) =>
-            service.http ? [{ service: service.name, port: service.http.port }] : []
-          ),
+          ports: release.services.flatMap((service) => {
+            if (!service.http || (service.name !== "api" && service.name !== "app")) return []
+            return [
+              { service: service.name, port: this.#ports[service.name] },
+              { service: `${service.name}-standby`, port: this.#standbyPorts[service.name] },
+            ]
+          }),
           envFromSource: release.steps.env !== undefined,
           location: this.location,
         })),
@@ -181,8 +208,11 @@ export class SshTarget implements DeployTarget {
     await this.#connected((shell) =>
       shell.run(
         [
+          `root="$HOME"/${shellQuote(context.name)}`,
           `project="$HOME"/${shellQuote(`${context.name}/code/${context.projectPath}`)}`,
-          'mkdir -p "$project"',
+          'mkdir -p "$root/shared"',
+          'if [ ! -L "$root/code" ]; then mkdir -p "$project"; fi',
+          'if [ -f "$root/shared/.env" ]; then chmod 600 "$root/shared/.env"; fi',
           'if [ -f "$project/.env" ]; then chmod 600 "$project/.env"; fi',
           `token="$HOME"/${shellQuote(`${context.name}/${ENV_TOKEN_FILE}`)}`,
           'if [ -f "$token" ]; then chmod 600 "$token"; fi',
@@ -263,6 +293,32 @@ export class SshTarget implements DeployTarget {
   }
 }
 
+function defaultStandbyPort(port: number): number {
+  return port + 10 <= 65_535 ? port + 10 : port - 10
+}
+
+function assertDistinctPorts(
+  primary: Readonly<Record<DeployHttpServiceName, number>>,
+  standby: Readonly<Record<DeployHttpServiceName, number>>
+): void {
+  const entries: readonly [string, number][] = [
+    ["ports.app", primary.app],
+    ["ports.api", primary.api],
+    ["standbyPorts.app", standby.app],
+    ["standbyPorts.api", standby.api],
+  ]
+  const seen = new Map<number, string>()
+  for (const [label, port] of entries) {
+    const previous = seen.get(port)
+    if (previous) {
+      throw new Error(
+        `[SshTarget] ${label} (${port}) conflicts with ${previous}. Give each HTTP service and slot its own port.`
+      )
+    }
+    seen.set(port, label)
+  }
+}
+
 function validateHost(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error("[SshTarget] host must be the server's hostname or IP address.")
@@ -302,20 +358,25 @@ function validateUser(value: unknown): string {
   return value
 }
 
-function validatePorts(value: unknown): Partial<Record<DeployHttpServiceName, number>> {
+function validatePorts(
+  value: unknown,
+  field: "ports" | "standbyPorts"
+): Partial<Record<DeployHttpServiceName, number>> {
   if (value === undefined) return {}
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("[SshTarget] ports must be an object, such as `{ api: 3012 }`.")
+    throw new Error(`[SshTarget] ${field} must be an object, such as \`{ api: 3012 }\`.`)
   }
 
   const ports: Partial<Record<DeployHttpServiceName, number>> = {}
   for (const [service, port] of Object.entries(value)) {
     if (!Object.hasOwn(DEFAULT_PORTS, service)) {
-      throw new Error(`[SshTarget] ports.${service} is not an HTTP service. Available: api, app.`)
+      throw new Error(
+        `[SshTarget] ${field}.${service} is not an HTTP service. Available: api, app.`
+      )
     }
     // A deploy user has no privileges, and ports below 1024 need them.
     if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
-      throw new Error(`[SshTarget] ports.${service} must be a port from 1024 to 65535.`)
+      throw new Error(`[SshTarget] ${field}.${service} must be a port from 1024 to 65535.`)
     }
     ports[service as DeployHttpServiceName] = port
   }

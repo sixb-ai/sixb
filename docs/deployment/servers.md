@@ -61,7 +61,8 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 | --- | --- | --- |
 | `host` | | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
 | `user` | `"sixb"` | The account the services run as. Never `root`. See [Several projects on one server](server-access.md#several-projects-on-one-server). |
-| `ports` | app 3001, API 3002 | The local port each domain is forwarded to. Give each project on a server its own. |
+| `ports` | app 3001, API 3002 | The primary local ports each domain is forwarded to. Give each project on a server its own. |
+| `standbyPorts` | `ports` + 10 (app 3011, API 3012) | Second local port pair used to boot and verify a new release before Caddy switches traffic. |
 
 ### Services
 
@@ -158,15 +159,13 @@ Only committed files are sent, with submodules at their recorded commits. Uncomm
 A deploy:
 
 1. Checks the server.
-2. Sends the commit and updates the project's files. The server's `.env`, `.sixb/`, and `node_modules/` stay.
-3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build`.
-4. Updates the routes. Caddy must accept them first; otherwise the deploy stops and the previous routes keep working.
-5. Stops the services, runs `sixb db migrate`, `sixb check`, and `sixb lake check`, and starts the services again.
-6. Waits for the API's `/ready`, and fails if a process exits in its first seconds.
+2. Unpacks the commit into its own `releases/<id>` directory and copies the server's shared `.env` into it.
+3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward so open tabs never `404`).
+4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving.
+5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.
+6. Validates and reloads the Caddy routes onto the new slot, swaps `orchestrator` and `rules`, and drains the retiring `api` and `workers` in the background so in-flight requests and agent turns finish cleanly.
 
-The services are down during step 5. Meanwhile, browsers opening your app get an "Updates in progress" page.
-
-A deploy that fails before the services stop leaves them running. One that fails later leaves them stopped until a deploy succeeds: fix the cause and deploy again, or deploy the previous commit with `--ref`. Two deploys of the same project never overlap; the second waits for the first.
+A deploy that fails at any step discards the candidate release and leaves the live release serving. Keep storage migrations additive across adjacent releases so the active release keeps working while step 4 runs. Two deploys of the same project never overlap; the second waits for the first.
 
 ## Operate the deployment
 

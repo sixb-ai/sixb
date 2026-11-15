@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DeployRelease } from "@sixb/core/deploy"
-import { deploymentLayout } from "../src/layout"
-import { renderCaddySnippet, renderCtl, renderProcessManifest, renderUnit } from "../src/render"
+import { deploymentLayout, releaseLayout } from "../src/layout"
+import {
+  releaseForSlot,
+  renderCaddySnippet,
+  renderCtl,
+  renderProcessManifest,
+  renderUnit,
+} from "../src/render"
 import { renderDeployScript, STEP_MARKER } from "../src/scripts"
 
 const release: DeployRelease = {
@@ -78,31 +84,50 @@ const deployScript = renderDeployScript({
 })
 
 describe("deployment files", () => {
-  test("keep a deployment in its own directory, and Bun per user and version", () => {
+  test("keep a deployment in its own directory, with immutable releases and Bun per user", () => {
     expect(layout.project).toBe("/home/sixb/northline/code/examples/northline")
+    expect(layout.releasesDir).toBe("/home/sixb/northline/releases")
+    expect(layout.currentLink).toBe("/home/sixb/northline/current")
+    expect(layout.sharedEnv).toBe("/home/sixb/northline/shared/.env")
+    expect(releaseLayout(layout, "r1").project).toBe(
+      "/home/sixb/northline/releases/r1/examples/northline"
+    )
     expect(layout.bun).toBe("/home/sixb/.sixb/bun/1.4.2/bun")
     expect(layout.unit).toBe("/home/sixb/.config/systemd/user/sixb-northline.service")
     expect(layout.caddySnippet).toBe("/etc/caddy/sixb.d/sixb/northline.caddy")
   })
 
-  test("run Sixb services with the project's CLI and scripts with its Bun", () => {
-    const manifest = renderProcessManifest(release, layout)
+  test("run Sixb services from their release directory and rewrite ports per slot", () => {
+    const green = releaseForSlot(release, { app: 3011, api: 3012 })
+    const targetRelease = releaseLayout(layout, "r1")
+    const manifest = renderProcessManifest(green, layout, {
+      projectDir: targetRelease.project,
+      slot: "green",
+    })
 
-    expect(manifest.cwd).toBe(layout.project)
+    expect(manifest.slot).toBe("green")
+    expect(manifest.cwd).toBe(targetRelease.project)
     expect(manifest.services[0]).toMatchObject({
+      kind: "http",
       processName: "northline-api",
       command: layout.bun,
       args: [
-        `${layout.project}/node_modules/.bin/sixb`,
+        `${targetRelease.project}/node_modules/.bin/sixb`,
         "api",
         "--host",
         "127.0.0.1",
         "--port",
-        "3002",
+        "3012",
       ],
-      env: { NODE_ENV: "production", POSTGRES_POOL_MAX: "6" },
+      env: {
+        NODE_ENV: "production",
+        POSTGRES_POOL_MAX: "6",
+        SIXB_DRAIN_TIMEOUT_MS: "290000",
+      },
     })
+    expect(manifest.services[1]?.args).toContain("3011")
     expect(manifest.services[2]).toMatchObject({
+      kind: "script",
       command: layout.bun,
       args: ["scripts/watch.ts"],
       instances: 2,
@@ -124,12 +149,18 @@ describe("deployment files", () => {
     )
   })
 
-  test("route each domain, with the update page for the app only", () => {
+  test("route each domain with upstream dial retries, and the update page for the app only", () => {
     const snippet = renderCaddySnippet(release)
 
     expect(snippet).toContain("api.example.com {\n\tencode {")
     expect(snippet).toContain(
-      "\n\nexample.com {\n\treverse_proxy 127.0.0.1:3001\n\thandle_errors 502 503 504 {"
+      [
+        "example.com {",
+        "\treverse_proxy 127.0.0.1:3001 {",
+        "\t\tlb_try_duration 5s",
+        "\t}",
+        "\thandle_errors 502 503 504 {",
+      ].join("\n")
     )
     expect(snippet.match(/handle_errors/g)?.length).toBe(1)
   })
@@ -148,7 +179,9 @@ describe("deployment files", () => {
         "\t\t\theader Content-Type application/json*",
         "\t\t}",
         "\t}",
-        "\treverse_proxy 127.0.0.1:3002",
+        "\treverse_proxy 127.0.0.1:3002 {",
+        "\t\tlb_try_duration 5s",
+        "\t}",
         "}",
       ].join("\n")
     )
@@ -157,19 +190,24 @@ describe("deployment files", () => {
 })
 
 describe("deploy script", () => {
-  test("names every step, in order, around the release's own commands", () => {
+  test("validates as bash and runs migrations and readiness before switching routes", async () => {
+    const child = Bun.spawn(["bash", "-n"], {
+      stdin: new Blob([deployScript.script]),
+      stderr: "pipe",
+    })
+    expect(await child.exited).toBe(0)
+    expect(await new Response(child.stderr).text()).toBe("")
+
     expect(deployScript.labels).toEqual([
-      "Apply files",
+      "Prepare release",
       "Install Bun 1.4.2",
       "Install dependencies",
       "sixb build",
-      "Write services",
-      "Update routes",
-      "Stop services",
       "sixb db migrate",
-      "Start services",
+      "Start new release",
       "Check services",
-      "Record release",
+      "Update routes",
+      "Activate release",
     ])
   })
 
@@ -192,13 +230,12 @@ describe("deploy script", () => {
       },
     })
 
-    // The services are still up here, so a pull that fails leaves the running release alone.
-    test("pulls .env once dependencies are in, before the build and any stop", () => {
+    test("pulls .env once dependencies are in, before the build and cutover", () => {
       const at = (label: string) => labels.indexOf(label)
 
       expect(at("sixb env pull --env prod")).toBe(at("Install dependencies") + 1)
       expect(at("sixb build")).toBeGreaterThan(at("sixb env pull --env prod"))
-      expect(at("Stop services")).toBeGreaterThan(at("sixb env pull --env prod"))
+      expect(at("Start new release")).toBeGreaterThan(at("sixb env pull --env prod"))
     })
 
     test("gives only that step the path to its token", () => {
@@ -213,18 +250,74 @@ describe("deploy script", () => {
     expect(deployScript.labels.some((label) => label.includes("env pull"))).toBe(false)
   })
 
-  test("holds the lock, keeps standard input closed, and waits for the API", () => {
+  test("holds the lock, keeps standard input closed, and prepares both blue and green routes", () => {
     const { script } = deployScript
     expect(script).toContain(`exec 9>'${layout.lock}'`)
     expect(script).toContain("flock -w 600 9")
     expect(script).toEndWith("main </dev/null\n")
     expect(script).toContain("export NODE_ENV='production'")
-    expect(script).toContain("ready_url='http://127.0.0.1:3002/ready'")
+    expect(script).toContain("http://127.0.0.1:3002/ready")
+    expect(script).toContain("http://127.0.0.1:3012/ready")
     expect(script).toContain("sudo -n /usr/bin/systemctl reload caddy")
   })
 
+  test("carries one generation of hashed app chunks into the next release", async () => {
+    const step = stepBody("sixb build")
+    const root = await mkdtemp(join(tmpdir(), "sixb-carry-assets-"))
+    try {
+      const oldProject = join(root, "old")
+      const newProject = join(root, "new")
+      const thirdProject = join(root, "third")
+      await mkdir(join(oldProject, ".sixb/dist/app"), { recursive: true })
+      await writeFile(join(oldProject, ".sixb/dist/app/index.html"), "old-shell")
+      await writeFile(join(oldProject, ".sixb/dist/app/chunk-r1-aaaa1111.js"), "r1-chunk")
+
+      const buildInto = async (
+        prev: string,
+        next: string,
+        chunkName: string,
+        shellText: string
+      ) => {
+        await mkdir(join(next, "node_modules/.bin"), { recursive: true })
+        await writeFile(
+          join(next, "node_modules/.bin/sixb"),
+          `import { mkdirSync, writeFileSync } from "node:fs"
+mkdirSync(".sixb/dist/app", { recursive: true })
+writeFileSync(".sixb/dist/app/index.html", ${JSON.stringify(shellText)})
+writeFileSync(".sixb/dist/app/${chunkName}", ${JSON.stringify(chunkName)})
+`
+        )
+        const child = Bun.spawn(["/bin/bash", "-euc", step], {
+          env: {
+            BUN: process.execPath,
+            PROJECT: prev,
+            RELEASE_PROJECT: next,
+            PATH: "/usr/bin:/bin",
+          },
+        })
+        expect(await child.exited).toBe(0)
+      }
+
+      await buildInto(oldProject, newProject, "chunk-r2-bbbb2222.js", "r2-shell")
+      expect(await readFile(join(newProject, ".sixb/dist/app/index.html"), "utf8")).toBe("r2-shell")
+      expect(await readFile(join(newProject, ".sixb/dist/app/chunk-r1-aaaa1111.js"), "utf8")).toBe(
+        "r1-chunk"
+      )
+
+      // Release 3 carries r2's chunk, while r1's drops off after one generation.
+      await buildInto(newProject, thirdProject, "chunk-r3-cccc3333.js", "r3-shell")
+      expect(
+        await readFile(join(thirdProject, ".sixb/dist/app/chunk-r2-bbbb2222.js"), "utf8")
+      ).toBe("chunk-r2-bbbb2222.js")
+      expect(
+        await lstat(join(thirdProject, ".sixb/dist/app/chunk-r1-aaaa1111.js")).catch(() => null)
+      ).toBeNull()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("lets dependency install scripts call node when the server has none", async () => {
-    // Red check: remove the node link from renderInstallBun; the first case finds no link.
     const step = stepBody("Install Bun 1.4.2")
 
     const root = await mkdtemp(join(tmpdir(), "sixb-install-bun-"))
@@ -234,8 +327,6 @@ describe("deploy script", () => {
         const tools = join(root, name, "tools")
         await mkdir(bunDir, { recursive: true })
         await mkdir(tools, { recursive: true })
-        // Bun is already installed, so the step skips the download. A link to an existing program
-        // stands in for it: macOS vets a freshly written executable for ~150ms on its first run.
         await symlink(Bun.which("true")!, join(bunDir, "bun"))
         await symlink(Bun.which("ln")!, join(tools, "ln"))
         if (withNode) await writeFile(join(tools, "node"), "#!/bin/sh\n", { mode: 0o755 })
@@ -261,22 +352,23 @@ describe("deploy script", () => {
   })
 
   test("counts the quiet window after start from when the services started", async () => {
-    // Red check: put back a fixed `sleep 5` after the readiness wait; the slow boot then sleeps.
     const step = stepBody("Check services")
     const root = await mkdtemp(join(tmpdir(), "sixb-check-services-"))
     try {
       const tools = join(root, "tools")
       await mkdir(tools)
-      // `sleep` records how long it was asked to wait instead of waiting.
       await writeFile(join(tools, "sleep"), `#!/bin/sh\necho "$1" >> "$SLEPT"\n`, { mode: 0o755 })
       await writeFile(join(tools, "ctl"), "#!/bin/sh\necho checked\n", { mode: 0o755 })
 
-      // The API answers at once, after the services have been up for `bootSeconds`.
       const check = async (name: string, bootSeconds: number) => {
         const slept = join(root, `${name}.txt`)
         await writeFile(slept, "")
         const child = Bun.spawn(
-          ["/bin/bash", "-euc", `started=$((SECONDS - ${bootSeconds}))\n${step}`],
+          [
+            "/bin/bash",
+            "-euc",
+            `deploy_mode="cold"\ntarget_slot="blue"\nstarted=$((SECONDS - ${bootSeconds}))\n${step}`,
+          ],
           {
             env: {
               BUN: Bun.which("true")!,

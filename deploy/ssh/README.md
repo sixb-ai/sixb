@@ -29,11 +29,13 @@ The rest of this file is for working on the package.
 Each deployment lives in its deploy user's home:
 
 ```
-~/<name>/code      the deployed commit, with the project's .env
-~/<name>/env-token the token a deploy pulls .env with, if the project has a source
-~/<name>/deploy    the lock, uploads, file list, release record, process manifest, and ctl
-~/<name>/run       process state and logs
-~/.sixb/bun/<v>    Bun, shared by the user's projects on the same version
+~/<name>/releases/<id> immutable release directories (code, node_modules, .sixb/dist)
+~/<name>/current       symlink to the active release directory (`code` points here too)
+~/<name>/shared/.env   shared project .env, copied into each release at deploy time
+~/<name>/env-token     the token a deploy pulls .env with, if the project has a source
+~/<name>/deploy        the lock, uploads, manifests, release record, and ctl
+~/<name>/run           process state and logs
+~/.sixb/bun/<v>        Bun, shared by the user's projects on the same version
 ```
 
 - **Processes.** The user unit `~/.config/systemd/user/sixb-<name>.service` runs the supervisor

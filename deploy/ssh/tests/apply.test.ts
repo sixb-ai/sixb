@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { deploymentLayout } from "../src/layout"
-import { renderApplyFiles, renderPrepareScript, renderReceiveScript } from "../src/scripts"
+import { deploymentLayout, releaseLayout } from "../src/layout"
+import {
+  renderPrepareRelease,
+  renderPrepareScript,
+  renderPruneReleases,
+  renderReceiveScript,
+} from "../src/scripts"
 import { LocalShell } from "../src/transport"
 
 const tempDirs: string[] = []
@@ -34,53 +39,68 @@ async function tree(root: string): Promise<string[]> {
     .sort()
 }
 
-async function deployFiles(home: string, files: Record<string, string>): Promise<void> {
-  const layout = deploymentLayout({
-    home,
-    user: "sixb",
-    name: "northline",
-    projectPath: ".",
-    bunVersion: "1.4.2",
-  })
-  const incoming = join(layout.incomingDir, `upload-${Math.random().toString(16).slice(2)}`)
-  await writeTree(incoming, files)
-  await new LocalShell().run(renderApplyFiles(layout, incoming))
-}
-
-describe("applying an upload", () => {
-  test("matches the commit like git reset --hard, keeping what the server made and its .env", async () => {
+describe("preparing a release directory", () => {
+  test("migrates an in-place code folder, isolates each release, and preserves the server's .env", async () => {
     const home = await tempDir()
-    const code = join(home, "northline", "code")
-
-    await deployFiles(home, {
-      "package.json": "{}",
-      "src/old/one.ts": "one",
-      "src/keep.ts": "v1",
+    const layout = deploymentLayout({
+      home,
+      user: "sixb",
+      name: "northline",
+      projectPath: ".",
+      bunVersion: "1.4.2",
     })
-    await writeTree(code, {
+    // Seed a legacy deployment where `code/` is a plain directory holding `.env`.
+    await writeTree(layout.code, {
       ".env": "SECRET=server",
-      ".sixb/sixb.db": "data",
-      "node_modules/pkg/index.js": "module",
+      "package.json": "{}",
+      "src/old.ts": "v1",
     })
 
-    await deployFiles(home, {
+    const r1 = releaseLayout(layout, "r1")
+    const incoming1 = join(layout.incomingDir, "upload-r1")
+    await writeTree(incoming1, {
       ".env": "SECRET=committed",
       "package.json": "{}",
-      "src/keep.ts": "v2",
-      "src/new.ts": "new",
+      "src/new.ts": "v2",
     })
+    await new LocalShell().run(renderPrepareRelease(layout, r1, incoming1))
 
-    expect(await tree(code)).toEqual([
-      ".env",
-      ".sixb/sixb.db",
-      "node_modules/pkg/index.js",
-      "package.json",
-      "src/keep.ts",
-      "src/new.ts",
-    ])
-    expect(await readFile(join(code, "src/keep.ts"), "utf8")).toBe("v2")
-    // A committed .env never replaces the server's.
-    expect(await readFile(join(code, ".env"), "utf8")).toBe("SECRET=server")
+    expect((await lstat(layout.code)).isSymbolicLink()).toBe(true)
+    expect(await tree(join(layout.releasesDir, "legacy"))).toContain("src/old.ts")
+    expect(await tree(r1.root)).toEqual([".env", "package.json", "src/new.ts"])
+    expect(await readFile(join(r1.root, ".env"), "utf8")).toBe("SECRET=server")
+    expect(await readFile(layout.sharedEnv, "utf8")).toBe("SECRET=server")
+  })
+
+  test("prunes older releases while keeping current, previous, and any retiring release", async () => {
+    const home = await tempDir()
+    const layout = deploymentLayout({
+      home,
+      user: "sixb",
+      name: "northline",
+      projectPath: ".",
+      bunVersion: "1.4.2",
+    })
+    for (const id of ["r1", "r2", "r3", "r4"]) {
+      await mkdir(join(layout.releasesDir, id), { recursive: true })
+    }
+    await mkdir(layout.runDir, { recursive: true })
+    await writeFile(
+      join(layout.runDir, "state.json"),
+      JSON.stringify({ retiringCwds: [join(layout.releasesDir, "r1")] })
+    )
+    await symlink("releases/r4", layout.currentLink)
+
+    const script = [
+      `RELEASES_DIR=${JSON.stringify(layout.releasesDir)}`,
+      `RELEASE_ID="r4"`,
+      `prev_release="r3"`,
+      `STATE_FILE=${JSON.stringify(join(layout.runDir, "state.json"))}`,
+      renderPruneReleases(),
+    ].join("\n")
+    await new LocalShell().run(script)
+
+    expect((await readdir(layout.releasesDir)).sort()).toEqual(["r1", "r3", "r4"])
   })
 })
 
@@ -118,8 +138,6 @@ describe("uploading the source", () => {
       onLine: (line) => lines.push(line),
     })
     const incoming = lines[1] ?? ""
-    await writeTree(incoming, { "app.ts": "app" })
-
     const layout = deploymentLayout({
       home,
       user: "sixb",
@@ -127,11 +145,14 @@ describe("uploading the source", () => {
       projectPath: ".",
       bunVersion: "1.4.2",
     })
-    await shell.run(renderApplyFiles(layout, incoming))
+    const target = releaseLayout(layout, "r1")
+    const source = await tempDir()
+    await writeTree(source, { "index.ts": "" })
+    const archive = Bun.spawn(["tar", "-c", "-f", "-", "."], { cwd: source }).stdout
+    await shell.run(renderReceiveScript(incoming, "."), { stdin: archive })
+    await shell.run(renderPrepareRelease(layout, target, incoming))
 
-    // Found on a real server: `code/` took the upload directory's 0700 from `mktemp -d`. Only GNU
-    // tar, which Linux (and CI) runs, passes that on; macOS's bsdtar leaves `code/` alone, so
-    // removing the `chmod` in renderPrepareScript fails this test on Linux only.
-    expect((await stat(layout.code)).mode & 0o050).toBe(0o050)
+    const stats = await lstat(target.root)
+    expect(stats.mode & 0o050).toBe(0o050)
   })
 })
