@@ -324,7 +324,7 @@ function parseOrigin(value: string, field: string): string {
 
 function parsePkce(value: "S256" | "disabled" | undefined): "S256" | "disabled" {
   if (value === undefined || value === "S256" || value === "disabled") return value ?? "S256"
-  throw new Error("[SixbGitHub] oauth.pkce must be \"S256\" or \"disabled\".")
+  throw new Error('[SixbGitHub] oauth.pkce must be "S256" or "disabled".')
 }
 
 function parseScopes(scopes: readonly string[] | undefined): readonly string[] | undefined {

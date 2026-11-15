@@ -320,7 +320,6 @@ function causes(error: unknown): unknown[] {
   return chain
 }
 
-
 describe("workspace access OAuth token forwarding", () => {
   test("forwards requestedBy and reuses one token source across invalidation and renewal", async () => {
     // Regression proof: instantiate a new ConnectorTokenSource on every connectionToken() call in

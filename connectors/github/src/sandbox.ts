@@ -390,7 +390,7 @@ function parseSlot(value: string | undefined): string {
 
 function parseOwnerMode(value: "user" | "project" | undefined): "user" | "project" {
   if (value === undefined || value === "user" || value === "project") return value ?? "user"
-  throw new Error("[SixbGitHub] Connection owner must be \"user\" or \"project\".")
+  throw new Error('[SixbGitHub] Connection owner must be "user" or "project".')
 }
 
 function parseFallback(value: SandboxSourceAuth | undefined): SandboxSourceAuth | undefined {

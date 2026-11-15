@@ -170,4 +170,3 @@ function fileName(segment: string): string {
     return segment
   }
 }
-

@@ -361,7 +361,6 @@ describe("github managed OAuth", () => {
   })
 })
 
-
 describe("githubOAuth connector type wiring", () => {
   test("accepts an OAuth github() connector definition and rejects static ones at compile time", () => {
     const oauthConnector = defineConnector("github", connector(), { owners: ["user"] })

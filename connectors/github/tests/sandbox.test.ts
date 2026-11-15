@@ -374,7 +374,6 @@ describe("GitHub App workspace auth", () => {
   })
 })
 
-
 const OAUTH_CONNECTOR: SandboxOAuthConnector = {
   kind: "connector",
   id: "github",
@@ -632,16 +631,13 @@ describe("GitHub OAuth workspace auth", () => {
       422,
       "[SixbGitHub] The GitHub App or connected account does not grant the permissions this workspace needs (Contents and Pull requests: write).",
     ],
-  ])(
-    "maps status %i to an actionable error without leaking provider details",
-    async (status, message) => {
+  ])("maps status %i to an actionable error without leaking provider details", async (status, message) => {
     const f = oauthFixture({ access: "write", scopedStatuses: [status] })
     const error = await f.authorize().catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe(message)
-      expect((error as Error).message).not.toContain("provider detail")
-    }
-  )
+    expect((error as Error).message).not.toContain("provider detail")
+  })
 
   test.each([
     { expires_at: null },
