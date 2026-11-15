@@ -22,7 +22,6 @@ import {
   boardPreviewStatuses,
   boardPreviews,
   boardsReadLiveData,
-  documentPdf,
   documentPdfKey,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
@@ -55,6 +54,7 @@ import {
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
+  ArtifactPdfDownloadQuerySchema,
   ArtifactPdfQuerySchema,
   ArtifactPdfResponseSchema,
   ArtifactQueryParamsSchema,
@@ -205,18 +205,11 @@ async function versionResponse(
       ? new Map([...stored.keys()].map((board) => [board, "none" as const]))
       : stored
 
-  // A designed document prints to PDF when asked, in a project that has sandboxes.
-  let pdf: "ready" | "printable" | "failed" | undefined
-  if (storage && documentPdfKey(version)) {
-    const kept = await documentPdf(storage, version)
-    if (kept) pdf = "failure" in kept ? "failed" : "ready"
-    else if (host.sandboxes) pdf = "printable"
-  }
-
   return {
     ...versionBody(version),
     ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
-    ...(pdf ? { pdf } : {}),
+    // A designed document prints to PDF when asked, in a project that has sandboxes.
+    ...(host.sandboxes && documentPdfKey(version) ? { printable: true } : {}),
   }
 }
 
@@ -347,6 +340,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
     switch (error.code) {
       case "artifact_not_found":
       case "comment_not_found":
+      case "holder_not_found":
       case "query_not_found":
       case "restore_point_not_found":
         set.status = 404
@@ -587,6 +581,7 @@ async function artifactPdfResponse(
   host: SixbHostView,
   context: {
     readonly params: { readonly artifactId: string; readonly version: string }
+    readonly query: { readonly key?: string | undefined }
     readonly request: Request
     readonly set: RouteSet & { headers: Record<string, string | number> }
   }
@@ -598,11 +593,15 @@ async function artifactPdfResponse(
     const version = await sixb.artifacts.getVersion(artifactId, number)
     if (!version) return await refusal(context, artifactId, context.set)
 
-    const storage = host.storage.artifacts
-    const kept = storage ? await documentPdf(storage, version) : null
-    const pdf = kept && !("failure" in kept) ? kept : null
+    // As the caller reads it: a document that shows live data prints their values, which the key
+    // its POST answered with names.
+    const pdf = await sixb.artifacts.pdf(artifactId, {
+      version: number,
+      print: false,
+      ...(context.query.key ? { key: context.query.key } : {}),
+    })
     const response =
-      pdf &&
+      pdf?.status === "ready" &&
       (await createFileContentResponse({
         blobStorage: host.blobStorage,
         fileRef: pdf.file,
@@ -1397,10 +1396,12 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const pdf = await requireRequestSixb(context).artifacts.pdf(artifactId, {
             version: versionParam(context.params.version),
             retry: context.query.retry === "true",
+            ...(context.query.key ? { key: context.query.key } : {}),
           })
           if (!pdf) return await refusal(context, artifactId, context.set)
-          if (pdf.status === "ready") return { status: "ready" as const, pages: pdf.pages }
-          return pdf
+          if (pdf.status !== "ready") return pdf
+          const { file: _file, ...ready } = pdf
+          return ready
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -1418,7 +1419,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Print a designed document to PDF",
           description:
-            "Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.",
+            "Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. A document that shows live data answers with a key: ask again and get it with that key, which names the values the first ask printed. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "printArtifactPdf",
           security: accessTokenSecurityRequirement("printArtifactPdf"),
@@ -1430,10 +1431,11 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => artifactPdfResponse(host, context),
       {
         params: ArtifactVersionParamsSchema,
+        query: ArtifactPdfDownloadQuerySchema,
         detail: {
           summary: "Get a designed document's PDF",
           description:
-            "The version printed to PDF, as a download named after the title it printed with. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.",
+            "The version printed to PDF, with the values its fields read as the caller reads them, as a download named after the title it printed with: for a document that shows live data, those its POST's key names. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactPdf",
           security: accessTokenSecurityRequirement("getArtifactPdf"),
@@ -1503,7 +1505,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Run an artifact's query",
           description:
-            'Runs the version\'s queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.',
+            'Runs the version\'s queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid. A designed document\'s "holder" is the object that holds it, of the type it names, with the links its fields read through: 404 holder_not_found when no one such object the caller reads holds it.',
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactQuery",
           security: accessTokenSecurityRequirement("getArtifactQuery"),

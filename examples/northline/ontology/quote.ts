@@ -1,4 +1,4 @@
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { defineObjectType, link, prop, ref, stringEnum } from "@sixb/core/ontology"
 import { CustomerAccount } from "./customer-account"
 import { Facility } from "./facility"
 import { ServiceCase } from "./service-case"
@@ -33,6 +33,12 @@ export const Quote = defineObjectType({
     prop("decisionAt", "timestamp"),
     prop("document", "fileRef"),
     prop("sourceUpdatedAt", "timestamp", { query: { searchable: true, sortable: true } }),
+    // Set in Northline, not by the business system: the designed proposal the customer reads,
+    // which shows this quote's figures live until it is sent.
+    prop("proposal", ref.artifact(), {
+      nullable: true,
+      description: "The proposal the customer reads and signs.",
+    }),
   ],
   links: [
     link("customer", CustomerAccount, { cardinality: "one" }),

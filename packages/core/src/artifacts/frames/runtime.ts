@@ -1,8 +1,15 @@
+import type {
+  DocumentData,
+  DocumentQueryResult,
+  DocumentReads,
+  DocumentTree,
+} from "./document-data"
+
 /**
  * The runtime the frame injects before anything else in an entry's `<head>`. It is served as this
- * function's own source, `(${frameRuntime})()`, so it imports nothing and names nothing outside
- * itself: the protocol string and the keys repeat what `protocol.ts` declares, and a test holds
- * the two together. Its tag names the layout, `data-sixb-layout`.
+ * function's own source, `(${frameRuntime})(${documentData})`, so it imports nothing but types and
+ * names nothing outside itself: the protocol string and the keys repeat what `protocol.ts`
+ * declares, and a test holds the two together. Its tag names the layout, `data-sixb-layout`.
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
  * what draws its own colors; answers the app's requests; and tells the app about the links the
@@ -21,6 +28,12 @@
  * the original, which is what assistive technology reads; a sheet in view, or next to one, holds
  * a copy of it, made as it comes near and dropped once it is far. It reports how many pages it
  * made. `sixb-section=<slug>` opens it at the heading publishing named so.
+ *
+ * Its fields and repeated elements show live data, as `documentData`, which the runtime is given,
+ * walks them: once it has read the object that holds the document and the queries they name, as
+ * the reader, from the document as published, before it is cut into pages; and again, cut anew,
+ * whenever one of those changes. Opened on its own, it reads them as `sixb.query` does. Served for
+ * editing, it shows what is written in them, which takes no typing.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
@@ -52,7 +65,7 @@
  * the page scrolls them, a finger's drag, Space held to drag, and the zooming above, and the words
  * of what they press, for the canvas to follow the arrow they label.
  */
-export function frameRuntime(): void {
+export function frameRuntime(data?: () => DocumentData): void {
   const PROTOCOL = "sixb-frame/1"
   const WIDTH = 1280
   const HEIGHT = 720
@@ -1260,17 +1273,97 @@ export function frameRuntime(): void {
     if (paged) fitPages()
     reportEmbeds()
   })
-  const ready = () => {
-    if (paged) {
-      settled().then(() => {
-        paginate()
-        openSection()
+  /** A designed document's live data, but not while it is served for editing. */
+  const live =
+    designed && data && !new URLSearchParams(window.location.search).has("sixb-edit")
+      ? data()
+      : null
+  const tree: DocumentTree<Element> = {
+    children: (node) => Array.from(node.children),
+    attribute: (node, name) => node.getAttribute(name),
+    setAttribute: (node, name, value) => node.setAttribute(name, value),
+    removeAttribute: (node, name) => node.removeAttribute(name),
+    setText: (node, text) => {
+      node.textContent = text
+    },
+    clone: (node) => node.cloneNode(true) as Element,
+    replace: (node, nodes) => node.replaceWith(...nodes),
+  }
+  /** The body as published, which each read of the data is shown in, and what it reads. */
+  let published: Node | null = null
+  let reads: DocumentReads | null = null
+  /** Which read of the data is the latest: an earlier one that answers later shows nothing. */
+  let showing = 0
+
+  /** Reads the data the fields show and shows it, from the body as published. */
+  const showData = async (): Promise<boolean> => {
+    const body = document.body
+    if (!live || !body) return false
+    reads ??= live.reads(live.marks(body, tree))
+    if (!reads.holder && reads.queries.length === 0) return false
+    published ??= body.cloneNode(true)
+    const read = ++showing
+
+    // What the reader may not read keeps its written text.
+    const answer = (name: string) =>
+      query(name).then(
+        (result) => result as DocumentQueryResult,
+        () => undefined
+      )
+    const [holder, ...results] = await Promise.all([
+      reads.holder ? answer("holder") : undefined,
+      ...reads.queries.map(answer),
+    ])
+    if (read !== showing) return false
+    const queries: Record<string, DocumentQueryResult> = {}
+    reads.queries.forEach((name, index) => {
+      const result = results[index]
+      if (result) queries[name] = result
+    })
+    const row = holder?.objects?.[0]
+    body.replaceChildren(...Array.from(published.cloneNode(true).childNodes))
+    live.fill(body, tree, {
+      sources: { ...(row ? { holder: row } : {}), queries },
+      lang: root.lang,
+    })
+    return true
+  }
+  if (live) {
+    window.addEventListener("sixb:query", (event) => {
+      const name = (event as CustomEvent<{ name?: unknown }>).detail?.name
+      const shows = name === "holder" ? reads?.holder : reads?.queries.includes(String(name))
+      if (!shows) return
+      showData().then(async (shown) => {
+        if (!shown) return
+        if (paged) {
+          // Not yet cut, it is cut once it first settles; cut, it is cut anew once this has.
+          if (!root.hasAttribute("data-sixb-pages")) return
+          await settled()
+          paginate()
+        } else {
+          markBreaks()
+        }
         reportSize()
         reportEmbeds()
       })
+    })
+  }
+
+  const ready = () => {
+    if (paged) {
+      showData()
+        .then(settled)
+        .then(() => {
+          paginate()
+          openSection()
+          reportSize()
+          reportEmbeds()
+        })
     } else if (designed) {
-      markBreaks()
-      settled().then(openSection)
+      showData().then(() => {
+        markBreaks()
+        settled().then(openSection)
+      })
     }
     if (!deck) {
       post({ event: "ready", params: {} })

@@ -295,7 +295,7 @@ describe("publishing a version that holds queries", () => {
     )
   })
 
-  test("refuses queries in a document, which shows a live sheet instead", async () => {
+  test("refuses queries in a Markdown document, which shows a live sheet instead", async () => {
     const { as, put } = setup()
 
     await expectRefused(
@@ -307,7 +307,7 @@ describe("publishing a version that holds queries", () => {
           await put("queries/open.json", JSON.stringify(open)),
         ],
       }),
-      "[Sixb] 'queries/open.json': a document runs no query. A document shows a live sheet instead."
+      "[Sixb] 'queries/open.json': a Markdown document runs no query. A Markdown document shows a live sheet instead; a designed one, document.html, runs queries."
     )
   })
 

@@ -193,13 +193,13 @@ export function useFileName(source: FileSource): string {
 }
 
 /** Where a designed document's version downloads as a PDF, once printed. */
-export function documentPdfUrl(version: {
-  readonly artifactId: string
-  readonly version: number
-}): string {
+export function documentPdfUrl(
+  version: { readonly artifactId: string; readonly version: number },
+  key?: string
+): string {
   return contentUrl(
     `/api/artifacts/${encodeURIComponent(version.artifactId)}/versions/${version.version}/pdf`,
-    {}
+    key ? { key } : {}
   )
 }
 

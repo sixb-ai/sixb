@@ -100,6 +100,39 @@ work/proposal/
   folder: a version holds everything it shows, so a later change to the design never changes a
   document already sent.
 
+### Live data
+
+A designed document an object holds, such as a contract's proposal, shows that object's values as
+each reader reads them, never a copy. Name its type in `<head>`, then mark each value; write in each
+one what it should read, which it keeps where no object holds it yet (a template) and while it is
+edited:
+
+```html
+<meta name="sixb:object-type" content="Contract">
+<h1 data-sixb-field="client.name">Harbor Co</h1>
+<p>A fixed fee of <span data-sixb-field="fee" data-format="money" data-currency-field="currency">$4,000</span>.</p>
+<tr data-sixb-each="milestones"><td data-sixb-field="title">Kickoff</td></tr>
+<tr data-sixb-each="query:past-work"><td data-sixb-field="title">Phase 1</td>
+  <td data-sixb-field="signedAt" data-format="date">March 2, 2026</td></tr>
+<span data-sixb-field="query:past-work.total">3</span>
+```
+
+- A path reads the holder's properties, `scope.services[job-flow].amount` (a list's item by its
+  `id`), and through one link, `client.name`. Fields in a `data-sixb-each` element read its item.
+- `data-sixb-each="query:<name>"` repeats per row of `queries/<name>.json` (`queries.md`), which
+  may start from the holder: `{ "kind": "traverse", "input": { "kind": "holder" }, … }`.
+  `query:<name>.total` is how many rows it matched; `query:<name>.facets.<property>` repeats per
+  facet value, with `value` and `count`.
+- `data-format` is `money` (with `data-currency="USD"` or `data-currency-field`), `number`,
+  `percent` (0.25 reads 25%), or `date`, formatted for `<html lang>`. A total or an instalment is
+  a property the object keeps: a document computes nothing.
+- Publishing warns `field_unknown` for a path the type doesn't hold. Freezing the version writes
+  the values in and keeps the fields, so the next version is live again; its PDF shows them as
+  whoever asks reads them.
+- After a freeze, a `data-sixb-each` element appears once per item, one after the other: they are
+  one element, copied from the first, so change the first. One marked `data-sixb-empty` is a list
+  that was empty: keep it.
+
 After publishing, open each `page-NN.png` the check returns: look at where each page breaks, for
 anything cut off at a page's edge, and for a page left nearly empty. Open `phone.png` too, for
 anything running off the side, then fix and update.

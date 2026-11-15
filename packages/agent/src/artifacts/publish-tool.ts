@@ -26,6 +26,7 @@ import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   answerArtifactQueries,
+  DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
   type RefusedBoardPreview,
@@ -582,8 +583,9 @@ async function checkedQueries(
 
   return {
     answers: Object.fromEntries(answers),
+    // A document no object holds yet shows its written text: none of its queries failed.
     warnings: answers.flatMap(([name, answer]) =>
-      "error" in answer
+      "error" in answer && name !== DOCUMENT_HOLDER_QUERY
         ? [
             {
               code: "query_failed",
