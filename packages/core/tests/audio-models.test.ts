@@ -327,6 +327,46 @@ describe("audio transcription", () => {
     })
   })
 
+  // Removal proof: return `{ text }` alone from the runtime; the timings never reach the caller.
+  test("returns the words a provider timed, with who said each", async () => {
+    const words = [
+      { text: "Hello", startMs: 0, endMs: 320, speaker: "speaker_0" },
+      { text: "there", startMs: 400, endMs: 900 },
+    ]
+    const { sixb, audio } = await setup(
+      createTranscriber(async () => ({ output: { text: "Hello there", words } }))
+    )
+
+    expect((await sixb.models.audio.transcribe({ audio })).output).toEqual({
+      text: "Hello there",
+      words,
+    })
+  })
+
+  // Removal proof: pass `output.words` through unchecked; the caller seeks to a negative second.
+  test("refuses a word list it cannot place, after billing the reply once", async () => {
+    const { sixb, audio, storage, identity } = await setup(
+      createTranscriber(async () => ({
+        output: {
+          text: "Hello",
+          words: [
+            { text: "Hello", startMs: 0, endMs: 320 },
+            { text: "there", startMs: -1, endMs: 900 },
+          ],
+        },
+        usage: { audioDurationMs: 1250 },
+      }))
+    )
+
+    const error = await sixb.models.audio.transcribe({ audio }).catch((thrown) => thrown)
+
+    expect(error).toMatchObject({ code: "invalid_transcription_response" })
+    expect(await storage.aiUsage.summarizeExecution(identity)).toMatchObject({
+      modelCallCount: 1,
+      usage: { audioDurationMs: 1250 },
+    })
+  })
+
   test("snapshots file metadata before the first await", async () => {
     const { sixb, audio } = await setup()
     const mutable = { ...audio }

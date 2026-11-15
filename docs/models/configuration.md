@@ -494,6 +494,29 @@ neither a language model nor a sandbox. Calls use the same [accounting and limit
 as other models. Authorize access to the owning object in the application before accepting
 a user-supplied file reference; a `FileRef` is an identifier, not an access grant.
 
+When the model times its words, `output.words` lists them in spoken order, each with `startMs`,
+`endMs` and, where the model labels voices, the `speaker` who said it:
+
+```ts
+const { output } = await sixb.models.audio.transcribe({ audio })
+// The word being spoken a minute in, and who is speaking it.
+const heard = output.words?.find((word) => word.startMs >= 60_000)
+```
+
+Only some models return them. Through Vercel Gateway, `elevenlabs/scribe-v2` times and labels
+every word by default, and `microsoft/mai-transcribe-2` does when the binding asks it to:
+
+```ts
+vercelGateway.transcription("microsoft/mai-transcribe-2", {
+  providerOptions: { azure: { timestamps: "word", diarization: { enabled: true } } },
+})
+```
+
+A model that times only phrases gives one entry per phrase, so seeking by word still lands on the
+right second and speaker. Sixb passes on what the model sends and never diarizes audio itself, so a
+`speaker` label, such as `speaker_0`, is stable within one transcript only. Text alone cannot say
+who spoke at 12:04, or where a recorded topic starts, which is what these words are for.
+
 ## Image generation
 
 Register image models in `models.image`. The first is the default:

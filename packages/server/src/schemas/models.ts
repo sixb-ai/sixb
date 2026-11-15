@@ -253,6 +253,16 @@ export const TranscriptionBodySchema = GenerationBodyBase.extend({
   audio: z.union([FileRefSchema, InlineAudioSchema]),
 })
 
+/** One word the model timed, with who said it where the model labels voices. */
+export const TranscriptionWordSchema = z.object({
+  text: z.string(),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().nonnegative(),
+  speaker: z.string().optional(),
+})
+
 export const TranscriptionSchema = GenerationResultBase.extend({
   text: z.string(),
+  /** Absent when the model returns no word timings. */
+  words: z.array(TranscriptionWordSchema).optional(),
 })

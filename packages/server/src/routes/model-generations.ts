@@ -275,7 +275,7 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
             model: entry.model,
             signal: request.signal,
           })
-          return TranscriptionSchema.parse({ ...result(entry, call), text: call.output.text })
+          return TranscriptionSchema.parse({ ...result(entry, call), ...call.output })
         } catch (error) {
           return generationError(error, set)
         }

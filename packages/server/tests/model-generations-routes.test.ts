@@ -202,6 +202,24 @@ describe("model generation routes", () => {
     })
   })
 
+  // Removal proof: send only `text` from the route; the timings never reach the caller.
+  test("returns the word timings the model timed, with the transcript", async () => {
+    const words = [
+      { text: "Hello", startMs: 0, endMs: 320, speaker: "speaker_0" },
+      { text: "there.", startMs: 400, endMs: 900, speaker: "speaker_1" },
+    ]
+    const { blobStorage, granted } = await setup({
+      transcription: [
+        { ...transcriber, transcribe: async () => ({ output: { text: "Hello there.", words } }) },
+      ],
+    })
+    const audio = await blobStorage.put({ body: MP3, mediaType: "audio/mpeg" })
+
+    const transcript = await granted("/api/models/audio/transcriptions", { audio })
+
+    expect(await transcript.response.json()).toMatchObject({ text: "Hello there.", words })
+  })
+
   // Removal proof: remove assertModelAccess from the image runtime; the plain user generates.
   test("calling a model takes can.run(project.models)", async () => {
     let calls = 0
