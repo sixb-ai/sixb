@@ -99,7 +99,7 @@ describe("a designed document's PDF download", () => {
     jest.advanceTimersByTime(1_000)
     const error = await done
     expect(error).toBeInstanceOf(Error)
-    // The reason, for the menu to show: asked once more, without printing it again.
+    // The reason, for the console: asked once more, without printing it again.
     expect(String(error)).toContain("This project's sandboxes have no headless browser.")
     expect(asked).toEqual([
       "POST /api/artifacts/art_pr0p0sa1x0/versions/2/pdf?retry=true",
