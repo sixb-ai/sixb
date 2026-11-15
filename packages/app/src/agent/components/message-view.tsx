@@ -247,13 +247,13 @@ function UserMessage({
             )}
           >
             {age ? (
-              <time
-                dateTime={message.createdAt}
+              <span
+                data-user-message-age=""
                 title={timestampTitle || undefined}
                 className="mr-1.5 text-xs text-muted-foreground/80 tabular-nums"
               >
                 {age}
-              </time>
+              </span>
             ) : null}
             {showEdit && messageId && onStartEdit ? (
               <Tooltip>

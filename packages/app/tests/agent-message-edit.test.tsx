@@ -382,7 +382,7 @@ describe("user message hover actions and in-place rewind UX", () => {
     const { view } = renderChat("dana")
     await view.findByText(/outlook message from unknow people/)
 
-    const times = view.container.querySelectorAll("[data-user-message-actions] time")
+    const times = view.container.querySelectorAll("[data-user-message-age]")
     expect(times[0]?.textContent).toBe("3 days ago")
     expect(times[1]?.textContent).toBe("1 hour ago")
 
