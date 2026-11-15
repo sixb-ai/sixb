@@ -88,8 +88,6 @@ export const en = {
     steer: "Steer this turn",
     sendNow: "Send now",
     withdraw: "Withdraw this message",
-    runningHint: "Enter steers this turn · Tab queues for the next one",
-    queuedHint: "Enter queues for your own turn",
   },
   /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
   commands: {

@@ -174,6 +174,28 @@ describe("while a turn runs", () => {
   })
 })
 
+// Removal proof: drop `!hasDraft` from the composer's stop button; with a draft the reader's own
+// answer still shows Stop, and there is no button that sends.
+test("a draft turns stop back into send, which steers the reader's own answer", () => {
+  const sent: string[] = []
+  let stopped = 0
+  const view = renderComposer({
+    running: true,
+    onStop: () => {
+      stopped += 1
+    },
+    onSend: (text, _attachments, _context, delivery) => sent.push(`${delivery}: ${text}`),
+  })
+  expect(view.getByRole("button", { name: "Stop generating" })).toBeDefined()
+
+  type(view.input(), "Use the Q3 numbers instead")
+  expect(view.queryByRole("button", { name: "Stop generating" })).toBeNull()
+  fireEvent.click(view.getByRole("button", { name: "Send message" }))
+
+  expect(sent).toEqual(["steer: Use the Q3 numbers instead"])
+  expect(stopped).toBe(0)
+})
+
 describe("the composer's layout", () => {
   // Removal proof: drop `value.includes("\n")` from `expanded`; a two-line draft stays in the row.
   test("a draft on more than one line gets a row of its own, above the controls", () => {

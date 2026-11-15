@@ -1171,17 +1171,13 @@ export function useAgentConversation({
     error: currentSendError
       ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
       : undefined,
-    // Whoever's answer is in flight, the reader writes the next message: Enter steers that answer,
-    // Tab queues the message for the turn after it.
+    // Whoever's answer is in flight, the reader writes the next message.
     disabled: Boolean(sandboxRecovery),
-    // Who is answering, and where a message the reader types now goes.
     hint: answeringName
-      ? `${agentMessages.sharing.answering(answeringName)} · ${agentMessages.composer.queuedHint}`
-      : isRunning
-        ? agentMessages.composer.runningHint
-        : othersWaiting
-          ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
-          : undefined,
+      ? agentMessages.sharing.answering(answeringName)
+      : othersWaiting
+        ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
+        : undefined,
     pending: composerPending,
     running: isRunning,
     // Only the turn the reader asked for takes a steer; another person's takes a queued message.

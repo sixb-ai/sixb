@@ -860,10 +860,11 @@ export function Composer({
         return
       }
     }
-    // While a turn runs the keys say where the message goes: Enter steers it, Tab queues it for the
-    // next turn, and the modifier sends it now.
+    // While a turn runs, Enter sends as always: a steer into the reader's own answer, a queued message
+    // behind another's. Tab queues a draft for the next turn instead, and the modifier sends it now.
+    // An empty composer leaves Tab to move focus.
     if (running) {
-      if (event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+      if (event.key === "Tab" && canSend && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
         event.preventDefault()
         submit("queue")
         return
@@ -1084,7 +1085,8 @@ export function Composer({
                     )}
                   />
                 ) : null}
-                {running && onStop ? (
+                {/* Stop while there is nothing to send; a draft turns it back into send. */}
+                {running && onStop && !hasDraft ? (
                   <button
                     type="button"
                     onClick={onStop}

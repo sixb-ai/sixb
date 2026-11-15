@@ -83,8 +83,6 @@ export const fr: Translation<AgentMessages> = {
     steer: "Orienter cette réponse",
     sendNow: "Envoyer maintenant",
     withdraw: "Retirer ce message",
-    runningHint: "Entrée oriente cette réponse · Tab la met en attente du prochain tour",
-    queuedHint: "Entrée la met en attente de votre propre tour",
   },
   commands: {
     list: "Commandes",

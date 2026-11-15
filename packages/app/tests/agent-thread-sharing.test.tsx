@@ -970,7 +970,7 @@ describe("who acts on a turn", () => {
   })
 
   // Removal proof: disable the composer again while the reader's own answer runs.
-  test("while their own answer streams, the reader writes the next message", async () => {
+  test("while their own answer streams, the reader writes the next message and can send it", async () => {
     const { view } = renderChat("alice", {
       thread: thread({ activeRunId: "run_2" }),
       runs: [
@@ -984,7 +984,9 @@ describe("who acts on a turn", () => {
 
     type(composer, "And Globex?")
     expect(composer.value).toBe("And Globex?")
-    expect(view.queryByRole("button", { name: "Send message" })).toBeNull()
+    // A draft turns Stop back into Send, which steers the answer in flight.
+    expect(view.getByRole("button", { name: "Send message" })).toBeDefined()
+    expect(view.queryByRole("button", { name: "Stop generating" })).toBeNull()
   })
 
   // Removal proof: pass stop unconditionally as composerProps.onStop in useAgentConversation.

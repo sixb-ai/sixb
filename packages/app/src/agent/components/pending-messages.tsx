@@ -6,7 +6,7 @@ import {
 } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowUp, Send, X } from "lucide-react"
+import { CornerDownRight, ListEnd, Send, X } from "lucide-react"
 import { useCurrentUser } from "../../session"
 import { useAgentMessages } from "../i18n"
 import { samePrincipal, userPrincipal } from "../sharing"
@@ -54,7 +54,7 @@ export function PendingMessages({
   return (
     // The composer's own column: the tray lines up with the input it waits above.
     <div className={cn("px-4", className)} data-pending-messages="">
-      <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-1.5">
+      <div className="mx-auto flex w-full max-w-[46rem] flex-col rounded-2xl bg-muted/60 p-1">
         {items.map((item) => (
           <PendingMessage
             key={item.id}
@@ -107,21 +107,25 @@ function PendingMessage({
     item.mode === "queue" &&
     item.immediate !== true &&
     !item.parts.some((part) => part.type === "file")
+  const status =
+    item.immediate === true
+      ? labels.sendNowPending
+      : item.mode === "steer"
+        ? labels.steerPending
+        : labels.queuePending
+  const Status = item.immediate === true ? Send : item.mode === "steer" ? CornerDownRight : ListEnd
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
-      <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 break-words text-foreground/80">{text || labels.waitingFile}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {item.immediate === true
-            ? labels.sendNowPending
-            : item.mode === "steer"
-              ? labels.steerPending
-              : labels.queuePending}
-        </p>
-      </div>
+    // One quiet line: where it goes, what it says, and, on hover, what can still be done with it.
+    <div
+      title={status}
+      className="group flex h-9 items-center gap-2.5 rounded-xl pr-1 pl-3 text-[14px] tracking-[-0.006em] transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+    >
+      <Status aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="sr-only">{status}: </span>
+      <p className="min-w-0 flex-1 truncate text-foreground/75">{text || labels.waitingFile}</p>
       {mine ? (
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
           {steerable ? (
             <button
               type="button"
@@ -131,7 +135,7 @@ function PendingMessage({
               aria-label={labels.steer}
               className={ACTION_CLASS}
             >
-              <ArrowUp className="size-3.5" />
+              <CornerDownRight className="size-3.5" />
             </button>
           ) : null}
           <button
@@ -161,7 +165,7 @@ function PendingMessage({
 }
 
 const ACTION_CLASS = cn(
-  "flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors",
+  "flex size-7 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors",
   "hover:bg-black/[0.05] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50",
   "dark:hover:bg-white/[0.08]"
 )
