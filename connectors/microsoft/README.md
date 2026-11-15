@@ -167,13 +167,17 @@ export const outlook = defineConnector(
     auth: { oauth },
     webhookSecret: process.env.MICROSOFT_WEBHOOK_SECRET!, // 1–128 characters
     async onEvent({ event, accountId, connections, sixb }) {
-      const graph = await connections[0]?.client()
-      if (!graph) return // They disconnected; the subscription expires on its own.
-      if (event.kind === "lifecycle" && event.lifecycleEvent === "reauthorizationRequired")
+      if (connections.length === 0) return // They disconnected; the subscription expires on its own.
+      if (event.kind === "change" || event.lifecycleEvent === "missed")
+        return recordMailboxChange(sixb, event, connections) // Your durable signal.
+
+      // Only lifecycle events need their token. If they must reconnect, skip it: throwing would
+      // fail the whole batch, other people's notifications included. The nightly run catches up.
+      const graph = await connections[0]?.client().catch(() => undefined)
+      if (!graph) return
+      if (event.lifecycleEvent === "reauthorizationRequired")
         return graph.subscriptions.reauthorize(event.subscriptionId)
-      if (event.kind === "lifecycle" && event.lifecycleEvent === "subscriptionRemoved")
-        return void (await graph.mail.ensureSubscription(accountId, INBOX))
-      await recordMailboxChange(sixb, event, connections) // Your durable signal.
+      await graph.mail.ensureSubscription(accountId, INBOX) // subscriptionRemoved
     },
   }),
   { owners: ["user"] }
