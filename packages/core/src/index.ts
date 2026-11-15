@@ -692,6 +692,7 @@ export type {
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorOAuthErrorKind,
+  ConnectorOAuthRevocation,
   ConnectorTokenSource,
   OAuthConnectorAdapter,
   OAuthConnectorAuthorizationContext,

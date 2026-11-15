@@ -1,6 +1,6 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
 import type { MicrosoftAuthOptions, MicrosoftOAuthOptions } from "../auth/types"
-import type { MicrosoftEventHandler } from "./webhooks"
+import type { MicrosoftEventHandler, MicrosoftOAuthEventHandler } from "./webhooks"
 
 export interface MicrosoftConnectorOptions {
   readonly auth: MicrosoftAuthOptions
@@ -9,16 +9,25 @@ export interface MicrosoftConnectorOptions {
   readonly minDelayMs?: number
   /** Read retries only. Mutations are never automatically replayed. */
   readonly retry?: RestRetryPolicy
-  /** Shared Graph clientState, at most 128 characters. Required for subscriptions and onEvent. */
+  /**
+   * Secret behind every subscription's Graph clientState, at most 128 characters. Required for
+   * subscriptions and onEvent. Application connections send it as is; a person's connection sends
+   * a value signed with it that names their account.
+   */
   readonly webhookSecret?: string
   /** Runs inside Sixb's webhook execution. Persist/enqueue work before returning. */
   readonly onEvent?: MicrosoftEventHandler
 }
 
-/** Connections people make with their own accounts. Change notifications stay app-only. */
+/** Connections people make with their own accounts. */
 export interface MicrosoftOAuthConnectorOptions
-  extends Omit<MicrosoftConnectorOptions, "auth" | "webhookSecret" | "onEvent"> {
+  extends Omit<MicrosoftConnectorOptions, "auth" | "onEvent"> {
   readonly auth: { readonly oauth: MicrosoftOAuthOptions }
+  /**
+   * Runs inside Sixb's webhook execution with the connections of the person whose subscription
+   * sent the notification. Persist/enqueue work before returning.
+   */
+  readonly onEvent?: MicrosoftOAuthEventHandler
 }
 
 export interface RequestOptions {
