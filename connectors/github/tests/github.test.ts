@@ -2261,3 +2261,61 @@ describe("comparing two refs", () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe("reading a file at a ref", () => {
+  test("reads a file, its base64 content, at the ref it was asked for", async () => {
+    const calls = record(() =>
+      json({ type: "file", encoding: "base64", content: "aGVsbG8=", path: "src/login.ts" })
+    )
+
+    const file = await (await connect())
+      .repo(webRepo)
+      .contents.get("src/login.ts", { ref: "feature/login" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/contents/src/login.ts")
+    expect(calls[0]?.url.searchParams.get("ref")).toBe("feature/login")
+    expect(file).toMatchObject({ type: "file", encoding: "base64", content: "aGVsbG8=" })
+  })
+
+  test("reads a directory, and the root without a path", async () => {
+    const calls = record(() =>
+      json([{ type: "file", name: "login.ts", path: "src/login.ts", size: 42 }])
+    )
+    const contents = (await connect()).repo(webRepo).contents
+
+    const entries = await contents.get("src")
+    const root = await contents.get()
+    await contents.get("")
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/contents/src",
+      "/repos/acme/web/contents",
+      "/repos/acme/web/contents",
+    ])
+    expect(Array.isArray(entries)).toBe(true)
+    expect(Array.isArray(root)).toBe(true)
+  })
+
+  // A file over 1 MB comes back with an empty content, so its bytes have to be asked for.
+  test("reads a file's raw bytes, asking GitHub for them without its JSON", async () => {
+    const calls = record(() => new Response("const a = 1\n"))
+
+    const response = await (await connect())
+      .repo(webRepo)
+      .contents.raw("src/login.ts", { ref: "abc" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/contents/src/login.ts")
+    expect(calls[0]?.url.searchParams.get("ref")).toBe("abc")
+    expect(calls[0]?.headers.get("accept")).toBe("application/vnd.github.raw+json")
+    expect(await response.text()).toBe("const a = 1\n")
+  })
+
+  test("refuses a path that walks up out of the repository", async () => {
+    const calls = record()
+    const contents = (await connect()).repo(webRepo).contents
+
+    await expect(contents.get("../../other/secret.ts")).rejects.toThrow("segment")
+    await expect(contents.raw("src/../secret.ts")).rejects.toThrow("segment")
+    expect(calls).toHaveLength(0)
+  })
+})

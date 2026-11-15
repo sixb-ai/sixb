@@ -10,6 +10,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files, compare two refs
+- **Contents** — read a file, a symlink, a submodule or a directory at a branch, tag or commit, and a file's raw bytes
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **Actions** — read workflows, runs, their jobs, logs and artifacts, re-run or cancel a run, and start one by hand
@@ -84,8 +85,8 @@ export const githubConnector = defineConnector(
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
 need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests
-need `Pull requests: read`, or `Pull requests: read & write` to merge, review or comment on one. Branches and commits
-need `Contents: read`, or `Contents: read & write` to create or delete a branch. Check runs and
+need `Pull requests: read`, or `Pull requests: read & write` to merge, review or comment on one. Branches, commits and
+contents need `Contents: read`, or `Contents: read & write` to create or delete a branch. Check runs and
 commit statuses need `Checks: read`. Releases need `Contents: read`, or `Contents: read & write`
 to create, update or delete them and their assets. GitHub Actions need `Actions: read`, or
 `Actions: read & write` to re-run or cancel runs. Organization people APIs require
@@ -176,6 +177,8 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
 | `gh.repo({ owner, repo }).commits.get(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}` |
 | `gh.repo({ owner, repo }).compare({ base, head })` | `GET /repos/{owner}/{repo}/compare/{base}...{head}` |
+| `gh.repo({ owner, repo }).contents.get(path, { ref })` | `GET /repos/{owner}/{repo}/contents/{path}` |
+| `gh.repo({ owner, repo }).contents.raw(path, { ref })` | `GET /repos/{owner}/{repo}/contents/{path}` (raw) |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
 | `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
 | `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
@@ -560,6 +563,18 @@ as `feature/login`.
 ```ts
 // What landed since a review started.
 const since = await repo.compare({ base: reviewSha, head: pull.head.sha })
+```
+
+**Contents.** `contents.get(path, { ref })` reads a path at a branch, tag or commit: a file with
+its `content` in base64, a symlink with its `target`, a submodule, or a directory's entries as an
+array. Omit `path` to list the root. GitHub answers a file over 1 MB with an empty `content` and
+`encoding: "none"`, and refuses one over 100 MB, so `contents.raw(path, { ref })` returns the bytes
+as a `Response` instead. A symlink pointing at a file in the same repository is answered with that
+file's content, and a path that walks up out of the repository is refused before the request.
+
+```ts
+const file = await repo.contents.get("src/login.ts", { ref: pull.head.sha })
+const text = file.type === "file" ? Buffer.from(file.content, "base64").toString("utf8") : ""
 ```
 
 Release calls accept a `signal` to abort the request. `releases.list()` returns

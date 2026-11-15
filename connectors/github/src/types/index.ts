@@ -76,6 +76,15 @@ export type {
   GitHubCompareStatus,
   RepositoryCompareApi,
 } from "./compare"
+export type {
+  GetContentsOptions,
+  GitHubContent,
+  GitHubContentEntry,
+  GitHubContentFile,
+  GitHubContentSubmodule,
+  GitHubContentSymlink,
+  RepositoryContentsApi,
+} from "./contents"
 export type { GitHubDiffEntry, GitHubDiffStatus } from "./diff"
 export type {
   CreateIssueCommentInput,
