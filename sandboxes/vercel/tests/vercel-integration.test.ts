@@ -26,6 +26,30 @@ guard("VercelSandbox (live)", () => {
     }
   }, 180_000)
 
+  // A compound command keeps bash as the parent of what it runs; killing bash left the server
+  // holding the command's output, and the call never returned (2026-11-14, an agent's turn stuck
+  // 10 minutes). Removal proof: drop killMarkedProcesses from kill(); this times out.
+  test("ends a timed-out command whose child still holds its output, and kills that child", async () => {
+    const sandbox = await new VercelSandboxFactory({ sessionTimeoutMs: 5 * 60_000 }).create()
+    try {
+      const server = `node -e 'require("http").createServer(() => {}).listen(0, () => console.log("listening"))'`
+      const started = Date.now()
+      const result = await sandbox.runCommand("bash", ["-lc", `${server} && echo after`], {
+        timeout: 5_000,
+      })
+
+      expect(result).toMatchObject({ exitCode: 137, timedOut: true })
+      expect(Date.now() - started).toBeLessThan(20_000)
+      const left = await sandbox.runCommand("bash", [
+        "-c",
+        "grep -l '[c]reateServer' /proc/[0-9]*/cmdline 2>/dev/null || true",
+      ])
+      expect(left.stdout.trim()).toBe("")
+    } finally {
+      await sandbox.destroy()
+    }
+  }, 180_000)
+
   // Regression check: restore `options.cwd ?? this.workingDirectory` in runCommand.
   // With @vercel/sandbox 2.9.2, cwd "." runs at / and the relative file read fails.
   test("reads workspace files with omitted, relative, and absolute cwd", async () => {

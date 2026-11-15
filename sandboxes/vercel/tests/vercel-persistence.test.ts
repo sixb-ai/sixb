@@ -7,7 +7,7 @@ import {
 } from "@sixb/core/sandboxes"
 import { APIError } from "@vercel/sandbox"
 import { persistentSandboxError } from "../src/vercel-persistence"
-import { VercelSandbox } from "../src/vercel-sandbox"
+import { COMMAND_MARKER, VercelSandbox } from "../src/vercel-sandbox"
 import { fixture } from "./vercel-sdk-fixture"
 
 describe("Vercel named persistence", () => {
@@ -177,6 +177,7 @@ describe("Vercel named persistence", () => {
     expect(f.requests.find((request) => request.path.includes("session-2/cmd"))?.body.env).toEqual({
       DEFAULT_ENV: "current",
       RUN_ACCESS: "new",
+      [COMMAND_MARKER]: expect.any(String),
     })
     // Regression proof: replacing the pinned Session with the named SDK handle causes an extra
     // get/resume after the stopped-command error under @vercel/sandbox 2.3.0.

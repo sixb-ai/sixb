@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 import {
   type CommandResult,
@@ -14,6 +15,25 @@ import { withRequestCredentials } from "./network"
 
 const DEFAULT_WORKING_DIRECTORY = "/vercel/sandbox"
 const KILLED_EXIT_CODE = 137
+
+/**
+ * Set on every command, and so inherited by every process it starts. Killing the command kills
+ * only its own process: a shell's child that outlives it keeps the command's output open, and
+ * Vercel reports no end until that output closes. A timeout or a stop kills them all by this.
+ */
+export const COMMAND_MARKER = "SIXB_SANDBOX_COMMAND"
+
+/** How long a killed command may take to report its end before the call returns without it. */
+export const KILLED_COMMAND_GRACE_MS = 5_000
+
+/** Kills every process whose environment carries the marker its one argument names. */
+const KILL_MARKED_PROCESSES = `marker="$1"
+for proc in /proc/[0-9]*; do
+  if tr '\\0' '\\n' < "$proc/environ" 2>/dev/null | grep -qxF -- "$marker"; then
+    kill -KILL "\${proc#/proc/}" 2>/dev/null
+  fi
+done
+true`
 
 export interface VercelRunCommandParams {
   readonly cmd: string
@@ -142,13 +162,14 @@ export class VercelSandbox implements Sandbox {
     let aborted = false
     let killStarted = false
     let commandHandle: VercelCommandClient
+    const marker = randomUUID()
 
     try {
       commandHandle = await this.client.runCommand({
         cmd: command,
         args: [...args],
         cwd,
-        env,
+        env: { ...env, [COMMAND_MARKER]: marker },
         detached: true,
         ...(timeoutMs !== undefined && timeoutMs > 0 ? { timeoutMs } : {}),
       })
@@ -160,12 +181,22 @@ export class VercelSandbox implements Sandbox {
 
     this.inFlight.add(commandHandle)
 
+    // Once killed, the call waits a little for the command to report its end, then returns
+    // without it: a process nothing could kill must not hold the run.
+    let giveUp: () => void = () => {}
+    const givenUp = new Promise<typeof GIVEN_UP>((resolve) => {
+      giveUp = () => resolve(GIVEN_UP)
+    })
+    let grace: ReturnType<typeof setTimeout> | undefined
+
     const kill = (): void => {
       if (killStarted) {
         return
       }
       killStarted = true
       commandHandle.kill("SIGKILL").catch(() => {})
+      void this.killMarkedProcesses(marker)
+      grace = setTimeout(giveUp, KILLED_COMMAND_GRACE_MS)
     }
 
     const timer =
@@ -178,36 +209,46 @@ export class VercelSandbox implements Sandbox {
 
     const onAbort = (): void => {
       aborted = true
-      kill()
+      // A stop after a timeout already killed the command: its caller waits no longer.
+      if (killStarted) giveUp()
+      else kill()
     }
     options.signal?.addEventListener("abort", onAbort)
     if (options.signal?.aborted) {
       onAbort()
     }
 
-    try {
-      const finished = await commandHandle.wait()
+    const killedResult = (): CommandResult => ({
+      exitCode: KILLED_EXIT_CODE,
+      stdout: "",
+      stderr: timedOut
+        ? `[Sandbox] command timed out after ${timeoutMs}ms`
+        : "[Sandbox] command aborted",
+      durationMs: Date.now() - start,
+      ...(timedOut ? { timedOut: true } : {}),
+    })
+
+    const ended = commandHandle.wait().then(async (finished) => {
       const [stdout, stderr] = await Promise.all([finished.stdout(), finished.stderr()])
-      const exitCode = normalizeExitCode(finished.exitCode, killStarted)
+      return { exitCode: finished.exitCode, stdout, stderr }
+    })
+    // Given up on, it may still fail later: that failure is nobody's to hear.
+    ended.catch(() => {})
+
+    try {
+      const outcome = await Promise.race([ended, givenUp])
+      if (outcome === GIVEN_UP) return killedResult()
+
       return {
-        exitCode,
-        stdout,
-        stderr,
+        exitCode: normalizeExitCode(outcome.exitCode, killStarted),
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
         durationMs: Date.now() - start,
         ...(timedOut ? { timedOut: true } : {}),
       }
     } catch (error) {
-      if (timedOut || aborted) {
-        return {
-          exitCode: KILLED_EXIT_CODE,
-          stdout: "",
-          stderr: timedOut
-            ? `[Sandbox] command timed out after ${timeoutMs}ms`
-            : "[Sandbox] command aborted",
-          durationMs: Date.now() - start,
-          ...(timedOut ? { timedOut: true } : {}),
-        }
-      }
+      if (timedOut || aborted) return killedResult()
+
       throw new SandboxError(
         `[Sandbox] vercel command failed for ${this.id}: ${errorMessage(error)}`
       )
@@ -215,8 +256,30 @@ export class VercelSandbox implements Sandbox {
       if (timer !== undefined) {
         clearTimeout(timer)
       }
+      if (grace !== undefined) {
+        clearTimeout(grace)
+      }
       options.signal?.removeEventListener("abort", onAbort)
       this.inFlight.delete(commandHandle)
+    }
+  }
+
+  /**
+   * Kill whatever a killed command left running. Best effort: a sandbox that stops meanwhile
+   * reaps them itself.
+   */
+  private async killMarkedProcesses(marker: string): Promise<void> {
+    try {
+      const killer = await this.client.runCommand({
+        cmd: "sh",
+        args: ["-c", KILL_MARKED_PROCESSES, "sh", `${COMMAND_MARKER}=${marker}`],
+        cwd: "/",
+        detached: true,
+        timeoutMs: KILLED_COMMAND_GRACE_MS,
+      })
+      await killer.wait()
+    } catch {
+      // The sandbox stopped, or the processes already ended.
     }
   }
 
@@ -312,6 +375,8 @@ export class VercelSandbox implements Sandbox {
 function normalizeWorkingDirectory(value: string | undefined): string {
   return value && value.length > 0 ? posix.resolve("/", value) : DEFAULT_WORKING_DIRECTORY
 }
+
+const GIVEN_UP = Symbol("given up")
 
 function normalizeExitCode(exitCode: number | null | undefined, killed: boolean): number {
   if (typeof exitCode === "number") {
