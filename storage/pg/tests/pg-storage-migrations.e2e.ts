@@ -840,7 +840,8 @@ describe("Postgres storage migrations", () => {
           activeRunId: child.active,
           lastMessageAt: new Date("2026-07-01T12:00:01.000Z"),
           messageCount: 1,
-          lastMessageSeq: 1,
+          // This schema predates the column: it reads as 0 until its migration backfills it.
+          lastMessageSeq: 0,
           createdAt: new Date("2026-07-01T12:00:01.000Z"),
           updatedAt: new Date(
             child.active ? "2026-07-01T12:00:01.000Z" : "2026-07-01T12:00:05.000Z"

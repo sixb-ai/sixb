@@ -170,7 +170,8 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,
     messageCount: Number(row.message_count),
-    lastMessageSeq: Number(row.last_message_seq),
+    // Read before the column's migration, as a migration test does, a thread has no mark yet.
+    lastMessageSeq: Number(row.last_message_seq ?? 0),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   }
