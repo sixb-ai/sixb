@@ -764,5 +764,47 @@ export function runAgentInboxStorageContractSuite<
         expect(bobNext?.id).toBe("inb_bob")
       })
     })
+
+    test("lists the idle threads whose inbox holds an item older than the cutoff", async () => {
+      await withStorage(async (storage) => {
+        const later = new Date(t0.getTime() + 60_000)
+        for (const id of ["thr_w1", "thr_w2", "thr_w3", "thr_busy"]) {
+          await storage.agents.threads.create({
+            id,
+            projectId,
+            ownerPrincipal: alice,
+            createdAt: t0,
+          })
+        }
+        await startConversationRun(storage, "thr_busy", "run_busy", "tok_busy")
+        const waiting = async (threadId: string, createdAt: Date) =>
+          storage.agents.inbox.enqueue({
+            id: `inb_${threadId}`,
+            projectId,
+            threadId,
+            messageId: `msg_${threadId}`,
+            authorPrincipal: alice,
+            mode: "queue",
+            parts: [{ type: "text", text: "Then run the tests" }],
+            createdAt,
+          })
+        await waiting("thr_w1", t0)
+        await waiting("thr_w2", t0)
+        await waiting("thr_busy", t0)
+        // Newer than the cutoff: a turn's end may still be starting it.
+        await waiting("thr_w3", later)
+
+        const list = (afterThreadId?: string) =>
+          storage.agents.inbox.listWaitingThreads({
+            projectId,
+            createdBefore: later,
+            limit: 1,
+            ...(afterThreadId === undefined ? {} : { afterThreadId }),
+          })
+        expect(await list()).toEqual(["thr_w1"])
+        expect(await list("thr_w1")).toEqual(["thr_w2"])
+        expect(await list("thr_w2")).toEqual([])
+      })
+    })
   })
 }

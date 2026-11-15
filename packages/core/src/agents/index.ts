@@ -199,7 +199,11 @@ export {
   retryAgentRun,
   startQueuedAgentTurnFromInbox,
 } from "./request"
-export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
+export {
+  afterAgentRunFinished,
+  repairAgentInboxes,
+  stopAgentRunChild,
+} from "./run-after-finish"
 export type {
   AgentRunArtifactPublish,
   AgentRunArtifacts,

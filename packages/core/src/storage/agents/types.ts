@@ -1484,6 +1484,15 @@ export interface TakeNextQueuedAgentInboxInput {
   readonly authorPrincipal?: Principal
 }
 
+export interface ListWaitingAgentInboxThreadsInput {
+  readonly projectId: string
+  /** Only threads holding an item created before this: newer ones a turn's end is still starting. */
+  readonly createdBefore: Date
+  /** Page after this thread id, in id order. */
+  readonly afterThreadId?: string
+  readonly limit: number
+}
+
 export interface AgentInboxStore {
   enqueue(input: EnqueueAgentInboxItemInput): Promise<EnqueueAgentInboxItemResult>
   getById(params: { projectId: string; id: string }): Promise<AgentInboxItemRecord | null>
@@ -1504,6 +1513,8 @@ export interface AgentInboxStore {
   releaseClaimed(input: { projectId: string; runId: string }): Promise<number>
   /** Pop the next unclaimed item when `thread.activeRunId` is null; null when busy or empty. */
   takeNextQueued(input: TakeNextQueuedAgentInboxInput): Promise<AgentInboxItemRecord | null>
+  /** Ids of threads no turn holds whose inbox still holds an item, for the repair pass. */
+  listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]>
 }
 
 export interface AgentStorage {

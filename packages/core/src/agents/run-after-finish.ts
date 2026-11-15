@@ -38,13 +38,71 @@ export async function afterAgentRunFinished(
   // leaves behind is what a turn that answered may start. Most turns end with an empty inbox, and
   // then read nothing else and write nothing.
   const inbox = await readInbox(host, run)
-  if (inbox?.claimed) await releaseInboxClaims(host, run)
+  if (inbox?.claimed) await releaseInboxClaims(host, run.id)
   if (isAwaitingApprovalRun(run)) {
     await resumeDecidedTurn(host, run)
     return
   }
   if (!inbox || inbox.waiting.length === 0) return
   await startNextQueuedMessage(host, run, inbox.waiting)
+}
+
+const INBOX_REPAIR_PAGE_SIZE = 100
+/** How long a turn's own end has to start what waits, before the repair pass looks at it. */
+const INBOX_REPAIR_GRACE_MS = 30_000
+
+/**
+ * The repair pass for thread inboxes: what a turn's end did not start, because its process stopped
+ * first, a read failed, or an AI limit refused it, starts by the same rules the end applies, as
+ * that turn's requester. Claims a finished turn left behind go back first. A message those rules
+ * keep waiting (another participant's, or one queued behind a turn that stopped) is left alone.
+ */
+export async function repairAgentInboxes(
+  host: AgentRunSessionHost,
+  input: { readonly now?: Date } = {}
+): Promise<void> {
+  const createdBefore = new Date((input.now ?? new Date()).getTime() - INBOX_REPAIR_GRACE_MS)
+  let afterThreadId: string | undefined
+  for (;;) {
+    const threadIds = await host.storage.agents.inbox.listWaitingThreads({
+      projectId: host.projectId,
+      createdBefore,
+      limit: INBOX_REPAIR_PAGE_SIZE,
+      ...(afterThreadId === undefined ? {} : { afterThreadId }),
+    })
+    for (const threadId of threadIds) {
+      try {
+        await repairThreadInbox(host, threadId)
+      } catch (error) {
+        console.error(
+          `[Sixb] Could not repair the inbox of Agent thread '${threadId}'; retrying.`,
+          error
+        )
+      }
+    }
+    afterThreadId = threadIds.at(-1)
+    if (afterThreadId === undefined || threadIds.length < INBOX_REPAIR_PAGE_SIZE) return
+  }
+}
+
+async function repairThreadInbox(host: AgentRunSessionHost, threadId: string): Promise<void> {
+  const { runs } = await host.storage.agents.runs.list({
+    projectId: host.projectId,
+    threadId,
+    kinds: ["conversation"],
+    order: "desc",
+    limit: 1,
+  })
+  const last = runs[0]
+  // A turn holds the thread again, or never ran in it: its end, or its first turn, starts these.
+  if (!last || last.status === "queued" || last.status === "running") return
+
+  const items = await host.storage.agents.inbox.list({ projectId: host.projectId, threadId })
+  const holders = new Set(items.flatMap((item) => (item.claimedBy ? [item.claimedBy.runId] : [])))
+  for (const runId of holders) await releaseInboxClaims(host, runId)
+  // The approval repair resumes a paused turn, and that turn's end starts what waits.
+  if (isAwaitingApprovalRun(last)) return
+  await startNextQueuedMessage(host, last, items)
 }
 
 /**
@@ -149,12 +207,12 @@ async function turnAnsweredEveryMessage(
 }
 
 /** Whatever a run stopped writing goes back to the thread's inbox, to be read again. */
-async function releaseInboxClaims(host: AgentRunSessionHost, run: AgentRunRecord): Promise<void> {
+async function releaseInboxClaims(host: AgentRunSessionHost, runId: string): Promise<void> {
   try {
-    await host.storage.agents.inbox.releaseClaimed({ projectId: host.projectId, runId: run.id })
+    await host.storage.agents.inbox.releaseClaimed({ projectId: host.projectId, runId })
   } catch (error) {
     console.error(
-      `[Sixb] Could not release the inbox claims of Agent run '${run.id}'; repair retries.`,
+      `[Sixb] Could not release the inbox claims of Agent run '${runId}'; repair retries.`,
       error
     )
   }

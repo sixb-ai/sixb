@@ -5,6 +5,7 @@ import {
   afterAgentRunFinished,
   claimAgentRun,
   NOOP_STREAM_SINK,
+  repairAgentInboxes,
 } from "../src/agents"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
@@ -297,5 +298,52 @@ describe("what a finished turn starts", () => {
     expect(pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual(
       [{ id: "inb_steer", claimed: false }]
     )
+  })
+})
+
+describe("the inbox repair pass", () => {
+  /** Past the grace a turn's own end has to start what waits. */
+  const later = () => new Date(Date.now() + 60_000)
+
+  // Guard proof: return before startNextQueuedMessage in repairThreadInbox; the message queued
+  // behind a turn whose end never ran waits for good.
+  test("starts what a turn's end never did, by the rules the end applies", async () => {
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { thread } = await finishedTurn(host, deps, sixb, { status: "succeeded" })
+    // Its process stopped before the turn's end read the inbox.
+    await queueMessage(host, thread.id, { id: "inb_1" })
+
+    await repairAgentInboxes(sessionHost(host, deps), { now: new Date() })
+    expect(await inbox(host, thread.id)).toHaveLength(1)
+
+    await repairAgentInboxes(sessionHost(host, deps), { now: later() })
+    const runs = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId: thread.id,
+      statuses: ["queued"],
+    })
+    expect(runs.runs.map((each) => each.triggerMessageId)).toEqual(["msg_inb_1"])
+    expect(await inbox(host, thread.id)).toEqual([])
+  })
+
+  test("after a stop, starts only the message sent now, and leaves the queued one waiting", async () => {
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { thread } = await finishedTurn(host, deps, sixb, { status: "cancelled" })
+    await queueMessage(host, thread.id, { id: "inb_later" })
+    await queueMessage(host, thread.id, { id: "inb_now", immediate: true })
+
+    await repairAgentInboxes(sessionHost(host, deps), { now: later() })
+    // A second pass finds a turn holding the thread, and starts nothing more.
+    await repairAgentInboxes(sessionHost(host, deps), { now: later() })
+
+    const runs = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId: thread.id,
+      statuses: ["queued"],
+    })
+    expect(runs.runs.map((each) => each.triggerMessageId)).toEqual(["msg_inb_now"])
+    expect((await inbox(host, thread.id)).map((item) => item.id)).toEqual(["inb_later"])
   })
 })

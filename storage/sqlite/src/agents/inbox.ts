@@ -20,6 +20,7 @@ import {
   type EnqueueAgentInboxItemInput,
   type EnqueueAgentInboxItemResult,
   type ListAgentInboxItemsInput,
+  type ListWaitingAgentInboxThreadsInput,
   type RemoveAgentInboxItemInput,
   type TakeAgentInboxSteersInput,
   type TakeNextQueuedAgentInboxInput,
@@ -157,6 +158,27 @@ export class SqliteAgentInboxStore implements AgentInboxStore {
       )
       .all(input.projectId, input.threadId) as AgentInboxRow[]
     return rows.map(rowToInboxItem)
+  }
+
+  async listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]> {
+    const rows = this.db
+      .query(
+        `SELECT DISTINCT inbox.thread_id AS thread_id
+         FROM agent_thread_inbox inbox
+         JOIN agent_threads thread
+           ON thread.project_id = inbox.project_id AND thread.id = inbox.thread_id
+         WHERE inbox.project_id = ? AND inbox.created_at < ? AND inbox.thread_id > ?
+           AND thread.active_run_id IS NULL
+         ORDER BY inbox.thread_id ASC
+         LIMIT ?`
+      )
+      .all(
+        input.projectId,
+        input.createdBefore.toISOString(),
+        input.afterThreadId ?? "",
+        input.limit
+      ) as { thread_id: string }[]
+    return rows.map((row) => row.thread_id)
   }
 
   async update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null> {
