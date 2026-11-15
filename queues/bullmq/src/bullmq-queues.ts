@@ -7,6 +7,7 @@ import type {
   PipelineRunRequestedQueueJob,
   ProjectionQueueJobFailureCode,
   ProjectionRunRequestedQueueJob,
+  RenderQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   VectorIndexingQueueJob,
@@ -80,6 +81,7 @@ export class BullMqQueues implements Queues {
     "internal.unexpected" | "runtime.cancelled"
   >
   readonly lake: BullMqQueue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
+  readonly renders: BullMqQueue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
@@ -103,6 +105,7 @@ export class BullMqQueues implements Queues {
 
     this.vectorIndexing = new BullMqQueue(shared, "vector.indexing")
     this.lake = new BullMqQueue(shared, "lake")
+    this.renders = new BullMqQueue(shared, "renders")
     this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
       shared,
       "sync.runs"
@@ -136,6 +139,7 @@ export class BullMqQueues implements Queues {
       this.agents.close(),
       this.vectorIndexing.close(),
       this.lake.close(),
+      this.renders.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

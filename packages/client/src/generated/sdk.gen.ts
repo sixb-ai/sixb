@@ -192,6 +192,9 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentErrors,
   GetArtifactFileContentResponses,
+  GetArtifactPdfData,
+  GetArtifactPdfErrors,
+  GetArtifactPdfResponses,
   GetArtifactQueryData,
   GetArtifactQueryErrors,
   GetArtifactQueryResponses,
@@ -514,6 +517,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
+  PrintArtifactPdfData,
+  PrintArtifactPdfErrors,
+  PrintArtifactPdfResponses,
   QueryObjectLinksData,
   QueryObjectLinksErrors,
   QueryObjectLinksResponses,
@@ -4240,6 +4246,43 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}",
+    ...options,
+  })
+
+/**
+ * Get a designed document's PDF
+ *
+ * The version printed to PDF, as a download named after the title it printed with. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.
+ */
+export const getArtifactPdf = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactPdfData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactPdfResponses, GetArtifactPdfErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/pdf",
+    ...options,
+  })
+
+/**
+ * Print a designed document to PDF
+ *
+ * Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.
+ */
+export const printArtifactPdf = <ThrowOnError extends boolean = false>(
+  options: Options<PrintArtifactPdfData, ThrowOnError>
+) =>
+  (options.client ?? client).post<PrintArtifactPdfResponses, PrintArtifactPdfErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/pdf",
     ...options,
   })
 

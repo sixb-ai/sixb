@@ -41,6 +41,7 @@
     "@sixb/orchestrator": "workspace:*",
     "@sixb/pipeline-worker": "workspace:*",
     "@sixb/projection-worker": "workspace:*",
+    "@sixb/render-worker": "workspace:*",
     "@sixb/rules-worker": "workspace:*",
     "@sixb/sandboxes-local": "workspace:^",
     "@sixb/server": "workspace:*",

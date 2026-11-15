@@ -43,6 +43,9 @@
       "path": "../projection-worker/tsconfig.build.json"
     },
     {
+      "path": "../render-worker/tsconfig.build.json"
+    },
+    {
       "path": "../rules-worker/tsconfig.build.json"
     },
     {

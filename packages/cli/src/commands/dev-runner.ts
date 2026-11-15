@@ -161,6 +161,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
         { type: "workflow", worker: runtime.workflowWorker },
         { type: "sync", worker: runtime.syncWorker },
         { type: "lake", worker: runtime.lakeWorker },
+        { type: "render", worker: runtime.renderWorker },
       ].flatMap(({ type, worker }) => (worker ? [{ type, concurrency: worker.concurrency }] : [])),
       warnings: devApp.warning ? [devApp.warning, ...runtime.warnings] : runtime.warnings,
     }

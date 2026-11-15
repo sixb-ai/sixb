@@ -981,6 +981,7 @@ export type {
   ArtifactContentInput,
   ArtifactHolderObject,
   ArtifactHolders,
+  ArtifactPdf,
   ArtifactQueryInput,
   ArtifactStateRuntime,
   ArtifactStateValue,

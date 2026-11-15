@@ -1,7 +1,7 @@
 import { createAgentThreadAccessRule } from "../agents/thread-access"
 import { type Principal, SYSTEM_PRINCIPAL } from "../auth"
 import { isRuntimeAllowed } from "../authorization"
-import type { BlobStorage } from "../blob-storage/types"
+import type { BlobStorage, FileRef } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { type AuthorizedObjectReader, objectReadersIn } from "../execution/authorized-object-reader"
 import type { SharedAccessDelegationRef } from "../execution/types"
@@ -38,6 +38,7 @@ import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "
 import { firstArtifactDocument, keepsDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
+import { documentPdf, documentPdfKey, requestDocumentPdf } from "./publish/pdf"
 import {
   type BoardPreviewRequester,
   boardsReadLiveData,
@@ -197,6 +198,18 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   holders(artifactId: string): Promise<ArtifactHolders | null>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
   /**
+   * A designed document's PDF, printed as its stylesheets' `@page` rule lays it out: `ready` with
+   * its file once printed, else `printing`, having asked the render worker to print it, which takes
+   * a few seconds. `failed` with why when it could not be printed; `retry` asks again instead.
+   * Whoever reads the artifact may ask. `null` when the caller cannot read the artifact or it has
+   * no such version. Throws `invalid_artifact` for a version that is not a designed document, and
+   * `pdf_unavailable` in a project without sandboxes, where nothing prints.
+   */
+  pdf(
+    artifactId: string,
+    options?: { readonly version?: number | "latest"; readonly retry?: boolean }
+  ): Promise<ArtifactPdf | null>
+  /**
    * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
    * cannot view refuses it, and a marked property they are not cleared for is left out of each
    * row. Whoever reads the artifact runs its queries, an observer too. `null` when the caller
@@ -242,6 +255,17 @@ export interface ArtifactStateRuntime {
   /** Deletes every value, and returns how many. */
   clear(): Promise<number>
 }
+
+/** A designed document's PDF: its file once printed, being printed, or why it could not be. */
+export type ArtifactPdf =
+  | {
+      readonly status: "ready"
+      readonly file: FileRef
+      /** How many pages it printed on. */
+      readonly pages: number
+    }
+  | { readonly status: "printing" }
+  | { readonly status: "failed"; readonly reason: string }
 
 /** The objects that hold an artifact, as the caller reads them. */
 export interface ArtifactHolders {
@@ -433,8 +457,11 @@ export function createArtifactsRuntime(
   runtime: SixbRuntimeContext,
   blobStorage: BlobStorage,
   options: {
-    /** The project has sandboxes, where the agent worker renders the pictures of boards. */
-    readonly rendersBoardPreviews?: boolean
+    /**
+     * The project has sandboxes, where the agent worker pictures canvas boards and the render
+     * worker prints designed documents to PDF.
+     */
+    readonly rendersInSandboxes?: boolean
   } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
@@ -478,7 +505,7 @@ export function createArtifactsRuntime(
   const checkQuery = createArtifactQueryChecker(runtime)
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
-    if (!options.rendersBoardPreviews || !storage) return
+    if (!options.rendersInSandboxes || !storage) return
 
     // Its queries are answered as whoever published it, who is this runtime's caller.
     await requestBoardPreviews(
@@ -813,6 +840,32 @@ export function createArtifactsRuntime(
 
     async getVersion(artifactId, version) {
       return (await readVersion(artifactId, version))?.version ?? null
+    },
+
+    async pdf(artifactId, pdfOptions = {}) {
+      const read = await readVersion(artifactId, pdfOptions.version ?? "latest")
+      if (!read) return null
+
+      const { version } = read
+      if (!documentPdfKey(version)) {
+        throw invalidArtifact(
+          `Version ${version.version} of '${artifactId}' is not a designed document, which alone prints to PDF.`
+        )
+      }
+      const storage = requireStorage()
+      const kept = await documentPdf(storage, version)
+      if (kept && !("failure" in kept))
+        return { status: "ready", file: kept.file, pages: kept.pages }
+      if (kept && !pdfOptions.retry) return { status: "failed", reason: kept.failure }
+      if (!options.rendersInSandboxes) {
+        throw new ArtifactRequestError(
+          "pdf_unavailable",
+          "[Sixb] A document prints to PDF in a sandbox, and this project has no sandbox provider."
+        )
+      }
+
+      await requestDocumentPdf({ storage, queue: runtime.queues.renders }, version)
+      return { status: "printing" }
     },
 
     async query(artifactId, name, options = {}) {

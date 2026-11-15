@@ -77,8 +77,8 @@ work/proposal/
 
 - **Paper.** Give the stylesheet an `@page` rule with a size and the margins:
   `@page { size: letter; margin: 0.75in 0.85in; }` (or `A4`, or two lengths). That is what makes
-  pages: the reader sees them, and the layout check shoots each one. Keep the margins there, not on
-  `<body>`, and give `<body>` no width, margin, or padding of its own.
+  pages: the reader sees them, downloads them as a PDF, and the layout check shoots each one. Keep
+  the margins there, not on `<body>`, and give `<body>` no width, margin, or padding of its own.
 - **Markup.** Any HTML that lays out text, tables, figures, and pictures, styled by any CSS: grids,
   columns, `::before` numbering, `<svg>`. No scripts, `on…` handlers, `<iframe>`, `<form>`, or
   `<base>`: publishing refuses them. Images are files in the artifact (or another artifact's,
@@ -90,8 +90,9 @@ work/proposal/
   table-header-group; }` repeats a table's header on each page it runs onto. Nothing may be wider
   than the space between the margins.
 - **Phones.** On a phone it shows as one sheet at the screen's width, with your CSS. Stack every
-  multi-column grid in `@media (max-width: 600px) { … }`, and size images with `max-width: 100%`,
-  so nothing runs off the side; print never reaches that width.
+  multi-column grid in `@media screen and (max-width: 600px) { … }`, and size images with
+  `max-width: 100%`, so nothing runs off the side. Keep `screen` in it: paper as narrow as A5
+  would match it when printed.
 - **Type in points**, as print is: body text around 10pt, labels no smaller than 6.5pt.
 - **Headings** `h1`–`h3` make the outline and the sections an address can name, as in Markdown.
 - **A project's design** comes as files in a project skill: copy its stylesheet, fonts, and images,

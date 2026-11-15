@@ -34,6 +34,7 @@ export const coreInternalCompanions: ReadonlySet<string> = new Set([
   "@sixb/pg",
   "@sixb/pipeline-worker",
   "@sixb/projection-worker",
+  "@sixb/render-worker",
   "@sixb/rules-worker",
   "@sixb/server",
   "@sixb/sqlite",

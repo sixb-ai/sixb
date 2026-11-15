@@ -10,6 +10,12 @@ export { ARTIFACT_LIMITS } from "../limits"
 export { artifactQueryName } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {
+  DOCUMENT_PDF_JOB,
+  documentPdf,
+  documentPdfKey,
+  MAX_DOCUMENT_PDF_BYTES,
+} from "./pdf"
+export {
   BOARD_PREVIEW_MEDIA_TYPES,
   type BoardPreviewInput,
   type BoardPreviewStatus,

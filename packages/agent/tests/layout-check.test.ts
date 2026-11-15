@@ -117,7 +117,7 @@ describe("layout warnings", () => {
         code: "layout_wide",
         part: "phone",
         message:
-          "On a phone (390px): img “img” runs past the screen's right edge at 249,171 (210×210), so the document scrolls sideways; let it wrap, or stack it in an @media (max-width: 600px) rule.",
+          "On a phone (390px): img “img” runs past the screen's right edge at 249,171 (210×210), so the document scrolls sideways; let it wrap, or stack it in an @media screen and (max-width: 600px) rule.",
       },
       {
         code: "layout_contrast",

@@ -319,3 +319,46 @@ describe("dataset ingestion", () => {
     ])
   })
 })
+
+describe("renders", () => {
+  /** A project with nothing to run but, with `sandboxes`, documents to print. */
+  function host(sandboxes: boolean) {
+    return new SixbHost({
+      id: "renders",
+      ontology: [],
+      storage: new InMemoryStorage(),
+      queues: new InMemoryQueues(),
+      broker: new InMemoryBroker(),
+      blobStorage: new InMemoryBlobStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      lakeMaintenance: { enabled: false },
+      ...(sandboxes
+        ? {
+            sandboxes: {
+              supportsRequestCredentials: true,
+              create: async () => {
+                throw new Error("Not opened here.")
+              },
+            },
+          }
+        : {}),
+    })
+  }
+
+  // Reproduce: drop `render` from resolveRegisteredWorkerTypes.
+  test("selects the render worker for a project with sandboxes, where documents print", () => {
+    expect(resolveRegisteredWorkerTypes(host(true))).toContain("render")
+    expect(resolveRegisteredWorkerTypes(host(false))).not.toContain("render")
+    expect(
+      createWorkerForType(host(true), "render", { workerConcurrency: { render: 3 } }).concurrency
+    ).toBe(3)
+  })
+
+  test("warns about a worker list that leaves the render worker out", () => {
+    expect(omittedWorkerWarnings(host(true), ["agent"])).toEqual([
+      expect.stringContaining("Documents print to PDF in a render worker"),
+    ])
+    expect(omittedWorkerWarnings(host(true), ["agent", "render"])).toEqual([])
+    expect(omittedWorkerWarnings(host(false), ["agent"])).toEqual([])
+  })
+})

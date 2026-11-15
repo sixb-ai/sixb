@@ -476,8 +476,8 @@ async function storeQueryAnswers(
 
 let kitDigest: string | undefined
 
-/** What a board runs with besides its own files: a new kit renders it anew. */
-function frameKitDigest(): string {
+/** What a page runs with besides its own files: a new kit renders it anew. */
+export function frameKitDigest(): string {
   kitDigest ??= createHash("sha256")
     .update(JSON.stringify([FRAME_ASSETS, FRAME_DEFAULT_THEMES]))
     .digest("hex")

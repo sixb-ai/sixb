@@ -302,6 +302,8 @@ export type {
   ArtifactLatestVersion,
   ArtifactOrigin,
   ArtifactOutline,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactReference,
   ArtifactRestorePointReason,

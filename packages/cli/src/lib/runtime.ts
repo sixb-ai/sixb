@@ -22,6 +22,7 @@ import {
 } from "@sixb/orchestrator"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
+import { RenderWorker } from "@sixb/render-worker"
 import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
@@ -29,7 +30,12 @@ import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 import { stopQuietly } from "./role-lifecycle"
 import type { WorkerConcurrency } from "./worker-registry"
-import { agentRuntimeRequired, agentWorkerRequired, lakeWorkerRequired } from "./worker-registry"
+import {
+  agentRuntimeRequired,
+  agentWorkerRequired,
+  lakeWorkerRequired,
+  renderWorkerRequired,
+} from "./worker-registry"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -45,6 +51,7 @@ export interface RunningSixbRuntime {
   readonly rulesWorker: RulesWorker | null
   readonly syncWorker: SyncWorker | null
   readonly lakeWorker: LakeWorker | null
+  readonly renderWorker: RenderWorker | null
   readonly agentWorker: AgentWorker | null
   readonly projectionWorker: ProjectionWorker | null
   readonly pipelineWorker: PipelineWorker | null
@@ -244,7 +251,7 @@ function hasRecoverableRuns({ definitions }: LoadedSixbHost): boolean {
  *   3. PipelineWorker (claims from queues)
  *   4. WorkflowWorker (claims from queues)
  *   5. SyncWorker (claims from queues)
- *   6. LakeWorker (claims from queues)
+ *   6. LakeWorker and RenderWorker (claim from queues)
  *   7. Orchestrator (subscribes to events, enqueues jobs, runs cron and the maintenance loop)
  *   8. API server, when this process serves it
  *   9. AgentWorker (claims from queues; its turns call the API)
@@ -253,7 +260,7 @@ function hasRecoverableRuns({ definitions }: LoadedSixbHost): boolean {
  *   1. AgentWorker (ends its turns while the API still answers them)
  *   2. API server
  *   3. Orchestrator (stops cron, drains pending dispatches)
- *   4. LakeWorker
+ *   4. RenderWorker and LakeWorker
  *   5. SyncWorker
  *   6. WorkflowWorker
  *   7. PipelineWorker
@@ -270,6 +277,7 @@ export async function startSixbRuntime(
   let rulesWorker: RulesWorker | null = null
   let syncWorker: SyncWorker | null = null
   let lakeWorker: LakeWorker | null = null
+  let renderWorker: RenderWorker | null = null
   let agentWorker: AgentWorker | null = null
   let pipelineWorker: PipelineWorker | null = null
   let workflowWorker: WorkflowWorker | null = null
@@ -281,6 +289,7 @@ export async function startSixbRuntime(
     await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => options.api?.stop() ?? Promise.resolve())
     await stopQuietly(() => orchestratorRuntime?.stop() ?? Promise.resolve())
+    await stopQuietly(() => renderWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => lakeWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => syncWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
@@ -344,6 +353,11 @@ export async function startSixbRuntime(
         await lakeWorker.start()
       }
 
+      if (renderWorkerRequired(sixb)) {
+        renderWorker = new RenderWorker(sixb, { concurrency: options.workerConcurrency?.render })
+        await renderWorker.start()
+      }
+
       orchestratorRuntime = await startOrchestratorRuntime(sixb)
       orchestratorWorker = orchestratorRuntime.orchestratorWorker
       warnings.push(...orchestratorRuntime.warnings)
@@ -361,6 +375,7 @@ export async function startSixbRuntime(
     if (rulesWorker) workers.push(rulesWorker)
     if (syncWorker) workers.push(syncWorker)
     if (lakeWorker) workers.push(lakeWorker)
+    if (renderWorker) workers.push(renderWorker)
     if (agentWorker) workers.push(agentWorker)
     if (projectionWorker) workers.push(projectionWorker)
     if (pipelineWorker) workers.push(pipelineWorker)
@@ -373,6 +388,7 @@ export async function startSixbRuntime(
     rulesWorker,
     syncWorker,
     lakeWorker,
+    renderWorker,
     agentWorker,
     projectionWorker,
     pipelineWorker,
