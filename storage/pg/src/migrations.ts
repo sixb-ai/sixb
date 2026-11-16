@@ -477,6 +477,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("104-artifact-pdfs", artifactPdfsSql),
     pgSql("105-guest-comment-links", guestCommentLinksSql),
     pgSql("106-agent-thread-inbox", agentThreadInboxSql),
+    pgSql("107-compact-replacement-plans", compactReplacementPlansSql),
   ],
 })
 
@@ -583,3 +584,6 @@ import scriptExecutionsSql from "./migrations/103-script-executions.sql" with { 
 import artifactPdfsSql from "./migrations/104-artifact-pdfs.sql" with { type: "text" }
 import guestCommentLinksSql from "./migrations/105-guest-comment-links.sql" with { type: "text" }
 import agentThreadInboxSql from "./migrations/106-agent-thread-inbox.sql" with { type: "text" }
+import compactReplacementPlansSql from "./migrations/107-compact-replacement-plans.sql" with {
+  type: "text",
+}

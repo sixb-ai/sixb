@@ -19,6 +19,7 @@ import {
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   MaterializationObjectExistence,
+  MaterializationWorkRecord,
   OntologyCommitWrite,
   OntologyReplacementPlanStorage,
   OpenedReplacementPlan,
@@ -368,6 +369,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         identityKey: identity.key,
         classified: identity.classified,
         change: identity.change,
+        ...identityExistence(identity),
       }))
       // Only an identity streamed and still to plan has the revision its work is planned from,
       // and holds no work: unplanning one deletes its work and forgets what it read.
@@ -379,6 +381,8 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         SET planned_revision = identities.read_revision,
           classified = (planned.value->>'classified')::boolean,
           change = planned.value->>'change',
+          planned_exists = (planned.value->>'plannedExists')::boolean,
+          flips = (planned.value->>'flips')::boolean,
           -- A planned object may flip its existence: the next link expansion starts from it.
           expand_at = CASE identities.entity_kind
             WHEN 'object' THEN (
@@ -402,8 +406,9 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
           `Replacement identity ${missing?.entityKey} is not streamed and still to plan.`
         )
       }
+      // What the identity row now holds is not work: only what a commit applies is.
       const work = identities.flatMap((identity) =>
-        identity.records.map((record) => {
+        identity.records.filter(isAppliedWork).map((record) => {
           const columns = materializationWorkColumns(record)
           return {
             entityKind: identity.kind,
@@ -466,7 +471,8 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         const stale = await sql.unsafe(
           `${whole ? "" : `WITH ${TOUCHED}`}
            UPDATE ${IDENTITIES} AS identities
-           SET read_revision = NULL, planned_revision = NULL, classified = FALSE, change = NULL
+           SET read_revision = NULL, planned_revision = NULL, classified = FALSE, change = NULL,
+             planned_exists = NULL, flips = FALSE
            WHERE identities.version_id = $2 AND identities.entity_kind = '${kind}'
              ${whole ? "" : `AND identities.identity_key = ANY(ARRAY(${touchedIdentities(kind)}))`}
              AND identities.planned_revision IS DISTINCT FROM ${revision(kind)}`,
@@ -700,8 +706,9 @@ async function endpoints(
   const unique = [...new Map(refs.map((ref) => [objectRefKey(ref), ref] as const)).values()]
   const rows = await sql<{ readonly key: string; readonly exists: boolean }[]>`
     SELECT requested.key, COALESCE(
-      (SELECT (payload->>'exists')::boolean FROM ${sql(PG_PLAN_WORK_TABLE)}
-        WHERE work_id = ${versionId} AND unique_key = 'object-existence:' || requested.key),
+      (SELECT planned_exists FROM ${sql(IDENTITIES)}
+        WHERE version_id = ${versionId} AND entity_kind = 'object'
+          AND identity_key = requested.key),
       EXISTS (
         SELECT 1 FROM objects
         WHERE project_id = ${projectId} AND object_type_id = requested.key::jsonb->>0
@@ -767,18 +774,11 @@ async function expandLinks(
   from: "pending" | "all"
 ): Promise<number> {
   const pending = from === "pending"
-  const incidentObjects = pending
-    ? `SELECT work.payload->'ref'->>'objectTypeId' AS object_type_id,
-        work.payload->'ref'->>'primaryId' AS primary_id
-      FROM ${IDENTITIES} AS objects
-      JOIN ${PG_PLAN_WORK_TABLE} AS work ON work.work_id = $2
-        AND work.unique_key = 'incident-object:' || objects.identity_key
-      WHERE objects.version_id = $2 AND objects.entity_kind = 'object'
-        AND objects.expand_at = ${NEXT_EXPANSION}`
-    : `SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
-        payload->'ref'->>'primaryId' AS primary_id
-      FROM ${PG_PLAN_WORK_TABLE}
-      WHERE work_id = $2 AND kind = 'incident-object'`
+  const incidentObjects = `SELECT identity_key::jsonb->>0 AS object_type_id,
+      identity_key::jsonb->>1 AS primary_id
+    FROM ${IDENTITIES}
+    WHERE version_id = $2 AND entity_kind = 'object' AND flips
+      ${pending ? `AND expand_at = ${NEXT_EXPANSION}` : ""}`
   const live = `JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
       AND roots.project_id = $1 AND roots.retired_at IS NULL AND NOT roots.deleted
     JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
@@ -959,10 +959,9 @@ async function expandTouched(
         SELECT ${columns} FROM slot_targets
       ) AS candidates
       WHERE EXISTS (
-        SELECT 1 FROM ${PG_PLAN_WORK_TABLE} AS work
-        WHERE work.work_id = $2 AND work.unique_key IN (
-          'incident-object:' || ${sourceKey}, 'incident-object:' || ${targetKey}
-        )
+        SELECT 1 FROM ${IDENTITIES} AS flipped
+        WHERE flipped.version_id = $2 AND flipped.entity_kind = 'object' AND flipped.flips
+          AND flipped.identity_key IN (${sourceKey}, ${targetKey})
       )
     )
     ${INSERT_INCIDENT_LINKS}`,
@@ -1049,7 +1048,7 @@ async function analyzePlans(sql: SQLClient): Promise<void> {
 
 /**
  * Analyzes the plan tables once the plan holds `ANALYZE_ROWS` rows of work. Counted in work rows,
- * not identities: an object stages its classification, its existence, its change and its event.
+ * not identities: a changed object stages its change and its event.
  */
 async function analyzeStagedWork(sql: SQLClient, versionId: string): Promise<void> {
   const [staged] = await sql<{ readonly rows: number | string }[]>`
@@ -1175,4 +1174,36 @@ async function sourceRow(
     ${lock ? sql`FOR UPDATE` : sql``}
   `
   return row ?? null
+}
+
+/**
+ * A planned object's existence and whether the plan flips it, which its identity row holds. Its
+ * classification is already there, as `classified`.
+ */
+function identityExistence(identity: {
+  readonly kind: "object" | "link"
+  readonly key: string
+  readonly records: readonly MaterializationWorkRecord[]
+}): { readonly plannedExists: boolean | null; readonly flips: boolean } {
+  let plannedExists: boolean | null = null
+  let flips = false
+  for (const record of identity.records) {
+    if (record.kind !== "object-existence" && record.kind !== "incident-object") continue
+    if (identity.kind !== "object" || objectRefKey(record.ref) !== identity.key) {
+      throw new MaterializationValidationError(
+        "A replacement identity can only plan its own existence."
+      )
+    }
+    if (record.kind === "object-existence") plannedExists = record.exists
+    else flips = true
+  }
+  return { plannedExists, flips }
+}
+
+function isAppliedWork(record: MaterializationWorkRecord): boolean {
+  return (
+    record.kind !== "classification" &&
+    record.kind !== "object-existence" &&
+    record.kind !== "incident-object"
+  )
 }
