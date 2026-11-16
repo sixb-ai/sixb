@@ -209,10 +209,19 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestRef = useRef({ code, lang })
   const busyRef = useRef(false)
+  const mountedRef = useRef(false)
   latestRef.current = { code, lang }
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   // Coalesce rapid streaming updates so at most one Shiki pass runs at a time, always catching up
-  // to the latest code snapshot without queuing intermediate token deltas.
+  // to the latest code snapshot without queuing intermediate token deltas. Only unmounting stops a
+  // pass: code that arrives while one runs is left to that pass, which highlights it next.
   useEffect(() => {
     if (plain) {
       setAsyncHtml(null)
@@ -223,21 +232,16 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       setAsyncHtml(immediate)
       return
     }
-    let active = true
-    if (busyRef.current) {
-      return () => {
-        active = false
-      }
-    }
+    if (busyRef.current) return
 
     const drain = async () => {
       busyRef.current = true
       try {
-        while (active) {
+        while (mountedRef.current) {
           const target = latestRef.current
           if (isPlainCodeLang(target.lang)) break
           const result = await highlightCode(target.code, target.lang)
-          if (!active) break
+          if (!mountedRef.current) break
           setAsyncHtml(result)
           if (target.code === latestRef.current.code && target.lang === latestRef.current.lang) {
             break
@@ -248,10 +252,6 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       }
     }
     void drain()
-
-    return () => {
-      active = false
-    }
   }, [code, lang, plain])
 
   useEffect(() => {

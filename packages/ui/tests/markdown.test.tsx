@@ -1,8 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { cleanup, render, waitFor } from "@testing-library/react"
+import { Window } from "happy-dom"
 import { renderToStaticMarkup } from "react-dom/server"
 import { defaultUrlTransform, Markdown } from "../src/components/ui/markdown"
+import * as shiki from "../src/lib/shiki"
 import { badgeLabel, getCachedHighlight, highlightCode, isPlainCodeLang } from "../src/lib/shiki"
 
 const GLOBALS_CSS = readFileSync(join(import.meta.dir, "../src/styles/globals.css"), "utf8")
@@ -177,5 +180,74 @@ describe("shiki helpers and prose styles", () => {
     expect(GLOBALS_CSS).toContain('.prose :is(th, td)[align="center"]')
     expect(GLOBALS_CSS).toContain('.prose :is(th, td)[align="right"]')
     expect(GLOBALS_CSS).toContain(".prose section[data-footnotes]")
+  })
+})
+
+describe("streamed code blocks", () => {
+  const browser = new Window({ url: "https://ui.sixb.test" })
+  const dom: Record<string, unknown> = {
+    window: browser,
+    self: browser,
+    document: browser.document,
+    navigator: browser.navigator,
+    HTMLElement: browser.HTMLElement,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  }
+  const previous = new Map<string, PropertyDescriptor | undefined>()
+
+  beforeAll(() => {
+    for (const [key, value] of Object.entries(dom)) {
+      previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+    }
+  })
+
+  afterEach(() => {
+    cleanup()
+    mock.restore()
+  })
+
+  afterAll(() => {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+    browser.close()
+  })
+
+  test("highlights the final code when it arrives while an earlier pass is still running", async () => {
+    // Reproduce by stopping a pass when `code` changes instead of on unmount in CodeBlock (an
+    // effect-scoped `active` flag): version 3 arrives during pass 2, no pass ever highlights it,
+    // and the finished block keeps version 1's HTML.
+    const passes: { code: string; finish: () => void }[] = []
+    spyOn(shiki, "highlightCode").mockImplementation(
+      (code) =>
+        new Promise((resolve) => {
+          const version = passes.length + 1
+          passes.push({ code, finish: () => resolve(`<pre data-version="${version}"></pre>`) })
+        })
+    )
+    const code = (version: number) =>
+      Array.from({ length: version }, (_, line) => `const line${line} = ${line}`).join("\n")
+    const reply = (version: number) => (
+      <Markdown>{["```ts", code(version), "```"].join("\n")}</Markdown>
+    )
+
+    const view = render(reply(1))
+    const highlighted = () =>
+      view.container.querySelector("[data-version]")?.getAttribute("data-version")
+    await waitFor(() => expect(passes).toHaveLength(1))
+    passes[0]?.finish()
+    await waitFor(() => expect(highlighted()).toBe("1"))
+
+    view.rerender(reply(2))
+    await waitFor(() => expect(passes).toHaveLength(2))
+    view.rerender(reply(3))
+    passes[1]?.finish()
+
+    await waitFor(() => expect(passes).toHaveLength(3))
+    expect(passes[2]?.code).toBe(code(3))
+    passes[2]?.finish()
+    await waitFor(() => expect(highlighted()).toBe("3"))
   })
 })
