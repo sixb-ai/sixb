@@ -369,6 +369,55 @@ describe("per-thread open artifact state", () => {
     cache.clear()
   })
 
+  test("a sub-agent opened over an artifact leaves the panel closed when its thread comes back", () => {
+    // Removal proof: write only non-slot targets in `show` (`if (next.type !== "slot") …`);
+    // returning to `thr_a` reopens the report the sub-agent replaced.
+    function Probe() {
+      const panel = useArtifactPanel()
+      const openReport = () => panel?.open({ type: "artifact", artifactId: REPORT })
+      const openSubAgent = () =>
+        panel?.open({ type: "slot", id: "researcher", title: "Researcher" })
+      return (
+        <>
+          <button type="button" onClick={openReport}>
+            Open report
+          </button>
+          <button type="button" onClick={openSubAgent}>
+            Open sub-agent
+          </button>
+          <output data-testid="open-key">{panel?.openKey ?? "none"}</output>
+        </>
+      )
+    }
+
+    const cache = seedThreadAndArtifacts()
+    const store = threadStateStoreFor(cache)
+    const ui = (scopeKey: string) => (
+      <QueryClientProvider client={cache}>
+        <MemoryRouter>
+          <ThreadStateContext.Provider value={store}>
+            <ArtifactPanelRoot scopeKey={scopeKey}>
+              <Probe />
+            </ArtifactPanelRoot>
+          </ThreadStateContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    const view = render(ui("thr_a"))
+    fireEvent.click(view.getByText("Open report"))
+    fireEvent.click(view.getByText("Open sub-agent"))
+    expect(view.getByTestId("open-key").textContent).toBe("slot:researcher")
+
+    view.rerender(ui("thr_b"))
+    view.rerender(ui("thr_a"))
+
+    expect(view.getByTestId("open-key").textContent).toBe("none")
+    expect(store.readPanelTarget("thr_a")).toBeNull()
+    view.unmount()
+    cache.clear()
+  })
+
   test("restores a thread's open artifact and draft across route navigation", async () => {
     // Removal proof: drop `readPanelTarget` / `readDraft` on mount; leaving `/threads/thr_a` for
     // `/threads` and coming back loses both the open artifact and the unsent draft.

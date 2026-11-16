@@ -202,7 +202,8 @@ export function ArtifactPanelRoot({
   }, [])
 
   const show = useCallback((next: PanelTarget) => {
-    if (next.type !== "slot") storeRef.current.writePanelTarget(scopeRef.current, next)
+    // A slot does not come back with its conversation, and neither does what it replaced.
+    storeRef.current.writePanelTarget(scopeRef.current, next.type === "slot" ? null : next)
     const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
     if (changeRoute && next.type === "artifact") {
       localTargetRef.current = null
