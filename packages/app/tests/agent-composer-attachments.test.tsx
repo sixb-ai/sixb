@@ -126,7 +126,7 @@ describe("Composer attachments", () => {
     await waitFor(() => expect(view.send().disabled).toBe(false))
 
     fireEvent.click(view.send())
-    expect(view.onSend).toHaveBeenCalledWith("", [uploaded], [])
+    expect(view.onSend).toHaveBeenCalledWith("", [uploaded], [], "auto")
   })
 
   // Removal proof: drop the text/plain check in handlePaste; the cells upload as a picture.
@@ -180,7 +180,7 @@ describe("Composer attachments", () => {
     // A click focuses the button it lands on.
     view.send().focus()
     fireEvent.click(view.send())
-    expect(view.onSend).toHaveBeenCalledWith("And Globex?", [], [])
+    expect(view.onSend).toHaveBeenCalledWith("And Globex?", [], [], "auto")
     // Removal proof: drop the focus call from submit; the focus stays on the button clicked.
     expect(document.activeElement).toBe(view.input())
   })
@@ -244,7 +244,8 @@ test("comments handed to the input join it as a chip, its words the reader's, an
   expect(view.onSend).toHaveBeenCalledWith(
     "Keep it short",
     [],
-    [{ context: comments, origin: "explicit" }]
+    [{ context: comments, origin: "explicit" }],
+    "auto"
   )
 })
 

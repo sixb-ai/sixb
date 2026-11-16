@@ -212,8 +212,13 @@ The default `StreamSink` writes:
 - `agent.compaction.completed`
 - `agent.compaction.failed`
 - `agent.ui.chunk`
+- `agent.inbox.read`
 - `agent.message.finalized`
 - `agent.run.finished`
+
+`agent.inbox.read` carries the steers a step read from the thread's inbox, published by the run
+session as it claims them, after what streamed before: a viewer shows each message where the
+conversation will hold it once the turn ends.
 
 Live model UI chunks are broker records only. They are not inserted into `agent_messages`.
 `agent_messages` stores the finalized assistant message after the model turn completes or is

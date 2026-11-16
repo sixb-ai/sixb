@@ -127,6 +127,9 @@ export async function runAgent(options: {
       },
       throwOnError: true,
     })
+    if (!posted.run) {
+      throw new Error("[SixbCli] A sent message started no turn: the thread already had one.")
+    }
     let runId: string | null = posted.run.id
     if (options.detach) {
       if (onComputer && !thread.computer?.online) step(tone.faint(waitingNote(thread.computer)))

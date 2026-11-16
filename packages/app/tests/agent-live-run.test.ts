@@ -104,6 +104,39 @@ describe("liveRunReducer", () => {
     expect(state.parts).toEqual([{ kind: "text", text: "Hello world" }])
   })
 
+  // Removal proof: drop the `agent.inbox.read` case from the reducer; nothing marks where the turn
+  // read the message.
+  test("keeps where the turn read a message, through a step asked again", () => {
+    const steer = {
+      id: "msg_steer",
+      authorPrincipal: { type: "user" as const, id: "usr_mina" },
+      parts: [{ type: "text" as const, text: "Use the Q3 numbers" }],
+      createdAt: "2026-11-15T09:00:00.000Z",
+    }
+    let state = reduceChunks([
+      { type: "start-step" },
+      { type: "text-delta", id: "a", delta: "Q2 shows a dip." },
+      { type: "start-step" },
+    ])
+    state = liveRunReducer(state, {
+      type: "event",
+      event: event({ type: "agent.inbox.read", messages: [steer] }),
+    })
+    for (const chunk of [
+      { type: "text-delta", id: "b", delta: "First try" },
+      { type: "start-step", retry: true },
+      { type: "text-delta", id: "b", delta: "With Q3" },
+    ]) {
+      state = liveRunReducer(state, { type: "event", event: uiChunk(chunk) })
+    }
+
+    expect(state.inboxReads).toEqual([{ at: 1, messages: [steer] }])
+    expect(state.parts).toEqual([
+      { kind: "text", text: "Q2 shows a dip." },
+      { kind: "text", text: "With Q3" },
+    ])
+  })
+
   test("marks the run active on start", () => {
     const state = liveRunReducer(createLiveRunState(null), {
       type: "event",

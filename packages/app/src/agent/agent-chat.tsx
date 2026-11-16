@@ -197,6 +197,7 @@ export function AgentChat({
           onInserted: inserted,
         }}
         question={conversation.questionProps}
+        pending={conversation.pendingProps}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}

@@ -125,7 +125,11 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       pausesAfterStep: () => call("heldCalls.pausesAfterStep"),
     },
     inbox: {
-      takeSteers: (input) => call("inbox.takeSteers", [input]),
+      // What streamed before the step reaches the server first: the read lands after it.
+      takeSteers: async (input) => {
+        await sink.flush()
+        return call("inbox.takeSteers", [input])
+      },
     },
     children: {
       get: (runId) => call("children.get", [runId]),
@@ -393,6 +397,8 @@ function batchedEvents(
       publishCompactionCompleted: enqueue("publishCompactionCompleted"),
       publishCompactionFailed: enqueue("publishCompactionFailed"),
       publishUiChunk: enqueue("publishUiChunk"),
+      // The server says what a step read, as it claims it (see inbox.takeSteers).
+      publishInboxRead: async () => {},
       publishMessageFinalized: enqueue("publishMessageFinalized"),
       async publishRunFinished(record) {
         await enqueue("publishRunFinished")(record)

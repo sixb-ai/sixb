@@ -156,6 +156,74 @@ describe("slash commands", () => {
   })
 })
 
+describe("while a turn runs", () => {
+  // Removal proof: pass `delivery` through as given in the composer's submit; the send button sends
+  // "auto", which the conversation drops while a turn runs, after the draft was already cleared.
+  test("the send button sends where Enter would, when the reader cannot stop the turn", () => {
+    const sent: string[] = []
+    const view = renderComposer({
+      running: true,
+      steerable: false,
+      onSend: (text, _attachments, _context, delivery) => sent.push(`${delivery}: ${text}`),
+    })
+
+    type(view.input(), "And the fixtures")
+    fireEvent.click(view.getByRole("button", { name: "Send message" }))
+
+    expect(sent).toEqual(["queue: And the fixtures"])
+  })
+})
+
+// Removal proof: drop the file rule from the composer's deliveryOf; the draft goes as a steer,
+// which the server always refuses for a file, and the reader is told to try again.
+test("a draft with a file goes after the reader's own answer, by Enter or the send button", () => {
+  const sent: string[] = []
+  const chart = {
+    blobId: `sha256-${"a".repeat(64)}`,
+    digest: `sha256:${"a".repeat(64)}`,
+    sizeBytes: 4,
+    fileName: "q3-chart.png",
+    mediaType: "image/png",
+  }
+  const view = renderComposer({
+    running: true,
+    onStop: () => {},
+    draft: "Use this chart",
+    draftAttachments: [chart],
+    draftNonce: 1,
+    onSend: (text, attachments, _context, delivery) =>
+      sent.push(`${delivery}: ${text} (${attachments.length} file)`),
+  })
+
+  const send = view.getByRole("button", { name: "Send message" })
+  expect(send.getAttribute("title")).toBe("Send once this answer ends")
+  fireEvent.keyDown(view.input(), { key: "Enter" })
+
+  expect(sent).toEqual(["queue: Use this chart (1 file)"])
+})
+
+// Removal proof: drop `!hasDraft` from the composer's stop button; with a draft the reader's own
+// answer still shows Stop, and there is no button that sends.
+test("a draft turns stop back into send, which steers the reader's own answer", () => {
+  const sent: string[] = []
+  let stopped = 0
+  const view = renderComposer({
+    running: true,
+    onStop: () => {
+      stopped += 1
+    },
+    onSend: (text, _attachments, _context, delivery) => sent.push(`${delivery}: ${text}`),
+  })
+  expect(view.getByRole("button", { name: "Stop generating" })).toBeDefined()
+
+  type(view.input(), "Use the Q3 numbers instead")
+  expect(view.queryByRole("button", { name: "Stop generating" })).toBeNull()
+  fireEvent.click(view.getByRole("button", { name: "Send message" }))
+
+  expect(sent).toEqual(["steer: Use the Q3 numbers instead"])
+  expect(stopped).toBe(0)
+})
+
 describe("the composer's layout", () => {
   // Removal proof: drop `value.includes("\n")` from `expanded`; a two-line draft stays in the row.
   test("a draft on more than one line gets a row of its own, above the controls", () => {

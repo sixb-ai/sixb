@@ -667,7 +667,7 @@ function Home(
         },
         throwOnError: true,
       })
-      if (created.thread.runsOn === "computer") void runner.claim(posted.run.id)
+      if (created.thread.runsOn === "computer" && posted.run) void runner.claim(posted.run.id)
       props.onOpen(created.thread.id)
       return true
     } catch (error) {
@@ -1006,10 +1006,6 @@ function ThreadView(
       props.say("It works in another folder: press ctrl+f to move it here first.")
       return false
     }
-    if (activeRunId) {
-      props.say("The agent is still working. Press esc twice to stop it.")
-      return false
-    }
     const { data, error } = await postAgentThreadMessage({
       client,
       path: { threadId },
@@ -1021,11 +1017,18 @@ function ThreadView(
           : {}),
         ...requesterSettings(),
         ...messageSelection(models, settings),
+        // Enter steers the turn that runs; a message it cannot steer is refused with why.
+        ...(activeRunId ? { delivery: "steer" as const } : {}),
       },
     })
     if (error || !data) {
       props.say(errorText(error), "error")
       return false
+    }
+    // A message sent while a turn runs waits in the thread's inbox instead of starting one.
+    if (!data.run) {
+      void reload()
+      return true
     }
     if (runsHere) void runner.claim(data.run.id)
     setLive(liveRun(data.run.id))

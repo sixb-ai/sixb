@@ -88,29 +88,36 @@ async function userScope(host: SixbHost, id: string) {
   })
 }
 
-/** A thread with a turn that ran, and the run as it ended. */
-async function finishedTurn(
+type Requester = Awaited<ReturnType<typeof userScope>>
+
+interface TurnOutcome {
+  readonly status: "succeeded" | "cancelled"
+  readonly answer?: AppendAgentMessageInput["parts"]
+}
+
+/** A turn the requester asks for in the thread, `during` it, and the run as it ended. */
+async function turn(
   host: SixbHost,
   deps: ReturnType<typeof createTestRuntimeDeps>,
-  sixb: Awaited<ReturnType<typeof userScope>>,
-  outcome: {
-    readonly status: "succeeded" | "cancelled"
-    readonly answer?: AppendAgentMessageInput["parts"]
-  }
+  sixb: Requester,
+  threadId: string,
+  outcome: TurnOutcome,
+  during: () => Promise<unknown> = async () => {}
 ) {
-  const thread = await sixb.agent.threads.create({ title: "Queued messages" })
-  const { run } = await sixb.agent.runs.request({ threadId: thread.id, text: "Read the book." })
+  const { run } = await sixb.agent.runs.request({ threadId, text: "Read the book." })
   const session = await claimAgentRun(sessionHost(host, deps), {
     run: run as ConversationAgentRunRecord,
     leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
   })
   if (!session) throw new Error("Expected the turn to be claimed.")
+  await during()
+
   const answer: AppendAgentMessageInput[] = []
   if (outcome.answer !== undefined) {
     answer.push({
       id: "msg_answer",
       projectId: host.id,
-      threadId: thread.id,
+      threadId,
       runId: run.id,
       role: "assistant",
       parts: outcome.answer,
@@ -124,30 +131,51 @@ async function finishedTurn(
     answer
   )
   await session.close()
-  return { thread, run: finished as ConversationAgentRunRecord }
+  return finished as ConversationAgentRunRecord
 }
 
-/** The thread's inbox, as the chat reads it. */
-function inbox(host: SixbHost, threadId: string) {
-  return host.storage.agents!.inbox.list({ projectId: host.id, threadId })
-}
-
-async function queueMessage(
+/** A thread with a turn that ran, the messages sent `during` it, and the run as it ended. */
+async function finishedTurn(
   host: SixbHost,
-  threadId: string,
-  input: { readonly id: string; readonly immediate?: boolean }
+  deps: ReturnType<typeof createTestRuntimeDeps>,
+  sixb: Requester,
+  outcome: TurnOutcome,
+  during: (threadId: string) => Promise<unknown> = async () => {}
 ) {
-  await host.storage.agents!.inbox.enqueue({
-    id: input.id,
+  const thread = await sixb.agent.threads.create({ title: "Queued messages" })
+  const run = await turn(host, deps, sixb, thread.id, outcome, () => during(thread.id))
+  return { thread, run }
+}
+
+/** The thread's inbox, as the chat reads it: the messages that wait. */
+async function inbox(host: SixbHost, threadId: string) {
+  const items = await host.storage.agents!.inbox.list({ projectId: host.id, threadId })
+  return items.map((item) => item.messageId)
+}
+
+/** The turns waiting to run, each with its trigger message. */
+async function startedTurns(host: SixbHost, threadId: string) {
+  const { runs } = await host.storage.agents!.runs.list({
     projectId: host.id,
     threadId,
+    statuses: ["queued"],
+  })
+  return runs.map((run) => run.triggerMessageId)
+}
+
+/** A message the sender queues while a turn runs, or sends now. */
+function queueMessage(
+  sixb: Requester,
+  threadId: string,
+  input: { readonly id: string; readonly immediate?: boolean; readonly text?: string }
+) {
+  return sixb.agent.runs.send({
+    threadId,
+    text: input.text ?? "Then run the tests.",
+    delivery: input.immediate ? "send_now" : "queue",
     messageId: `msg_${input.id}`,
-    authorPrincipal: { type: "user", id: "owner" },
-    mode: "queue",
-    parts: [{ type: "text", text: "Then run the tests." }],
     timeZone: "America/New_York",
     locale: "en-US",
-    ...(input.immediate ? { immediate: true } : {}),
   })
 }
 
@@ -155,8 +183,9 @@ describe("what a finished turn starts", () => {
   test("reads the next message its requester queued for the thread", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "succeeded" })
-    await queueMessage(host, thread.id, { id: "inb_1" })
+    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "succeeded" }, (id) =>
+      queueMessage(sixb, id, { id: "inb_1" })
+    )
 
     await afterAgentRunFinished(sessionHost(host, deps), run)
 
@@ -189,42 +218,33 @@ describe("what a finished turn starts", () => {
   test("starts nothing after a turn that was stopped", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "cancelled" })
-    await queueMessage(host, thread.id, { id: "inb_1" })
+    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "cancelled" }, (id) =>
+      queueMessage(sixb, id, { id: "inb_1" })
+    )
 
     await afterAgentRunFinished(sessionHost(host, deps), run)
 
-    const runs = await host.storage.agents!.runs.list({
-      projectId: host.id,
-      threadId: thread.id,
-      statuses: ["queued"],
-    })
-    expect(runs.runs).toEqual([])
-    const pending = await inbox(host, thread.id)
-    expect(pending.map((item) => item.id)).toEqual(["inb_1"])
+    expect(await startedTurns(host, thread.id)).toEqual([])
+    expect(await inbox(host, thread.id)).toEqual(["msg_inb_1"])
   })
 
   test("starts a message sent now even after a stop", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "cancelled" })
-    await queueMessage(host, thread.id, { id: "inb_now", immediate: true })
+    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "cancelled" }, (id) =>
+      queueMessage(sixb, id, { id: "inb_now", immediate: true })
+    )
 
     await afterAgentRunFinished(sessionHost(host, deps), run)
 
-    const runs = await host.storage.agents!.runs.list({
-      projectId: host.id,
-      threadId: thread.id,
-      statuses: ["queued"],
-    })
-    expect(runs.runs.map((each) => each.triggerMessageId)).toEqual(["msg_inb_now"])
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_inb_now"])
     expect(await inbox(host, thread.id)).toEqual([])
   })
 
   test("waits when the turn asked its requester a question", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread, run } = await finishedTurn(host, deps, sixb, {
+    const asked: TurnOutcome = {
       status: "succeeded",
       answer: [
         {
@@ -236,19 +256,15 @@ describe("what a finished turn starts", () => {
           output: { status: "asked", note: "The user sees your questions." },
         },
       ],
-    })
-    await queueMessage(host, thread.id, { id: "inb_1" })
+    }
+    const { thread, run } = await finishedTurn(host, deps, sixb, asked, (id) =>
+      queueMessage(sixb, id, { id: "inb_1" })
+    )
 
     await afterAgentRunFinished(sessionHost(host, deps), run)
 
-    const runs = await host.storage.agents!.runs.list({
-      projectId: host.id,
-      threadId: thread.id,
-      statuses: ["queued"],
-    })
-    expect(runs.runs).toEqual([])
-    const pending = await inbox(host, thread.id)
-    expect(pending.map((item) => item.id)).toEqual(["inb_1"])
+    expect(await startedTurns(host, thread.id)).toEqual([])
+    expect(await inbox(host, thread.id)).toEqual(["msg_inb_1"])
   })
 
   test("releases a steer the turn never wrote, whatever ended it", async () => {
@@ -294,10 +310,120 @@ describe("what a finished turn starts", () => {
     const lost = await host.storage.agents!.runs.getById({ projectId: host.id, id: "run_lost" })
     await afterAgentRunFinished(sessionHost(host, deps), lost!)
 
-    const pending = await inbox(host, thread.id)
+    const pending = await host.storage.agents!.inbox.list({
+      projectId: host.id,
+      threadId: thread.id,
+    })
     expect(pending.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))).toEqual(
       [{ id: "inb_steer", claimed: false }]
     )
+  })
+})
+
+describe("what a finished turn starts in a shared thread", () => {
+  /** Theo's thread, shared with Mina, who has never written in it. */
+  async function sharedThread(host: SixbHost) {
+    const owner = await userScope(host, "owner")
+    const guest = await userScope(host, "guest")
+    const thread = await owner.agent.threads.create({ title: "Shared" })
+    await owner.agent.threads.participants.add(thread.id, [{ type: "user", id: "guest" }])
+    return { owner, guest, threadId: thread.id }
+  }
+
+  /** Whom the thread's waiting turns run as. */
+  async function startedAs(host: SixbHost, threadId: string) {
+    const { runs } = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId,
+      statuses: ["queued"],
+    })
+    return Promise.all(
+      runs.map(
+        async (run) =>
+          (await host.storage.executions.getById({ projectId: host.id, id: run.executionId }))
+            ?.requestedBy
+      )
+    )
+  }
+
+  // Guard proof: return after the requester's own messages in startNextQueuedMessage, or drop
+  // `executionId` from the enqueue in sendAgentMessage; the guest's first message waits for good.
+  test("starts a participant's first message as their own turn", async () => {
+    const { host, ...deps } = setup()
+    const { owner, guest, threadId } = await sharedThread(host)
+    const run = await turn(host, deps, owner, threadId, { status: "succeeded" }, () =>
+      queueMessage(guest, threadId, { id: "inb_guest", text: "And Halden." })
+    )
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    expect(await startedTurns(host, threadId)).toEqual(["msg_inb_guest"])
+    expect(await startedAs(host, threadId)).toEqual([{ type: "user", id: "guest" }])
+  })
+
+  test("starts the requester's own message first, however late it came", async () => {
+    const { host, ...deps } = setup()
+    const { owner, guest, threadId } = await sharedThread(host)
+    const run = await turn(host, deps, owner, threadId, { status: "succeeded" }, async () => {
+      await queueMessage(guest, threadId, { id: "inb_guest" })
+      await queueMessage(owner, threadId, { id: "inb_owner" })
+    })
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    expect(await startedTurns(host, threadId)).toEqual(["msg_inb_owner"])
+    expect(await inbox(host, threadId)).toEqual(["msg_inb_guest"])
+  })
+
+  test("leaves it waiting once its sender can no longer run turns in the thread", async () => {
+    const { host, ...deps } = setup()
+    const { owner, guest, threadId } = await sharedThread(host)
+    const run = await turn(host, deps, owner, threadId, { status: "succeeded" }, () =>
+      queueMessage(guest, threadId, { id: "inb_guest" })
+    )
+    await owner.agent.threads.participants.remove(threadId, { type: "user", id: "guest" })
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    expect(await startedTurns(host, threadId)).toEqual([])
+    expect(await inbox(host, threadId)).toEqual(["msg_inb_guest"])
+  })
+
+  // Guard proof: rethrow every error in boundSender; the ended session stops the whole start, and
+  // the next sender's message waits too.
+  test("passes over a message whose session ended, and starts the next sender's", async () => {
+    const { host, ...deps } = setup()
+    const { owner, guest, threadId } = await sharedThread(host)
+    const ana = await userScope(host, "ana")
+    await owner.agent.threads.participants.add(threadId, [{ type: "user", id: "ana" }])
+    const run = await turn(host, deps, owner, threadId, { status: "succeeded" }, async () => {
+      await queueMessage(guest, threadId, { id: "inb_guest" })
+      await queueMessage(ana, threadId, { id: "inb_ana" })
+    })
+    await host.storage.auth!.sessions.revoke({
+      projectId: host.id,
+      id: "session-guest",
+      revokedAt: new Date(),
+    })
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    expect(await startedAs(host, threadId)).toEqual([{ type: "user", id: "ana" }])
+    expect(await inbox(host, threadId)).toEqual(["msg_inb_guest"])
+  })
+
+  test("the repair pass starts it the same way", async () => {
+    const { host, ...deps } = setup()
+    const { owner, guest, threadId } = await sharedThread(host)
+    // The owner's turn ended without starting it: its process stopped first.
+    await turn(host, deps, owner, threadId, { status: "succeeded" }, () =>
+      queueMessage(guest, threadId, { id: "inb_guest" })
+    )
+
+    await repairAgentInboxes(sessionHost(host, deps), { now: new Date(Date.now() + 60_000) })
+
+    expect(await startedTurns(host, threadId)).toEqual(["msg_inb_guest"])
+    expect(await startedAs(host, threadId)).toEqual([{ type: "user", id: "guest" }])
   })
 })
 
@@ -310,40 +436,32 @@ describe("the inbox repair pass", () => {
   test("starts what a turn's end never did, by the rules the end applies", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread } = await finishedTurn(host, deps, sixb, { status: "succeeded" })
     // Its process stopped before the turn's end read the inbox.
-    await queueMessage(host, thread.id, { id: "inb_1" })
+    const { thread } = await finishedTurn(host, deps, sixb, { status: "succeeded" }, (id) =>
+      queueMessage(sixb, id, { id: "inb_1" })
+    )
 
     await repairAgentInboxes(sessionHost(host, deps), { now: new Date() })
     expect(await inbox(host, thread.id)).toHaveLength(1)
 
     await repairAgentInboxes(sessionHost(host, deps), { now: later() })
-    const runs = await host.storage.agents!.runs.list({
-      projectId: host.id,
-      threadId: thread.id,
-      statuses: ["queued"],
-    })
-    expect(runs.runs.map((each) => each.triggerMessageId)).toEqual(["msg_inb_1"])
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_inb_1"])
     expect(await inbox(host, thread.id)).toEqual([])
   })
 
   test("after a stop, starts only the message sent now, and leaves the queued one waiting", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")
-    const { thread } = await finishedTurn(host, deps, sixb, { status: "cancelled" })
-    await queueMessage(host, thread.id, { id: "inb_later" })
-    await queueMessage(host, thread.id, { id: "inb_now", immediate: true })
+    const { thread } = await finishedTurn(host, deps, sixb, { status: "cancelled" }, async (id) => {
+      await queueMessage(sixb, id, { id: "inb_later" })
+      await queueMessage(sixb, id, { id: "inb_now", immediate: true })
+    })
 
     await repairAgentInboxes(sessionHost(host, deps), { now: later() })
     // A second pass finds a turn holding the thread, and starts nothing more.
     await repairAgentInboxes(sessionHost(host, deps), { now: later() })
 
-    const runs = await host.storage.agents!.runs.list({
-      projectId: host.id,
-      threadId: thread.id,
-      statuses: ["queued"],
-    })
-    expect(runs.runs.map((each) => each.triggerMessageId)).toEqual(["msg_inb_now"])
-    expect((await inbox(host, thread.id)).map((item) => item.id)).toEqual(["inb_later"])
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_inb_now"])
+    expect(await inbox(host, thread.id)).toEqual(["msg_inb_later"])
   })
 })

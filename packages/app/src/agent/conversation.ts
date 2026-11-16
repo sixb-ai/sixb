@@ -1,6 +1,6 @@
 import { type FileSource, messageFileSource } from "../artifacts/file-source"
 import { isApprovalOutcomeMessage } from "./approvals"
-import type { LiveRunState } from "./live-run"
+import type { LiveInboxRead, LiveRunState } from "./live-run"
 import { knownName, type MessageAuthor, principalKey } from "./message-authors"
 import {
   type NormalizedFile,
@@ -80,8 +80,9 @@ export interface AgentConversationMessage {
   readonly id: string | null
   readonly role: "user" | "assistant"
   /**
-   * `pending`: sent, not saved yet. `streaming`: a reply that still comes from its run, until its
-   * saved copy replaces it. `complete`: everything else.
+   * `pending`: sent, not saved yet. `streaming`: from the run's live stream until its saved copy
+   * replaces it: the reply, and a message the run read while answering, where it read it.
+   * `complete`: everything else.
    */
   readonly status: "pending" | "streaming" | "complete"
   /** The run that wrote a reply. */
@@ -153,26 +154,48 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   for (const run of input.runs ?? []) {
     if (run.status === "failed" || run.status === "cancelled") ended.set(run.id, run.status)
   }
+  // A turn that read messages as it answered holds a reply on each side of them: only its last one
+  // says how the turn ended, as its live copy did.
+  const lastReplyOfRun = new Map<string, string>()
+  for (const message of input.messages) {
+    if (message.role === "assistant" && message.runId !== null) {
+      lastReplyOfRun.set(message.runId, message.id)
+    }
+  }
 
+  let lastUserMessageId: string | null = null
   for (const message of input.messages) {
     if (message.role === "system") continue
 
     savedIds.add(message.id)
     if (message.role === "assistant" && message.runId !== null) answeredRuns.add(message.runId)
+    if (message.role === "user") lastUserMessageId = message.id
 
     // Continue writes the model a message the reader never wrote: nothing to draw. Neither is the
     // one a decision resumes a turn with: its calls' cards say how they ended, and the resumed
     // answer stays right under the one it continues.
     if (isContinuation(message) || isApprovalOutcomeMessage(message)) continue
 
-    // One reply per run: a second one, which nothing writes today, keeps a key of its own.
+    // A run's reply after a message it read keeps the key its live copy had (see liveMessages).
     const preferred = savedKey(message, input.sentKeys)
-    const key = keys.has(preferred) ? `message:${message.id}` : preferred
+    const after =
+      message.role === "assistant" && lastUserMessageId !== null
+        ? `${preferred}:after:${lastUserMessageId}`
+        : null
+    const key = !keys.has(preferred)
+      ? preferred
+      : after !== null && !keys.has(after)
+        ? after
+        : `message:${message.id}`
     keys.add(key)
 
     const saved = savedMessage(message, key, authorOf(message.authorPrincipal, input), input)
     const unfinished =
-      message.role === "assistant" && message.runId !== null ? ended.get(message.runId) : undefined
+      message.role === "assistant" &&
+      message.runId !== null &&
+      lastReplyOfRun.get(message.runId) === message.id
+        ? ended.get(message.runId)
+        : undefined
     result.push(unfinished ? unfinishedMessage(saved, unfinished) : saved)
   }
 
@@ -181,8 +204,7 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
     result.push(pendingMessage(pending, input))
   }
 
-  const live = liveReply(input, savedIds, answeredRuns)
-  if (live) result.push(live)
+  result.push(...liveMessages(input, savedIds, answeredRuns))
 
   return result
 }
@@ -418,45 +440,111 @@ function pendingMessage(
   }
 }
 
-/** The reply streaming in, until its saved copy is in the conversation. */
-function liveReply(
+/**
+ * The reply streaming in, until its saved copies are in the conversation. A message the run read as
+ * it answered sits where it read it, between the reply before and the reply after, as the thread
+ * holds them once the turn ends; each keeps the key its saved copy will have.
+ */
+function liveMessages(
   input: ConversationMessagesInput,
   savedIds: ReadonlySet<string>,
   answeredRuns: ReadonlySet<string>
-): AgentConversationMessage | null {
+): AgentConversationMessage[] {
   const live = input.live
-  if (!live || live.runId === null || live.parts.length === 0) return null
-  if (live.finalizedMessageId !== null && savedIds.has(live.finalizedMessageId)) return null
-  if (answeredRuns.has(live.runId)) return null
+  if (!live || live.runId === null) return []
+  if (live.parts.length === 0 && live.inboxReads.length === 0) return []
+  if (live.finalizedMessageId !== null && savedIds.has(live.finalizedMessageId)) return []
+  if (answeredRuns.has(live.runId)) return []
 
   // A worker that stopped mid-turn saved none of what it streamed.
   const presentation = input.presentation
-  if (presentation.kind === "interrupted" && !presentation.hasProgress) return null
+  if (presentation.kind === "interrupted" && !presentation.hasProgress) return []
 
+  const runId = live.runId
   const unfinished =
     live.finishStatus === "failed" || live.finishStatus === "cancelled"
       ? live.finishStatus
       : undefined
+  // Saved but not read back yet: the reply keeps its live shape until the copy replaces it.
+  const status = live.active || live.finalizedMessageId !== null ? "streaming" : "complete"
+
+  const result: AgentConversationMessage[] = []
+  let replied = false
+  let lastRead: string | null = null
+  const reply = (from: number, to: number, last: boolean) => {
+    const parts = liveParts(live, from, to, last)
+    if (parts.length === 0) return
+
+    result.push({
+      key: replied && lastRead !== null ? `run:${runId}:after:${lastRead}` : `run:${runId}`,
+      id: null,
+      role: "assistant",
+      status,
+      runId,
+      parts,
+      context: [],
+      diagnostics: [],
+      ...(last && unfinished ? { unfinished } : {}),
+    })
+    replied = true
+  }
+
+  let from = 0
+  for (const read of live.inboxReads) {
+    reply(from, read.at, false)
+    from = read.at
+
+    for (const message of read.messages) {
+      if (savedIds.has(message.id)) continue
+
+      result.push(readMessage(message, input))
+      lastRead = message.id
+    }
+  }
+  reply(from, live.parts.length, true)
+
+  return result
+}
+
+/** A message the run read as it answered, drawn as the thread will hold it. */
+function readMessage(
+  message: LiveInboxRead["messages"][number],
+  input: ConversationMessagesInput
+): AgentConversationMessage {
+  const author = authorOf(message.authorPrincipal, input)
 
   return {
-    key: `run:${live.runId}`,
+    key: `message:${message.id}`,
     id: null,
-    role: "assistant",
-    // Saved but not read back yet: the reply keeps its live shape until the copy replaces it.
-    status: live.active || live.finalizedMessageId !== null ? "streaming" : "complete",
-    runId: live.runId,
-    parts: liveParts(live),
-    context: [],
+    role: "user",
+    status: "streaming",
+    runId: null,
+    ...(author ? { author } : {}),
+    parts: message.parts.flatMap((part) =>
+      part.type === "text" ? [{ type: "text" as const, text: part.text, streaming: false }] : []
+    ),
+    context: message.parts.flatMap((part) =>
+      part.type === "context"
+        ? [{ context: part.context as AgentContextInput, origin: part.origin }]
+        : []
+    ),
     diagnostics: [],
-    ...(unfinished ? { unfinished } : {}),
   }
 }
 
-/** The live parts. Text streams in spans the built-in chat joins, so they join here too. */
-function liveParts(live: LiveRunState): AgentConversationPart[] {
+/**
+ * The live parts from `from` to `to`. Text streams in spans the built-in chat joins, so they join
+ * here too; the model is still writing the text the `last` ones end on.
+ */
+function liveParts(
+  live: LiveRunState,
+  from: number,
+  to: number,
+  last: boolean
+): AgentConversationPart[] {
   const result: AgentConversationPart[] = []
 
-  live.parts.forEach((part, index) => {
+  live.parts.slice(from, to).forEach((part, offset) => {
     switch (part.kind) {
       case "text": {
         const previous = result.at(-1)
@@ -473,7 +561,7 @@ function liveParts(live: LiveRunState): AgentConversationPart[] {
         return
 
       case "tool": {
-        const key = live.partKeys[index]
+        const key = live.partKeys[from + offset]
         const toolCallId = key?.startsWith("tool#") ? key.slice("tool#".length) : undefined
         result.push({
           type: "tool",
@@ -497,10 +585,9 @@ function liveParts(live: LiveRunState): AgentConversationPart[] {
     }
   })
 
-  // The model is still writing the text it ended on.
-  const last = result.at(-1)
-  if (live.active && last?.type === "text") {
-    result[result.length - 1] = { ...last, streaming: true }
+  const end = result.at(-1)
+  if (last && live.active && end?.type === "text") {
+    result[result.length - 1] = { ...end, streaming: true }
   }
 
   return result

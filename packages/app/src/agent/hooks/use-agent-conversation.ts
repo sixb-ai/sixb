@@ -14,6 +14,7 @@ import {
   listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
+  listAgentThreadInboxQueryKey,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
@@ -48,6 +49,7 @@ import {
 import type { TranscriptBackground } from "../background/context"
 import type { ComposerProps } from "../components/composer"
 import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
+import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
 import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
@@ -89,6 +91,7 @@ import {
 import type {
   AgentContextEntryInput,
   AgentFileRef,
+  AgentMessageDelivery,
   AgentRun,
   AgentThreadSandboxParams,
   LanguageModel,
@@ -144,6 +147,7 @@ export type ConversationComposerProps = Pick<
   | "disabled"
   | "pending"
   | "running"
+  | "steerable"
   | "stopping"
   | "onStop"
   | "hint"
@@ -412,6 +416,11 @@ export function useAgentConversation({
       ? selectActiveRunId({ pendingRun, threadActiveRunId: thread?.activeRunId ?? null, latestRun })
       : null
   const { live, run: streamRun, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  // What the turn read as it answered leaves the tray: the transcript shows it where it was read.
+  const readMessageIds = useMemo(
+    () => new Set(live.inboxReads.flatMap((read) => read.messages.map((message) => message.id))),
+    [live.inboxReads]
+  )
   // A compaction that ended changed what the conversation weighs: measure it again.
   const wasCompactingRef = useRef(false)
   useEffect(() => {
@@ -536,38 +545,58 @@ export function useAgentConversation({
   const send = async (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery: AgentMessageDelivery = "auto"
   ) => {
-    if (isRunning) return
+    // A running turn takes the message as a steer, a queued turn, or one that stops it. A chat that
+    // does not say where it goes sends it where Enter would: into the reader's own answer, or after
+    // the answer in flight when it is someone else's or carries a file, which no step reads.
+    // The thread that a message starts is always a turn, whatever the composer said.
+    const where: AgentMessageDelivery =
+      isRunning && delivery === "auto"
+        ? attachments.length === 0 && !requestedBySomeoneElse(activeRun, user)
+          ? "steer"
+          : "queue"
+        : delivery
     setSendError(null)
     const targetThreadId = threadId
     const key = `sent:${++sentMessageCount}`
     let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
-        setPendingUser({
-          key,
-          threadId: targetThreadId,
-          text,
-          attachments,
-          context,
-          messageId: null,
-        })
+        // A message for the running turn waits in the inbox, which the tray shows: only one that
+        // starts a turn is the transcript's next message.
+        if (where === "auto") {
+          setPendingUser({
+            key,
+            threadId: targetThreadId,
+            text,
+            attachments,
+            context,
+            messageId: null,
+          })
+        }
         const response = await sendWithRequesterSettings((settings) =>
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
             body: {
               ...messageBody(text, attachments, context, modelSelection.request, settings),
               ...turnApprovalMode,
+              ...(where === "auto" ? {} : { delivery: where }),
             },
           })
         )
-        recordAcceptedSend(response.run, key)
+        if (response.run) recordAcceptedSend(response.run, key)
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: listAgentThreadMessagesQueryKey({ path: { threadId: targetThreadId } }),
           }),
           queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+          // A message that waits beside the running turn is in the thread's inbox, not its
+          // transcript: the tray reads it from there.
+          queryClient.invalidateQueries({
+            queryKey: listAgentThreadInboxQueryKey({ path: { threadId: targetThreadId } }),
+          }),
         ])
         return
       }
@@ -614,7 +643,7 @@ export function useAgentConversation({
           },
         })
       )
-      recordAcceptedSend(response.run, key)
+      if (response.run) recordAcceptedSend(response.run, key)
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -701,6 +730,10 @@ export function useAgentConversation({
       }),
       queryClient.invalidateQueries({
         queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
+      }),
+      // A turn that ended read its steers, or started what was queued behind it.
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadInboxQueryKey({ path: { threadId } }),
       }),
     ])
 
@@ -807,8 +840,10 @@ export function useAgentConversation({
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
       setContinuingThreadId(null)
-      watchRun(response.run)
-      setPendingSend({ run: response.run, anchor: true })
+      if (response.run) {
+        watchRun(response.run)
+        setPendingSend({ run: response.run, anchor: true })
+      }
       await refreshThread(threadId)
     } catch (error) {
       setContinuingThreadId(null)
@@ -1149,7 +1184,7 @@ export function useAgentConversation({
     error: currentSendError
       ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
       : undefined,
-    // Whoever's answer is in flight, the reader writes the next message, and sends it once it ends.
+    // Whoever's answer is in flight, the reader writes the next message.
     disabled: Boolean(sandboxRecovery),
     hint: answeringName
       ? agentMessages.sharing.answering(answeringName)
@@ -1158,6 +1193,8 @@ export function useAgentConversation({
         : undefined,
     pending: composerPending,
     running: isRunning,
+    // Only the turn the reader asked for takes a steer; another person's takes a queued message.
+    steerable: !requestedBySomeoneElse(activeRun, user),
     stopping,
     onStop: canStop ? stop : undefined,
     ...modelControlsProps,
@@ -1174,6 +1211,12 @@ export function useAgentConversation({
       modelName: meteredModelName(models, contextQuery.data?.model),
       condensing: live.compacting,
     },
+  }
+
+  const pendingProps: PendingMessagesProps = {
+    threadId,
+    steerable: composerProps.steerable,
+    read: readMessageIds,
   }
 
   const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
@@ -1281,6 +1324,8 @@ export function useAgentConversation({
      * until the reader answers it or sets it aside.
      */
     questionProps,
+    /** Spread into `<PendingMessages>`, above the composer: what waits beside the running turn. */
+    pendingProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
     /** Where the reader's own conversation runs on their computer, for its badge. */

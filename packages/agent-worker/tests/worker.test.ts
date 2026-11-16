@@ -13576,6 +13576,9 @@ describe("AgentWorker", () => {
           async publishUiChunk() {
             throw new Error("sink down")
           },
+          async publishInboxRead() {
+            throw new Error("sink down")
+          },
           async publishMessageFinalized() {
             throw new Error("sink down")
           },

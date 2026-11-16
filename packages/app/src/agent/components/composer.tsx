@@ -46,7 +46,7 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
-import type { AgentFileRef, LanguageModel } from "../types"
+import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
   type AgentContextMention,
@@ -74,10 +74,16 @@ import { ContextPicker } from "./context-picker"
 import { DictationBar } from "./dictation-bar"
 
 export interface ComposerProps {
+  /**
+   * `delivery` says where the message goes while a turn runs: into it, behind it, or after stopping
+   * it. It is `auto` when nothing runs; passed on as `auto` or left out while a turn runs,
+   * `useAgentConversation` sends it where Enter would.
+   */
   readonly onSend: (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery?: AgentMessageDelivery
   ) => void
   readonly disabled?: boolean
   readonly pending?: boolean
@@ -89,6 +95,11 @@ export interface ComposerProps {
   readonly running?: boolean
   /** A stop has been requested and we're waiting for the run to end. */
   readonly stopping?: boolean
+  /**
+   * The running turn is the reader's own, so a message sent into it steers it. Another person's
+   * turn takes no steer: the message queues for the reader's own turn instead.
+   */
+  readonly steerable?: boolean
   readonly onStop?: () => void
   readonly models?: readonly LanguageModel[]
   readonly selectedModel?: LanguageModel
@@ -216,6 +227,7 @@ export function Composer({
   pending,
   running,
   stopping,
+  steerable = true,
   onStop,
   models = [],
   selectedModel,
@@ -331,13 +343,14 @@ export function Composer({
       : matchCommands(allCommands(), commandText).slice(0, 6)
   const commandsOpen = commandMatches.length > 0
   // Files alone are a message too.
+  // A message sent while a turn runs steers it, so the input stays usable: the reader corrects the
+  // answer they are watching rather than waiting for it.
   const canSend =
     (value.trim().length > 0 || readyAttachments.length > 0) &&
     mention === null &&
     !commandsOpen &&
     !disabled &&
     !pending &&
-    !running &&
     !uploading &&
     !voice.isActive &&
     failedCount === 0
@@ -494,9 +507,17 @@ export function Composer({
     }
   }, [])
 
-  const submit = () => {
+  // While a turn runs, a message goes somewhere: the send button does what Enter does. A file
+  // never goes into the answer in flight, which reads text at its next step: it goes after it.
+  const deliveryOf = (delivery: AgentMessageDelivery): AgentMessageDelivery => {
+    if (!running) return "auto"
+    const where = delivery === "auto" ? (steerable ? "steer" : "queue") : delivery
+    return where === "steer" && readyAttachments.length > 0 ? "queue" : where
+  }
+
+  const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
-    onSend(value.trim(), readyAttachments, contextEntries)
+    onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
     setValue("")
     voice.reset()
     setAttachments([])
@@ -846,6 +867,27 @@ export function Composer({
         return
       }
     }
+    // While a turn runs, Enter sends as always: a steer into the reader's own answer, a queued message
+    // behind another's. Tab queues a draft for the next turn instead, and the modifier sends it now.
+    // An empty composer leaves Tab to move focus.
+    if (running) {
+      if (event.key === "Tab" && canSend && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault()
+        submit("queue")
+        return
+      }
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        submit(steerable ? "send_now" : "queue")
+        return
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault()
+        submit(steerable ? "steer" : "queue")
+        return
+      }
+      return
+    }
     if (event.key !== "Enter") return
     if (event.shiftKey) return
     event.preventDefault()
@@ -890,7 +932,8 @@ export function Composer({
             <MarkerContent>{error}</MarkerContent>
           </Marker>
         ) : null}
-        <div className="relative">
+        {/* A row too narrow for the draft beside the controls, as on a phone, is laid out expanded. */}
+        <div className="@container/composer-row relative">
           <ContextPicker
             open={mention !== null}
             query={mentionQuery}
@@ -918,7 +961,7 @@ export function Composer({
             // The composer focuses itself on arrival and after each answer; on a phone that raises
             // the keyboard only after a tap on it (TouchViewport).
             data-focus-on-tap=""
-            className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
+            className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px] @max-[30rem]/composer-row:gap-y-1 @max-[30rem]/composer-row:rounded-[26px]"
           >
             {/* The draft on one line, to tell when it stops fitting there. */}
             <span
@@ -972,7 +1015,7 @@ export function Composer({
                 />
                 <span
                   aria-hidden="true"
-                  className="hidden flex-1 group-data-[expanded]/composer:block"
+                  className="hidden flex-1 group-data-[expanded]/composer:block @max-[30rem]/composer-row:block"
                 />
               </>
             )}
@@ -1008,6 +1051,7 @@ export function Composer({
               className={cn(
                 "max-h-[200px] min-h-10 min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-2 py-2 text-[16px] leading-6 tracking-[-0.012em] shadow-none placeholder:text-muted-foreground focus-visible:ring-0 md:text-[16px] dark:bg-transparent",
                 "group-data-[expanded]/composer:order-[-1] group-data-[expanded]/composer:basis-full group-data-[expanded]/composer:px-2.5 group-data-[expanded]/composer:pt-1.5 group-data-[expanded]/composer:pb-1",
+                "@max-[30rem]/composer-row:order-[-1] @max-[30rem]/composer-row:basis-full @max-[30rem]/composer-row:px-2.5 @max-[30rem]/composer-row:pt-1.5 @max-[30rem]/composer-row:pb-1",
                 // While dictating, the text being spoken into stays; an empty field makes way.
                 voice.isActive && "read-only:text-muted-foreground",
                 voice.isActive && value.trim().length === 0 && "hidden"
@@ -1050,7 +1094,8 @@ export function Composer({
                     )}
                   />
                 ) : null}
-                {running && onStop ? (
+                {/* Stop while there is nothing to send; a draft turns it back into send. */}
+                {running && onStop && !hasDraft ? (
                   <button
                     type="button"
                     onClick={onStop}
@@ -1067,9 +1112,17 @@ export function Composer({
                 ) : showSend ? (
                   <button
                     type="button"
-                    onClick={submit}
+                    onClick={() => submit()}
                     disabled={!canSend}
                     aria-label={messages.send}
+                    // While an answer runs, where the message goes.
+                    title={
+                      running
+                        ? deliveryOf("auto") === "steer"
+                          ? messages.steer
+                          : messages.queue
+                        : undefined
+                    }
                     className={SEND_BUTTON_CLASS_NAME}
                   >
                     {pending || uploading ? (

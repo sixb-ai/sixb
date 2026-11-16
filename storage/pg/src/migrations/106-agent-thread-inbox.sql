@@ -14,6 +14,8 @@ CREATE TABLE agent_thread_inbox (
   time_zone TEXT,
   locale TEXT,
   immediate BOOLEAN NOT NULL DEFAULT FALSE,
+  -- The request that sent it, whose child execution a turn that starts it runs as.
+  execution_id TEXT,
   claimed_by_run_id TEXT,
   claimed_by_token TEXT,
   claimed_by_step INTEGER,

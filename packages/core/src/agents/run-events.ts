@@ -6,7 +6,12 @@ import type {
   AgentRunRecord,
   ConversationAgentRunRecord,
 } from "../storage/agents"
-import type { AgentCompactionFailureCode, AgentRunStreamEvent, ModelUiChunk } from "./streams"
+import type {
+  AgentCompactionFailureCode,
+  AgentInboxReadMessage,
+  AgentRunStreamEvent,
+  ModelUiChunk,
+} from "./streams"
 import {
   agentRunFinishedEvent,
   agentRunStreamDefinition,
@@ -45,6 +50,11 @@ export interface StreamSink {
     readonly chunkIndex: number
     readonly chunk: ModelUiChunk
   }): Promise<void>
+  /** Messages a turn read from its thread's inbox, in the stream where it read them. */
+  publishInboxRead(input: {
+    readonly run: ConversationAgentRunRecord
+    readonly messages: readonly AgentInboxReadMessage[]
+  }): Promise<void>
   publishMessageFinalized(input: {
     readonly run: ConversationAgentRunRecord
     readonly messageId: string
@@ -59,6 +69,7 @@ export const NOOP_STREAM_SINK: StreamSink = {
   async publishCompactionCompleted() {},
   async publishCompactionFailed() {},
   async publishUiChunk() {},
+  async publishInboxRead() {},
   async publishMessageFinalized() {},
   async publishRunFinished() {},
 }
@@ -90,6 +101,8 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
       ),
     publishUiChunk: (input) =>
       isolateStreamSinkCall(input.run.id, "ui chunk", () => sink.publishUiChunk(input)),
+    publishInboxRead: (input) =>
+      isolateStreamSinkCall(input.run.id, "inbox read", () => sink.publishInboxRead(input)),
     publishMessageFinalized: (input) =>
       isolateStreamSinkCall(input.run.id, "message finalized", () =>
         sink.publishMessageFinalized(input)
@@ -114,6 +127,7 @@ export function withAgentActivityStream(sink: StreamSink, broker: Broker): Strea
     publishCompactionCompleted: (input) => sink.publishCompactionCompleted(input),
     publishCompactionFailed: (input) => sink.publishCompactionFailed(input),
     publishUiChunk: (input) => sink.publishUiChunk(input),
+    publishInboxRead: (input) => sink.publishInboxRead(input),
     publishMessageFinalized: (input) => sink.publishMessageFinalized(input),
     publishRunFinished: (run) =>
       publishLifecycle([
@@ -203,6 +217,17 @@ class BrokerStreamSink implements StreamSink {
       },
       { prevalidated: true }
     )
+  }
+
+  async publishInboxRead(input: {
+    readonly run: ConversationAgentRunRecord
+    readonly messages: readonly AgentInboxReadMessage[]
+  }): Promise<void> {
+    await this.publish({
+      ...agentRunStreamEventBase(input.run),
+      type: "agent.inbox.read",
+      messages: input.messages,
+    })
   }
 
   async publishMessageFinalized(input: {

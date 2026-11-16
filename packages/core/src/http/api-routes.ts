@@ -444,6 +444,15 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // What waits beside the turn that runs, for the people reading and writing the thread. A run token
+  // reaches none of it: a steer arrives in the turn by itself, and the Agent has no inbox to read.
+  {
+    operationId: "listAgentThreadInbox",
+    method: "GET",
+    path: "/api/agent-threads/:threadId/inbox",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "getAgentMessageFileContent",
     method: "GET",

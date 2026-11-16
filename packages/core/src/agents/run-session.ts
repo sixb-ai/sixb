@@ -89,6 +89,7 @@ import {
   readAgentRunContext,
   readAgentTurnHistory,
 } from "./run-turn"
+import type { AgentInboxReadMessage } from "./streams"
 import { subscribeAgentRunCancel } from "./streams/protocol"
 import { subagentSandboxFiles } from "./subagent-runs"
 import { conversationThreadId } from "./thread-access"
@@ -503,7 +504,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         const authorPrincipal = await requester()
         if (!authorPrincipal) return []
 
-        return fenced(run.id, () =>
+        const items = await fenced(run.id, () =>
           agents.inbox.takeSteers({
             projectId: host.projectId,
             threadId: run.threadId,
@@ -514,6 +515,13 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
             authorPrincipal,
           })
         )
+
+        // Whoever watches sees each message where the turn read it, before the step it answers
+        // streams, from what was stored: a runner never says what was sent, or by whom.
+        if (items.length > 0) {
+          await host.events.publishInboxRead({ run, messages: items.map(inboxReadMessage) })
+        }
+        return items
       },
     },
     models: {
@@ -927,6 +935,8 @@ async function reconcileClaimedSteers(
   executionToken: string,
   messages: readonly AppendAgentMessageInput[]
 ): Promise<readonly AppendAgentMessageInput[]> {
+  // A storage without an inbox claims nothing, so every message is the turn's own.
+  if (typeof agents.inbox?.consumeClaimed !== "function") return messages
   const userIds = messages.filter((message) => message.role === "user").map((message) => message.id)
   const consumed = await agents.inbox.consumeClaimed({
     projectId: run.projectId,
@@ -964,4 +974,14 @@ async function reconcileClaimedSteers(
       ...(metadata ? { metadata } : {}),
     }
   })
+}
+
+/** A message a turn read, as its stream tells whoever watches: the stored item, not the runner. */
+function inboxReadMessage(item: AgentInboxItemRecord): AgentInboxReadMessage {
+  return {
+    id: item.messageId,
+    authorPrincipal: item.authorPrincipal,
+    parts: item.parts,
+    createdAt: item.createdAt.toISOString(),
+  }
 }

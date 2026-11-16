@@ -80,6 +80,20 @@ export const en = {
     add: "Add files and more",
     mention: "Mention a record",
     commands: "Commands",
+    /** The messages waiting beside a running turn. */
+    steerPending: "Adds to this answer",
+    queuePending: "Sent once this answer ends",
+    sendNowPending: "Sends now",
+    waitingFile: "A file",
+    steer: "Add to this answer",
+    queue: "Send once this answer ends",
+    sendNow: "Stop this answer and send now",
+    withdraw: "Withdraw this message",
+    messageActions: "Change this message",
+    changeFailed: "Couldn't change this message. Try again.",
+    withdrawFailed: "Couldn't withdraw this message. Try again.",
+    notYourAnswer:
+      "Only the person who asked for this answer can change or stop it. Yours goes after it.",
   },
   /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
   commands: {

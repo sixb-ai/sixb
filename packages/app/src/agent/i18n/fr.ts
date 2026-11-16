@@ -75,6 +75,20 @@ export const fr: Translation<AgentMessages> = {
     add: "Ajouter des fichiers et plus",
     mention: "Mentionner un enregistrement",
     commands: "Commandes",
+    /** The messages waiting beside a running turn. */
+    steerPending: "S’ajoute à cette réponse",
+    queuePending: "Envoyé à la fin de cette réponse",
+    sendNowPending: "Envoyé maintenant",
+    waitingFile: "Un fichier",
+    steer: "Ajouter à cette réponse",
+    queue: "Envoyer à la fin de cette réponse",
+    sendNow: "Arrêter cette réponse et envoyer",
+    withdraw: "Retirer ce message",
+    messageActions: "Modifier ce message",
+    changeFailed: "Impossible de modifier ce message. Réessayez.",
+    withdrawFailed: "Impossible de retirer ce message. Réessayez.",
+    notYourAnswer:
+      "Seule la personne qui a demandé cette réponse peut la modifier ou l’arrêter. Le vôtre partira après.",
   },
   commands: {
     list: "Commandes",

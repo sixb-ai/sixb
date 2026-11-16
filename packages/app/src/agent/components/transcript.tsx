@@ -162,11 +162,14 @@ function TranscriptView({
   const last = messages.at(-1)
   const liveReply = last?.role === "assistant" && last.id === null ? last : undefined
 
-  // Bridge the gap between sending and the reply's first content with a thinking shimmer.
+  // Bridge the gap between sending and the reply's first content with a thinking shimmer, and
+  // between a message the turn just read and the reply to it.
+  const justRead = last?.role === "user" && last.status === "streaming"
   const showThinking =
     turn.kind === "responding" &&
     !liveReply &&
-    !messages.some((message) => message.role === "assistant" && message.runId === turn.runId)
+    (justRead ||
+      !messages.some((message) => message.role === "assistant" && message.runId === turn.runId))
 
   // A saved thread should open at the newest content, not at the first or last user turn. Only mark
   // a row as a scroll anchor while the current UI-initiated turn is in flight: the pending row
@@ -484,9 +487,15 @@ function currentTurnAnchor(
   messages: readonly AgentConversationMessage[],
   turnRunId: string | null | undefined
 ): string | undefined {
+  // A message the turn read as it answered comes after its first reply: the turn still answers the
+  // one before, and the view stays where it is.
+  const firstReply = messages.findIndex(
+    (message) => message.role === "assistant" && message.runId === (turnRunId ?? null)
+  )
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
     if (!message) continue
+    if (message.role === "user" && firstReply !== -1 && index > firstReply) continue
     if (message.role === "user") return message.key
 
     const earlierAnswer = message.id !== null && message.runId !== (turnRunId ?? null)

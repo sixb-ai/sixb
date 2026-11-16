@@ -3,6 +3,7 @@ import type {
   GetAgentResponse,
   GetAgentRunResponse,
   GetAgentThreadContextResponse,
+  ListAgentThreadInboxResponse,
   ListAgentThreadMessagesResponse,
   ListAgentThreadsResponse,
   ListModelsResponse,
@@ -29,6 +30,12 @@ export type AgentMessagePart = AgentMessage["parts"][number]
 export type AgentFileRef = Extract<AgentMessagePart, { type: "file" }>["fileRef"]
 
 export type AgentContextPart = Extract<AgentMessagePart, { type: "context" }>
+
+/** A message waiting in a conversation's inbox: a steer, or a turn queued behind one. */
+export type AgentInboxItem = ListAgentThreadInboxResponse["items"][number]
+
+/** Where a message goes while a turn runs: into it, behind it, or after stopping it. */
+export type AgentMessageDelivery = "auto" | "steer" | "queue" | "send_now"
 
 export type AgentRun = GetAgentRunResponse
 

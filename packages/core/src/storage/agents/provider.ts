@@ -1630,6 +1630,7 @@ export function assertEnqueueAgentInboxItemInput(
   assertAgentInboxMode(input.mode, prefix)
   assertAgentInboxParts(input.parts, input.mode, prefix)
   assertAgentInboxSpec(input.spec, prefix)
+  if (input.executionId !== undefined) assertNonEmptyText(input.executionId, "executionId", prefix)
 }
 
 /**
@@ -1751,6 +1752,7 @@ export function newAgentInboxItemRecord(
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
     ...(input.locale ? { locale: input.locale } : {}),
     ...(input.immediate ? { immediate: true } : {}),
+    ...(input.executionId ? { executionId: input.executionId } : {}),
     createdAt,
     updatedAt: new Date(createdAt),
   }

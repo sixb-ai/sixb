@@ -1,6 +1,17 @@
-import type { AgentRunFailure, AgentRunStreamEvent, ModelUiChunk } from "@sixb/client"
+import type {
+  AgentInboxReadMessage,
+  AgentRunFailure,
+  AgentRunStreamEvent,
+  ModelUiChunk,
+} from "@sixb/client"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import type { AgentRunStatus } from "./types"
+
+/** Messages the turn read from its inbox, before the part at `at`: where the thread will hold them. */
+export interface LiveInboxRead {
+  readonly at: number
+  readonly messages: readonly AgentInboxReadMessage[]
+}
 
 export interface LiveRunState {
   /** The run this state belongs to, or null when idle. */
@@ -19,6 +30,8 @@ export interface LiveRunState {
    * rendering — the view consumes `parts` directly.
    */
   readonly partKeys: readonly string[]
+  /** What the turn read from its inbox as it answered, in order. */
+  readonly inboxReads: readonly LiveInboxRead[]
   /** Model step currently being streamed. Used to keep reused part ids ordered. */
   readonly stepIndex: number
   /** How many parts came before the current step: a step asked again drops the ones after. */
@@ -48,6 +61,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     contextFull: false,
     parts: [],
     partKeys: [],
+    inboxReads: [],
     stepIndex: 0,
     stepStart: 0,
     finalizedMessageId: null,
@@ -99,6 +113,11 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
       return { ...state, compacting: false, contextFull: false }
     case "agent.ui.chunk":
       return applyChunk(state, event.chunk)
+    case "agent.inbox.read":
+      return {
+        ...state,
+        inboxReads: [...state.inboxReads, { at: state.parts.length, messages: event.messages }],
+      }
     case "agent.message.finalized":
       return { ...state, finalizedMessageId: event.messageId }
     case "agent.run.finished":
@@ -135,12 +154,14 @@ function applyChunk(state: LiveRunState, chunk: ModelUiChunk): LiveRunState {
     case "reasoning-end":
       return reduceReasoning(state, chunk)
     case "start-step":
-      // A step asked again drops what its first call streamed.
+      // A step asked again drops what its first call streamed. What the turn read before the step
+      // stays: the step reads it again.
       if (chunk.retry) {
         return {
           ...state,
           parts: state.parts.slice(0, state.stepStart),
           partKeys: state.partKeys.slice(0, state.stepStart),
+          inboxReads: state.inboxReads.filter((read) => read.at <= state.stepStart),
         }
       }
       return { ...state, stepIndex: state.stepIndex + 1, stepStart: state.parts.length }
