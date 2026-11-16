@@ -121,7 +121,7 @@ Setup logs in as that account only when the server needs something, and:
 - lets the deploy account reload Caddy, and nothing else that needs root;
 - adds your admin account to the deploy account's group, so it can read the projects without `sudo`.
 
-`--key <file>` authorizes a different public key than the one SSH uses for the server. On a server where Caddy already serves other sites, setup keeps its configuration, adds one import line, and saves the previous file as `/etc/caddy/Caddyfile.before-sixb-deploy`. Setup reports an SSH server that accepts passwords, or a firewall that blocks ports 80 and 443, but changes neither.
+`--key <file>` authorizes a different public key than the one SSH uses for the server. A Caddy already on the server must be 2.7 or later, and `sixb deploy check` stops on an older one. On a server where Caddy already serves other sites, setup keeps its configuration, adds one import line, and saves the previous file as `/etc/caddy/Caddyfile.before-sixb-deploy`. Setup reports an SSH server that accepts passwords, or a firewall that blocks ports 80 and 443, but changes neither.
 
 Setup is safe to run again. More projects under the same deploy account need no admin login.
 

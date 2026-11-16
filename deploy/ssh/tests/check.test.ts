@@ -36,6 +36,43 @@ describe("server checks", () => {
     expect(script).toContain("project=\"$HOME\"/'northline/code/examples/northline'")
   })
 
+  // Reproduce: drop the version check; on Ubuntu's Caddy 2.6 every deploy then passes the checks
+  // and fails at "Update routes", where `caddy validate` rejects `stream_close_delay`.
+  test("stop a deploy on a Caddy older than 2.7, and compare versions as numbers", async () => {
+    const caddyCheck = async (version: string) => {
+      const home = await mkdtemp(join(tmpdir(), "sixb-check-caddy-"))
+      tempDirs.push(home)
+      const tools = join(home, "tools")
+      await mkdir(tools)
+      await writeFile(join(tools, "caddy"), `#!/bin/sh\necho "v${version} h1:abc="\n`, {
+        mode: 0o755,
+      })
+
+      const child = Bun.spawn(
+        ["bash", "-c", renderCheckScript({ ...context, projectPath: ".", ports: [] })],
+        {
+          env: { HOME: home, USER: "sixb", PATH: `${tools}:/usr/bin:/bin` },
+          stdout: "pipe",
+          stderr: "ignore",
+        }
+      )
+      const output = await new Response(child.stdout).text()
+      await child.exited
+
+      const [check] = parseCheckOutput(output.split("\n"), context).filter(
+        (entry) => entry.id === "server.caddy"
+      )
+      return check
+    }
+
+    expect(await caddyCheck("2.10.2")).toMatchObject({ label: "Caddy version", status: "ok" })
+
+    const old = await caddyCheck("2.6.2")
+    expect(old).toMatchObject({ status: "manual", detail: "2.6.2 is older than 2.7" })
+    expect(old && blocksDeploy(old)).toBe(true)
+    expect(old?.remedy).toContain("caddyserver.com/docs/install")
+  })
+
   test("read back with labels, and with what to do about each", () => {
     const checks = parseCheckOutput(
       [
