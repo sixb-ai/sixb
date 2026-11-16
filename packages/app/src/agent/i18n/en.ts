@@ -50,7 +50,7 @@ export const en = {
     sendFailed: "Couldn't send your message. Please try again.",
     busy: "An answer is already in progress. Send yours when it finishes.",
     busyOther: "Someone else's message is being answered. Send yours when it finishes.",
-    sandboxUnavailable: "This conversation's sandbox must be recovered before another answer.",
+    sandboxUnavailable: "Choose how the agent goes on before sending another message.",
     computerUnavailable:
       "This computer can't run the agent right now. Try again, or choose Cloud below.",
     retryFailed: "Couldn't retry this answer. Try again.",
@@ -909,23 +909,22 @@ export const en = {
     saved: (project: boolean): string => (project ? "Saved to project memory" : "Saved to memory"),
   },
   sandbox: {
-    title: "Sandbox recovery required",
-    description:
-      "Recovery failed or the previous operation could not be confirmed. Automatic resume is blocked to protect your work.",
-    recreateFailed: "Could not recreate the sandbox. Reload and try again.",
-    recreating: "Recreating…",
-    startFresh: "Start with a fresh sandbox",
-    confirmTitle: "Start with a fresh sandbox?",
+    title: "The agent was interrupted",
+    description: "Its work stopped before it could be saved.",
+    recreateFailed: "Couldn't start over. Reload the page and try again.",
+    recreating: "Starting over…",
+    startFresh: "Start over without the files",
+    confirmTitle: "Start over without the files?",
     confirmDescription:
-      "The next run will initialize a new environment. Local files from the previous workspace will not be copied. Conversation history and published attachments stay available. The previous sandbox is not deleted and remains subject to provider retention.",
+      "The agent will go on without the files it made in this conversation. Your messages and published attachments stay.",
     cancel: "Cancel",
-    create: "Create fresh sandbox",
-    ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
-    resume: "Resume previous sandbox",
-    resuming: "Resuming…",
-    resumeHint:
-      "Resume goes on with the files the last run left. Its last change may be unfinished; start fresh to discard them.",
-    resumeFailed: "Could not resume the previous sandbox. Reload and try again, or start fresh.",
+    create: "Start over",
+    ownerOnly: (owner: string) => `Only ${owner} can choose how this conversation goes on.`,
+    resume: "Pick up where it left off",
+    resuming: "Picking up…",
+    resumeHint: "Its files are kept, but its last change may be unfinished.",
+    resumeFailed:
+      "Couldn't pick up where it left off. Reload the page and try again, or start over without the files.",
   },
   /** A command the agent runs in the background, as its card and its calls read. */
   background: {

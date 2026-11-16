@@ -1085,17 +1085,17 @@ describe("who acts on a turn", () => {
     const participant = renderChat("bob", stuck)
     expect(
       await participant.view.findByText(
-        "Only Alice Martin can start this conversation with a fresh sandbox."
+        "Only Alice Martin can choose how this conversation goes on."
       )
     ).toBeDefined()
     expect(
-      participant.view.queryByRole("button", { name: "Start with a fresh sandbox" })
+      participant.view.queryByRole("button", { name: "Start over without the files" })
     ).toBeNull()
     participant.view.unmount()
 
     const owner = renderChat("alice", stuck)
     expect(
-      await owner.view.findByRole("button", { name: "Start with a fresh sandbox" })
+      await owner.view.findByRole("button", { name: "Start over without the files" })
     ).toBeDefined()
   })
 
@@ -1140,7 +1140,7 @@ describe("who acts on a turn", () => {
     fireEvent.click(view.getByRole("button", { name: "Send message" }))
 
     expect(
-      await view.findByText("This conversation's sandbox must be recovered before another answer.")
+      await view.findByText("Choose how the agent goes on before sending another message.")
     ).toBeDefined()
   })
 
