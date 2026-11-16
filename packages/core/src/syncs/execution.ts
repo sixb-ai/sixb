@@ -8,8 +8,9 @@ import type {
   ListSyncRunsResult,
   SyncRunRecord,
 } from "../storage/sync-runs"
+import type { SyncConnections } from "./connections"
 import { SyncValidationError } from "./errors"
-import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResult } from "./request"
+import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResults } from "./request"
 import type { SyncDefinition } from "./types"
 
 export interface SyncRunsRuntime {
@@ -21,14 +22,16 @@ export interface SyncRunsRuntime {
 export interface SyncsRuntime {
   list(): readonly SyncDefinition[]
   getById(syncId: string): SyncDefinition | null
-  request(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
+  /** Queue a run, or on a sync of an OAuth connector one run per connection the caller may run. */
+  request(input: RequestSyncRunInput): Promise<SyncRunRequestResults>
   readonly runs: SyncRunsRuntime
 }
 
 export function createSyncsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  source: Pick<SyncsRuntime, "list" | "getById">
+  source: Pick<SyncsRuntime, "list" | "getById">,
+  connections?: SyncConnections
 ): SyncsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (syncId: string) => isRuntimeAllowed(runtime, { kind: "sync.run", syncId })
@@ -58,7 +61,8 @@ export function createSyncsRuntime(
       assertAuthorized(runtime, { kind: "sync.run", syncId: input.syncId })
       const sync = source.getById(input.syncId)
       if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
-      return requestSyncRun(runtime, execution, sync, input)
+      const { syncId: _syncId, ...options } = input
+      return requestSyncRun(runtime, execution, sync, options, connections)
     },
     runs: {
       getById: async (runId) => {

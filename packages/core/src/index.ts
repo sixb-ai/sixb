@@ -760,6 +760,7 @@ export type {
   SyncReadResult,
   SyncRunRequestOptions,
   SyncRunRequestResult,
+  SyncRunRequestResults,
   SyncTargetBuilder,
 } from "./syncs"
 export { defineSync } from "./syncs"

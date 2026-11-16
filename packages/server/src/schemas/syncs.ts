@@ -19,6 +19,7 @@ const SyncModeSchema = z.enum(["snapshot", "append", "merge"])
 
 export const SyncRunsQuerySchema = z.object({
   syncId: z.string().optional(),
+  connectionId: z.string().optional(),
   datasetId: z.string().optional(),
   status: SyncRunStatusSchema.optional(),
   startedAfter: z.string().optional(),
@@ -29,6 +30,8 @@ export const SyncRunsQuerySchema = z.object({
 })
 
 export const RequestSyncRunBodySchema = z.object({
+  /** One connection to run, on a sync of an OAuth connector. Without it, every one you can run. */
+  connectionId: z.string().optional(),
   expectedLatestVersionId: z.string().optional(),
   commitMessage: z.string().optional(),
 })
@@ -42,6 +45,8 @@ export const SyncRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   syncId: z.string(),
+  /** The connection the run reads, on a sync of an OAuth connector. */
+  connectionId: z.string().optional(),
   datasetId: z.string(),
   mode: SyncModeSchema,
   status: SyncRunStatusSchema,
@@ -83,9 +88,16 @@ export const SyncRunListResponseSchema = z.object({
   total: z.number(),
 })
 
-export const RequestSyncRunResponseSchema = z.object({
+const RequestedSyncRunSchema = z.object({
   runId: z.string(),
   jobId: z.string(),
   syncId: z.string(),
+  /** The connection the run reads, on a sync of an OAuth connector. */
+  connectionId: z.string().optional(),
   queuedAt: z.string(),
+})
+
+/** One run for a static connector's sync; one per connection for an OAuth connector's sync. */
+export const RequestSyncRunResponseSchema = z.object({
+  runs: z.array(RequestedSyncRunSchema),
 })

@@ -7011,6 +7011,7 @@ export type ListSyncsResponses = {
       id: string
       projectId: string
       syncId: string
+      connectionId?: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -7031,6 +7032,7 @@ export type ListSyncsResponses = {
           | "runtime.cancelled"
           | "queue.enqueue_failed"
           | "sync.execution_failed"
+          | "connector.authorization_required"
         message: string
         retryable: boolean
         at: string
@@ -7121,6 +7123,7 @@ export type GetSyncResponses = {
       id: string
       projectId: string
       syncId: string
+      connectionId?: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -7141,6 +7144,7 @@ export type GetSyncResponses = {
           | "runtime.cancelled"
           | "queue.enqueue_failed"
           | "sync.execution_failed"
+          | "connector.authorization_required"
         message: string
         retryable: boolean
         at: string
@@ -7171,6 +7175,7 @@ export type ListSyncRunsData = {
   path?: never
   query?: {
     syncId?: string
+    connectionId?: string
     datasetId?: string
     status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
@@ -7208,6 +7213,7 @@ export type ListSyncRunsResponses = {
       id: string
       projectId: string
       syncId: string
+      connectionId?: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -7228,6 +7234,7 @@ export type ListSyncRunsResponses = {
           | "runtime.cancelled"
           | "queue.enqueue_failed"
           | "sync.execution_failed"
+          | "connector.authorization_required"
         message: string
         retryable: boolean
         at: string
@@ -7257,6 +7264,7 @@ export type ListSyncRunsResponse = ListSyncRunsResponses[keyof ListSyncRunsRespo
 
 export type RequestSyncRunData = {
   body: {
+    connectionId?: string
     expectedLatestVersionId?: string
     commitMessage?: string
   }
@@ -7295,10 +7303,13 @@ export type RequestSyncRunResponses = {
    * Response for status 202
    */
   202: {
-    runId: string
-    jobId: string
-    syncId: string
-    queuedAt: string
+    runs: Array<{
+      runId: string
+      jobId: string
+      syncId: string
+      connectionId?: string
+      queuedAt: string
+    }>
   }
 }
 

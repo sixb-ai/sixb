@@ -96,7 +96,7 @@ export default function HomePage() {
       setRunId(undefined)
       setRequestedAt(Date.now())
     },
-    onSuccess: (result) => setRunId(result.runId),
+    onSuccess: (result) => setRunId(result.runs[0]?.runId),
   })
   const runs = useQuery({
     ...listSyncRunsOptions({ query: { syncId, limit: "10", order: "desc" } }),

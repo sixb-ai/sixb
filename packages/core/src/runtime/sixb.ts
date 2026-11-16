@@ -38,6 +38,7 @@ import type { SandboxDefinition } from "../sandboxes/configuration"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
 import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
+import { createSyncConnections } from "../syncs/connections"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createUsersRuntime, type MemberStatusRuntime, type UsersRuntime } from "../users"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
@@ -170,7 +171,12 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.datasetIngest
     ),
     workflows,
-    syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs),
+    syncs: createSyncsRuntime(
+      runtime,
+      execution,
+      dependencies.definitions.syncs,
+      createSyncConnections(dependencies.connectorService)
+    ),
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),

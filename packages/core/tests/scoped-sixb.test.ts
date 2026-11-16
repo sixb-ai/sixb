@@ -902,9 +902,11 @@ describe("bound Sixb operational access", () => {
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
 
     // Before `request*`, `listSyncs()` advertised runnable syncs the caller had no way to start.
-    const sync = await runner.syncs.request({ syncId: "sync-contracts" })
-    expect(sync.syncId).toBe("sync-contracts")
-    expect(sync.runId).toStartWith("run_")
+    const {
+      runs: [sync],
+    } = await runner.syncs.request({ syncId: "sync-contracts" })
+    expect(sync?.syncId).toBe("sync-contracts")
+    expect(sync?.runId).toStartWith("run_")
 
     const pipeline = await runner.pipelines.request({ pipelineId: "contract-pipeline" })
     expect(pipeline.pipelineId).toBe("contract-pipeline")

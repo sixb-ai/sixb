@@ -21032,6 +21032,9 @@
                           "syncId": {
                             "type": "string"
                           },
+                          "connectionId": {
+                            "type": "string"
+                          },
                           "datasetId": {
                             "type": "string"
                           },
@@ -21086,7 +21089,8 @@
                                   "internal.unexpected",
                                   "runtime.cancelled",
                                   "queue.enqueue_failed",
-                                  "sync.execution_failed"
+                                  "sync.execution_failed",
+                                  "connector.authorization_required"
                                 ]
                               },
                               "message": {
@@ -21330,6 +21334,9 @@
                         "syncId": {
                           "type": "string"
                         },
+                        "connectionId": {
+                          "type": "string"
+                        },
                         "datasetId": {
                           "type": "string"
                         },
@@ -21384,7 +21391,8 @@
                                 "internal.unexpected",
                                 "runtime.cancelled",
                                 "queue.enqueue_failed",
-                                "sync.execution_failed"
+                                "sync.execution_failed",
+                                "connector.authorization_required"
                               ]
                             },
                             "message": {
@@ -21502,6 +21510,14 @@
             }
           },
           {
+            "name": "connectionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "datasetId",
             "in": "query",
             "required": false,
@@ -21582,6 +21598,9 @@
                           "syncId": {
                             "type": "string"
                           },
+                          "connectionId": {
+                            "type": "string"
+                          },
                           "datasetId": {
                             "type": "string"
                           },
@@ -21636,7 +21655,8 @@
                                   "internal.unexpected",
                                   "runtime.cancelled",
                                   "queue.enqueue_failed",
-                                  "sync.execution_failed"
+                                  "sync.execution_failed",
+                                  "connector.authorization_required"
                                 ]
                               },
                               "message": {
@@ -21785,6 +21805,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "connectionId": {
+                    "type": "string"
+                  },
                   "expectedLatestVersionId": {
                     "type": "string"
                   },
@@ -21799,6 +21822,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "connectionId": {
+                    "type": "string"
+                  },
                   "expectedLatestVersionId": {
                     "type": "string"
                   },
@@ -21813,6 +21839,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "connectionId": {
+                    "type": "string"
+                  },
                   "expectedLatestVersionId": {
                     "type": "string"
                   },
@@ -21833,20 +21862,33 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runId": {
-                      "type": "string"
-                    },
-                    "jobId": {
-                      "type": "string"
-                    },
-                    "syncId": {
-                      "type": "string"
-                    },
-                    "queuedAt": {
-                      "type": "string"
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "jobId": {
+                            "type": "string"
+                          },
+                          "syncId": {
+                            "type": "string"
+                          },
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "queuedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["runId", "jobId", "syncId", "queuedAt"],
+                        "additionalProperties": false
+                      }
                     }
                   },
-                  "required": ["runId", "jobId", "syncId", "queuedAt"],
+                  "required": ["runs"],
                   "additionalProperties": false
                 }
               }
