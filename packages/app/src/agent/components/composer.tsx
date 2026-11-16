@@ -604,18 +604,21 @@ export const Composer = memo(function Composer({
   const measureRef = useRef(measure)
   measureRef.current = measure
 
+  // Measured before paint whenever the text changes, or the models land and the settings chip
+  // names one, so the box never shows the wrong shape for a frame.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
   useLayoutEffect(measure, [
     value,
     placeholderText,
     voice.isActive,
+    modelsLoading,
     attachments.length,
     contextEntries.length,
     expanded,
   ])
 
-  // The room changes without the text changing: the model label settles after the first render, a
-  // run starts or stops, or the window resizes.
+  // The room changes without the text changing: a run starts or stops, a model is picked, or the
+  // window resizes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the spacer is drawn anew once dictation ends
   useEffect(() => {
     const el = textareaRef.current

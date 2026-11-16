@@ -76,16 +76,26 @@ export const ComposerSettings = memo(function ComposerSettings(props: ComposerSe
   const auto = choosesModel && autoModels(models, onResetModelSelection) && !selectedModel
   const modeLabel = approvalMode ? agentMessages.approvalModes.modes[approvalMode].label : undefined
   const ModeIcon = approvalMode ? APPROVAL_MODE_ICONS[approvalMode] : undefined
+
+  // While the models load, the chip names nothing rather than a stand-in it would swap a moment
+  // later: its label lands once, and the composer around it doesn't jump.
+  const loading = choosesModel && modelsLoading && !selectedModel
   const name = !choosesModel
     ? modeLabel
-    : auto
-      ? agentMessages.models.auto
-      : (selectedModel?.name ??
-        (modelsError ? agentMessages.models.unavailable : agentMessages.models.defaultModel))
+    : loading
+      ? undefined
+      : auto
+        ? agentMessages.models.auto
+        : (selectedModel?.name ??
+          (modelsError ? agentMessages.models.unavailable : agentMessages.models.defaultModel))
   const level = auto
     ? undefined
     : reasoningLabel(selectedModel, selectedReasoning, agentMessages.reasoning)
   const summary = [name, level, choosesModel ? modeLabel : undefined].filter(Boolean)
+  const label =
+    summary.length > 0
+      ? agentMessages.settings.chip(summary.join(", "))
+      : agentMessages.settings.title
 
   return (
     <ComposerMenu
@@ -97,10 +107,10 @@ export const ComposerSettings = memo(function ComposerSettings(props: ComposerSe
         <button
           type="button"
           disabled={!choosesMode && (disabled || modelsLoading || models.length === 0)}
-          aria-label={agentMessages.settings.chip(summary.join(", "))}
+          aria-label={label}
           aria-haspopup="dialog"
           aria-expanded={open}
-          title={summary.join(" · ")}
+          title={summary.length > 0 ? summary.join(" · ") : undefined}
           data-approval-mode={approvalMode}
           className="group/settings mb-0.5 flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full pr-[9px] pl-[11px] text-[13.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-60 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]"
         >
@@ -110,7 +120,7 @@ export const ComposerSettings = memo(function ComposerSettings(props: ComposerSe
           {!choosesModel && ModeIcon ? (
             <ModeIcon className="size-[15px] shrink-0" strokeWidth={1.9} aria-hidden="true" />
           ) : null}
-          <span className="max-w-[11rem] truncate max-sm:max-w-[7rem]">{name}</span>
+          {name ? <span className="max-w-[11rem] truncate max-sm:max-w-[7rem]">{name}</span> : null}
           {choosesModel && choosesMode && approvalMode !== "auto" && ModeIcon ? (
             <>
               <span aria-hidden="true" className="mx-px h-[13px] w-px bg-current opacity-20" />

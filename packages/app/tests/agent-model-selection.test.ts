@@ -165,3 +165,18 @@ test("with tiers the chip says Auto while no model is pinned", () => {
   expect(html).toContain('aria-label="Auto. Change model and permissions"')
   expect(html).not.toContain("Default model")
 })
+
+test("while the models load, the chip names no model it would swap a moment later", () => {
+  // Removal proof: drop the `loading` branch from ComposerSettings; it shows "Default model".
+  const html = renderToStaticMarkup(
+    createElement(ComposerSettings, {
+      models: [],
+      modelsLoading: true,
+      onSelectModel: () => {},
+      onSelectReasoning: () => {},
+      onResetModelSelection: () => {},
+    })
+  )
+  expect(html).toContain('aria-label="Model and permissions"')
+  expect(html).not.toContain("Default model")
+})
