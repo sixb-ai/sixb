@@ -19,6 +19,7 @@ export const SYNC_RUN_FAILURE_CODES = [
   "runtime.cancelled",
   "queue.enqueue_failed",
   "sync.execution_failed",
+  "connector.authorization_required",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type SyncRunFailureCode = (typeof SYNC_RUN_FAILURE_CODES)[number]

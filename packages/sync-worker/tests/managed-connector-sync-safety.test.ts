@@ -84,11 +84,15 @@ describe("managed connector Sync safety", () => {
         fixture,
         sync.id,
         `run-checkpoint-seed-${index}`,
-        candidate.checkpoint
+        candidate.checkpoint,
+        "connection-a"
       )
       const runId = `run-checkpoint-incompatible-${index}`
 
-      await expect(run(fixture, sync.id, runId)).rejects.toThrow("checkpoint incompatible")
+      const failure = await run(fixture, sync.id, runId, { connectionId: "connection-a" }).catch(
+        (error) => error
+      )
+      expect(String(failure)).toContain("checkpoint incompatible")
       const failed = await fixture.runtime.syncRunsStorage.getById({
         projectId: fixture.runtime.id,
         id: runId,
@@ -158,7 +162,10 @@ describe("managed connector Sync safety", () => {
       source("connection-b", "account-b", "brand-b"),
     ])
 
-    await expect(run(fixture, sync.id, "run-invalid-row")).rejects.toThrow("invalid row")
+    const failure = await run(fixture, sync.id, "run-invalid-row", {
+      connectionId: "connection-b",
+    }).catch((error) => error)
+    expect(String(failure)).toContain("invalid row")
     const failed = await fixture.runtime.syncRunsStorage.getById({
       projectId: fixture.runtime.id,
       id: "run-invalid-row",
@@ -170,7 +177,7 @@ describe("managed connector Sync safety", () => {
         details: {
           connectionId: "connection-b",
           accountId: "account-b",
-          itemIndex: 2,
+          itemIndex: 1,
         },
       },
     })
@@ -197,9 +204,10 @@ describe("managed connector Sync safety", () => {
       source("connection-b", "account-b", "brand-b"),
     ])
 
-    await expect(run(fixture, sync.id, "run-missing-blob")).rejects.toThrow(
-      "referencing unknown blob"
-    )
+    const failure = await run(fixture, sync.id, "run-missing-blob", {
+      connectionId: "connection-b",
+    }).catch((error) => error)
+    expect(String(failure)).toContain("referencing unknown blob")
     const failed = await fixture.runtime.syncRunsStorage.getById({
       projectId: fixture.runtime.id,
       id: "run-missing-blob",
@@ -211,7 +219,7 @@ describe("managed connector Sync safety", () => {
         details: {
           connectionId: "connection-b",
           accountId: "account-b",
-          itemIndex: 2,
+          itemIndex: 1,
         },
       },
     })
@@ -232,7 +240,10 @@ describe("managed connector Sync safety", () => {
       .intoDataset(socialRows)
     const fixture = createFixture(sync, () => [pendingSource])
     const controller = new AbortController()
-    const running = run(fixture, sync.id, "run-cancel-connect", controller.signal)
+    const running = run(fixture, sync.id, "run-cancel-connect", {
+      connectionId: "connection-a",
+      signal: controller.signal,
+    })
 
     await waitFor(() => sourceSignal !== undefined)
     controller.abort(new DOMException("cancelled while connecting", "AbortError"))
@@ -251,7 +262,10 @@ describe("managed connector Sync safety", () => {
       .intoDataset(socialRows)
     const fixture = createFixture(sync, () => [source("connection-a", "account-a", "brand-a")])
     const controller = new AbortController()
-    const running = run(fixture, sync.id, "run-cancel-handler", controller.signal)
+    const running = run(fixture, sync.id, "run-cancel-handler", {
+      connectionId: "connection-a",
+      signal: controller.signal,
+    })
 
     await waitFor(() => handlerStarted)
     controller.abort(new DOMException("cancelled while reading", "AbortError"))
@@ -282,7 +296,10 @@ describe("managed connector Sync safety", () => {
       .intoDataset(socialRows)
     const fixture = createFixture(sync, () => [source("connection-a", "account-a", "brand-a")])
     const controller = new AbortController()
-    const running = run(fixture, sync.id, "run-cancel-iterator", controller.signal)
+    const running = run(fixture, sync.id, "run-cancel-iterator", {
+      connectionId: "connection-a",
+      signal: controller.signal,
+    })
 
     await waitFor(() => nextStarted)
     controller.abort(new DOMException("cancelled while iterating", "AbortError"))

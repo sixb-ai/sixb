@@ -1,4 +1,11 @@
-import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type {
+  DomainEventLog,
+  LakeStorage,
+  Queues,
+  SixbDefinitions,
+  SixbFailure,
+  Storage,
+} from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
@@ -13,6 +20,7 @@ import {
   type RunClaim,
   type RunExecution,
   SYNC_RUN_FAILURE_CODES,
+  type SyncRunFailureCode,
   type SyncRunRecord,
   type SyncRunStatus,
   type SyncRunStorage,
@@ -102,6 +110,7 @@ export class SyncWorker extends RunWorker<
         await this.wakeNextRun(finished)
       },
       onRunFailed: (error, run, failure) => {
+        if (isPersonalReconnect(failure)) return
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
           attempt: run.attempt,
@@ -116,12 +125,13 @@ export class SyncWorker extends RunWorker<
     })
   }
 
-  /** A run of a Sync that waited for this one need not wait for its next look. */
+  /** A run of a Sync and connection that waited for this one need not wait for its next look. */
   private async wakeNextRun(finished: SyncRunRecord): Promise<void> {
     try {
       const { runs } = await requireSyncRuns(this.host).list({
         projectId: this.host.id,
         syncId: finished.syncId,
+        connectionId: finished.connectionId ?? null,
         statuses: ["queued"],
         order: "asc",
         limit: 1,
@@ -222,6 +232,16 @@ async function emitSyncRunFinishedEvents(
   )
 }
 
+/** A person's own connection needs reconnecting: theirs to fix, so not the project's error. */
+function isPersonalReconnect(failure: SixbFailure<SyncRunFailureCode>): boolean {
+  const details = failure.details
+  return (
+    failure.code === "connector.authorization_required" &&
+    isRecord(details) &&
+    details.ownerType === "user"
+  )
+}
+
 function requireTerminalStatus(
   status: SyncRunStatus,
   context: string
@@ -256,4 +276,8 @@ function buildSyncContext(
       list: (definition) => resolveSyncConnectorSources(sixb.connector, definition),
     },
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

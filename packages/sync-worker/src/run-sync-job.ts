@@ -16,7 +16,12 @@ import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, LakeConcurrencyError } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { throwIfAborted } from "./normalize"
-import { readSyncValues, type SyncSourceValue } from "./source-read"
+import {
+  readSyncValues,
+  resolveSyncRunSource,
+  SyncRunSourceGoneError,
+  type SyncSourceValue,
+} from "./source-read"
 import type { RunSyncJobInput, SyncRunFinishedHandler, SyncRunResult } from "./types"
 
 /** What the execution behind a commit read, which the run records once it finds that commit. */
@@ -90,7 +95,9 @@ function translateSyncExecutionError(
 ): unknown {
   if (
     isSixbError(error) &&
-    (error.code === "internal.unexpected" || error.code === "sync.execution_failed")
+    (error.code === "internal.unexpected" ||
+      error.code === "sync.execution_failed" ||
+      error.code === "connector.authorization_required")
   ) {
     return error
   }
@@ -214,7 +221,8 @@ async function commitRun(execution: SyncExecution, logger: Logger): Promise<Sync
   const sync = requireSync(runtime, run)
   const dataset = requireDataset(runtime, sync, run)
 
-  const previousCheckpoint = await readPreviousCheckpoint(runtime, sync)
+  const source = await resolveSyncRunSource(runtime, sync, run)
+  const previousCheckpoint = await readPreviousCheckpoint(runtime, sync, run)
   execution.nextCheckpoint = cloneCheckpoint(previousCheckpoint)
 
   const { outcome, version } = await writeDataset({
@@ -228,6 +236,7 @@ async function commitRun(execution: SyncExecution, logger: Logger): Promise<Sync
       readSyncValues({
         runtime,
         sync,
+        source,
         runId: run.id,
         datasetId: dataset.id,
         signal,
@@ -375,6 +384,11 @@ async function settleFailure(execution: SyncExecution, caught: unknown): Promise
   const landed = committedVersion ? null : await landedCommitBehind(execution, caught)
   if (landed) return finishLanded(execution, landed, landedRead(execution, caught))
 
+  if (caught instanceof SyncRunSourceGoneError && !signal.aborted) {
+    await recordCancelled(execution, caught)
+    throw caught
+  }
+
   const error = translateLostRace(run, caught)
 
   if (!committedVersion && !signal.aborted && !(error instanceof CommitLostRaceError)) {
@@ -430,23 +444,61 @@ async function recordFailed(execution: SyncExecution, error: unknown): Promise<v
   }
 }
 
+/** The run had nothing left to read: nothing failed, so nothing is reported. */
+async function recordCancelled(execution: SyncExecution, reason: Error): Promise<void> {
+  const { run } = execution
+  const { runtime, claim, onRunFinished } = execution.input
+
+  try {
+    const cancelled = await runtime.syncRunsStorage.finish({
+      projectId: runtime.id,
+      id: run.id,
+      executionToken: claim.execution.token,
+      status: "cancelled",
+      rowsRead: 0,
+      error: captureSixbFailure(createSixbError("runtime.cancelled", reason.message), {
+        allowedCodes: SYNC_RUN_FAILURE_CODES,
+        defaultCode: "runtime.cancelled",
+      }),
+    })
+
+    await notifyRunFinished(onRunFinished, cancelled)
+  } catch {
+    // The run did not transition: a later delivery, or the execution that holds it, ends it.
+  }
+}
+
 function cloneCheckpoint(checkpoint: JsonValue | undefined): JsonValue | undefined {
   return checkpoint === undefined ? undefined : cloneJsonValue(checkpoint)
 }
 
+/**
+ * The checkpoint of the last succeeded run of this sync, and of this run's connection. A
+ * connection's first run of its own starts from the last succeeded run that read every connection,
+ * whose checkpoint holds an entry for each.
+ */
 async function readPreviousCheckpoint(
   runtime: RunSyncJobInput["runtime"],
-  sync: SyncDefinition
+  sync: SyncDefinition,
+  run: SyncRunRecord
 ): Promise<JsonValue | undefined> {
-  const { runs } = await runtime.syncRunsStorage.list({
-    projectId: runtime.id,
-    syncId: sync.id,
-    statuses: ["succeeded"],
-    limit: 1,
-    order: "desc",
-  })
+  const latest = (connectionId?: string | null) =>
+    runtime.syncRunsStorage
+      .list({
+        projectId: runtime.id,
+        syncId: sync.id,
+        ...(connectionId === undefined ? {} : { connectionId }),
+        statuses: ["succeeded"],
+        limit: 1,
+        order: "desc",
+      })
+      .then(({ runs }) => runs[0])
 
-  return runs[0]?.checkpoint
+  if (run.connectionId === undefined) return (await latest())?.checkpoint
+
+  const own = await latest(run.connectionId)
+  if (own) return own.checkpoint
+  return (await latest(null))?.checkpoint
 }
 
 function requireDataset(
