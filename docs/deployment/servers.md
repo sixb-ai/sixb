@@ -165,7 +165,7 @@ A deploy:
 5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.
 6. Validates and reloads the Caddy routes onto the new slot, swaps `orchestrator` and `rules`, and drains the retiring `api` and `workers` in the background so in-flight requests and agent turns finish cleanly.
 
-A deploy that fails at any step discards the candidate release and leaves the live release serving. Keep storage migrations additive across adjacent releases so the active release keeps working while step 4 runs. Two deploys of the same project never overlap; the second waits for the first.
+A deploy that fails before the new release takes over discards it, and the live release keeps serving. A check that fails after that leaves the new release serving: the deploy says so, and `sixb deploy status` names its commit. Keep storage migrations additive across adjacent releases so the active release keeps working while step 4 runs. Two deploys of the same project never overlap; the second waits for the first.
 
 ## Operate the deployment
 

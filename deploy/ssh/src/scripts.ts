@@ -133,12 +133,7 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     },
     {
       label: "Activate release",
-      body: renderActivateRelease({
-        release: blueRelease,
-        layout,
-        slots,
-        record: input.record,
-      }),
+      body: renderActivateRelease({ release: blueRelease, layout, slots }),
     },
   ]
 
@@ -147,6 +142,7 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     "main() {",
     renderEnvironment(release, layout, targetRelease),
     renderTakeLock(layout),
+    renderUseRelease(layout, input.record),
     renderCandidateTrap(),
     ...steps.flatMap((step, index) => [
       `printf '\\n%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} start`,
@@ -216,14 +212,40 @@ function renderTakeLock(layout: DeploymentLayout): string {
   ].join("\n")
 }
 
+/**
+ * Points `current` at the new release and records it in `release.json` at the same moment, so
+ * `sixb deploy status` names the commit that serves from then on, even when a later check fails.
+ */
+function renderUseRelease(layout: DeploymentLayout, record: DeployRecord): string {
+  return [
+    "use_release() {",
+    '  ln -sfn "releases/$RELEASE_ID" "$CURRENT"',
+    '  ln -sfn "current" "$CODE"',
+    `  ${writeFileCommand(layout.releaseRecord, `${JSON.stringify(record)}\n`)}`,
+    "}",
+  ].join("\n")
+}
+
+/**
+ * A failure before the switch discards the candidate, and the live release keeps serving. After
+ * the switch there is nothing to discard: the new release serves, and the operator is told so.
+ */
 function renderCandidateTrap(): string {
   return [
     "cleanup_candidate() {",
     "  status=$?",
-    '  if [ "$status" -ne 0 ] && [ "$deploy_mode" = "staged" ]; then',
-    '    "$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb-deploy-ssh" discard --manifest "$MANIFEST" > /dev/null 2>&1 || true',
-    '    rm -f "$CANDIDATE_MANIFEST" "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
-    "  fi",
+    '  if [ "$status" -eq 0 ]; then return; fi',
+    "",
+    '  case "$deploy_mode" in',
+    "    staged)",
+    '      "$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb-deploy-ssh" discard --manifest "$MANIFEST" > /dev/null 2>&1 || true',
+    '      rm -f "$CANDIDATE_MANIFEST" "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
+    "      ;;",
+    "    activated | cold)",
+    "      echo 'The new release is in place, but it failed a check after taking over.' >&2",
+    "      echo 'sixb deploy status and sixb deploy logs show what failed. To go back, deploy the previous commit with --ref.' >&2",
+    "      ;;",
+    "  esac",
     "}",
     "trap cleanup_candidate EXIT",
   ].join("\n")
@@ -431,8 +453,7 @@ function renderStartCandidate(input: {
     '    rm -f "$stage_err"',
     '    target_slot="blue"',
     '    systemctl --user stop "$UNIT"',
-    '    ln -sfn "releases/$RELEASE_ID" "$CURRENT"',
-    '    ln -sfn "current" "$CODE"',
+    "    use_release",
     ...installServiceFiles.map((line) => `    ${line}`),
     '    mv "$DEPLOY/manifest.blue.json" "$MANIFEST"',
     '    rm -f "$DEPLOY/manifest.green.json" "$CANDIDATE_MANIFEST"',
@@ -447,8 +468,7 @@ function renderStartCandidate(input: {
     "  fi",
     "else",
     '  target_slot="blue"',
-    '  ln -sfn "releases/$RELEASE_ID" "$CURRENT"',
-    '  ln -sfn "current" "$CODE"',
+    "  use_release",
     ...installServiceFiles.map((line) => `  ${line}`),
     '  mv "$DEPLOY/manifest.blue.json" "$MANIFEST"',
     '  rm -f "$DEPLOY/manifest.green.json" "$CANDIDATE_MANIFEST"',
@@ -582,7 +602,6 @@ function renderActivateRelease(input: {
   readonly release: DeployRelease
   readonly layout: DeploymentLayout
   readonly slots: SlotPorts
-  readonly record: DeployRecord
 }): string {
   const hasExclusiveServices = input.release.services.some(
     (service) => service.kind === "singleton" || service.kind === "script"
@@ -590,8 +609,7 @@ function renderActivateRelease(input: {
   const installServiceFiles = renderInstallServiceFiles(input.release, input.layout, input.slots)
   return [
     'if [ "$deploy_mode" = "staged" ]; then',
-    '  ln -sfn "releases/$RELEASE_ID" "$CURRENT"',
-    '  ln -sfn "current" "$CODE"',
+    "  use_release",
     ...installServiceFiles.map((line) => `  ${line}`),
     '  mv "$CANDIDATE_MANIFEST" "$MANIFEST"',
     '  rm -f "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
@@ -600,7 +618,6 @@ function renderActivateRelease(input: {
     ...(hasExclusiveServices ? ["  sleep 2"] : []),
     '  "$CTL" status --check',
     "fi",
-    writeFileCommand(input.layout.releaseRecord, `${JSON.stringify(input.record)}\n`),
     renderPruneReleases(),
   ].join("\n")
 }

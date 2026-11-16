@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } fro
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DeployRelease } from "@sixb/core/deploy"
-import { deploymentLayout, releaseLayout } from "../src/layout"
+import { type DeploymentLayout, deploymentLayout, releaseLayout } from "../src/layout"
 import {
   releaseForSlot,
   renderCaddySnippet,
@@ -11,7 +11,7 @@ import {
   renderProcessManifest,
   renderUnit,
 } from "../src/render"
-import { renderDeployScript, STEP_MARKER } from "../src/scripts"
+import { type DeployScript, deriveReleaseId, renderDeployScript, STEP_MARKER } from "../src/scripts"
 
 const release: DeployRelease = {
   name: "northline",
@@ -456,6 +456,123 @@ writeFileSync(".sixb/dist/app/${chunkName}", ${JSON.stringify(chunkName)})
     }
   })
 })
+
+describe("a deploy that fails", () => {
+  // Reproduce: write `release.json` at the end of "Activate release" again; a check that fails
+  // after the switch then leaves the record on the previous commit while the new one serves.
+  test("records the new release as soon as it takes over, even when a later check fails", async () => {
+    const server = await standInServer({
+      ctl: ['[ "$1" = activate ] && exit 0', "echo 'orchestrator exited' >&2", "exit 1"],
+    })
+    try {
+      await writeFile(server.layout.candidateManifest, "{}")
+
+      const result = await runDeploySteps(server, ["Activate release"], 'deploy_mode="staged"')
+
+      expect(result.exitCode).not.toBe(0)
+      expect(await readlink(server.layout.currentLink)).toBe(`releases/${server.releaseId}`)
+      expect(JSON.parse(await readFile(server.layout.releaseRecord, "utf8"))).toMatchObject({
+        commit: "def456",
+      })
+      expect(result.stderr).toContain("The new release is in place")
+    } finally {
+      await server.remove()
+    }
+  })
+})
+
+interface StandInServer {
+  readonly root: string
+  readonly layout: DeploymentLayout
+  readonly releaseId: string
+  readonly script: DeployScript
+  /** The `systemctl`, `sudo`, and `ctl` calls the steps made, one per line. */
+  readonly calls: string
+  remove(): Promise<void>
+}
+
+/**
+ * A deployment under a temporary home, with stand-ins for the server's tools: `systemctl` and
+ * `sudo` record their calls, `flock` and `sleep` return at once, and `ctl` runs the given lines.
+ */
+async function standInServer(options: { readonly ctl: readonly string[] }): Promise<StandInServer> {
+  const root = await mkdtemp(join(tmpdir(), "sixb-deploy-steps-"))
+  const tools = join(root, "tools")
+  const calls = join(root, "calls.txt")
+  const serverLayout = deploymentLayout({
+    home: root,
+    user: "sixb",
+    name: "northline",
+    projectPath: "examples/northline",
+    bunVersion: "1.4.2",
+  })
+  const record = {
+    commit: "def456",
+    ref: "main",
+    deployedAt: "2026-11-16T09:00:00.000Z",
+    deployedBy: "ci",
+  }
+
+  const standIns: Record<string, readonly string[]> = {
+    systemctl: ['echo "systemctl $*" >> "$CALLS"'],
+    sudo: ['echo "sudo $*" >> "$CALLS"'],
+    flock: ["exit 0"],
+    sleep: ["exit 0"],
+    ctl: ['echo "ctl $*" >> "$CALLS"', ...options.ctl],
+  }
+  await mkdir(tools, { recursive: true })
+  for (const [name, lines] of Object.entries(standIns)) {
+    await writeFile(join(tools, name), ["#!/bin/sh", ...lines, ""].join("\n"), { mode: 0o755 })
+  }
+  await mkdir(serverLayout.deployDir, { recursive: true })
+  await writeFile(calls, "")
+
+  return {
+    root,
+    layout: serverLayout,
+    releaseId: deriveReleaseId(record),
+    script: renderDeployScript({
+      release,
+      layout: serverLayout,
+      incoming: join(serverLayout.incomingDir, "upload"),
+      record,
+    }),
+    calls,
+    remove: () => rm(root, { recursive: true, force: true }),
+  }
+}
+
+/**
+ * Runs the deploy script's preamble (its variables, lock, functions and trap), then `prelude` to
+ * set the state earlier steps would have left, then the named steps.
+ */
+async function runDeploySteps(
+  server: StandInServer,
+  labels: readonly string[],
+  prelude: string
+): Promise<{ readonly exitCode: number; readonly stderr: string }> {
+  const tools = join(server.root, "tools")
+  const preamble = server.script.script
+    .split("main() {\n")[1]
+    ?.split(`printf '\\n%s\\t%s\\t%s\\n' ${STEP_MARKER} 0 start`)[0]
+  if (!preamble) throw new Error("Missing the deploy script's preamble")
+
+  const body = [
+    "set -euo pipefail",
+    preamble,
+    `CTL=${join(tools, "ctl")}`,
+    prelude,
+    ...labels.map((label) => stepBody(label, server.script)),
+  ].join("\n")
+
+  const child = Bun.spawn(["/bin/bash", "-c", body], {
+    env: { CALLS: server.calls, PATH: `${tools}:/usr/bin:/bin`, XDG_RUNTIME_DIR: server.root },
+    stdout: "ignore",
+    stderr: "pipe",
+  })
+  const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  return { exitCode, stderr }
+}
 
 function stepBody(label: string, rendered = deployScript): string {
   const index = rendered.labels.indexOf(label)
