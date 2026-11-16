@@ -16,6 +16,7 @@ import {
   endInterruptedAgentRun,
   endLapsedAgentRuns,
   isolateStreamSink,
+  repairAgentInboxes,
   sandboxCredentialIssue,
   stopAgentRunChild,
   WorkflowResumeDispatchError,
@@ -376,6 +377,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
    * Each read covers only active rows, and the deterministic job ids make republication idempotent.
    * Held calls are repaired in the same pass: expired, run after a crash, and their turns resumed.
+   * So are thread inboxes: what a turn's end did not start, it starts.
    */
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
@@ -405,6 +407,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         await repairAgentApprovals({ host: this.host, agents: context.storage.agents })
       } catch (error) {
         console.error("[SixbAgentWorker] Could not repair Agent approvals; retrying.", error)
+      }
+      try {
+        await repairAgentInboxes(this.sessionHost(context))
+      } catch (error) {
+        console.error("[SixbAgentWorker] Could not repair Agent thread inboxes; retrying.", error)
       }
       await waitForAbort(AGENT_DISPATCH_REPAIR_MS, signal)
     }

@@ -188,15 +188,22 @@ export type {
   RunModelLoopInput,
 } from "./model-loop"
 export { runModelLoop } from "./model-loop"
+export { registerAgentQueuedTurn, startQueuedAgentTurn } from "./queued-turn"
 export { agent } from "./reference"
 export {
+  type AgentQueuedTurnStart,
   isRetryableAgentRun,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
   retryAgentRun,
+  startQueuedAgentTurnFromInbox,
 } from "./request"
-export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
+export {
+  afterAgentRunFinished,
+  repairAgentInboxes,
+  stopAgentRunChild,
+} from "./run-after-finish"
 export type {
   AgentRunArtifactPublish,
   AgentRunArtifacts,

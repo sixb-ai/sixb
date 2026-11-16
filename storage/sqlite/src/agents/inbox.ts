@@ -20,6 +20,7 @@ import {
   type EnqueueAgentInboxItemInput,
   type EnqueueAgentInboxItemResult,
   type ListAgentInboxItemsInput,
+  type ListWaitingAgentInboxThreadsInput,
   type RemoveAgentInboxItemInput,
   type TakeAgentInboxSteersInput,
   type TakeNextQueuedAgentInboxInput,
@@ -157,6 +158,27 @@ export class SqliteAgentInboxStore implements AgentInboxStore {
       )
       .all(input.projectId, input.threadId) as AgentInboxRow[]
     return rows.map(rowToInboxItem)
+  }
+
+  async listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]> {
+    const rows = this.db
+      .query(
+        `SELECT DISTINCT inbox.thread_id AS thread_id
+         FROM agent_thread_inbox inbox
+         JOIN agent_threads thread
+           ON thread.project_id = inbox.project_id AND thread.id = inbox.thread_id
+         WHERE inbox.project_id = ? AND inbox.created_at < ? AND inbox.thread_id > ?
+           AND thread.active_run_id IS NULL
+         ORDER BY inbox.thread_id ASC
+         LIMIT ?`
+      )
+      .all(
+        input.projectId,
+        input.createdBefore.toISOString(),
+        input.afterThreadId ?? "",
+        input.limit
+      ) as { thread_id: string }[]
+    return rows.map((row) => row.thread_id)
   }
 
   async update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null> {
@@ -332,12 +354,20 @@ export class SqliteAgentInboxStore implements AgentInboxStore {
            WHERE project_id = ? AND thread_id = ?
              AND claimed_by_run_id IS NULL
              AND (? = 0 OR immediate = 1)
+             AND (? IS NULL OR (author_principal_type = ? AND author_principal_id = ?))
            ORDER BY
              CASE WHEN immediate = 1 THEN 0 WHEN mode = 'steer' THEN 1 ELSE 2 END ASC,
              seq ASC
            LIMIT 1`
         )
-        .get(input.projectId, input.threadId, input.onlyImmediate ? 1 : 0) as AgentInboxRow | null
+        .get(
+          input.projectId,
+          input.threadId,
+          input.onlyImmediate ? 1 : 0,
+          input.authorPrincipal?.type ?? null,
+          input.authorPrincipal?.type ?? null,
+          input.authorPrincipal?.id ?? null
+        ) as AgentInboxRow | null
       if (!winner) return null
 
       this.db

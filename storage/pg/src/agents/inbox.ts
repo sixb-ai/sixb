@@ -19,6 +19,7 @@ import {
   type EnqueueAgentInboxItemInput,
   type EnqueueAgentInboxItemResult,
   type ListAgentInboxItemsInput,
+  type ListWaitingAgentInboxThreadsInput,
   type RemoveAgentInboxItemInput,
   type TakeAgentInboxSteersInput,
   type TakeNextQueuedAgentInboxInput,
@@ -171,6 +172,22 @@ export class PgAgentInboxStore implements AgentInboxStore {
           ORDER BY seq ASC
         `
     return rows.map(rowToInboxItem)
+  }
+
+  async listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]> {
+    const rows = await this.sql<{ thread_id: string }[]>`
+      SELECT DISTINCT inbox.thread_id
+      FROM agent_thread_inbox inbox
+      JOIN agent_threads thread
+        ON thread.project_id = inbox.project_id AND thread.id = inbox.thread_id
+      WHERE inbox.project_id = ${input.projectId}
+        AND inbox.created_at < ${input.createdBefore}
+        AND inbox.thread_id > ${input.afterThreadId ?? ""}
+        AND thread.active_run_id IS NULL
+      ORDER BY inbox.thread_id ASC
+      LIMIT ${input.limit}
+    `
+    return rows.map((row) => row.thread_id)
   }
 
   async update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null> {
@@ -331,6 +348,11 @@ export class PgAgentInboxStore implements AgentInboxStore {
           AND thread_id = ${input.threadId}
           AND claimed_by_run_id IS NULL
           AND (${!input.onlyImmediate}::boolean OR immediate = TRUE)
+          AND (
+            ${input.authorPrincipal?.id ?? null}::text IS NULL
+            OR (author_principal_type = ${input.authorPrincipal?.type ?? null}
+              AND author_principal_id = ${input.authorPrincipal?.id ?? null})
+          )
         ORDER BY
           CASE WHEN immediate = TRUE THEN 0 WHEN mode = 'steer' THEN 1 ELSE 2 END ASC,
           seq ASC

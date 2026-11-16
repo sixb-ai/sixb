@@ -90,6 +90,7 @@ export type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ListThreadSubagentsInput,
+  ListWaitingAgentInboxThreadsInput,
   MarkAgentApprovalsReportedInput,
   MoveAgentThreadToCloudInput,
   MoveAgentThreadToCloudResult,

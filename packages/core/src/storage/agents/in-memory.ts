@@ -124,6 +124,7 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ListThreadSubagentsInput,
+  ListWaitingAgentInboxThreadsInput,
   MarkAgentApprovalsReportedInput,
   MoveAgentThreadToCloudInput,
   MoveAgentThreadToCloudResult,
@@ -1963,13 +1964,32 @@ class InMemoryAgentInboxStore implements AgentInboxStore {
     if (!thread || thread.status !== "active" || thread.activeRunId !== null) return null
 
     const candidates = this.threadItems(input.projectId, input.threadId)
-      .filter((item) => item.claimedBy === undefined && (!input.onlyImmediate || item.immediate))
+      .filter(
+        (item) =>
+          item.claimedBy === undefined &&
+          (!input.onlyImmediate || item.immediate) &&
+          (input.authorPrincipal === undefined ||
+            principalsEqual(item.authorPrincipal, input.authorPrincipal))
+      )
       .sort((left, right) => inboxPriority(left) - inboxPriority(right) || left.seq - right.seq)
     const winner = candidates[0]
     if (!winner) return null
 
     this.state.inbox.delete(key(winner.projectId, winner.id))
     return clone(winner)
+  }
+
+  async listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]> {
+    const ids = new Set<string>()
+    for (const item of this.state.inbox.values()) {
+      if (item.projectId !== input.projectId) continue
+      if (item.createdAt.getTime() >= input.createdBefore.getTime()) continue
+      if (input.afterThreadId !== undefined && item.threadId <= input.afterThreadId) continue
+      const thread = this.state.threads.get(key(item.projectId, item.threadId))
+      if (!thread || thread.activeRunId !== null) continue
+      ids.add(item.threadId)
+    }
+    return [...ids].sort().slice(0, input.limit)
   }
 
   private threadItems(projectId: string, threadId: string): AgentInboxItemRecord[] {

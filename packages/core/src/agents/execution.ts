@@ -64,7 +64,9 @@ import {
   addAgentThreadParticipants,
   removeAgentThreadParticipant,
 } from "./participants"
+import { registerAgentQueuedTurn } from "./queued-turn"
 import {
+  type AgentQueuedTurnStart,
   assertComputerPlaceRequest,
   dispatchAgentRun,
   type RequestAgentRunInput,
@@ -72,6 +74,7 @@ import {
   requestAgentRun,
   resumeAgentTurn,
   retryAgentRun,
+  startQueuedAgentTurnFromInbox,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
@@ -703,6 +706,38 @@ export function createAgentRuntime<
     }
   }
 
+  /**
+   * Start the next message the run's requester queued for its thread, as that requester. It never
+   * throws: what keeps the message from starting comes back as `closed`, and the message waits.
+   */
+  const startQueuedTurn = async (
+    runId: string,
+    options: { readonly onlyImmediate: boolean }
+  ): Promise<AgentQueuedTurnStart> => {
+    const agents = requireAgents()
+    const run = await agents.runs.getById({ projectId: runtime.projectId, id: runId })
+    if (run?.kind !== "conversation") return { status: "closed" }
+
+    const requester = (
+      await runtime.storage.executions.getById({
+        projectId: runtime.projectId,
+        id: run.executionId,
+      })
+    )?.requestedBy
+    if (authority.type === "principal" && !(requester && principalsEqual(requester, principal))) {
+      return { status: "closed" }
+    }
+
+    try {
+      // A requester who left the thread no longer starts turns in it.
+      if (!(await rule.read(run.threadId))) return { status: "closed" }
+      return await startQueuedAgentTurnFromInbox(runtime, execution, run, options)
+    } catch (error) {
+      console.error(`[Sixb] Could not start a queued message of Agent run '${run.id}'.`, error)
+      return { status: "closed" }
+    }
+  }
+
   const preferences: AgentPreferencesRuntime = {
     get: async () => {
       const { approvalMode, approvalModeSource } = await defaultAgentApprovalMode(requireAgents(), {
@@ -1019,6 +1054,7 @@ export function createAgentRuntime<
     observed: createObservedAgentThreadsRuntime(runtime),
   }
   registerAgentTurnResume(agentRuntime, resumeDecidedTurn)
+  registerAgentQueuedTurn(agentRuntime, startQueuedTurn)
   return agentRuntime
 }
 
