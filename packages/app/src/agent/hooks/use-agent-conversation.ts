@@ -407,6 +407,8 @@ export function useAgentConversation({
   } | null>(null)
   /** The thread whose answer Continue is asking for, until the API accepts or refuses it. */
   const [continuingThreadId, setContinuingThreadId] = useState<string | null>(null)
+  /** The thread whose sandbox its owner just resumed, until its cut-short turn runs again. */
+  const [resumedThreadId, setResumedThreadId] = useState<string | null>(null)
 
   const pendingRun =
     pendingSend && threadId !== null && pendingSend.run.threadId === threadId
@@ -880,6 +882,8 @@ export function useAgentConversation({
       },
       {
         onSuccess: () => {
+          if (recovery === restoreSandbox) setResumedThreadId(thread.id)
+
           void queryClient.invalidateQueries({
             queryKey: getAgentThreadQueryKey({ path: { threadId: thread.id } }),
           })
@@ -987,6 +991,22 @@ export function useAgentConversation({
     messages: savedMessages,
     latestRun,
   })
+
+  // Resuming the sandbox picks the cut-short turn up again, once the thread reads ready: it goes
+  // on where it stopped, or runs again when it had not got anywhere.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Continue and Retry check their own state
+  useEffect(() => {
+    if (resumedThreadId === null) return
+    if (resumedThreadId !== threadId) {
+      setResumedThreadId(null)
+      return
+    }
+    if (sandboxRecovery) return
+
+    setResumedThreadId(null)
+    if (canContinue) void continueTurn()
+    else if (canRetry) retry()
+  }, [resumedThreadId, threadId, sandboxRecovery, canContinue, canRetry])
 
   const reader = user
     ? { type: "user" as const, id: user.id, displayName: user.displayName }
