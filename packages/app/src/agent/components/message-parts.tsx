@@ -1,8 +1,37 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+  Markdown,
+  type MarkdownProps,
+  PHONE_QUERY,
+} from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowUpRight, BookmarkCheck, ChevronRight, FileX, Wrench } from "lucide-react"
-import { memo, useState } from "react"
+import {
+  ArrowDown,
+  ArrowUpRight,
+  BookmarkCheck,
+  ChevronRight,
+  FileX,
+  Wrench,
+  X,
+} from "lucide-react"
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react"
 import { formatFileSize } from "../../artifacts/file-size"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { viewerTargetKey } from "../../artifacts/target"
@@ -230,9 +259,32 @@ function sameElements<T>(a: readonly T[], b: readonly T[]): boolean {
   return true
 }
 
+const DETACH_THRESHOLD_PX = 24
+const REATTACH_THRESHOLD_PX = 12
+const REASONING_COMPONENTS: MarkdownProps["components"] = { img: () => null }
+
+function usePhoneSheet(enabled: boolean): boolean {
+  const [phone, setPhone] = useState(false)
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      setPhone(false)
+      return
+    }
+    const mql = window.matchMedia(PHONE_QUERY)
+    const onChange = () => setPhone(mql.matches)
+    setPhone(mql.matches)
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
+  }, [enabled])
+
+  return enabled && phone
+}
+
 function WorkGroupView({ parts, inProgress, nested = false }: WorkGroupProps) {
   const messages = useAgentMessages()
   const [open, setOpen] = useState(false)
+  const phoneSheet = usePhoneSheet(!nested)
   const sources = collectWebSources(parts)
   const searches = parts.flatMap((part) =>
     part.kind === "tool" && part.tool.toolName === "web_search" ? [part.tool] : []
@@ -257,39 +309,16 @@ function WorkGroupView({ parts, inProgress, nested = false }: WorkGroupProps) {
   // while it waits on the reader, and once it is done.
   const label = hasTools ? messages.activity.steps(toolCount) : messages.activity.reasoning
 
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
-      <CollapsibleTrigger
-        className={cn(
-          ACTIVITY_STATUS_ROW_CLASS_NAME,
-          "outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        )}
-      >
-        {inProgress ? (
-          <ActivityStatusText label={liveLabel} className="shimmer motion-reduce:animate-none" />
-        ) : (
-          <span>{label}</span>
-        )}
-        <ChevronRight className="size-3.5 shrink-0 opacity-50 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div
-          className={cn(
-            "mt-2 ml-1 flex flex-col gap-3 border-l border-border py-0.5 pr-2 pl-3.5",
-            !nested && "scrollbar-thin max-h-[min(24rem,50vh)] overflow-y-auto overscroll-contain"
-          )}
-        >
-          {parts.map((part, index) => {
-            if (part.kind === "reasoning") {
-              return <GroupReasoning key={index} text={part.text} streaming={part.streaming} />
-            }
-            if (part.kind === "tool") {
-              return <ToolCallRow key={index} tool={part.tool} parts={parts} />
-            }
-            return null
-          })}
-        </div>
-      </CollapsibleContent>
+  const triggerLabel = inProgress ? (
+    <ActivityStatusText label={liveLabel} className="shimmer motion-reduce:animate-none" />
+  ) : (
+    <span>{label}</span>
+  )
+
+  const stepsContent = <WorkStepsList parts={parts} />
+
+  const afterTrigger = (
+    <>
       {made.length > 0 ? (
         <div className="mt-3 flex flex-col gap-5">
           {made.map(({ media, running }, index) => (
@@ -307,7 +336,255 @@ function WorkGroupView({ parts, inProgress, nested = false }: WorkGroupProps) {
           {searchFailed ? messages.activity.searchFailedHint : messages.activity.noSources}
         </p>
       ) : null}
+    </>
+  )
+
+  if (phoneSheet) {
+    return (
+      <div className="max-w-full">
+        <Drawer open={open} onOpenChange={setOpen}>
+          <DrawerTrigger asChild>
+            <button
+              type="button"
+              data-state={open ? "open" : "closed"}
+              className={cn(
+                ACTIVITY_STATUS_ROW_CLASS_NAME,
+                "outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              )}
+            >
+              {triggerLabel}
+              <ChevronRight className="size-3.5 shrink-0 opacity-50 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
+            </button>
+          </DrawerTrigger>
+          <DrawerContent data-work-sheet="" className="max-h-[82dvh] outline-none">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 pt-3 pb-2.5">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <DrawerTitle className="min-w-0 truncate text-sm font-semibold text-foreground">
+                  {inProgress ? (
+                    <ActivityStatusText
+                      label={liveLabel}
+                      className="shimmer motion-reduce:animate-none"
+                    />
+                  ) : (
+                    label
+                  )}
+                </DrawerTitle>
+                {inProgress && hasTools ? (
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+                    {label}
+                  </span>
+                ) : null}
+              </div>
+              <DrawerDescription className="sr-only">{label}</DrawerDescription>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label={messages.artifacts.close}
+                className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </div>
+            <WorkStepsScroll inProgress={inProgress} mobile>
+              {stepsContent}
+            </WorkStepsScroll>
+          </DrawerContent>
+        </Drawer>
+        {afterTrigger}
+      </div>
+    )
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
+      <CollapsibleTrigger
+        className={cn(
+          ACTIVITY_STATUS_ROW_CLASS_NAME,
+          "outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        )}
+      >
+        {triggerLabel}
+        <ChevronRight className="size-3.5 shrink-0 opacity-50 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {nested ? (
+          <div className="mt-2 ml-1 flex flex-col gap-3 border-l border-border py-0.5 pr-2 pl-3.5">
+            {stepsContent}
+          </div>
+        ) : (
+          <WorkStepsScroll inProgress={inProgress}>{stepsContent}</WorkStepsScroll>
+        )}
+      </CollapsibleContent>
+      {afterTrigger}
     </Collapsible>
+  )
+}
+
+function WorkStepsList({ parts }: { readonly parts: readonly NormalizedPart[] }) {
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.kind === "reasoning") {
+          return <GroupReasoning key={index} text={part.text} streaming={part.streaming} />
+        }
+        if (part.kind === "tool") {
+          return <ToolCallRow key={index} tool={part.tool} parts={parts} />
+        }
+        return null
+      })}
+    </>
+  )
+}
+
+function WorkStepsScroll({
+  inProgress,
+  mobile = false,
+  children,
+}: {
+  readonly inProgress: boolean
+  readonly mobile?: boolean
+  readonly children: ReactNode
+}) {
+  const messages = useAgentMessages().activity
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const followingRef = useRef(inProgress)
+  const lastScrollTopRef = useRef(0)
+  const [detached, setDetached] = useState(false)
+
+  const syncEdges = useCallback((box: HTMLDivElement) => {
+    const remaining = box.scrollHeight - box.scrollTop - box.clientHeight
+    box.toggleAttribute("data-fade-top", box.scrollTop > 2)
+    box.toggleAttribute("data-fade-bottom", remaining > 2)
+    return remaining
+  }, [])
+
+  const pinToBottom = useCallback(
+    (box: HTMLDivElement) => {
+      box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight)
+      lastScrollTopRef.current = box.scrollTop
+      syncEdges(box)
+    },
+    [syncEdges]
+  )
+
+  // Active turns open pinned to the live bottom before paint; settled turns open at the top.
+  useLayoutEffect(() => {
+    const box = scrollRef.current
+    if (!box) return
+    if (inProgress) {
+      followingRef.current = true
+      setDetached(false)
+      pinToBottom(box)
+    } else {
+      followingRef.current = false
+      setDetached(false)
+      lastScrollTopRef.current = box.scrollTop
+      syncEdges(box)
+    }
+  }, [inProgress, pinToBottom, syncEdges])
+
+  // Follow newly streamed reasoning deltas and tool rows until the reader scrolls upward.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: children drives synchronous follow on stream updates
+  useLayoutEffect(() => {
+    const box = scrollRef.current
+    if (!box) return
+    if (inProgress && followingRef.current) {
+      pinToBottom(box)
+    } else {
+      syncEdges(box)
+    }
+  }, [children, inProgress, pinToBottom, syncEdges])
+
+  useEffect(() => {
+    const box = scrollRef.current
+    const inner = contentRef.current
+    if (!box || !inner) return
+
+    const onResize = () => {
+      if (inProgress && followingRef.current) {
+        pinToBottom(box)
+      } else {
+        const remaining = syncEdges(box)
+        if (inProgress && !followingRef.current && remaining > DETACH_THRESHOLD_PX) {
+          setDetached((prev) => (prev ? prev : true))
+        }
+      }
+    }
+
+    const onScroll = () => {
+      const movedUp = box.scrollTop < lastScrollTopRef.current - 1
+      lastScrollTopRef.current = box.scrollTop
+      const remaining = syncEdges(box)
+      if (remaining <= REATTACH_THRESHOLD_PX) {
+        followingRef.current = true
+        setDetached((prev) => (prev ? false : prev))
+      } else if (movedUp && remaining > DETACH_THRESHOLD_PX) {
+        followingRef.current = false
+        if (inProgress) setDetached((prev) => (prev ? prev : true))
+      }
+    }
+
+    const observer = new ResizeObserver(onResize)
+    observer.observe(inner)
+    observer.observe(box)
+    box.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      observer.disconnect()
+      box.removeEventListener("scroll", onScroll)
+    }
+  }, [inProgress, pinToBottom, syncEdges])
+
+  const releaseOnUpwardWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY >= 0) return
+    const box = scrollRef.current
+    if (!box || box.scrollHeight <= box.clientHeight) return
+    followingRef.current = false
+    if (inProgress && box.scrollHeight - box.scrollTop - box.clientHeight > REATTACH_THRESHOLD_PX) {
+      setDetached(true)
+    }
+  }
+
+  const jumpToLatest = () => {
+    const box = scrollRef.current
+    followingRef.current = true
+    setDetached(false)
+    if (box) pinToBottom(box)
+  }
+
+  return (
+    <div className={cn("relative min-h-0", mobile && "flex flex-1 flex-col")}>
+      <div
+        ref={scrollRef}
+        data-work-scroll=""
+        onWheel={releaseOnUpwardWheel}
+        className={cn(
+          "sixb-work-scroll scrollbar-thin overflow-y-auto overscroll-contain",
+          mobile
+            ? "max-h-[min(64dvh,32rem)] px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            : "mt-2 ml-1 max-h-[min(24rem,50vh)] border-l border-border py-0.5 pr-2 pl-3.5"
+        )}
+      >
+        <div ref={contentRef} className="flex flex-col gap-3">
+          {children}
+        </div>
+      </div>
+      {inProgress && detached ? (
+        <button
+          type="button"
+          data-work-latest=""
+          onClick={jumpToLatest}
+          className="sixb-work-latest absolute bottom-2 left-1/2 z-10 flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-foreground outline-none transition-transform hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span
+            className="size-1.5 rounded-full bg-sky-500 motion-safe:animate-pulse"
+            aria-hidden="true"
+          />
+          <span>{messages.latest}</span>
+          <ArrowDown className="size-3 text-muted-foreground" aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -321,16 +598,25 @@ function sameWorkGroup(prev: WorkGroupProps, next: WorkGroupProps): boolean {
 
 const WorkGroup = memo(WorkGroupView, sameWorkGroup)
 
-/** Reasoning inside a work group: plain, quiet text that flows with the rest of the chain. */
-function GroupReasoning({ text, streaming }: { text: string; streaming: boolean }) {
+/** Reasoning inside a work group: structured Markdown notes subordinate to the main answer. */
+const GroupReasoning = memo(function GroupReasoning({
+  text,
+  streaming,
+}: {
+  text: string
+  streaming: boolean
+}) {
   if (!text.trim()) return null
   return (
-    <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground/80">
+    <Markdown
+      className="sixb-reasoning-prose"
+      components={REASONING_COMPONENTS}
+      data-streaming={streaming ? "true" : undefined}
+    >
       {text}
-      {streaming ? <span className="shimmer">▍</span> : null}
-    </p>
+    </Markdown>
   )
-}
+})
 
 /**
  * A single tool call within a work group. A project view placed in the work takes the row; else
