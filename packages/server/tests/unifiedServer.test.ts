@@ -313,4 +313,42 @@ describe("SixbServer start", () => {
     expect(response.status).toBe(200)
     await stopping
   })
+
+  // Reproduce: make a second `stop()` start its own stop instead of joining `inProgressStop`; it
+  // finds nothing left to close, and the first stop keeps waiting for the request until the
+  // 60-second deadline, past this test's timeout.
+  test("a stop with no timeout cuts short a drain already in progress", async () => {
+    const started = Promise.withResolvers<void>()
+    const host = new SixbHost({
+      id: "test-project",
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    spyOn(host, "getOntologyOperationalStatus").mockImplementation(async () => {
+      started.resolve()
+      return new Promise(() => {})
+    })
+
+    const server = new SixbServer({
+      host,
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+    })
+    await server.start()
+
+    const stuck = fetch(`http://127.0.0.1:${server.getPort()}/api/status`).catch((error) => error)
+    await started.promise
+
+    const draining = server.stop({ timeoutMs: 60_000 })
+    const interrupting = server.stop({ timeoutMs: 0 })
+
+    await Promise.all([draining, interrupting])
+    expect(await stuck).toBeInstanceOf(Error)
+  })
 })

@@ -104,7 +104,8 @@ export interface SixbServerOptions {
 export interface SixbServerStopOptions {
   /**
    * How long in-flight HTTP requests may take to finish before remaining connections are closed.
-   * Defaults to 65 seconds, matching the Action drain window; `0` closes them at once.
+   * Defaults to 65 seconds, matching the Action drain window; `0` closes them at once. A stop
+   * called while another one drains joins it, and a shorter timeout brings its deadline closer.
    */
   readonly timeoutMs?: number
 }
@@ -133,6 +134,7 @@ export class SixbServer {
   private readonly flushesIngestion: boolean
   private maintenance: OntologyMaintenanceHandle | null = null
   private stopSweeper: (() => void) | null = null
+  private inProgressStop: InProgressStop | null = null
 
   constructor(options: SixbServerOptions) {
     this.hostRuntime = options.host
@@ -271,6 +273,23 @@ export class SixbServer {
 
   async stop(options: SixbServerStopOptions = {}): Promise<void> {
     const timeoutMs = resolveStopTimeoutMs(options.timeoutMs, ACTION_RUN_DRAIN_TIMEOUT_MS)
+
+    // A stop that arrives while another one drains joins it, and can only bring its deadline
+    // closer: `sixb api` passes `timeoutMs: 0` when SIGINT follows SIGTERM.
+    if (this.inProgressStop) {
+      this.inProgressStop.deadline.bringForward(timeoutMs)
+      return this.inProgressStop.done
+    }
+
+    const deadline = new StopDeadline(timeoutMs)
+    const done = this.stopUntil(deadline).finally(() => {
+      this.inProgressStop = null
+    })
+    this.inProgressStop = { deadline, done }
+    return done
+  }
+
+  private async stopUntil(deadline: StopDeadline): Promise<void> {
     this.stopping = true
     this.setIngestFlush(false)
     this.stopSweeper?.()
@@ -292,7 +311,7 @@ export class SixbServer {
     }
 
     if (bunServer) {
-      await drainBunServer(bunServer, timeoutMs, stopAppAndSockets)
+      await drainBunServer(bunServer, deadline, stopAppAndSockets)
     } else {
       await stopAppAndSockets()
     }
@@ -711,12 +730,35 @@ function resolveStopTimeoutMs(timeoutMs: number | undefined, fallbackMs: number)
   return resolved
 }
 
+/** A stop under way: a later `stop()` joins `done` and may bring `deadline` closer. */
+interface InProgressStop {
+  readonly deadline: StopDeadline
+  readonly done: Promise<void>
+}
+
+/** When a stopping server gives up on in-flight requests. A later `stop()` can only bring it closer. */
+class StopDeadline {
+  private at: number
+
+  constructor(timeoutMs: number) {
+    this.at = Date.now() + timeoutMs
+  }
+
+  remainingMs(): number {
+    return this.at - Date.now()
+  }
+
+  bringForward(timeoutMs: number): void {
+    this.at = Math.min(this.at, Date.now() + timeoutMs)
+  }
+}
+
 async function drainBunServer(
   server: ReturnType<typeof Bun.serve>,
-  timeoutMs: number,
+  deadline: StopDeadline,
   beforeWait: () => Promise<void>
 ): Promise<void> {
-  if (timeoutMs <= 0) {
+  if (deadline.remainingMs() <= 0) {
     try {
       await beforeWait()
     } finally {
@@ -736,17 +778,17 @@ async function drainBunServer(
 
   // Bun's `stop(false)` can stay pending on an already-answered 413 socket whose unread upload
   // body has not hit its idle timeout yet, even though `pendingRequests` is already 0.
-  await waitUntilIdleOrTimeout(server, draining, timeoutMs)
+  await waitUntilIdleOrTimeout(server, draining, deadline)
   await server.stop(true)
   await draining
 }
 
+/** Polls every 25 ms, so a deadline brought forward takes effect within one poll. */
 async function waitUntilIdleOrTimeout(
   server: ReturnType<typeof Bun.serve>,
   draining: Promise<void>,
-  timeoutMs: number
+  deadline: StopDeadline
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs
   let settled = false
   void draining.then(
     () => {
@@ -758,7 +800,7 @@ async function waitUntilIdleOrTimeout(
   )
 
   while (!settled && (server.pendingRequests > 0 || server.pendingWebSockets > 0)) {
-    const remaining = deadline - Date.now()
+    const remaining = deadline.remainingMs()
     if (remaining <= 0) return
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
