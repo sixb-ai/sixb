@@ -267,8 +267,8 @@ const comments = {
 }
 
 // Guard proof: set the handed words in place of the input's (`setValue(text)`); what the reader
-// wrote is lost. Drop the context branch of the insertion effect; no chip shows, and the comments
-// never reach the Agent.
+// wrote is lost. Drop the `includes` check in `withInsertedText`; the words are repeated. Drop the
+// context branch of the insertion effect; no chip shows, and the comments never reach the Agent.
 test("comments handed to the input join it as a chip, its words the reader's, and nothing is sent", async () => {
   const view = renderComposer()
   view.rerender({
@@ -279,14 +279,23 @@ test("comments handed to the input join it as a chip, its words the reader's, an
   // The reader reads the comments' words, never where the Agent finds them.
   expect(view.container.textContent).not.toContain("body>")
 
-  // What the reader wrote stays; the same comments handed again make one chip.
+  // What the reader wrote stays, the words after it; the same comments handed again make one chip.
   fireEvent.focusIn(view.input())
   fireEvent.input(view.input(), { target: { value: "Keep it short" } })
   fireEvent.keyUp(view.input(), { key: "t" })
   view.rerender({
     insertion: { text: "Please address these comments.", context: comments, nonce: 2 },
   })
-  await waitFor(() => expect(view.input().value).toBe("Keep it short"))
+  await waitFor(() =>
+    expect(view.input().value).toBe("Keep it short\nPlease address these comments.")
+  )
+  // Handed a third time, the words are not repeated.
+  view.rerender({
+    insertion: { text: "Please address these comments.", context: comments, nonce: 3 },
+  })
+  await waitFor(() =>
+    expect(view.input().value).toBe("Keep it short\nPlease address these comments.")
+  )
   expect(view.getAllByRole("button", { name: "Show 2 comments · Summer sale" })).toHaveLength(1)
   expect(view.onSend).not.toHaveBeenCalled()
 
@@ -295,11 +304,37 @@ test("comments handed to the input join it as a chip, its words the reader's, an
     fireEvent.keyDown(view.input(), { key: "Enter" })
   })
   expect(view.onSend).toHaveBeenCalledWith(
-    "Keep it short",
+    "Keep it short\nPlease address these comments.",
     [],
     [{ context: comments, origin: "explicit" }],
     "auto"
   )
+})
+
+// Guard proof: fill only an empty input (`current.trim() ? current : text`); the question left on
+// the welcome comes back alone, and the comments go without what to do with them.
+test("words handed to the input join a draft restored with the conversation", async () => {
+  const queryClient = new QueryClient()
+  threadStateStoreFor(queryClient).writeDraft("draft", {
+    text: "How many invoices are overdue?",
+    attachments: [],
+    explicitContext: [],
+  })
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <Composer
+        onSend={() => {}}
+        draftKey="draft"
+        insertion={{ text: "Please address these comments.", context: comments, nonce: 1 }}
+      />
+    </QueryClientProvider>
+  )
+  const input = () => view.getByLabelText("Message") as HTMLTextAreaElement
+
+  await waitFor(() =>
+    expect(input().value).toBe("How many invoices are overdue?\nPlease address these comments.")
+  )
+  expect(view.getByRole("button", { name: "Show 2 comments · Summer sale" })).toBeTruthy()
 })
 
 // Guard proof: render the chip's label without CommentsPreview; a tap shows nothing of what the

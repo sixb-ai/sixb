@@ -143,8 +143,8 @@ export interface ComposerProps {
   /**
    * What an artifact hands the conversation, such as the comments the reader asks the Agent to
    * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
-   * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
-   * is sent.
+   * one of the same identity, and its words follow the reader's own on a line of their own.
+   * Nothing is sent.
    */
   readonly insertion?: {
     readonly text: string
@@ -496,7 +496,7 @@ export const Composer = memo(function Composer({
     textareaRef.current?.focus()
   }, [draftNonce])
 
-  // What an artifact hands the input: its context as a chip, its words in an empty input, the
+  // What an artifact hands the input: its context as a chip, its words after the reader's, the
   // caret after what the input holds.
   // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
   useEffect(() => {
@@ -509,7 +509,7 @@ export const Composer = memo(function Composer({
         { context, origin: "explicit" },
       ])
     }
-    setValue((current) => (current.trim() ? current : text))
+    setValue((current) => withInsertedText(current, text))
     onInserted?.(insertion.nonce)
     requestAnimationFrame(() => {
       const input = textareaRef.current
@@ -1408,6 +1408,13 @@ function contextLabel(label: string): { readonly label?: string } {
         ? `${trimmed.slice(0, MAX_AGENT_CONTEXT_LABEL_LENGTH - 1).trimEnd()}…`
         : trimmed,
   }
+}
+
+/** A draft restored with its conversation keeps its words; the handed ones come after them, once. */
+function withInsertedText(current: string, text: string): string {
+  if (!current.trim()) return text
+  if (!text || current.includes(text)) return current
+  return `${current.trimEnd()}\n${text}`
 }
 
 function readInitialDraftText(store: ThreadStateStore, draftKey: string | undefined): string {
