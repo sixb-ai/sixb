@@ -103,8 +103,12 @@ async function status(manifestPath: string): Promise<DeployStatus> {
   return JSON.parse((await ctl(manifestPath, "status", "--json")).stdout) as DeployStatus
 }
 
-async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
-  for (let attempt = 0; attempt < 200; attempt++) {
+async function until<T>(
+  read: () => Promise<T>,
+  done: (value: T) => boolean,
+  attempts = 200
+): Promise<T> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const value = await read().catch(() => undefined)
     if (value !== undefined && done(value)) return value
     await Bun.sleep(25)
@@ -527,6 +531,94 @@ describe("supervisor", () => {
     expect(isAlive(greenPid)).toBe(false)
     expect(isAlive(bluePid)).toBe(true)
   }, 15_000)
+
+  // Reproduce: let the restart timer use the cohort the instance had when it exited; it then
+  // looks for the candidate manifest that activation cleared, and green's API never comes back.
+  test("a candidate that exits just before activate restarts as part of the live release", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-activate-restart-"))
+    const crashedOnce = join(root, "green-crashed-once")
+    const greenPidFile = join(root, "green.pid")
+
+    // Green's API exits on its first start, and its restart waits long enough for activate to
+    // land first, even on a slow runner: a restart before activate would pass without the fix.
+    const makeManifest = (slot: "blue" | "green", script: string): ProcessManifest => ({
+      version: 1,
+      name: "northline",
+      slot,
+      cwd: root,
+      runDir: join(root, "run"),
+      logDir: join(root, "run", "logs"),
+      releasePath: join(root, "release.json"),
+      services: [
+        {
+          name: "api",
+          kind: "http",
+          processName: "northline-api",
+          command: process.execPath,
+          args: ["-e", script],
+          env: {},
+          instances: 1,
+          killTimeoutMs: 2_000,
+          restartDelayMs: slot === "green" ? 5_000 : 100,
+        },
+      ],
+    })
+
+    const blueManifest = makeManifest("blue", "setInterval(() => {}, 1000)")
+    const greenManifest = makeManifest(
+      "green",
+      [
+        `const crashedOnce = ${JSON.stringify(crashedOnce)}`,
+        "if (!(await Bun.file(crashedOnce).exists())) {",
+        '  await Bun.write(crashedOnce, "")',
+        "  process.exit(1)",
+        "}",
+        `await Bun.write(${JSON.stringify(greenPidFile)}, String(process.pid))`,
+        "setInterval(() => {}, 1000)",
+      ].join("\n")
+    )
+
+    const manifestPath = join(root, "processes.json")
+    const candidatePath = join(root, "candidate.json")
+    await writeFile(manifestPath, JSON.stringify(blueManifest))
+    await writeFile(candidatePath, JSON.stringify(greenManifest))
+
+    const supervisor = Bun.spawn(
+      [process.execPath, helper, "supervise", "--manifest", manifestPath],
+      {
+        stdout: "ignore",
+        stderr: "ignore",
+      }
+    )
+    cleanups.push(async () => {
+      supervisor.kill("SIGKILL")
+      await supervisor.exited
+      await rm(root, { recursive: true, force: true })
+    })
+
+    await until(
+      () => status(manifestPath),
+      (current) => current.processes.some((entry) => entry.status === "running")
+    )
+    expect((await ctl(manifestPath, "stage", candidatePath)).exitCode).toBe(0)
+
+    // `status --json` lists the live release only; the candidate check sees green's exit.
+    await until(() => Bun.file(crashedOnce).exists(), Boolean)
+    await until(
+      async () => (await ctl(manifestPath, "status", "--check", "--candidate")).exitCode !== 0,
+      Boolean
+    )
+
+    await writeFile(manifestPath, JSON.stringify(greenManifest))
+    expect((await ctl(manifestPath, "activate")).exitCode).toBe(0)
+
+    const greenPid = await until(
+      async () => Number(await readFile(greenPidFile, "utf8")),
+      (value) => value > 0,
+      400
+    )
+    expect(greenPid).toBeGreaterThan(0)
+  }, 20_000)
 })
 
 describe("log lines", () => {

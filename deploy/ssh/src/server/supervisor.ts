@@ -275,11 +275,17 @@ class Supervisor {
     managed.restarts = restarts
     const delay = Math.min(managed.service.restartDelayMs * restarts, MAX_RESTART_DELAY_MS)
     managed.restartTimer = setTimeout(() => {
-      if (ownerMap.get(managed.key) !== managed) return
-      ownerMap.delete(managed.key)
-      const currentManifest = cohort === "active" ? this.manifest : this.candidate
+      // Read where the instance belongs now: `activate` can make a waiting candidate active.
+      const cohortNow = managed.cohort
+      if (cohortNow === "retiring") return
+
+      const ownerNow = cohortNow === "active" ? this.managed : this.staged
+      if (ownerNow.get(managed.key) !== managed) return
+      ownerNow.delete(managed.key)
+
+      const currentManifest = cohortNow === "active" ? this.manifest : this.candidate
       if (!currentManifest || currentManifest.cwd !== managed.cwd) return
-      void this.startInstance(currentManifest, managed.service, managed.instance, cohort)
+      void this.startInstance(currentManifest, managed.service, managed.instance, cohortNow)
     }, delay)
     await this.writeState()
   }
