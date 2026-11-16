@@ -32,7 +32,14 @@ const LINUX_CLOCK_TICKS_PER_SECOND = 100
 const SAMPLE_INTERVAL_MS = 5_000
 const MAX_RESTART_DELAY_MS = 30_000
 /** How long old `api` and `workers` may drain in the background after a blue-green cutover. */
-export const RETIRING_KILL_TIMEOUT_MS = 300_000
+const RETIRING_KILL_TIMEOUT_MS = 300_000
+/** SIGINT comes this long before SIGKILL, so a draining role can still record its partial work. */
+export const INTERRUPT_LEAD_MS = 10_000
+
+/** A retiring process gets the cutover's drain window, or its own kill timeout when longer. */
+export function retiringKillTimeoutMs(killTimeoutMs: number): number {
+  return Math.max(killTimeoutMs, RETIRING_KILL_TIMEOUT_MS)
+}
 
 interface SupervisorRequest {
   readonly id: string
@@ -313,7 +320,7 @@ class Supervisor {
         timeoutMs > 15_000
           ? setTimeout(() => {
               if (!managed.exited) managed.child.kill("SIGINT")
-            }, timeoutMs - 10_000)
+            }, timeoutMs - INTERRUPT_LEAD_MS)
           : undefined
       const killTimer = setTimeout(() => {
         if (!managed.exited) managed.child.kill("SIGKILL")
@@ -347,12 +354,12 @@ class Supervisor {
     }
 
     this.retiring.add(managed)
-    const timeoutMs = Math.max(managed.service.killTimeoutMs, RETIRING_KILL_TIMEOUT_MS)
+    const timeoutMs = retiringKillTimeoutMs(managed.service.killTimeoutMs)
     const interruptTimer = setTimeout(
       () => {
         if (!managed.exited) managed.child.kill("SIGINT")
       },
-      Math.max(timeoutMs - 10_000, 1_000)
+      Math.max(timeoutMs - INTERRUPT_LEAD_MS, 1_000)
     )
     const killTimer = setTimeout(() => {
       if (!managed.exited) managed.child.kill("SIGKILL")

@@ -135,6 +135,24 @@ describe("deployment files", () => {
     })
   })
 
+  // Reproduce: give `serviceEnvWithDrain` a fixed 290000 again; a 15-minute kill timeout then
+  // still drains for 290 seconds.
+  test("drain a retiring API until just before the supervisor's SIGINT", () => {
+    const api = release.services[0]
+    if (!api) throw new Error("The fixture has an api service.")
+
+    const longTurns: DeployRelease = {
+      ...release,
+      services: [{ ...api, process: { ...api.process, killTimeoutMs: 900_000 } }],
+    }
+
+    const [defaultApi] = renderProcessManifest(release, layout).services
+    const [longApi] = renderProcessManifest(longTurns, layout).services
+
+    expect(defaultApi?.env.SIXB_DRAIN_TIMEOUT_MS).toBe("290000")
+    expect(longApi?.env.SIXB_DRAIN_TIMEOUT_MS).toBe("890000")
+  })
+
   test("start the supervisor from a user unit that outlasts every kill timeout", () => {
     const unit = renderUnit(release, layout)
 
