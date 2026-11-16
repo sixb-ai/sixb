@@ -6,6 +6,7 @@ import { useLayoutEffect } from "react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import { ContextChips } from "../src/agent/components/context-chips"
 import { useComposerInsertion } from "../src/agent/composer-insertion"
+import { threadStateStoreFor } from "../src/agent/thread-state"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -77,6 +78,17 @@ function serveUploads() {
   return uploads
 }
 
+/** Plays `POST /api/files`, holding each upload until the test lets it land. */
+function holdUploads() {
+  const held: Array<() => void> = []
+  const fetch = () =>
+    new Promise<Response>((resolve) => {
+      held.push(() => resolve(Response.json(uploaded, { status: 201 })))
+    })
+  client.setConfig({ fetch: Object.assign(fetch, { preconnect: globalThis.fetch.preconnect }) })
+  return held
+}
+
 function renderComposer(props: Partial<ComposerProps> = {}) {
   const onSend = mock<ComposerProps["onSend"]>(() => {})
   const queryClient = new QueryClient()
@@ -91,6 +103,7 @@ function renderComposer(props: Partial<ComposerProps> = {}) {
   return {
     ...view,
     onSend,
+    queryClient,
     input,
     send,
     rerender: (next: Partial<ComposerProps>) => view.rerender(composer(next)),
@@ -163,6 +176,46 @@ describe("Composer attachments", () => {
     // An upload shows its chip at once, before it reaches the API.
     expect(view.queryByLabelText("Remove image.png")).toBeNull()
     expect(uploads).toEqual([])
+  })
+
+  // Removal proof: settle every upload in the open input (make `startUpload`'s
+  // `unlanded.draftKey === draftKeyRef.current` always true); the file is in neither draft.
+  test("a file still uploading when the reader opens another conversation lands in its own", async () => {
+    const held = holdUploads()
+    const view = renderComposer({ draftKey: "thr_a" })
+    const store = threadStateStoreFor(view.queryClient)
+    fireEvent.paste(view.input(), { clipboardData: clipboard([screenshot()]) })
+    await waitFor(() => expect(held).toHaveLength(1))
+
+    view.rerender({ draftKey: "thr_b" })
+    expect(view.queryByLabelText("Remove image.png")).toBeNull()
+
+    await act(async () => held[0]?.())
+    await waitFor(() => expect(store.readDraft("thr_a")?.attachments).toEqual([uploaded]))
+    expect(view.queryByLabelText("Remove image.png")).toBeNull()
+    expect(store.readDraft("thr_b")).toBeNull()
+
+    view.rerender({ draftKey: "thr_a" })
+    expect(view.getByLabelText("Remove image.png")).toBeDefined()
+    expect(view.send().disabled).toBe(false)
+  })
+
+  // Removal proof: reload only the stored draft on a conversation change, without
+  // `unlandedAttachments`; back in A, the file is gone while it still uploads, and for good.
+  test("back in its conversation before it lands, a file shows uploading, then attached", async () => {
+    const held = holdUploads()
+    const view = renderComposer({ draftKey: "thr_a" })
+    fireEvent.paste(view.input(), { clipboardData: clipboard([screenshot()]) })
+    await waitFor(() => expect(held).toHaveLength(1))
+
+    view.rerender({ draftKey: "thr_b" })
+    view.rerender({ draftKey: "thr_a" })
+    expect(view.getByLabelText("Remove image.png")).toBeDefined()
+    expect(view.send().disabled).toBe(true)
+
+    await act(async () => held[0]?.())
+    await waitFor(() => expect(view.send().disabled).toBe(false))
+    expect(view.getAllByLabelText("Remove image.png")).toHaveLength(1)
   })
 
   test("while an answer runs, the next message is written, then sent once it ends", () => {

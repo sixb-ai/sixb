@@ -203,6 +203,11 @@ type ComposerAttachment =
       readonly sizeBytes: number
     }
 
+interface UnlandedAttachment {
+  readonly draftKey: string | undefined
+  readonly attachment: ComposerAttachment
+}
+
 const MAX_HEIGHT_PX = 200
 const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
@@ -299,6 +304,12 @@ export const Composer = memo(function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
+  // Each file that has not landed, still uploading or failed, and the conversation it was attached
+  // in. A stored draft keeps only landed files: these come back with their conversation, and one
+  // landing after the reader left joins that conversation's draft.
+  const unlandedRef = useRef(new Map<string, UnlandedAttachment>())
+  const draftKeyRef = useRef(draftKey)
+  draftKeyRef.current = draftKey
   // The transcript is appended to the text as it was when dictation started, so the input stays
   // read-only until it lands. Recording ends only when the reader stops it: no restarts. A
   // composer disabled meanwhile, by someone else's turn, only keeps a new dictation from starting.
@@ -343,7 +354,10 @@ export const Composer = memo(function Composer({
   if (loadedDraftKey !== draftKey) {
     setLoadedDraftKey(draftKey)
     setValue(readInitialDraftText(threadState, draftKey))
-    setAttachments(readInitialDraftAttachments(threadState, draftKey))
+    setAttachments([
+      ...readInitialDraftAttachments(threadState, draftKey),
+      ...unlandedAttachments(unlandedRef.current, draftKey),
+    ])
     setContextEntries(readInitialDraftContext(threadState, draftKey, ambientContext))
     setMention(null)
     setDismissedMention(null)
@@ -618,37 +632,51 @@ export const Composer = memo(function Composer({
         mediaType: file.type || undefined,
         sizeBytes: file.size,
       }
+      unlandedRef.current.set(id, { draftKey: draftKeyRef.current, attachment: pendingAttachment })
       setAttachments((current) => [...current, pendingAttachment])
+
+      const settle = (settled: ComposerAttachment) => {
+        const unlanded = unlandedRef.current.get(id)
+        // The reader removed it while it uploaded.
+        if (!unlanded) return
+
+        if (settled.status === "ready") unlandedRef.current.delete(id)
+        else unlandedRef.current.set(id, { ...unlanded, attachment: settled })
+
+        if (unlanded.draftKey === draftKeyRef.current) {
+          setAttachments((current) =>
+            current.map((attachment) => (attachment.id === id ? settled : attachment))
+          )
+          return
+        }
+
+        // The reader opened another conversation meanwhile: the file joins the draft of the one
+        // it was attached in.
+        if (unlanded.draftKey && settled.status === "ready") {
+          const stored = threadState.readDraft(unlanded.draftKey)
+          threadState.writeDraft(unlanded.draftKey, {
+            text: stored?.text ?? "",
+            attachments: [...(stored?.attachments ?? []), settled.fileRef],
+            explicitContext: stored?.explicitContext ?? [],
+          })
+        }
+      }
 
       uploadFile
         .mutateAsync({ file, fileName: file.name })
-        .then((fileRef) => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? { id, status: "ready", fileRef: fileRef as AgentFileRef }
-                : attachment
-            )
-          )
-        })
+        .then((fileRef) => settle({ id, status: "ready", fileRef: fileRef as AgentFileRef }))
         // The API explains failures to developers; the composer shows its own message.
-        .catch(() => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? {
-                    id,
-                    status: "error",
-                    fileName: file.name,
-                    mediaType: file.type || undefined,
-                    sizeBytes: file.size,
-                  }
-                : attachment
-            )
-          )
-        })
+        .catch(() =>
+          settle({
+            id,
+            status: "error",
+            fileName: file.name,
+            mediaType: file.type || undefined,
+            sizeBytes: file.size,
+          })
+        )
     },
-    [uploadFile]
+    [uploadFile, threadState]
   )
 
   const handleFilesSelected = useCallback(
@@ -733,6 +761,7 @@ export const Composer = memo(function Composer({
   }, [canAttachFiles, compact, handleFilesSelected])
 
   const removeAttachment = (id: string) => {
+    unlandedRef.current.delete(id)
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
   }
 
@@ -1374,6 +1403,15 @@ function readInitialDraftAttachments(
     status: "ready",
     fileRef,
   }))
+}
+
+function unlandedAttachments(
+  unlanded: ReadonlyMap<string, UnlandedAttachment>,
+  draftKey: string | undefined
+): ComposerAttachment[] {
+  return [...unlanded.values()].flatMap((entry) =>
+    entry.draftKey === draftKey ? [entry.attachment] : []
+  )
 }
 
 function readInitialDraftContext(
