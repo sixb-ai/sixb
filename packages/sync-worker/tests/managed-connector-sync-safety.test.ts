@@ -147,7 +147,7 @@ describe("managed connector Sync safety", () => {
   })
 
   test("keeps connection provenance on dataset validation failures", async () => {
-    const sync = defineSync("sync-validation-provenance")
+    const sync = defineSync("sync-validation-provenance", { mode: "append" })
       .from(social)
       .read((_client, { connection }) => ({
         id: connection.id === "connection-b" ? 42 : connection.id,
@@ -177,7 +177,7 @@ describe("managed connector Sync safety", () => {
   })
 
   test("keeps connection provenance on missing blob failures", async () => {
-    const sync = defineSync("sync-file-provenance")
+    const sync = defineSync("sync-file-provenance", { mode: "append" })
       .from(social)
       .read((_client, { connection }) => ({
         id: connection.id,
@@ -226,7 +226,7 @@ describe("managed connector Sync safety", () => {
         return new Promise(() => {})
       },
     }
-    const sync = defineSync("sync-cancel-connect")
+    const sync = defineSync("sync-cancel-connect", { mode: "append" })
       .from(social)
       .read(() => [])
       .intoDataset(socialRows)
@@ -242,7 +242,7 @@ describe("managed connector Sync safety", () => {
 
   test("stops while awaiting the read handler", async () => {
     let handlerStarted = false
-    const sync = defineSync("sync-cancel-handler")
+    const sync = defineSync("sync-cancel-handler", { mode: "append" })
       .from(social)
       .read(() => {
         handlerStarted = true
@@ -261,7 +261,7 @@ describe("managed connector Sync safety", () => {
   test("stops while awaiting the next async source value", async () => {
     let nextStarted = false
     let iteratorClosed = false
-    const sync = defineSync("sync-cancel-iterator")
+    const sync = defineSync("sync-cancel-iterator", { mode: "append" })
       .from(social)
       .read(
         (): AsyncIterable<unknown> => ({

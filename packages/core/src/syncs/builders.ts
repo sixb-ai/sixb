@@ -1,4 +1,8 @@
-import type { AnyConnectorAdapter, ConnectorDefinition } from "../connectors"
+import {
+  type AnyConnectorAdapter,
+  type ConnectorDefinition,
+  isOAuthConnectorDefinition,
+} from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
@@ -24,6 +28,17 @@ function assertDataset(dataset: DatasetDefinition, mode: SyncMode): void {
   if (mode === "merge" && dataset.primaryKey === undefined) {
     throw new SyncValidationError(`Merge sync dataset '${dataset.id}' must define a primaryKey.`)
   }
+}
+
+/**
+ * A sync on an OAuth connector runs once per connection, and a snapshot of one connection would
+ * replace every other connection's rows.
+ */
+function assertConnectorMode(syncId: string, connector: ConnectorDefinition, mode: SyncMode): void {
+  if (mode !== "snapshot" || !isOAuthConnectorDefinition(connector)) return
+  throw new SyncValidationError(
+    `[Sixb] Sync '${syncId}' reads OAuth connector '${connector.id}', which runs once per connection. Use mode "merge" or "append": a snapshot of one connection would replace every other connection's rows.`
+  )
 }
 
 function normalizeBatchSyncConfig(options: BatchSyncConfig | undefined): BatchSyncDefinitionConfig {
@@ -85,6 +100,8 @@ export function defineSync<TId extends string>(
       from<TConnector extends ConnectorDefinition<string, AnyConnectorAdapter>>(
         connector: TConnector
       ): SyncReadBuilder<TId, TConnector, TCheckpoint, SyncMode> {
+        assertConnectorMode(id, connector, config.mode)
+
         return {
           read(handler): SyncTargetBuilder<TId, TConnector, TCheckpoint, SyncMode> {
             return {

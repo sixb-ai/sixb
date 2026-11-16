@@ -86,27 +86,9 @@ describe("managed connector Sync fan-out", () => {
     expect(String(failed)).toContain("Reconnect the project.")
   })
 
-  test("a snapshot sync still fails when an account needs reconnecting", async () => {
-    const sync = defineSync("sync-social-snapshot-skip")
-      .from(social)
-      .read((client) => ({ id: client.accountId }))
-      .intoDataset(socialRows)
-    const fixture = createFixture(sync, () => [
-      source("connection-a", "account-a", "default"),
-      {
-        ...source("connection-b", "account-b", "default"),
-        async connect() {
-          throw createSixbError("connector.authorization_required", "Reconnect Ben's account.")
-        },
-      },
-    ])
-    const failed = await run(fixture, sync.id, "run-snapshot-skip").catch((error) => error)
-    expect(String(failed)).toContain("Reconnect Ben's account.")
-  })
-
-  test("reads every connection into one snapshot and clears it when none remain", async () => {
+  test("reads every connection into one run", async () => {
     const seen: string[] = []
-    const sync = defineSync("sync-social-accounts")
+    const sync = defineSync("sync-social-accounts", { mode: "append" })
       .from(social)
       .read((client, context) => {
         seen.push(context.connection.id)
@@ -116,7 +98,7 @@ describe("managed connector Sync fan-out", () => {
         }
       })
       .intoDataset(socialRows)
-    let sources = [
+    const sources = [
       source("connection-b", "account-b", "brand-b"),
       source("connection-a", "account-a", "brand-a"),
     ]
@@ -129,11 +111,6 @@ describe("managed connector Sync fan-out", () => {
       { id: "connection-a:row", accountId: "account-a" },
       { id: "connection-b:row", accountId: "account-b" },
     ])
-
-    sources = []
-    const empty = await run(fixture, sync.id, "run-managed-empty")
-    expect(empty.rowsRead).toBe(0)
-    expect(await rows(fixture.lakeStorage)).toEqual([])
   })
 
   test("isolates checkpoints and resets only a replaced account", async () => {
@@ -218,7 +195,7 @@ describe("managed connector Sync fan-out", () => {
   test("preserves the previous dataset and checkpoints when one source fails", async () => {
     let generation = "initial"
     let failConnectionB = false
-    const sync = defineSync("sync-social-atomic")
+    const sync = defineSync("sync-social-atomic", { mode: "append" })
       .checkpoint<{ cursor: string }>()
       .from(social)
       .read((client, context) => {

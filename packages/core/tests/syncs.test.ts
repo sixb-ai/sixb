@@ -35,6 +35,18 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
+const social = defineConnector("social", {
+  type: "social-oauth",
+  authentication: {
+    type: "oauth2",
+    authorizationUrl: () => "https://provider.test/oauth",
+    exchangeCode: () => ({ accessToken: "access" }),
+    refresh: () => ({ accessToken: "refreshed" }),
+  },
+  discoverAccounts: () => [],
+  connect: () => ({}),
+})
+
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [col("orderId", "string")],
 })
@@ -139,6 +151,11 @@ describe("defineSync", () => {
       "an invalid mode",
       () => defineSync("sync-orders", { mode: "invalid" as never }),
       "Invalid sync mode",
+    ],
+    [
+      "a snapshot of an OAuth connector, which runs once per connection",
+      () => defineSync("sync-videos").from(social),
+      `Sync 'sync-videos' reads OAuth connector 'social', which runs once per connection. Use mode "merge" or "append"`,
     ],
     [
       "an empty dataset target name",
