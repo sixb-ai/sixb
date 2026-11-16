@@ -308,7 +308,8 @@ async function startWorker(
   projectId = PROJECT_ID,
   projectionDispatcher?: ProjectionDispatcherPort,
   workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId),
-  reporter: object = {}
+  reporter: object = {},
+  syncDispatcher = createTestSyncRunDispatcher(queues, projectId)
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
     projectId,
@@ -316,7 +317,7 @@ async function startWorker(
     queues,
     routes,
     dispatchers: {
-      syncs: createTestSyncRunDispatcher(queues, projectId),
+      syncs: syncDispatcher,
       pipelines: createTestPipelineRunDispatcher(queues, projectId),
       workflows: workflowDispatcher,
       ...(projectionDispatcher === undefined ? {} : { projections: projectionDispatcher }),
@@ -330,10 +331,12 @@ async function startWorker(
 
 function createTestSyncRunDispatcher(
   queues: InMemoryQueues,
-  projectId = PROJECT_ID
+  projectId = PROJECT_ID,
+  dispatches?: Parameters<SyncDispatcherPort["dispatch"]>[0][]
 ): SyncDispatcherPort {
   return {
     async dispatch(input) {
+      dispatches?.push(input)
       const [job] = await queues.syncRuns.enqueue({
         projectId,
         jobs: [
@@ -345,13 +348,15 @@ function createTestSyncRunDispatcher(
           },
         ],
       })
-      return {
-        syncId: input.syncId,
-        runId: input.runId,
-        queuedAt: job!.createdAt,
-        jobId: job!.id,
-        created: true,
-      }
+      return [
+        {
+          syncId: input.syncId,
+          runId: input.runId,
+          queuedAt: job!.createdAt,
+          jobId: job!.id,
+          created: true,
+        },
+      ]
     },
   }
 }
@@ -861,6 +866,73 @@ describe("OrchestratorWorker", () => {
       input: { connectionId: "ccn_outlook" },
       scheduleId: outlookConnected.id,
       source: { type: "event", eventId: connected!.id },
+    })
+  })
+
+  // Drop the connection from the Sync dispatch in `enqueueEventScheduleTarget` to watch this fail.
+  test("someone connecting starts the sync of that connection alone", async () => {
+    const outlook = defineConnector("outlook", {
+      type: "test-oauth",
+      authentication: {
+        type: "oauth2",
+        authorizationUrl: () => "https://provider.test/oauth",
+        exchangeCode: () => ({ accessToken: "access" }),
+        refresh: () => ({ accessToken: "refreshed" }),
+      },
+      discoverAccounts: () => [],
+      connect: () => ({}),
+    })
+    const outlookConnected = defineSchedule("outlook-connected").on(
+      events.connector(outlook).connected()
+    )
+    const inbox = defineSync("inbox", { mode: "append" })
+      .when(outlookConnected)
+      .from(outlook)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const routes = compileRoutes({
+      schedules: [outlookConnected],
+      syncs: [inbox],
+      pipelines: [],
+      workflows: [],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const dispatches: Parameters<SyncDispatcherPort["dispatch"]>[0][] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      undefined,
+      undefined,
+      {},
+      createTestSyncRunDispatcher(queues, PROJECT_ID, dispatches)
+    )
+
+    await eventRuntime.append({
+      events: [
+        {
+          type: "connector.connection.connected",
+          payload: {
+            connectorId: "outlook",
+            connection: {
+              id: "ccn_ada",
+              connectorId: "outlook",
+              owner: { type: "user", id: "usr_ada" },
+              slot: "default",
+              account: { id: "account-a", label: "ada@example.com" },
+            },
+            reason: "connected",
+          },
+        },
+      ],
+    })
+
+    await waitFor(() => dispatches.length === 1)
+    expect(dispatches[0]).toMatchObject({
+      syncId: inbox.id,
+      connection: { id: "ccn_ada", connectorId: "outlook" },
     })
   })
 

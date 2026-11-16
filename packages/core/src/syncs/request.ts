@@ -26,6 +26,8 @@ export interface RequestSyncRunInput extends SyncRunRequestOptions {
 export interface SyncRunRequestResult {
   readonly syncId: string
   readonly runId: string
+  /** The connection the run reads, on a sync of an OAuth connector. */
+  readonly connectionId?: string
   /** Durable time at which the run entered the queue. */
   readonly queuedAt: string
   readonly jobId?: string

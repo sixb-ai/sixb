@@ -125,6 +125,7 @@ import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
+import { createSyncConnections, registerSyncConnections } from "../syncs/connections"
 import type { RegisteredWebhook } from "../webhooks"
 import { WebhookRegistry, WebhookValidationError } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
@@ -320,6 +321,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         this,
         this.connectorService.connectionProcess.callbackProcess
       )
+      registerSyncConnections(this, createSyncConnections(this.connectorService))
     }
     registerSandboxConnectionTokenAccess(this, ({ connector, selector, requestedBy }) => {
       assertPersonalConnectionRequester(connector, requestedBy, selector)
