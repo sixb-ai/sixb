@@ -161,11 +161,11 @@ A deploy:
 1. Checks the server.
 2. Unpacks the commit into its own `releases/<id>` directory and links it to the server's `.env`.
 3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward so open tabs never `404`).
-4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving.
+4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving. When the new release brings storage migrations, the services stop first, since the previous release cannot run against the new schema: that deploy has a short downtime.
 5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.
 6. Validates and reloads the Caddy routes onto the new slot, swaps `orchestrator` and `rules`, and drains the retiring `api` and `workers` in the background so in-flight requests and agent turns finish cleanly.
 
-A deploy that fails before the new release takes over discards it, and the live release keeps serving. A check that fails after that leaves the new release serving: the deploy says so, and `sixb deploy status` names its commit. Keep storage migrations additive across adjacent releases so the active release keeps working while step 4 runs. Two deploys of the same project never overlap; the second waits for the first.
+A deploy that fails before the new release takes over discards it, and the live release keeps serving, unless a migration stopped it in step 4. A check that fails after that leaves the new release serving: the deploy says so, and `sixb deploy status` names its commit. Two deploys of the same project never overlap; the second waits for the first.
 
 ## Operate the deployment
 

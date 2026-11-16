@@ -380,7 +380,7 @@ async function main(): Promise<void> {
 
     case "db:migrate": {
       const { runDbMigrate } = await import("./commands/db-migrate")
-      await runDbMigrate({ entry: getFlag("entry") })
+      await runDbMigrate({ entry: getFlag("entry"), check: hasFlag("check") })
       break
     }
 

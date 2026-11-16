@@ -55,6 +55,39 @@ describe("sixb db", () => {
     expect(result.logEntries).toEqual(migratedThenPrepared)
   })
 
+  // A deploy reads the exit code to decide whether the live release can keep serving while the
+  // new one migrates. Reproduce: drop `process.exitCode` from the `--check` branch; this fails.
+  test("--check exits 3 when migrations are pending, and migrates nothing", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "pending"
+      return runDbMigrate({ entry, check: true })
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(result.exitCode).toBe(3)
+    expect(result.output).toContain("Database migrations pending")
+    expect(result.logEntries).toEqual([])
+  })
+
+  test("--check exits 0 when the schema is current", async () => {
+    const result = await runLogged(() => runDbMigrate({ entry, check: true }))
+
+    expect(result.error).toBeUndefined()
+    expect(result.exitCode ?? 0).toBe(0)
+    expect(result.output).toContain("No database migrations pending")
+    expect(result.logEntries).toEqual([])
+  })
+
+  test("--check fails on a schema a migration cannot fix", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "dirty"
+      return runDbMigrate({ entry, check: true })
+    })
+
+    expect(String(result.error)).toContain("FixtureStorage cannot be migrated: dirty")
+    expect(result.logEntries).toEqual([])
+  })
+
   // A child process: which entry runs depends on the working directory.
   test("uses the default built runtime when present and closes providers", async () => {
     const projectRoot = await tempDir("sixb-cli-db-built-")
@@ -78,7 +111,7 @@ describe("sixb db", () => {
       timeoutMs: FAST_CLI_TIMEOUT_MS,
     })
 
-    expect(result.exitCode).toBe(0)
+    expect(result.exitCode ?? 0).toBe(0)
     expect(result.stderr).toBe("")
     expect(result.stdout).toContain("Database migrations complete")
     expect(result.stdout).toContain("cli-prod-roles")

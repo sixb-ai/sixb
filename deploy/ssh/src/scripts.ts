@@ -105,7 +105,9 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     ...release.steps.build.map((command, index, all) =>
       index === all.length - 1 ? withCarriedAssets(runStep(command)) : runStep(command)
     ),
-    ...release.steps.beforeStart.map((command) => runStep(command)),
+    ...release.steps.beforeStart.flatMap((command) =>
+      isStorageMigration(command) ? [stopForSchemaChange(), runStep(command)] : [runStep(command)]
+    ),
     {
       label: "Start new release",
       body: renderStartCandidate({
@@ -262,6 +264,9 @@ function renderCandidateTrap(): string {
     '      "$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb-deploy-ssh" discard --manifest "$MANIFEST" > /dev/null 2>&1 || true',
     '      rm -f "$CANDIDATE_MANIFEST" "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
     "      ;;",
+    "    stopped)",
+    "      echo 'The services were stopped for the storage migration and stay stopped. Fix what failed and deploy again.' >&2",
+    "      ;;",
     "    activated | cold)",
     "      echo 'The new release is in place, but it did not pass its checks.' >&2",
     "      echo 'sixb deploy status and sixb deploy logs show what failed. To go back, deploy the previous commit with --ref.' >&2",
@@ -361,6 +366,42 @@ function renderInstallDependencies(): string {
     "  fi",
     "done",
   ].join("\n")
+}
+
+function isStorageMigration(command: DeployCommand): boolean {
+  return command.program === "sixb" && command.args[0] === "db" && command.args[1] === "migrate"
+}
+
+/**
+ * The live release cannot run against a schema it does not know, so a release with storage
+ * migrations pending stops the services before migrating. "Start new release" then finds nothing
+ * running and starts it cold. `sixb db migrate --check` reads the schema without changing it, and
+ * exits 3 when migrations are pending. A release whose `sixb` predates `--check` rejects the
+ * option with 2: nothing says the schema stays, so the services stop too.
+ */
+function stopForSchemaChange(): Step {
+  return {
+    label: "Check storage migrations",
+    body: [
+      'cd "$RELEASE_PROJECT"',
+      "migrations=0",
+      '"$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb" db migrate --check || migrations=$?',
+      "",
+      'case "$migrations" in',
+      "  0) ;;",
+      "  2 | 3)",
+      '    if [ "$migrations" = 3 ]; then',
+      "      echo 'This release changes the storage schema, so the services stop while it migrates.'",
+      "    else",
+      "      echo 'This release cannot tell whether its schema changes, so the services stop while it migrates.'",
+      "    fi",
+      '    if systemctl --user is-active --quiet "$UNIT"; then systemctl --user stop "$UNIT"; fi',
+      '    deploy_mode="stopped"',
+      "    ;;",
+      '  *) exit "$migrations" ;;',
+      "esac",
+    ].join("\n"),
+  }
 }
 
 function runStep(command: DeployCommand): Step {

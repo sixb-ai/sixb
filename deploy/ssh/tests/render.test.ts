@@ -221,6 +221,7 @@ describe("deploy script", () => {
       "Install Bun 1.4.2",
       "Install dependencies",
       "sixb build",
+      "Check storage migrations",
       "sixb db migrate",
       "Start new release",
       "Check services",
@@ -457,103 +458,196 @@ writeFileSync(".sixb/dist/app/${chunkName}", ${JSON.stringify(chunkName)})
   })
 })
 
+/**
+ * A test that runs deploy steps spawns bash and a few dozen short processes: under a second alone,
+ * and past the default five seconds beside the whole suite.
+ */
+const STEP_RUN_TIMEOUT_MS = 20_000
+
+describe("a release with storage migrations", () => {
+  const migrationCheck = async (exitCode: number) => {
+    const server = await standInServer({ bun: [`exit ${exitCode}`] })
+    try {
+      const result = await runDeploySteps(server, {
+        before: `RELEASE_PROJECT=${server.root}`,
+        steps: ["Check storage migrations"],
+        after: 'echo "deploy_mode=$deploy_mode" >> "$CALLS"',
+      })
+      const calls = (await readFile(server.calls, "utf8")).trim().split("\n")
+      return { exitCode: result.exitCode, calls }
+    } finally {
+      await server.remove()
+    }
+  }
+
+  // Reproduce: drop the stop from "Check storage migrations"; the live release then keeps serving
+  // while `sixb db migrate` drops columns it still writes.
+  test(
+    "stops the live release before migrating, so it never runs against the new schema",
+    async () => {
+      const { exitCode, calls } = await migrationCheck(3)
+
+      expect(exitCode).toBe(0)
+      expect(calls).toEqual([
+        "bun sixb db",
+        "systemctl --user is-active --quiet sixb-northline.service",
+        "systemctl --user stop sixb-northline.service",
+        "deploy_mode=stopped",
+      ])
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+
+  // Redeploying an older commit with `--ref`: its `sixb` rejects `--check` as a usage error.
+  // Reproduce: treat 2 as a failure; that rollback then can never deploy.
+  test(
+    "stops the live release too when the release cannot tell whether its schema changes",
+    async () => {
+      const { exitCode, calls } = await migrationCheck(2)
+
+      expect(exitCode).toBe(0)
+      expect(calls).toContain("systemctl --user stop sixb-northline.service")
+      expect(calls).toContain("deploy_mode=stopped")
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+
+  test(
+    "keeps the live release serving when the schema does not change",
+    async () => {
+      const { exitCode, calls } = await migrationCheck(0)
+
+      expect(exitCode).toBe(0)
+      expect(calls).toEqual(["bun sixb db", "deploy_mode=none"])
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+
+  test(
+    "stops the deploy, and nothing else, when the schema cannot be read",
+    async () => {
+      const { exitCode, calls } = await migrationCheck(1)
+
+      expect(exitCode).toBe(1)
+      expect(calls).toEqual(["bun sixb db"])
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+})
+
 describe("a deploy that fails", () => {
   // Reproduce: write `release.json` at the end of "Activate release" again; a check that fails
   // after the switch then leaves the record on the previous commit while the new one serves.
-  test("records the new release as soon as it takes over, even when a later check fails", async () => {
-    const server = await standInServer({
-      ctl: ['[ "$1" = activate ] && exit 0', "echo 'orchestrator exited' >&2", "exit 1"],
-    })
-    try {
-      await writeFile(server.layout.candidateManifest, "{}")
-
-      const result = await runDeploySteps(server, {
-        before: 'deploy_mode="staged"',
-        steps: ["Activate release"],
+  test(
+    "records the new release as soon as it takes over, even when a later check fails",
+    async () => {
+      const server = await standInServer({
+        ctl: ['[ "$1" = activate ] && exit 0', "echo 'orchestrator exited' >&2", "exit 1"],
       })
+      try {
+        await writeFile(server.layout.candidateManifest, "{}")
 
-      expect(result.exitCode).not.toBe(0)
-      expect(await readlink(server.layout.currentLink)).toBe(`releases/${server.releaseId}`)
-      expect(JSON.parse(await readFile(server.layout.releaseRecord, "utf8"))).toMatchObject({
-        commit: "def456",
-      })
-      expect(result.stderr).toContain("The new release is in place")
-    } finally {
-      await server.remove()
-    }
-  })
+        const result = await runDeploySteps(server, {
+          before: 'deploy_mode="staged"',
+          steps: ["Activate release"],
+        })
+
+        expect(result.exitCode).not.toBe(0)
+        expect(await readlink(server.layout.currentLink)).toBe(`releases/${server.releaseId}`)
+        expect(JSON.parse(await readFile(server.layout.releaseRecord, "utf8"))).toMatchObject({
+          commit: "def456",
+        })
+        expect(result.stderr).toContain("The new release is in place")
+      } finally {
+        await server.remove()
+      }
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
 
   // Reproduce: call `use_release` before the service files are installed; a failure there then
   // puts traffic back on the live release while `current` and `release.json` name the discarded one.
-  test("switches nothing when activation fails before the switch", async () => {
-    const server = await standInServer({
-      systemctl: ['[ "$2" = daemon-reload ] && exit 1', "exit 0"],
-    })
-    try {
-      await writeFile(server.layout.candidateManifest, "{}")
-      await writeFile(join(server.layout.deployDir, "Caddyfile.previous"), "live routes")
-      await writeFile(server.caddySnippet, "candidate routes")
-
-      const result = await runDeploySteps(server, {
-        before: 'deploy_mode="routed"',
-        steps: ["Activate release"],
+  test(
+    "switches nothing when activation fails before the switch",
+    async () => {
+      const server = await standInServer({
+        systemctl: ['[ "$2" = daemon-reload ] && exit 1', "exit 0"],
       })
+      try {
+        await writeFile(server.layout.candidateManifest, "{}")
+        await writeFile(join(server.layout.deployDir, "Caddyfile.previous"), "live routes")
+        await writeFile(server.caddySnippet, "candidate routes")
 
-      expect(result.exitCode).not.toBe(0)
-      expect(
-        await lstat(server.layout.currentLink).catch((error: unknown) => error)
-      ).toBeInstanceOf(Error)
-      expect(await Bun.file(server.layout.releaseRecord).exists()).toBe(false)
-      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
-    } finally {
-      await server.remove()
-    }
-  })
+        const result = await runDeploySteps(server, {
+          before: 'deploy_mode="routed"',
+          steps: ["Activate release"],
+        })
+
+        expect(result.exitCode).not.toBe(0)
+        expect(
+          await lstat(server.layout.currentLink).catch((error: unknown) => error)
+        ).toBeInstanceOf(Error)
+        expect(await Bun.file(server.layout.releaseRecord).exists()).toBe(false)
+        expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+      } finally {
+        await server.remove()
+      }
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
 
   // Reproduce: let a failed reload leave the new routes in the snippet; the next deploy then
   // finds them unchanged, skips the reload, and retires the release Caddy still routes to.
-  test("puts the live routes back when Caddy does not reload", async () => {
-    const server = await standInServer({ sudo: ["exit 1"] })
-    try {
-      await writeFile(server.caddySnippet, "live routes")
+  test(
+    "puts the live routes back when Caddy does not reload",
+    async () => {
+      const server = await standInServer({ sudo: ["exit 1"] })
+      try {
+        await writeFile(server.caddySnippet, "live routes")
 
-      const result = await runDeploySteps(server, {
-        before: 'deploy_mode="staged"\ntarget_slot="green"',
-        steps: ["Update routes"],
-      })
+        const result = await runDeploySteps(server, {
+          before: 'deploy_mode="staged"\ntarget_slot="green"',
+          steps: ["Update routes"],
+        })
 
-      expect(result.exitCode).not.toBe(0)
-      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
-      expect(await readFile(server.calls, "utf8")).toContain("bun sixb-deploy-ssh discard")
-    } finally {
-      await server.remove()
-    }
-  })
+        expect(result.exitCode).not.toBe(0)
+        expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+        expect(await readFile(server.calls, "utf8")).toContain("bun sixb-deploy-ssh discard")
+      } finally {
+        await server.remove()
+      }
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
 
   // Reproduce: leave `deploy_mode` on "staged" after the reload; the trap then stops the
   // candidate while Caddy routes every request to it.
-  test("routes back to the live release before discarding a candidate Caddy already serves", async () => {
-    const server = await standInServer()
-    try {
-      await writeFile(server.caddySnippet, "live routes")
+  test(
+    "routes back to the live release before discarding a candidate Caddy already serves",
+    async () => {
+      const server = await standInServer()
+      try {
+        await writeFile(server.caddySnippet, "live routes")
 
-      const result = await runDeploySteps(server, {
-        before: 'deploy_mode="staged"\ntarget_slot="green"',
-        steps: ["Update routes"],
-        after: "false",
-      })
+        const result = await runDeploySteps(server, {
+          before: 'deploy_mode="staged"\ntarget_slot="green"',
+          steps: ["Update routes"],
+          after: "false",
+        })
 
-      expect(result.exitCode).not.toBe(0)
-      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
-      expect((await readFile(server.calls, "utf8")).trim().split("\n")).toEqual([
-        "sudo -n /usr/bin/systemctl reload caddy",
-        "sudo -n /usr/bin/systemctl reload caddy",
-        "bun sixb-deploy-ssh discard",
-      ])
-    } finally {
-      await server.remove()
-    }
-  })
+        expect(result.exitCode).not.toBe(0)
+        expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+        expect((await readFile(server.calls, "utf8")).trim().split("\n")).toEqual([
+          "sudo -n /usr/bin/systemctl reload caddy",
+          "sudo -n /usr/bin/systemctl reload caddy",
+          "bun sixb-deploy-ssh discard",
+        ])
+      } finally {
+        await server.remove()
+      }
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
 })
 
 interface StandInServer {
@@ -579,6 +673,7 @@ async function standInServer(
     readonly ctl?: readonly string[]
     readonly sudo?: readonly string[]
     readonly systemctl?: readonly string[]
+    readonly bun?: readonly string[]
   } = {}
 ): Promise<StandInServer> {
   const root = await mkdtemp(join(tmpdir(), "sixb-deploy-steps-"))
@@ -606,7 +701,7 @@ async function standInServer(
     systemctl: recorded("systemctl", options.systemctl),
     sudo: recorded("sudo", options.sudo),
     ctl: recorded("ctl", options.ctl),
-    bun: [`echo "bun $(basename "$1") $2" >> "$CALLS"`],
+    bun: [`echo "bun $(basename "$1") $2" >> "$CALLS"`, ...(options.bun ?? [])],
     caddy: ["exit 0"],
     flock: ["exit 0"],
     sleep: ["exit 0"],
