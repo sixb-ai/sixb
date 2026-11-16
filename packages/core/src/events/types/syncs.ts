@@ -9,6 +9,8 @@ export interface SyncRunStartedEvent extends EventEnvelope {
   payload: {
     syncId: string
     runId: string
+    /** The connection the run reads, on a sync of an OAuth connector. */
+    connectionId?: string
     startedAt: string
   }
 }
@@ -20,6 +22,8 @@ export interface SyncRunFinishedEvent extends EventEnvelope {
   payload: {
     syncId: string
     runId: string
+    /** The connection the run reads, on a sync of an OAuth connector. */
+    connectionId?: string
     status: "succeeded" | "failed" | "cancelled"
     datasetId?: string
     versionId?: string

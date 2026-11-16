@@ -159,7 +159,7 @@ export class SyncWorker extends RunWorker<
 
 async function emitSyncRunStarted(
   host: SyncWorkerHost,
-  run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">,
+  run: Pick<SyncRunRecord, "id" | "syncId" | "connectionId" | "startedAt">,
   correlationId: string
 ): Promise<void> {
   if (!run.startedAt) {
@@ -173,6 +173,7 @@ async function emitSyncRunStarted(
           payload: {
             syncId: run.syncId,
             runId: run.id,
+            ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
             startedAt: run.startedAt.toISOString(),
           },
         },
@@ -185,7 +186,10 @@ async function emitSyncRunStarted(
 
 async function emitSyncRunFinishedEvents(
   host: SyncWorkerHost,
-  run: Pick<SyncRunRecord, "id" | "syncId" | "datasetId" | "status" | "output" | "error">,
+  run: Pick<
+    SyncRunRecord,
+    "id" | "syncId" | "connectionId" | "datasetId" | "status" | "output" | "error"
+  >,
   correlationId: string,
   createdVersion?: DatasetVersion
 ): Promise<void> {
@@ -219,6 +223,7 @@ async function emitSyncRunFinishedEvents(
           payload: {
             syncId: run.syncId,
             runId: run.id,
+            ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
             status: requireTerminalStatus(run.status, `Sync run '${run.id}'`),
             datasetId: run.datasetId,
             ...(run.output ? { versionId: run.output.versionId } : {}),
