@@ -692,6 +692,13 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
             `[Sixb] Agent run '${run.id}' moves only its own thread's workspace, not '${input.id}'.`
           )
         }
+        // Recreating or restoring is its owner's choice, never a run's.
+        const { action } = input as { readonly action: string }
+        if (action !== "acquire" && action !== "replace" && action !== "settle") {
+          throw new AgentRunRefusedError(
+            `[Sixb] Agent run '${run.id}' cannot ${action} its thread's workspace: only its owner recovers it.`
+          )
+        }
         return fenced(run.id, () =>
           host.storage.agents.threads.transitionSandbox({
             ...input,

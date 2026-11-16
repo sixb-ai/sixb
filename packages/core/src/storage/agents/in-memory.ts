@@ -247,7 +247,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     const threadKey = key(input.projectId, input.id)
     const thread = this.state.threads.get(threadKey) ?? null
     const run =
-      input.action === "recreate"
+      input.action === "recreate" || input.action === "restore"
         ? null
         : (this.state.runs.get(key(input.projectId, input.runId)) ?? null)
     const sandboxState = transitionAgentThreadSandbox(thread, run, input)

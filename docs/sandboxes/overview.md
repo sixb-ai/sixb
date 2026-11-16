@@ -173,10 +173,21 @@ Sixb saves before finalization. If the provider confirms saved state is lost, Si
 sandbox, repeats setup and tells the agent its earlier local files were not recovered.
 Conversation history and published attachments remain available.
 
-Uncertain state or failed recovery blocks further runs. Use the chat recovery control or
-`sixb.agent.threads.recreateSandbox(thread.id, { expectedSandboxName: thread.sandboxState.name })`.
-Recreation does not recover edits or delete the previous environment.
-Files remain subject to provider retention; workflows remain ephemeral.
+Uncertain state or failed recovery blocks further runs, such as a save that fails because the
+provider stopped the VM at the end of its session. The thread's owner chooses how to go on, from
+the chat recovery control or the SDK:
+
+| Choice | Call | Files |
+|---|---|---|
+| Resume the previous sandbox | `sixb.agent.threads.restoreSandbox(thread.id, { expectedSandboxName })` | As the last run left them; its last change may be unfinished |
+| Start fresh | `sixb.agent.threads.recreateSandbox(thread.id, { expectedSandboxName })` | A new environment; earlier edits are not copied |
+
+`expectedSandboxName` is `thread.sandboxState.name`. Resuming is offered only for a sandbox its run
+finished preparing (`sandboxState.initialized`). The next run resumes it; if the provider no longer
+has its files, the run starts fresh and tells the agent. A provider never resumes a VM that still
+runs, so a resumed sandbox cannot receive a late operation from the failed run. Neither choice
+deletes the previous environment: its files remain subject to provider retention. Workflows remain
+ephemeral.
 
 On a provider that keeps files, such as Vercel, a [sub-agent](../models/overview.md#it-delegates)
 keeps its sandbox while it pauses, and Sixb deletes it once the sub-agent ends. The sandbox of a

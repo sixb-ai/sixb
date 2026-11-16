@@ -44,8 +44,7 @@ export const fr: Translation<AgentMessages> = {
       "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",
     computerUnavailable:
       "Cet ordinateur ne peut pas exécuter l’agent pour le moment. Réessayez, ou choisissez Cloud ci-dessous.",
-    sandboxUnavailable:
-      "L’environnement de cette conversation doit être récupéré avant une nouvelle réponse.",
+    sandboxUnavailable: "Choisissez comment l’agent continue avant d’envoyer un autre message.",
     retryFailed: "Impossible de relancer cette réponse. Réessayez.",
     stopFailed: "Impossible d’arrêter cette réponse. Réessayez.",
     removed: "Vous ne participez plus à ce fil.",
@@ -943,19 +942,23 @@ export const fr: Translation<AgentMessages> = {
       project ? "Enregistré dans la mémoire du projet" : "Enregistré en mémoire",
   },
   sandbox: {
-    title: "Récupération de l’environnement requise",
-    description:
-      "La récupération a échoué ou l’opération précédente n’a pas pu être confirmée. La reprise automatique est bloquée pour protéger le travail en cours.",
-    recreateFailed: "Impossible de recréer l’environnement. Rechargez la page et réessayez.",
-    recreating: "Recréation…",
-    startFresh: "Repartir d’un nouvel environnement",
-    confirmTitle: "Repartir d’un nouvel environnement ?",
+    title: "L’agent a été interrompu",
+    description: "Son travail s’est arrêté avant d’être enregistré.",
+    recreateFailed: "Impossible de repartir de zéro. Rechargez la page et réessayez.",
+    recreating: "Préparation…",
+    startFresh: "Repartir sans les fichiers",
+    confirmTitle: "Repartir sans les fichiers ?",
     confirmDescription:
-      "La prochaine exécution initialisera un nouvel environnement. Les fichiers locaux de l’espace de travail précédent ne seront pas copiés. L’historique de la conversation et les pièces jointes publiées restent disponibles. L’environnement précédent n’est pas supprimé et reste soumis à la politique de conservation du fournisseur.",
+      "L’agent continuera sans les fichiers créés dans cette conversation. Vos messages et les pièces jointes publiées restent disponibles.",
     cancel: "Annuler",
-    create: "Créer un nouvel environnement",
+    create: "Repartir de zéro",
     ownerOnly: (owner) =>
-      `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
+      `${owner} est la seule personne à pouvoir choisir comment cette conversation continue.`,
+    resume: "Reprendre où il s’était arrêté",
+    resuming: "Reprise…",
+    resumeHint: "Ses fichiers sont conservés, mais sa dernière modification peut être inachevée.",
+    resumeFailed:
+      "Impossible de reprendre où il s’était arrêté. Rechargez la page et réessayez, ou repartez sans les fichiers.",
   },
   background: {
     card: (command) => `Commande en arrière-plan : ${command}`,

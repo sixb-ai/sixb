@@ -58,7 +58,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
     return runPgTransaction(this.sql, async (tx) => {
       // Same lock order as run finalization: run, then thread.
       const runs =
-        input.action === "recreate"
+        input.action === "recreate" || input.action === "restore"
           ? []
           : await tx<AgentRunRow[]>`
         SELECT * FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${input.runId}

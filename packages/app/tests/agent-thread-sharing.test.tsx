@@ -377,6 +377,12 @@ function api(scenario: Scenario, requests: string[]) {
       scenario.thread = { ...cloud, movedAt: "2026-10-21T10:00:00.000Z" }
       return Response.json(scenario.thread)
     }
+    // Its owner resumes the sandbox a failed save left: the thread reads ready again.
+    if (url.pathname === "/api/agent-threads/thr_1/sandbox/restore") {
+      const sandboxState = scenario.thread.sandboxState as Record<string, unknown>
+      scenario.thread = { ...scenario.thread, sandboxState: { ...sandboxState, status: "ready" } }
+      return Response.json(scenario.thread)
+    }
     if (url.pathname === "/api/agent-threads/thr_1/fork") {
       await scenario.forkGate
       return Response.json({ thread: thread({ id: "thr_2", participants: [] }) }, { status: 201 })
@@ -1085,18 +1091,38 @@ describe("who acts on a turn", () => {
     const participant = renderChat("bob", stuck)
     expect(
       await participant.view.findByText(
-        "Only Alice Martin can start this conversation with a fresh sandbox."
+        "Only Alice Martin can choose how this conversation goes on."
       )
     ).toBeDefined()
     expect(
-      participant.view.queryByRole("button", { name: "Start with a fresh sandbox" })
+      participant.view.queryByRole("button", { name: "Start over without the files" })
     ).toBeNull()
     participant.view.unmount()
 
     const owner = renderChat("alice", stuck)
     expect(
-      await owner.view.findByRole("button", { name: "Start with a fresh sandbox" })
+      await owner.view.findByRole("button", { name: "Start over without the files" })
     ).toBeDefined()
+  })
+
+  // Removal proof: drop setResumedThreadId from recoverSandbox in useAgentConversation; the
+  // sandbox is resumed, and the turn waits for another message.
+  test("resuming a stuck sandbox runs its cut-short turn again", async () => {
+    const { view, requests } = renderChat("alice", {
+      thread: thread({ sandboxState: { name: "sbx_1", status: "blocked", initialized: true } }),
+      runs: [run({ id: "run_2", status: "failed", requestedBy: alice })],
+    })
+
+    fireEvent.click(await view.findByRole("button", { name: "Pick up where it left off" }))
+
+    await waitFor(() =>
+      expect(requests).toContain("POST /api/agent-threads/thr_1/runs/run_2/retry")
+    )
+    expect(requests.indexOf("POST /api/agent-threads/thr_1/runs/run_2/retry")).toBeGreaterThan(
+      requests.findIndex((entry) =>
+        entry.startsWith("POST /api/agent-threads/thr_1/sandbox/restore")
+      )
+    )
   })
 
   // Removal proof: return "send" for every 409 from sendFailure; the generic line shows instead.
@@ -1140,7 +1166,7 @@ describe("who acts on a turn", () => {
     fireEvent.click(view.getByRole("button", { name: "Send message" }))
 
     expect(
-      await view.findByText("This conversation's sandbox must be recovered before another answer.")
+      await view.findByText("Choose how the agent goes on before sending another message.")
     ).toBeDefined()
   })
 

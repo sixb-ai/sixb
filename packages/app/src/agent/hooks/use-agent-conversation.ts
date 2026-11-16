@@ -24,6 +24,7 @@ import {
   moveAgentThreadToCloudMutation,
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
+  restoreAgentThreadSandboxMutation,
   retryAgentRunMutation,
   setAgentThreadApprovalModeMutation,
   stopAgentBackgroundCommandMutation,
@@ -406,6 +407,8 @@ export function useAgentConversation({
   } | null>(null)
   /** The thread whose answer Continue is asking for, until the API accepts or refuses it. */
   const [continuingThreadId, setContinuingThreadId] = useState<string | null>(null)
+  /** The thread whose sandbox its owner just resumed, until its cut-short turn runs again. */
+  const [resumedThreadId, setResumedThreadId] = useState<string | null>(null)
 
   const pendingRun =
     pendingSend && threadId !== null && pendingSend.run.threadId === threadId
@@ -479,6 +482,7 @@ export function useAgentConversation({
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
+  const restoreSandbox = useMutation(restoreAgentThreadSandboxMutation())
   const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
   const stopBackgroundCommand = useMutation(stopAgentBackgroundCommandMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
@@ -868,15 +872,18 @@ export function useAgentConversation({
     )
   }
 
-  const handleRecreateSandbox = () => {
+  /** Recover the thread's sandbox as its owner chose: fresh, or as the failed save left it. */
+  const recoverSandbox = (recovery: typeof recreateSandbox | typeof restoreSandbox) => {
     if (!thread?.sandboxState || isRunning || access !== "owner") return
-    recreateSandbox.mutate(
+    recovery.mutate(
       {
         path: { threadId: thread.id },
         body: { expectedSandboxName: thread.sandboxState.name },
       },
       {
         onSuccess: () => {
+          if (recovery === restoreSandbox) setResumedThreadId(thread.id)
+
           void queryClient.invalidateQueries({
             queryKey: getAgentThreadQueryKey({ path: { threadId: thread.id } }),
           })
@@ -984,6 +991,22 @@ export function useAgentConversation({
     messages: savedMessages,
     latestRun,
   })
+
+  // Resuming the sandbox picks the cut-short turn up again, once the thread reads ready: it goes
+  // on where it stopped, or runs again when it had not got anywhere.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Continue and Retry check their own state
+  useEffect(() => {
+    if (resumedThreadId === null) return
+    if (resumedThreadId !== threadId) {
+      setResumedThreadId(null)
+      return
+    }
+    if (sandboxRecovery) return
+
+    setResumedThreadId(null)
+    if (canContinue) void continueTurn()
+    else if (canRetry) retry()
+  }, [resumedThreadId, threadId, sandboxRecovery, canContinue, canRetry])
 
   const reader = user
     ? { type: "user" as const, id: user.id, displayName: user.displayName }
@@ -1243,9 +1266,19 @@ export function useAgentConversation({
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
     ? {
-        pending: recreateSandbox.isPending,
+        pending: recreateSandbox.isPending || restoreSandbox.isPending,
         error: recreateSandbox.isError,
-        onRecreate: handleRecreateSandbox,
+        onRecreate: () => recoverSandbox(recreateSandbox),
+        // Only a workspace its run finished preparing has files to go on from.
+        ...(sandboxRecovery.status !== "unavailable" && sandboxRecovery.initialized
+          ? {
+              restore: {
+                pending: restoreSandbox.isPending,
+                error: restoreSandbox.isError,
+                onRestore: () => recoverSandbox(restoreSandbox),
+              },
+            }
+          : {}),
         canRecreate: access === "owner",
         owner: thread ? personName(threadOwner(thread)) : "",
       }

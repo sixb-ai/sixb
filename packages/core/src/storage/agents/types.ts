@@ -63,6 +63,11 @@ export type TransitionAgentThreadSandboxInput = {
       readonly expectedSandboxName: string
       readonly name: string
     }
+  | {
+      /** Go on in the sandbox a failed save left, as its owner chose: the one named `name`. */
+      readonly action: "restore"
+      readonly name: string
+    }
 )
 
 /**

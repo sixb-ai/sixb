@@ -268,7 +268,7 @@ class PersistentSandboxSession {
     // Never destroy persistent state. Lost/uncertain acquisition is quarantined, not retried.
     try {
       await this.assertOwner()
-      if (session) await bounded(session.stop())
+      if (session) await this.stopForRecovery(session)
       await this.settle(error instanceof SandboxStateUnavailableError ? "unavailable" : "blocked")
     } catch {
       // Durable busy ownership remains when reconciliation cannot be confirmed.
@@ -371,6 +371,12 @@ class PersistentSandboxSession {
       await bounded(session.stop())
       await this.settle("ready")
     } catch (error) {
+      if (!(error instanceof AgentExecutionLostError)) {
+        console.error(
+          `[SixbAgentWorker] The workspace of thread '${this.input.thread.id}' could not be saved; it waits for its owner to resume or recreate it.`,
+          error
+        )
+      }
       try {
         await this.access.close()
       } catch {
@@ -379,7 +385,7 @@ class PersistentSandboxSession {
       try {
         await this.assertOwner()
         // Failed cleanup still closes the owned VM. Stopping is not proof of clean state.
-        if (!stopAttempted) await bounded(session.stop())
+        if (!stopAttempted) await this.stopForRecovery(session)
         await this.settle("blocked")
       } catch {
         console.error(
@@ -442,6 +448,20 @@ class PersistentSandboxSession {
         // A state left busy is started again by the thread's next run, as a blocked one is.
       }
     }
+  }
+
+  /**
+   * Stop a VM whose workspace waits for recovery. A provider may have stopped it already, at the
+   * end of its session for one, and refuse: that leaves nothing running, and the state is still this
+   * run's to record. A VM still running is harmless too, as no provider resumes a running one.
+   */
+  private async stopForRecovery(session: Sandbox): Promise<void> {
+    await bounded(session.stop()).catch((error: unknown) => {
+      console.error(
+        `[SixbAgentWorker] The sandbox of thread '${this.input.thread.id}' could not be stopped for recovery; it may have stopped already.`,
+        error
+      )
+    })
   }
 
   private settle(status: "ready" | "blocked" | "unavailable") {

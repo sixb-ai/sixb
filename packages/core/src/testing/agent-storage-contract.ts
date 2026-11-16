@@ -669,6 +669,109 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("restores a prepared workspace for its owner, once its run ended", async () => {
+      // Regression proof: drop the initialized or active-run check from the restore transition.
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ sandboxParams: {} }))
+        const input = runInput({ execution: execution("owner", new Date("2099-01-01")) })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: input.id,
+          executionId: input.executionId,
+          authority: "inherited",
+        })
+        await storage.runs.create(input)
+        await storage.runs.start(input)
+        const acquire = {
+          projectId,
+          id: "thr_1",
+          action: "acquire" as const,
+          runId: input.id,
+          executionToken: "owner",
+          name: "name-1",
+          sourceFingerprint: "d".repeat(64),
+        }
+        await storage.threads.transitionSandbox(acquire)
+        // The run prepared its workspace, then could not confirm saving it.
+        await storage.threads.transitionSandbox({
+          ...acquire,
+          action: "settle",
+          status: "blocked",
+          initialized: true,
+        })
+        const restore = {
+          projectId,
+          id: "thr_1",
+          action: "restore" as const,
+          name: "name-1",
+        }
+        await expectAgentError(storage.threads.transitionSandbox(restore), "invalid_state")
+        await storage.runs.finish({
+          projectId,
+          id: input.id,
+          executionToken: "owner",
+          status: "failed",
+        })
+        await expectAgentError(
+          storage.threads.transitionSandbox({ ...restore, name: "name-2" }),
+          "invalid_state"
+        )
+
+        expect(await storage.threads.transitionSandbox(restore)).toEqual({
+          name: "name-1",
+          status: "ready",
+          initialized: true,
+          sourceFingerprint: acquire.sourceFingerprint,
+        })
+        expect(
+          (await storage.threads.getById({ projectId, id: "thr_1" }))?.sandboxState
+        ).toMatchObject({ name: "name-1", status: "ready" })
+        await expectAgentError(storage.threads.transitionSandbox(restore), "invalid_state")
+      })
+    })
+
+    test("restores no workspace its run never finished preparing", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ sandboxParams: {} }))
+        const input = runInput({ execution: execution("owner", new Date("2099-01-01")) })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: input.id,
+          executionId: input.executionId,
+          authority: "inherited",
+        })
+        await storage.runs.create(input)
+        await storage.runs.start(input)
+        const acquire = {
+          projectId,
+          id: "thr_1",
+          action: "acquire" as const,
+          runId: input.id,
+          executionToken: "owner",
+          name: "name-1",
+          sourceFingerprint: "e".repeat(64),
+        }
+        await storage.threads.transitionSandbox(acquire)
+        await storage.runs.finish({
+          projectId,
+          id: input.id,
+          executionToken: "owner",
+          status: "failed",
+        })
+
+        // Left busy and never prepared: only starting fresh recovers it.
+        await expectAgentError(
+          storage.threads.transitionSandbox({
+            projectId,
+            id: "thr_1",
+            action: "restore",
+            name: "name-1",
+          }),
+          "invalid_state"
+        )
+      })
+    })
+
     test("snapshots workspace bindings without accepting runtime state or credentials", async () => {
       // Regression proof: remove snapshotAgentThreadSandboxParams from a provider's thread create.
       await withStorage(async (storage) => {
