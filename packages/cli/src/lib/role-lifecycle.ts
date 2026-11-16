@@ -42,6 +42,9 @@ export async function runUntilSignal(
     let shuttingDown = false
 
     const handle = (signal: ShutdownSignal) => {
+      // The SIGTERM listener stays until the shutdown ends: without one, a repeated SIGTERM takes
+      // the default action and kills the role mid-drain. When a deployment stops, systemd and the
+      // deploy supervisor each send one.
       if (shuttingDown) {
         if (signal === "SIGINT") {
           process.off("SIGINT", onSigint)
@@ -49,8 +52,8 @@ export async function runUntilSignal(
         }
         return
       }
+
       shuttingDown = true
-      process.off("SIGTERM", onSigterm)
       if (signal === "SIGINT") process.off("SIGINT", onSigint)
 
       void Promise.resolve()

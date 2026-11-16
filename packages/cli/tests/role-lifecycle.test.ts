@@ -41,6 +41,31 @@ describe("role-lifecycle", () => {
     expect(interrupted).toBe(true)
   })
 
+  // A real process with no SIGTERM listener dies on the signal's default action, so the listener
+  // count is what keeps a draining role alive. To check the guard, let `runUntilSignal` remove its
+  // SIGTERM listener when the shutdown starts: the count drops during the drain and this fails.
+  test("keeps a SIGTERM listener for the whole drain and ignores repeated SIGTERMs", async () => {
+    const listenersBefore = process.listenerCount("SIGTERM")
+    const shutdowns: ShutdownSignal[] = []
+    const release = Promise.withResolvers<void>()
+
+    const running = runUntilSignal(async (signal) => {
+      shutdowns.push(signal)
+      await release.promise
+    })
+
+    process.emit("SIGTERM", "SIGTERM")
+    await Promise.resolve()
+
+    process.emit("SIGTERM", "SIGTERM")
+    expect(process.listenerCount("SIGTERM")).toBe(listenersBefore + 1)
+    expect(shutdowns).toEqual(["SIGTERM"])
+
+    release.resolve()
+    await running
+    expect(process.listenerCount("SIGTERM")).toBe(listenersBefore)
+  })
+
   test("resolves SIXB_DRAIN_TIMEOUT_MS and rejects invalid values", () => {
     delete process.env.SIXB_DRAIN_TIMEOUT_MS
     expect(resolveDrainTimeoutMs(60_000)).toBe(60_000)
