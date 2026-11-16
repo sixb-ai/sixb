@@ -56,6 +56,7 @@ export function SyncButton({
         queryClient.invalidateQueries({ queryKey: getSyncQueryKey({ path }) }),
         queryClient.invalidateQueries({ queryKey: listSyncsQueryKey() }),
         queryClient.invalidateQueries({ queryKey: listSyncRunsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: [{ _id: "listConnectorAccounts" }] }),
       ]),
   })
 

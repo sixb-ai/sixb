@@ -5,7 +5,9 @@ import {
   type GetDatasetResponse,
   type GetLakeHealthResponse,
   type GetSyncResponse,
+  type ListConnectorAccountsResponse,
   type ListDatasetRowsResponse,
+  type ListSyncsResponse,
 } from "@sixb/client"
 import {
   getAuthSessionQueryKey,
@@ -13,8 +15,10 @@ import {
   getDatasetQueryKey,
   getLakeHealthQueryKey,
   getSyncQueryKey,
+  listConnectorAccountsQueryKey,
   listDatasetRowsQueryKey,
   listDatasetVersionsQueryKey,
+  listSyncRunsQueryKey,
   listSyncsQueryKey,
   listWebhookRunsQueryKey,
 } from "@sixb/client/hooks"
@@ -28,6 +32,7 @@ import {
   ConsoleConnectorPage,
   ConsoleDatasetPage,
   ConsoleLakeHealthPage,
+  ConsoleSyncPage,
   SectionsProvider,
 } from "../src/pages"
 import { DatasetCell, datasetColumnNames } from "../src/pages/console/data/datasets"
@@ -110,6 +115,7 @@ function renderPage(
           <Routes>
             <Route path="/console/connectors/:connectorId" element={ui} />
             <Route path="/console/datasets/:datasetId" element={ui} />
+            <Route path="/console/syncs/:syncId" element={ui} />
             <Route path="*" element={ui} />
           </Routes>
         </MemoryRouter>
@@ -330,6 +336,175 @@ describe("SyncButton", () => {
     expect(requests[0]).toBe("POST /api/syncs/sync-orbit/runs")
     const busy = await view.findByRole("button", { name: "Syncing…" })
     expect(busy.hasAttribute("disabled")).toBe(true)
+  })
+})
+
+describe("a connector's accounts", () => {
+  const connector: GetConnectorResponse = {
+    id: "outlook",
+    type: "microsoft",
+    connection: { authentication: "oauth2" },
+    syncIds: ["inbox", "calendar"],
+    webhooks: [],
+  }
+  const sync = (id: string): ListSyncsResponse[number] => ({
+    id,
+    mode: "merge",
+    connector: { id: "outlook", type: "microsoft" },
+    target: { kind: "dataset", dataset: { id, schema: { columns: [] } } },
+    triggers: [],
+    latestRun: null,
+    accounts: { total: 3, needsReconnecting: 1, failing: 0 },
+  })
+  const run = (
+    syncId: string,
+    connectionId: string,
+    status: "succeeded" | "failed",
+    code?: "connector.authorization_required"
+  ) => ({
+    id: `run-${syncId}-${connectionId}`,
+    projectId: "project",
+    syncId,
+    connectionId,
+    datasetId: syncId,
+    mode: "merge" as const,
+    status,
+    attempt: 1,
+    queuedAt: "2026-10-07T11:50:00.000Z",
+    finishedAt: "2026-10-07T11:51:00.000Z",
+    rowsRead: 12,
+    ...(code
+      ? { error: { code, message: "Reconnect.", retryable: false, at: "2026-10-07T11:51:00.000Z" } }
+      : {}),
+  })
+  const account = (
+    id: string,
+    latestRuns: ListConnectorAccountsResponse["accounts"][number]["latestRuns"]
+  ) => ({
+    connection: {
+      id,
+      owner: { type: "user" as const, id: `usr_${id}` },
+      slot: "default",
+      account: { id, label: `${id}@example.com` },
+    },
+    latestRuns,
+  })
+  const accounts: ListConnectorAccountsResponse = {
+    accounts: [
+      account("ada", [run("inbox", "ada", "succeeded"), run("calendar", "ada", "succeeded")]),
+      account("grace", []),
+      account("linus", [run("inbox", "linus", "failed", "connector.authorization_required")]),
+    ],
+  }
+  const connectorPath = { connectorId: "outlook" }
+  const data = (answer: ListConnectorAccountsResponse = accounts) =>
+    [
+      [getConnectorQueryKey({ path: connectorPath }), connector],
+      [listSyncsQueryKey(), [sync("inbox"), sync("calendar")]],
+      [listConnectorAccountsQueryKey({ path: connectorPath }), answer],
+    ] as const
+  const rowLabels = (view: ReturnType<typeof render>) =>
+    within(view.getByText("Accounts").closest("section")!)
+      .getAllByText(/@example\.com$/)
+      .map((element) => element.textContent)
+
+  // Removal proof: drop the sort in ConnectorAccountsSection; Linus is no longer first.
+  test("list the accounts that need attention first, with each sync's last run", () => {
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/outlook",
+      data: data(),
+    })
+
+    expect(rowLabels(view)).toEqual(["linus@example.com", "grace@example.com", "ada@example.com"])
+    const panel = within(view.getByText("Accounts").closest("section")!)
+    expect(panel.getByText("Needs reconnecting")).toBeDefined()
+    expect(panel.getAllByText("Not synced yet")).toHaveLength(2)
+    expect(panel.getByText(/^Calendar /)).toBeDefined()
+  })
+
+  test("show eight, then all of them, and offer a search past twenty", () => {
+    const many = {
+      accounts: Array.from({ length: 25 }, (_, index) =>
+        account(`person${String(index).padStart(2, "0")}`, [
+          run("inbox", `person${index}`, "succeeded"),
+        ])
+      ),
+    }
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/outlook",
+      data: data(many),
+    })
+
+    const search = view.getByRole("searchbox", { name: "Search accounts" })
+    // React DOM was imported before Happy DOM, so it sees typing through its fallback: a keyup in
+    // the field that has focus.
+    const type = (value: string) => {
+      fireEvent.focusIn(search)
+      fireEvent.input(search, { target: { value } })
+      fireEvent.keyUp(search, { key: value.at(-1) ?? "Backspace" })
+    }
+
+    expect(rowLabels(view)).toHaveLength(8)
+    type("person07")
+    expect(rowLabels(view)).toEqual(["person07@example.com"])
+    type("")
+    fireEvent.click(view.getByRole("button", { name: "Show all 25 accounts" }))
+    expect(rowLabels(view)).toHaveLength(25)
+  })
+
+  // Removal proof: send an empty body from AccountSyncButton; each request runs every account.
+  test("sync one account across its syncs from its row", async () => {
+    const posts: { path: string; body: unknown }[] = []
+    const api = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      const pathname = new URL(request.url).pathname
+      if (request.method === "POST") {
+        posts.push({ path: pathname, body: await request.json() })
+        return Response.json({ runs: [] }, { status: 202 })
+      }
+      if (pathname.endsWith("/accounts")) return Response.json(accounts)
+      if (pathname === "/api/syncs") return Response.json([sync("inbox"), sync("calendar")])
+      return Response.json(connector)
+    }
+    client.setConfig({ fetch: Object.assign(api, { preconnect: fetch.preconnect }) })
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/outlook",
+      data: data(),
+    })
+
+    await act(async () => {
+      fireEvent.click(view.getByRole("button", { name: "Sync grace@example.com" }))
+    })
+    await waitFor(() =>
+      expect(posts).toEqual([
+        { path: "/api/syncs/inbox/runs", body: { connectionId: "grace" } },
+        { path: "/api/syncs/calendar/runs", body: { connectionId: "grace" } },
+      ])
+    )
+  })
+
+  test("name each run's account on the sync's page, a reconnect as a status", () => {
+    const { view } = renderPage(<ConsoleSyncPage />, {
+      path: "/console/syncs/inbox",
+      data: [
+        ...data(),
+        [getSyncQueryKey({ path: { syncId: "inbox" } }), sync("inbox")],
+        [
+          listSyncRunsQueryKey({ query: { syncId: "inbox", limit: "20", order: "desc" } }),
+          {
+            runs: [run("inbox", "linus", "failed", "connector.authorization_required")],
+            hasMore: false,
+            total: 1,
+          },
+        ],
+      ],
+    })
+
+    expect(view.getByText("3 accounts")).toBeDefined()
+    const runs = within(view.getByText("Runs").closest("section")!)
+    expect(runs.getByText("linus@example.com")).toBeDefined()
+    expect(runs.getByText("Needs reconnecting")).toBeDefined()
+    expect(runs.queryByText("Reconnect.")).toBeNull()
   })
 })
 

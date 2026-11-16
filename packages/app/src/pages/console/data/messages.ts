@@ -52,6 +52,12 @@ export const en = {
     webhookCount: (count: number) =>
       plural("en", count, { one: "1 webhook", other: `${count} webhooks` }),
     oauth: "Connects with OAuth",
+    accountsTitle: "Accounts",
+    accountsDescription: "Each connected account, and how its syncs last ran.",
+    noAccountsTitle: "No accounts connected",
+    searchAccounts: "Search accounts",
+    noMatchingAccounts: "No accounts match",
+    showAllAccounts: (count: string) => `Show all ${count} accounts`,
     syncsTitle: "Syncs",
     syncsDescription: "What this connector copies into the project.",
     noSyncsTitle: "No syncs",
@@ -80,6 +86,19 @@ export const en = {
     connector: "Connector",
     dataset: "Dataset",
     runWhat: "Sync runs",
+    accounts: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} account`, other: `${formatted} accounts` }),
+    needReconnecting: (count: number) =>
+      plural("en", count, {
+        one: "1 needs reconnecting",
+        other: `${count} need reconnecting`,
+      }),
+    failingAccounts: (count: number) => `${count} failing`,
+    project: "Project",
+    slot: (slot: string) => `Slot ${slot}`,
+    notSyncedYet: "Not synced yet",
+    needsReconnecting: "Needs reconnecting",
+    syncAccount: (account: string) => `Sync ${account}`,
   },
   datasets: {
     title: "Datasets",
@@ -295,6 +314,12 @@ export const fr: Translation<DataMessages> = {
     webhookCount: (count: number) =>
       plural("fr", count, { one: "1 webhook", other: `${count} webhooks` }),
     oauth: "Se connecte avec OAuth",
+    accountsTitle: "Comptes",
+    accountsDescription: "Chaque compte connecté, et le dernier passage de ses synchronisations.",
+    noAccountsTitle: "Aucun compte connecté",
+    searchAccounts: "Rechercher un compte",
+    noMatchingAccounts: "Aucun compte ne correspond",
+    showAllAccounts: (count: string) => `Afficher les ${count} comptes`,
     syncsTitle: "Synchronisations",
     syncsDescription: "Ce que ce connecteur copie dans le projet.",
     noSyncsTitle: "Aucune synchronisation",
@@ -324,6 +349,20 @@ export const fr: Translation<DataMessages> = {
     connector: "Connecteur",
     dataset: "Jeu de données",
     runWhat: "Les synchronisations",
+    accounts: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} compte`, other: `${formatted} comptes` }),
+    needReconnecting: (count: number) =>
+      plural("fr", count, {
+        one: "1 à reconnecter",
+        other: `${count} à reconnecter`,
+      }),
+    failingAccounts: (count: number) =>
+      plural("fr", count, { one: "1 en échec", other: `${count} en échec` }),
+    project: "Projet",
+    slot: (slot: string) => `Emplacement ${slot}`,
+    notSyncedYet: "Pas encore synchronisé",
+    needsReconnecting: "À reconnecter",
+    syncAccount: (account: string) => `Synchroniser ${account}`,
   },
   datasets: {
     title: "Jeux de données",

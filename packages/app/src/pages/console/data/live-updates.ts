@@ -27,6 +27,8 @@ export function useSyncLiveUpdates(options: { syncId?: string } = {}) {
         key("listSyncs"),
         key("listSyncRuns"),
         key("getSync", { syncId: event.payload.syncId }),
+        // Which connector a sync reads isn't in its events: refresh every connector's accounts.
+        key("listConnectorAccounts"),
       ]
       if ("datasetId" in event.payload && event.payload.datasetId) {
         keys.push(...datasetChangedKeys(event.payload.datasetId))

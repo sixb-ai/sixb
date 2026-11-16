@@ -25,6 +25,7 @@ import {
   useRunStatusLabels,
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
+import { AccountsMeta, needsReconnecting, useConnectorAccounts } from "./accounts"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
@@ -85,6 +86,7 @@ export function ConsoleSyncsPage() {
                       </span>
                     </>
                   ) : null}
+                  {sync.accounts ? <AccountsMeta summary={sync.accounts} /> : null}
                 </>
               }
               trailing={
@@ -124,6 +126,14 @@ export function ConsoleSyncPage() {
         : false,
   })
   const sync = syncQuery.data
+  // Runs name their account: the connector's accounts give their labels.
+  const accountsQuery = useConnectorAccounts(sync?.connector.id ?? "", sync?.accounts !== undefined)
+  const accountLabels = new Map(
+    accountsQuery.data?.accounts.map(({ connection }) => [
+      connection.id,
+      connection.account.label,
+    ]) ?? []
+  )
   const back = { href: "/console/syncs", label: messages.syncs.title }
 
   if (!sync) {
@@ -190,6 +200,12 @@ export function ConsoleSyncPage() {
           <Link to={datasetHref} className="hover:text-foreground hover:underline">
             {messages.common.writes(dataset.id)}
           </Link>
+          {sync.accounts ? (
+            <AccountsMeta
+              summary={sync.accounts}
+              href={`/console/connectors/${encodeURIComponent(sync.connector.id)}`}
+            />
+          ) : null}
         </>
       }
       actions={<SyncButton sync={sync.id} variant="default" />}
@@ -250,6 +266,14 @@ export function ConsoleSyncPage() {
                 title={format.dateTime(run.startedAt ?? run.queuedAt)}
                 meta={
                   <>
+                    {run.connectionId ? (
+                      <>
+                        <span className="truncate">
+                          {accountLabels.get(run.connectionId) ?? run.connectionId}
+                        </span>
+                        <MetaDot />
+                      </>
+                    ) : null}
                     <span>{messages.common.modes[run.mode]}</span>
                     {run.finishedAt ? (
                       <>
@@ -292,9 +316,15 @@ export function ConsoleSyncPage() {
                     ) : null}
                   </>
                 }
-                trailing={<RunStatusPill status={run.status} />}
+                trailing={
+                  needsReconnecting(run) ? (
+                    <Pill tone="warn">{messages.syncs.needsReconnecting}</Pill>
+                  ) : (
+                    <RunStatusPill status={run.status} />
+                  )
+                }
               >
-                {run.error && run.id !== failedLatest?.id ? (
+                {run.error && run.id !== failedLatest?.id && !needsReconnecting(run) ? (
                   <FailureSummary failure={run.error} compact />
                 ) : null}
               </PanelRow>

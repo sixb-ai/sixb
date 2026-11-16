@@ -30,6 +30,7 @@ import {
   useNumbers,
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
+import { ConnectorAccountsSection } from "./accounts"
 import { useDataMessages } from "./messages"
 import { ConnectorIcon } from "./shared"
 
@@ -218,6 +219,10 @@ export function ConsoleConnectorPage() {
           )}
         </Panel>
       </PageSection>
+
+      {connector.connection && syncs.length > 0 ? (
+        <ConnectorAccountsSection connectorId={connector.id} syncs={syncs} />
+      ) : null}
 
       {webhooks.length > 0 ? (
         <>
