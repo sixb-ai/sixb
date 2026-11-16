@@ -1,5 +1,5 @@
-import { assertAuthorized, isRuntimeAllowed } from "../authorization"
-import { type ConnectorConnectionMetadata, isOAuthConnectorDefinition } from "../connectors"
+import { assertAuthorized } from "../authorization"
+import { isOAuthConnectorDefinition } from "../connectors"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
@@ -8,7 +8,7 @@ import {
 } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { SyncConnections } from "./connections"
+import { mayRunConnection, type SyncConnections } from "./connections"
 import { SyncValidationError } from "./errors"
 import { dispatchSyncRun } from "./run-dispatch"
 import type { SyncDefinition } from "./types"
@@ -122,7 +122,7 @@ export async function requestSyncRun(
     )
   }
   const runnable = (await connections.list(sync.connector)).filter((connection) =>
-    mayRequestConnectionRun(runtime, execution, connection)
+    mayRunConnection(runtime, execution, connection)
   )
 
   if (connectionId !== undefined) {
@@ -140,24 +140,4 @@ export async function requestSyncRun(
     runs.push(await dispatch(runId, connection.id))
   }
   return { runs }
-}
-
-/**
- * Anyone may run the project's connections. A person's own connection is theirs to run, and the
- * connector's managers may run anyone's: a sync reads into rows its owner owns, as the schedule
- * would. A run no one requested runs them all.
- */
-function mayRequestConnectionRun(
-  runtime: SixbRuntimeContext,
-  execution: ExecutionContext,
-  connection: ConnectorConnectionMetadata
-): boolean {
-  const { owner } = connection
-  const requester = execution.requestedBy
-  if (owner.type !== "user" || requester === undefined) return true
-  if (requester.type === "user" && requester.id === owner.id) return true
-  return isRuntimeAllowed(runtime, {
-    kind: "connector.manage",
-    connectorId: connection.connectorId,
-  })
 }

@@ -3,6 +3,7 @@ export { canRequeueSyncRunAfterEnqueueFailure } from "./idempotency"
 export { InMemorySyncRunStorage } from "./in-memory"
 export type {
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,

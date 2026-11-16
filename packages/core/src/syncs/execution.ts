@@ -8,6 +8,7 @@ import type {
   ListSyncRunsResult,
   SyncRunRecord,
 } from "../storage/sync-runs"
+import { createSyncAccountsRuntime, type SyncAccountsRuntime } from "./accounts"
 import type { SyncConnections } from "./connections"
 import { SyncValidationError } from "./errors"
 import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResults } from "./request"
@@ -25,6 +26,8 @@ export interface SyncsRuntime {
   /** Queue a run, or on a sync of an OAuth connector one run per connection the caller may run. */
   request(input: RequestSyncRunInput): Promise<SyncRunRequestResults>
   readonly runs: SyncRunsRuntime
+  /** Where each connected account stands, on a sync of an OAuth connector. */
+  readonly accounts: SyncAccountsRuntime
 }
 
 export function createSyncsRuntime(
@@ -47,16 +50,25 @@ export function createSyncsRuntime(
         ? visibleIds()
         : []
 
+  const getById = (syncId: string) => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
+    const sync = source.getById(syncId)
+    return sync && allowed(syncId) ? sync : null
+  }
+
   return {
     list: () =>
       authority.type === "denied" || authority.type === "delegated"
         ? []
         : source.list().filter((sync) => allowed(sync.id)),
-    getById: (syncId) => {
-      if (authority.type === "denied" || authority.type === "delegated") return null
-      const sync = source.getById(syncId)
-      return sync && allowed(syncId) ? sync : null
-    },
+    getById,
+    accounts: createSyncAccountsRuntime({
+      runtime,
+      execution,
+      syncs: () => source.list(),
+      runnable: getById,
+      ...(connections === undefined ? {} : { connections }),
+    }),
     request: async (input) => {
       assertAuthorized(runtime, { kind: "sync.run", syncId: input.syncId })
       const sync = source.getById(input.syncId)

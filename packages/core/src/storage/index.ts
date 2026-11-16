@@ -920,6 +920,7 @@ export type {
 export { InMemoryShareSessionStorage, ShareSessionStorageError } from "./share-sessions"
 export type {
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,

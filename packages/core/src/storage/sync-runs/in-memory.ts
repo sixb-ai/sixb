@@ -27,6 +27,7 @@ import { assertSyncRunExecution } from "./provider"
 import { canFinishSyncRun } from "./transitions"
 import type {
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
@@ -316,6 +317,25 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     return {
       runs: runs.map(cloneSyncRunRecord),
     }
+  }
+
+  async listLatestByConnection(
+    input: ListLatestSyncConnectionRunsInput
+  ): Promise<ListLatestSyncRunsResult> {
+    const syncIds = new Set(input.syncIds)
+    const connectionIds = input.connectionIds ? new Set(input.connectionIds) : null
+    const latest = new Map<string, SyncRunRecord>()
+    for (const record of this.rows.values()) {
+      const { connectionId } = record
+      if (record.projectId !== input.projectId || connectionId === undefined) continue
+      if (!syncIds.has(record.syncId) || (connectionIds && !connectionIds.has(connectionId))) {
+        continue
+      }
+      const key = JSON.stringify([record.syncId, connectionId])
+      const current = latest.get(key)
+      if (!current || compareStartedAt(record, current, "desc") < 0) latest.set(key, record)
+    }
+    return { runs: [...latest.values()].map(cloneSyncRunRecord) }
   }
 
   private requireRun(projectId: string, id: string): SyncRunRecord {

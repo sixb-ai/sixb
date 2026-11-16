@@ -11,6 +11,7 @@ import type {
   ConfirmRunExecutionInput,
   ExecutionStorage,
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListLostRunsInput,
@@ -324,6 +325,39 @@ export class PgSyncRunStorage implements SyncRunStorage {
     return {
       runs: rows.map(rowToSyncRunRecord),
     }
+  }
+
+  async listLatestByConnection(
+    input: ListLatestSyncConnectionRunsInput
+  ): Promise<ListLatestSyncRunsResult> {
+    if (input.syncIds.length === 0 || input.connectionIds?.length === 0) return { runs: [] }
+
+    const params: SqlParameter[] = [input.projectId]
+    const placeholders = (values: readonly string[]) =>
+      values
+        .map((value) => {
+          params.push(value)
+          return `$${params.length}`
+        })
+        .join(", ")
+    const syncFilter = `sync_id IN (${placeholders(input.syncIds)})`
+    const connectionFilter =
+      input.connectionIds === undefined
+        ? "connection_id IS NOT NULL"
+        : `connection_id IN (${placeholders(input.connectionIds)})`
+
+    const rows = await this.sql.unsafe<DatabaseRow[]>(
+      `
+        SELECT DISTINCT ON (sync_id, connection_id)
+          *, checkpoint IS NOT NULL AS checkpoint_present
+        FROM sync_runs
+        WHERE project_id = $1 AND ${syncFilter} AND ${connectionFilter}
+        ORDER BY sync_id, connection_id, COALESCE(started_at, queued_at) DESC, id DESC
+      `,
+      params
+    )
+
+    return { runs: rows.map(rowToSyncRunRecord) }
   }
 }
 

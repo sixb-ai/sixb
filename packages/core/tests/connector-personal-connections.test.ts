@@ -716,4 +716,44 @@ describe("sync runs people request", () => {
     expect(second.runs[0]?.runId).toBe(first.runs[0]?.runId)
     expect(second.runs[0]?.created).toBe(false)
   })
+
+  // Removal proof: drop the `mayRunConnection` filter from accounts.list; Ada sees Ben's account.
+  test("a connector's accounts list what each person may see, with their latest runs", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ada = as("user-a", members)
+    const {
+      runs: [queued],
+    } = await ada.request({ syncId: inbox.id })
+
+    expect(await ada.accounts.list(connectorId)).toMatchObject([
+      { connection: { id: connectionOf("user-a") }, latestRuns: [{ id: queued?.runId }] },
+    ])
+    const everyone = await as("user-a", managers).accounts.list(connectorId)
+    expect(everyone.map(({ connection }) => connection.id).sort()).toEqual(
+      [connectionOf("user-a"), connectionOf("user-b")].sort()
+    )
+    expect(everyone.find(({ connection }) => connection.id === connectionOf("user-b"))).toEqual({
+      connection: expect.objectContaining({ id: connectionOf("user-b") }),
+      latestRuns: [],
+    })
+  })
+
+  // Removal proof: return true from `seesConnection`; Ada reads Ben's sync status.
+  test("a person reads their own connection's sync status, not someone else's", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ben = as("user-b", members)
+    const {
+      runs: [queued],
+    } = await ben.request({ syncId: inbox.id })
+
+    expect(await ben.accounts.latestRuns(connectorId, connectionOf("user-b"))).toMatchObject([
+      { id: queued?.runId, syncId: inbox.id, status: "queued" },
+    ])
+    expect(
+      await as("user-a", members).accounts.latestRuns(connectorId, connectionOf("user-b"))
+    ).toEqual([])
+    expect(
+      await as("user-a", managers).accounts.latestRuns(connectorId, connectionOf("user-b"))
+    ).toHaveLength(1)
+  })
 })
