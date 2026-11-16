@@ -144,7 +144,7 @@ ssh sixb@203.0.113.10 'install -m 600 /dev/null ~/shop/code/.env'
 ssh -t sixb@203.0.113.10 'nano ~/shop/code/.env'
 ```
 
-For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
+For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
 
 ## Deploy
 
@@ -159,7 +159,7 @@ Only committed files are sent, with submodules at their recorded commits. Uncomm
 A deploy:
 
 1. Checks the server.
-2. Unpacks the commit into its own `releases/<id>` directory and copies the server's shared `.env` into it.
+2. Unpacks the commit into its own `releases/<id>` directory and links it to the server's `.env`.
 3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward so open tabs never `404`).
 4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving.
 5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.

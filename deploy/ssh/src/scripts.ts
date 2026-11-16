@@ -231,8 +231,9 @@ function renderCandidateTrap(): string {
 
 /**
  * Unpacks the upload into an immutable `releases/<id>` directory, migrating an in-place `code/`
- * directory on upgrade and copying the server's shared `.env` into the release without ever
- * letting a committed `.env` overwrite it.
+ * directory on upgrade. The release's `.env` links to the server's `shared/.env`, so an edit to
+ * that one file reaches the services on their next restart, and a committed `.env` never
+ * replaces it.
  */
 export function renderPrepareRelease(
   layout: DeploymentLayout,
@@ -260,7 +261,7 @@ export function renderPrepareRelease(
     '  ln -sfn "releases/legacy" "$current"',
     '  ln -sfn "current" "$code"',
     "fi",
-    // Pick up manual edits made to `~/app/code/.../.env` since the last deploy.
+    // A release deployed before `.env` became a link holds a copy: keep the edits made to it.
     'if [ -f "$project/.env" ] && { [ ! -f "$shared_env" ] || [ "$project/.env" -nt "$shared_env" ]; }; then',
     '  cp -pf "$project/.env" "$shared_env" && chmod 600 "$shared_env"',
     "fi",
@@ -270,9 +271,7 @@ export function renderPrepareRelease(
     `(cd "$incoming" && tar -c -f - --exclude=.env .) | (cd "$release_root" && tar -x -f -)`,
     'chmod 755 "$release_root"',
     'mkdir -p "$release_project"',
-    'if [ -f "$shared_env" ]; then',
-    '  cp -pf "$shared_env" "$release_project/.env" && chmod 600 "$release_project/.env"',
-    "fi",
+    'if [ -f "$shared_env" ]; then ln -sfn "$shared_env" "$release_project/.env"; fi',
     'rm -rf "$incoming"',
     // Uploads a deploy abandoned before it took the lock.
     'find "$(dirname "$incoming")" -mindepth 1 -maxdepth 1 -mmin +1440 -exec rm -rf {} + 2>/dev/null || true',
@@ -332,15 +331,19 @@ function runStep(command: DeployCommand): Step {
   }
 }
 
-/** Pulls `.env` with the token only this step reads, and updates `shared/.env` for later deploys. */
+/**
+ * Pulls `.env` with the token only this step reads. The pull replaces the release's link with a
+ * file, which becomes the server's `shared/.env` before the link comes back.
+ */
 function envStep(command: DeployCommand, layout: DeploymentLayout): Step {
   const step = runStep(command)
   return {
     ...step,
     body: [
       `${step.body} --token-file ${shellQuote(layout.envToken)}`,
-      'if [ -f "$RELEASE_PROJECT/.env" ]; then',
-      '  cp -pf "$RELEASE_PROJECT/.env" "$SHARED_ENV" && chmod 600 "$SHARED_ENV"',
+      'if [ -f "$RELEASE_PROJECT/.env" ] && [ ! -L "$RELEASE_PROJECT/.env" ]; then',
+      '  mv -f "$RELEASE_PROJECT/.env" "$SHARED_ENV" && chmod 600 "$SHARED_ENV"',
+      '  ln -sfn "$SHARED_ENV" "$RELEASE_PROJECT/.env"',
       "fi",
     ].join("\n"),
   }

@@ -262,6 +262,49 @@ describe("deploy script", () => {
       expect(uses).toHaveLength(1)
       expect(uses[0]).toEndWith(`'prod' --token-file '/home/sixb/northline/env-token'`)
     })
+
+    // Reproduce: copy the pulled file into `shared/.env` and leave it in the release; the release
+    // then holds its own copy again, and an edit to `shared/.env` never reaches it.
+    test("makes the pulled .env the server's shared one, linked from the release", async () => {
+      const step = stepBody("sixb env pull --env prod", { labels, script })
+      const root = await mkdtemp(join(tmpdir(), "sixb-env-pull-"))
+      try {
+        const releaseProject = join(root, "release")
+        const sharedEnv = join(root, "shared.env")
+        await mkdir(releaseProject)
+        await writeFile(sharedEnv, "API_KEY=old")
+        await symlink(sharedEnv, join(releaseProject, ".env"))
+
+        // Like `sixb env pull`, the stand-in writes a temporary file and renames it over `.env`.
+        const pull = join(root, "pull")
+        await writeFile(
+          pull,
+          [
+            "#!/bin/sh",
+            'printf "API_KEY=pulled" > "$RELEASE_PROJECT/.env.tmp"',
+            'mv "$RELEASE_PROJECT/.env.tmp" "$RELEASE_PROJECT/.env"',
+            "",
+          ].join("\n"),
+          { mode: 0o755 }
+        )
+
+        const child = Bun.spawn(["/bin/bash", "-euc", step], {
+          env: {
+            BUN: pull,
+            RELEASE_PROJECT: releaseProject,
+            SHARED_ENV: sharedEnv,
+            PATH: "/usr/bin:/bin",
+          },
+          stderr: "pipe",
+        })
+        expect(await child.exited).toBe(0)
+
+        expect(await readlink(join(releaseProject, ".env"))).toBe(sharedEnv)
+        expect(await readFile(sharedEnv, "utf8")).toBe("API_KEY=pulled")
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
   })
 
   test("runs no pull for a project that keeps its own .env", () => {
@@ -414,9 +457,9 @@ writeFileSync(".sixb/dist/app/${chunkName}", ${JSON.stringify(chunkName)})
   })
 })
 
-function stepBody(label: string): string {
-  const index = deployScript.labels.indexOf(label)
-  const body = deployScript.script
+function stepBody(label: string, rendered = deployScript): string {
+  const index = rendered.labels.indexOf(label)
+  const body = rendered.script
     .split(`${STEP_MARKER} ${index} start\n`)[1]
     ?.split(`\nprintf '%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} done`)[0]
   if (!body) throw new Error(`Missing ${label} step`)

@@ -31,7 +31,7 @@ Each deployment lives in its deploy user's home:
 ```
 ~/<name>/releases/<id> immutable release directories (code, node_modules, .sixb/dist)
 ~/<name>/current       symlink to the active release directory (`code` points here too)
-~/<name>/shared/.env   shared project .env, copied into each release at deploy time
+~/<name>/shared/.env   shared project .env, linked from each release
 ~/<name>/env-token     the token a deploy pulls .env with, if the project has a source
 ~/<name>/deploy        the lock, uploads, manifests, release record, and ctl
 ~/<name>/run           process state and logs

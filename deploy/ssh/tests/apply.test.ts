@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { deploymentLayout, releaseLayout } from "../src/layout"
@@ -67,9 +77,35 @@ describe("preparing a release directory", () => {
 
     expect((await lstat(layout.code)).isSymbolicLink()).toBe(true)
     expect(await tree(join(layout.releasesDir, "legacy"))).toContain("src/old.ts")
-    expect(await tree(r1.root)).toEqual([".env", "package.json", "src/new.ts"])
+    expect(await tree(r1.root)).toEqual(["package.json", "src/new.ts"])
     expect(await readFile(join(r1.root, ".env"), "utf8")).toBe("SECRET=server")
     expect(await readFile(layout.sharedEnv, "utf8")).toBe("SECRET=server")
+  })
+
+  // Reproduce: copy `shared/.env` into the release again; the release keeps the old secret, and
+  // `sixb deploy restart` after editing the file `sixb deploy check` names changes nothing.
+  test("links the release's .env to the server's shared one, so an edit reaches the next restart", async () => {
+    const home = await tempDir()
+    const layout = deploymentLayout({
+      home,
+      user: "sixb",
+      name: "northline",
+      projectPath: "apps/web",
+      bunVersion: "1.4.2",
+    })
+    await mkdir(layout.sharedDir, { recursive: true })
+    await writeFile(layout.sharedEnv, "API_KEY=leaked", { mode: 0o600 })
+
+    const r1 = releaseLayout(layout, "r1")
+    const incoming = join(layout.incomingDir, "upload-r1")
+    await writeTree(incoming, { "apps/web/package.json": "{}" })
+    await new LocalShell().run(renderPrepareRelease(layout, r1, incoming))
+
+    const releaseEnv = join(r1.project, ".env")
+    expect(await readlink(releaseEnv)).toBe(layout.sharedEnv)
+
+    await writeFile(layout.sharedEnv, "API_KEY=rotated")
+    expect(await readFile(releaseEnv, "utf8")).toBe("API_KEY=rotated")
   })
 
   test("prunes older releases while keeping current, previous, and any retiring release", async () => {

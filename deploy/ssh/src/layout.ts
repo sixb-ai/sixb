@@ -7,7 +7,7 @@ import { posix } from "node:path"
  *   ~/<name>/releases/<id>  immutable release directories (code, node_modules, .sixb/dist)
  *   ~/<name>/current        symlink to the active release directory
  *   ~/<name>/code           symlink to `current` (migrated in place from single-folder deploys)
- *   ~/<name>/shared/.env    shared project `.env`, copied into each release at deploy time
+ *   ~/<name>/shared/.env    shared project `.env`, linked from each release
  *   ~/<name>/env-token      the read-only token a deploy pulls `.env` with, if it has a source
  *   ~/<name>/deploy         lock, uploads, manifests, release record, ctl
  *   ~/<name>/run            supervisor state, control requests, and logs
