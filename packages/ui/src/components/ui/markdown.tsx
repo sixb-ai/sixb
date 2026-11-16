@@ -11,6 +11,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -186,10 +187,20 @@ function Markdown({
     () => (components ? { ...COMPONENTS, ...components } : COMPONENTS),
     [components]
   )
+
+  // Footnote ids are unique to each rendered document, so a `[1]` in one reply of a conversation
+  // scrolls to that reply's note rather than to the first `fn-1` on the page.
+  const id = useId()
+  const remarkRehypeOptions = useMemo(
+    () => ({ clobberPrefix: `user-content-${id.replace(/[^\w-]/g, "")}-` }),
+    [id]
+  )
+
   return (
     <div data-slot="markdown" className={cn("prose", className)} {...props}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
+        remarkRehypeOptions={remarkRehypeOptions}
         rehypePlugins={rehypePlugins}
         components={mergedComponents}
         {...(urlTransform ? { urlTransform } : {})}

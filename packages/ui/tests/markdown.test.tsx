@@ -105,6 +105,35 @@ describe("Markdown", () => {
     expect(html).not.toMatch(/href="#overview"[^>]*target="_blank"/)
   })
 
+  test("gives each rendered document its own footnote ids", () => {
+    // Reproduce by dropping `remarkRehypeOptions` from Markdown in markdown.tsx; both replies render
+    // `user-content-fn-1`, and the second reply's `[1]` scrolls to the first reply's note.
+    const reply = (note: string) => `Sourced[^1].\n\n[^1]: ${note}`
+    const html = renderToStaticMarkup(
+      <>
+        <Markdown>{reply("First reply's source.")}</Markdown>
+        <Markdown>{reply("Second reply's source.")}</Markdown>
+      </>
+    )
+
+    const replies = html.split('<div data-slot="markdown"').slice(1)
+    const footnotes = replies.map((reply) => {
+      const note = /<li id="([^"]+)">/.exec(reply)?.[1]
+      const ref = /<a href="#([^"]+)" id="([^"]+)" data-footnote-ref/.exec(reply)
+      const backref = /<a href="#([^"]+)" data-footnote-backref/.exec(reply)?.[1]
+      return { note, href: ref?.[1], ref: ref?.[2], backref }
+    })
+
+    expect(footnotes).toHaveLength(2)
+    for (const footnote of footnotes) {
+      expect(footnote.note).toEndWith("fn-1")
+      expect(footnote.href).toBe(footnote.note)
+      expect(footnote.backref).toBe(footnote.ref)
+    }
+    expect(footnotes[0]?.note).not.toBe(footnotes[1]?.note)
+    expect(footnotes[0]?.ref).not.toBe(footnotes[1]?.ref)
+  })
+
   test("wraps tables in a scroll container and keeps only short cells on a single line", () => {
     const table = [
       "| ID | Description | Amount |",

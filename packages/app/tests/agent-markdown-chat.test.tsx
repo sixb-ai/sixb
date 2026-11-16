@@ -63,7 +63,8 @@ describe("chat markdown rendering", () => {
     )
     expect(html).toContain('<a href="#summary">Summary</a>')
     expect(html).not.toMatch(/href="#summary"[^>]*target="_blank"/)
-    expect(html).not.toMatch(/href="#user-content-fn-1"[^>]*target="_blank"/)
+    expect(html).toMatch(/href="#user-content-[^"]*fn-1"/)
+    expect(html).not.toMatch(/href="#user-content-[^"]*fn-1"[^>]*target="_blank"/)
   })
 
   test("defines conversational .prose.prose-chat typography rules in agent.css", () => {
