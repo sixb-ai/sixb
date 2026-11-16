@@ -36,7 +36,8 @@ export const importInvoices = defineSync("import-invoices")
 ```
 
 One run of a sync runs at a time: a new run waits for the one in progress, and triggers that arrive
-meanwhile join it.
+meanwhile join it. A sync of an OAuth connector runs
+[once per connected account](#sync-connected-accounts), one run at a time for each.
 
 ## Choose a sync mode
 
@@ -55,29 +56,54 @@ To read only changes since the previous run, use a checkpoint. See [Incremental 
 
 ## Sync connected accounts
 
-For [OAuth connectors](../connectors/authentication.md), Sixb reads each connected account
-automatically. Use `connection.account.id` when rows need to identify their source account:
+A sync of an [OAuth connector](../connectors/authentication.md) runs once for each connected
+account. Each run reads one account, keeps its own checkpoint, and commits its own rows, so one
+account's failure never holds back another's. `connection` is the account the run reads:
 
 ```ts
-import { defineSync } from "@sixb/core"
+import { change, defineSync } from "@sixb/core"
 import { social } from "../connectors/social"
 import { videos } from "../datasets/videos"
 
-export const importVideos = defineSync("import-videos")
+export const importVideos = defineSync("import-videos", { mode: "merge" })
   .from(social)
   .read(async (client, { connection }) => {
     const rows = await client.listVideos()
-    return rows.map((video) => ({
-      id: video.id,
-      title: video.title,
-      accountId: connection.account.id,
-    }))
+    return rows.map((video) =>
+      change.upsert({ id: video.id, title: video.title, accountId: connection.account.id })
+    )
   })
   .intoDataset(videos)
 ```
 
-If record IDs can repeat across accounts, include the account ID in the dataset's primary key.
-Incremental checkpoints are saved separately for each connection and account.
+Use `"merge"` or `"append"`. A snapshot of one account would replace every other account's rows,
+so `defineSync` rejects `"snapshot"` for an OAuth connector. If record IDs can repeat across
+accounts, include the account ID in the dataset's primary key.
+
+A schedule starts a run for every connected account. A schedule on
+`events.connector(social).connected()` starts one for the account that just connected, so its first
+read doesn't wait for the next run:
+
+```ts
+const socialConnected = defineSchedule("social-connected").on(events.connector(social).connected())
+
+export const importVideos = defineSync("import-videos", { mode: "merge" })
+  .when(hourly) // every account
+  .when(socialConnected) // the account in the event
+  .from(social)
+  // ...
+```
+
+To run one account now, for example when a [webhook](../connectors/webhooks.md) says it changed,
+pass its connection:
+
+```ts
+await sixb.syncs.request({ syncId: importVideos.id, connectionId: connection.id })
+```
+
+Without `connectionId`, a request runs every account you may run: the project's and your own, or
+everyone's with `can.manage` on the connector. `request()` returns one entry in `runs` for each. A
+request for an account whose run hasn't started yet joins that run.
 
 [Personal connections](../connectors/authentication.md#let-people-connect-their-own-accounts) are
 read too. `connection.owner` is `{ type: "user", id }` for one and `{ type: "project" }`
@@ -86,15 +112,14 @@ otherwise. To show each person only their own rows, write the owner's id on each
 `can.view(Type).where((row) => row.p.owner.eq(currentUser()))`. Grant a workflow's group
 `can.view(Type)` without the condition when it needs to see everyone's.
 
-When a person's account needs reconnecting, a `merge` or `append` sync skips it: the run
-succeeds, the account keeps its checkpoint and rows, and the next run after it reconnects resumes
-from there. A `snapshot` sync fails instead, because leaving the account out would drop its rows.
-A project connection that needs reconnecting fails the run in every mode.
+When an account needs reconnecting, its run fails with `connector.authorization_required`. The
+account keeps its checkpoint and rows, and its first run after reconnecting resumes from there. A
+person's own account isn't reported to `onError`, since they're the one to reconnect it; a project
+connection is.
 
-A [suspended](../auth/members.md#when-someone-leaves) member's connections are never read. A
-`merge` or `append` sync keeps the rows it already read from them, still owned by that member; a
-`snapshot` sync no longer lists them, so its next run drops their rows. To delete or reassign kept
-rows, start a workflow from `events.users().suspended()`.
+A [suspended](../auth/members.md#when-someone-leaves) member's connections are never read. The
+sync keeps the rows it already read from them, still owned by that member. To delete or reassign
+those rows, start a workflow from `events.users().suspended()`.
 
 ## Import files
 

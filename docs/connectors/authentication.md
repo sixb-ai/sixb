@@ -152,9 +152,9 @@ is logged, and Sixb still never uses the connection; disconnect it to delete its
 
 ### Bring each person's data in
 
-[Syncs](../syncs/overview.md#sync-connected-accounts) read every connected account, personal
-ones included, and [webhooks](webhooks.md) receive their events. Everyone's rows land in the same
-dataset, so have the sync write each row's owner and slot. `connection.owner` is
+[Syncs](../syncs/overview.md#sync-connected-accounts) run once for each connected account,
+personal ones included, and [webhooks](webhooks.md) receive their events. Everyone's rows land in
+the same dataset, so have the sync write each row's owner and slot. `connection.owner` is
 `{ type: "user", id }` for a personal connection and `{ type: "project" }` otherwise; write its `id`
 and `connection.slot` on each row. Map the id to a
 [`ref.user()`](../ontology/properties.md#reference-a-user) property with
@@ -171,7 +171,8 @@ connector becomes usable or stops being usable:
 | `events.connector(gmail).connected()` | Someone connects an account, replaces the one in a slot, or reconnects | `"connected"`, `"replaced"`, `"reconnected"` |
 | `events.connector(gmail).disconnected()` | Sixb can no longer use the connection: it was disconnected, its grant revoked, or its owner suspended | `"disconnected"`, `"revoked"`, `"suspended"` |
 
-The event carries the `connection`: its `id`, `owner`, `slot` and `account`. This workflow runs a
+The event carries the `connection`: its `id`, `owner`, `slot` and `account`. A sync of the same
+connector that runs on a `connected` schedule runs for that connection alone. This workflow runs a
 person's first setup as soon as they connect:
 
 ```ts

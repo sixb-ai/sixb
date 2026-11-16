@@ -111,12 +111,14 @@ the run failed, and if the lake cannot say, the run stays open for the next deli
 
 A checkpoint is one cursor, and two runs reading from it read the same rows. So a queued sync run
 waits while another run of that sync is `running`, however that one is doing, and triggers that
-arrive meanwhile join it, through one job per run. The check holds in the transaction that claims the
+arrive meanwhile join it, through one job per run. A sync of an OAuth connector runs once per
+connection, with a checkpoint for each, so the rule holds per sync and connection: Ada's next run
+waits for Ada's current one, not for Grace's. The check holds in the transaction that claims the
 run (an advisory lock on PostgreSQL). Datasets stay multi-writer, which is why this is a rule about
 syncs and not about the dataset: guarding every sync from its start would fail it for any ingest that
 landed while it read.
 
-A run that ends wakes the oldest run waiting for it, with a job of its own. The waiting job comes back
+A run that ends wakes the oldest run of the same connection waiting for it, with a job of its own. The waiting job comes back
 once a minute in case that word gets lost, and the `runs` pass brings a job to a sibling whose lease
 lapsed. Only a sibling with an execution counts: an older version's run never promised this rule, so
 it holds nothing back, as on that version.

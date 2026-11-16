@@ -26,6 +26,21 @@ its attempts.
 One run of a sync runs at a time: a queued run waits for the one running, whose end wakes it, and
 triggers join it.
 
+## Connections
+
+A sync of an OAuth connector runs once per connection: dispatch queues a run for each, and each run
+names its `connectionId`. `resolveSyncRunSource` finds that one connection among those the run may
+read. Its checkpoint is the last succeeded run of the same sync and connection, bound to the account
+it read, so a replaced account starts over. A connection's first run of its own starts from its
+entry in the last run that read every connection, from before runs were per connection.
+
+| What happens | The run |
+| --- | --- |
+| The connection's grant can no longer give a token | Fails with `connector.authorization_required`. A person's own connection isn't reported to `onError` |
+| The connection is gone, or its owner suspended, since it was queued | Ends `cancelled` without reading |
+| It was queued before runs were per connection | Ends `cancelled` without reading; the next trigger runs each connection |
+| Any other failure | Fails that run alone |
+
 ## Recovery
 
 Nothing of a partial run exists until its commit: rows stay in a session no reader sees, and a crash
