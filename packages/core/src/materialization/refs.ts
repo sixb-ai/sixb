@@ -83,10 +83,22 @@ export function telemetryPointKey(series: TelemetrySeriesRef, at: string): strin
  * verbatim; all ontology identity structure is supplied by core in the canonical JSON tuple.
  */
 export function canonicalIdentitySortKey(parts: readonly string[]): string {
+  const json = JSON.stringify(parts)
   let result = ""
-  for (const byte of textEncoder.encode(JSON.stringify(parts))) {
-    result += byte.toString(16).padStart(2, "0")
+  // Most keys are ASCII, where a character is its own UTF-8 byte: no encoding pass.
+  for (let index = 0; index < json.length; index++) {
+    const code = json.charCodeAt(index)
+    if (code >= 0x80) return utf8Hex(json)
+    result += HEX_BYTES[code]
   }
+  return result
+}
+
+const HEX_BYTES = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"))
+
+function utf8Hex(text: string): string {
+  let result = ""
+  for (const byte of textEncoder.encode(text)) result += HEX_BYTES[byte]
   return result
 }
 
