@@ -1,7 +1,7 @@
 import { LANGUAGE_MODEL_TIERS, type ModelReasoningLevel } from "@sixb/core/models"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronDown, Search } from "lucide-react"
-import { Fragment, useEffect, useId, useMemo, useState } from "react"
+import { Fragment, memo, useEffect, useId, useMemo, useState } from "react"
 import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
@@ -53,7 +53,7 @@ export interface ComposerSettingsProps {
  * model with its provider's mark, then the permissions' icon unless the agent has full access. Its
  * menu holds the model, with the chosen model's thinking under it, and the permissions.
  */
-export function ComposerSettings(props: ComposerSettingsProps) {
+export const ComposerSettings = memo(function ComposerSettings(props: ComposerSettingsProps) {
   const {
     models = [],
     selectedModel,
@@ -137,7 +137,7 @@ export function ComposerSettings(props: ComposerSettingsProps) {
       ) : null}
     </ComposerMenu>
   )
-}
+})
 
 /** Tiers with a way back to Auto: the list opens on Auto, and choosing a model pins it. */
 function autoModels(models: readonly LanguageModel[], onResetModelSelection?: () => void) {

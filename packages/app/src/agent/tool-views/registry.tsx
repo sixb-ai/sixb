@@ -1,5 +1,5 @@
 import type { AgentToolDefinition, InferAgentToolInput, InferAgentToolOutput } from "@sixb/core"
-import { Component, createContext, type ReactNode, useContext, useMemo } from "react"
+import { Component, createContext, memo, type ReactNode, useContext, useMemo } from "react"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { type AgentToolView, type AgentToolViewProps, agentToolViews } from "./define"
 
@@ -34,8 +34,32 @@ export function useAgentToolView(toolName: string): AgentToolView | undefined {
  * The views of the turn's tools shown in the answer, in call order. Each call keeps its row in the
  * work; a view that fails shows nothing here.
  */
-export function AnswerToolViews({ parts }: { readonly parts: readonly NormalizedPart[] }) {
+function sameToolSequence(a: readonly NormalizedPart[], b: readonly NormalizedPart[]): boolean {
+  if (a === b) return true
+  let i = 0
+  let j = 0
+  while (true) {
+    while (i < a.length && a[i]?.kind !== "tool") i++
+    while (j < b.length && b[j]?.kind !== "tool") j++
+    if (i >= a.length && j >= b.length) return true
+    if (i >= a.length || j >= b.length) return false
+    if (!Object.is(a[i], b[j])) return false
+    i++
+    j++
+  }
+}
+
+interface AnswerToolViewsProps {
+  readonly parts: readonly NormalizedPart[]
+}
+
+function sameAnswerTools(prev: AnswerToolViewsProps, next: AnswerToolViewsProps): boolean {
+  return sameToolSequence(prev.parts, next.parts)
+}
+
+function AnswerToolViewsList({ parts }: AnswerToolViewsProps) {
   const views = useContext(AgentToolViewsContext)
+  if (views.size === 0) return null
 
   return parts.map((part, index) => {
     if (part.kind !== "tool") return null
@@ -45,6 +69,8 @@ export function AnswerToolViews({ parts }: { readonly parts: readonly Normalized
     return <ProjectToolView key={`answer-${index}`} view={view} tool={part.tool} fallback={null} />
   })
 }
+
+export const AnswerToolViews = memo(AnswerToolViewsList, sameAnswerTools)
 
 /** A call shown through the project's view, or through `fallback` when the view throws. */
 export function ProjectToolView({

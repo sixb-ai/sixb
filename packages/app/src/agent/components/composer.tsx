@@ -34,6 +34,7 @@ import {
 import {
   type ClipboardEvent,
   type KeyboardEvent,
+  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -200,6 +201,7 @@ type ComposerAttachment =
     }
 
 const MAX_HEIGHT_PX = 200
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
 // The microphone and Cancel: round, quiet until hovered.
 const ICON_BUTTON_CLASS_NAME = cn(
@@ -221,7 +223,7 @@ export function composerCanFocus({
   return !disabled && !pending
 }
 
-export function Composer({
+export const Composer = memo(function Composer({
   onSend,
   disabled,
   pending,
@@ -250,13 +252,13 @@ export function Composer({
   draftNonce,
   insertion,
   onInserted,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   approvalMode,
   onApprovalModeChange,
   awaitingApproval = false,
   dictation,
-  commands = [],
+  commands: customCommands = [],
   contextMeter,
   newThreadPlace,
   newThreadControls,
@@ -337,10 +339,42 @@ export function Composer({
   const canAttachFiles = !disabled && !pending
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
   const commandText = commandQuery(value)
+  const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
+  const changeApprovalMode = useCallback(
+    (mode: AgentApprovalMode) => {
+      onApprovalModeChange?.(mode)
+      setModeAnnouncement(
+        agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
+      )
+    },
+    [onApprovalModeChange, agentMessages.approvalModes]
+  )
+  const availableCommands = useMemo(
+    (): readonly ComposerCommand[] => [
+      ...builtInCommands({
+        models,
+        onSelectModel: choosesModel ? onSelectModel : undefined,
+        onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
+        onApprovalModeChange: showPermissions ? changeApprovalMode : undefined,
+        messages: agentMessages.commands,
+      }),
+      ...customCommands,
+    ],
+    [
+      models,
+      choosesModel,
+      onSelectModel,
+      onResetModelSelection,
+      showPermissions,
+      changeApprovalMode,
+      agentMessages.commands,
+      customCommands,
+    ]
+  )
   const commandMatches =
     commandText === null || dismissedCommand === value || voice.isActive
       ? []
-      : matchCommands(allCommands(), commandText).slice(0, 6)
+      : matchCommands(availableCommands, commandText).slice(0, 6)
   const commandsOpen = commandMatches.length > 0
   // Files alone are a message too.
   // A message sent while a turn runs steers it, so the input stays usable: the reader corrects the
@@ -730,28 +764,6 @@ export function Composer({
     })
   }
 
-  const changeApprovalMode = (mode: AgentApprovalMode) => {
-    onApprovalModeChange?.(mode)
-    setModeAnnouncement(
-      agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
-    )
-  }
-
-  function allCommands(): readonly ComposerCommand[] {
-    const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
-    return [
-      ...builtInCommands({
-        models,
-        onSelectModel: choosesModel ? onSelectModel : undefined,
-        onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
-        // Called on Enter, long after the render that lists it.
-        onApprovalModeChange: showPermissions ? (mode) => changeApprovalMode(mode) : undefined,
-        messages: agentMessages.commands,
-      }),
-      ...commands,
-    ]
-  }
-
   const runCommand = (command: ComposerCommand) => {
     command.run()
     setValue("")
@@ -1008,7 +1020,7 @@ export function Composer({
                   onAddFiles={canAttachFiles ? () => fileInputRef.current?.click() : undefined}
                   onMention={() => insertAtCaret("@")}
                   onCommand={
-                    value.length === 0 && allCommands().length > 0
+                    value.length === 0 && availableCommands.length > 0
                       ? () => insertAtCaret("/")
                       : undefined
                   }
@@ -1172,7 +1184,7 @@ export function Composer({
       </div>
     </div>
   )
-}
+})
 
 function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
   const messages = useAgentMessages().composer

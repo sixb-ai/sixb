@@ -213,7 +213,7 @@ const CALLOUT_ICONS: Record<CalloutKind, typeof Info> = {
   caution: OctagonAlert,
 }
 
-function Callout({
+export function Callout({
   kind,
   label,
   children,
@@ -240,6 +240,6 @@ function headingText(version: ArtifactVersion, slug: string): string {
   return headings.find((heading) => heading.slug === slug)?.text ?? slug
 }
 
-function isCalloutKind(value: unknown): value is CalloutKind {
+export function isCalloutKind(value: unknown): value is CalloutKind {
   return typeof value === "string" && (CALLOUT_KINDS as readonly string[]).includes(value)
 }

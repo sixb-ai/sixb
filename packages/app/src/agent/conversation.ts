@@ -261,7 +261,7 @@ interface SavedEntry {
   readonly message: AgentConversationMessage
 }
 
-const savedEntries = new WeakMap<AgentMessage, SavedEntry>()
+const savedEntries = new WeakMap<AgentMessage, readonly SavedEntry[]>()
 
 function savedMessage(
   message: AgentMessage,
@@ -270,15 +270,11 @@ function savedMessage(
   input: ConversationMessagesInput
 ): AgentConversationMessage {
   const observed = Boolean(input.observed)
-  const cached = savedEntries.get(message)
-  if (
-    cached &&
-    cached.key === key &&
-    cached.observed === observed &&
-    sameAuthor(cached.author, author)
-  ) {
-    return cached.message
-  }
+  const existing = savedEntries.get(message)
+  const hit = existing?.find(
+    (entry) => entry.key === key && entry.observed === observed && sameAuthor(entry.author, author)
+  )
+  if (hit) return hit.message
 
   const fileSource = (fileRef: AgentFileRef, path: string) =>
     messageFileSource({
@@ -306,7 +302,8 @@ function savedMessage(
     ...(message.compaction ? { compaction: message.compaction } : {}),
   }
 
-  savedEntries.set(message, { key, author, observed, message: converted })
+  const nextEntry: SavedEntry = { key, author, observed, message: converted }
+  savedEntries.set(message, existing ? [nextEntry, ...existing.slice(0, 1)] : [nextEntry])
   return converted
 }
 
@@ -532,6 +529,12 @@ function readMessage(
   }
 }
 
+const liveNonTextParts = new WeakMap<
+  NormalizedPart,
+  { readonly key: string | undefined; readonly part: AgentConversationPart }
+>()
+const liveSettledTextParts = new WeakMap<NormalizedPart, AgentConversationPart>()
+
 /**
  * The live parts from `from` to `to`. Text streams in spans the built-in chat joins, so they join
  * here too; the model is still writing the text the `last` ones end on.
@@ -551,31 +554,69 @@ function liveParts(
         if (previous?.type === "text") {
           result[result.length - 1] = { ...previous, text: previous.text + part.text }
         } else {
-          result.push({ type: "text", text: part.text, streaming: false })
+          const cached = liveSettledTextParts.get(part)
+          if (cached) {
+            result.push(cached)
+          } else {
+            const created: AgentConversationPart = {
+              type: "text",
+              text: part.text,
+              streaming: false,
+            }
+            liveSettledTextParts.set(part, created)
+            result.push(created)
+          }
         }
         return
       }
 
-      case "reasoning":
-        result.push({ type: "reasoning", text: part.text, streaming: part.streaming })
+      case "reasoning": {
+        const cached = liveNonTextParts.get(part)
+        if (cached) {
+          result.push(cached.part)
+          return
+        }
+        const created: AgentConversationPart = {
+          type: "reasoning",
+          text: part.text,
+          streaming: part.streaming,
+        }
+        liveNonTextParts.set(part, { key: undefined, part: created })
+        result.push(created)
         return
+      }
 
       case "tool": {
         const key = live.partKeys[from + offset]
+        const cached = liveNonTextParts.get(part)
+        if (cached && cached.key === key) {
+          result.push(cached.part)
+          return
+        }
         const toolCallId = key?.startsWith("tool#") ? key.slice("tool#".length) : undefined
-        result.push({
+        const created: AgentConversationPart = {
           type: "tool",
           toolName: part.tool.toolName,
           ...(toolCallId === undefined ? {} : { toolCallId }),
           ...toolViewProps(part.tool),
           ...(part.tool.files ? { files: part.tool.files.map(fileOf) } : {}),
-        })
+        }
+        liveNonTextParts.set(part, { key, part: created })
+        result.push(created)
         return
       }
 
-      case "file":
-        result.push({ type: "file", ...fileOf(part) })
+      case "file": {
+        const cached = liveNonTextParts.get(part)
+        if (cached) {
+          result.push(cached.part)
+          return
+        }
+        const created: AgentConversationPart = { type: "file", ...fileOf(part) }
+        liveNonTextParts.set(part, { key: undefined, part: created })
+        result.push(created)
         return
+      }
 
       case "step-start":
         return
@@ -603,31 +644,49 @@ function fileOf(file: NormalizedFile): AgentConversationFile {
  * The parts as the built-in chat draws them. Two text parts in a row were two steps, which the
  * chat keeps apart with the step boundary between them.
  */
+const normalizedPartEntries = new WeakMap<AgentConversationPart, NormalizedPart>()
+const normalizedToolEntries = new WeakMap<AgentConversationToolPart, NormalizedTool>()
+const STEP_START_PART: NormalizedPart = { kind: "step-start" }
+
 export function normalizedParts(parts: readonly AgentConversationPart[]): NormalizedPart[] {
   const result: NormalizedPart[] = []
 
   for (const part of parts) {
+    if (part.type === "text" && result.at(-1)?.kind === "text") {
+      result.push(STEP_START_PART)
+    }
+
+    const cached = normalizedPartEntries.get(part)
+    if (cached) {
+      result.push(cached)
+      continue
+    }
+
+    let created: NormalizedPart
     switch (part.type) {
       case "text":
-        if (result.at(-1)?.kind === "text") result.push({ kind: "step-start" })
-        result.push({ kind: "text", text: part.text })
+        created = { kind: "text", text: part.text }
         break
 
       case "reasoning":
-        result.push({ kind: "reasoning", text: part.text, streaming: part.streaming })
+        created = { kind: "reasoning", text: part.text, streaming: part.streaming }
         break
 
       case "tool":
-        result.push({ kind: "tool", tool: normalizedTool(part) })
+        created = { kind: "tool", tool: normalizedTool(part) }
         break
 
       case "file":
-        result.push({ kind: "file", ...fileOf(part) })
+        created = { kind: "file", ...fileOf(part) }
         break
 
       default:
         part satisfies never
+        continue
     }
+
+    normalizedPartEntries.set(part, created)
+    result.push(created)
   }
 
   return result
@@ -635,7 +694,10 @@ export function normalizedParts(parts: readonly AgentConversationPart[]): Normal
 
 /** A tool part as the built-in tool views read it. */
 export function normalizedTool(part: AgentConversationToolPart): NormalizedTool {
+  const cached = normalizedToolEntries.get(part)
+  if (cached) return cached
   const { type: _type, toolCallId: _toolCallId, ...tool } = part
+  normalizedToolEntries.set(part, tool)
   return tool
 }
 

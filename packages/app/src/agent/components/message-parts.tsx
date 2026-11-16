@@ -214,16 +214,23 @@ const FileBlock = memo(function FileBlock({
  * the newest step, keeping the main transcript informative without exposing debug detail. Inside,
  * items flow in one indented column and can expand inline when deeper inspection is useful.
  */
-function WorkGroup({
-  parts,
-  inProgress,
-  nested = false,
-}: {
-  parts: readonly NormalizedPart[]
-  inProgress: boolean
-  /** In a sub-agent's thread: closed like the chat's own work line, and without a scroll once open. */
-  nested?: boolean
-}) {
+interface WorkGroupProps {
+  readonly parts: readonly NormalizedPart[]
+  readonly inProgress: boolean
+  /** In a sub-agent's thread: closed like the chat's work line, without an inner scroll. */
+  readonly nested?: boolean
+}
+
+function sameElements<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) return false
+  }
+  return true
+}
+
+function WorkGroupView({ parts, inProgress, nested = false }: WorkGroupProps) {
   const messages = useAgentMessages()
   const [open, setOpen] = useState(false)
   const sources = collectWebSources(parts)
@@ -304,6 +311,16 @@ function WorkGroup({
   )
 }
 
+function sameWorkGroup(prev: WorkGroupProps, next: WorkGroupProps): boolean {
+  return (
+    prev.inProgress === next.inProgress &&
+    (prev.nested ?? false) === (next.nested ?? false) &&
+    sameElements(prev.parts, next.parts)
+  )
+}
+
+const WorkGroup = memo(WorkGroupView, sameWorkGroup)
+
 /** Reasoning inside a work group: plain, quiet text that flows with the rest of the chain. */
 function GroupReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   if (!text.trim()) return null
@@ -321,14 +338,13 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
  * inspector. All keep their bodies borderless and inline so an expanded result flows within the
  * group rather than reading as a nested dropdown.
  */
-function ToolCallRow({
-  tool,
-  parts,
-}: {
-  tool: NormalizedTool
+interface ToolCallRowProps {
+  readonly tool: NormalizedTool
   /** The rest of its work, which names the children a wait is for. */
-  parts: readonly NormalizedPart[]
-}) {
+  readonly parts: readonly NormalizedPart[]
+}
+
+function ToolCallRowView({ tool, parts }: ToolCallRowProps) {
   const view = useAgentToolView(tool.toolName)
   const row =
     view?.placement === "work" ? (
@@ -349,6 +365,12 @@ function ToolCallRow({
     </div>
   )
 }
+
+function sameToolCallRow(prev: ToolCallRowProps, next: ToolCallRowProps): boolean {
+  return Object.is(prev.tool, next.tool) && sameElements(prev.parts, next.parts)
+}
+
+const ToolCallRow = memo(ToolCallRowView, sameToolCallRow)
 
 /**
  * Under a call whose output was too large for the model's context, the whole output it saved: it

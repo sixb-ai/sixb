@@ -135,7 +135,7 @@ function DebugStepCard({
           ) : (
             <div className="space-y-1.5">
               <DebugLabel icon={<MessageSquareText />} label="Agent message" />
-              <Markdown className="prose-chat text-sm">{text}</Markdown>
+              <Markdown className="prose-chat text-sm!">{text}</Markdown>
             </div>
           )
         ) : null}
@@ -185,7 +185,7 @@ function FinalAnswerDisclosure({ text }: { text: string }) {
         </p>
       )}
       <CollapsibleContent>
-        <Markdown className="prose-chat mt-2 text-sm">{text}</Markdown>
+        <Markdown className="prose-chat mt-2 text-sm!">{text}</Markdown>
       </CollapsibleContent>
     </Collapsible>
   )
