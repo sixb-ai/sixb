@@ -147,7 +147,6 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       (run) =>
         run.projectId === input.projectId &&
         run.syncId === existing.syncId &&
-        run.connectionId === existing.connectionId &&
         run.id !== existing.id &&
         run.status === "running"
     )

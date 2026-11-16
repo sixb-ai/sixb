@@ -144,9 +144,10 @@ export interface ListLatestSyncRunsResult {
 export interface SyncRunStorage {
   queue(input: QueueSyncRunInput): Promise<SyncRunRecord>
   /**
-   * Takes the run for one execution, or says why this delivery cannot. One run of a Sync, and of
-   * one of its connections, runs at a time: a checkpoint is one cursor, and two runs reading from
-   * it would read the same rows.
+   * Takes the run for one execution, or says why this delivery cannot. One run of a Sync runs at a
+   * time, whichever connection it reads: a checkpoint is one cursor, and two runs reading from it
+   * would read the same rows. Runs of different connections also commit to one dataset, and a
+   * merge run's commit fails if anything committed since its read began.
    */
   startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>>
   /** Projects a renewed queue lease onto the run. */

@@ -37,7 +37,7 @@ export const importInvoices = defineSync("import-invoices")
 
 One run of a sync runs at a time: a new run waits for the one in progress, and triggers that arrive
 meanwhile join it. A sync of an OAuth connector runs
-[once per connected account](#sync-connected-accounts), one run at a time for each.
+[once per connected account](#sync-connected-accounts), still one run of the sync at a time.
 
 ## Choose a sync mode
 

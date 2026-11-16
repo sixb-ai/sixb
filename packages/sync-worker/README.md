@@ -29,7 +29,7 @@ triggers join it.
 ## Connections
 
 A sync of an OAuth connector runs once per connection: dispatch queues a run for each, and each run
-names its `connectionId`. `resolveSyncRunSource` finds that one connection among those the run may
+names its `connectionId`. They still run one at a time, since they commit to one dataset. `resolveSyncRunSource` finds that one connection among those the run may
 read. Its checkpoint is the last succeeded run of the same sync and connection, bound to the account
 it read, so a replaced account starts over. A connection's first run of its own starts from its
 entry in the last run that read every connection, from before runs were per connection.

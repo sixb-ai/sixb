@@ -174,25 +174,13 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
 
   async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>> {
     return this.db.transaction((): RunClaim<SyncRunRecord> => {
-      const { syncId, connectionId } = requireSqliteRun(
-        this.db,
-        SYNC_RUNS,
-        input.projectId,
-        input.id
-      )
+      const { syncId } = requireSqliteRun(this.db, SYNC_RUNS, input.projectId, input.id)
 
       const sibling = this.db
         .query(
-          `SELECT * FROM sync_runs
-           WHERE project_id = ? AND sync_id = ? AND connection_id IS ? AND status = ? AND id <> ?`
+          "SELECT * FROM sync_runs WHERE project_id = ? AND sync_id = ? AND status = ? AND id <> ?"
         )
-        .get(
-          input.projectId,
-          syncId,
-          connectionId ?? null,
-          "running",
-          input.id
-        ) as DatabaseRow | null
+        .get(input.projectId, syncId, "running", input.id) as DatabaseRow | null
 
       return claimSqliteRun(
         this.db,

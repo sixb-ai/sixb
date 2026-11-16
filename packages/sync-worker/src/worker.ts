@@ -125,13 +125,12 @@ export class SyncWorker extends RunWorker<
     })
   }
 
-  /** A run of a Sync and connection that waited for this one need not wait for its next look. */
+  /** A run of a Sync that waited for this one need not wait for its next look. */
   private async wakeNextRun(finished: SyncRunRecord): Promise<void> {
     try {
       const { runs } = await requireSyncRuns(this.host).list({
         projectId: this.host.id,
         syncId: finished.syncId,
-        connectionId: finished.connectionId ?? null,
         statuses: ["queued"],
         order: "asc",
         limit: 1,
