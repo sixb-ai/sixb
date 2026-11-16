@@ -61,7 +61,7 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 | --- | --- | --- |
 | `host` | | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
 | `user` | `"sixb"` | The account the services run as. Never `root`. See [Several projects on one server](server-access.md#several-projects-on-one-server). |
-| `ports` | app 3001, API 3002 | The primary local ports each domain is forwarded to. Give each project on a server its own. |
+| `ports` | app 3001, API 3002 | The primary local ports each domain is forwarded to. A project also uses its `standbyPorts`, so give the next project on a server ports 20 higher. |
 | `standbyPorts` | `ports` + 10 (app 3011, API 3012) | Second local port pair used to boot and verify a new release before Caddy switches traffic. |
 
 ### Services
