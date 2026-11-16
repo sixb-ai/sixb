@@ -143,3 +143,26 @@ Everything else works the same way, with these differences:
 `sixb deploy setup` creates a service principal that can read the prod vault and nothing else, and installs its credential on the server. Run it signed in to the vault's subscription (`az account set --subscription <id>`), as someone who can create app registrations and grant access to the vault: an Owner or Role Based Access Control Administrator on a vault using Azure RBAC, or someone who can change its access policies.
 
 The credential expires after a year. When a deploy stops with `AADSTS7000222`, delete `~/<name>/env-token` on the server and run setup again, then delete the old app registration, named `sixb-<name>-<date>`, in the Azure portal.
+
+### Read with the server's managed identity
+
+On an Azure VM, the server can read the vault with the VM's [managed identity](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview) instead. Nothing is created, and nothing expires:
+
+```ts
+source: azureKeyVault({
+  vaults: { dev: "client-a-dev", prod: "client-a-prod" },
+  server: { identity: "managed" },
+}),
+```
+
+`sixb deploy setup` then needs no Azure rights at all. The VM needs an identity, and someone who can grant access to the prod vault lets it read secrets there, once. The first deploy prints the exact command, with the identity's object ID:
+
+```bash
+az role assignment create --role "Key Vault Secrets User" --assignee-object-id <object ID> --assignee-principal-type ServicePrincipal --scope "$(az keyvault show --name client-a-prod --query id --output tsv)"
+```
+
+On a vault using access policies, it's `az keyvault set-policy` with `get` and `list` on secrets instead. A new role assignment takes a minute or two to apply. If the VM has no identity, the deploy prints the `az vm identity assign` command that turns one on.
+
+To read with a user-assigned identity, add its client ID: `server: { identity: "managed", clientId: "<client ID>" }`.
+
+To move a server that reads with a service principal, let its identity read the vault, then add `server` and deploy: from then on it reads with the identity. Delete `~/<name>/env-token` on the server and run setup again, then delete the old app registration.

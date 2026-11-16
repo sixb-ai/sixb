@@ -4,6 +4,13 @@ import { type EnvName, type EnvSource, EnvSourceUnreachableError } from "@sixb/c
 const API_VERSION = "7.5"
 const VAULT_RESOURCE = "https://vault.azure.net"
 const LOGIN_ORIGIN = "https://login.microsoftonline.com"
+const METADATA_ORIGIN = "http://169.254.169.254"
+const METADATA_API_VERSION = "2018-02-01"
+const METADATA_COMPUTE_API_VERSION = "2021-02-01"
+/** The service is on the VM itself and answers at once. Elsewhere the address goes nowhere. */
+const METADATA_TIMEOUT_MS = 5_000
+/** Key Vault's code for a caller a vault's access policies leave out. */
+const ACCESS_POLICY_DENIED = "AccessDenied"
 const READER_ROLE = "Key Vault Secrets User"
 const REQUEST_TIMEOUT_MS = 15_000
 const CLI_TIMEOUT_MS = 60_000
@@ -22,18 +29,33 @@ export interface AzureKeyVaultOptions {
   readonly vaults: Readonly<Record<EnvName, string>>
   /** The Microsoft Entra tenant the vaults belong to, when it isn't `az`'s default. */
   readonly tenant?: string
+  /**
+   * How a server reads its vault. By default with a service principal `sixb deploy setup` creates.
+   * `{ identity: "managed" }` reads with the Azure VM's managed identity instead; add `clientId`
+   * for a user-assigned one.
+   */
+  readonly server?: AzureKeyVaultServer
 }
 
-/** What a server keeps to read its vault: a service principal that can read it and nothing else. */
-interface ServerCredential {
+export interface AzureKeyVaultServer {
+  readonly identity: "managed"
+  /** A user-assigned identity's client ID. Without it, the VM's system-assigned identity. */
+  readonly clientId?: string
+}
+
+/** A service principal that can read one vault and nothing else. */
+interface ServicePrincipal {
   readonly tenant: string
   readonly clientId: string
   readonly clientSecret: string
 }
 
+/** What a server keeps to read its vault: a service principal's secret, or which identity to use. */
+type ServerCredential = ServicePrincipal | AzureKeyVaultServer
+
 /** Keeps a project's values in Azure Key Vault. Nothing reaches the network until a command needs it. */
 export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
-  const { vaults, tenant } = options
+  const { vaults, tenant, server } = options
   if (
     typeof vaults?.dev !== "string" ||
     typeof vaults.prod !== "string" ||
@@ -46,6 +68,11 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
   }
   if (tenant !== undefined && (typeof tenant !== "string" || tenant.trim() === "")) {
     throw new Error("[AzureKeyVault] Set `tenant` to a tenant ID or domain, or leave it out.")
+  }
+  if (server !== undefined && !isManagedIdentity(server)) {
+    throw new Error(
+      '[AzureKeyVault] Set `server` to { identity: "managed" }, with a `clientId` for a user-assigned identity, or leave it out.'
+    )
   }
   const tenantArgs = tenant === undefined ? [] : ["--tenant", tenant]
 
@@ -91,10 +118,13 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
     return token
   }
 
-  async function accessToken(serverToken: string | undefined): Promise<string> {
-    return serverToken === undefined
-      ? signedInToken()
-      : clientToken(parseServerCredential(serverToken))
+  /**
+   * A project that sets `server` reads that way whatever its token file holds, so moving to a
+   * managed identity is a commit. A token naming one still reads that way after a rollback to a
+   * commit from before the move.
+   */
+  function serverCredential(token: string): ServerCredential {
+    return server ?? parseServerCredential(token)
   }
 
   async function call(
@@ -231,28 +261,44 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
     return names
   }
 
+  async function readAll(env: EnvName, token: string): Promise<Record<string, string>> {
+    const origin = vaultOrigin(vaults[env])
+    const names = await secretNames(env, token)
+
+    const values = await mapInParallel(names, async (name) => {
+      const url = `${origin}/secrets/${encodeURIComponent(name)}?api-version=${API_VERSION}`
+      const secret = (await call(env, token, url)) as { readonly value?: unknown }
+      if (typeof secret.value !== "string") {
+        throw new Error(
+          `[AzureKeyVault] ${variableName(name)} in the vault ${vaults[env]} has no value.`
+        )
+      }
+      return [variableName(name), secret.value] as const
+    })
+    return Object.fromEntries(values)
+  }
+
   return {
     async names(env) {
-      const names = await secretNames(env, await accessToken(undefined))
+      const names = await secretNames(env, await signedInToken())
       return names.map(variableName)
     },
 
     async read(env, readOptions) {
-      const token = await accessToken(readOptions?.token)
-      const origin = vaultOrigin(vaults[env])
-      const names = await secretNames(env, token)
+      const credential =
+        readOptions?.token === undefined ? undefined : serverCredential(readOptions.token)
 
-      const values = await mapInParallel(names, async (name) => {
-        const url = `${origin}/secrets/${encodeURIComponent(name)}?api-version=${API_VERSION}`
-        const secret = (await call(env, token, url)) as { readonly value?: unknown }
-        if (typeof secret.value !== "string") {
-          throw new Error(
-            `[AzureKeyVault] ${variableName(name)} in the vault ${vaults[env]} has no value.`
-          )
+      if (credential !== undefined && isManagedIdentity(credential)) {
+        const token = await managedIdentityToken(credential)
+        try {
+          return await readAll(env, token)
+        } catch (error) {
+          throw withGrant(error, vaults[env], token)
         }
-        return [variableName(name), secret.value] as const
-      })
-      return Object.fromEntries(values)
+      }
+
+      const token = credential === undefined ? await signedInToken() : await clientToken(credential)
+      return readAll(env, token)
     },
 
     async write(env, values) {
@@ -277,13 +323,21 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
         seen.set(name.toLowerCase(), name)
       }
 
-      const token = await accessToken(undefined)
+      const token = await signedInToken()
       // Key Vault sets one secret per request. A failure part way leaves the others written,
       // and writing them again is harmless.
       await mapInParallel(names, (name) => setSecret(env, token, name, values[name] ?? ""))
     },
 
     async createServerToken(env, label) {
+      // Nothing to create: the server already has its identity, and an admin grants it the vault.
+      if (server) {
+        return JSON.stringify({
+          identity: "managed",
+          ...(server.clientId === undefined ? {} : { clientId: server.clientId }),
+        } satisfies AzureKeyVaultServer)
+      }
+
       const vault = vaults[env]
       const shown = await azJson<{ readonly id?: unknown; readonly rbac?: unknown }>(
         [
@@ -336,7 +390,7 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
         tenant: created.tenant,
         clientId: created.clientId,
         clientSecret: created.clientSecret,
-      } satisfies ServerCredential)
+      } satisfies ServicePrincipal)
     },
   }
 }
@@ -415,14 +469,31 @@ async function mapInParallel<T, R>(
   return results
 }
 
+function isManagedIdentity(value: unknown): value is AzureKeyVaultServer {
+  if (typeof value !== "object" || value === null) return false
+  const { identity, clientId } = value as {
+    readonly identity?: unknown
+    readonly clientId?: unknown
+  }
+  return (
+    identity === "managed" &&
+    (clientId === undefined || (typeof clientId === "string" && clientId.trim() !== ""))
+  )
+}
+
 function parseServerCredential(token: string): ServerCredential {
-  let parsed: Partial<Record<keyof ServerCredential, unknown>> | null = null
+  let parsed: unknown = null
   try {
     parsed = JSON.parse(token)
   } catch {
     // Reported below, without the token.
   }
-  const { tenant, clientId, clientSecret } = parsed ?? {}
+  if (isManagedIdentity(parsed)) {
+    return { identity: "managed", ...(parsed.clientId ? { clientId: parsed.clientId } : {}) }
+  }
+  const { tenant, clientId, clientSecret } = (parsed ?? {}) as Partial<
+    Record<keyof ServicePrincipal, unknown>
+  >
   if (
     typeof tenant !== "string" ||
     typeof clientId !== "string" ||
@@ -435,8 +506,148 @@ function parseServerCredential(token: string): ServerCredential {
   return { tenant, clientId, clientSecret }
 }
 
+/**
+ * Asks the VM's instance metadata service for a token of its managed identity. Only a process on
+ * the VM can reach the service, and it answers only for an identity assigned to the VM.
+ */
+async function managedIdentityToken(identity: AzureKeyVaultServer): Promise<string> {
+  const { clientId } = identity
+  const which =
+    clientId === undefined ? "The VM's managed identity" : `The managed identity ${clientId}`
+  const query = new URLSearchParams({
+    "api-version": METADATA_API_VERSION,
+    resource: VAULT_RESOURCE,
+    ...(clientId === undefined ? {} : { client_id: clientId }),
+  })
+
+  let response: Response
+  try {
+    response = await fetch(`${METADATA_ORIGIN}/metadata/identity/oauth2/token?${query}`, {
+      headers: { metadata: "true" },
+      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+    })
+  } catch (error) {
+    // Not an outage: Azure answers this on every VM, so the server isn't one.
+    throw new Error(
+      "[AzureKeyVault] There's no Azure instance metadata service here, so no managed identity to read the vault with. Managed identities work on Azure VMs.",
+      { cause: error }
+    )
+  }
+
+  const body = (await response.json().catch(() => null)) as {
+    readonly access_token?: unknown
+    readonly error_description?: unknown
+  } | null
+  if (response.ok && typeof body?.access_token === "string" && body.access_token) {
+    return body.access_token
+  }
+  if (response.ok) {
+    throw new EnvSourceUnreachableError(
+      "[AzureKeyVault] Could not read the instance metadata service's answer."
+    )
+  }
+
+  const description =
+    typeof body?.error_description === "string" ? body.error_description.split(/\r?\n/)[0] : ""
+  // Azure's advice for these is to retry: the service is updating, or busy.
+  if (response.status === 410 || response.status === 429 || response.status >= 500) {
+    throw new EnvSourceUnreachableError(
+      `[AzureKeyVault] ${which}: ${description || response.statusText} (HTTP ${response.status})`
+    )
+  }
+  if (response.status === 400 && /identity not found/i.test(description ?? "")) {
+    const vm = await thisVm()
+    const subscription = vm?.subscriptionId ?? "<subscription>"
+    const assign = [
+      "az vm identity assign",
+      `--subscription ${subscription}`,
+      `--resource-group ${vm?.resourceGroupName ?? "<resource group>"}`,
+      `--name ${vm?.name ?? "<vm>"}`,
+      ...(clientId === undefined
+        ? []
+        : [
+            `--identities "$(az identity list --subscription ${subscription} --query "[?clientId=='${clientId}'].id" --output tsv)"`,
+          ]),
+    ].join(" ")
+    throw new Error(
+      clientId === undefined
+        ? `[AzureKeyVault] This VM has no system-assigned managed identity. Turn it on:\n  ${assign}`
+        : `[AzureKeyVault] The managed identity ${clientId} isn't assigned to this VM. Assign it:\n  ${assign}`
+    )
+  }
+  throw new Error(
+    `[AzureKeyVault] ${which}: ${description || response.statusText} (HTTP ${response.status})`
+  )
+}
+
+/** Where this VM is, to name it in a command. Undefined when the metadata service won't say. */
+async function thisVm(): Promise<
+  | { readonly subscriptionId: string; readonly resourceGroupName: string; readonly name: string }
+  | undefined
+> {
+  try {
+    const response = await fetch(
+      `${METADATA_ORIGIN}/metadata/instance/compute?api-version=${METADATA_COMPUTE_API_VERSION}`,
+      { headers: { metadata: "true" }, signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) }
+    )
+    const { subscriptionId, resourceGroupName, name } = (await response.json()) as Record<
+      string,
+      unknown
+    >
+    if (
+      response.ok &&
+      typeof subscriptionId === "string" &&
+      typeof resourceGroupName === "string" &&
+      typeof name === "string"
+    ) {
+      return { subscriptionId, resourceGroupName, name }
+    }
+  } catch {
+    // The command then has placeholders.
+  }
+  return undefined
+}
+
+/**
+ * Key Vault refusing a managed identity usually means nobody has granted it the vault yet, which
+ * a deployer without that right can't do. So the error names the identity and the command that
+ * grants it, for whoever can: a role on a vault using Azure RBAC, a policy on one that isn't.
+ */
+function withGrant(error: unknown, vault: string, token: string): unknown {
+  if (!(error instanceof KeyVaultRefusal) || error.status !== 403) return error
+  const objectId = tokenObjectId(token)
+  if (!objectId) return error
+
+  let grant: string
+  if (error.innerCode === "ForbiddenByRbac") {
+    grant = [
+      `az role assignment create --role "${READER_ROLE}"`,
+      `--assignee-object-id ${objectId} --assignee-principal-type ServicePrincipal`,
+      `--scope "$(az keyvault show --name ${vault} --query id --output tsv)"`,
+    ].join(" ")
+  } else if (error.innerCode === ACCESS_POLICY_DENIED) {
+    grant = `az keyvault set-policy --name ${vault} --object-id ${objectId} --secret-permissions get list`
+  } else {
+    return error
+  }
+  return new Error(
+    `${error.message}\nThe server reads with its managed identity, ${objectId}. Let it read the vault; a new grant takes a few minutes to apply:\n  ${grant}`,
+    { cause: error }
+  )
+}
+
+/** The `oid` claim of an access token: the object ID of whoever it's for. */
+function tokenObjectId(token: string): string | undefined {
+  try {
+    const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString())
+    return typeof claims?.oid === "string" && claims.oid ? claims.oid : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Trades a service principal's secret for a Key Vault access token. */
-async function clientToken(credential: ServerCredential): Promise<string> {
+async function clientToken(credential: ServicePrincipal): Promise<string> {
   const where = `the service principal ${credential.clientId}`
   let response: Response
   try {
@@ -489,7 +700,7 @@ async function clientToken(credential: ServerCredential): Promise<string> {
 async function createServicePrincipal(
   label: string,
   roleArgs: readonly string[]
-): Promise<ServerCredential> {
+): Promise<ServicePrincipal> {
   let created: { readonly appId?: unknown; readonly password?: unknown; readonly tenant?: unknown }
   try {
     created = await azJson(
