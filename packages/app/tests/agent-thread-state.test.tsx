@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { client } from "@sixb/client"
 import {
   getAgentQueryKey,
   getAgentThreadQueryKey,
@@ -7,7 +8,7 @@ import {
   listAgentThreadRunsQueryKey,
 } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { Composer } from "../src/agent/components/composer"
@@ -38,6 +39,11 @@ installDom([
   "requestAnimationFrame",
   "cancelAnimationFrame",
 ])
+
+const originalConfig = client.getConfig()
+client.setConfig({ baseUrl: "https://api.sixb.test" })
+afterEach(() => client.setConfig({ fetch: originalConfig.fetch }))
+afterAll(() => client.setConfig({ baseUrl: originalConfig.baseUrl }))
 
 const REPORT = "art_rep0rt0001"
 const SHEET = "art_sh33t00002"
@@ -216,6 +222,69 @@ describe("per-thread composer drafts", () => {
     }
     expect(store.readDraft("thr_0")).toBeNull()
     expect(store.readDraft("thr_54")?.text).toBe("Note 54")
+  })
+})
+
+describe("a message that comes back", () => {
+  test("a send refused after the reader opened another thread goes back to its own thread", async () => {
+    // Removal proof: drop the `draftReseedKey` branch of Composer's reseed effect, or the key
+    // useAgentConversation passes it; thread A's message replaces thread B's draft.
+    let refuse: () => void = () => {}
+    const fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      if (request.method === "POST" && new URL(request.url).pathname.endsWith("/messages")) {
+        return new Promise<Response>((resolve) => {
+          refuse = () => resolve(Response.json({ error: "[Sixb] Unavailable." }, { status: 503 }))
+        })
+      }
+      return Promise.resolve(Response.json({ error: "Not found" }, { status: 404 }))
+    }
+    client.setConfig({ fetch: Object.assign(fetch, { preconnect: globalThis.fetch.preconnect }) })
+
+    const cache = seedThreadAndArtifacts()
+    const store = threadStateStoreFor(cache)
+    store.writeDraft("thr_b", { text: "Relancer Globex", attachments: [], explicitContext: [] })
+
+    function Harness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate("/threads/thr_a")}>
+            Open thread A
+          </button>
+          <button type="button" onClick={() => navigate("/threads/thr_b")}>
+            Open thread B
+          </button>
+          <Routes>
+            <Route path="/threads/:threadId" element={<AgentChatPage />} />
+          </Routes>
+        </>
+      )
+    }
+
+    const view = render(
+      <QueryClientProvider client={cache}>
+        <MemoryRouter initialEntries={["/threads/thr_a"]}>
+          <Harness />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    typeText(messageInput(view), "Note : appeler Alice")
+    fireEvent.click(view.getByRole("button", { name: "Send message" }))
+    await waitFor(() => expect(messageInput(view).value).toBe(""))
+
+    fireEvent.click(view.getByText("Open thread B"))
+    expect(messageInput(view).value).toBe("Relancer Globex")
+    await act(async () => refuse())
+
+    await waitFor(() => expect(store.readDraft("thr_a")?.text).toBe("Note : appeler Alice"))
+    expect(messageInput(view).value).toBe("Relancer Globex")
+    expect(store.readDraft("thr_b")?.text).toBe("Relancer Globex")
+
+    fireEvent.click(view.getByText("Open thread A"))
+    expect(messageInput(view).value).toBe("Note : appeler Alice")
+    view.unmount()
+    cache.clear()
   })
 })
 

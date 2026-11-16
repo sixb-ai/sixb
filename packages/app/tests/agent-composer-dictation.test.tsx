@@ -75,6 +75,12 @@ function renderComposer(props: Partial<ComposerProps>) {
   return { ...view, rerender, input }
 }
 
+/** Types as the reader does: the draft is kept once the key is up. */
+function type(view: ReturnType<typeof renderComposer>, value: string) {
+  fireEvent.input(view.input(), { target: { value } })
+  fireEvent.keyUp(view.input(), { key: value.at(-1) ?? "a" })
+}
+
 /** Presses the microphone and opens it: the recording bar is up. */
 function startDictation(view: ReturnType<typeof renderComposer>, session: () => FakeSession) {
   fireEvent.click(view.getByLabelText("Start dictation"))
@@ -134,6 +140,30 @@ describe("Composer dictation", () => {
     expect(sessions[0]?.aborted).toBe(false)
     fireEvent.click(view.getByLabelText("Done"))
     expect(sessions[0]?.stopped).toBe(true)
+  })
+
+  // Removal proof: drop the layout effect that aborts the dictation when `draftKey` changes; B's
+  // input becomes A's text and transcript, under the recording bar A started.
+  test("opening another conversation ends a dictation, leaving that conversation's draft alone", () => {
+    const { recognizer, sessions } = fakeRecognizer()
+    const view = renderComposer({ dictation: recognizer, draftKey: "thr_b" })
+    type(view, "Relancer Globex")
+    view.rerender({ draftKey: "thr_a" })
+    type(view, "Note :")
+    startDictation(view, () => sessions[0]!)
+    fireEvent.click(view.getByLabelText("Done"))
+
+    view.rerender({ draftKey: "thr_b" })
+    act(() => {
+      sessions[0]?.handlers.onResult?.({ transcript: "appeler Alice", isFinal: true })
+      sessions[0]?.handlers.onEnd?.()
+    })
+
+    expect(view.input().value).toBe("Relancer Globex")
+    expect(view.queryByLabelText("Done")).toBeNull()
+    expect(sessions[0]?.aborted).toBe(true)
+    view.rerender({ draftKey: "thr_a" })
+    expect(view.input().value).toBe("Note :")
   })
 
   test("a disabled composer does not start a dictation", () => {

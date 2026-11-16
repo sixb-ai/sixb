@@ -136,6 +136,11 @@ export interface ComposerProps {
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
   /**
+   * The `draftKey` the restored draft belongs to. Another conversation's input leaves it alone:
+   * it waits in its own conversation's stored draft.
+   */
+  readonly draftReseedKey?: string
+  /**
    * What an artifact hands the conversation, such as the comments the reader asks the Agent to
    * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
    * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
@@ -259,6 +264,7 @@ export const Composer = memo(function Composer({
   draftAttachments,
   draftContext,
   draftNonce,
+  draftReseedKey,
   insertion,
   onInserted,
   ambientContext = EMPTY_AMBIENT_CONTEXT,
@@ -454,10 +460,20 @@ export const Composer = memo(function Composer({
 
   // Reseed the input on demand (a failed send hands the text and already-uploaded attachments back).
   // Keyed on the nonce so restoring the same draft twice still fires; ignored on mount (nonce 0) so
-  // it never clobbers a fresh draft.
+  // it never clobbers a fresh draft. One for another conversation goes to that one's stored draft.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseed only when the nonce changes
   useEffect(() => {
     if (!draftNonce) return
+
+    if (draftReseedKey !== undefined && draftReseedKey !== draftKey) {
+      threadState.writeDraft(draftReseedKey, {
+        text: draft ?? "",
+        attachments: draftAttachments ?? [],
+        explicitContext: explicitEntries(draftContext ?? []),
+      })
+      return
+    }
+
     setValue(draft ?? "")
     setAttachments(
       (draftAttachments ?? []).map((fileRef) => ({
@@ -502,6 +518,11 @@ export const Composer = memo(function Composer({
       input.setSelectionRange(input.value.length, input.value.length)
     })
   }, [insertion?.nonce])
+
+  // A dictation belongs to the conversation it started in: opening another one ends it, before
+  // its transcript can replace that conversation's draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ends only when the conversation changes
+  useLayoutEffect(() => () => voice.abort(), [draftKey])
 
   // However a dictation ends, the focus returns to the input, the caret after any transcript.
   useEffect(() => {
