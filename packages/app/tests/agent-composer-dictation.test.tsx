@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import { installDom } from "./helpers/dom"
+import { composerLayout } from "./helpers/layout"
 
 installDom([
   "document",
@@ -173,5 +174,36 @@ describe("Composer dictation", () => {
     fireEvent.click(view.getByLabelText("Start dictation"))
 
     expect(sessions).toHaveLength(0)
+  })
+
+  // Removal proof: drop the `voice.isActive` check from the composer's `textWraps`, and the field
+  // an empty box hides while dictating measures 0 wide, so the box folds around the bar; or drop
+  // `voice.isActive` from the ResizeObserver effect's dependencies, and it keeps watching the
+  // spacer dictation took away, so the box never unfolds.
+  test("an empty box dictates on one row, and folds with the room once dictation ends", () => {
+    let room = 80
+    const layout = composerLayout(() => room)
+
+    try {
+      const { recognizer, sessions } = fakeRecognizer()
+      const view = renderComposer({ dictation: recognizer, placeholder: "Ask anything" })
+      const expanded = () =>
+        view.input().closest(".sixb-composer-surface")?.hasAttribute("data-expanded")
+      expect(expanded()).toBe(true)
+
+      startDictation(view, () => sessions[0]!)
+      layout.resize()
+      expect(expanded()).toBe(false)
+
+      fireEvent.click(view.getByLabelText("Cancel dictation"))
+      layout.resize()
+      expect(expanded()).toBe(true)
+
+      room = 180
+      layout.resize()
+      expect(expanded()).toBe(false)
+    } finally {
+      layout.restore()
+    }
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render } from "@testing-library/react"
+import { fireEvent, render } from "@testing-library/react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import {
   builtInCommands,
@@ -10,6 +10,7 @@ import {
 import { en } from "../src/agent/i18n/en"
 import type { LanguageModel } from "../src/agent/types"
 import { installDom } from "./helpers/dom"
+import { composerLayout } from "./helpers/layout"
 
 installDom([
   "document",
@@ -236,77 +237,31 @@ describe("the composer's layout", () => {
     expect(surface()?.hasAttribute("data-expanded")).toBe(true)
   })
 
-  // Removal proof: render `value` alone in `[data-composer-sizer]`, or stop reading the spacer's
-  // width while expanded; an empty narrow box leaves `data-expanded` off so the placeholder wraps
-  // inside the pill, and a folded box never unfolds once the controls leave room again.
+  // Removal proof: render `value` alone in `[data-composer-sizer]`, stop reading the spacer's
+  // width while expanded, or stop observing the spacer; an empty narrow box leaves `data-expanded`
+  // off so the placeholder wraps inside the pill, or a folded box never unfolds once the controls
+  // leave room again.
   test("a box too narrow for its placeholder folds to two rows, and unfolds once it fits", () => {
-    const observers = new Set<ResizeObserverCallback>()
-    const OriginalResizeObserver = globalThis.ResizeObserver
-    globalThis.ResizeObserver = class {
-      readonly #cb: ResizeObserverCallback
-      constructor(cb: ResizeObserverCallback) {
-        this.#cb = cb
-        observers.add(cb)
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {
-        observers.delete(this.#cb)
-      }
-    } as unknown as typeof ResizeObserver
+    let room = 80
+    const layout = composerLayout(() => room)
 
     try {
       const view = renderComposer({ placeholder: "Ask anything" })
-      const root = view.container.firstElementChild as HTMLElement
-      const surface = () => view.input().closest(".sixb-composer-surface")
-      const sizer = view.container.querySelector("[data-composer-sizer]") as HTMLElement
-      const spacer = view.container.querySelector("[data-composer-spacer]") as HTMLElement
-      let rowWidth = 80
-      Object.defineProperty(root, "clientWidth", { get: () => 390 })
-      Object.defineProperty(view.input(), "clientWidth", {
-        get: () => (surface()?.hasAttribute("data-expanded") ? 340 : rowWidth),
-      })
-      Object.defineProperty(spacer, "offsetWidth", {
-        get: () => (surface()?.hasAttribute("data-expanded") ? rowWidth : 0),
-      })
-      Object.defineProperty(sizer, "offsetWidth", {
-        get: () => {
-          const spans = [...sizer.querySelectorAll("span")]
-          return Math.max(0, ...spans.map((span) => (span.textContent?.length ?? 0) * 9))
-        },
-      })
-
-      const notifyResize = () => {
-        let pending: FrameRequestCallback | undefined
-        const originalRaf = globalThis.requestAnimationFrame
-        globalThis.requestAnimationFrame = (cb) => {
-          pending = cb
-          return 1
-        }
-        try {
-          act(() => {
-            for (const cb of observers) cb([], {} as ResizeObserver)
-            pending?.(0)
-          })
-        } finally {
-          globalThis.requestAnimationFrame = originalRaf
-        }
-      }
-
-      notifyResize()
-      notifyResize()
-      expect(surface()?.hasAttribute("data-expanded")).toBe(true)
+      const expanded = () =>
+        view.input().closest(".sixb-composer-surface")?.hasAttribute("data-expanded")
+      expect(expanded()).toBe(true)
 
       // A short start stays on two rows instead of snapping back into the cramped row.
       type(view.input(), "Hi")
-      expect(surface()?.hasAttribute("data-expanded")).toBe(true)
+      expect(expanded()).toBe(true)
 
+      // A run ends and its Stop button leaves: only the spacer beside `+` widens.
       type(view.input(), "")
-      rowWidth = 180
-      notifyResize()
-      expect(surface()?.hasAttribute("data-expanded")).toBe(false)
+      room = 180
+      layout.resize()
+      expect(expanded()).toBe(false)
     } finally {
-      globalThis.ResizeObserver = OriginalResizeObserver
+      layout.restore()
     }
   })
 })

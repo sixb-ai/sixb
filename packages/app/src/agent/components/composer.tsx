@@ -216,6 +216,11 @@ interface UnlandedAttachment {
 const MAX_HEIGHT_PX = 200
 const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
+/** The width as laid out, to the fraction of a pixel where the text breaks. */
+function widthOf(element: Element | null): number {
+  return element?.getBoundingClientRect().width ?? 0
+}
+
 // The microphone and Cancel: round, quiet until hovered.
 const ICON_BUTTON_CLASS_NAME = cn(
   "flex size-10 shrink-0 items-center justify-center rounded-full text-foreground/80 outline-none transition-colors",
@@ -306,8 +311,6 @@ export const Composer = memo(function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sizerRef = useRef<HTMLSpanElement>(null)
   const spacerRef = useRef<HTMLSpanElement>(null)
-  // How wide the text is when it shares a row with the controls.
-  const inlineWidthRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
@@ -561,26 +564,39 @@ export const Composer = memo(function Composer({
         : awaitingApproval
           ? agentMessages.approvals.composerPlaceholder
           : (placeholder ?? messages.placeholder)
-  // A draft, or a placeholder in an empty box, that no longer fits in one row beside the controls
-  // takes a row of its own, with the controls under it.
+
+  // Text that no longer fits in one row beside the controls takes a row of its own, with the
+  // controls under it. The text is the draft or the placeholder, whichever is wider.
   const expanded =
     wraps ||
     value.includes("\n") ||
     attachments.length > 0 ||
     contextEntries.length > 0 ||
     (voice.isActive && value.trim().length > 0)
+
+  // Whether the text is wider than the room the controls leave it in their row. That room is the
+  // textarea's while it shares the row, and the spacer's, in its place beside `+`, once the text
+  // has a row of its own.
+  const textWraps = (textarea: HTMLTextAreaElement) => {
+    // The dictation bar holds the row, and a transcript already gets a row of its own.
+    if (voice.isActive) return false
+
+    // Not laid out, as in a hidden panel: there is nothing to measure yet.
+    if (!rootRef.current?.clientWidth) return wraps
+
+    const room = widthOf(expanded ? spacerRef.current : textarea)
+    return widthOf(sizerRef.current) > room
+  }
+
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
   // render a scrollbar in browsers configured to always show scroll bars.
   const measure = () => {
     const el = textareaRef.current
     if (!el) return
-    if (rootRef.current?.clientWidth) {
-      if (!expanded) inlineWidthRef.current = el.clientWidth
-      else if (spacerRef.current) inlineWidthRef.current = spacerRef.current.offsetWidth
-      const sizer = sizerRef.current
-      setWraps(sizer !== null && sizer.offsetWidth > inlineWidthRef.current)
-    }
+
+    setWraps(textWraps(el))
+
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
@@ -598,20 +614,21 @@ export const Composer = memo(function Composer({
     expanded,
   ])
 
-  // The row's width changes without the text changing: the model label settles after the first
-  // render, a run starts or stops, or the window resizes. Once the text has its own row, the
-  // spacer beside `+` holds the width the text would have had inline.
+  // The room changes without the text changing: the model label settles after the first render, a
+  // run starts or stops, or the window resizes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the spacer is drawn anew once dictation ends
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    const spacer = voice.isActive ? null : spacerRef.current
-    let textWidth = el.clientWidth
-    let spacerWidth = spacer?.offsetWidth ?? 0
+
+    const spacer = spacerRef.current
+    let textWidth = widthOf(el)
+    let spacerWidth = widthOf(spacer)
     let frame = 0
     // Measuring resizes the textarea, so it waits a frame rather than resize inside the callback.
     const observer = new ResizeObserver(() => {
-      const nextTextWidth = el.clientWidth
-      const nextSpacerWidth = spacer?.offsetWidth ?? 0
+      const nextTextWidth = widthOf(el)
+      const nextSpacerWidth = widthOf(spacer)
       if (nextTextWidth === textWidth && nextSpacerWidth === spacerWidth) return
       textWidth = nextTextWidth
       spacerWidth = nextSpacerWidth
@@ -1064,9 +1081,9 @@ export const Composer = memo(function Composer({
             onRun={runCommand}
           />
           {/*
-            One row while the draft, or the placeholder in an empty box, fits beside the controls;
-            once it doesn't, the text gets a row of its own and the controls sit under it.
-            Attachments and context lead, on their own row.
+            One row while the text fits beside the controls; once it doesn't, the text gets a row
+            of its own and the controls sit under it. Attachments and context lead, on their own
+            row.
           */}
           <div
             data-dragging={draggingFiles || undefined}
@@ -1076,7 +1093,11 @@ export const Composer = memo(function Composer({
             data-focus-on-tap=""
             className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
           >
-            {/* The text on one line, to tell when it stops fitting beside the controls. */}
+            {/*
+              The text on one line, to tell when it stops fitting beside the controls: as wide as
+              the draft or the placeholder, whichever is wider, so a box folded for its placeholder
+              doesn't snap back into the row at the first letter typed.
+            */}
             <span
               aria-hidden="true"
               className="pointer-events-none invisible absolute inset-0 overflow-hidden"
@@ -1087,7 +1108,7 @@ export const Composer = memo(function Composer({
                 className="absolute grid whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
               >
                 <span>{value}</span>
-                {voice.isActive ? null : <span>{placeholderText}</span>}
+                <span>{placeholderText}</span>
               </span>
             </span>
             {contextEntries.length > 0 || attachments.length > 0 ? (
