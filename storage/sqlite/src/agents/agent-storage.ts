@@ -7,6 +7,7 @@ import {
 import { SqliteAgentApprovalStore } from "./approvals"
 import { SqliteAgentContextCheckpointStore } from "./checkpoints"
 import { SqliteAgentComputerSessionStore } from "./computers"
+import { SqliteAgentInboxStore } from "./inbox"
 import { SqliteAgentMemoryStore } from "./memory"
 import { SqliteAgentMessageStore } from "./messages"
 import { SqliteAgentRunStore } from "./runs"
@@ -39,6 +40,7 @@ export class SqliteAgentStorage implements AgentStorage {
   readonly approvalModes: SqliteAgentApprovalModeStore
   readonly computers: SqliteAgentComputerSessionStore
   readonly tokenRates: SqliteAgentTokenRateStore
+  readonly inbox: SqliteAgentInboxStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -54,6 +56,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.approvalModes = new SqliteAgentApprovalModeStore(this.connection.db)
     this.computers = new SqliteAgentComputerSessionStore(this.connection.db)
     this.tokenRates = new SqliteAgentTokenRateStore(this.connection.db)
+    this.inbox = new SqliteAgentInboxStore(this.connection.db)
   }
 
   close(): void {
