@@ -467,7 +467,10 @@ describe("a deploy that fails", () => {
     try {
       await writeFile(server.layout.candidateManifest, "{}")
 
-      const result = await runDeploySteps(server, ["Activate release"], 'deploy_mode="staged"')
+      const result = await runDeploySteps(server, {
+        before: 'deploy_mode="staged"',
+        steps: ["Activate release"],
+      })
 
       expect(result.exitCode).not.toBe(0)
       expect(await readlink(server.layout.currentLink)).toBe(`releases/${server.releaseId}`)
@@ -479,23 +482,105 @@ describe("a deploy that fails", () => {
       await server.remove()
     }
   })
+
+  // Reproduce: call `use_release` before the service files are installed; a failure there then
+  // puts traffic back on the live release while `current` and `release.json` name the discarded one.
+  test("switches nothing when activation fails before the switch", async () => {
+    const server = await standInServer({
+      systemctl: ['[ "$2" = daemon-reload ] && exit 1', "exit 0"],
+    })
+    try {
+      await writeFile(server.layout.candidateManifest, "{}")
+      await writeFile(join(server.layout.deployDir, "Caddyfile.previous"), "live routes")
+      await writeFile(server.caddySnippet, "candidate routes")
+
+      const result = await runDeploySteps(server, {
+        before: 'deploy_mode="routed"',
+        steps: ["Activate release"],
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(
+        await lstat(server.layout.currentLink).catch((error: unknown) => error)
+      ).toBeInstanceOf(Error)
+      expect(await Bun.file(server.layout.releaseRecord).exists()).toBe(false)
+      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+    } finally {
+      await server.remove()
+    }
+  })
+
+  // Reproduce: let a failed reload leave the new routes in the snippet; the next deploy then
+  // finds them unchanged, skips the reload, and retires the release Caddy still routes to.
+  test("puts the live routes back when Caddy does not reload", async () => {
+    const server = await standInServer({ sudo: ["exit 1"] })
+    try {
+      await writeFile(server.caddySnippet, "live routes")
+
+      const result = await runDeploySteps(server, {
+        before: 'deploy_mode="staged"\ntarget_slot="green"',
+        steps: ["Update routes"],
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+      expect(await readFile(server.calls, "utf8")).toContain("bun sixb-deploy-ssh discard")
+    } finally {
+      await server.remove()
+    }
+  })
+
+  // Reproduce: leave `deploy_mode` on "staged" after the reload; the trap then stops the
+  // candidate while Caddy routes every request to it.
+  test("routes back to the live release before discarding a candidate Caddy already serves", async () => {
+    const server = await standInServer()
+    try {
+      await writeFile(server.caddySnippet, "live routes")
+
+      const result = await runDeploySteps(server, {
+        before: 'deploy_mode="staged"\ntarget_slot="green"',
+        steps: ["Update routes"],
+        after: "false",
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(await readFile(server.caddySnippet, "utf8")).toBe("live routes")
+      expect((await readFile(server.calls, "utf8")).trim().split("\n")).toEqual([
+        "sudo -n /usr/bin/systemctl reload caddy",
+        "sudo -n /usr/bin/systemctl reload caddy",
+        "bun sixb-deploy-ssh discard",
+      ])
+    } finally {
+      await server.remove()
+    }
+  })
 })
 
 interface StandInServer {
   readonly root: string
+  readonly tools: string
   readonly layout: DeploymentLayout
   readonly releaseId: string
   readonly script: DeployScript
-  /** The `systemctl`, `sudo`, and `ctl` calls the steps made, one per line. */
+  /** Where the steps write the deployment's Caddy routes, in place of `/etc/caddy`. */
+  readonly caddySnippet: string
+  /** The `systemctl`, `sudo`, `ctl`, and `bun` calls the steps made, one per line. */
   readonly calls: string
   remove(): Promise<void>
 }
 
 /**
- * A deployment under a temporary home, with stand-ins for the server's tools: `systemctl` and
- * `sudo` record their calls, `flock` and `sleep` return at once, and `ctl` runs the given lines.
+ * A deployment under a temporary home, with stand-ins for the server's tools: `systemctl`,
+ * `sudo`, `ctl`, and `bun` record their calls, then run the given lines; `caddy`, `flock`, and
+ * `sleep` return at once.
  */
-async function standInServer(options: { readonly ctl: readonly string[] }): Promise<StandInServer> {
+async function standInServer(
+  options: {
+    readonly ctl?: readonly string[]
+    readonly sudo?: readonly string[]
+    readonly systemctl?: readonly string[]
+  } = {}
+): Promise<StandInServer> {
   const root = await mkdtemp(join(tmpdir(), "sixb-deploy-steps-"))
   const tools = join(root, "tools")
   const calls = join(root, "calls.txt")
@@ -513,22 +598,30 @@ async function standInServer(options: { readonly ctl: readonly string[] }): Prom
     deployedBy: "ci",
   }
 
+  const recorded = (name: string, then: readonly string[] = []) => [
+    `echo "${name} $*" >> "$CALLS"`,
+    ...then,
+  ]
   const standIns: Record<string, readonly string[]> = {
-    systemctl: ['echo "systemctl $*" >> "$CALLS"'],
-    sudo: ['echo "sudo $*" >> "$CALLS"'],
+    systemctl: recorded("systemctl", options.systemctl),
+    sudo: recorded("sudo", options.sudo),
+    ctl: recorded("ctl", options.ctl),
+    bun: [`echo "bun $(basename "$1") $2" >> "$CALLS"`],
+    caddy: ["exit 0"],
     flock: ["exit 0"],
     sleep: ["exit 0"],
-    ctl: ['echo "ctl $*" >> "$CALLS"', ...options.ctl],
   }
   await mkdir(tools, { recursive: true })
   for (const [name, lines] of Object.entries(standIns)) {
     await writeFile(join(tools, name), ["#!/bin/sh", ...lines, ""].join("\n"), { mode: 0o755 })
   }
   await mkdir(serverLayout.deployDir, { recursive: true })
+  await mkdir(join(root, "caddy"))
   await writeFile(calls, "")
 
   return {
     root,
+    tools,
     layout: serverLayout,
     releaseId: deriveReleaseId(record),
     script: renderDeployScript({
@@ -537,21 +630,21 @@ async function standInServer(options: { readonly ctl: readonly string[] }): Prom
       incoming: join(serverLayout.incomingDir, "upload"),
       record,
     }),
+    caddySnippet: join(root, "caddy", "northline.caddy"),
     calls,
     remove: () => rm(root, { recursive: true, force: true }),
   }
 }
 
 /**
- * Runs the deploy script's preamble (its variables, lock, functions and trap), then `prelude` to
- * set the state earlier steps would have left, then the named steps.
+ * Runs the deploy script's preamble (its variables, lock, functions and trap) with the stand-ins
+ * in place, then `before` to set the state earlier steps would have left, the named steps, and
+ * `after`.
  */
 async function runDeploySteps(
   server: StandInServer,
-  labels: readonly string[],
-  prelude: string
+  run: { readonly before: string; readonly steps: readonly string[]; readonly after?: string }
 ): Promise<{ readonly exitCode: number; readonly stderr: string }> {
-  const tools = join(server.root, "tools")
   const preamble = server.script.script
     .split("main() {\n")[1]
     ?.split(`printf '\\n%s\\t%s\\t%s\\n' ${STEP_MARKER} 0 start`)[0]
@@ -560,13 +653,21 @@ async function runDeploySteps(
   const body = [
     "set -euo pipefail",
     preamble,
-    `CTL=${join(tools, "ctl")}`,
-    prelude,
-    ...labels.map((label) => stepBody(label, server.script)),
+    `BUN=${join(server.tools, "bun")}`,
+    `CTL=${join(server.tools, "ctl")}`,
+    `CADDY_DIR=${join(server.root, "caddy")}`,
+    `CADDY_SNIPPET=${server.caddySnippet}`,
+    run.before,
+    ...run.steps.map((label) => stepBody(label, server.script)),
+    run.after ?? "",
   ].join("\n")
 
   const child = Bun.spawn(["/bin/bash", "-c", body], {
-    env: { CALLS: server.calls, PATH: `${tools}:/usr/bin:/bin`, XDG_RUNTIME_DIR: server.root },
+    env: {
+      CALLS: server.calls,
+      PATH: `${server.tools}:/usr/bin:/bin`,
+      XDG_RUNTIME_DIR: server.root,
+    },
     stdout: "ignore",
     stderr: "pipe",
   })

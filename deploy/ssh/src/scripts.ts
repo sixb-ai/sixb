@@ -143,6 +143,7 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     renderEnvironment(release, layout, targetRelease),
     renderTakeLock(layout),
     renderUseRelease(layout, input.record),
+    renderRestoreRoutes(),
     renderCandidateTrap(),
     ...steps.flatMap((step, index) => [
       `printf '\\n%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} start`,
@@ -185,6 +186,7 @@ function renderEnvironment(
     UNIT_PATH: layout.unit,
     CADDY_DIR: layout.caddyDir,
     CADDY_SNIPPET: layout.caddySnippet,
+    PREVIOUS_ROUTES: `${layout.deployDir}/Caddyfile.previous`,
   }
   return [
     ...Object.entries(variables).map(([name, value]) => `${name}=${shellQuote(value)}`),
@@ -215,6 +217,7 @@ function renderTakeLock(layout: DeploymentLayout): string {
 /**
  * Points `current` at the new release and records it in `release.json` at the same moment, so
  * `sixb deploy status` names the commit that serves from then on, even when a later check fails.
+ * Callers set `deploy_mode` right after it, with nothing in between that can fail.
  */
 function renderUseRelease(layout: DeploymentLayout, record: DeployRecord): string {
   return [
@@ -226,9 +229,19 @@ function renderUseRelease(layout: DeploymentLayout, record: DeployRecord): strin
   ].join("\n")
 }
 
+/** Puts back the routes "Update routes" replaced: the live release's, or none on a first deploy. */
+function renderRestoreRoutes(): string {
+  return [
+    "restore_routes() {",
+    '  if [ -f "$PREVIOUS_ROUTES" ]; then cp "$PREVIOUS_ROUTES" "$CADDY_SNIPPET"; else rm -f "$CADDY_SNIPPET"; fi',
+    "}",
+  ].join("\n")
+}
+
 /**
- * A failure before the switch discards the candidate, and the live release keeps serving. After
- * the switch there is nothing to discard: the new release serves, and the operator is told so.
+ * A failure before the switch discards the candidate, and the live release keeps serving. When
+ * Caddy already routes to the candidate, its routes go back to the live release first. After the
+ * switch there is nothing to discard: the new release serves, and the operator is told so.
  */
 function renderCandidateTrap(): string {
   return [
@@ -237,12 +250,20 @@ function renderCandidateTrap(): string {
     '  if [ "$status" -eq 0 ]; then return; fi',
     "",
     '  case "$deploy_mode" in',
-    "    staged)",
+    "    staged | routed)",
+    '      if [ "$deploy_mode" = "routed" ]; then',
+    "        restore_routes || true",
+    "        if sudo -n /usr/bin/systemctl reload caddy > /dev/null 2>&1; then",
+    "          echo 'The routes are back on the live release.' >&2",
+    "        else",
+    "          echo 'Caddy did not reload the previous routes: run sudo systemctl reload caddy on the server.' >&2",
+    "        fi",
+    "      fi",
     '      "$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb-deploy-ssh" discard --manifest "$MANIFEST" > /dev/null 2>&1 || true',
     '      rm -f "$CANDIDATE_MANIFEST" "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
     "      ;;",
     "    activated | cold)",
-    "      echo 'The new release is in place, but it failed a check after taking over.' >&2",
+    "      echo 'The new release is in place, but it did not pass its checks.' >&2",
     "      echo 'sixb deploy status and sixb deploy logs show what failed. To go back, deploy the previous commit with --ref.' >&2",
     "      ;;",
     "  esac",
@@ -454,12 +475,12 @@ function renderStartCandidate(input: {
     '    target_slot="blue"',
     '    systemctl --user stop "$UNIT"',
     "    use_release",
+    '    deploy_mode="cold"',
     ...installServiceFiles.map((line) => `    ${line}`),
     '    mv "$DEPLOY/manifest.blue.json" "$MANIFEST"',
     '    rm -f "$DEPLOY/manifest.green.json" "$CANDIDATE_MANIFEST"',
     '    systemctl --user restart "$UNIT"',
     '    systemctl --user is-active --quiet "$UNIT"',
-    '    deploy_mode="cold"',
     "    started=$SECONDS",
     "  else",
     '    cat "$stage_err" >&2',
@@ -469,12 +490,12 @@ function renderStartCandidate(input: {
     "else",
     '  target_slot="blue"',
     "  use_release",
+    '  deploy_mode="cold"',
     ...installServiceFiles.map((line) => `  ${line}`),
     '  mv "$DEPLOY/manifest.blue.json" "$MANIFEST"',
     '  rm -f "$DEPLOY/manifest.green.json" "$CANDIDATE_MANIFEST"',
     '  systemctl --user restart "$UNIT"',
     '  systemctl --user is-active --quiet "$UNIT"',
-    '  deploy_mode="cold"',
     "  started=$SECONDS",
     "fi",
   ].join("\n")
@@ -550,17 +571,26 @@ function renderUpdateRoutes(input: {
     '    echo "$CADDY_DIR is missing or not writable, so this server is not set up for sixb deploy." >&2',
     "    exit 1",
     "  fi",
-    '  previous="$DEPLOY/Caddyfile.previous"',
-    '  rm -f "$previous"',
-    '  if [ -f "$CADDY_SNIPPET" ]; then cp "$CADDY_SNIPPET" "$previous"; fi',
+    '  rm -f "$PREVIOUS_ROUTES"',
+    '  if [ -f "$CADDY_SNIPPET" ]; then cp "$CADDY_SNIPPET" "$PREVIOUS_ROUTES"; fi',
     '  cp "$DEPLOY/Caddyfile" "$CADDY_SNIPPET"',
+    "",
     '  if ! caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile > "$DEPLOY/caddy-validate.log" 2>&1; then',
-    '    if [ -f "$previous" ]; then cp "$previous" "$CADDY_SNIPPET"; else rm -f "$CADDY_SNIPPET"; fi',
+    "    restore_routes",
     '    tail -n 20 "$DEPLOY/caddy-validate.log" >&2',
     "    echo 'Caddy rejected the routes; the previous ones are back in place.' >&2",
     "    exit 1",
     "  fi",
-    "  sudo -n /usr/bin/systemctl reload caddy",
+    "",
+    // Caddy keeps the routes it had when a reload fails: the file goes back to match them.
+    "  if ! sudo -n /usr/bin/systemctl reload caddy; then",
+    "    restore_routes",
+    "    echo 'Caddy did not reload; the previous routes are back in place.' >&2",
+    "    exit 1",
+    "  fi",
+    "",
+    // From here a failure has to bring traffic back to the live release before discarding.
+    '  if [ "$deploy_mode" = "staged" ]; then deploy_mode="routed"; fi',
     "fi",
   ].join("\n")
 }
@@ -608,12 +638,12 @@ function renderActivateRelease(input: {
   )
   const installServiceFiles = renderInstallServiceFiles(input.release, input.layout, input.slots)
   return [
-    'if [ "$deploy_mode" = "staged" ]; then',
-    "  use_release",
+    'if [ "$deploy_mode" = "staged" ] || [ "$deploy_mode" = "routed" ]; then',
     ...installServiceFiles.map((line) => `  ${line}`),
+    "  use_release",
+    '  deploy_mode="activated"',
     '  mv "$CANDIDATE_MANIFEST" "$MANIFEST"',
     '  rm -f "$DEPLOY/manifest.blue.json" "$DEPLOY/manifest.green.json"',
-    '  deploy_mode="activated"',
     '  "$CTL" activate',
     ...(hasExclusiveServices ? ["  sleep 2"] : []),
     '  "$CTL" status --check',
