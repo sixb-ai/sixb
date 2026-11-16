@@ -2,7 +2,7 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createSixbError } from "../errors/internal"
 import type { DomainEventLog } from "../events/service"
-import type { AuthorizationRef } from "../execution"
+import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
 import {
   type AgentExecutionHost,
   bindAgentModelExecution,
@@ -25,6 +25,7 @@ import type { Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
+  type AgentInboxItemRecord,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
@@ -127,6 +128,8 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly events: StreamSink
   /** Approvals that hold the run: they are created by the API its commands call, never here. */
   readonly heldCalls: AgentRunHeldCalls
+  /** Mid-run steers waiting in a conversation turn's inbox. */
+  readonly inbox: AgentRunInbox
   /** A conversation turn's children: spawning them, and reading them and their threads. */
   readonly children: AgentRunChildren
   /**
@@ -259,6 +262,18 @@ export interface AgentRunHeldCalls {
   pausesAfterStep(): Promise<boolean>
 }
 
+export interface AgentRunInbox {
+  /**
+   * Claim unclaimed non-immediate `steer` items of a conversation turn's thread at `stepIndex`:
+   * those its requester sent, since the turn runs as them. Answers `[]` on a sub-agent's session,
+   * whose parent steers it through `FamilyMailbox`.
+   */
+  takeSteers(input: {
+    readonly stepIndex: number
+    readonly afterAnswer?: boolean
+  }): Promise<readonly AgentInboxItemRecord[]>
+}
+
 /** How a run ended; the session supplies which run, and its token. */
 export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
   ? Finish extends FinishAgentRunInput
@@ -363,6 +378,27 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     return bound
   }
   const runSdk = async () => (await bind()).sixb
+
+  // Who the turn runs as, read once from its execution, which never changes.
+  let requestedBy: Promise<AuthorizablePrincipal | undefined> | undefined
+  const requester = () => {
+    requestedBy ??= host.storage.executions
+      .getById({ projectId: host.projectId, id: run.executionId })
+      .then((execution) => {
+        if (!execution) {
+          throw new Error(
+            `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+          )
+        }
+        return execution.requestedBy
+      })
+      .catch((error: unknown) => {
+        requestedBy = undefined
+        throw error
+      })
+    return requestedBy
+  }
+
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
   // each renewal of its lease.
@@ -458,6 +494,28 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
       pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
     },
+    inbox: {
+      async takeSteers({ stepIndex, afterAnswer }) {
+        if (run.kind !== "conversation") return []
+
+        // The turn runs as its requester, so it reads only what they sent: another participant's
+        // steer waits for a turn of theirs. A turn nobody requested has no one to steer it.
+        const authorPrincipal = await requester()
+        if (!authorPrincipal) return []
+
+        return fenced(run.id, () =>
+          agents.inbox.takeSteers({
+            projectId: host.projectId,
+            threadId: run.threadId,
+            runId: run.id,
+            executionToken,
+            stepIndex,
+            ...(afterAnswer ? { afterAnswer: true } : {}),
+            authorPrincipal,
+          })
+        )
+      },
+    },
     models: {
       async language(ref, options) {
         const key = `${ref.provider}/${ref.modelId}`
@@ -514,6 +572,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     async finish(outcome, messages) {
       const finished = await finishWithRetries(
         host.storage,
+        run,
         { ...outcome, ...fence },
         messages ?? []
       )
@@ -833,23 +892,76 @@ const FINISH_BACKOFF_MS = [50, 200, 600] as const
 
 async function finishWithRetries(
   storage: AgentRunSessionHost["storage"],
+  run: AgentRunRecord,
   finish: FinishAgentRunInput,
   messages: readonly AppendAgentMessageInput[]
 ): Promise<AgentRunRecord> {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      if (messages.length === 0) return await storage.agents.runs.finish(finish)
+      if (run.kind !== "conversation" && messages.length === 0) {
+        return await storage.agents.runs.finish(finish)
+      }
       return await storage.transaction(async (tx) => {
         const agents = tx.agents
         if (!agents) throw new Error("[Sixb] Agent storage is not configured.")
-        for (const message of messages) await agents.messages.append(message)
+        const resolved =
+          run.kind === "conversation"
+            ? await reconcileClaimedSteers(agents, run, finish.executionToken, messages)
+            : messages
+        for (const message of resolved) await agents.messages.append(message)
         return agents.runs.finish(finish)
       })
     } catch (error) {
+      if (error instanceof AgentRunRefusedError) throw error
       if (isTerminalOrExecutionGone(error)) throw new AgentExecutionLostError(finish.id)
       const delay = FINISH_BACKOFF_MS[attempt]
       if (delay === undefined) throw new AgentFinalizationError(finish.id, { cause: error })
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
+}
+
+async function reconcileClaimedSteers(
+  agents: AgentStorage,
+  run: ConversationAgentRunRecord,
+  executionToken: string,
+  messages: readonly AppendAgentMessageInput[]
+): Promise<readonly AppendAgentMessageInput[]> {
+  const userIds = messages.filter((message) => message.role === "user").map((message) => message.id)
+  const consumed = await agents.inbox.consumeClaimed({
+    projectId: run.projectId,
+    threadId: run.threadId,
+    runId: run.id,
+    executionToken,
+    messageIds: userIds,
+  })
+  const byMessageId = new Map(consumed.map((item) => [item.messageId, item]))
+
+  return messages.map((message): AppendAgentMessageInput => {
+    if (message.role !== "user") return message
+    const claimed = byMessageId.get(message.id)
+    if (!claimed) {
+      throw new AgentRunRefusedError(
+        `[Sixb] Agent run '${run.id}' finishes only with user messages from its thread's inbox.`
+      )
+    }
+    const metadata =
+      claimed.timeZone || claimed.locale
+        ? {
+            ...(claimed.timeZone ? { timeZone: claimed.timeZone } : {}),
+            ...(claimed.locale ? { locale: claimed.locale } : {}),
+          }
+        : undefined
+    return {
+      id: claimed.messageId,
+      projectId: claimed.projectId,
+      threadId: claimed.threadId,
+      runId: null,
+      role: "user",
+      parts: claimed.parts,
+      authorPrincipal: claimed.authorPrincipal,
+      createdAt: claimed.createdAt,
+      ...(metadata ? { metadata } : {}),
+    }
+  })
 }

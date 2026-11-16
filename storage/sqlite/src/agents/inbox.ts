@@ -213,10 +213,19 @@ export class SqliteAgentInboxStore implements AgentInboxStore {
         .query(
           `SELECT * FROM agent_thread_inbox
            WHERE project_id = ? AND thread_id = ?
-             AND claimed_by_run_id IS NULL AND mode = 'steer' AND immediate = 0
+             AND mode = 'steer' AND immediate = 0
+             AND author_principal_type = ? AND author_principal_id = ?
+             AND (claimed_by_run_id IS NULL OR claimed_by_run_id <> ? OR claimed_by_token <> ?)
            ORDER BY seq ASC`
         )
-        .all(input.projectId, input.threadId) as AgentInboxRow[]
+        .all(
+          input.projectId,
+          input.threadId,
+          input.authorPrincipal.type,
+          input.authorPrincipal.id,
+          input.runId,
+          input.executionToken
+        ) as AgentInboxRow[]
       if (unclaimed.length === 0) return []
 
       const updatedAt = new Date().toISOString()

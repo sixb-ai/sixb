@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import type { Principal } from "../auth"
+import type { AgentFilePart } from "../agents/message"
+import type { UserPrincipal } from "../auth"
 import {
   AGENT_THREAD_INBOX_MAX_ITEMS,
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
 } from "../storage/agents"
+import type { AuthStorage } from "../storage/auth"
 import type { ExecutionStorage } from "../storage/executions"
 import { createTestAgentExecution } from "./agent-execution"
 
 export interface AgentInboxStorageContractStorage {
   readonly agents: AgentStorage
+  readonly auth: AuthStorage
   readonly executions: ExecutionStorage
 }
 
@@ -22,8 +25,8 @@ export interface AgentInboxStorageContractSuiteOptions<
 }
 
 const projectId = "inbox-contract"
-const alice: Principal = { type: "user", id: "usr_alice" }
-const bob: Principal = { type: "user", id: "usr_bob" }
+const alice: UserPrincipal = { type: "user", id: "usr_alice" }
+const bob: UserPrincipal = { type: "user", id: "usr_bob" }
 const t0 = new Date("2026-11-14T16:00:00.000Z")
 
 async function expectErrorCode(
@@ -52,7 +55,8 @@ export function runAgentInboxStorageContractSuite<
     storage: TStorage,
     threadId: string,
     runId: string,
-    token: string
+    token: string,
+    requestedBy: UserPrincipal = alice
   ) => {
     const triggerId = `msg_trig_${runId}`
     await storage.agents.messages.append({
@@ -62,10 +66,10 @@ export function runAgentInboxStorageContractSuite<
       runId: null,
       role: "user",
       parts: [{ type: "text", text: "Start task" }],
-      authorPrincipal: alice,
+      authorPrincipal: requestedBy,
       createdAt: t0,
     })
-    const executionId = await createTestAgentExecution(storage, { projectId, runId })
+    const executionId = await createTestAgentExecution(storage, { projectId, runId, requestedBy })
     await storage.agents.runs.create({
       id: runId,
       projectId,
@@ -313,6 +317,63 @@ export function runAgentInboxStorageContractSuite<
       })
     })
 
+    test("refuses a steer that carries a file, which a mid-turn read cannot prepare", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_file",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        const filePart: AgentFilePart = {
+          type: "file",
+          fileRef: {
+            blobId: "blob_1",
+            digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            sizeBytes: 12,
+            fileName: "chart.png",
+            mediaType: "image/png",
+          },
+        }
+
+        await expectErrorCode(
+          storage.agents.inbox.enqueue({
+            id: "inb_file_steer",
+            projectId,
+            threadId: "thr_file",
+            messageId: "msg_file_steer",
+            authorPrincipal: alice,
+            mode: "steer",
+            parts: [filePart],
+          }),
+          "invalid_input"
+        )
+
+        // The next turn prepares its attachments, so there it waits as a queued message.
+        const queued = await storage.agents.inbox.enqueue({
+          id: "inb_file_steer",
+          projectId,
+          threadId: "thr_file",
+          messageId: "msg_file_steer",
+          authorPrincipal: alice,
+          mode: "queue",
+          parts: [filePart],
+        })
+        expect(queued.created).toBe(true)
+
+        // Promoting it to a steer is refused too, before a turn could read bytes it cannot replay.
+        await expectErrorCode(
+          storage.agents.inbox.update({
+            projectId,
+            threadId: "thr_file",
+            id: "inb_file_steer",
+            mode: "steer",
+          }),
+          "invalid_input"
+        )
+      })
+    })
+
     test("fences takeSteers, blocks claimed edits, and consumes or releases claims", async () => {
       await withStorage(async (storage) => {
         await storage.agents.threads.create({
@@ -372,6 +433,7 @@ export function runAgentInboxStorageContractSuite<
             runId: "run_1",
             executionToken: "tok_stale",
             stepIndex: 1,
+            authorPrincipal: alice,
           }),
           "execution_lost"
         )
@@ -383,6 +445,7 @@ export function runAgentInboxStorageContractSuite<
           runId: "run_1",
           executionToken: "tok_live",
           stepIndex: 2,
+          authorPrincipal: alice,
           afterAnswer: true,
         })
         expect(taken.map((item) => item.id)).toEqual(["inb_s1", "inb_q1"])
@@ -445,10 +508,138 @@ export function runAgentInboxStorageContractSuite<
           runId: "run_1",
           executionToken: "tok_live",
           stepIndex: 3,
+          authorPrincipal: alice,
         })
         expect(await storage.agents.inbox.releaseClaimed({ projectId, runId: "run_1" })).toBe(1)
         const afterRelease = await storage.agents.inbox.getById({ projectId, id: "inb_q1" })
         expect(afterRelease?.claimedBy).toBeUndefined()
+      })
+    })
+
+    // Guard proof: keep takeSteers to unclaimed rows only; the run's new execution reads nothing,
+    // and the steer stays claimed by the execution it replaced.
+    test("hands a run taken over the steers its replaced execution claimed", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_reclaim",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        await startConversationRun(storage, "thr_reclaim", "run_r", "tok_first")
+        await storage.agents.inbox.enqueue({
+          id: "inb_r1",
+          projectId,
+          threadId: "thr_reclaim",
+          messageId: "msg_r1",
+          authorPrincipal: alice,
+          mode: "steer",
+          parts: [{ type: "text", text: "Use the Q3 numbers" }],
+        })
+        const first = await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_reclaim",
+          runId: "run_r",
+          executionToken: "tok_first",
+          stepIndex: 1,
+          authorPrincipal: alice,
+        })
+        expect(first.map((item) => item.id)).toEqual(["inb_r1"])
+
+        await storage.agents.runs.reclaim({
+          projectId,
+          id: "run_r",
+          execution: { token: "tok_second", queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+        })
+        const second = await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_reclaim",
+          runId: "run_r",
+          executionToken: "tok_second",
+          stepIndex: 1,
+          authorPrincipal: alice,
+        })
+        expect(second.map((item) => item.claimedBy)).toEqual([
+          { runId: "run_r", executionToken: "tok_second", stepIndex: 1 },
+        ])
+
+        // Its own claims are not taken twice.
+        expect(
+          await storage.agents.inbox.takeSteers({
+            projectId,
+            threadId: "thr_reclaim",
+            runId: "run_r",
+            executionToken: "tok_second",
+            stepIndex: 2,
+            authorPrincipal: alice,
+          })
+        ).toEqual([])
+      })
+    })
+
+    // A turn runs as its requester, so a steer reaches only a turn of its author. Guard proof: drop
+    // the author filter from takeSteers; Alice's turn then claims both of Bob's steers.
+    test("claims only the steers its run's requester sent", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_authors",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        const steer = (id: string, author: UserPrincipal) =>
+          storage.agents.inbox.enqueue({
+            id,
+            projectId,
+            threadId: "thr_authors",
+            messageId: `msg_${id}`,
+            authorPrincipal: author,
+            mode: "steer",
+            parts: [{ type: "text", text: `Steer ${id}` }],
+          })
+
+        // Bob's turn reads his steer, then ends without giving it back: its release failed.
+        await startConversationRun(storage, "thr_authors", "run_bob", "tok_bob", bob)
+        await steer("inb_bob_left", bob)
+        await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_authors",
+          runId: "run_bob",
+          executionToken: "tok_bob",
+          stepIndex: 1,
+          authorPrincipal: bob,
+        })
+        await storage.agents.runs.finish({
+          projectId,
+          id: "run_bob",
+          executionToken: "tok_bob",
+          status: "cancelled",
+        })
+
+        // On the idle thread, Bob turns a message into a steer, and Alice steers her own turn.
+        await steer("inb_bob_idle", bob)
+        await steer("inb_alice", alice)
+        await startConversationRun(storage, "thr_authors", "run_alice", "tok_alice", alice)
+
+        const taken = await storage.agents.inbox.takeSteers({
+          projectId,
+          threadId: "thr_authors",
+          runId: "run_alice",
+          executionToken: "tok_alice",
+          stepIndex: 1,
+          authorPrincipal: alice,
+        })
+        expect(taken.map((item) => item.id)).toEqual(["inb_alice"])
+
+        // Bob's wait for a turn of his, where they were.
+        const left = await storage.agents.inbox.list({ projectId, threadId: "thr_authors" })
+        expect(
+          left.map((item) => ({ id: item.id, claimedBy: item.claimedBy?.runId ?? null }))
+        ).toEqual([
+          { id: "inb_bob_left", claimedBy: "run_bob" },
+          { id: "inb_bob_idle", claimedBy: null },
+          { id: "inb_alice", claimedBy: "run_alice" },
+        ])
       })
     })
 

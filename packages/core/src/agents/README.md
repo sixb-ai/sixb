@@ -73,6 +73,8 @@ callTool(call)                         one call of a project tool the run offers
                                        the run and stopped with it, the files it puts stored within
                                        the run's budget and returned for the runner to copy in
 events · heldCalls                     live records (best effort) and the approvals that hold a run
+inbox.takeSteers()                     the thread's mid-run steers its requester sent, claimed by
+                                       this run and step; a conversation's alone, never a child's
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
                                        docs, a turn's delegation models and the bytes per token its

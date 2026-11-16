@@ -240,9 +240,15 @@ export class PgAgentInboxStore implements AgentInboxStore {
           updated_at = ${updatedAt}
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
-          AND claimed_by_run_id IS NULL
+          AND (
+            claimed_by_run_id IS NULL
+            OR claimed_by_run_id <> ${input.runId}
+            OR claimed_by_token <> ${input.executionToken}
+          )
           AND mode = 'steer'
           AND immediate = FALSE
+          AND author_principal_type = ${input.authorPrincipal.type}
+          AND author_principal_id = ${input.authorPrincipal.id}
         RETURNING *
       `
       return rows.map(rowToInboxItem).sort((left, right) => left.seq - right.seq)

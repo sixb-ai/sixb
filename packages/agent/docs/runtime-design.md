@@ -349,6 +349,32 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
 - A decision made while the turn still runs takes effect once it pauses: it then resumes at once,
   and the child continues in the next turn.
 
+## Steering a running turn
+
+A message the reader sends while a turn runs is steered into it: it waits in the thread's inbox
+(`agent_thread_inbox`) and the turn reads it at a step boundary, so the model adjusts before its
+next call. A message that should wait for the next turn is queued instead, and a child is steered by
+its parent with `message_agent` (see [messages to a child](#messages-to-a-child)).
+
+- **Where it waits.** `storage.agents.inbox` holds it, not `agent_messages`: a turn writes the
+  messages it read when it finishes, so the thread's `seq` order stays the order the model read.
+  A message edited or withdrawn before a step claims it never reaches the conversation.
+- **When the turn reads it.** At each step boundary (`turn-inbox.ts`), after the step's tools
+  settled: `prepareStep` claims the unclaimed `steer` items and appends them to that request, and
+  `beforeComplete` claims the ones that came while the model answered, which the loop follows with
+  one more step (`afterAnswer`). The claim records the run, its execution token and the step, so a
+  step that reads twice reads once.
+- **Whose steers it reads.** A turn runs as its requester, so it claims only the steers they sent,
+  whatever was checked when each was sent. Another participant's steer, one a stopped turn left or
+  one made on an idle thread, waits for a turn of its author.
+- **What the model reads.** Each steer is one user message, closed with when it was sent and who
+  wrote it, projected from the item alone: a steer carries text and context, never a file, whose
+  text a later turn would derive from the attachments it prepares.
+- **What the conversation keeps.** The turn's steps are sliced around each delivery, so
+  `agent_messages` holds `[assistant, user, assistant]`, and the next turn's request sends those
+  bytes. `session.finish` consumes the claims it wrote in the same transaction as the messages and
+  the run's end; a steer no step answered is released, and reads as unread in the thread again.
+
 ## Messages to a child
 
 The parent steers a child still at work with `message_agent({ key, text })`. The key, not a run

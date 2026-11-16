@@ -1456,6 +1456,11 @@ export interface TakeAgentInboxSteersInput {
   readonly executionToken: string
   readonly stepIndex: number
   readonly afterAnswer?: boolean
+  /**
+   * The run's requester: a turn runs as them, so it reads only the steers they sent. Another
+   * participant's steer waits for a turn of theirs.
+   */
+  readonly authorPrincipal: Principal
 }
 
 export interface ConsumeClaimedAgentInboxInput {
@@ -1482,7 +1487,11 @@ export interface AgentInboxStore {
   update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
   /** Remove an unclaimed inbox item; throws `invalid_state` when already claimed. */
   remove(input: RemoveAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
-  /** Fenced by `(runId, executionToken)`: claim unclaimed non-immediate steers in FIFO order. */
+  /**
+   * Fenced by `(runId, executionToken)`: claim the non-immediate steers `authorPrincipal` sent, in
+   * FIFO order. The thread's running turn holds it, so a claim any other execution left behind (one
+   * this run replaced, or a turn whose release failed) was never written, and is taken over.
+   */
   takeSteers(input: TakeAgentInboxSteersInput): Promise<readonly AgentInboxItemRecord[]>
   /** Consume persisted claims of `(runId, executionToken)` and release any unwritten ones. */
   consumeClaimed(input: ConsumeClaimedAgentInboxInput): Promise<readonly AgentInboxItemRecord[]>
