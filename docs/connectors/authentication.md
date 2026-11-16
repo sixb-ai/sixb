@@ -134,6 +134,20 @@ const connection = useConnectorConnection({ connectorId: "gmail", owner: "me" })
 The account fills the member's `default` slot. Pass `slot` to let one person connect several
 accounts, such as `work` and `personal`.
 
+Once the account is connected, `sync` says how its
+[syncs](../syncs/overview.md#sync-connected-accounts) last went, across every sync of the
+connector, so the person sees their data arriving:
+
+```tsx
+const { sync } = useConnectorConnection({ connectorId: "gmail", owner: "me" })
+
+sync?.status // "syncing" | "synced" | "failed", undefined before the first sync
+sync?.at // when that run started (syncing) or finished
+```
+
+The hook checks again every few seconds while a sync runs. An account that needs reconnecting
+reports `status: "needs_reauthorization"` on the hook itself.
+
 A personal connection belongs to the member who connected it:
 
 | Who | Can |

@@ -7053,6 +7053,11 @@ export type ListSyncsResponses = {
         truncated?: true
       }
     } | null
+    accounts?: {
+      total: number
+      needsReconnecting: number
+      failing: number
+    }
   }>
 }
 
@@ -7165,10 +7170,166 @@ export type GetSyncResponses = {
         truncated?: true
       }
     } | null
+    accounts?: {
+      total: number
+      needsReconnecting: number
+      failing: number
+    }
   }
 }
 
 export type GetSyncResponse = GetSyncResponses[keyof GetSyncResponses]
+
+export type ListConnectorAccountsData = {
+  body?: never
+  path: {
+    connectorId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/accounts"
+}
+
+export type ListConnectorAccountsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accounts: Array<{
+      connection: {
+        id: string
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
+        slot: string
+        account: {
+          id: string
+          label: string
+        }
+      }
+      latestRuns: Array<{
+        id: string
+        projectId: string
+        syncId: string
+        connectionId?: string
+        datasetId: string
+        mode: "snapshot" | "append" | "merge"
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        queuedAt: string
+        startedAt?: string
+        finishedAt?: string
+        rowsRead?: number
+        output?: {
+          datasetId: string
+          versionId: string
+        }
+        expectedLatestVersionId?: string
+        commitMessage?: string
+        error?: {
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "sync.execution_failed"
+            | "connector.authorization_required"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          httpStatus?: number
+          redacted?: true
+          truncated?: true
+        }
+      }>
+    }>
+  }
+}
+
+export type ListConnectorAccountsResponse =
+  ListConnectorAccountsResponses[keyof ListConnectorAccountsResponses]
+
+export type ListConnectorConnectionSyncRunsData = {
+  body?: never
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}/sync-runs"
+}
+
+export type ListConnectorConnectionSyncRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      syncId: string
+      connectionId?: string
+      datasetId: string
+      mode: "snapshot" | "append" | "merge"
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
+      queuedAt: string
+      startedAt?: string
+      finishedAt?: string
+      rowsRead?: number
+      output?: {
+        datasetId: string
+        versionId: string
+      }
+      expectedLatestVersionId?: string
+      commitMessage?: string
+      error?: {
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
+          | "connector.authorization_required"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        httpStatus?: number
+        redacted?: true
+        truncated?: true
+      }
+    }>
+  }
+}
+
+export type ListConnectorConnectionSyncRunsResponse =
+  ListConnectorConnectionSyncRunsResponses[keyof ListConnectorConnectionSyncRunsResponses]
 
 export type ListSyncRunsData = {
   body?: never

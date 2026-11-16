@@ -1,4 +1,5 @@
-import type { SixbHostView, SyncDefinition } from "@sixb/core"
+import type { SixbHostView, SyncAccount, SyncDefinition } from "@sixb/core"
+import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -7,6 +8,10 @@ import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
+  ConnectionSyncRunsParamsSchema,
+  ConnectionSyncRunsResponseSchema,
+  ConnectorAccountListResponseSchema,
+  ConnectorAccountsParamsSchema,
   RequestSyncRunBodySchema,
   RequestSyncRunResponseSchema,
   SyncParamsSchema,
@@ -68,9 +73,53 @@ async function getLatestSyncRuns(
   return new Map(result.runs.map((run) => [run.syncId, serializeSyncRun(run)]))
 }
 
+function serializeAccount(account: SyncAccount) {
+  const { id, owner, slot, account: candidate } = account.connection
+  return {
+    connection: { id, owner, slot, account: { id: candidate.id, label: candidate.label } },
+    latestRuns: account.latestRuns.map(serializeSyncRun),
+  }
+}
+
+type RequestSixb = ReturnType<typeof requireRequestSixb>
+
+/** Each connector's accounts, read once however many of its syncs a response describes. */
+function connectorAccounts(sixb: RequestSixb) {
+  const byConnector = new Map<string, Promise<readonly SyncAccount[]>>()
+  return (connectorId: string) => {
+    let accounts = byConnector.get(connectorId)
+    if (!accounts) {
+      accounts = sixb.syncs.accounts.list(connectorId)
+      byConnector.set(connectorId, accounts)
+    }
+    return accounts
+  }
+}
+
+/** On a sync of an OAuth connector, how the accounts the caller may see stand in it. */
+async function summarizeAccounts(
+  sync: SyncDefinition,
+  accountsOf: ReturnType<typeof connectorAccounts>
+) {
+  if (!isOAuthConnectorDefinition(sync.connector)) return undefined
+  const accounts = await accountsOf(sync.connector.id)
+  const failed = accounts.flatMap(({ latestRuns }) =>
+    latestRuns.filter((run) => run.syncId === sync.id && run.status === "failed")
+  )
+  const needsReconnecting = failed.filter(
+    (run) => run.error?.code === "connector.authorization_required"
+  ).length
+  return {
+    total: accounts.length,
+    needsReconnecting,
+    failing: failed.length - needsReconnecting,
+  }
+}
+
 function serializeSync(
   sync: SyncDefinition,
-  latestRun: SerializedSyncRun | null
+  latestRun: SerializedSyncRun | null,
+  accounts?: Awaited<ReturnType<typeof summarizeAccounts>>
 ): ReturnType<typeof SyncSchema.parse> {
   return SyncSchema.parse({
     id: sync.id,
@@ -85,6 +134,7 @@ function serializeSync(
     },
     triggers: sync.triggers,
     latestRun,
+    ...(accounts === undefined ? {} : { accounts }),
   })
 }
 
@@ -99,8 +149,17 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           sixb,
           syncs.map((sync) => sync.id)
         )
+        const accountsOf = connectorAccounts(sixb)
 
-        return syncs.map((sync) => serializeSync(sync, latestRuns.get(sync.id) ?? null))
+        return Promise.all(
+          syncs.map(async (sync) =>
+            serializeSync(
+              sync,
+              latestRuns.get(sync.id) ?? null,
+              await summarizeAccounts(sync, accountsOf)
+            )
+          )
+        )
       },
       {
         response: { 200: SyncSchema.array() },
@@ -123,7 +182,11 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Sync not found" }
         }
 
-        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
+        return serializeSync(
+          sync,
+          await getLatestSyncRun(sixb, sync.id),
+          await summarizeAccounts(sync, connectorAccounts(sixb))
+        )
       },
       {
         params: SyncParamsSchema,
@@ -133,6 +196,47 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.syncs.name],
           operationId: "getSync",
           security: accessTokenSecurityRequirement("getSync"),
+        },
+      }
+    )
+    .get(
+      "/api/connectors/:connectorId/accounts",
+      async (context) => {
+        const { params } = context
+        const sixb = requireRequestSixb(context)
+        const accounts = await sixb.syncs.accounts.list(params.connectorId)
+        return { accounts: accounts.map(serializeAccount) }
+      },
+      {
+        params: ConnectorAccountsParamsSchema,
+        response: { 200: ConnectorAccountListResponseSchema },
+        detail: {
+          summary: "List a connector's accounts and how they synced",
+          description:
+            "On an OAuth connector, each connected account you may see, with the latest run of each of its syncs you may run. Empty for a static connector.",
+          tags: [OPENAPI_TAGS.connectorConnections.name],
+          operationId: "listConnectorAccounts",
+          security: accessTokenSecurityRequirement("listConnectorAccounts"),
+        },
+      }
+    )
+    .get(
+      "/api/connectors/:connectorId/connections/:connectionId/sync-runs",
+      async (context) => {
+        const { params } = context
+        const sixb = requireRequestSixb(context)
+        const runs = await sixb.syncs.accounts.latestRuns(params.connectorId, params.connectionId)
+        return { runs: runs.map(serializeSyncRun) }
+      },
+      {
+        params: ConnectionSyncRunsParamsSchema,
+        response: { 200: ConnectionSyncRunsResponseSchema },
+        detail: {
+          summary: "Latest sync runs of a connection",
+          description:
+            "The latest run of each sync of one connection: your own, or anyone's with can.manage on its connector. Empty for a connection you don't see.",
+          tags: [OPENAPI_TAGS.connectorConnections.name],
+          operationId: "listConnectorConnectionSyncRuns",
         },
       }
     )

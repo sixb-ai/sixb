@@ -438,6 +438,10 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
+  ListConnectorAccountsData,
+  ListConnectorAccountsResponses,
+  ListConnectorConnectionSyncRunsData,
+  ListConnectorConnectionSyncRunsResponses,
   ListConnectorConnectionsData,
   ListConnectorConnectionsErrors,
   ListConnectorConnectionsResponses,
@@ -1901,6 +1905,37 @@ export const getSync = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/syncs/{syncId}",
+    ...options,
+  })
+
+/**
+ * List a connector's accounts and how they synced
+ *
+ * On an OAuth connector, each connected account you may see, with the latest run of each of its syncs you may run. Empty for a static connector.
+ */
+export const listConnectorAccounts = <ThrowOnError extends boolean = false>(
+  options: Options<ListConnectorAccountsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListConnectorAccountsResponses, unknown, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/connectors/{connectorId}/accounts",
+    ...options,
+  })
+
+/**
+ * Latest sync runs of a connection
+ *
+ * The latest run of each sync of one connection: your own, or anyone's with can.manage on its connector. Empty for a connection you don't see.
+ */
+export const listConnectorConnectionSyncRuns = <ThrowOnError extends boolean = false>(
+  options: Options<ListConnectorConnectionSyncRunsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListConnectorConnectionSyncRunsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/sync-runs",
     ...options,
   })
 
