@@ -19,7 +19,7 @@ import {
 import { useDictation } from "@sixb/ui/hooks"
 import type { SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   ArrowUp,
@@ -47,6 +47,7 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
+import { type ThreadStateStore, useThreadStateStore } from "../thread-state"
 import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
@@ -123,6 +124,8 @@ export interface ComposerProps {
   readonly hint?: string
   /** A failed send, kept within the same width constraint as the input. */
   readonly error?: string
+  /** Key under which unsent text, attachments, and explicit @ context persist per thread. */
+  readonly draftKey?: string
   /**
    * Text to restore into the input, e.g. after a failed send so the user does not lose it.
    * Applied whenever `draftNonce` changes to a non-zero value, so re-sending the same text works.
@@ -133,10 +136,15 @@ export interface ComposerProps {
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
   /**
+   * The `draftKey` the restored draft belongs to. Another conversation's input leaves it alone:
+   * it waits in its own conversation's stored draft.
+   */
+  readonly draftReseedKey?: string
+  /**
    * What an artifact hands the conversation, such as the comments the reader asks the Agent to
    * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
-   * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
-   * is sent.
+   * one of the same identity, and its words follow the reader's own on a line of their own.
+   * Nothing is sent.
    */
   readonly insertion?: {
     readonly text: string
@@ -200,6 +208,11 @@ type ComposerAttachment =
       readonly sizeBytes: number
     }
 
+interface UnlandedAttachment {
+  readonly draftKey: string | undefined
+  readonly attachment: ComposerAttachment
+}
+
 const MAX_HEIGHT_PX = 200
 const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
@@ -246,10 +259,12 @@ export const Composer = memo(function Composer({
   className,
   hint,
   error,
+  draftKey,
   draft,
   draftAttachments,
   draftContext,
   draftNonce,
+  draftReseedKey,
   insertion,
   onInserted,
   ambientContext = EMPTY_AMBIENT_CONTEXT,
@@ -266,10 +281,15 @@ export const Composer = memo(function Composer({
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
   const unnamedContext = agentMessages.context.unnamed
-  const [value, setValue] = useState("")
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const queryClient = useQueryClient()
+  const threadState = useThreadStateStore(queryClient)
+  const [loadedDraftKey, setLoadedDraftKey] = useState(draftKey)
+  const [value, setValue] = useState(() => readInitialDraftText(threadState, draftKey))
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
+    readInitialDraftAttachments(threadState, draftKey)
+  )
   const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
-    ambientContext.map((context) => ({ context, origin: "ambient" }))
+    readInitialDraftContext(threadState, draftKey, ambientContext)
   )
   const [mention, setMention] = useState<AgentContextMention | null>(null)
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
@@ -290,6 +310,12 @@ export const Composer = memo(function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
+  // Each file that has not landed, still uploading or failed, and the conversation it was attached
+  // in. A stored draft keeps only landed files: these come back with their conversation, and one
+  // landing after the reader left joins that conversation's draft.
+  const unlandedRef = useRef(new Map<string, UnlandedAttachment>())
+  const draftKeyRef = useRef(draftKey)
+  draftKeyRef.current = draftKey
   // The transcript is appended to the text as it was when dictation started, so the input stays
   // read-only until it lands. Recording ends only when the reader stops it: no restarts. A
   // composer disabled meanwhile, by someone else's turn, only keeps a new dictation from starting.
@@ -331,10 +357,32 @@ export const Composer = memo(function Composer({
     }))
   }, [ambientContext, contextSearch.data?.items, mention, unnamedContext])
 
+  if (loadedDraftKey !== draftKey) {
+    setLoadedDraftKey(draftKey)
+    setValue(readInitialDraftText(threadState, draftKey))
+    setAttachments([
+      ...readInitialDraftAttachments(threadState, draftKey),
+      ...unlandedAttachments(unlandedRef.current, draftKey),
+    ])
+    setContextEntries(readInitialDraftContext(threadState, draftKey, ambientContext))
+    setMention(null)
+    setDismissedMention(null)
+    setDismissedCommand(null)
+    setActiveCommand(0)
+  }
+
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
-  const readyAttachments = attachments.flatMap((attachment) =>
-    attachment.status === "ready" ? [attachment.fileRef] : []
-  )
+  const readyAttachments = useMemo(() => readyAttachmentFiles(attachments), [attachments])
+  const explicitContext = useMemo(() => explicitEntries(contextEntries), [contextEntries])
+
+  useEffect(() => {
+    if (!draftKey || loadedDraftKey !== draftKey) return
+    threadState.writeDraft(draftKey, {
+      text: value,
+      attachments: readyAttachments,
+      explicitContext,
+    })
+  }, [threadState, draftKey, loadedDraftKey, value, readyAttachments, explicitContext])
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
@@ -412,10 +460,20 @@ export const Composer = memo(function Composer({
 
   // Reseed the input on demand (a failed send hands the text and already-uploaded attachments back).
   // Keyed on the nonce so restoring the same draft twice still fires; ignored on mount (nonce 0) so
-  // it never clobbers a fresh draft.
+  // it never clobbers a fresh draft. One for another conversation goes to that one's stored draft.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseed only when the nonce changes
   useEffect(() => {
     if (!draftNonce) return
+
+    if (draftReseedKey !== undefined && draftReseedKey !== draftKey) {
+      threadState.writeDraft(draftReseedKey, {
+        text: draft ?? "",
+        attachments: draftAttachments ?? [],
+        explicitContext: explicitEntries(draftContext ?? []),
+      })
+      return
+    }
+
     setValue(draft ?? "")
     setAttachments(
       (draftAttachments ?? []).map((fileRef) => ({
@@ -438,7 +496,7 @@ export const Composer = memo(function Composer({
     textareaRef.current?.focus()
   }, [draftNonce])
 
-  // What an artifact hands the input: its context as a chip, its words in an empty input, the
+  // What an artifact hands the input: its context as a chip, its words after the reader's, the
   // caret after what the input holds.
   // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
   useEffect(() => {
@@ -451,7 +509,7 @@ export const Composer = memo(function Composer({
         { context, origin: "explicit" },
       ])
     }
-    setValue((current) => (current.trim() ? current : text))
+    setValue((current) => withInsertedText(current, text))
     onInserted?.(insertion.nonce)
     requestAnimationFrame(() => {
       const input = textareaRef.current
@@ -460,6 +518,11 @@ export const Composer = memo(function Composer({
       input.setSelectionRange(input.value.length, input.value.length)
     })
   }, [insertion?.nonce])
+
+  // A dictation belongs to the conversation it started in: opening another one ends it, before
+  // its transcript can replace that conversation's draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ends only when the conversation changes
+  useLayoutEffect(() => () => voice.abort(), [draftKey])
 
   // However a dictation ends, the focus returns to the input, the caret after any transcript.
   useEffect(() => {
@@ -552,6 +615,7 @@ export const Composer = memo(function Composer({
   const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
     onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
+    if (draftKey) threadState.clearDraft(draftKey)
     setValue("")
     voice.reset()
     setAttachments([])
@@ -589,37 +653,51 @@ export const Composer = memo(function Composer({
         mediaType: file.type || undefined,
         sizeBytes: file.size,
       }
+      unlandedRef.current.set(id, { draftKey: draftKeyRef.current, attachment: pendingAttachment })
       setAttachments((current) => [...current, pendingAttachment])
+
+      const settle = (settled: ComposerAttachment) => {
+        const unlanded = unlandedRef.current.get(id)
+        // The reader removed it while it uploaded.
+        if (!unlanded) return
+
+        if (settled.status === "ready") unlandedRef.current.delete(id)
+        else unlandedRef.current.set(id, { ...unlanded, attachment: settled })
+
+        if (unlanded.draftKey === draftKeyRef.current) {
+          setAttachments((current) =>
+            current.map((attachment) => (attachment.id === id ? settled : attachment))
+          )
+          return
+        }
+
+        // The reader opened another conversation meanwhile: the file joins the draft of the one
+        // it was attached in.
+        if (unlanded.draftKey && settled.status === "ready") {
+          const stored = threadState.readDraft(unlanded.draftKey)
+          threadState.writeDraft(unlanded.draftKey, {
+            text: stored?.text ?? "",
+            attachments: [...(stored?.attachments ?? []), settled.fileRef],
+            explicitContext: stored?.explicitContext ?? [],
+          })
+        }
+      }
 
       uploadFile
         .mutateAsync({ file, fileName: file.name })
-        .then((fileRef) => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? { id, status: "ready", fileRef: fileRef as AgentFileRef }
-                : attachment
-            )
-          )
-        })
+        .then((fileRef) => settle({ id, status: "ready", fileRef: fileRef as AgentFileRef }))
         // The API explains failures to developers; the composer shows its own message.
-        .catch(() => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? {
-                    id,
-                    status: "error",
-                    fileName: file.name,
-                    mediaType: file.type || undefined,
-                    sizeBytes: file.size,
-                  }
-                : attachment
-            )
-          )
-        })
+        .catch(() =>
+          settle({
+            id,
+            status: "error",
+            fileName: file.name,
+            mediaType: file.type || undefined,
+            sizeBytes: file.size,
+          })
+        )
     },
-    [uploadFile]
+    [uploadFile, threadState]
   )
 
   const handleFilesSelected = useCallback(
@@ -704,6 +782,7 @@ export const Composer = memo(function Composer({
   }, [canAttachFiles, compact, handleFilesSelected])
 
   const removeAttachment = (id: string) => {
+    unlandedRef.current.delete(id)
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
   }
 
@@ -1329,4 +1408,57 @@ function contextLabel(label: string): { readonly label?: string } {
         ? `${trimmed.slice(0, MAX_AGENT_CONTEXT_LABEL_LENGTH - 1).trimEnd()}…`
         : trimmed,
   }
+}
+
+/** A draft restored with its conversation keeps its words; the handed ones come after them, once. */
+function withInsertedText(current: string, text: string): string {
+  if (!current.trim()) return text
+  if (!text || current.includes(text)) return current
+  return `${current.trimEnd()}\n${text}`
+}
+
+function readInitialDraftText(store: ThreadStateStore, draftKey: string | undefined): string {
+  return draftKey ? (store.readDraft(draftKey)?.text ?? "") : ""
+}
+
+function readInitialDraftAttachments(
+  store: ThreadStateStore,
+  draftKey: string | undefined
+): ComposerAttachment[] {
+  if (!draftKey) return []
+  return (store.readDraft(draftKey)?.attachments ?? []).map((fileRef) => ({
+    id: attachmentId(),
+    status: "ready",
+    fileRef,
+  }))
+}
+
+function unlandedAttachments(
+  unlanded: ReadonlyMap<string, UnlandedAttachment>,
+  draftKey: string | undefined
+): ComposerAttachment[] {
+  return [...unlanded.values()].flatMap((entry) =>
+    entry.draftKey === draftKey ? [entry.attachment] : []
+  )
+}
+
+function readInitialDraftContext(
+  store: ThreadStateStore,
+  draftKey: string | undefined,
+  ambientContext: readonly AgentContextInput[]
+): AgentContextEntryInput[] {
+  const explicit = draftKey ? (store.readDraft(draftKey)?.explicitContext ?? []) : []
+  const explicitIds = new Set(explicit.map((entry) => agentContextIdentity(entry.context)))
+  const ambient = ambientContext
+    .filter((context) => !explicitIds.has(agentContextIdentity(context)))
+    .map((context) => ({ context, origin: "ambient" as const }))
+  return [...ambient, ...explicit]
+}
+
+function readyAttachmentFiles(attachments: readonly ComposerAttachment[]): AgentFileRef[] {
+  return attachments.flatMap((item) => (item.status === "ready" ? [item.fileRef] : []))
+}
+
+function explicitEntries(entries: readonly AgentContextEntryInput[]): AgentContextEntryInput[] {
+  return entries.filter((entry) => entry.origin === "explicit")
 }

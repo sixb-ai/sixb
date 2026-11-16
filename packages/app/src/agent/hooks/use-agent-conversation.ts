@@ -168,10 +168,12 @@ export type ConversationComposerProps = Pick<
   | "usingDefaultModel"
   | "onResetModelSelection"
   | "modelRouting"
+  | "draftKey"
   | "draft"
   | "draftAttachments"
   | "draftContext"
   | "draftNonce"
+  | "draftReseedKey"
   | "insertion"
   | "onInserted"
   | "approvalMode"
@@ -398,7 +400,9 @@ export function useAgentConversation({
     attachments: readonly AgentFileRef[]
     context: readonly AgentContextEntryInput[]
     nonce: number
-  }>({ text: "", attachments: [], context: [], nonce: 0 })
+    /** The conversation the message was for, whichever one is open when it comes back. */
+    draftKey: string
+  }>({ text: "", attachments: [], context: [], nonce: 0, draftKey: "draft" })
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
   const stopRef = useRef<(approval: AgentApproval) => Promise<void>>(async () => {})
   const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {
@@ -620,7 +624,13 @@ export function useAgentConversation({
       }
       if (!place) {
         // They cancelled choosing a folder: nothing was sent, and their message goes back.
-        setDraftReseed((current) => ({ text, attachments, context, nonce: current.nonce + 1 }))
+        setDraftReseed((current) => ({
+          text,
+          attachments,
+          context,
+          nonce: current.nonce + 1,
+          draftKey: "draft",
+        }))
         return
       }
       const title = deriveTitle(text, attachments)
@@ -666,6 +676,7 @@ export function useAgentConversation({
         attachments,
         context,
         nonce: current.nonce + 1,
+        draftKey: createdThreadId ?? targetThreadId ?? "draft",
       }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
@@ -1341,10 +1352,12 @@ export function useAgentConversation({
       usingDefaultModel,
       onResetModelSelection: stableResetModelSelection,
       modelRouting,
+      draftKey: threadId ?? "draft",
       draft: draftReseed.text,
       draftAttachments: draftReseed.attachments,
       draftContext: draftReseed.context,
       draftNonce: draftReseed.nonce,
+      draftReseedKey: draftReseed.draftKey,
       approvalMode,
       onApprovalModeChange: stableSetApprovalMode,
       awaitingApproval,
@@ -1374,6 +1387,7 @@ export function useAgentConversation({
       usingDefaultModel,
       stableResetModelSelection,
       modelRouting,
+      threadId,
       draftReseed,
       approvalMode,
       stableSetApprovalMode,

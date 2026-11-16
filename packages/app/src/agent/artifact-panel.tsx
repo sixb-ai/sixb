@@ -41,6 +41,7 @@ import {
   writeArtifactPanelWidth,
 } from "./artifact-panel-state"
 import { useAgentMessages } from "./i18n"
+import { useThreadStateStore } from "./thread-state"
 
 /**
  * A place in the panel a part of the conversation fills itself, such as a sub-agent's thread: the
@@ -100,7 +101,10 @@ export interface ArtifactPanelRootProps {
   /** The conversation; a different one starts with nothing open. */
   readonly scopeKey: string
   readonly routeTarget?: ArtifactTarget | null
-  readonly onRouteTargetChange?: (target: ArtifactTarget | null) => void
+  readonly onRouteTargetChange?: (
+    target: ArtifactTarget | null,
+    options?: { readonly replace?: boolean }
+  ) => void
   /** Offer each artifact's own page, to open or to copy a link to. Off for an observer. */
   readonly pageLinks?: boolean
   /**
@@ -128,38 +132,85 @@ export function ArtifactPanelRoot({
 }: ArtifactPanelRootProps) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
-  const [localTarget, setLocalTarget] = useState<PanelTarget | null>(null)
-  const target: PanelTarget | null = routeTarget ?? localTarget
-  // What the reader followed a reference from, so the panel can take them back.
-  const [trail, setTrail] = useState<readonly PanelTarget[]>([])
-  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null)
+  const store = useThreadStateStore()
+  const storeRef = useRef(store)
+  storeRef.current = store
   const presentation = artifactPanelPresentation({
     compact,
     isMobile: useIsMobile(),
     hasCanvas: Boolean(overlayHost),
     split,
   })
+  // Restore side-by-side panels and dock canvases automatically; never auto-pop a blocking modal.
+  const canAutoRestore = presentation !== "dialog"
+  const [localTarget, setLocalTarget] = useState<PanelTarget | null>(() =>
+    routeTarget || !canAutoRestore ? null : store.readPanelTarget(scopeKey)
+  )
+  const target: PanelTarget | null = routeTarget ?? localTarget
+  // What the reader followed a reference from, so the panel can take them back.
+  const [trail, setTrail] = useState<readonly PanelTarget[]>([])
+  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null)
   const [revealCount, reveal] = useReducer((count: number) => count + 1, 0)
   const openerRef = useRef<HTMLElement | null>(null)
   const scopeRef = useRef(scopeKey)
-
-  useLayoutEffect(() => {
-    if (scopeRef.current === scopeKey) return
-    scopeRef.current = scopeKey
-    setLocalTarget(null)
-    setTrail([])
-    openerRef.current = null
-  }, [scopeKey])
+  const prevRouteKeyRef = useRef<string | null>(routeTarget ? viewerTargetKey(routeTarget) : null)
+  const localTargetRef = useRef(localTarget)
+  localTargetRef.current = localTarget
 
   const routeRef = useRef({ routeTarget, onRouteTargetChange })
   routeRef.current = { routeTarget, onRouteTargetChange }
 
+  useLayoutEffect(() => {
+    const scopeChanged = scopeRef.current !== scopeKey
+    const nextRouteKey = routeTarget ? viewerTargetKey(routeTarget) : null
+    const prevRouteKey = prevRouteKeyRef.current
+    scopeRef.current = scopeKey
+    prevRouteKeyRef.current = nextRouteKey
+
+    if (scopeChanged) {
+      setTrail([])
+      openerRef.current = null
+      if (routeTarget) {
+        setLocalTarget(null)
+        storeRef.current.writePanelTarget(scopeKey, routeTarget)
+      } else if (canAutoRestore) {
+        const restored = storeRef.current.readPanelTarget(scopeKey)
+        setLocalTarget(restored)
+        if (restored?.type === "artifact" && routeRef.current.onRouteTargetChange) {
+          routeRef.current.onRouteTargetChange(restored, { replace: true })
+        }
+      } else {
+        setLocalTarget(null)
+      }
+      return
+    }
+
+    if (routeTarget) {
+      setLocalTarget(null)
+      storeRef.current.writePanelTarget(scopeKey, routeTarget)
+    } else if (prevRouteKey !== null && localTargetRef.current === null) {
+      storeRef.current.writePanelTarget(scopeKey, null)
+    }
+  }, [scopeKey, routeTarget, canAutoRestore])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sync restored artifact once on mount
+  useEffect(() => {
+    const changeRoute = routeRef.current.onRouteTargetChange
+    if (!routeTarget && localTarget?.type === "artifact" && changeRoute) {
+      changeRoute(localTarget, { replace: true })
+    }
+  }, [])
+
   const show = useCallback((next: PanelTarget) => {
+    // A slot does not come back with its conversation, and neither does what it replaced.
+    storeRef.current.writePanelTarget(scopeRef.current, next.type === "slot" ? null : next)
     const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
     if (changeRoute && next.type === "artifact") {
+      localTargetRef.current = null
       setLocalTarget(null)
       changeRoute(next)
     } else {
+      localTargetRef.current = next
       setLocalTarget(next)
       if (changeRoute && currentRoute) changeRoute(null)
     }
@@ -178,7 +229,9 @@ export function ArtifactPanelRoot({
     [show]
   )
   const close = useCallback(() => {
+    storeRef.current.writePanelTarget(scopeRef.current, null)
     const { routeTarget: currentRoute, onRouteTargetChange: changeRoute } = routeRef.current
+    localTargetRef.current = null
     setLocalTarget(null)
     setTrail([])
     if (changeRoute && currentRoute) changeRoute(null)
