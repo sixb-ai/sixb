@@ -4891,6 +4891,242 @@ export type GetDefinitionsManifestResponses = {
 export type GetDefinitionsManifestResponse =
   GetDefinitionsManifestResponses[keyof GetDefinitionsManifestResponses]
 
+export type ListBranchesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/branches"
+}
+
+export type ListBranchesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type ListBranchesError = ListBranchesErrors[keyof ListBranchesErrors]
+
+export type ListBranchesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    branches: Array<{
+      name: string
+      wanted: "running" | "stopped"
+      state: "stopped" | "starting" | "ready" | "failed"
+      generation: number | null
+      commit: string | null
+      manifest: string | null
+      error: {
+        message: string
+        file?: string
+      } | null
+      createdBy: string | null
+      createdAt: string
+      updatedAt: string
+      lastSeenAt: string
+    }>
+  }
+}
+
+export type ListBranchesResponse = ListBranchesResponses[keyof ListBranchesResponses]
+
+export type OpenBranchData = {
+  body: {
+    name: string
+  }
+  path?: never
+  query?: never
+  url: "/api/branches"
+}
+
+export type OpenBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type OpenBranchError = OpenBranchErrors[keyof OpenBranchErrors]
+
+export type OpenBranchResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    name: string
+    wanted: "running" | "stopped"
+    state: "stopped" | "starting" | "ready" | "failed"
+    generation: number | null
+    commit: string | null
+    manifest: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    createdBy: string | null
+    createdAt: string
+    updatedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type OpenBranchResponse = OpenBranchResponses[keyof OpenBranchResponses]
+
+export type GetBranchData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/api/branches/{name}"
+}
+
+export type GetBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type GetBranchError = GetBranchErrors[keyof GetBranchErrors]
+
+export type GetBranchResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    name: string
+    wanted: "running" | "stopped"
+    state: "stopped" | "starting" | "ready" | "failed"
+    generation: number | null
+    commit: string | null
+    manifest: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    createdBy: string | null
+    createdAt: string
+    updatedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type GetBranchResponse = GetBranchResponses[keyof GetBranchResponses]
+
+export type StopBranchData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/api/branches/{name}/stop"
+}
+
+export type StopBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type StopBranchError = StopBranchErrors[keyof StopBranchErrors]
+
+export type StopBranchResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    name: string
+    wanted: "running" | "stopped"
+    state: "stopped" | "starting" | "ready" | "failed"
+    generation: number | null
+    commit: string | null
+    manifest: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    createdBy: string | null
+    createdAt: string
+    updatedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type StopBranchResponse = StopBranchResponses[keyof StopBranchResponses]
+
 export type GetStatusData = {
   body?: never
   path?: never

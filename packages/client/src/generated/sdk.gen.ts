@@ -225,6 +225,9 @@ import type {
   GetAuthProfileResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
+  GetBranchData,
+  GetBranchErrors,
+  GetBranchResponses,
   GetBulkTelemetryHistoryData,
   GetBulkTelemetryHistoryErrors,
   GetBulkTelemetryHistoryResponses,
@@ -438,6 +441,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
+  ListBranchesData,
+  ListBranchesErrors,
+  ListBranchesResponses,
   ListConnectorConnectionsData,
   ListConnectorConnectionsErrors,
   ListConnectorConnectionsResponses,
@@ -520,6 +526,9 @@ import type {
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerErrors,
   MoveAgentThreadToComputerResponses,
+  OpenBranchData,
+  OpenBranchErrors,
+  OpenBranchResponses,
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
@@ -628,6 +637,9 @@ import type {
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandErrors,
   StopAgentBackgroundCommandResponses,
+  StopBranchData,
+  StopBranchErrors,
+  StopBranchResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -1561,6 +1573,80 @@ export const getDefinitionsManifest = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/definitions",
+    ...options,
+  })
+
+/**
+ * List the project's branches
+ *
+ * Every branch with a runtime of its own, and where that runtime is.
+ */
+export const listBranches = <ThrowOnError extends boolean = false>(
+  options?: Options<ListBranchesData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListBranchesResponses, ListBranchesErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches",
+    ...options,
+  })
+
+/**
+ * Open a branch
+ *
+ * Wants the branch's runtime running, adding the branch when it's new. A worker starts it in a sandbox of its own, checked out on the branch; it stops after twenty minutes without a visit.
+ */
+export const openBranch = <ThrowOnError extends boolean = false>(
+  options: Options<OpenBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<OpenBranchResponses, OpenBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get a branch
+ *
+ * A branch name with `/` in it is sent encoded, as `feature%2Finvoices`.
+ */
+export const getBranch = <ThrowOnError extends boolean = false>(
+  options: Options<GetBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetBranchResponses, GetBranchErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/{name}",
+    ...options,
+  })
+
+/**
+ * Stop a branch
+ *
+ * Stops its runtime. Its sandbox keeps what it held for the next open.
+ */
+export const stopBranch = <ThrowOnError extends boolean = false>(
+  options: Options<StopBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<StopBranchResponses, StopBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/{name}/stop",
     ...options,
   })
 

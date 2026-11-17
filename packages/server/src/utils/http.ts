@@ -37,7 +37,7 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "ai.usage_limit_unavailable": 429,
 }
 
-interface RouteResponseSet {
+export interface RouteResponseSet {
   status?: number | string
   headers?: unknown
 }

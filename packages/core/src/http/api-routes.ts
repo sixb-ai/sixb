@@ -57,6 +57,36 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // A project's branches, for whoever may manage its source. What a branch's runtime serves is
+  // forwarded under /branches/:name, for signed-in browsers: the Console.
+  {
+    operationId: "listBranches",
+    method: "GET",
+    path: "/api/branches",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "openBranch",
+    method: "POST",
+    path: "/api/branches",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getBranch",
+    method: "GET",
+    path: "/api/branches/:name",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "stopBranch",
+    method: "POST",
+    path: "/api/branches/:name/stop",
+    accessToken: true,
+    agentApi: false,
+  },
   // Token and service-account management is bearer-capable so the CLI can authenticate with a
   // personal access token. It is NOT exposed to agents. The runtime still confines every operation
   // to the caller's own groups, and service-account tokens are rejected (only user principals may

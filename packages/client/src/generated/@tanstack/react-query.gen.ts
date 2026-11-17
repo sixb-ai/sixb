@@ -83,6 +83,7 @@ import {
   getAuthMembershipOptions,
   getAuthProfile,
   getAuthSession,
+  getBranch,
   getBulkTelemetryHistory,
   getConnector,
   getConnectorConnectionRun,
@@ -147,6 +148,7 @@ import {
   listAuthServiceAccountAccessTokens,
   listAuthServiceAccounts,
   listAuthSessions,
+  listBranches,
   listConnectorConnections,
   listConnectors,
   listDatasetRows,
@@ -178,6 +180,7 @@ import {
   moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   type Options,
+  openBranch,
   postAgentThreadMessage,
   printArtifactPdf,
   queryObjectLinks,
@@ -214,6 +217,7 @@ import {
   signOutSharedAccess,
   startConnectorConnectionRun,
   stopAgentBackgroundCommand,
+  stopBranch,
   submitWorkflowIntervention,
   suspendAuthMember,
   transcribeAudio,
@@ -445,6 +449,9 @@ import type {
   GetAuthProfileResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
+  GetBranchData,
+  GetBranchError,
+  GetBranchResponse,
   GetBulkTelemetryHistoryData,
   GetBulkTelemetryHistoryError,
   GetBulkTelemetryHistoryResponse,
@@ -634,6 +641,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsError,
   ListAuthSessionsResponse,
+  ListBranchesData,
+  ListBranchesError,
+  ListBranchesResponse,
   ListConnectorConnectionsData,
   ListConnectorConnectionsError,
   ListConnectorConnectionsResponse,
@@ -716,6 +726,9 @@ import type {
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerError,
   MoveAgentThreadToComputerResponse,
+  OpenBranchData,
+  OpenBranchError,
+  OpenBranchResponse,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
@@ -822,6 +835,9 @@ import type {
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandError,
   StopAgentBackgroundCommandResponse,
+  StopBranchData,
+  StopBranchError,
+  StopBranchResponse,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
@@ -2296,6 +2312,110 @@ export const getDefinitionsManifestOptions = (options?: Options<GetDefinitionsMa
     },
     queryKey: getDefinitionsManifestQueryKey(options),
   })
+
+export const listBranchesQueryKey = (options?: Options<ListBranchesData>) =>
+  createQueryKey("listBranches", options)
+
+/**
+ * List the project's branches
+ *
+ * Every branch with a runtime of its own, and where that runtime is.
+ */
+export const listBranchesOptions = (options?: Options<ListBranchesData>) =>
+  queryOptions<
+    ListBranchesResponse,
+    ListBranchesError,
+    ListBranchesResponse,
+    ReturnType<typeof listBranchesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listBranches({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listBranchesQueryKey(options),
+  })
+
+/**
+ * Open a branch
+ *
+ * Wants the branch's runtime running, adding the branch when it's new. A worker starts it in a sandbox of its own, checked out on the branch; it stops after twenty minutes without a visit.
+ */
+export const openBranchMutation = (
+  options?: Partial<Options<OpenBranchData>>
+): UseMutationOptions<OpenBranchResponse, OpenBranchError, Options<OpenBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    OpenBranchResponse,
+    OpenBranchError,
+    Options<OpenBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await openBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getBranchQueryKey = (options: Options<GetBranchData>) =>
+  createQueryKey("getBranch", options)
+
+/**
+ * Get a branch
+ *
+ * A branch name with `/` in it is sent encoded, as `feature%2Finvoices`.
+ */
+export const getBranchOptions = (options: Options<GetBranchData>) =>
+  queryOptions<
+    GetBranchResponse,
+    GetBranchError,
+    GetBranchResponse,
+    ReturnType<typeof getBranchQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getBranch({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getBranchQueryKey(options),
+  })
+
+/**
+ * Stop a branch
+ *
+ * Stops its runtime. Its sandbox keeps what it held for the next open.
+ */
+export const stopBranchMutation = (
+  options?: Partial<Options<StopBranchData>>
+): UseMutationOptions<StopBranchResponse, StopBranchError, Options<StopBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    StopBranchResponse,
+    StopBranchError,
+    Options<StopBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await stopBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getStatusQueryKey = (options?: Options<GetStatusData>) =>
   createQueryKey("getStatus", options)
