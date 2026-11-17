@@ -64,6 +64,20 @@ export interface ObjectQueryValidationOptions {
   normalize?: boolean
   /** Name the types each traversal and expansion can reach, for a provider. See `ObjectQueryTraverse`. */
   resolveLinkEndpoints?: boolean
+  /**
+   * What the caller discovers of the ontology. An unknown-property issue lists the properties it
+   * shows on the type, so a guessed name is fixed on the next try. Without it the issue lists none:
+   * validation reads the complete registry, which holds types the caller may not view.
+   */
+  discovery?: ObjectQueryDiscovery
+}
+
+/**
+ * The ontology a caller discovers, as an unknown-property issue reads it: a reader's authorized
+ * view, or the registry itself for a caller that sees all of it.
+ */
+export interface ObjectQueryDiscovery {
+  getObjectTypeById(objectTypeId: string): { readonly properties: readonly { id: string }[] } | null
 }
 
 /** Opaque semantic state carried by the canonical query validator for an internal admission. */
@@ -138,6 +152,7 @@ type QueryValidationContext = Required<
   >
 > & {
   ontology: OntologyRegistry
+  discovery: ObjectQueryDiscovery | undefined
   valueTypesById: ReadonlyMap<string, ValueType>
   issues: ObjectQueryValidationIssue[]
   touchedObjectTypeIds: Set<string>
@@ -310,6 +325,7 @@ function createValidationContext(
 ): QueryValidationContext {
   return {
     ontology: options.ontology,
+    discovery: options.discovery,
     valueTypesById: options.ontology.getValueTypesById(),
     maxLimit: options.maxLimit ?? DEFAULT_MAX_LIMIT,
     maxPageSize: options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE,
@@ -1979,7 +1995,7 @@ function getPropertiesForResult(
         ctx,
         path,
         "unknown_property",
-        `Property '${propertyId}' does not exist on object type '${objectType.id}'${knownProperties(objectType)}`
+        `Property '${propertyId}' does not exist on object type '${objectType.id}'${knownProperties(objectType.id, ctx)}`
       )
       continue
     }
@@ -1993,13 +2009,11 @@ function getPropertiesForResult(
 const KNOWN_PROPERTIES_LISTED = 25
 
 /**
- * The properties the caller may have meant, so a guessed name is fixed on the next try. Marked
- * properties stay unnamed: a caller without clearance learns nothing of them here.
+ * The properties the caller may have meant, as its discovery shows them: none on a type it does
+ * not view, and only those a share selects.
  */
-function knownProperties(objectType: ObjectType): string {
-  const ids = objectType.properties
-    .filter((property) => !property.markings?.length)
-    .map((property) => property.id)
+function knownProperties(objectTypeId: string, ctx: QueryValidationContext): string {
+  const ids = ctx.discovery?.getObjectTypeById(objectTypeId)?.properties.map(({ id }) => id) ?? []
   if (ids.length === 0) return ""
   const listed = ids.slice(0, KNOWN_PROPERTIES_LISTED).join(", ")
   const more =

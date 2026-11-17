@@ -44,6 +44,7 @@ import { sortTieDirection } from "./sort-ties"
 import { withoutUserExpansions } from "./user-expansions"
 import {
   type AdmittedObjectQuery,
+  type ObjectQueryDiscovery,
   type ObjectQuerySemanticAdmission,
   type ObjectQueryValidationIssue,
   resolveObjectQueryResultShape,
@@ -88,6 +89,8 @@ export interface QueryExecutorOptions
   readableObjectTypes?: ReadableObjectTypes
   /** Reader-specific admission applied after grants, such as marking clearances. */
   admission?: ObjectQuerySemanticAdmission
+  /** What the reader discovers of the ontology, which an unknown-property issue lists from. */
+  discovery?: ObjectQueryDiscovery
   /** The user `currentUser()` stands for; absent when the reader is not a user. */
   requestingUser?: UserRef
 }
@@ -450,6 +453,7 @@ function validateExecutableQuery(
     maxRefs: options.maxRefs,
     normalize: false,
     resolveLinkEndpoints: true,
+    discovery: options.discovery,
   }
   const normalized = normalizeObjectQuery(input.query)
   const validated = validateObjectQuery(normalized, validationOptions)

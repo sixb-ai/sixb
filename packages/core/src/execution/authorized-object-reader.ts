@@ -37,6 +37,7 @@ import { userExpansionPlan } from "../objects/query/user-expansions"
 import {
   type AdmittedObjectQuery,
   composeObjectQueryAdmissions,
+  type ObjectQueryDiscovery,
   type ObjectQuerySemanticAdmission,
   validateObjectQuery,
   validateObjectQueryWithAdmission,
@@ -193,6 +194,10 @@ class AuthorizedObjectReaderImpl {
 
   static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
     return reader.#ontology.view()
+  }
+
+  static queryDiscovery(reader: AuthorizedObjectReaderImpl): ObjectQueryDiscovery {
+    return reader.#ontology.discovery
   }
 
   /** Project identity carried by this nominal reader capability. */
@@ -445,11 +450,15 @@ class AuthorizedObjectReaderImpl {
     if (admission) {
       const preflight = preflightObjectQueryLinks(
         { query, ...request, projectId: this.#security.runtime.projectId },
-        { ontology: this.#ontology.registry }
+        { ontology: this.#ontology.registry, discovery: this.#ontology.discovery }
       )
       const admitted = validateObjectQueryWithAdmission(
         preflight.validated.query,
-        { ontology: this.#ontology.registry, normalize: false },
+        {
+          ontology: this.#ontology.registry,
+          discovery: this.#ontology.discovery,
+          normalize: false,
+        },
         admission
       )
       admission.assertIncidentEdgeSelected({
@@ -465,6 +474,7 @@ class AuthorizedObjectReaderImpl {
     if (clearance) {
       assertLinkQueryReadable({
         ontology: this.#ontology.registry,
+        discovery: this.#ontology.discovery,
         clearance,
         query,
         request: { ...request, projectId: this.#security.runtime.projectId },
@@ -537,13 +547,20 @@ class AuthorizedObjectReaderImpl {
     if (admission) {
       // Terminal arguments are ordinary validation errors, not an authorization oracle. Validate
       // them against the canonical result shape before raising any delegated-scope denial.
-      const validated = validateObjectQuery(query, { ontology: this.#ontology.registry })
+      const validated = validateObjectQuery(query, {
+        ontology: this.#ontology.registry,
+        discovery: this.#ontology.discovery,
+      })
       const normalizedFacets = validateObjectFacetRequests(facets, validated.result.objectTypeIds, {
         ontology: this.#ontology.registry,
       })
       const admitted = validateObjectQueryWithAdmission(
         validated.query,
-        { ontology: this.#ontology.registry, normalize: false },
+        {
+          ontology: this.#ontology.registry,
+          discovery: this.#ontology.discovery,
+          normalize: false,
+        },
         admission
       )
       normalizedFacets.forEach((facet, index) => {
@@ -657,6 +674,7 @@ class AuthorizedObjectReaderImpl {
       // forgeable bypass flag; neither is needed at this nominal boundary.
       return {
         ontology: this.#ontology.registry,
+        discovery: this.#ontology.discovery,
         storage: this.#storage,
         embeddingModels: this.#models.embedding,
         rerankingModels: this.#models.reranking,
@@ -666,6 +684,7 @@ class AuthorizedObjectReaderImpl {
     }
     return {
       ontology: this.#ontology.registry,
+      discovery: this.#ontology.discovery,
       embeddingModels: this.#models.embedding,
       rerankingModels: this.#models.reranking,
       storage: this.#storage,
@@ -775,7 +794,11 @@ class AuthorizedObjectReaderImpl {
   #admitDelegatedQuery(query: ObjectQuery): AdmittedObjectQuery | undefined {
     const admission = this.#security.delegation?.queryAdmission
     if (!admission) return undefined
-    return validateObjectQueryWithAdmission(query, { ontology: this.#ontology.registry }, admission)
+    return validateObjectQueryWithAdmission(
+      query,
+      { ontology: this.#ontology.registry, discovery: this.#ontology.discovery },
+      admission
+    )
   }
 
   #resolveListObjectTypes(
@@ -866,6 +889,11 @@ export function objectReadersIn(
 /** Return inert metadata projected from the exact authority already owned by the reader. */
 export function getAuthorizedOntologyView(reader: AuthorizedObjectReader): AuthorizedOntologyView {
   return AuthorizedObjectReaderImpl.ontologyView(reader)
+}
+
+/** The reader's view as query validation reads it, built only when an issue reads it. */
+export function getQueryDiscovery(reader: AuthorizedObjectReader): ObjectQueryDiscovery {
+  return AuthorizedObjectReaderImpl.queryDiscovery(reader)
 }
 
 /**

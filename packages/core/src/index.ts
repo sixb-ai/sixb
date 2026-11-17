@@ -646,6 +646,7 @@ export type {
   ObjectExpansion,
   ObjectQuery,
   ObjectQueryDirection,
+  ObjectQueryDiscovery,
   ObjectQueryExpand,
   ObjectQueryFilter,
   ObjectQueryLimit,

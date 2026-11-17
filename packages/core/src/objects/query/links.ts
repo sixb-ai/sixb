@@ -61,7 +61,10 @@ const LINK_PAGE_TOKEN_PREFIX = "link:v1:"
  */
 export function preflightObjectQueryLinks(
   input: ExecuteObjectQueryLinksInput,
-  options: Pick<QueryExecutorOptions, "ontology" | "maxLimit" | "maxPageSize" | "maxRefs">
+  options: Pick<
+    QueryExecutorOptions,
+    "ontology" | "maxLimit" | "maxPageSize" | "maxRefs" | "discovery"
+  >
 ): PreflightObjectQueryLinksResult {
   // Capture caller-owned scalar fields once so validation, token scoping, and execution agree on
   // one request even when this internal API is reached without an AuthorizedObjectReader snapshot.
@@ -110,6 +113,7 @@ export function preflightObjectQueryLinks(
     maxPageSize: options.maxPageSize,
     maxRefs: options.maxRefs,
     normalize: false,
+    discovery: options.discovery,
   })
   assertLinkSelectorShape(validated.query)
   const pageScope = linkPageScope(projectId, validated.query, direction, linkId)
