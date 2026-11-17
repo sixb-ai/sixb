@@ -34,6 +34,8 @@ export async function runDev(options: DevOptions = {}) {
     }
     process.exit(process.exitCode ?? 0)
   }
-  await assertDevEnv(dirname(resolve(options.entry ?? "sixb.config.ts")))
+  await assertDevEnv(dirname(resolve(options.entry ?? "sixb.config.ts")), {
+    pullWithoutAsking: options.branch !== undefined,
+  })
   await runDevSupervisor(options)
 }

@@ -334,6 +334,23 @@ describe("sixb dev", () => {
     expect(String(result.error)).toContain("Missing SIXB_ENV_TEST_DEV,")
     expect(errorRemediation(result.error)).toContain("sixb env pull")
   })
+
+  test("a branch's runtime pulls what's missing without asking", async () => {
+    const dir = await project(
+      { dev: { SIXB_ENV_TEST_BRANCH: "from-dev" } },
+      { SIXB_ENV_TEST_BRANCH: "required" }
+    )
+
+    let seen: string | undefined
+    const result = await runInProcess(async () => {
+      process.env.CI = "1"
+      await assertDevEnv(dir, { pullWithoutAsking: true })
+      seen = process.env.SIXB_ENV_TEST_BRANCH
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(seen).toBe("from-dev")
+  })
 })
 
 describe("sixb env set", () => {

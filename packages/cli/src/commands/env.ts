@@ -165,12 +165,23 @@ async function readToken(path: string): Promise<string> {
 // ─── dev ─────────────────────────────────────────────────────────────────────
 
 /** Before `sixb dev`: stops on a missing variable, offering to pull when there's a source. */
-export async function assertDevEnv(cwd: string): Promise<void> {
+/**
+ * Asks to pull what's missing from dev, in a terminal. A branch's runtime has nobody to ask: it
+ * pulls, with whatever access its sandbox adds to the source's requests.
+ */
+export async function assertDevEnv(
+  cwd: string,
+  options: { readonly pullWithoutAsking?: boolean } = {}
+): Promise<void> {
   const config = await loadEnvConfig(cwd)
   if (!config) return
 
   const missing = missingEnvVars(config, process.env, "dev")
   if (missing.length === 0) return
+  if (config.source && options.pullWithoutAsking) {
+    await pullIntoThisProcess(cwd, config, config.source)
+    return
+  }
   if (!config.source || !canRunLive()) throw missingEnvError(config, missing)
 
   process.stderr.write(`\n${missingEnvSentence(missing)}\n`)
