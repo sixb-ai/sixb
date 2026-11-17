@@ -221,6 +221,17 @@ describe("deploy release", () => {
     expect(service(overridden, "workers").process.killTimeoutMs).toBe(5_000)
   })
 
+  test("tells every service the commit it runs, which the config's env cannot override", () => {
+    const built = buildDeployRelease(
+      { name: "northline", domain: "example.com", target, env: { SIXB_COMMIT: "stale" } },
+      { bunVersion: "1.4.2", commit: "a41f9c2" }
+    )
+
+    expect(built.env.SIXB_COMMIT).toBe("a41f9c2")
+    expect(service(built, "api").env.SIXB_COMMIT).toBe("a41f9c2")
+    expect(release().env.SIXB_COMMIT).toBeUndefined()
+  })
+
   test("gives every service the public origins, then its own environment", () => {
     const built = release({
       env: { SIXB_ERROR_EMAIL_TO: "ops@example.com" },

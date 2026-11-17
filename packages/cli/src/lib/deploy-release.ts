@@ -75,6 +75,8 @@ export interface DeployReleaseOptions {
   readonly bunVersion: string
   /** Whether a deploy writes the target's `.env` from the project's source. */
   readonly envFromSource?: boolean
+  /** The commit being deployed, which the runtime reports in its definitions manifest. */
+  readonly commit?: string
 }
 
 export function buildDeployRelease(
@@ -91,6 +93,7 @@ export function buildDeployRelease(
       [...http].map(([service, address]) => [PUBLIC_ORIGIN_ENV[service], address.publicOrigin])
     ),
     ...config.env,
+    ...(options.commit ? { SIXB_COMMIT: options.commit } : {}),
   }
 
   return {

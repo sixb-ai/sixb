@@ -83,6 +83,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     const source = await packSource(cwd, options.ref)
     const release = buildDeployRelease(config, {
       bunVersion: await resolveBunVersion(cwd, source),
+      commit: source.commit,
       // `--ref` can name a commit from before the project had one, which can't run the pull.
       envFromSource: envFromSource && (await commitHasProjectFile(cwd, source, ENV_CONFIG_FILE)),
     })
