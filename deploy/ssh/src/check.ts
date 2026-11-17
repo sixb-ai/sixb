@@ -27,11 +27,14 @@ export function renderCheckScript(input: {
   readonly envFromSource?: boolean
 }): string {
   const project = posix.join(input.name, "code", input.projectPath)
+  const sharedEnv = posix.join(input.name, "shared", ".env")
   const envToken = posix.join(input.name, ENV_TOKEN_FILE)
   return [
     `emit() { printf '${CHECK_MARKER}\\t%s\\t%s\\t%s\\n' "$1" "$2" "$(printf '%s' "$3" | tr '\\t\\n' '  ')"; }`,
     `project="$HOME"/${shellQuote(project)}`,
+    `shared_env="$HOME"/${shellQuote(sharedEnv)}`,
     `manifest="$HOME"/${shellQuote(input.name)}/deploy/processes.json`,
+    `ports_file="$HOME"/${shellQuote(input.name)}/deploy/ports.txt`,
     'routes_dir="/etc/caddy/sixb.d/$USER"',
     `snippet="$routes_dir"/${shellQuote(`${input.name}.caddy`)}`,
     "",
@@ -76,20 +79,24 @@ export function renderCheckScript(input: {
           `else emit ${ENV_TOKEN_CHECK} ok "$token"; fi`,
         ]
       : [
-          'if [ ! -f "$project/.env" ]; then emit project.env manual "$project/.env does not exist"',
-          'elif [ "$(stat -c %a "$project/.env")" != 600 ]; then emit project.env fixable "$project/.env is readable by others (mode $(stat -c %a "$project/.env"))"',
-          'else emit project.env ok "$project/.env"; fi',
+          'env_file="$project/.env"',
+          'if [ -f "$shared_env" ]; then env_file="$shared_env"; fi',
+          'if [ ! -f "$env_file" ]; then emit project.env manual "$env_file does not exist"',
+          'elif [ "$(stat -c %a "$env_file")" != 600 ]; then emit project.env fixable "$env_file is readable by others (mode $(stat -c %a "$env_file"))"',
+          'else emit project.env ok "$env_file"; fi',
         ]),
     "",
     ...input.ports.flatMap(({ service, port }) => [
       `if ss -ltnH "sport = :${port}" 2> /dev/null | grep -q .; then`,
-      `  if grep -qs '"--port",' "$manifest" && grep -A1 -s '"--port",' "$manifest" | grep -q '"${port}"'; then`,
+      `  if grep -qx '${port}' "$ports_file" 2> /dev/null || { grep -qs '"--port",' "$manifest" && grep -A1 -s '"--port",' "$manifest" | grep -q '"${port}"'; }; then`,
       `    emit project.port.${service} ok "${port}, used by this deployment"`,
       "  else",
       `    emit project.port.${service} manual "${port} is in use by another program"`,
       "  fi",
       `elif grep -ls '127.0.0.1:${port}\\b' /etc/caddy/sixb.d/*/*.caddy 2> /dev/null | grep -qv "^$snippet$"; then`,
       `  emit project.port.${service} manual "${port} is routed to another deployment"`,
+      `elif grep -lxs '${port}' "$HOME"/*/deploy/ports.txt 2> /dev/null | grep -qv "^$ports_file$"; then`,
+      `  emit project.port.${service} manual "${port} is reserved by another deployment"`,
       "else",
       `  emit project.port.${service} ok "${port}"`,
       "fi",
@@ -181,7 +188,8 @@ function describe(
   detail: string,
   context: { readonly location: string; readonly name: string }
 ): DeployCheck {
-  const label = LABELS[id] ?? (id.startsWith("project.port.") ? `${id.slice(13)} port` : id)
+  const label =
+    LABELS[id] ?? (id.startsWith("project.port.") ? `${id.slice(13).replace(/-/g, " ")} port` : id)
   const check = { id, label, status, detail }
   if (status === "ok") return check
   if (status === "fixable") return { ...check, remedy: "Run `sixb deploy setup`." }
@@ -194,7 +202,10 @@ function describe(
     }
   }
   if (id.startsWith("project.port.")) {
-    return { ...check, remedy: "Give this service another port in the target's `ports`." }
+    return {
+      ...check,
+      remedy: "Give this service another port in the target's `ports` or `standbyPorts`.",
+    }
   }
   if (id === "server.admin-api") {
     return {

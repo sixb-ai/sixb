@@ -131,6 +131,7 @@ Run these from your project root:
 | `sixb check` | Validate the project and check provider health. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
+| `sixb db migrate --check` | Report pending storage migrations without applying them; exits `3` when there are some. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
 | `sixb lake rejected` | Print, as JSON, the [ingested changes](../datasets/ingestion.md#where-it-runs-and-what-can-fail) refused after `ingest` answered, kept for a week. `--dataset <id>` shows one dataset's. |

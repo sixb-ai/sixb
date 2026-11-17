@@ -421,6 +421,29 @@ export function dbMigrateView({
   )
 }
 
+export function dbMigrateCheckView({
+  projectId,
+  pending,
+}: {
+  projectId: string
+  /** The storage adapters with migrations to apply. */
+  pending: readonly { readonly adapterId: string; readonly reason?: string }[]
+}): string {
+  if (pending.length === 0) {
+    return screen(headline("ok", "No database migrations pending", projectId))
+  }
+
+  return screen(
+    stack(
+      headline("warn", "Database migrations pending", projectId),
+      ...pending.map(
+        (status) =>
+          `  ${tone.faint(glyph.rule)} ${tone.muted(`${status.adapterId}: ${status.reason ?? ""}`)}`
+      )
+    )
+  )
+}
+
 export function lakeCheckView({
   projectId,
   warnings = [],

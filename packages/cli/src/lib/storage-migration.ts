@@ -1,4 +1,9 @@
-import { migrateStorage } from "@sixb/core"
+import {
+  isMigrationCapableStorage,
+  type MigrationStatus,
+  migrateStorage,
+  type Storage,
+} from "@sixb/core"
 import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import type { StorageSchemaRole } from "./production-roles"
@@ -90,6 +95,33 @@ export async function migrateStorageForRole(
     applied,
     summary: `migrated: ${applied.join(", ")}`,
   }
+}
+
+/**
+ * The storage adapters `sixb db migrate` would bring up to date, read without touching the
+ * schema. A state a migration does not resolve, such as a history this build does not know,
+ * throws: migrating would fail too.
+ */
+export async function findPendingMigrations(storage: Storage): Promise<readonly MigrationStatus[]> {
+  if (!isMigrationCapableStorage(storage)) return []
+
+  const statuses = await Promise.all(storage.migrators.map((migrator) => migrator.status()))
+  const pending: MigrationStatus[] = []
+
+  for (const status of statuses) {
+    if (status.state === "current") continue
+
+    if (status.state === "pending" || status.state === "uninitialized") {
+      pending.push(status)
+      continue
+    }
+
+    throw new SixbCliError(`[SixbCLI] ${status.adapterId} cannot be migrated: ${status.state}.`, {
+      remediation: status.reason,
+    })
+  }
+
+  return pending
 }
 
 async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {

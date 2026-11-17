@@ -1,10 +1,15 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import type { DeploySlot } from "../layout"
+
+export type ProcessServiceKind = "http" | "singleton" | "workers" | "script"
 
 /** What the supervisor runs for one deployment, written by `sixb deploy` on each deploy. */
 export interface ProcessManifest {
   readonly version: 1
   readonly name: string
+  /** Which port pair (`blue` or `green`) this release's HTTP services bind. */
+  readonly slot?: DeploySlot
   /** The project directory every process starts in. */
   readonly cwd: string
   /** Supervisor state, control requests, and logs live here. */
@@ -22,6 +27,7 @@ export interface ProcessManifest {
 
 export interface ProcessServiceManifest {
   readonly name: string
+  readonly kind?: ProcessServiceKind
   readonly processName: string
   readonly command: string
   readonly args: readonly string[]
@@ -30,6 +36,13 @@ export interface ProcessServiceManifest {
   readonly killTimeoutMs: number
   readonly restartDelayMs: number
   readonly maxMemory?: string
+}
+
+const SERVICE_KINDS: readonly ProcessServiceKind[] = ["http", "singleton", "workers", "script"]
+
+export function isOverlapSafeService(service: ProcessServiceManifest): boolean {
+  if (service.kind) return service.kind === "http" || service.kind === "workers"
+  return service.name === "api" || service.name === "app" || service.name === "workers"
 }
 
 export async function loadProcessManifest(path: string): Promise<ProcessManifest> {
@@ -54,10 +67,12 @@ export function parseProcessManifest(value: unknown, source = "process manifest"
   if (!Array.isArray(manifest.services)) {
     throw new Error(`[SshTarget] ${source}.services must be an array`)
   }
+  const slot = parseSlot(manifest.slot, `${source}.slot`)
 
   return {
     version: 1,
     name: string(manifest.name, `${source}.name`),
+    ...(slot === undefined ? {} : { slot }),
     cwd: string(manifest.cwd, `${source}.cwd`),
     runDir: string(manifest.runDir, `${source}.runDir`),
     logDir: string(manifest.logDir, `${source}.logDir`),
@@ -75,9 +90,11 @@ function parseService(value: unknown, source: string): ProcessServiceManifest {
     throw new Error(`[SshTarget] ${source}.args must be an array of strings`)
   }
   const env = environment(service.env, `${source}.env`)
+  const kind = parseKind(service.kind, `${source}.kind`)
 
   return {
     name: string(service.name, `${source}.name`),
+    ...(kind === undefined ? {} : { kind }),
     processName: string(service.processName, `${source}.processName`),
     command: string(service.command, `${source}.command`),
     args: service.args,
@@ -89,6 +106,20 @@ function parseService(value: unknown, source: string): ProcessServiceManifest {
       ? {}
       : { maxMemory: string(service.maxMemory, `${source}.maxMemory`) }),
   }
+}
+
+function parseSlot(value: unknown, source: string): DeploySlot | undefined {
+  if (value === undefined) return undefined
+  if (value === "blue" || value === "green") return value
+  throw new Error(`[SshTarget] ${source} must be 'blue' or 'green'`)
+}
+
+function parseKind(value: unknown, source: string): ProcessServiceKind | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === "string" && (SERVICE_KINDS as readonly string[]).includes(value)) {
+    return value as ProcessServiceKind
+  }
+  throw new Error(`[SshTarget] ${source} must be one of: ${SERVICE_KINDS.join(", ")}`)
 }
 
 function environment(value: unknown, source: string): Record<string, string> {
@@ -114,7 +145,7 @@ function string(value: unknown, source: string): string {
   return value
 }
 
-function positiveInteger(value: unknown, source: string): number {
+function positiveInteger(value: unknown, source: number | string): number {
   if (!Number.isInteger(value) || (value as number) < 1) {
     throw new Error(`[SshTarget] ${source} must be a positive integer`)
   }
