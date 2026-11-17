@@ -14239,6 +14239,10 @@ export type PostAgentThreadMessageResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -15844,6 +15848,10 @@ export type CancelAgentRunResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -16048,6 +16056,10 @@ export type RetryAgentRunResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -16312,6 +16324,10 @@ export type ListAgentThreadRunsResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -16480,6 +16496,10 @@ export type GetAgentRunResponses = {
         }
     approvalMode?: "manual" | "accept-edits" | "auto"
     runsOn?: "computer"
+    computer?: {
+      id: string
+      folder: string
+    }
     modelId?: string
     finishReason?:
       | "stop"
@@ -16660,6 +16680,10 @@ export type CancelAgentRunByIdResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -18069,6 +18093,10 @@ export type DecideAgentApprovalResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"
@@ -19089,6 +19117,10 @@ export type ListObservedAgentThreadRunsResponses = {
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
       runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
       modelId?: string
       finishReason?:
         | "stop"

@@ -42313,6 +42313,19 @@
                           "type": "string",
                           "enum": ["computer"]
                         },
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "folder"],
+                          "additionalProperties": false
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -46732,6 +46745,19 @@
                           "type": "string",
                           "enum": ["computer"]
                         },
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "folder"],
+                          "additionalProperties": false
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -47222,6 +47248,19 @@
                         "runsOn": {
                           "type": "string",
                           "enum": ["computer"]
+                        },
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "folder"],
+                          "additionalProperties": false
                         },
                         "modelId": {
                           "type": "string"
@@ -48011,6 +48050,19 @@
                             "type": "string",
                             "enum": ["computer"]
                           },
+                          "computer": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "folder": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "folder"],
+                            "additionalProperties": false
+                          },
                           "modelId": {
                             "type": "string"
                           },
@@ -48446,6 +48498,19 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "folder"],
+                      "additionalProperties": false
+                    },
                     "modelId": {
                       "type": "string"
                     },
@@ -48880,6 +48945,19 @@
                         "runsOn": {
                           "type": "string",
                           "enum": ["computer"]
+                        },
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "folder"],
+                          "additionalProperties": false
                         },
                         "modelId": {
                           "type": "string"
@@ -53022,6 +53100,19 @@
                           "type": "string",
                           "enum": ["computer"]
                         },
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "folder"],
+                          "additionalProperties": false
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -55777,6 +55868,19 @@
                           "runsOn": {
                             "type": "string",
                             "enum": ["computer"]
+                          },
+                          "computer": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "folder": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "folder"],
+                            "additionalProperties": false
                           },
                           "modelId": {
                             "type": "string"

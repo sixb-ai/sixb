@@ -78,37 +78,42 @@ export function ConversationPanel({
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
   // A reader who cannot write here cannot answer: the reply shows the question as waiting.
   const asking = readOnly ? null : question
-  const renderComposer = (wideClassName?: string) =>
-    readOnly ? (
-      // Where the composer would end, so the notice keeps its place at the foot of the pane.
-      <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
-    ) : (
-      <>
-        {asking ? (
-          <QuestionComposer
-            // The question is the conversation's last message: a new one starts over.
-            key={transcript.messages.at(-1)?.key}
-            {...asking}
-            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-          />
-        ) : null}
-        {/* Kept while the question asks, so a draft written before it is still there after. */}
-        <div className={asking ? "hidden" : "contents"}>
+  const renderComposer = (wideClassName?: string) => (
+    <>
+      {readOnly ? (
+        // Where the composer would end, so the notice keeps its place at the foot of the pane.
+        <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
+      ) : null}
+      {asking ? (
+        <QuestionComposer
+          // The question is the conversation's last message: a new one starts over.
+          key={transcript.messages.at(-1)?.key}
+          {...asking}
+          className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+        />
+      ) : null}
+      {/* Kept while the question asks, or while the reader can only follow, as when its owner moves
+          the conversation to their computer: a draft written before is still there after. */}
+      <div className="contents" hidden={asking !== null || readOnly}>
+        {readOnly ? null : (
           <PendingMessages
             threadId={currentThread?.id ?? null}
             {...pending}
             className={compact ? "px-4 pb-2" : cn("pb-2", wideClassName)}
           />
-          <Composer
-            {...composer}
-            placeholder={composerPlaceholder}
-            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-            ambientContext={ambientContext}
-            compact={compact}
-          />
-        </div>
-      </>
-    )
+        )}
+        <Composer
+          {...composer}
+          // Hidden, it keeps its draft and takes nothing more: not even a file dropped on the page.
+          disabled={composer.disabled || readOnly}
+          placeholder={composerPlaceholder}
+          className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+          ambientContext={ambientContext}
+          compact={compact}
+        />
+      </div>
+    </>
+  )
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-thread-id={currentThread?.id}>

@@ -959,27 +959,34 @@ export const en = {
   },
   /** A conversation that runs on its owner's computer, as its owner sees it. */
   computer: {
-    online: "Connected",
-    offline: "Not connected",
-    offlineNotice: (computer: string, folder: string) =>
-      `${computer} is offline. Your message waits until ${folder} is connected there.`,
+    online: "available",
+    offline: "not available",
+    /** Its folder isn't open on its computer: nothing waits for it. */
+    folderUnavailable: (folder: string, computer: string) =>
+      `${folder} isn't available on ${computer} right now. Open Sixb there to continue, or continue in the cloud.`,
+    /** Its folder isn't open on its computer, and a message waits for it. */
+    messageWaiting: (folder: string, computer: string) =>
+      `Your message is waiting for ${folder} on ${computer}. Open Sixb there, or continue in the cloud.`,
     noFolder:
-      "This conversation has no folder yet. Open sixb in its folder and press ctrl+f, or continue in the cloud.",
+      "This conversation has no folder yet. Choose one from the menu at the top, or continue in the cloud.",
     /** In a desktop app, about a conversation of this computer's. */
     offlineHere: (folder: string) =>
-      `Not running here yet. Your message waits until this computer is connected in ${folder}.`,
-    runHere: "Run on this computer",
+      `Messages from the app don't run in ${folder} on this computer yet.`,
+    runHere: "Run them here",
     waitingFor: (computer: string) => `Waiting for ${computer}`,
     /** Where a new conversation runs, in a desktop app. */
     placeTitle: "Where this conversation runs",
-    placeChip: (place: string) => `Runs in ${place}. Change where it runs`,
+    placeChip: (place: string, status: string | null) =>
+      `Runs in ${place}${status ? `, ${status}` : ""}. Change where it runs`,
+    noFolderChip: "No folder yet. Choose where this conversation runs",
     cloud: "Cloud",
-    cloudDescription: "Available from any device",
+    cloudDescription: "Runs even when your computers are off",
     thisComputer: "This computer",
     checkingComputers: "Checking connected computers…",
-    connectComputerTitle: "Run on your computer",
-    connectComputerHint:
-      "Open sixb in a project folder on your computer to move this conversation there.",
+    noComputers:
+      "None of your computers is connected. Open Sixb on one to move this conversation there.",
+    offlineLabel: "Offline",
+    offlineMenuHint: "Not available right now. Messages wait for it, or choose another place.",
     chooseFolder: "Choose a folder…",
     chooseFolderShort: "Choose a folder",
     forgetFolder: (folder: string) => `Stop running messages in ${folder}`,
@@ -987,19 +994,39 @@ export const en = {
     moving: "Moving…",
     moveFailed: "Could not move it to the cloud. Try again.",
     moveSwitchFailed: "Could not switch where this conversation runs. Try again.",
-    moveBusy: "A turn is running or waiting for your approval. Stop or answer it first.",
-    moveWhileBusy: "Finish or stop the current reply to switch where this conversation runs.",
-    confirmTitle: "Continue in the cloud?",
-    confirmDescription:
-      "This conversation will run in the cloud from now on, including any waiting message. Its folder's files stay on your computer, and you can move it back anytime.",
+    moveBusy:
+      "A reply is in progress or waiting for approval. Stop it or answer the request, then try again.",
+    moveWhileRunning: "A reply is in progress. Stop it or let it finish to move this conversation.",
+    moveWhileApproval:
+      "A request is waiting for approval. You can move this conversation once it's decided.",
+    confirmTitle: "Run your waiting message in the cloud?",
+    confirmDescription: (folder: string | null) =>
+      folder
+        ? `In the cloud, the agent won't see the files in ${folder}. You can move the conversation back once ${folder} is available again.`
+        : "In the cloud, the agent won't see the computer's files. You can move the conversation back once it's available again.",
+    confirmAction: "Run in the cloud",
     cancel: "Cancel",
-    movedToCloud: "Moved to the cloud. Files from before stayed on the computer.",
-    movedToComputer: "Moved to the computer. Files from before stayed in the cloud.",
-    movedToComputerFolder: (folder: string) =>
-      `Moved to ${folder}. Files from before stayed in the cloud.`,
-    movedToFolder: (folder: string) =>
-      `Moved to ${folder}. Files from before stayed where they were.`,
-    movedElsewhere: "Moved to another folder. Files from before stayed where they were.",
+    /** A folder on a computer, in running text. */
+    placeOn: (folder: string, computer: string) => `${folder} on ${computer}`,
+    cloudPlace: "the cloud",
+    movedToCloud: (from: string | null) =>
+      from
+        ? `Moved to the cloud. The files in ${from} stay behind.`
+        : "Moved to the cloud. The computer's files stay behind.",
+    movedToFolder: (place: string) => `Moved to ${place}. The cloud's files stay behind.`,
+    /** For someone the conversation is shared with, who isn't shown its folders. */
+    movedToComputer: (owner: string | null) =>
+      `Moved to ${owner ? `${owner}'s computer` : "the computer"}. The cloud's files stay behind.`,
+    movedBetweenFolders: (folder: string, from: string) =>
+      `Moved from ${from} to ${folder}. The files in ${from} stay behind.`,
+    movedElsewhere: (place: string | null) =>
+      `Moved to ${place ?? "another folder"}. Earlier files stay where they were.`,
+    /** A fork's first turn, in a workspace of its own. */
+    continuedIn: (place: string) =>
+      `Continued in ${place}. The original conversation's files stay with it.`,
+    /** A fork's first turn on a computer whose folder the reader isn't shown. */
+    continuedOnComputer: (owner: string | null) =>
+      `Continued on ${owner ? `${owner}'s computer` : "the computer"}. The original conversation's files stay with it.`,
   },
   /** A conversation its owner shares with other users of the project. */
   sharing: {

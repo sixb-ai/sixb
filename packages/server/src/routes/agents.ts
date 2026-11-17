@@ -279,7 +279,14 @@ export function serializeAgentInboxItem(
   })
 }
 
-export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRunSchema.parse> {
+/**
+ * A run as the API returns it. `ownerReads`: its thread's owner reads it, and alone sees the folder
+ * on their computer it runs in, as with the thread's own `computer`.
+ */
+export function serializeAgentRun(
+  run: AgentRunView,
+  { ownerReads = false }: { readonly ownerReads?: boolean } = {}
+): ReturnType<typeof AgentRunSchema.parse> {
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
@@ -294,6 +301,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     reasoning: run.spec?.reasoning,
     approvalMode: run.spec?.approvalMode,
     runsOn: run.kind === "conversation" ? run.spec?.runsOn : undefined,
+    computer: ownerReads && run.kind === "conversation" ? run.spec?.computer : undefined,
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
@@ -1403,19 +1411,26 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const parsed = AgentRunListQuerySchema.parse(query)
-          const result = await sixb.agent.runs.listForThread(params.threadId, {
-            statuses: parsed.status ? [parsed.status] : undefined,
-            limit: parseOptionalInt(parsed.limit),
-            offset: parseOptionalInt(parsed.offset),
-            order: parsed.order,
-          })
+          const [result, thread] = await Promise.all([
+            sixb.agent.runs.listForThread(params.threadId, {
+              statuses: parsed.status ? [parsed.status] : undefined,
+              limit: parseOptionalInt(parsed.limit),
+              offset: parseOptionalInt(parsed.offset),
+              order: parsed.order,
+            }),
+            storage.threads.getById({ projectId: host.id, id: params.threadId }),
+          ])
           if (!result) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
+          // Its owner reads where each turn ran, down to the folder: the app marks every move.
+          const ownerReads =
+            thread !== null && principalsEqual(thread.ownerPrincipal, requestActor(sixb))
+
           return AgentRunListResponseSchema.parse({
-            runs: result.runs.map(serializeAgentRun),
+            runs: result.runs.map((run) => serializeAgentRun(run, { ownerReads })),
             hasMore: result.hasMore,
             total: result.total,
           })

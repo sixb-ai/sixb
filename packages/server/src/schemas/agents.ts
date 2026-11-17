@@ -552,6 +552,12 @@ export const AgentRunSchema = z.object({
   approvalMode: AgentApprovalModeSchema.optional(),
   /** Its owner's computer claims it; absent, the cloud runs it. */
   runsOn: z.literal("computer").optional(),
+  /**
+   * The computer and folder it runs in, in the list of a thread's runs its owner reads: shown to
+   * them alone, as the thread's `computer` is. A turn in another place than the one before it no
+   * longer has the files that turn worked on.
+   */
+  computer: z.object({ id: z.string(), folder: z.string() }).optional(),
   modelId: z.string().optional(),
   /**
    * `awaiting_approval`: the turn succeeded and paused on calls waiting for its requester. It stays

@@ -458,17 +458,25 @@ describe("the line under the composer", () => {
 
 describe("a conversation waiting for its computer", () => {
   const computer = { id: "cmp_1", name: "Ava's Mac", folder: "/work/notes", online: false }
-  const notice = { computer, pending: false, error: null, onContinueInCloud: () => {} }
+  const notice = {
+    computer,
+    waiting: false,
+    pending: false,
+    moving: false,
+    busy: null,
+    error: null,
+    onContinueInCloud: () => {},
+  }
 
   // Guard proof: show the button with or without onRunHere; a browser offers to run on a computer it
   // isn't on, and clicking does nothing.
   test("offers to run here only on its own computer", () => {
     let asked = 0
     const { rerender, queryByRole, getByRole } = render(<ComputerOfflineNotice {...notice} />)
-    expect(queryByRole("button", { name: "Run on this computer" })).toBeNull()
+    expect(queryByRole("button", { name: "Run them here" })).toBeNull()
 
     rerender(<ComputerOfflineNotice {...notice} onRunHere={() => (asked += 1)} />)
-    fireEvent.click(getByRole("button", { name: "Run on this computer" }))
+    fireEvent.click(getByRole("button", { name: "Run them here" }))
     expect(asked).toBe(1)
   })
 })

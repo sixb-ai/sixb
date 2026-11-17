@@ -413,6 +413,41 @@ describe("a runner outside the worker", () => {
     })
   })
 
+  // Guard proofs: drop `computer` from serializeAgentRun (Ava's list no longer names the folder the
+  // app marks a move to); serialize it without the owner check (Bob reads her folder).
+  test("names the folder each turn runs in, to the conversation's owner alone", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    const runs = async (as: typeof ava) =>
+      (
+        (await (await call(as, "GET", `/api/agent-threads/${threadId}/runs`)).json()) as {
+          readonly runs: readonly Record<string, unknown>[]
+        }
+      ).runs
+
+    expect(await runs(ava)).toEqual([
+      expect.objectContaining({
+        id: runId,
+        runsOn: "computer",
+        computer: { id: LAPTOP.id, folder: LAPTOP.folder },
+      }),
+    ])
+
+    const [followed] = await runs(bob)
+    expect(followed).toMatchObject({ id: runId, runsOn: "computer" })
+    expect(followed).not.toHaveProperty("computer")
+  })
+
   // Guard proof: drop the computerClaiming call from the claim route; Ava's desktop runs a turn
   // of the conversation her laptop runs, and her laptop runs it in another folder.
   test("runs a conversation's turns on the computer and in the folder it runs in, until it moves", async () => {

@@ -11,6 +11,7 @@ import {
   getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
+  listAgentComputersOptions,
   listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
@@ -21,7 +22,6 @@ import {
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
   listModelsOptions,
-  moveAgentThreadToCloudMutation,
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
   restoreAgentThreadSandboxMutation,
@@ -49,7 +49,7 @@ import {
 } from "../approvals"
 import type { TranscriptBackground } from "../background/context"
 import type { ComposerProps } from "../components/composer"
-import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
+import { type ComputerOfflineNoticeProps, folderName } from "../components/computer-place"
 import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
@@ -70,6 +70,7 @@ import {
   preferenceWithReasoning,
   resolveModelSelection,
 } from "../model-selection"
+import { transcriptMoves } from "../moves"
 import { openQuestion } from "../questions/interpret"
 import type { QuestionComposerProps } from "../questions/question-composer"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
@@ -333,10 +334,11 @@ export function useAgentConversation({
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
   const authors = messagesQuery.data?.authors
+  // Every run, as every message is read: the transcript marks each move from the runs either side.
   const runsQuery = useQuery({
     ...listAgentThreadRunsOptions({
       path: { threadId: threadId ?? "" },
-      query: { limit: "50", order: "desc" },
+      query: { order: "desc" },
     }),
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
@@ -493,7 +495,6 @@ export function useAgentConversation({
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
   const restoreSandbox = useMutation(restoreAgentThreadSandboxMutation())
-  const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
   const stopBackgroundCommand = useMutation(stopAgentBackgroundCommandMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
   // Each runs after the one before, so the last choice is the one the server keeps.
@@ -873,22 +874,6 @@ export function useAgentConversation({
     }
   }
 
-  const handleContinueInCloud = () => {
-    if (!thread || thread.runsOn !== "computer" || access !== "owner") return
-    moveToCloud.mutate(
-      { path: { threadId: thread.id } },
-      {
-        onSuccess: (moved) => {
-          queryClient.setQueryData(getAgentThreadQueryKey({ path: { threadId: moved.id } }), moved)
-          void queryClient.invalidateQueries({
-            queryKey: listAgentThreadRunsQueryKey({ path: { threadId: moved.id } }),
-          })
-          void refreshThreads()
-        },
-      }
-    )
-  }
-
   /** Recover the thread's sandbox as its owner chose: fresh, or as the failed save left it. */
   const recoverSandbox = (recovery: typeof recreateSandbox | typeof restoreSandbox) => {
     if (!thread?.sandboxState || isRunning || access !== "owner") return
@@ -1055,7 +1040,10 @@ export function useAgentConversation({
     [answeringFor, answeringForName]
   )
   const continuingHere = continuingThreadId !== null && continuingThreadId === threadId
-  const waitingForComputer = computerOffline ? (thread?.computer?.name ?? null) : null
+  const waitingForComputer =
+    computerOffline && thread?.computer
+      ? agentMessages.computer.placeOn(folderName(thread.computer.folder), thread.computer.name)
+      : null
   const streamReconnecting = live.active && reconnecting
   const nextTurn = conversationTurn({
     presentation,
@@ -1141,87 +1129,40 @@ export function useAgentConversation({
     [runs, access, user]
   )
 
-  // Where the conversation moved, across every cloud <-> computer handoff and its latest folder:
-  // the files earlier turns worked on stayed behind.
-  const movedAt = thread?.movedAt
-  const savedBefore = movedAt
-    ? new Set(savedMessages.filter((saved) => saved.createdAt <= movedAt).map(({ id }) => id))
-    : null
-  // The last one the transcript shows: not every saved message is drawn.
-  const movedAfterId =
-    savedBefore && messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
-  const { moved, moves } = useMemo(() => {
-    const entries = new Map<string, string>()
-    const shownIds = new Set(
-      messages.flatMap((message) => (message.id !== null ? [message.id] : []))
+  // The names of the reader's computers, where they're already known: a run keeps only the id.
+  const listedComputers = useQuery({ ...listAgentComputersOptions(), enabled: false }).data
+  const computerNames = useMemo(() => {
+    const names = new Map(
+      (listedComputers?.computers ?? []).map((computer) => [computer.id, computer.name])
     )
-    const placeByTrigger = new Map<string, "cloud" | "computer">()
-    for (const run of [...runs].reverse()) {
-      placeByTrigger.set(run.triggerMessageId, run.runsOn === "computer" ? "computer" : "cloud")
-    }
-    let lastShownId: string | null = null
-    let previousPlace: "cloud" | "computer" | null = null
-    let sawCloud = false
-    let sawComputer = false
-    for (const saved of savedMessages) {
-      if (saved.role === "user") {
-        const runPlace = placeByTrigger.get(saved.id)
-        if (runPlace !== undefined) {
-          if (runPlace === "cloud") sawCloud = true
-          else sawComputer = true
-          if (previousPlace !== null && previousPlace !== runPlace && lastShownId !== null) {
-            entries.set(
-              lastShownId,
-              runPlace === "cloud"
-                ? agentMessages.computer.movedToCloud
-                : agentMessages.computer.movedToComputer
-            )
-          }
-          previousPlace = runPlace
-        }
-      }
-      if (shownIds.has(saved.id)) lastShownId = saved.id
-    }
+    if (thread?.computer) names.set(thread.computer.id, thread.computer.name)
+    return names
+  }, [listedComputers, thread?.computer])
 
-    if (!thread || !movedAfterId) {
-      return { moved: null, moves: entries }
-    }
-    const currentPlace = thread.runsOn === "computer" ? "computer" : "cloud"
-    const hasMessagesAfterMove = movedAt
-      ? savedMessages.some((saved) => saved.createdAt > movedAt)
-      : false
-    if (
-      !hasMessagesAfterMove &&
-      sawCloud &&
-      sawComputer &&
-      previousPlace === currentPlace &&
-      currentPlace === "cloud"
-    ) {
-      return { moved: null, moves: entries }
-    }
-    const latestLabel =
-      thread.runsOn !== "computer"
-        ? agentMessages.computer.movedToCloud
-        : thread.computer
-          ? !hasMessagesAfterMove && previousPlace === "cloud"
-            ? agentMessages.computer.movedToComputerFolder(shownFolder(thread.computer.folder))
-            : agentMessages.computer.movedToFolder(shownFolder(thread.computer.folder))
-          : agentMessages.computer.movedElsewhere
-    entries.set(movedAfterId, latestLabel)
-    return {
-      moved: { afterMessageId: movedAfterId, label: latestLabel },
-      moves: entries,
-    }
-  }, [agentMessages.computer, messages, movedAfterId, movedAt, runs, savedMessages, thread])
+  // Where the conversation moved, at every turn that ran elsewhere than the one before and where it
+  // runs now: the files earlier turns worked on stayed behind.
+  const { moved, moves } = useMemo(
+    () =>
+      transcriptMoves({
+        thread,
+        savedMessages,
+        shownIds: new Set(messages.flatMap((message) => (message.id !== null ? [message.id] : []))),
+        runs,
+        messages: agentMessages.computer,
+        computerNames,
+        ownerName: thread && access === "participant" ? personName(threadOwner(thread)) : null,
+      }),
+    [access, agentMessages.computer, computerNames, messages, runs, savedMessages, thread]
+  )
 
   const hasPendingApprovals =
     isAwaitingApproval(latestRun) &&
     approvals.some((approval) => approval.status === "pending" && approval.runId === latestRun?.id)
-  const placeBusy =
-    thread?.runsOn === "computer"
-      ? activeRun?.status === "running" || hasPendingApprovals
-      : isRunning || hasPendingApprovals
-  const place = useThreadPlace({ thread, access, busy: placeBusy })
+  // A computer's conversation moves with a turn still queued for it; the cloud's, once none is.
+  const replyRunning = thread?.runsOn === "computer" ? activeRun?.status === "running" : isRunning
+  const placeBusy = hasPendingApprovals ? "approval" : replyRunning ? "running" : null
+  const messageWaiting = thread?.runsOn === "computer" && activeRun?.status === "queued"
+  const place = useThreadPlace({ thread, access, busy: placeBusy, waiting: messageWaiting })
 
   // Its background commands: what its owner's sixb reports of them, and their Stop, to its owner
   // alone, as the computer is theirs. A command started in a folder runs on there once the thread
@@ -1467,27 +1408,25 @@ export function useAgentConversation({
     [threadId, steerable, readMessageIds]
   )
 
-  const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
-  const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
-    ? {
-        computer: thread?.computer ?? null,
-        // One mutation serves every conversation this view opens: only this one's state shows.
-        pending: movingThisThread && moveToCloud.isPending,
-        error:
-          !movingThisThread || !moveToCloud.isError
-            ? null
-            : isSixbApiError(moveToCloud.error) && moveToCloud.error.code === "active_run_exists"
-              ? "busy"
-              : "failed",
-        onContinueInCloud: handleContinueInCloud,
-        ...(desktopComputer && thread?.computer && thread.computer.id === desktopComputerId
-          ? {
-              onRunHere: () =>
-                void desktopComputer.allowFolder(thread.computer?.folder ?? "").catch(() => {}),
-            }
-          : {}),
-      }
-    : null
+  // The header's move to the cloud, from the notice: one move, one state, wherever it's asked.
+  const computerNoticeProps: ComputerOfflineNoticeProps | null =
+    computerOffline && place
+      ? {
+          computer: thread?.computer ?? null,
+          waiting: messageWaiting,
+          pending: place.movingTo === "cloud",
+          moving: place.pending,
+          busy: place.busy,
+          error: place.cloudError,
+          onContinueInCloud: place.moveToCloud,
+          ...(desktopComputer && thread?.computer && thread.computer.id === desktopComputerId
+            ? {
+                onRunHere: () =>
+                  void desktopComputer.allowFolder(thread.computer?.folder ?? "").catch(() => {}),
+              }
+            : {}),
+        }
+      : null
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
     ? {
