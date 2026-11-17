@@ -35,9 +35,13 @@ const SHELL_SOURCE_DIR = fileURLToPath(new URL("../src/shell", import.meta.url))
 
 /**
  * Where a project's desktop app is generated (`app`), what runs the agent is compiled (`runner`, beside
- * the app as everything in the app's directory ships inside its archive), and it's packaged (`dist`).
+ * the app as everything in the app's directory ships inside its archive), it's packaged (`dist`), and
+ * the files a release publishes are written (`release`).
  */
-export function desktopDir(projectRoot: string, part: "app" | "dist" | "runner"): string {
+export function desktopDir(
+  projectRoot: string,
+  part: "app" | "dist" | "release" | "runner"
+): string {
   return join(projectRoot, ".sixb", "desktop", part)
 }
 
@@ -96,22 +100,46 @@ export async function writeDesktopApp(options: DesktopAppOptions): Promise<Gener
  * beside it. The agent's own `sixb` runs on Bun or Node, which a person may have neither of, and the
  * program can stand in for Bun: last on the PATH the shell gives it, after any they have. Returns its
  * directory: null with no entry, and on Windows, which has no local sandbox to run the agent in.
+ *
+ * `universal` compiles it for both kinds of Mac and joins the two with `lipo`, for the universal app
+ * a release ships: every file is the same in both halves of that app, so the runner must be too.
  */
-export async function writeRunner(options: DesktopAppOptions): Promise<string | null> {
+export async function writeRunner(
+  options: DesktopAppOptions,
+  { universal = false }: { readonly universal?: boolean } = {}
+): Promise<string | null> {
   const dir = desktopDir(options.projectRoot, "runner")
   await rm(dir, { recursive: true, force: true })
-  if (!options.runnerEntry || process.platform === "win32") return null
+  const entry = options.runnerEntry
+  if (!entry || process.platform === "win32") return null
   await mkdir(dir, { recursive: true })
-  await run(
-    [
-      process.execPath,
-      "build",
-      "--compile",
-      options.runnerEntry,
-      `--outfile=${join(dir, RUNNER_BINARY)}`,
-    ],
-    "Could not compile what runs the agent."
-  )
+  const program = join(dir, RUNNER_BINARY)
+  const compile = (outfile: string, target?: string) =>
+    run(
+      [
+        process.execPath,
+        "build",
+        "--compile",
+        ...(target ? [`--target=${target}`] : []),
+        entry,
+        `--outfile=${outfile}`,
+      ],
+      "Could not compile what runs the agent.",
+      // Compiling for another kind of Mac first downloads Bun for it.
+      { timeoutMs: 600_000 }
+    )
+  if (universal && process.platform === "darwin") {
+    // Beside the runner's directory, not in it: everything in there ships.
+    const halves = ["arm64", "x64"].map((arch) => ({ arch, path: `${dir}-${arch}` }))
+    await Promise.all(halves.map(({ arch, path }) => compile(path, `bun-darwin-${arch}`)))
+    await run(
+      ["lipo", "-create", ...halves.map(({ path }) => path), "-output", program],
+      "Could not join the runner's two halves."
+    )
+    await Promise.all(halves.map(({ path }) => rm(path, { force: true })))
+  } else {
+    await compile(program)
+  }
   await writeFile(
     join(dir, "bun"),
     `#!/bin/sh\nBUN_BE_BUN=1 exec "$(dirname "$0")/${RUNNER_BINARY}" "$@"\n`,

@@ -30,6 +30,7 @@ Log in with your admin account. It belongs to the deploy account's group, so it 
 | `/home/sixb/<name>/code` | The deployed commit, and `.env`. |
 | `/home/sixb/<name>/env-token` | The token a deploy [pulls `.env`](environment-variables.md#deploy) with, if the project has a source. |
 | `/home/sixb/<name>/run/logs` | Each process's log. |
+| `/home/sixb/<name>/desktop` | The [desktop app](../apps/desktop.md#distribute-it) the app serves, for each system. |
 
 Group membership takes effect at your next login after setup. Reading `.env` takes `sudo`. To work as the deploy account:
 

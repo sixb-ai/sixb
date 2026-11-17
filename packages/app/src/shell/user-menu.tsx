@@ -17,12 +17,14 @@ import {
 } from "@sixb/ui/components"
 import { useOptionalTheme } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronsUpDown, CircleUserRound, Layers, LogOut, SunMoon } from "lucide-react"
-import type { ComponentType, ReactNode } from "react"
+import { ChevronsUpDown, CircleUserRound, Download, Layers, LogOut, SunMoon } from "lucide-react"
+import { type ComponentType, type ReactNode, useState } from "react"
 import { useAppMessages } from "../locale"
 import { ARTIFACTS_HREF } from "../pages/routes"
 import { useSections } from "../sections/sections"
 import { type CurrentUser, useCurrentUser, useSignOut } from "../session"
+import { readDocumentIdentity } from "./brand"
+import { useDesktopDownload } from "./desktop-download"
 
 export interface UserMenuProps {
   /** Extra items, such as `<UserMenu.Item>`, shown below the built-in sections. */
@@ -38,8 +40,8 @@ export interface UserMenuItemProps {
 
 /**
  * The signed-in person, Artifacts and the built-in sections they may open, the Console and
- * Settings, theme switching and sign-out, at the foot of any sidebar. With sign-in off it is the
- * way into the sections.
+ * Settings, theme switching, the desktop app once one is released for this computer, and sign-out,
+ * at the foot of any sidebar. With sign-in off it is the way into the sections.
  */
 function UserMenuRoot({ children }: UserMenuProps) {
   const user = useCurrentUser()
@@ -50,6 +52,9 @@ function UserMenuRoot({ children }: UserMenuProps) {
   // Theme switching appears only where the app provides a theme.
   const themeControls = useOptionalTheme()
   const { isMobile } = useSidebar()
+  // The desktop app takes the name the build wrote into the document, as the brand does.
+  const [appName] = useState(() => readDocumentIdentity().title)
+  const download = useDesktopDownload(appName)
   const items = (
     <>
       <UserMenuItem href={ARTIFACTS_HREF} icon={Layers}>
@@ -107,7 +112,7 @@ function UserMenuRoot({ children }: UserMenuProps) {
             ) : null}
 
             {items}
-            {themeControls ? <DropdownMenuSeparator /> : null}
+            {themeControls || download ? <DropdownMenuSeparator /> : null}
 
             {themeControls ? (
               // One row: a click on an option picks it, and with the row focused the arrow keys
@@ -126,6 +131,15 @@ function UserMenuRoot({ children }: UserMenuProps) {
                 <SunMoon />
                 <span className="flex-1">{messages.theme}</span>
                 <ThemePicker focusable={false} />
+              </DropdownMenuItem>
+            ) : null}
+
+            {download ? (
+              <DropdownMenuItem asChild>
+                <a href={download.href} download={download.fileName}>
+                  <Download />
+                  <span>{messages.downloadForMac}</span>
+                </a>
               </DropdownMenuItem>
             ) : null}
 

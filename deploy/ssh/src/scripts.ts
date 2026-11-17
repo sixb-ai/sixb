@@ -25,6 +25,39 @@ export function renderReceiveScript(incoming: string, path: string): string {
   return `mkdir -p ${shellQuote(directory)} && tar -x -f - -C ${shellQuote(directory)}`
 }
 
+/**
+ * A fresh directory beside the deployment's desktop releases to upload one system's into, and its
+ * path. Uploaded there, the release replaces the one served only once it is whole.
+ */
+export function renderPrepareDesktopScript(name: string, platform: string): string {
+  return [
+    `desktop="$HOME"/${shellQuote(`${name}/desktop`)}`,
+    'mkdir -p "$desktop"',
+    `incoming="$(mktemp -d "$desktop/.${platform}.XXXXXX")"`,
+    "printf '%s\\n' \"$incoming\"",
+  ].join("\n")
+}
+
+/**
+ * Serves the uploaded release in place of the last one. Between the two renames nothing is served
+ * for that system, for an instant; a download already under way keeps reading the file it opened.
+ */
+export function renderServeDesktopScript(name: string, platform: string, incoming: string): string {
+  return [
+    `desktop="$HOME"/${shellQuote(`${name}/desktop`)}`,
+    `incoming=${shellQuote(incoming)}`,
+    `served="$desktop"/${shellQuote(platform)}`,
+    `previous="$desktop"/${shellQuote(`.${platform}.previous`)}`,
+    'rm -rf "$previous"',
+    'if [ -e "$served" ]; then mv "$served" "$previous"; fi',
+    'mv "$incoming" "$served"',
+    'chmod 755 "$served"',
+    'rm -rf "$previous"',
+    // Uploads that never finished, such as one cut off by a lost connection.
+    `find "$desktop" -mindepth 1 -maxdepth 1 -name ${shellQuote(`.${platform}.*`)} -mmin +60 -exec rm -rf {} + 2>/dev/null || true`,
+  ].join("\n")
+}
+
 export interface DeployScriptInput {
   readonly release: DeployRelease
   readonly layout: DeploymentLayout

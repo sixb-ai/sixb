@@ -10,6 +10,7 @@ export type {
   DeployConfig,
   DeployContext,
   DeployControlAction,
+  DeployDesktopRelease,
   DeployEnv,
   DeployEvent,
   DeployHttpServiceConfig,

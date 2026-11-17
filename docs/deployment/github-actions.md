@@ -35,6 +35,14 @@ gh secret set SIXB_GITHUB_TOKEN --env production
 
 Without that secret, the workflow stops at its first step and says which secret to set.
 
+## The desktop app
+
+For a project with a [desktop app](../apps/desktop.md#distribute-it), `sixb deploy ci` also stores
+the Apple signing variables set where you run it, and the workflow gets a Mac job. After each
+deploy, the job releases the desktop app when `version` in `package.json` is newer than the one
+people have. A push that leaves the version alone starts no Mac runner. Without the variables,
+`sixb deploy ci` names the ones it lacks, and the workflow deploys as before.
+
 ## The project's own variables
 
 The workflow needs no secrets for them. With [a source](environment-variables.md#deploy), the server pulls `.env` itself, so the job never holds a value or a token.

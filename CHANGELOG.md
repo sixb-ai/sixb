@@ -6,6 +6,10 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ### Highlights
 
+- Release the desktop app to your deployment with `sixb desktop release`: a universal macOS app,
+  signed and notarized, in a disk image. Your app's user menu offers **Download for Mac**, installed
+  apps update themselves, and `sixb deploy ci` adds a Mac job that releases after each deploy that
+  raises the version. `sixb desktop status` shows what the deployment serves.
 - Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
   portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
   ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's

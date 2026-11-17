@@ -28,7 +28,11 @@ export function renderProcessManifest(
         service.command.program === "sixb"
           ? [sixb, ...service.command.args]
           : [...service.command.args],
-      env: service.env,
+      // Outside `code/`, so a deploy leaves the desktop app's releases alone.
+      env:
+        service.name === "app"
+          ? { ...service.env, SIXB_DESKTOP_DIR: layout.desktopDir }
+          : service.env,
       instances: service.instances,
       killTimeoutMs: service.process.killTimeoutMs,
       restartDelayMs: service.process.restartDelayMs,

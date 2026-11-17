@@ -102,6 +102,11 @@ describe("deployment files", () => {
       ],
       env: { NODE_ENV: "production", POSTGRES_POOL_MAX: "6" },
     })
+    // Outside the code a deploy replaces.
+    expect(manifest.services[1]?.env).toEqual({
+      NODE_ENV: "production",
+      SIXB_DESKTOP_DIR: `${layout.root}/desktop`,
+    })
     expect(manifest.services[2]).toMatchObject({
       command: layout.bun,
       args: ["scripts/watch.ts"],

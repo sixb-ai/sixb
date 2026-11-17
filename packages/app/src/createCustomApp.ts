@@ -109,6 +109,9 @@ const internalAppShellRoute = "/__sixb/generated/app-shell"
 const frameworkAssetsRoute = "/__sixb/assets"
 const frameworkAssetsDir = join(packageRoot, "assets")
 const internalSharedAppShellRoute = "/__sixb/generated/shared-app-shell"
+// The desktop app's releases, from the folder `SIXB_DESKTOP_DIR` names: what people download, and
+// what installed apps update themselves from. `sixb desktop release` publishes them there.
+const desktopReleasesRoute = "/__sixb/desktop"
 
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
@@ -361,6 +364,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async dev(devOptions: CustomAppDevOptions = {}) {
       const publicEnv = collectPublicEnv()
       const frameOrigins = readAppFrameOrigins(process.env)
+      const desktopDir = readDesktopDir(process.env)
       const withRuntime = (html: string) =>
         injectRuntimeConfig(html, { apiBaseUrl, authEnabled, publicEnv })
       const host = devOptions.host ?? "0.0.0.0"
@@ -394,6 +398,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             "/__sixb/dev-reload.js": getHeadRoute(devReloadResponse),
             [`${frameworkAssetsRoute}/*`]: getHeadRoute((request) =>
               frameworkAssetResponse(request, new URL(request.url).pathname)
+            ),
+            [`${desktopReleasesRoute}/*`]: getHeadRoute((request) =>
+              desktopReleaseResponse(request, new URL(request.url).pathname, desktopDir)
             ),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [privateAppShellRoute]: htmlBundleRoute(bundle),
@@ -588,6 +595,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async start(startOptions: CustomAppStartOptions = {}) {
       const publicEnv = collectPublicEnv()
       const frameOrigins = readAppFrameOrigins(process.env)
+      const desktopDir = readDesktopDir(process.env)
       const host = startOptions.host ?? "0.0.0.0"
       const port = startOptions.port ?? 3000
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
@@ -634,6 +642,10 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           if (url.pathname.startsWith(`${frameworkAssetsRoute}/`)) {
             return frameworkAssetResponse(req, url.pathname)
+          }
+
+          if (url.pathname.startsWith(`${desktopReleasesRoute}/`)) {
+            return desktopReleaseResponse(req, url.pathname, desktopDir)
           }
 
           if (isSharedAppRoute(url.pathname)) {
@@ -828,6 +840,29 @@ async function frameworkAssetResponse(request: Request, pathname: string): Promi
   if (!resolvedPath || !(await Bun.file(resolvedPath).exists())) return notFoundResponse()
   // A release replaces the package, and with it every asset, so a day of caching is safe.
   return staticFileResponse(request, resolvedPath, { "cache-control": "public, max-age=86400" })
+}
+
+/** The folder of desktop releases this app serves, if it serves any. */
+function readDesktopDir(env: NodeJS.ProcessEnv): string | undefined {
+  const dir = env.SIXB_DESKTOP_DIR?.trim()
+  return dir ? resolve(dir) : undefined
+}
+
+async function desktopReleaseResponse(
+  request: Request,
+  pathname: string,
+  desktopDir: string | undefined
+): Promise<Response> {
+  if (!desktopDir) return notFoundResponse()
+  const resolvedPath = resolveStaticPath(desktopDir, pathname.slice(desktopReleasesRoute.length))
+  if (!resolvedPath || !(await Bun.file(resolvedPath).exists())) return notFoundResponse()
+  return staticFileResponse(request, resolvedPath, {
+    // Each release reuses the names of the last, so a cached copy is checked again before use.
+    "cache-control": "no-cache",
+    // Without a file name, which Bun would otherwise add and browsers would prefer: the web app's
+    // link names the download after the app.
+    "content-disposition": "attachment",
+  })
 }
 
 async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {

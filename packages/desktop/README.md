@@ -7,6 +7,7 @@ Install it in a project, and the `sixb` CLI does the rest:
 bun add -d @sixb/desktop
 bun sixb dev --desktop      # the dev server, and the app in a desktop window
 bun sixb desktop build      # the deployed app, packaged for this machine
+bun sixb desktop release    # built, signed and published to the deployment
 ```
 
 See [Desktop App](https://docs.sixb.ai/apps/desktop) for what the desktop app takes from the app,
@@ -44,13 +45,39 @@ exposes, which says how to add to it. The window stays on the app and API origin
   continuous corners in a canvas of 1024, over a soft shadow. Both were measured against Apple's
   Notes icon. An icon drawn to its edges otherwise stands larger than every icon beside it. It runs
   AppKit through `osascript`, and `sips` and `iconutil` turn the result into `.icns`.
+- **Universal.** One app for Apple silicon and Intel: the packager builds both and joins them, and
+  the runner is compiled twice and joined with `lipo`, since every file must match in both halves.
+- **Release.** `buildDesktopApp` writes `.sixb/desktop/release/darwin/`, which the deployment serves
+  as it is (`src/release.ts`):
+
+  ```
+  install.dmg       the app beside an Applications shortcut, LZMA-compressed; what people download
+  app-<v>.zip       what the app updates itself from
+  releases.json     the update feed Electron reads with serverType "json", naming only this version
+  ```
+
 - **Signature.** Packaging breaks the ad-hoc signature Electron ships with, and macOS calls a
   downloaded app with a broken signature damaged, with no way to open it. An unsigned build is
-  re-signed ad hoc, so users can allow it. With `APPLE_API_KEY`, `APPLE_API_KEY_ID` and
-  `APPLE_API_ISSUER`, the packager signs with the keychain's Developer ID certificate and notarizes
-  instead.
+  re-signed ad hoc, so users can allow it. With the Apple variables (`src/mac.ts`), the packager
+  signs every binary with the hardened runtime, the runner with the JIT entitlements Bun needs, then
+  the disk image is signed, notarized once (which covers the app inside) and stapled.
+  `APPLE_CERTIFICATE` goes into a temporary keychain, on the search list until the build ends, so a
+  laptop and a CI runner sign the same way.
 - **Packager.** `@electron/packager` fails under Bun whenever it verifies a download, so
   `src/packager.mjs` runs it under Electron's own binary as Node.
+
+### Updates
+
+A packaged macOS app keeps itself current from the deployment that serves it (`src/shell/updates.ts`):
+Electron's `autoUpdater` reads `/__sixb/desktop/darwin/releases.json` at launch and every 4 hours,
+downloads a newer version in the background, and the new version takes over the next time the app
+starts. Nothing shows on screen, and checking stops once a version is downloaded, since another check
+would download it again.
+
+- macOS installs an update only when it's signed by the same Developer ID as the running app, so an
+  app signed ad hoc doesn't try.
+- Run from the disk image or Downloads, the app can't replace itself, so it first offers to move to
+  Applications, which relaunches it there.
 
 ### Signing in
 

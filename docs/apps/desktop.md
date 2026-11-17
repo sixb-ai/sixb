@@ -5,8 +5,8 @@ app people open in the browser. Sixb builds it with [Electron](https://www.elect
 the app already declares, so there is nothing new to configure.
 
 The desktop app opens your deployed app; it does not contain it. Every deploy reaches desktop users
-as it reaches the browser. You rebuild the desktop app to change its name or icon, or to pick up a
-new version of `@sixb/desktop`.
+as it reaches the browser. You release the desktop app again to change its name or icon, or to pick
+up a new version of `@sixb/desktop`.
 
 ## Add it
 
@@ -36,8 +36,9 @@ The build opens your app where it is deployed: the domains in `sixb.deploy.ts`, 
 `--api-public-origin` flags). The app must be running there, because the build reads the app's name
 and icon from it.
 
-It packages the app for the platform and architecture you build on, into `.sixb/desktop/dist/`: on
-macOS a `.zip` of the app to hand out, elsewhere the app's folder.
+It packages the app for the system you build on. On macOS that's one app for Apple silicon and
+Intel, in a disk image at `.sixb/desktop/release/darwin/install.dmg`; elsewhere it's the app's
+folder in `.sixb/desktop/dist/`.
 
 To try a build against `sixb dev`, point it at the local app and API:
 
@@ -76,26 +77,64 @@ This works with every sign-in method, because the sign-in itself happens in the 
 
 ## Distribute it
 
-Host the `.zip` anywhere people can download it.
-
-Unsigned, a downloaded Mac app opens only once the user allows it: they open it, then click **Open
-Anyway** in System Settings → Privacy & Security. Macs managed by an IT department may not allow
-this. On Windows, users choose **More info**, then **Run anyway**.
-
-To sign and notarize the macOS app, so that it opens like any other download, join the Apple
-Developer Program, put a Developer ID Application certificate in your keychain, and build with an
-App Store Connect API key:
+Release the desktop app to your deployment, and people download it from your app:
 
 ```bash
-APPLE_API_KEY=~/keys/AuthKey_ABC123.p8 APPLE_API_KEY_ID=ABC123 APPLE_API_ISSUER=<issuer-id> \
-  bun sixb desktop build
+bun sixb desktop release
 ```
 
-To install a build on your own Mac, copy it into Applications:
+It builds the app for the system you run it on, signs and notarizes it, and publishes it to the
+deployment in `sixb.deploy.ts`. Releases are made for macOS. Then:
 
-```bash
-ditto ".sixb/desktop/dist/Acme Orders-darwin-arm64/Acme Orders.app" "/Applications/Acme Orders.app"
+- The user menu shows **Download for Mac** to people on a Mac. They get a disk image named after
+  your app, drag the app to Applications, open it, and approve its sign-in in their browser.
+- Installed apps update themselves. A new release downloads in the background, and takes over the
+  next time the app starts.
+
+A release takes its version from `version` in the project's `package.json`. To release again,
+raise it. When the deployment already serves that version, `release` says so and builds nothing;
+an older version is refused. `sixb desktop status` shows what the deployment serves:
+
+```text
+            Released   package.json
+macOS       1.1.0      1.2.0
 ```
+
+### Signing
+
+A release is always signed and notarized, so it opens like any other download. You need a
+membership in the [Apple Developer Program](https://developer.apple.com/programs/), a **Developer
+ID Application** certificate exported with its private key as a `.p12`, and an App Store Connect
+API key with the Developer role. Set them where you release, in `.env` or the
+[project's source](../deployment/environment-variables.md):
+
+| Variable | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | The `.p12`, base64-encoded: `base64 -i certificate.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | The `.p12`'s password |
+| `APPLE_API_KEY` | The API key's `.p8` file, or its contents |
+| `APPLE_API_KEY_ID` | The API key's ID |
+| `APPLE_API_ISSUER` | The issuer ID shown with your API keys in App Store Connect |
+
+On a Mac that has the certificate in its keychain, leave out `APPLE_CERTIFICATE`. macOS shows the
+certificate's name as the app's developer; the app's name and icon stay your app's.
+
+`sixb desktop build` signs with the same variables when they are set. Without them it builds an
+unsigned app to try on your own Mac: downloaded, macOS blocks it until the person clicks **Open
+Anyway** in System Settings → Privacy & Security.
+
+### Release from CI
+
+With the variables set where you run it, [`sixb deploy ci`](../deployment/github-actions.md#the-desktop-app)
+adds a Mac job to the deploy workflow that releases the desktop app after each deploy that raises
+the version.
+
+### Where releases are served
+
+Your app serves them from its own domain, under `/__sixb/desktop/`, from the folder
+`SIXB_DESKTOP_DIR` names. A deployment made with `sixb deploy` sets this up. When you run the app
+server yourself, set `SIXB_DESKTOP_DIR` for it, and copy what `sixb desktop build` writes to
+`.sixb/desktop/release/` into that folder.
 
 ## The window
 
@@ -154,9 +193,7 @@ const folder = await desktop?.computer?.pickFolder() // the system's dialog; nul
 
 ## Limitations
 
-- `sixb desktop build` is tested on macOS. On Windows and Linux it packages the app's folder,
-  unsigned and without an icon.
-- There is no installer and no automatic update of the desktop app itself. A new build is
-  downloaded again; deploys reach users without one.
+- Releases are made for macOS. On Windows and Linux, `sixb desktop build` packages the app's
+  folder, unsigned and without an icon.
 - Under `sixb dev --desktop`, macOS names the app Electron in the menu bar and app switcher. Built
   apps carry their own name.

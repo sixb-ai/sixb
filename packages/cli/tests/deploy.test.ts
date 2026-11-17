@@ -771,6 +771,76 @@ export default {
     expect(await readFile(path, "utf8")).toBe(edited)
   })
 
+  describe("with a desktop app", () => {
+    async function desktopProject(): Promise<{ root: string; recordPath: string }> {
+      const root = await repository({
+        "package.json": JSON.stringify({
+          packageManager: "bun@1.4.2",
+          devDependencies: { "@sixb/desktop": "^0.2.0" },
+        }),
+        "sixb.deploy.ts": recordingConfig,
+      })
+      return { root, recordPath: join(await tempDir(), "record.jsonl") }
+    }
+
+    test("releases it from CI, with Apple's variables stored beside the key", async () => {
+      const { root, recordPath } = await desktopProject()
+      const key = join(await tempDir(), "AuthKey_KEY.p8")
+      await writeFile(key, "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n")
+      const gh = await fakeGh()
+      const result = await deploy(
+        {
+          DEPLOY_RECORD: recordPath,
+          PATH: gh.path,
+          APPLE_CERTIFICATE: "the certificate",
+          APPLE_CERTIFICATE_PASSWORD: "",
+          APPLE_API_KEY: key,
+          APPLE_API_KEY_ID: "KEY",
+          APPLE_API_ISSUER: "the issuer",
+        },
+        () => runDeployCi({ cwd: root })
+      )
+
+      expect(result.error).toBeUndefined()
+      expect(result.output).toContain("macOS, when the version goes up")
+      const secrets = (await gh.calls()).filter((call) => call.startsWith("secret set APPLE"))
+      expect(secrets.map((call) => call.split(" --env")[0])).toEqual([
+        "secret set APPLE_CERTIFICATE_NORTHLINE",
+        "secret set APPLE_API_KEY_NORTHLINE",
+        "secret set APPLE_API_KEY_ID_NORTHLINE",
+        "secret set APPLE_API_ISSUER_NORTHLINE",
+      ])
+      // A runner has no key file at that path: the key itself is stored.
+      expect(secrets[1]).toEndWith("<-----BEGIN PRIVATE KEY-----")
+      const workflow = await readFile(join(root, ".github/workflows/deploy-northline.yml"), "utf8")
+      expect(workflow).toContain("  desktop-mac:")
+      expect(workflow).toContain(`APPLE_API_KEY: \${{ secrets.APPLE_API_KEY_NORTHLINE }}`)
+    })
+
+    test("names the Apple variables it lacks to release from CI", async () => {
+      const { root, recordPath } = await desktopProject()
+      const gh = await fakeGh()
+      const result = await deploy(
+        {
+          DEPLOY_RECORD: recordPath,
+          PATH: gh.path,
+          APPLE_CERTIFICATE: "",
+          APPLE_API_KEY: "",
+          APPLE_API_KEY_ID: "KEY",
+          APPLE_API_ISSUER: "",
+        },
+        () => runDeployCi({ cwd: root })
+      )
+
+      expect(result.error).toBeUndefined()
+      expect(result.output).toContain("not released from CI")
+      expect(result.output).toContain("Set APPLE_CERTIFICATE, APPLE_API_KEY, APPLE_API_ISSUER")
+      expect((await gh.calls()).some((call) => call.startsWith("secret set APPLE"))).toBe(false)
+      const workflow = await readFile(join(root, ".github/workflows/deploy-northline.yml"), "utf8")
+      expect(workflow).not.toContain("desktop-mac")
+    })
+  })
+
   test("revokes the new CI key when GitHub does not take it", async () => {
     const { root, recordPath } = await project()
     const gh = await fakeGh()

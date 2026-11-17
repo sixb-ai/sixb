@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 import * as desktop from "@sixb/desktop"
-import { deployedOrigins } from "../src/commands/desktop"
+import {
+  deployedOrigins,
+  needsRelease,
+  runDesktopRelease,
+  runDesktopStatus,
+} from "../src/commands/desktop"
 import { DESKTOP_RUNNER_ENTRY, loadDesktop, type SixbDesktop } from "../src/lib/desktop"
 import { runDevSupervisor } from "../src/lib/dev-supervisor"
 
@@ -163,6 +168,145 @@ describe("sixb desktop build", () => {
       remediation:
         "Describe the deployment in sixb.deploy.ts, or set SIXB_APP_PUBLIC_ORIGIN and " +
         "SIXB_API_PUBLIC_ORIGIN.",
+    })
+  })
+})
+
+describe("desktop releases", () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  /** The deployed app, serving `released` as its macOS release, or none. */
+  function serveRelease(released: string | null): string[] {
+    const asked: string[] = []
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input)
+      asked.push(url)
+      if (url === "https://ops.example.com/__sixb/desktop/darwin/releases.json" && released) {
+        return Response.json({ currentRelease: released, releases: [] })
+      }
+      return new Response("Not Found", { status: 404 })
+    }) as typeof fetch
+    return asked
+  }
+
+  /**
+   * A project at `version` whose deployment records what it's asked to publish, and whose
+   * `@sixb/desktop` records what it's asked to build.
+   */
+  async function releaseProject(version: string): Promise<string> {
+    const root = await tempDir()
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "ops", version }))
+    await writeFile(
+      join(root, "sixb.deploy.ts"),
+      `export default {
+  name: "northline",
+  domain: "example.com",
+  services: { app: { domain: "ops.example.com" } },
+  target: {
+    kind: "test",
+    location: "sixb@test-server",
+    listenAddress: (service) => ({ host: "127.0.0.1", port: { app: 3001, api: 3002 }[service] }),
+    async deploy() {}, async status() {}, async logs() {}, async control() {}, async check() { return [] },
+    async publishDesktop(release, context) {
+      globalThis.desktopTest.published.push({ release, name: context.name })
+    },
+  },
+}
+`
+    )
+    await installDesktopStub(
+      root,
+      `export async function openDesktopApp() {}
+export async function buildDesktopApp(options) {
+  globalThis.desktopTest.built.push(options)
+  return { path: "/out/install.dmg", signed: true, release: { platform: "darwin", version: ${JSON.stringify(version)}, dir: "/out" } }
+}
+`
+    )
+    return root
+  }
+
+  function recorded() {
+    const record = { built: [] as Record<string, unknown>[], published: [] as unknown[] }
+    ;(globalThis as { desktopTest?: unknown }).desktopTest = record
+    return record
+  }
+
+  /** What a command wrote with `--json`. */
+  async function json(run: () => Promise<void>): Promise<unknown> {
+    const write = spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      await run()
+      return JSON.parse(String(write.mock.calls.at(-1)?.[0]))
+    } finally {
+      write.mockRestore()
+    }
+  }
+
+  test("releases a version newer than the deployment's, and only that", () => {
+    expect(needsRelease(null, "1.0.0", "macOS")).toBe(true)
+    expect(needsRelease("1.0.0", "1.1.0", "macOS")).toBe(true)
+    expect(needsRelease("1.2.0", "1.10.0", "macOS")).toBe(true)
+    // Already out: no failure, so CI can run a release on every commit.
+    expect(needsRelease("1.1.0", "1.1.0", "macOS")).toBe(false)
+    expect(() => needsRelease("1.2.0", "1.1.0", "macOS")).toThrow(
+      "The macOS release is 1.2.0, newer than 1.1.0 in package.json."
+    )
+  })
+
+  test("shows what the deployment serves beside the version package.json names", async () => {
+    const root = await releaseProject("1.2.0")
+    serveRelease("1.1.0")
+
+    expect(await json(() => runDesktopStatus({ cwd: root, json: true }))).toEqual({
+      version: "1.2.0",
+      platforms: [{ platform: "darwin", released: "1.1.0", outdated: true }],
+    })
+  })
+
+  test("asks for a version before releasing anything", async () => {
+    const root = await releaseProject("1.2.0")
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "ops" }))
+    serveRelease(null)
+
+    const error = await runDesktopStatus({ cwd: root }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ remediation: 'Set "version" in package.json, such as "1.0.0".' })
+  })
+
+  describe.if(process.platform === "darwin")("on macOS", () => {
+    // Guard check: drop the version check from runDesktopRelease, and the second release builds
+    // and publishes again.
+    test("builds a signed release for the deployed app, publishes it, then waits for a new version", async () => {
+      const root = await releaseProject("1.2.0")
+      const record = recorded()
+      serveRelease("1.1.0")
+
+      expect(await json(() => runDesktopRelease({ cwd: root, json: true }))).toEqual({
+        platform: "darwin",
+        version: "1.2.0",
+        released: true,
+        download: "https://ops.example.com/__sixb/desktop/darwin/install.dmg",
+      })
+      expect(record.built).toEqual([
+        expect.objectContaining({
+          appUrl: "https://ops.example.com",
+          apiOrigin: "https://northline-api.example.com",
+          requireSignature: true,
+        }),
+      ])
+      expect(record.published).toEqual([
+        { release: { platform: "darwin", version: "1.2.0", dir: "/out" }, name: "northline" },
+      ])
+
+      serveRelease("1.2.0")
+      expect(await json(() => runDesktopRelease({ cwd: root, json: true }))).toMatchObject({
+        released: false,
+      })
+      expect(record.built).toHaveLength(1)
+      expect(record.published).toHaveLength(1)
     })
   })
 })
