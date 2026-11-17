@@ -193,6 +193,17 @@ describe("github connector auth modes", () => {
     expect(await first).toEqual(new Error("run cancelled"))
     expect((await second).accessToken).toBe("ghs_shared")
     expect(requests).toBe(1)
+
+    // With nothing cached, a caller that already gave up starts no request that nobody would await.
+    const idle = createAppInstallationTokenSource(
+      { appId: "123", privateKey: pem, installationId: 42 },
+      new URL("https://api.github.com/")
+    )
+    const gaveUp = await idle
+      .get(AbortSignal.abort(new Error("already cancelled")))
+      .catch((error: unknown) => error)
+    expect(gaveUp).toEqual(new Error("already cancelled"))
+    expect(requests).toBe(1)
   })
 })
 

@@ -129,6 +129,10 @@ export function createAppInstallationTokenSource(
 
   return {
     async get(signal?: AbortSignal): Promise<InstallationTokenHandle> {
+      // Before any request starts: a caller that already gave up must not leave one behind that
+      // nobody waits for.
+      signal?.throwIfAborted()
+
       const reusable =
         current !== undefined &&
         current.revision > rejectedRevision &&
@@ -170,7 +174,6 @@ export function createAppInstallationTokenSource(
 /** Waits for a shared request, but stops waiting when this caller's signal aborts. */
 function waitUnlessAborted<T>(shared: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return shared
-  if (signal.aborted) return Promise.reject(signal.reason)
 
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason)
