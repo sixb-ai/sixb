@@ -1,10 +1,6 @@
-import {
-  calendarPeriodStart,
-  calendarPeriods,
-  canonicalTimeZone,
-  DEFAULT_PROJECT_TIME_ZONE,
-} from "../../calendar"
+import { calendarPeriodStart, calendarPeriods, canonicalTimeZone } from "../../calendar"
 import { MODEL_KINDS, type ModelKind } from "../../models/definitions"
+import { DEFAULT_PROJECT_TIME_ZONE } from "../../runtime/locale"
 import { type AiModelCallUsageRecord, normalizeAiModelCallUsage } from "../ai-usage"
 import type {
   AiAccountingAgentBreakdown,

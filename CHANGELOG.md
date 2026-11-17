@@ -7,10 +7,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 ### Highlights
 
 - The Usage page counts days, weeks and hours on the reader's calendar rather than UTC's, so its
-  last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. The
-  accounting API buckets a series on the `timeZone` its query names, UTC when it names none, and
-  `@sixb/core/calendar` holds the arithmetic: `calendarPeriodStart`, `addCalendarPeriods` and
-  `calendarPeriods`, whole periods of a zone across a change of clocks.
+  last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
+  link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
+  series on the `timeZone` its query names, UTC when it names none.
 - Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
   portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
   ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
@@ -21,6 +20,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 - `getAiAccountingOverview` takes an optional `timeZone`, an IANA name, and returns its periods on
   that calendar instead of always UTC's. Settings › Usage sends the browser's.
+- A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's
+  `timeZone`, a project's `timeZone` and the agent's requester zone. Name the zone instead, such as
+  `"Asia/Kolkata"`.
 - `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
   omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
   `"ads"` too.

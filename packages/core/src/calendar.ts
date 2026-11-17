@@ -5,13 +5,16 @@
  * clocks a day lasts 23 or 25 hours, and a zone such as Asia/Kolkata starts its hours half past a
  * UTC hour. Usage buckets are whole periods of the reader's calendar, so the queried range, the
  * bars and the calls in them all go through these functions.
+ *
+ * It is `@sixb/core/calendar` rather than `internal/*` because `@sixb/app` draws the bars with it,
+ * and the app installs core by a compatible range, which `internal/*` refuses. It is not part of
+ * the documented API: export only what the app calls.
  */
+
+import { DEFAULT_PROJECT_TIME_ZONE } from "./runtime/locale"
 
 /** An hour, a day, or a week starting Monday: the periods a usage chart is drawn in. */
 export type CalendarPeriod = "hour" | "day" | "week"
-
-/** The zone a project assumes when it sets none, and the one a calendar defaults to. */
-export const DEFAULT_PROJECT_TIME_ZONE = "UTC"
 
 /** A period of the calendar: a start and the start of the one after it. */
 export interface CalendarPeriodRange {
