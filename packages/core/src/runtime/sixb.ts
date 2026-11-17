@@ -26,6 +26,11 @@ import { registerRequestPreparation } from "../execution/preparation"
 import type { LakeStorage } from "../lake-storage/types"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
+import {
+  createDefinitionsManifestReader,
+  registerDefinitionsManifestReader,
+} from "../manifest/execution"
+import type { DefinitionsManifest } from "../manifest/types"
 import { createDecisionRuntime } from "../models/decision/runtime"
 import { createModelsRuntime } from "../models/execution"
 import { ModelExecutionSession } from "../models/execution/session"
@@ -90,6 +95,7 @@ export interface SixbDependencies {
   readonly lakeStorage: LakeStorage
   readonly datasetVersionMarkings: DatasetVersionMarkings
   readonly datasetIngest: DatasetIngestRuntime
+  readonly definitionsManifest: () => Promise<DefinitionsManifest>
 }
 
 export function createBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
@@ -111,6 +117,10 @@ export function createBoundSixb<TParams extends Record<string, unknown> = Record
   }
   shareOntologyMutationRuntime(runtime, sixb)
   registerActivityCaptureRuntime(sixb, createActivityCaptureRuntime(runtime, dependencies.activity))
+  registerDefinitionsManifestReader(
+    sixb,
+    createDefinitionsManifestReader(runtime, dependencies.definitionsManifest)
+  )
   registerRequestPreparation(sixb, runtime, execution, dependencies.definitions.workflows)
   if (dependencies.connectorConnections) {
     registerConnectorConnectionsRuntime(

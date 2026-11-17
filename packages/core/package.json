@@ -299,6 +299,12 @@
       "import": "./dist/logging/internal.js",
       "default": "./dist/logging/internal.js"
     },
+    "./internal/manifest": {
+      "types": "./dist/manifest/index.d.ts",
+      "bun": "./src/manifest/index.ts",
+      "import": "./dist/manifest/index.js",
+      "default": "./dist/manifest/index.js"
+    },
     "./internal/materialization": {
       "types": "./dist/materialization/index.d.ts",
       "bun": "./src/materialization/index.ts",

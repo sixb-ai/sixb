@@ -79,6 +79,7 @@ import { cronPass } from "../maintenance/passes/cron-pass"
 import { directoryPass } from "../maintenance/passes/directory-pass"
 import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
+import { readDefinitionsManifest } from "../manifest/build"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
@@ -626,6 +627,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       lakeStorage: this.lakeStorage,
       datasetVersionMarkings: this.datasetVersionMarkings,
       datasetIngest: this.datasetIngest,
+      definitionsManifest: () => readDefinitionsManifest(this),
     }
   }
 }
