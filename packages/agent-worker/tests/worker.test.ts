@@ -119,6 +119,7 @@ import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   exec,
   initializeSandboxEnvironment,
+  SandboxNotRunningError,
   SandboxStateUnavailableError,
   sandboxConfig,
 } from "@sixb/core/sandboxes"
@@ -3868,6 +3869,186 @@ describe("AgentWorker", () => {
     expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toMatchObject({
       name: blocked!.name,
       status: "ready",
+    })
+  })
+
+  // The provider stopped the sandbox mid-turn, at its session's time limit for one. The model once
+  // retried `echo` thirty times in a dead sandbox, and the turn still read succeeded. Every tool
+  // ends the turn, wrapped errors included: `read` wraps what the sandbox threw. Removal proof: drop
+  // `onSandboxStopped` from createConversationAgentEnvironment; the model is called a second time.
+  test.each([
+    { tool: "bash", input: { command: "npm test" }, sent: "npm test" },
+    { tool: "read", input: { path: "notes/plan.md" }, sent: "notes/plan.md" },
+  ])("ends a turn whose sandbox stopped under $tool, saying so", async ({ tool, input, sent }) => {
+    const sandbox = new RecordingSandbox("stopped-mid-turn")
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (args.some((arg) => arg.includes(sent))) {
+        sandbox.status = "stopped"
+        throw new SandboxNotRunningError("[Sandbox] sandbox stopped-mid-turn stopped.")
+      }
+      return runCommand(command, args, options)
+    }
+
+    // Asked again, the model would answer: a turn that goes on succeeds, and the test says so.
+    let modelCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        modelCalls++
+        if (modelCalls > 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "I could not do it." },
+            { type: "text-end", id: "t" },
+            finish("stop"),
+          ])
+        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: `${tool}-1`,
+            toolName: tool,
+            input: JSON.stringify(input),
+          },
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const host = buildSixb(model, new InMemoryBroker(), {
+      supportsRequestCredentials: true,
+      create: async () => sandbox,
+    })
+    attachSixbErrorReporter(host, () => {})
+    const requested = await requestAgent(host, { text: "Run the tests" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+
+    expect(modelCalls).toBe(1)
+    const run = await agentStorageOf(host).runs.getById({
+      projectId: PROJECT_ID,
+      id: requested.run.id,
+    })
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "agent.execution_failed",
+        message: expect.stringContaining("send a message to go on"),
+      },
+    })
+
+    // The step that found it stopped is kept, with what the model read.
+    const messages = await listMessages(agentStorageOf(host), requested.run.threadId)
+    const parts = messages.flatMap((message) => (message.role === "assistant" ? message.parts : []))
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: "tool-call",
+        toolName: tool,
+        state: "output-error",
+        errorText: "The sandbox stopped: commands and files are no longer available in it.",
+      })
+    )
+  })
+
+  // A thread that keeps its files, whose VM the provider stopped mid-turn, as Vercel does at a
+  // session's time limit: its save cannot run, so it waits for its owner, and the run says why and
+  // what to do instead of only that it failed. Removal proof: drop the `sandboxStopOf` branch in
+  // runConversationTurn's save failure; the run reads "Agent execution failed." alone.
+  test("ends a turn whose kept workspace stopped, and says how its owner goes on", async () => {
+    const sandbox = Object.assign(new RecordingSandbox("kept-stopped"), {
+      setRequestCredentials: async () => {},
+    })
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (sandbox.status === "stopped" || args.some((arg) => arg.includes("npm test"))) {
+        sandbox.status = "stopped"
+        throw new SandboxNotRunningError("[Sandbox] sandbox kept-stopped stopped.")
+      }
+      return runCommand(command, args, options)
+    }
+    // Asked again, the model would answer: a turn that goes on succeeds, and the test says so.
+    let modelCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        modelCalls++
+        return modelCalls > 1
+          ? stream([
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "I could not do it." },
+              { type: "text-end", id: "t" },
+              finish("stop"),
+            ])
+          : stream([
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "bash-1",
+                toolName: "bash",
+                input: JSON.stringify({ command: "npm test" }),
+              },
+              finish("tool-calls"),
+            ])
+      },
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          return sandbox
+        },
+        resume: async () => sandbox,
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => ({ source: { type: "git", url: "https://example.com/repository.git" } }),
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Run the tests" })
+    const worker = new AgentWorker(host, workerOptions())
+    const completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+      errors.mockRestore()
+    }
+
+    expect(modelCalls).toBe(1)
+    expect(
+      await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+    ).toMatchObject({
+      status: "failed",
+      error: {
+        code: "agent.execution_failed",
+        message:
+          "Agent execution failed. The sandbox stopped, so this turn ended here. To go on, pick up where it left off or start over.",
+      },
+    })
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toMatchObject({
+      status: "blocked",
     })
   })
 

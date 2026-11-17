@@ -1,5 +1,5 @@
 import { posix } from "node:path"
-import type { Principal } from "@sixb/core"
+import type { Principal, SandboxNotRunningError } from "@sixb/core"
 import {
   type AgentContextBudget,
   type AgentRunArtifacts,
@@ -67,7 +67,9 @@ import {
   type AcquiredRunSandbox,
   acquireRunSandbox,
   type BeforeFinalizeOptions,
+  endsWhenStopped,
   type RunSandbox,
+  sandboxStoppedError,
 } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
@@ -114,6 +116,13 @@ import { createWriteTool } from "./tools/write"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
+
+// What each kind of run says when its provider stopped its sandbox, to whoever goes on from it: the
+// person in a conversation, the parent of a child, the run of a workflow step.
+const SANDBOX_STOPPED_TURN_MESSAGE =
+  "The sandbox stopped, so this turn ended here. Its work so far is kept: send a message to go on."
+const SANDBOX_STOPPED_CHILD_MESSAGE = "The sandbox stopped, so this agent ended here."
+const SANDBOX_STOPPED_STEP_MESSAGE = "The sandbox stopped, so this step ended here."
 
 export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
@@ -405,6 +414,8 @@ export async function createConversationAgentEnvironment(
       },
       sandboxSignal,
       failureSignal: failure.signal,
+      onSandboxStopped: (error) =>
+        failure.abort(sandboxStoppedError(error, SANDBOX_STOPPED_TURN_MESSAGE)),
       context,
       plan,
       runId: run.id,
@@ -474,7 +485,9 @@ export async function createConversationAgentEnvironment(
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<SubagentAgentExecutionEnvironment> {
-  // A child's workspace is blank, so it has no source credentials to lose.
+  // A child's workspace is blank, so it has no source credentials to lose. It ends only when its
+  // provider stops the sandbox.
+  const failure = new AbortController()
   const { sandbox, resumed = false } = await input.openSandbox({
     signal: input.signal ?? NEVER_ABORTED_SIGNAL,
     onFailure: () => {},
@@ -493,6 +506,9 @@ export async function createSubagentEnvironment(
       ...input,
       sandbox,
       resumed,
+      failureSignal: failure.signal,
+      onSandboxStopped: (error) =>
+        failure.abort(sandboxStoppedError(error, SANDBOX_STOPPED_CHILD_MESSAGE)),
       acquireBeforeStart: acquire,
       acquire: () => {
         provisioning = true
@@ -518,6 +534,9 @@ async function startSubagentEnvironment(
     readonly sandbox: RunSandbox
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
+    /** Ends the child when its provider stops the sandbox. */
+    readonly failureSignal: AbortSignal
+    readonly onSandboxStopped: (error: SandboxNotRunningError) => void
     /** How the summary acquires the workspace its prompt describes, before the environment. */
     readonly acquireBeforeStart: () => Promise<AcquiredRunSandbox>
     /** How provisioning acquires it, which from then gives it back. */
@@ -680,6 +699,8 @@ async function startSubagentEnvironment(
     ...(networkPolicy ? { networkPolicy } : {}),
     acquire: input.acquire,
     sandboxSignal: input.signal,
+    failureSignal: input.failureSignal,
+    onSandboxStopped: input.onSandboxStopped,
     context,
     plan,
     runId: run.id,
@@ -758,6 +779,8 @@ export async function createWorkflowAgentNodeEnvironment(
       sandbox,
       sandboxSignal,
       failureSignal: failure.signal,
+      onSandboxStopped: (error) =>
+        failure.abort(sandboxStoppedError(error, SANDBOX_STOPPED_STEP_MESSAGE)),
       context,
       actorId: run.actorId,
       plan,
@@ -795,6 +818,11 @@ interface AgentEnvironmentSetup
   readonly sandboxSignal?: AbortSignal
   /** Environment-owned failure, such as lost source credentials. */
   readonly failureSignal?: AbortSignal
+  /**
+   * Ends the run when a command or a file write finds that the provider stopped the sandbox, such
+   * as at the end of a Vercel session: whichever tool met it, nothing more runs in it.
+   */
+  readonly onSandboxStopped?: (error: SandboxNotRunningError) => void
   /** How the run calls a project tool. */
   readonly callTool: AgentToolCaller
   /** How it searches the web, where the project is: `web_search` calls it. */
@@ -990,6 +1018,7 @@ async function startAgentEnvironment(
     ontologyFiles: input.ontologyDocs?.files ?? [],
     ...(installedArtifacts ? { artifacts: installedArtifacts } : {}),
     ...(input.memory ? { memory: input.memory.repos } : {}),
+    ...(input.onSandboxStopped ? { onSandboxStopped: input.onSandboxStopped } : {}),
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -1216,6 +1245,7 @@ interface ProvisionSandboxInput {
   /** The conversation's artifacts, read while the sandbox starts. */
   readonly artifacts?: Promise<MaterializedArtifacts>
   readonly memory?: PrepareAgentSandboxApiContextInput["memory"]
+  readonly onSandboxStopped?: (error: SandboxNotRunningError) => void
 }
 
 /** A sandbox acquired for the run, with the run's files installed in its context directory. */
@@ -1224,7 +1254,10 @@ type ProvisionedRunSandbox = AcquiredRunSandbox & AgentSandboxHandle
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<ProvisionedRunSandbox> {
   const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
   const acquired = await (input.acquire?.() ?? acquireRunSandbox(input.sandbox, input.signal))
-  const { sandbox } = acquired
+  // What the run's tools and files reach the sandbox through.
+  const sandbox = input.onSandboxStopped
+    ? endsWhenStopped(acquired.sandbox, input.onSandboxStopped)
+    : acquired.sandbox
   const { contextDirectory } = input.sandbox
   try {
     const apiContext = await prepareAgentSandboxApiContext({
@@ -1248,6 +1281,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
     })
     const provisioned = {
       ...acquired,
+      sandbox,
       contextDirectory,
       env: { ...acquired.env, ...apiContext.env },
     }

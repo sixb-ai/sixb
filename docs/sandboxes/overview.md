@@ -30,8 +30,12 @@ By default, each agent run gets a fresh environment that is removed when the run
 Files returned as agent attachments are saved separately.
 
 Each command the agent runs has 2 minutes, and up to 10 when the agent expects a longer build or
-test suite. The provider's session lifetime still applies: on Vercel, set `sessionTimeoutMs` to
-cover your longest run, since Vercel's default session lasts 5 minutes.
+test suite. A command that times out or is stopped ends with everything it started. The
+provider's session lifetime still applies: on Vercel, set `sessionTimeoutMs` to cover your longest
+run, since Vercel's default session lasts 5 minutes. If the session ends mid-run, the run ends
+there with "The sandbox stopped" instead of retrying in it. A conversation goes on with a new
+message; one that keeps its files waits for its owner to
+[resume or start fresh](#keep-files-across-conversation-runs).
 
 ## Providers
 

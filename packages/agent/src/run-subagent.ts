@@ -132,7 +132,11 @@ export async function runSubagent(input: {
       : {}),
   })
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
-  const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
+  const abortSignal = AbortSignal.any([
+    runtime.signal,
+    sandboxReadiness.signal,
+    ...(context.environmentFailureSignal ? [context.environmentFailureSignal] : []),
+  ])
   let chunkIndex = 0
   const generation = await runModelLoop({
     model: plan.model,
@@ -177,6 +181,7 @@ export async function runSubagent(input: {
     pauseAfterStep: async () =>
       inbox.deferred !== undefined || (await input.session.heldCalls.holdsRun()),
   }).catch((error: unknown) => {
+    context.environmentFailureSignal?.throwIfAborted()
     throw subagentContextFailure(error, run) ?? error
   })
   const work = subagentWorkMessages(
@@ -377,11 +382,13 @@ function subagentWorkMessages(
 }
 
 function assertSubagentCanFinalize(input: {
+  readonly context: AgentTurnContext
   readonly runtime: AgentTurnRuntime
   readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
 }): void {
   throwIfExecutionLost(input.runtime.sourceSignal)
   input.sandboxReadiness.throwIfFailed()
+  input.context.environmentFailureSignal?.throwIfAborted()
   input.runtime.assertCanContinue()
 }
 

@@ -1,5 +1,5 @@
 import type { AgentMessagePart, JsonValue } from "@sixb/core"
-import { AgentToolPublicError } from "@sixb/core"
+import { AgentToolPublicError, SandboxNotRunningError } from "@sixb/core"
 import {
   type AgentToolCall,
   type AgentToolCallFile,
@@ -267,7 +267,26 @@ function assertUnreachableModelPart(part: never, errorDetails?: AgentErrorDetail
   )
 }
 
-/** Expose only failures that the tool author explicitly marked as safe for the model and storage. */
-export function agentToolErrorText(error: unknown): string {
-  return error instanceof AgentToolPublicError ? error.message : "An error occurred."
+/** What a tool says when its sandbox stopped: the run ends right after, so this is its last word. */
+const SANDBOX_STOPPED_TOOL_TEXT =
+  "The sandbox stopped: commands and files are no longer available in it."
+
+/**
+ * Expose only failures that the tool author explicitly marked as safe for the model and storage,
+ * and a stopped sandbox, in fixed words, even when the tool wrapped it.
+ */
+export function agentToolErrorText(error: unknown, fallback = "An error occurred."): string {
+  if (error instanceof AgentToolPublicError) return error.message
+  if (foundSandboxStopped(error)) return SANDBOX_STOPPED_TOOL_TEXT
+  return fallback
+}
+
+function foundSandboxStopped(error: unknown): boolean {
+  // Bounded: a cause chain can loop.
+  let cause = error
+  for (let depth = 0; depth < 8 && cause instanceof Error; depth++) {
+    if (cause instanceof SandboxNotRunningError) return true
+    cause = cause.cause
+  }
+  return false
 }

@@ -1,17 +1,23 @@
-import { describe, expect, test } from "bun:test"
-import { SandboxNotRunningError } from "@sixb/core"
+import { describe, expect, jest, test } from "bun:test"
+import { SandboxError, SandboxNotRunningError } from "@sixb/core"
+import { APIError } from "@vercel/sandbox"
 import type {
   VercelCommandClient,
   VercelCommandFinishedClient,
   VercelRunCommandParams,
   VercelSandboxClient,
 } from "../src/vercel-sandbox"
-import { VercelSandbox } from "../src/vercel-sandbox"
+import { COMMAND_MARKER, KILLED_COMMAND_GRACE_MS, VercelSandbox } from "../src/vercel-sandbox"
 import {
   DEFAULT_VERCEL_SANDBOX_RUNTIME,
   type VercelCreateSandbox,
   VercelSandboxFactory,
 } from "../src/vercel-sandbox-factory"
+
+/** Let pending promise callbacks run: under fake timers, a command starts before its timer does. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+}
 
 class FakeFinished implements VercelCommandFinishedClient {
   constructor(
@@ -33,7 +39,11 @@ class FakeCommand implements VercelCommandClient {
   killed = false
   private release: ((value: VercelCommandFinishedClient) => void) | undefined
 
-  constructor(private readonly waitForKill = false) {}
+  constructor(
+    private readonly waitForKill = false,
+    /** False for a command whose child outlives the kill and keeps its output open. */
+    private readonly endsWhenKilled = true
+  ) {}
 
   async wait(): Promise<VercelCommandFinishedClient> {
     if (!this.waitForKill) {
@@ -49,7 +59,7 @@ class FakeCommand implements VercelCommandClient {
 
   async kill(): Promise<void> {
     this.killed = true
-    this.release?.(new FakeFinished(137, "", "killed"))
+    if (this.endsWhenKilled) this.release?.(new FakeFinished(137, "", "killed"))
   }
 }
 
@@ -65,6 +75,9 @@ class FakeVercelClient implements VercelSandboxClient {
   deleteCalls = 0
   status = "running"
   nextCommandWaitsForKill = false
+  nextCommandOutlivesKill = false
+  /** What the next runCommand and writeFiles throw, as Vercel answers a sandbox it stopped. */
+  failWith: unknown
 
   constructor(
     readonly name = "vercel-sandbox-1",
@@ -73,8 +86,10 @@ class FakeVercelClient implements VercelSandboxClient {
 
   async runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient> {
     this.commands.push(params)
-    const command = new FakeCommand(this.nextCommandWaitsForKill)
+    if (this.failWith) throw this.failWith
+    const command = new FakeCommand(this.nextCommandWaitsForKill, !this.nextCommandOutlivesKill)
     this.nextCommandWaitsForKill = false
+    this.nextCommandOutlivesKill = false
     this.commandHandles.push(command)
     return command
   }
@@ -86,6 +101,7 @@ class FakeVercelClient implements VercelSandboxClient {
       readonly mode?: number
     }[]
   ): Promise<void> {
+    if (this.failWith) throw this.failWith
     this.writes.push([...files])
   }
 
@@ -136,7 +152,7 @@ describe("VercelSandbox", () => {
       cmd: "bash",
       args: ["-lc", "echo hi"],
       cwd: "/tmp",
-      env: { A: "factory", B: "call" },
+      env: { A: "factory", B: "call", [COMMAND_MARKER]: expect.any(String) },
       detached: true,
       timeoutMs: 123,
     })
@@ -170,6 +186,124 @@ describe("VercelSandbox", () => {
     expect(result.exitCode).toBe(137)
     expect(result.timedOut).toBe(true)
     expect(client.commandHandles[0].killed).toBe(true)
+  })
+
+  // Removal proof: drop killMarkedProcesses from kill(); no command kills what the shell started.
+  test("timeout also kills every process the command started, by its marker", async () => {
+    const client = new FakeVercelClient()
+    client.nextCommandWaitsForKill = true
+    const sandbox = new VercelSandbox({ client })
+
+    await sandbox.runCommand("bash", ["-lc", "bun server.ts && echo done"], { timeout: 5 })
+    await sandbox.runCommand("true")
+
+    const marker = client.commands[0].env?.[COMMAND_MARKER]
+    expect(marker).toEqual(expect.any(String))
+    expect(client.commands[2].env?.[COMMAND_MARKER]).not.toBe(marker)
+    const killer = client.commands[1]
+    expect(killer).toMatchObject({ cmd: "sh", detached: true })
+    expect(killer.args?.at(-1)).toBe(`${COMMAND_MARKER}=${marker}`)
+    expect(killer.env?.[COMMAND_MARKER]).toBeUndefined()
+  })
+
+  // A shell's child that outlives the kill keeps the command's output open, and Vercel reports
+  // no end. Removal proof: await commandHandle.wait() without the grace race; this never settles.
+  test("returns a killed command whose end never comes after a short grace", async () => {
+    jest.useFakeTimers()
+    try {
+      const client = new FakeVercelClient()
+      client.nextCommandWaitsForKill = true
+      client.nextCommandOutlivesKill = true
+      const sandbox = new VercelSandbox({ client })
+
+      let settled = false
+      const result = sandbox
+        .runCommand("bash", ["-lc", "bun server.ts && echo done"], { timeout: 5 })
+        .finally(() => {
+          settled = true
+        })
+      await settle()
+      jest.advanceTimersByTime(5)
+      await settle()
+      jest.advanceTimersByTime(KILLED_COMMAND_GRACE_MS - 1)
+      await settle()
+      expect(settled).toBe(false)
+      jest.advanceTimersByTime(1)
+
+      expect(await result).toMatchObject({ exitCode: 137, timedOut: true })
+      expect(client.commandHandles[0].killed).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Removal proof: let onAbort only call kill(), which a timeout already spent; the stop waits.
+  test("returns at once when stopped after a timeout already killed the command", async () => {
+    jest.useFakeTimers()
+    try {
+      const client = new FakeVercelClient()
+      client.nextCommandWaitsForKill = true
+      client.nextCommandOutlivesKill = true
+      const sandbox = new VercelSandbox({ client })
+      const stop = new AbortController()
+
+      const result = sandbox.runCommand("bash", ["-lc", "bun server.ts && echo done"], {
+        timeout: 5,
+        signal: stop.signal,
+      })
+      await settle()
+      jest.advanceTimersByTime(5)
+      await settle()
+      stop.abort()
+
+      expect(await result).toMatchObject({ exitCode: 137, timedOut: true })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Vercel stopped the session, at its time limit: the handle still reads running and each call
+  // answers 410. Removal proof: drop isSessionStopped from runCommand; the error stays a generic
+  // SandboxError that nothing upstream can tell from a failed command.
+  test("a command Vercel refuses with sandbox_stopped stops the sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "sandbox_stopped", message: "Sandbox has stopped execution" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(SandboxNotRunningError)
+    expect(sandbox.status).toBe("stopped")
+    await expect(sandbox.writeFiles([{ path: "a.txt", contents: "a" }])).rejects.toBeInstanceOf(
+      SandboxNotRunningError
+    )
+    expect(client.commands).toHaveLength(1)
+  })
+
+  test("a file write Vercel refuses with sandbox_stopped stops the sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "sandbox_stopped" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    await expect(sandbox.writeFiles([{ path: "a.txt", contents: "a" }])).rejects.toBeInstanceOf(
+      SandboxNotRunningError
+    )
+    expect(sandbox.status).toBe("stopped")
+  })
+
+  test("any other refusal stays a failed call on a running sandbox", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "snapshot_not_found" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    const error = await sandbox.runCommand("echo", ["hi"]).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(error).not.toBeInstanceOf(SandboxNotRunningError)
+    expect(sandbox.status).toBe("running")
   })
 
   test("stop and destroy are idempotent and reject further work", async () => {

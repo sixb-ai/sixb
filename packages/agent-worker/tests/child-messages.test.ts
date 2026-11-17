@@ -18,10 +18,12 @@ import {
   prop,
   type RunCommandOptions,
   type Sandbox,
+  SandboxNotRunningError,
   SixbHost,
 } from "@sixb/core"
 import { createSubagentRunId, holdAgentApprovalCall } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
+import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
@@ -36,6 +38,8 @@ const projectId = "agent-child-messages"
 const alice = { type: "user", id: "usr_alice" } as const
 const HELD_COMMAND = "sixb actions request mark-paid --subject invoice:INV-2041"
 const STEER = "Skip Globex; focus on payment terms."
+/** What the child runs as its provider stops the sandbox. */
+const STOPPING_COMMAND = "npm test"
 
 const Invoice = defineObjectType({
   id: "invoice",
@@ -123,6 +127,9 @@ class TestSandbox implements Sandbox {
           project: { id: projectId },
         })
       )
+    }
+    if (script.includes(STOPPING_COMMAND)) {
+      throw new SandboxNotRunningError(`[Sandbox] sandbox ${this.id} stopped.`)
     }
     if (script === HELD_COMMAND) {
       await holdTheCall(this.host, String(options.env?.SIXB_RUN_ID))
@@ -1055,6 +1062,55 @@ describe("waiting by key for a child of an earlier turn", () => {
       await requestTurn(harness, run.threadId)
       expect(toolOutput(harness.parentRequests[4], "wait-earlier")).toMatchObject({
         results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("a child whose sandbox stopped", () => {
+  // Its provider stopped it, as at a Vercel session's time limit: the child ends without retrying,
+  // and its parent reads why, in a child's words, not a conversation's. Removal proof: drop
+  // `onSandboxStopped` from createSubagentEnvironment; the child's model is called again and it
+  // succeeds.
+  test("ends failed after the step that found it, and tells its parent so", async () => {
+    const harness = setup({
+      parent: async (_request, call) => {
+        if (call === 1) {
+          return toolCalls(
+            ["spawn", "spawn_agent", spawn(COMPARE)],
+            ["wait", "wait", { ids: [COMPARE.key] }]
+          )
+        }
+        return answer("The comparison could not run.")
+      },
+      children: {
+        [COMPARE.key]: async (_request, call) =>
+          call === 1
+            ? toolCalls(["test", "bash", { command: STOPPING_COMMAND }])
+            : answer("Compared payment terms."),
+      },
+    })
+    // The child's failure is the outcome under test, not one to report.
+    attachSixbErrorReporter(harness.host, () => {})
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      await requestTurn(harness)
+
+      expect(harness.childRequests(COMPARE.key)).toHaveLength(1)
+      expect(toolOutput(harness.parentRequests[1], "wait")).toMatchObject({
+        results: [
+          {
+            runId: COMPARE.key,
+            status: "failed",
+            error: {
+              code: "agent.execution_failed",
+              message: "Agent execution failed. The sandbox stopped, so this agent ended here.",
+            },
+          },
+        ],
       })
     } finally {
       await settle(harness.worker.stop(), "worker stop")
