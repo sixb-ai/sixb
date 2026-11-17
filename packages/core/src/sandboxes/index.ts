@@ -45,6 +45,7 @@ export type {
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
+  SandboxProcess,
   SandboxRequestCredential,
   SandboxRequestMethod,
   SandboxSessionOptions,

@@ -6,6 +6,7 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxProcess,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
@@ -32,7 +33,7 @@ export interface VercelCommandFinishedClient {
 
 export interface VercelCommandClient {
   wait(params?: { readonly signal?: AbortSignal }): Promise<VercelCommandFinishedClient>
-  kill(signal?: "SIGKILL", opts?: { readonly abortSignal?: AbortSignal }): Promise<void>
+  kill(signal?: "SIGKILL" | "SIGTERM", opts?: { readonly abortSignal?: AbortSignal }): Promise<void>
 }
 
 export interface VercelSandboxClient {
@@ -41,6 +42,10 @@ export interface VercelSandboxClient {
   readonly name: string
   readonly cwd?: string
   readonly status?: string
+  /** The public domain of a port the sandbox was created with. */
+  readonly domain?: (port: number) => string
+  /** Extends this session's timeout by `ms`. */
+  readonly extendTimeout?: (ms: number) => Promise<void>
   runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient>
   writeFiles(
     files: readonly {
@@ -63,6 +68,8 @@ export interface VercelSandboxOptions extends SandboxSessionOptions {
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
   readonly credentialedUrl?: Sandbox["credentialedUrl"]
+  readonly url?: Sandbox["url"]
+  readonly keepAlive?: Sandbox["keepAlive"]
   readonly id: string
   readonly provider = "vercel"
   readonly workingDirectory: string
@@ -83,6 +90,28 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
+    const { domain, extendTimeout } = options.client
+    if (domain !== undefined) {
+      this.url = (port) => {
+        try {
+          return domain.call(options.client, port)
+        } catch {
+          throw new SandboxError(`[Sandbox] port ${port} was not among the ports this sandbox has.`)
+        }
+      }
+    }
+    if (extendTimeout !== undefined) {
+      this.keepAlive = async (ms) => {
+        this.assertRunning("extend its session")
+        try {
+          await extendTimeout.call(options.client, ms)
+        } catch (error) {
+          throw new SandboxError(
+            `[Sandbox] vercel could not extend ${this.id}'s session: ${errorMessage(error)}`
+          )
+        }
+      }
+    }
     if (options.client.updateNetworkPolicy) {
       const updateNetworkPolicy = options.client.updateNetworkPolicy.bind(options.client)
       const network = options.network
@@ -217,6 +246,44 @@ export class VercelSandbox implements Sandbox {
       }
       options.signal?.removeEventListener("abort", onAbort)
       this.inFlight.delete(commandHandle)
+    }
+  }
+
+  /** A detached Vercel command: it outlives this call and ends with the session. */
+  readonly start = async (
+    command: string,
+    args: readonly string[] = [],
+    options: Pick<RunCommandOptions, "cwd" | "env"> = {}
+  ): Promise<SandboxProcess> => {
+    this.assertRunning("start commands")
+    let handle: VercelCommandClient
+    try {
+      handle = await this.client.runCommand({
+        cmd: command,
+        args: [...args],
+        cwd: posix.resolve(this.workingDirectory, options.cwd ?? "."),
+        env: { ...this.sandboxEnv, ...(options.env ?? {}) },
+        detached: true,
+      })
+    } catch (error) {
+      throw new SandboxError(
+        `[Sandbox] vercel could not start a command in ${this.id}: ${errorMessage(error)}`
+      )
+    }
+    const exited = handle.wait().then(
+      (finished) => normalizeExitCode(finished.exitCode, false),
+      () => KILLED_EXIT_CODE
+    )
+    let killing: Promise<void> | undefined
+    return {
+      exited,
+      kill: () => {
+        killing ??= handle.kill("SIGTERM").then(
+          () => {},
+          () => {}
+        )
+        return killing
+      },
     }
   }
 

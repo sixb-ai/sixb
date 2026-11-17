@@ -57,6 +57,7 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
       readOnlyPaths: this.defaults.readOnlyPaths,
       readWritePaths: this.defaults.readWritePaths,
       denyReadPaths: this.defaults.denyReadPaths,
+      ...(options.ports === undefined ? {} : { ports: options.ports }),
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.configuration.network,
       ...(options.requestCredentials === undefined

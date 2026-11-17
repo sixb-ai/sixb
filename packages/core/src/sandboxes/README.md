@@ -43,6 +43,16 @@ Factories define environments; threads retain immutable parameters; runs provide
 - Request origins are read from the first grant, so renewals must keep to the same origins: a
   provider rejects a credential for an origin the network does not allow.
 
+## Serving the host
+
+A sandbox may keep a process running for the host to reach, such as a branch's dev server:
+`create({ ports })` names the guest ports, `start` leaves a command running past the call, `url`
+gives the address the host reaches a port at, and `keepAlive` pushes the session's deadline out.
+All three are optional, and a caller checks for them before relying on them. Vercel maps them to a
+detached command, the port's sandbox domain and `extendTimeout`. Local commands share this machine's
+network, so a port must be free at creation and `url` is loopback; `keepAlive` has nothing to do.
+A Vercel domain is public: whatever serves on it checks who is asking.
+
 ## V1 limits
 
 Vercel requests can outlive their worker: storage fencing cannot cancel provider-side work.

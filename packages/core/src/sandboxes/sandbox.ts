@@ -130,11 +130,25 @@ export interface CreateSandboxOptions extends SandboxSessionOptions {
   readonly environment?: Pick<SandboxEnvironment, "source" | "setup">
   /** Create new named state; reject an existing name or unsupported persistence before provisioning. */
   readonly persistence?: { readonly name: string }
+  /**
+   * Guest ports the host reaches through {@link Sandbox.url}, such as a server a command starts.
+   * Kept for the sandbox's life, resumes included. Reject before provisioning when the provider
+   * can't serve them.
+   */
+  readonly ports?: readonly number[]
 }
 
 /** Resume changes execution defaults, not the identity or creation configuration of saved state. */
 export interface ResumeSandboxOptions extends SandboxSessionOptions {
   readonly persistence?: never
+}
+
+/** A command {@link Sandbox.start} left running. */
+export interface SandboxProcess {
+  /** Settles with the exit code once the command ends, however it ends. Never rejects. */
+  readonly exited: Promise<number>
+  /** Ends the command and everything it started. Idempotent. */
+  kill(): Promise<void>
 }
 
 export interface Sandbox {
@@ -167,6 +181,24 @@ export interface Sandbox {
     args?: readonly string[],
     options?: RunCommandOptions
   ): Promise<CommandResult>
+
+  /**
+   * Starts a command that keeps running after the call returns, such as a server. It ends when
+   * it exits, is killed, or the session stops. Its output is discarded: a command that needs a
+   * log writes one. Optional, with {@link url} and {@link keepAlive}: a sandbox that has all three
+   * can serve a long-lived process to the host.
+   */
+  readonly start?: (
+    command: string,
+    args?: readonly string[],
+    options?: Pick<RunCommandOptions, "cwd" | "env">
+  ) => Promise<SandboxProcess>
+
+  /** The address the host reaches `port` at, one of the `ports` the sandbox was created with. */
+  readonly url?: (port: number) => string
+
+  /** Pushes the session's deadline out by `ms`, so a process it serves isn't cut off. */
+  readonly keepAlive?: (ms: number) => Promise<void>
 
   /**
    * Materialize files into the sandbox so a subsequent {@link runCommand} can read them. Each

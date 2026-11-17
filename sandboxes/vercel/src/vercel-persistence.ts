@@ -10,7 +10,15 @@ import { VercelSandbox, type VercelSandboxClient } from "./vercel-sandbox"
 
 type PersistentSession = Pick<
   Session,
-  "sessionId" | "status" | "cwd" | "runCommand" | "writeFiles" | "stop" | "update"
+  | "sessionId"
+  | "status"
+  | "cwd"
+  | "runCommand"
+  | "writeFiles"
+  | "stop"
+  | "update"
+  | "domain"
+  | "extendTimeout"
 >
 
 export interface VercelPersistentClient {
@@ -112,6 +120,8 @@ export async function bindPersistentSandbox(
     get status() {
       return session.status
     },
+    domain: (port) => session.domain(port),
+    extendTimeout: (ms) => session.extendTimeout(ms),
     runCommand: (params) => session.runCommand({ ...params, args: [...(params.args ?? [])] }),
     writeFiles: (files) =>
       session.writeFiles(

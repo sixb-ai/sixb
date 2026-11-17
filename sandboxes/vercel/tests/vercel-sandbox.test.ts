@@ -188,6 +188,44 @@ describe("VercelSandbox", () => {
     await sandbox.destroy()
     expect(client.deleteCalls).toBe(1)
   })
+
+  test("start leaves a detached command running, and kill ends it", async () => {
+    const client = new FakeVercelClient()
+    client.nextCommandWaitsForKill = true
+    const sandbox = new VercelSandbox({ client, env: { A: "factory" } })
+
+    const server = await sandbox.start("bun", ["run", "serve"], { cwd: "app", env: { B: "call" } })
+    expect(client.commands[0]).toEqual({
+      cmd: "bun",
+      args: ["run", "serve"],
+      cwd: "/vercel/sandbox/app",
+      env: { A: "factory", B: "call" },
+      detached: true,
+    })
+    expect(client.commandHandles[0].killed).toBe(false)
+
+    await server.kill()
+    expect(await server.exited).toBe(137)
+  })
+
+  test("url is the port's public domain, and keepAlive extends the session", async () => {
+    const extended: number[] = []
+    const client = Object.assign(new FakeVercelClient(), {
+      domain: (port: number) => {
+        if (port !== 3000) throw new Error("no route")
+        return "https://sb-3000.vercel.run"
+      },
+      extendTimeout: async (ms: number) => {
+        extended.push(ms)
+      },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    expect(sandbox.url?.(3000)).toBe("https://sb-3000.vercel.run")
+    expect(() => sandbox.url?.(4000)).toThrow("[Sandbox] port 4000")
+    await sandbox.keepAlive?.(60_000)
+    expect(extended).toEqual([60_000])
+  })
 })
 
 describe("VercelSandboxFactory", () => {
@@ -294,6 +332,21 @@ describe("VercelSandboxFactory", () => {
 
     await sandbox.runCommand("echo", ["ok"])
     expect(client.commands[0].timeoutMs).toBe(222)
+  })
+
+  test("exposes the factory's ports and the ones a create asks for, at most four", async () => {
+    let captured: unknown
+    const factory = new VercelSandboxFactory({ ports: [3000] }, async (params) => {
+      captured = params
+      return new FakeVercelClient()
+    })
+
+    await factory.create({ ports: [3000, 4310] })
+    expect(captured).toMatchObject({ ports: [3000, 4310] })
+
+    captured = undefined
+    await expect(factory.create({ ports: [1, 2, 3, 4] })).rejects.toThrow("at most 4 ports")
+    expect(captured).toBeUndefined()
   })
 
   test("creates a configured working directory in the remote sandbox", async () => {
