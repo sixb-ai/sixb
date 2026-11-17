@@ -1,12 +1,28 @@
-import { mkdir, readdir, rm } from "node:fs/promises"
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { type DesktopAppOptions, desktopDir, writeDesktopApp, writeRunner } from "./generate"
 import { bundleIdentifier } from "./identity"
+import {
+  type AppleSigning,
+  appleSigning,
+  makeDiskImage,
+  notarize,
+  RUNNER_ENTITLEMENTS,
+  signFile,
+} from "./mac"
+import {
+  INSTALLER,
+  MAC_FEED,
+  macUpdateArchive,
+  type ReleasePlatform,
+  renderMacFeed,
+} from "./release"
 import { run } from "./run"
 
 export type { DesktopAppOptions } from "./generate"
+export type { ReleasePlatform } from "./release"
 
 export interface DesktopWindow {
   /** Resolves with Electron's exit code once the user quits it. */
@@ -14,11 +30,25 @@ export interface DesktopWindow {
   close(): void
 }
 
+export interface DesktopBuildOptions extends DesktopAppOptions {
+  /** Fail before building unless the build can be signed, as `sixb desktop release` asks. */
+  readonly requireSignature?: boolean
+}
+
 export interface DesktopBuild {
-  /** What to hand to users: a zip of the app on macOS, the app's folder elsewhere. */
+  /** What people download: the disk image on macOS, the app's folder elsewhere. */
   readonly path: string
-  /** Whether it was signed and notarized, and so opens without a warning. */
+  /** Whether it was signed, and on macOS notarized, so that it opens without a warning. */
   readonly signed: boolean
+  /** What `sixb desktop release` publishes. Null on the systems releases aren't made for yet. */
+  readonly release: DesktopReleaseFiles | null
+}
+
+/** One system's release: files the deployment serves as they are, at `/__sixb/desktop/<platform>/`. */
+export interface DesktopReleaseFiles {
+  readonly platform: ReleasePlatform
+  readonly version: string
+  readonly dir: string
 }
 
 const packageRequire = createRequire(import.meta.url)
@@ -55,15 +85,41 @@ export async function openDesktopApp(options: DesktopAppOptions): Promise<Deskto
   }
 }
 
-/** Packages the app for this machine's platform. `sixb desktop build` calls this. */
-export async function buildDesktopApp(options: DesktopAppOptions): Promise<DesktopBuild> {
+/**
+ * Packages the app for this machine's system, and on macOS writes the release: a universal app in a
+ * disk image, the archive it updates itself from, and the feed that names it. Signed and notarized
+ * when the Apple variables are set. `sixb desktop build` and `sixb desktop release` call this.
+ */
+export async function buildDesktopApp(options: DesktopBuildOptions): Promise<DesktopBuild> {
+  const mac = process.platform === "darwin"
+  if (options.requireSignature && !mac) {
+    throw new Error("[SixbDesktop] Desktop releases are made on macOS for now.")
+  }
+  const signing = mac ? await appleSigning() : null
+  if (options.requireSignature && !signing) {
+    throw new Error(
+      "[SixbDesktop] Releasing for macOS needs Apple signing credentials. Set APPLE_API_KEY, " +
+        "APPLE_API_KEY_ID and APPLE_API_ISSUER, and APPLE_CERTIFICATE unless the Developer ID " +
+        "certificate is in your keychain."
+    )
+  }
+  try {
+    return await packageForThisSystem(options, signing)
+  } finally {
+    await signing?.dispose()
+  }
+}
+
+async function packageForThisSystem(
+  options: DesktopAppOptions,
+  signing: AppleSigning | null
+): Promise<DesktopBuild> {
+  const mac = process.platform === "darwin"
   const app = await writeDesktopApp(options)
-  const runner = await writeRunner(options)
+  const runner = await writeRunner(options, { universal: mac })
   const out = desktopDir(options.projectRoot, "dist")
   await rm(out, { recursive: true, force: true })
 
-  const mac = process.platform === "darwin"
-  const notarize = mac ? appleNotarization() : null
   const packaged = await packageApp({
     dir: app.dir,
     name: app.name,
@@ -72,49 +128,65 @@ export async function buildDesktopApp(options: DesktopAppOptions): Promise<Deskt
     appVersion: app.version,
     electronVersion: (packageRequire("electron/package.json") as { readonly version: string })
       .version,
+    ...(mac
+      ? {
+          // One download for every Mac, so nobody has to know which chip theirs has.
+          arch: "universal",
+          // macOS asks before a page first listens, as for dictation, and shows this as the reason.
+          extendInfo: {
+            NSMicrophoneUsageDescription: `${app.name} uses the microphone when you dictate.`,
+          },
+        }
+      : {}),
     ...(mac && app.icon ? { icon: await macIcon(app.icon) } : {}),
     // Beside the app's archive, not in it: a program has to be a file of its own to run.
     ...(runner ? { extraResource: [runner] } : {}),
-    // Signs with the Developer ID certificate in the keychain, which notarization requires.
-    ...(notarize ? { osxSign: {}, osxNotarize: notarize } : {}),
+    ...(signing
+      ? {
+          osxSign: {
+            identity: signing.identity,
+            ...(signing.keychain ? { keychain: signing.keychain } : {}),
+            // A build that people get unsigned would warn them. Better that it fails here.
+            continueOnError: false,
+          },
+          runnerEntitlements: RUNNER_ENTITLEMENTS,
+        }
+      : {}),
   })
-  if (!mac) return { path: packaged, signed: false }
+  if (!mac) return { path: packaged, signed: false, release: null }
 
   const name = (await readdir(packaged)).find((entry) => entry.endsWith(".app"))
   if (!name) throw new Error(`[SixbDesktop] The packaged app is missing from ${packaged}.`)
   const bundle = join(packaged, name)
   // Packaging breaks the ad-hoc signature Electron ships with. macOS calls a downloaded app with a
   // broken signature damaged, and offers no way to open it; signed ad hoc, it can be allowed.
-  if (!notarize) {
+  if (!signing) {
     await run(["codesign", "--force", "--deep", "--sign", "-", bundle], "Could not sign the app.")
   }
-  // `ditto`, not `zip`: it keeps the bundle's symlinks, and with them its signature.
-  const zip = `${packaged}.zip`
-  await run(["ditto", "-c", "-k", "--keepParent", bundle, zip], "Could not zip the app.")
-  return { path: zip, signed: notarize !== null }
-}
 
-/**
- * An App Store Connect API key, which notarizes the app so macOS opens it without a warning.
- * Without one, the app is built unsigned.
- */
-function appleNotarization(): {
-  readonly appleApiKey: string
-  readonly appleApiKeyId: string
-  readonly appleApiIssuer: string
-} | null {
-  const { APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER } = process.env
-  if (!APPLE_API_KEY && !APPLE_API_KEY_ID && !APPLE_API_ISSUER) return null
-  if (!APPLE_API_KEY || !APPLE_API_KEY_ID || !APPLE_API_ISSUER) {
-    throw new Error(
-      "[SixbDesktop] Set all of APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER to sign the " +
-        "macOS app, or none of them to build it unsigned."
-    )
+  const dir = join(desktopDir(options.projectRoot, "release"), "darwin")
+  await rm(dir, { recursive: true, force: true })
+  await mkdir(dir, { recursive: true })
+  const dmg = join(dir, INSTALLER.darwin)
+  await makeDiskImage(bundle, app.name, dmg)
+  if (signing) {
+    await signFile(dmg, signing)
+    await notarize(dmg, signing)
   }
+  // `ditto`, not `zip`: it keeps the bundle's symlinks, and with them its signature.
+  await run(
+    ["ditto", "-c", "-k", "--keepParent", bundle, join(dir, macUpdateArchive(app.version))],
+    "Could not archive the app.",
+    { timeoutMs: 600_000 }
+  )
+  await writeFile(
+    join(dir, MAC_FEED),
+    renderMacFeed({ appUrl: options.appUrl, version: app.version, publishedAt: new Date() })
+  )
   return {
-    appleApiKey: APPLE_API_KEY,
-    appleApiKeyId: APPLE_API_KEY_ID,
-    appleApiIssuer: APPLE_API_ISSUER,
+    path: dmg,
+    signed: signing !== null,
+    release: { platform: "darwin", version: app.version, dir },
   }
 }
 

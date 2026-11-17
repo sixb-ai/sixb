@@ -2,4 +2,13 @@
 // Electron's own Node, not Bun: see `packageApp`.
 import { packager } from "@electron/packager"
 
-await packager(JSON.parse(process.argv[2]))
+const { runnerEntitlements, ...options } = JSON.parse(process.argv[2])
+
+// A function, which JSON can't carry: the runner gets its own entitlements, everything else the
+// signer's defaults for Electron.
+if (options.osxSign && runnerEntitlements) {
+  options.osxSign.optionsForFile = (file) =>
+    file.includes("/Contents/Resources/runner/") ? { entitlements: runnerEntitlements } : undefined
+}
+
+await packager(options)

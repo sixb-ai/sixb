@@ -1,11 +1,24 @@
-/** Runs a command to completion, quietly unless it fails: then it throws `failure` and its errors. */
-export async function run(command: readonly string[], failure: string): Promise<void> {
+/**
+ * Runs a command to completion, quietly unless it fails: then it throws `failure` and its errors.
+ * Resolves with what it printed, for the commands whose answer is their output.
+ */
+export async function run(
+  command: readonly string[],
+  failure: string,
+  options: { readonly timeoutMs?: number } = {}
+): Promise<string> {
   const child = Bun.spawn([...command], {
-    stdio: ["ignore", "ignore", "pipe"],
-    timeout: 120_000,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: options.timeoutMs ?? 120_000,
   })
-  const [exitCode, errors] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  const [exitCode, output, errors] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
   if (exitCode !== 0) {
-    throw new Error(`[SixbDesktop] ${failure}${errors.trim() ? `\n${errors.trim()}` : ""}`)
+    const detail = errors.trim() || output.trim()
+    throw new Error(`[SixbDesktop] ${failure}${detail ? `\n${detail}` : ""}`)
   }
+  return output
 }
