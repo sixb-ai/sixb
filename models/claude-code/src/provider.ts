@@ -10,6 +10,8 @@ import {
 import {
   defineLanguageModel,
   defineLanguageModelLabel,
+  defineModelRateCard,
+  estimateModelReservation,
   isJsonObject,
   type JsonObject,
   type LanguageModel,
@@ -24,12 +26,15 @@ import {
   MODEL_REASONING_LEVELS,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
+  type ModelCostEstimator,
   ModelProviderError,
+  type ModelRateCard,
   type ModelReasoning,
   type ModelReasoningCapabilities,
   type ModelReasoningEffort,
   type ModelReasoningLevel,
   modelReasoningSupportIssue,
+  rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { ClaudeCodeStream } from "./stream"
@@ -41,6 +46,17 @@ const CATALOG_TIMEOUT_MS = 30_000
 const ANTHROPIC = { id: "anthropic", name: "Anthropic" } as const
 /** How starting a Claude Code that is not there fails. */
 const MISSING_EXECUTABLE = /ENOENT|not found/i
+
+/**
+ * Claude Code adds context about its own process to every conversation, with no way to leave it
+ * out: where it runs, a scratchpad of its own, and the email of the account it is signed in with.
+ */
+const RELAY_NOTE = [
+  "Claude Code relays this conversation, and adds context about its own process: an",
+  '"# Environment" section with its working directory, platform and scratchpad, and the email of',
+  "the account it is signed in with. That context describes the relay, not where your tools run",
+  "or who you work for: the instructions that follow say that.",
+].join(" ")
 
 /** What every model reached through Claude Code takes, whatever its catalog entry says. */
 const CAPABILITIES: ModelCapabilities = {
@@ -56,6 +72,24 @@ const CAPABILITIES: ModelCapabilities = {
  * the server the project's agent worker runs on, it reads `CLAUDE_CODE_OAUTH_TOKEN`: a token from
  * `claude setup-token`.
  */
+/**
+ * A Claude plan bills by subscription, not by call: each call costs the project nothing, so cost
+ * limits admit it and token limits still count it.
+ */
+const RATE_CARD: ModelRateCard = defineModelRateCard({
+  currency: "USD",
+  input: "0",
+  output: "0",
+  cacheReadInput: "0",
+  cacheWriteInput: "0",
+  cacheWriteInput5m: "0",
+  cacheWriteInput1h: "0",
+})
+const COST_ESTIMATOR: ModelCostEstimator = {
+  estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard: RATE_CARD }),
+  estimate: ({ usage }) => rateModelCall({ usage, rateCard: RATE_CARD }),
+}
+
 export interface ClaudeCodeOptions {
   /** The Claude Code executable to run, such as the `claude` on your PATH. Defaults to the SDK's. */
   readonly executable?: string
@@ -311,6 +345,8 @@ class ClaudeCodeLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly defaultReasoning?: ModelReasoningLevel
+  readonly rateCard = RATE_CARD
+  readonly costEstimator = COST_ESTIMATOR
   /** A computer that runs a turn calls Claude Code itself, signed in as whoever runs it there. */
   readonly runsOnComputers = true
 
@@ -417,7 +453,8 @@ class ClaudeCodeLanguageModel implements LanguageModel {
         ...(await this.runtime.queryOptions()),
         abortController: released,
         model: this.modelId,
-        systemPrompt,
+        // Rendered from Sixb's prompt on every call, which can change within a conversation.
+        systemPrompt: { type: "custom", prompt: [RELAY_NOTE, systemPrompt], snapshot: false },
         includePartialMessages: true,
         // Only Sixb's tools exist, and each is allowed: nothing is left to ask about.
         permissionMode: "dontAsk",
@@ -432,7 +469,14 @@ class ClaudeCodeLanguageModel implements LanguageModel {
             }),
         ...(resume === undefined
           ? {}
-          : { resume: resume.session.sessionId, resumeSessionAt: resume.session.at }),
+          : {
+              resume: resume.session.sessionId,
+              resumeSessionAt: resume.session.at,
+              // A copy of the session up to the answer. Stopping at Sixb's tool calls leaves
+              // Claude Code's own record that they were refused in the session after it, and
+              // Claude Code reads that record in place of Sixb's results on later calls.
+              forkSession: true,
+            }),
         ...reasoningOptions(request.reasoning),
         ...(request.responseFormat === undefined
           ? {}

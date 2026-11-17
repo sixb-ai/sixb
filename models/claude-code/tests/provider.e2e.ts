@@ -37,10 +37,11 @@ function user(text: string): ModelMessage {
 }
 
 function sessionOf(step: ModelStep): unknown {
-  const state = step.content.find((part) => part.type === "provider-state")
-  return state?.type === "provider-state" && typeof state.data === "object" && state.data !== null
-    ? Reflect.get(state.data, "sessionId")
-    : undefined
+  for (const part of step.content) {
+    const data = part.type === "provider-state" ? undefined : part.providerData?.["claude-code"]
+    if (typeof data === "object" && data !== null) return Reflect.get(data, "sessionId")
+  }
+  return undefined
 }
 
 /** The steps of a loop as the conversation the next turn sends. */
@@ -74,7 +75,9 @@ liveTest(
 
     const text = events.flatMap((event) => (event.type === "text-delta" ? [event.delta] : []))
     expect(text.join("")).toContain("sixb-ok")
-    expect(events.some((event) => event.type === "provider-state")).toBe(true)
+    expect(
+      events.some((event) => "providerData" in event && event.providerData?.["claude-code"])
+    ).toBe(true)
     expect(events.at(-1)).toMatchObject({ type: "finish", finishReason: "stop" })
   },
   100_000
@@ -113,11 +116,45 @@ liveTest(
     })
     if (second.status !== "completed") throw new Error(`The loop ended '${second.status}'.`)
     expect(second.output).toContain("7")
-    // The next turn continued the same session rather than starting one from a transcript.
+    // The next turn resumed a copy of the session rather than starting one from a transcript.
     expect(sessionOf(first.steps[0]!)).toEqual(expect.any(String))
-    expect(sessionOf(second.steps[0]!)).toBe(sessionOf(first.steps[0]!))
+    expect(second.steps[0]!.usage.cacheReadInputTokens ?? 0).toBeGreaterThan(0)
   },
   320_000
+)
+
+// Guard proof: drop `forkSession` from the resume options in provider.ts. Claude Code then reads
+// the refusal it recorded when the first call stopped at its tool call in place of Sixb's result,
+// and the answer misses the first stock level.
+liveTest(
+  "keeps each tool result through later calls of the same turn",
+  async () => {
+    const stock: Record<string, string> = { "7": "12 in stock", "9": "31 in stock" }
+    const result = await runModelLoop({
+      model: claudeCode(modelId),
+      messages: [
+        system,
+        user(
+          "Look up item 7, and only after its result arrives, look up item 9: one call at a time. Then give both stock levels."
+        ),
+      ],
+      tools: [
+        {
+          ...lookupTool,
+          execute: async (input: unknown) =>
+            stock[String(Reflect.get(Object(input), "item"))] ?? "unknown item",
+        },
+      ],
+      maxSteps: 4,
+      signal: AbortSignal.timeout(200_000),
+    })
+    if (result.status !== "completed") throw new Error(`The loop ended '${result.status}'.`)
+
+    expect(result.steps.length).toBe(3)
+    expect(result.output).toContain("12")
+    expect(result.output).toContain("31")
+  },
+  240_000
 )
 
 liveTest(
@@ -131,10 +168,7 @@ liveTest(
         user("Remember the code word: heron."),
         {
           role: "assistant",
-          content: [
-            { type: "text", text: "Noted." },
-            { type: "provider-state", providerId: "claude-code", data: missing },
-          ],
+          content: [{ type: "text", text: "Noted.", providerData: { "claude-code": missing } }],
         },
         user("What was the code word? Answer with the word only."),
       ],

@@ -74,11 +74,10 @@ describe("ClaudeCodeStream", () => {
       { type: "tool-input-end", id: "toolu_1" },
       { type: "tool-input-start", id: "toolu_2", toolName: "clock" },
       { type: "tool-input-delta", id: "toolu_2", delta: "{}" },
-      { type: "tool-input-end", id: "toolu_2" },
       {
-        type: "provider-state",
-        providerId: "claude-code",
-        data: { sessionId: "session-1", at: "entry-3" },
+        type: "tool-input-end",
+        id: "toolu_2",
+        providerData: { "claude-code": { sessionId: "session-1", at: "entry-3" } },
       },
       {
         type: "finish",
@@ -125,11 +124,10 @@ describe("ClaudeCodeStream", () => {
     expect(answer).toEqual([
       { type: "text-start", id: "structured-output" },
       { type: "text-delta", id: "structured-output", delta: '{"capital":"Paris"}' },
-      { type: "text-end", id: "structured-output" },
       {
-        type: "provider-state",
-        providerId: "claude-code",
-        data: { sessionId: "session-1", at: "entry-2" },
+        type: "text-end",
+        id: "structured-output",
+        providerData: { "claude-code": { sessionId: "session-1", at: "entry-2" } },
       },
       expect.objectContaining({ type: "finish", finishReason: "stop" }),
     ])

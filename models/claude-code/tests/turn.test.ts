@@ -26,8 +26,13 @@ describe("planTurn", () => {
       {
         role: "assistant",
         content: [
-          { type: "tool-call", toolCallId: "toolu_1", toolName: "lookup", input: { item: "7" } },
-          { type: "provider-state", providerId: "claude-code", data: session },
+          {
+            type: "tool-call",
+            toolCallId: "toolu_1",
+            toolName: "lookup",
+            input: { item: "7" },
+            providerData: { "claude-code": session },
+          },
         ],
       },
       {
@@ -54,10 +59,7 @@ describe("planTurn", () => {
       user("Hi"),
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "Hello." },
-          { type: "provider-state", providerId: "claude-code", data: session },
-        ],
+        content: [{ type: "text", text: "Hello.", providerData: { "claude-code": session } }],
       },
       user("And now?"),
       user("Also this."),
@@ -74,10 +76,7 @@ describe("planTurn", () => {
       user("Hi"),
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "Hello." },
-          { type: "provider-state", providerId: "anthropic", data: session },
-        ],
+        content: [{ type: "text", text: "Hello.", providerData: { anthropic: session } }],
       },
       user("And now?"),
     ])

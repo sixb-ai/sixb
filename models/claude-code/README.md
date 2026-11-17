@@ -27,7 +27,12 @@ servers, and with Sixb's system prompt in place of its own.
 | Structured output | Supported, through Claude Code's own structured output. |
 | Files | Images and PDFs in user messages. |
 | Reasoning | Sixb's levels map to Claude Code's effort; `minimal` runs as `low`. |
-| Cost | Not reported. A subscription bills by plan, not by call. |
+| Cost | $0 per call: a Claude plan bills by subscription, not by call. Cost limits admit the calls, and token limits count them. |
+
+Claude Code also adds context about its own process to every conversation, and offers no way to
+leave it out: its working directory, platform and scratchpad, and the email address of the
+account it is signed in with. Sixb tells the model that this describes Claude Code, not where its
+tools run. A server signed in only with `CLAUDE_CODE_OAUTH_TOKEN` has no account email to add.
 
 Claude Code cannot resume a session it no longer has, such as one its cleanup removed, or a
 conversation whose earlier answers came from another model provider. Then a new session starts

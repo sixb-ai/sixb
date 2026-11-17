@@ -23,6 +23,30 @@ describe("claudeCode", () => {
     expect(model.definition.name).toBe("Sonnet")
   })
 
+  // Guard proof: drop costEstimator from ClaudeCodeLanguageModel; a project with a cost limit then
+  // refuses every call with ai.usage_limit_unavailable, since no reservation can be priced.
+  test("prices each call at nothing, so a cost limit can admit it", () => {
+    const model = claudeCode("sonnet")
+
+    expect(
+      model.costEstimator?.estimateReservation?.({ inputTokens: 50_000, outputTokens: 8_000 })
+    ).toEqual({ currency: "USD", amountNanos: "0" })
+    expect(
+      // A call's usage as Claude Code reports it: its session prompt cached for an hour.
+      model.costEstimator?.estimate({
+        usage: {
+          inputTokens: 13_037,
+          outputTokens: 69,
+          uncachedInputTokens: 2,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 13_035,
+          cacheWrite5mInputTokens: 0,
+          cacheWrite1hInputTokens: 13_035,
+        },
+      })
+    ).toMatchObject({ status: "rated", money: { currency: "USD", amountNanos: "0" } })
+  })
+
   test("refuses a call made where the project runs when it runs only on computers", async () => {
     const provider = createClaudeCode({ computersOnly: true })
 

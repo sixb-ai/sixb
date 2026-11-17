@@ -19,6 +19,11 @@ interface Block {
   input: string
 }
 
+type BlockEnd = Extract<
+  LanguageModelStreamEvent,
+  { readonly type: "text-end" | "reasoning-end" | "tool-input-end" }
+>
+
 /** Assistant errors a later attempt can get past. */
 const RETRYABLE_ERRORS = new Set(["rate_limit", "overloaded", "server_error"])
 
@@ -28,7 +33,8 @@ const RETRYABLE_ERRORS = new Set(["rate_limit", "overloaded", "server_error"])
  * With partial messages on, Claude Code forwards each Messages API stream event, so text, reasoning
  * and Sixb's tool calls stream as they arrive. Tool calls Claude Code makes for itself, such as
  * the one that returns structured output, stay inside it. Usage adds up every API call of the
- * query, and the answer ends with the session's provider state, so the next call can resume it.
+ * query. The answer's last part carries the session in its `providerData`, so the next call can
+ * resume it: the session is known only once the answer ends, so the last part's end waits for it.
  */
 export class ClaudeCodeStream {
   private readonly blocks = new Map<number, Block>()
@@ -41,6 +47,8 @@ export class ClaudeCodeStream {
   private sessionId: string | undefined
   private lastEntry: string | undefined
   private structuredOutput: JsonValue | undefined
+  /** The latest block's end, held until the next block starts or the answer ends. */
+  private pendingEnd: BlockEnd | undefined
 
   /** The last answer called Sixb's tools: the query is waiting for their results. */
   toolCallsReady = false
@@ -81,17 +89,20 @@ export class ClaudeCodeStream {
     if (this.structuredOutput !== undefined) {
       const id = "structured-output"
       events.push(
+        ...this.flushEnd(),
         { type: "text-start", id },
-        { type: "text-delta", id, delta: JSON.stringify(this.structuredOutput) },
-        { type: "text-end", id }
+        { type: "text-delta", id, delta: JSON.stringify(this.structuredOutput) }
       )
+      this.pendingEnd = { type: "text-end", id }
     }
-    if (this.sessionId !== undefined && this.lastEntry !== undefined) {
-      events.push({
-        type: "provider-state",
-        providerId: PROVIDER_ID,
-        data: { sessionId: this.sessionId, at: this.lastEntry },
-      })
+    const last = this.pendingEnd
+    this.pendingEnd = undefined
+    if (last !== undefined) {
+      const session =
+        this.sessionId === undefined || this.lastEntry === undefined
+          ? undefined
+          : { [PROVIDER_ID]: { sessionId: this.sessionId, at: this.lastEntry } }
+      events.push(session === undefined ? last : { ...last, providerData: session })
     }
     events.push({
       type: "finish",
@@ -158,11 +169,11 @@ export class ClaudeCodeStream {
 
     if (block?.type === "text" && !this.options.structuredOutput) {
       this.blocks.set(index, { kind: "text", id, input: "" })
-      return [{ type: "text-start", id }]
+      return [...this.flushEnd(), { type: "text-start", id }]
     }
     if (block?.type === "thinking") {
       this.blocks.set(index, { kind: "reasoning", id, input: "" })
-      return [{ type: "reasoning-start", id }]
+      return [...this.flushEnd(), { type: "reasoning-start", id }]
     }
 
     const name = string(block?.name)
@@ -171,7 +182,7 @@ export class ClaudeCodeStream {
       const toolName = name.slice(TOOL_PREFIX.length)
       this.blocks.set(index, { kind: "tool", id: toolCallId, input: "" })
       this.messageToolCalls += 1
-      return [{ type: "tool-input-start", id: toolCallId, toolName }]
+      return [...this.flushEnd(), { type: "tool-input-start", id: toolCallId, toolName }]
     }
 
     return []
@@ -201,13 +212,21 @@ export class ClaudeCodeStream {
     if (block === undefined) return []
     this.blocks.delete(index)
 
-    if (block.kind === "text") return [{ type: "text-end", id: block.id }]
-    if (block.kind === "reasoning") return [{ type: "reasoning-end", id: block.id }]
-    // A call without arguments streams none: its input is still an object.
-    return [
-      ...(block.input ? [] : [{ type: "tool-input-delta" as const, id: block.id, delta: "{}" }]),
-      { type: "tool-input-end", id: block.id },
-    ]
+    const events = this.flushEnd()
+    if (block.kind === "text") this.pendingEnd = { type: "text-end", id: block.id }
+    if (block.kind === "reasoning") this.pendingEnd = { type: "reasoning-end", id: block.id }
+    if (block.kind === "tool") {
+      // A call without arguments streams none: its input is still an object.
+      if (!block.input) events.push({ type: "tool-input-delta", id: block.id, delta: "{}" })
+      this.pendingEnd = { type: "tool-input-end", id: block.id }
+    }
+    return events
+  }
+
+  private flushEnd(): LanguageModelStreamEvent[] {
+    const end = this.pendingEnd
+    this.pendingEnd = undefined
+    return end === undefined ? [] : [end]
   }
 
   private acceptResult(result: SDKResultMessage) {

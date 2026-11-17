@@ -13,7 +13,8 @@ export const ERROR_PREFIX = "[SixbClaudeCode]"
 
 /**
  * Where a Claude Code session stands after a call: resuming `sessionId` at the transcript entry
- * `at` continues exactly what the answer was given. Stored in the answer as provider state.
+ * `at` continues exactly what the answer was given. Stored in the `providerData` of the answer's
+ * last part, which costs no tokens and keeps the conversation estimable for AI usage limits.
  */
 export interface ClaudeCodeSessionState {
   readonly sessionId: string
@@ -69,10 +70,10 @@ export function sessionState(
   content: readonly ModelAssistantPart[]
 ): ClaudeCodeSessionState | undefined {
   for (const part of [...content].reverse()) {
-    if (part.type !== "provider-state" || part.providerId !== PROVIDER_ID) continue
-    if (!isJsonObject(part.data)) continue
+    const data = part.type === "provider-state" ? undefined : part.providerData?.[PROVIDER_ID]
+    if (!isJsonObject(data)) continue
 
-    const { sessionId, at } = part.data
+    const { sessionId, at } = data
     if (typeof sessionId === "string" && sessionId && typeof at === "string" && at) {
       return { sessionId, at }
     }
