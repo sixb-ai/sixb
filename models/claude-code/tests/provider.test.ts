@@ -42,7 +42,6 @@ describe("claudeCode", () => {
 
   test("rejects options it cannot use", () => {
     expect(() => claudeCode(" ")).toThrow("Model id must not be empty")
-    expect(() => createClaudeCode({ catalogTtlMs: 0 })).toThrow("catalogTtlMs")
     expect(() => createClaudeCode({ executable: "" })).toThrow("executable")
   })
 

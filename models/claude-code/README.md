@@ -62,11 +62,7 @@ on a computer. Its model list is only the definitions passed in `models`.
 
 To run it in the cloud as well, sign Claude Code in where the agent worker runs: run
 `claude setup-token` on your computer, and set the token it prints as `CLAUDE_CODE_OAUTH_TOKEN` in
-the worker's environment, or pass it as `oauthToken`:
-
-```ts
-const claudeCode = createClaudeCode({ oauthToken: () => process.env.CLAUDE_CODE_OAUTH_TOKEN })
-```
+the worker's environment. Claude Code reads it there itself.
 
 Turns on people's computers still use their own Claude Code; every other call uses that one
 sign-in. The SDK installs Claude Code for Linux, macOS and Windows with the package, so the server
@@ -88,19 +84,18 @@ import { createClaudeCode } from "@sixb/claude-code"
 const provider = createClaudeCode({
   // Run the `claude` on your PATH instead of the one the SDK ships.
   executable: "/usr/local/bin/claude",
-  // Bill an API key instead of Claude Code's sign-in.
-  apiKey: () => process.env.CLAUDE_CODE_API_KEY,
-  // Sign in with a token from `claude setup-token`, where nobody signs in to Claude Code.
-  oauthToken: () => process.env.CLAUDE_CODE_OAUTH_TOKEN,
-  // Where Claude Code runs, and so where its sessions are filed under ~/.claude/projects.
-  cwd: "/tmp/sixb-claude-code",
+  // Definitions that override Claude Code's own list, such as one with a context window.
+  models: [],
+  // Keep every call on people's computers (see above).
+  computersOnly: true,
 })
 
 const sonnet = provider("sonnet", { name: "Sonnet", description: "For everyday questions." })
 ```
 
-`ANTHROPIC_API_KEY` in the environment is not passed to Claude Code, because Claude Code would bill
-it ahead of its sign-in. Pass `apiKey` to use a key on purpose.
+`ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` in the environment are not passed to Claude Code,
+because Claude Code would bill them ahead of its sign-in. To bill an API key, use
+`@sixb/anthropic`.
 
 ## Requirements
 

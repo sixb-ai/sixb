@@ -36,9 +36,7 @@ import { ClaudeCodeStream } from "./stream"
 import { sixbToolServer, TOOL_PREFIX } from "./tools"
 import { type ClaudeCodeSessionState, ERROR_PREFIX, PROVIDER_ID, planTurn } from "./turn"
 
-type ValueSource<T> = T | (() => T)
-
-const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
+const CATALOG_TTL_MS = 60 * 60 * 1_000
 const CATALOG_TIMEOUT_MS = 30_000
 const ANTHROPIC = { id: "anthropic", name: "Anthropic" } as const
 /** How starting a Claude Code that is not there fails. */
@@ -53,29 +51,14 @@ const CAPABILITIES: ModelCapabilities = {
   providerExecutedTools: false,
 }
 
+/**
+ * Claude Code signs in as whoever is signed in where it runs. Where nobody signs in to it, such as
+ * the server the project's agent worker runs on, it reads `CLAUDE_CODE_OAUTH_TOKEN`: a token from
+ * `claude setup-token`.
+ */
 export interface ClaudeCodeOptions {
-  /**
-   * A key Claude Code bills to instead of its own sign-in. Absent, `ANTHROPIC_API_KEY` is kept from
-   * Claude Code, so a Claude subscription it is signed in with pays for the calls.
-   */
-  readonly apiKey?: ValueSource<string | undefined>
-  /**
-   * A token from `claude setup-token`, which signs Claude Code in where nobody signs in to it, such
-   * as the server the project's agent worker runs on. Claude Code also reads it from
-   * `CLAUDE_CODE_OAUTH_TOKEN` itself.
-   */
-  readonly oauthToken?: ValueSource<string | undefined>
   /** The Claude Code executable to run, such as the `claude` on your PATH. Defaults to the SDK's. */
   readonly executable?: string
-  /** Variables for Claude Code, over the ones it inherits from this process. */
-  readonly env?: Readonly<Record<string, string | undefined>>
-  /**
-   * The folder Claude Code runs in. Its sessions are stored for this folder, under
-   * `~/.claude/projects`. Defaults to `sixb-claude-code` in the system's temporary folder.
-   */
-  readonly cwd?: string
-  /** How long the model list stays in memory. Defaults to one hour. */
-  readonly catalogTtlMs?: number
   /** Definitions supplied here override matching entries from Claude Code's model list. */
   readonly models?: readonly LanguageModelDefinition[]
   /**
@@ -108,19 +91,13 @@ export interface ClaudeCodeProvider extends LanguageModelProvider {
  * answers, without its own tools, settings or MCP servers.
  */
 export function createClaudeCode(options: ClaudeCodeOptions = {}): ClaudeCodeProvider {
-  if (
-    options.catalogTtlMs !== undefined &&
-    (!Number.isSafeInteger(options.catalogTtlMs) || options.catalogTtlMs <= 0)
-  ) {
-    throw new TypeError(`${ERROR_PREFIX} catalogTtlMs must be a positive integer.`)
-  }
   if (options.executable !== undefined && !options.executable.trim()) {
     throw new TypeError(`${ERROR_PREFIX} executable must not be empty.`)
   }
 
   const runtime = new ClaudeCodeRuntime(options)
   const configured = configuredModelDefinitions(options.models ?? [])
-  const catalog = new ClaudeCodeModelCatalog(runtime, configured, options.catalogTtlMs)
+  const catalog = new ClaudeCodeModelCatalog(runtime, configured)
   const model = (modelId: string, modelOptions: ClaudeCodeModelOptions = {}) => {
     if (!modelId.trim()) throw new TypeError(`${ERROR_PREFIX} Model id must not be empty.`)
     return new ClaudeCodeLanguageModel(
@@ -137,6 +114,12 @@ export function createClaudeCode(options: ClaudeCodeOptions = {}): ClaudeCodePro
 
 export const claudeCode: ClaudeCodeProvider = createClaudeCode()
 
+/**
+ * The folder every query runs Claude Code in, so that its sessions are filed together under
+ * `~/.claude/projects`.
+ */
+const CWD = join(tmpdir(), "sixb-claude-code")
+
 /** How every query starts Claude Code. */
 class ClaudeCodeRuntime {
   constructor(private readonly options: ClaudeCodeOptions) {}
@@ -146,12 +129,11 @@ class ClaudeCodeRuntime {
   }
 
   async queryOptions(): Promise<Options> {
-    const cwd = this.options.cwd ?? join(tmpdir(), "sixb-claude-code")
-    await mkdir(cwd, { recursive: true })
+    await mkdir(CWD, { recursive: true })
 
     return {
-      cwd,
-      env: this.env(),
+      cwd: CWD,
+      env: environment(),
       ...(this.options.executable === undefined
         ? {}
         : { pathToClaudeCodeExecutable: this.options.executable }),
@@ -163,23 +145,15 @@ class ClaudeCodeRuntime {
       strictMcpConfig: true,
     }
   }
+}
 
-  private env(): Record<string, string | undefined> {
-    const inherited: Record<string, string | undefined> = { ...process.env }
-    // A key in the environment would take precedence over Claude Code's sign-in.
-    delete inherited.ANTHROPIC_API_KEY
-    delete inherited.ANTHROPIC_AUTH_TOKEN
-
-    const apiKey = read(this.options.apiKey)
-    const oauthToken = read(this.options.oauthToken)
-    return {
-      ...inherited,
-      ...this.options.env,
-      ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
-      ...(oauthToken ? { CLAUDE_CODE_OAUTH_TOKEN: oauthToken } : {}),
-      CLAUDE_AGENT_SDK_CLIENT_APP: "sixb",
-    }
-  }
+/**
+ * This process's environment, without the Anthropic keys another provider of the project may use:
+ * Claude Code would bill one ahead of its sign-in.
+ */
+function environment(): Record<string, string | undefined> {
+  const { ANTHROPIC_API_KEY: _key, ANTHROPIC_AUTH_TOKEN: _token, ...inherited } = process.env
+  return { ...inherited, CLAUDE_AGENT_SDK_CLIENT_APP: "sixb" }
 }
 
 function configuredModelDefinitions(
@@ -208,8 +182,7 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
 
   constructor(
     private readonly runtime: ClaudeCodeRuntime,
-    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>,
-    private readonly ttlMs = DEFAULT_CATALOG_TTL_MS
+    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>
   ) {}
 
   async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
@@ -229,7 +202,7 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
   }
 
   private load(): Promise<readonly LanguageModelDefinition[]> {
-    if (this.loadPromise && this.loadedAt !== 0 && Date.now() - this.loadedAt >= this.ttlMs) {
+    if (this.loadPromise && this.loadedAt !== 0 && Date.now() - this.loadedAt >= CATALOG_TTL_MS) {
       this.loadPromise = undefined
       this.loadedAt = 0
     }
@@ -562,10 +535,6 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
 
 function isMissingSession(error: unknown): boolean {
   return error instanceof ModelProviderError && /no conversation found/i.test(error.message)
-}
-
-function read(source: ValueSource<string | undefined>): string | undefined {
-  return typeof source === "function" ? source() : source
 }
 
 function errorMessage(error: unknown): string {

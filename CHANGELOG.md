@@ -16,7 +16,8 @@ Sixb packages are versioned independently. Each release entry names the packages
   Code session the last one came from, and a conversation it cannot resume starts a new session
   from a transcript. A turn that runs on a person's computer, in the desktop app or `sixb agent`,
   calls Claude Code there, billed to their own plan, and the project records what each call used;
-  `createClaudeCode({ computersOnly: true })` keeps every call on people's computers.
+  `createClaudeCode({ computersOnly: true })` keeps every call on people's computers, and
+  `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` signs it in where the agent worker runs.
 
 ### Upgrade notes
 
