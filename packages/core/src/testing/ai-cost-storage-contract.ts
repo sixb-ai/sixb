@@ -436,6 +436,28 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           ["2026-11-01T04:00:00.000Z", 1],
           ["2026-11-02T05:00:00.000Z", 1],
         ])
+
+        // Removal proof: step each day from the one before it instead of from its midnight; after
+        // Chile skips midnight on September 6, the days start at 1 am, PostgreSQL refuses its own
+        // buckets, and the in-memory and SQLite bars lose or move the calls.
+        const santiago = await storage.queryProjectOverview({
+          projectId,
+          from: new Date("2026-09-05T04:00:00.000Z"),
+          to: new Date("2026-11-03T03:00:00.000Z"),
+          bucket: "day",
+          timeZone: "America/Santiago",
+          providerId: "gateway",
+          modelId: "clock/model",
+        })
+        expect(santiago.series).toHaveLength(59)
+        expect(
+          santiago.series
+            .filter((period) => period.modelCallCount > 0)
+            .map((period) => [period.start.toISOString(), period.modelCallCount])
+        ).toEqual([
+          ["2026-11-01T03:00:00.000Z", 1],
+          ["2026-11-02T03:00:00.000Z", 1],
+        ])
       } finally {
         await options.cleanup?.(storage)
       }

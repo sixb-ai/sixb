@@ -60,6 +60,34 @@ describe("calendar periods", () => {
     ).toBe("2026-09-06T04:00:00.000Z")
   })
 
+  // Removal proof: step from the wall clock of the jump instead of the period's midnight; every
+  // day after September 6 starts at 1 am, and no call finds the day it belongs to.
+  test("step back onto midnight after a day that began at the jump", () => {
+    expect(
+      calendarPeriods(
+        at("2026-09-05T04:00:00.000Z"),
+        at("2026-09-08T03:00:00.000Z"),
+        "day",
+        "America/Santiago"
+      ).map((period) => iso(period.start))
+    ).toEqual(["2026-09-05T04:00:00.000Z", "2026-09-06T04:00:00.000Z", "2026-09-07T03:00:00.000Z"])
+
+    // Lord Howe Island moves its clocks half an hour, from 2 am to 2:30, on October 4, 2026.
+    expect(
+      calendarPeriods(
+        at("2026-10-03T14:30:00.000Z"),
+        at("2026-10-03T17:30:00.000Z"),
+        "hour",
+        "Australia/Lord_Howe"
+      ).map((period) => iso(period.start))
+    ).toEqual([
+      "2026-10-03T14:30:00.000Z",
+      "2026-10-03T15:30:00.000Z",
+      "2026-10-03T16:00:00.000Z",
+      "2026-10-03T17:00:00.000Z",
+    ])
+  })
+
   test("read a wall clock a database returns without a zone", () => {
     expect(iso(wallClockInstant("2026-11-14T00:00:00Z", "America/New_York"))).toBe(
       "2026-11-14T05:00:00.000Z"

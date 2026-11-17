@@ -109,35 +109,46 @@ export function wallClockInstant(wallClock: string, timeZone = DEFAULT_PROJECT_T
   return instantOf(wall, timeZone)
 }
 
+/**
+ * The wall clock a period of the calendar is named by: its hour, its midnight, or its Monday's.
+ *
+ * It is the name even where the zone skips it, so a period that began at the jump still steps to
+ * the next midnight rather than to the next 1 am.
+ */
+function periodWallClock(wallClock: number, period: CalendarPeriod): number {
+  if (period === "hour") return wallClock - (wallClock % hourMs)
+  const midnight = wallClock - (wallClock % dayMs)
+  if (period === "day") return midnight
+
+  // Weeks begin on Monday, which is what a date truncated to its week gives everywhere else.
+  const mondayOffset = (new Date(midnight).getUTCDay() + 6) % 7
+  return midnight - mondayOffset * dayMs
+}
+
 /** The start of the period an instant falls in, on the zone's calendar. */
 export function calendarPeriodStart(
   at: Date,
   period: CalendarPeriod,
   timeZone = DEFAULT_PROJECT_TIME_ZONE
 ): Date {
-  const wallClock = wallClockOf(at, timeZone)
-  if (period === "hour") return instantOf(wallClock - (wallClock % hourMs), timeZone)
-  const midnight = wallClock - (wallClock % dayMs)
-  if (period === "day") return instantOf(midnight, timeZone)
-  // Weeks begin on Monday, which is what a date truncated to its week gives everywhere else.
-  const mondayOffset = (new Date(midnight).getUTCDay() + 6) % 7
-  return instantOf(midnight - mondayOffset * dayMs, timeZone)
+  return instantOf(periodWallClock(wallClockOf(at, timeZone), period), timeZone)
 }
 
 /**
- * The period `count` periods away from `start`, which is a period start.
+ * The start of the period `count` periods away from the one `at` falls in.
  *
  * Stepping the zone's wall clock keeps every period whole across a change of clocks, where adding
  * milliseconds would land an hour off a boundary.
  */
 export function addCalendarPeriods(
-  start: Date,
+  at: Date,
   period: CalendarPeriod,
   count: number,
   timeZone = DEFAULT_PROJECT_TIME_ZONE
 ): Date {
   const step = period === "hour" ? hourMs : period === "week" ? 7 * dayMs : dayMs
-  return instantOf(wallClockOf(start, timeZone) + count * step, timeZone)
+  const start = periodWallClock(wallClockOf(at, timeZone), period)
+  return instantOf(start + count * step, timeZone)
 }
 
 /**
