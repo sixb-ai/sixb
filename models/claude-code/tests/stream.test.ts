@@ -192,4 +192,64 @@ describe("ClaudeCodeStream", () => {
       retryable: false,
     })
   })
+
+  // Guard proof: return early from planLimitReached; a used-up plan then fails as a rate limit,
+  // which Sixb retries for nothing until the limit resets.
+  test("stops at a used-up plan limit, and retries a passing rate limit", () => {
+    const refused = (messages: readonly SDKMessage[]) => {
+      const stream = new ClaudeCodeStream({ modelId: "haiku", structuredOutput: false })
+      try {
+        run(stream, messages)
+      } catch (caught) {
+        return caught
+      }
+    }
+    const rateLimited = (fields: object = {}) =>
+      sdk({
+        type: "assistant",
+        uuid: "entry-1",
+        error: "rate_limit",
+        message: { content: [{ type: "text", text: "Rate limited" }] },
+        ...fields,
+      })
+    // 2026-11-17T21:00:00Z, as Claude Code reports it: seconds since the epoch.
+    const resetsAt = 1_794_949_200
+
+    expect(
+      refused([
+        rateLimited({
+          api_error_params: {
+            rate_limit_info: { status: "rejected", rateLimitType: "five_hour", resetsAt },
+          },
+        }),
+      ])
+    ).toMatchObject({
+      message:
+        "[SixbClaudeCode] The Claude plan Claude Code is signed in with has reached its 5-hour usage limit: it resets at 2026-11-17T21:00:00.000Z.",
+      code: "usage_limit",
+      retryable: false,
+    })
+    // The limit can also arrive ahead of the refusal, as a rate limit event.
+    expect(
+      refused([
+        sdk({
+          type: "rate_limit_event",
+          uuid: "limit-1",
+          rate_limit_info: { status: "rejected", rateLimitType: "seven_day", resetsAt },
+        }),
+        rateLimited(),
+      ])
+    ).toMatchObject({ code: "usage_limit", retryable: false })
+    // While extra usage pays, or without a used-up limit, a later attempt can get through.
+    expect(
+      refused([
+        rateLimited({
+          api_error_params: {
+            rate_limit_info: { status: "rejected", overageStatus: "allowed", resetsAt },
+          },
+        }),
+      ])
+    ).toMatchObject({ code: "rate_limit", retryable: true })
+    expect(refused([rateLimited()])).toMatchObject({ code: "rate_limit", retryable: true })
+  })
 })

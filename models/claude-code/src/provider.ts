@@ -4,6 +4,7 @@ import { join } from "node:path"
 import {
   type ModelInfo,
   type Options,
+  type Query,
   query,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
@@ -42,7 +43,7 @@ import { sixbToolServer, TOOL_PREFIX } from "./tools"
 import { type ClaudeCodeSessionState, ERROR_PREFIX, PROVIDER_ID, planTurn } from "./turn"
 
 const CATALOG_TTL_MS = 60 * 60 * 1_000
-const CATALOG_TIMEOUT_MS = 30_000
+const INSPECT_TIMEOUT_MS = 30_000
 const ANTHROPIC = { id: "anthropic", name: "Anthropic" } as const
 /** How starting a Claude Code that is not there fails. */
 const MISSING_EXECUTABLE = /ENOENT|not found/i
@@ -179,15 +180,66 @@ class ClaudeCodeRuntime {
       strictMcpConfig: true,
     }
   }
+
+  /** Asks a Claude Code that is sent nothing: it answers control requests without a turn. */
+  async inspect<T>(model: string | undefined, ask: (session: Query) => Promise<T>): Promise<T> {
+    const abort = new AbortController()
+    let release = () => {}
+    const idle = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const session = query({
+      prompt: waitFor(idle),
+      options: {
+        ...(await this.queryOptions()),
+        abortController: abort,
+        ...(model === undefined ? {} : { model }),
+      },
+    })
+
+    try {
+      return await Promise.race([
+        ask(session),
+        rejectOnAbort(AbortSignal.timeout(INSPECT_TIMEOUT_MS)),
+      ])
+    } finally {
+      release()
+      abort.abort()
+      session.close()
+    }
+  }
 }
 
 /**
- * This process's environment, without the Anthropic keys another provider of the project may use:
- * Claude Code would bill one ahead of its sign-in.
+ * Left out of the environment Claude Code inherits. The Anthropic keys another provider of the
+ * project may use: Claude Code would bill one ahead of its sign-in. And what a Claude Code session
+ * exports to the commands it runs, such as `sixb dev` started from one: a Claude Code that inherits
+ * its session id, messaging socket and token acts as part of that session.
  */
-function environment(): Record<string, string | undefined> {
-  const { ANTHROPIC_API_KEY: _key, ANTHROPIC_AUTH_TOKEN: _token, ...inherited } = process.env
-  return { ...inherited, CLAUDE_AGENT_SDK_CLIENT_APP: "sixb" }
+const WITHHELD_ENV = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDECODE",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_HOST_SESSION_ID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_DESKTOP_APP_VERSION",
+  "CLAUDE_EFFORT",
+  "CLAUDE_PID",
+  "CLAUDE_AGENT_SDK_VERSION",
+]
+
+/** The environment Claude Code runs with: this process's, without {@link WITHHELD_ENV}. */
+export function environment(
+  inherited: Readonly<Record<string, string | undefined>> = process.env
+): Record<string, string | undefined> {
+  const env = { ...inherited }
+  for (const name of WITHHELD_ENV) delete env[name]
+  return { ...env, CLAUDE_AGENT_SDK_CLIENT_APP: "sixb" }
 }
 
 function configuredModelDefinitions(
@@ -209,10 +261,17 @@ function configuredModelDefinitions(
   return configured
 }
 
-/** The models Claude Code offers the account it is signed in with, as it lists them itself. */
+/**
+ * The models Claude Code offers the account it is signed in with, as it lists them itself. A model
+ * looked up for a call also carries its context window, which the list does not have.
+ */
 class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
+  private readonly windows = new Map<
+    string,
+    { readonly window: Promise<number | undefined>; readonly loadedAt: number }
+  >()
 
   constructor(
     private readonly runtime: ClaudeCodeRuntime,
@@ -220,9 +279,20 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
   ) {}
 
   async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
-    return (
+    const definition =
       this.supplied.get(modelId) ?? (await this.load()).find((model) => model.modelId === modelId)
-    )
+    if (
+      definition === undefined ||
+      definition.contextWindow !== undefined ||
+      this.runtime.computersOnly
+    ) {
+      return definition
+    }
+
+    const contextWindow = await this.contextWindow(modelId)
+    return contextWindow === undefined
+      ? definition
+      : defineLanguageModel({ ...definition, contextWindow })
   }
 
   list(): Promise<readonly LanguageModelDefinition[]> {
@@ -232,6 +302,7 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
   refresh(): Promise<readonly LanguageModelDefinition[]> {
     this.loadPromise = undefined
     this.loadedAt = 0
+    this.windows.clear()
     return this.load()
   }
 
@@ -256,20 +327,8 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
     // Claude Code may not even be installed where the project runs.
     if (this.runtime.computersOnly) return [...this.supplied.values()]
 
-    const abort = new AbortController()
-    let release = () => {}
-    const idle = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    // A query that sends nothing: Claude Code answers control requests without a turn.
-    const session = query({
-      prompt: waitFor(idle),
-      options: { ...(await this.runtime.queryOptions()), abortController: abort },
-    })
-    const timeout = AbortSignal.timeout(CATALOG_TIMEOUT_MS)
-
     try {
-      const models = await Promise.race([session.supportedModels(), rejectOnAbort(timeout)])
+      const models = await this.runtime.inspect(undefined, (session) => session.supportedModels())
       const listed = models
         // "default" names whichever model the account defaults to, which another entry also lists.
         .filter((info) => info.value !== "default")
@@ -282,11 +341,29 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
         `${ERROR_PREFIX} Claude Code could not list its models: ${errorMessage(error)}`,
         { cause: error }
       )
-    } finally {
-      release()
-      abort.abort()
-      session.close()
     }
+  }
+
+  /**
+   * The window Claude Code sizes the model's context to for this account, which can be larger than
+   * the model's default. Unknown when Claude Code cannot say: Sixb then assumes one.
+   */
+  private contextWindow(modelId: string): Promise<number | undefined> {
+    const cached = this.windows.get(modelId)
+    if (cached && Date.now() - cached.loadedAt < CATALOG_TTL_MS) return cached.window
+
+    const window = this.runtime
+      .inspect(modelId, async (session) => {
+        // A summary answers from what Claude Code knows of the model, without a model call.
+        const { rawMaxTokens } = await session.getContextUsage({ detail: "summary" })
+        return Number.isSafeInteger(rawMaxTokens) && rawMaxTokens > 0 ? rawMaxTokens : undefined
+      })
+      .catch(() => {
+        this.windows.delete(modelId)
+        return undefined
+      })
+    this.windows.set(modelId, { window, loadedAt: Date.now() })
+    return window
   }
 }
 

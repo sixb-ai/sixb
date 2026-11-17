@@ -18,6 +18,8 @@ Sixb packages are versioned independently. Each release entry names the packages
   calls Claude Code there, billed to their own plan, and the project records what each call used;
   `createClaudeCode({ computersOnly: true })` keeps every call on people's computers, and
   `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` signs it in where the agent worker runs.
+  The Agent sizes a conversation to the context window Claude Code gives the account, and a call
+  the plan's usage limit refuses says when the limit resets instead of being retried.
 
 ### Upgrade notes
 

@@ -173,4 +173,38 @@ describe("a runner's models", () => {
     expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 9 } })
     session.close()
   })
+
+  // Guard proof: pass `local` to computerModel unresolved, or drop the context it takes from it; the
+  // runner's model then has no context window, and the Agent assumes one.
+  test("size a computer model's context to what the runner's copy reports", async () => {
+    const { host, run } = await seedAgentRun()
+    const claimed = await claimAgentRunForRunner(host, {
+      run,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    })
+    if (!claimed) throw new Error("Expected the run to be claimed.")
+    const session = createHttpAgentRunSession({
+      apiUrl: "http://sixb.test",
+      runnerToken: claimed.runnerToken,
+      run: claimed.run,
+      fetch: async (request) =>
+        (await serveAgentRunSession(host, request)) ?? new Response(null, { status: 404 }),
+      localModel: (described) => {
+        const local = new MockLanguageModel({
+          providerId: described.providerId,
+          modelId: described.modelId,
+        })
+        // The window is known once the copy resolves, as Claude Code's is.
+        const resolved = new MockLanguageModel({
+          definition: { ...local.definition, contextWindow: 1_000_000 },
+        })
+        return Object.assign(local, { resolve: async () => resolved })
+      },
+    })
+
+    const model = await session.models.language({ provider: "test", modelId: "computer-model" })
+
+    expect(model.definition.contextWindow).toBe(1_000_000)
+    session.close()
+  })
 })

@@ -1,5 +1,6 @@
 import type { FileRef } from "../blob-storage/types"
 import type { LanguageModel, LanguageModelRequest, LanguageModelStreamEvent } from "../models"
+import { resolveLanguageModel } from "../models/resolve"
 import type {
   AgentRunRecord,
   AgentThreadComputer,
@@ -126,7 +127,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
         const model = await described
         const local = model.runsOnComputers === true ? input.localModel?.(model) : undefined
         if (local) {
-          return computerModel(model, local, (modelCall, events) =>
+          return computerModel(model, await resolveLanguageModel(local), (modelCall, events) =>
             call("models.recordCall", [ref, modelCall, events])
           )
         }
@@ -342,8 +343,21 @@ function computerModel(
     events: readonly LanguageModelStreamEvent[]
   ) => Promise<void>
 ): LanguageModel {
+  // The project may not know the model's context, such as when only computers run it: this
+  // computer's copy says what it knows of it.
+  const project = described.definition
+  const { contextWindow, maxInputTokens } = local.definition
+  const context =
+    project.contextWindow !== undefined || project.maxInputTokens !== undefined
+      ? {}
+      : {
+          ...(contextWindow === undefined ? {} : { contextWindow }),
+          ...(maxInputTokens === undefined ? {} : { maxInputTokens }),
+        }
+
   return {
     ...described,
+    definition: { ...project, ...context },
     async stream(request) {
       const opened = await local.stream(request)
       return { events: reportedEvents(opened.events, request, record) }

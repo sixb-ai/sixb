@@ -78,8 +78,12 @@ tools, and a token there would be readable by the agent's commands.
 
 `claudeCode.catalog.list()` returns the models Claude Code offers the account it is signed in
 with, such as `opus`, `sonnet`, `haiku` and full model ids, with their names and effort levels.
-Loading the list starts Claude Code briefly, once an hour at most. Context windows are not listed:
-pass `contextWindow` through `models` when the Agent should size its context to one.
+Loading the list starts Claude Code briefly, once an hour at most.
+
+A model bound for a call, such as the Agent's, takes the context window Claude Code gives the
+account, such as 1,000,000 tokens, so the Agent compacts a conversation only near it. Claude Code
+reports it without a model call. On a person's computer, that computer's Claude Code reports it,
+including with `computersOnly`. A `contextWindow` passed through `models` takes precedence.
 
 ## Options
 
@@ -100,13 +104,16 @@ const sonnet = provider("sonnet", { name: "Sonnet", description: "For everyday q
 
 `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` in the environment are not passed to Claude Code,
 because Claude Code would bill them ahead of its sign-in. To bill an API key, use
-`@sixb/anthropic`.
+`@sixb/anthropic`. Neither are the variables a Claude Code session exports to the commands it runs,
+such as `sixb dev` started from one: Claude Code would act as part of that session.
 
 ## Requirements
 
 - Claude Code signed in on the machine that runs the model: run `claude`, then `/login`. A call
   made while it is signed out fails with `Claude Code is not signed in`, and one made where it is
   not installed with `Claude Code is not installed here`.
+- A call the Claude plan's usage limit refuses fails with the limit and the time it resets, and is
+  not retried: only extra usage, or the reset, lets the next call through.
 - Each call starts a Claude Code process, which adds its startup time to every model call.
 
 This provider is for running Sixb on your own computer with your own Claude account. Anthropic does

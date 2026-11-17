@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { claudeCode, createClaudeCode } from "../src"
-import { modelInfoDefinition, reasoningOptions } from "../src/provider"
+import { environment, modelInfoDefinition, reasoningOptions } from "../src/provider"
 
 describe("claudeCode", () => {
   test("binds a model through Claude Code before its model list loads", () => {
@@ -84,6 +84,29 @@ describe("claudeCode", () => {
 
     const resolved = await provider("sonnet").resolve?.({ offline: true })
     expect(resolved?.definition.contextWindow).toBe(200_000)
+  })
+})
+
+describe("environment", () => {
+  // Guard proof: return `inherited` unchanged; the API keys and the host session's variables then
+  // reach Claude Code.
+  test("keeps the project's API keys and a surrounding Claude Code session out of Claude Code", () => {
+    const env = environment({
+      PATH: "/usr/bin",
+      CLAUDE_CODE_OAUTH_TOKEN: "token",
+      ANTHROPIC_API_KEY: "key",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "host-session",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/socket",
+      CLAUDE_CODE_MESSAGING_TOKEN: "secret",
+      CLAUDE_EFFORT: "high",
+    })
+
+    expect(env).toEqual({
+      PATH: "/usr/bin",
+      CLAUDE_CODE_OAUTH_TOKEN: "token",
+      CLAUDE_AGENT_SDK_CLIENT_APP: "sixb",
+    })
   })
 })
 

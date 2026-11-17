@@ -213,6 +213,19 @@ liveTest(
   160_000
 )
 
+// Guard proof: return the listed definition from ClaudeCodeModelCatalog.get; the model then has
+// no context window, and the Agent assumes 128,000 tokens.
+liveTest(
+  "sizes a model's context to the window Claude Code gives its account",
+  async () => {
+    const resolved = await claudeCode(modelId).resolve?.()
+
+    // Claude Code's models have 200,000 tokens of context at the least.
+    expect(resolved?.definition.contextWindow).toBeGreaterThanOrEqual(200_000)
+  },
+  60_000
+)
+
 liveTest(
   "lists the models Claude Code offers its account",
   async () => {

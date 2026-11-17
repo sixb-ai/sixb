@@ -1,4 +1,4 @@
-import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { SDKMessage, SDKRateLimitInfo, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk"
 import {
   isJsonObject,
   isJsonValue,
@@ -27,6 +27,16 @@ type BlockEnd = Extract<
 /** Assistant errors a later attempt can get past. */
 const RETRYABLE_ERRORS = new Set(["rate_limit", "overloaded", "server_error"])
 
+/** The Claude plan usage limits Claude Code reports, as a person knows them. */
+const PLAN_LIMITS: Readonly<Record<NonNullable<SDKRateLimitInfo["rateLimitType"]>, string>> = {
+  five_hour: "5-hour",
+  seven_day: "weekly",
+  seven_day_opus: "weekly Opus",
+  seven_day_sonnet: "weekly Sonnet",
+  seven_day_overage_included: "weekly",
+  overage: "extra usage",
+}
+
 /**
  * Turns the messages of one Claude Code query into Sixb model events.
  *
@@ -47,6 +57,8 @@ export class ClaudeCodeStream {
   private sessionId: string | undefined
   private lastEntry: string | undefined
   private structuredOutput: JsonValue | undefined
+  /** The latest state of the plan's usage limits, from Claude Code's rate limit events. */
+  private rateLimit: SDKRateLimitInfo | undefined
   /** The latest block's end, held until the next block starts or the answer ends. */
   private pendingEnd: BlockEnd | undefined
 
@@ -71,9 +83,14 @@ export class ClaudeCodeStream {
     }
 
     if (message.type === "stream_event") return this.acceptEvent(message.event)
+    if (message.type === "rate_limit_event") this.rateLimit = message.rate_limit_info
     if (message.type === "assistant") {
       this.lastEntry = message.uuid
-      if (message.error !== undefined) throw this.assistantError(message.error, message.message)
+      if (message.error !== undefined) {
+        // Newer than the SDK's types: a refused request carries the limit that refused it.
+        const limit = object(Reflect.get(message, "api_error_params"))?.rate_limit_info
+        throw this.assistantError(message.error, message.message, limit ?? this.rateLimit)
+      }
       return []
     }
     // Results of Claude Code's own tool calls end up in the transcript as user entries.
@@ -248,7 +265,20 @@ export class ClaudeCodeStream {
     )
   }
 
-  private assistantError(code: string, message: unknown): ModelProviderError {
+  private assistantError(code: string, message: unknown, limit: unknown): ModelProviderError {
+    const reached = code === "rate_limit" ? planLimitReached(limit) : undefined
+    if (reached !== undefined) {
+      // Retrying cannot help until the limit resets, which can be days away.
+      return new ModelProviderError(
+        `${ERROR_PREFIX} ${reached}`,
+        PROVIDER_ID,
+        this.options.modelId,
+        {
+          code: "usage_limit",
+        }
+      )
+    }
+
     const content = isJsonObject(message) && Array.isArray(message.content) ? message.content : []
     const text = content
       .flatMap((block) =>
@@ -286,6 +316,26 @@ export class ClaudeCodeStream {
         return "other"
     }
   }
+}
+
+/**
+ * What a person reads when the Claude plan Claude Code is signed in with has used up a limit, or
+ * undefined when the limit has not refused the call, such as while extra usage pays for it.
+ */
+function planLimitReached(limit: unknown): string | undefined {
+  if (!isJsonObject(limit) || limit.status !== "rejected") return undefined
+  if (limit.overageStatus === "allowed" || limit.overageStatus === "allowed_warning")
+    return undefined
+  if (limit.isUsingOverage === true || limit.overageInUse === true) return undefined
+
+  const type = string(limit.rateLimitType)
+  const name = type in PLAN_LIMITS ? `${PLAN_LIMITS[type as keyof typeof PLAN_LIMITS]} ` : ""
+  const resetsAt = typeof limit.resetsAt === "number" ? new Date(limit.resetsAt * 1_000) : undefined
+  const reset =
+    resetsAt === undefined || Number.isNaN(resetsAt.getTime())
+      ? ""
+      : `: it resets at ${resetsAt.toISOString()}`
+  return `The Claude plan Claude Code is signed in with has reached its ${name}usage limit${reset}.`
 }
 
 /** Adds one API call's usage into the query's: counters add up, nested breakdowns too. */
