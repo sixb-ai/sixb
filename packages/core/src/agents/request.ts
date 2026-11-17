@@ -35,6 +35,7 @@ import {
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
 } from "../storage/agents"
+import { type AgentTurnPlace, turnPlace } from "../storage/agents/provider"
 import {
   aiLimitSubjectsFromAttribution,
   aiUsageLimitExceededError,
@@ -206,6 +207,8 @@ export async function requestAgentRun(
     (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: existingThread?.id }))
       .approvalMode
 
+  const place = turnPlace(runsOn, existingThread ? existingThread.computer : input.computer)
+
   // Last before anything is written, so a message the checks above refuse never reaches the
   // decision model. Concurrent messages to an idle thread can still each ask before one of them is
   // refused with `active_run_exists` below.
@@ -215,15 +218,12 @@ export async function requestAgentRun(
           ...requested,
           projectId,
           threadId: existingThread?.id,
+          place,
           settings,
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({
-    ...selected,
-    approvalMode,
-    ...(runsOn === undefined ? {} : { runsOn }),
-  })
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
   const createdThread = existingThread === null
   const thread =
@@ -322,7 +322,7 @@ export async function retryAgentRun(
    */
   blobStorage?: Pick<BlobStorage, "open" | "put">
 ): Promise<RequestAgentRunResult> {
-  resolveExecutionScopeAuthorization(runtime.projectId, {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
   })
@@ -347,6 +347,16 @@ export async function retryAgentRun(
     )
   }
   assertSandboxExecutionAvailable(thread)
+  if (
+    authority.type === "principal" &&
+    thread.runsOn === "computer" &&
+    !principalsEqual(authority.context.principal, thread.ownerPrincipal)
+  ) {
+    throw new AgentRequestError(
+      "not_thread_owner",
+      `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can retry a turn in it.`
+    )
+  }
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
@@ -1079,8 +1089,8 @@ function inPlace(
   thread: AgentThreadRecord,
   spec: ConversationAgentRunSpec
 ): ConversationAgentRunSpec {
-  const { runsOn: _runsOn, ...rest } = spec
-  return Object.freeze(thread.runsOn === undefined ? rest : { ...rest, runsOn: thread.runsOn })
+  const { runsOn: _runsOn, computer: _computer, ...rest } = spec
+  return Object.freeze({ ...rest, ...turnPlace(thread.runsOn, thread.computer) })
 }
 
 /** The paused turn's spec, with defaults for a model that has since left the catalog. */
@@ -1157,6 +1167,8 @@ async function routedConversationRunSpec(
   input: RoutedTurn & {
     readonly projectId: string
     readonly threadId: string | undefined
+    /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
+    readonly place: AgentTurnPlace
     readonly settings: RequesterSettings
     readonly language: LanguageModelCatalog | undefined
   }
@@ -1164,7 +1176,7 @@ async function routedConversationRunSpec(
   const previous = input.threadId
     ? await latestConversationRun(agents, input.projectId, input.threadId)
     : undefined
-  const choice = await input.router.choose(input.text, previous)
+  const choice = await input.router.choose(input.text, previous, input.place)
 
   return resolveConversationRunSpec({
     models: input.language,
@@ -1245,7 +1257,11 @@ function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal)
 }
 
 function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.sandboxState && !["new", "ready"].includes(thread.sandboxState.status)) {
+  if (
+    thread.runsOn !== "computer" &&
+    thread.sandboxState &&
+    !["new", "ready"].includes(thread.sandboxState.status)
+  ) {
     throw new AgentRequestError(
       "sandbox_execution_unavailable",
       "[Sixb] Sandbox recovery is required before another run. Reload the thread, then resume its previous sandbox or recreate it to start fresh."

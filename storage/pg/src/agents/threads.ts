@@ -8,6 +8,7 @@ import {
   participantsToAdd,
   planAgentThreadFork,
   queuedTurnInCloud,
+  queuedTurnOnComputer,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -471,12 +472,29 @@ export class PgAgentThreadStore implements AgentThreadStore {
     return runPgTransaction(this.sql, async (tx) => {
       const { thread, active } = await lockThreadAndActiveRun(tx, input)
       assertAssignableComputer(thread, active, input.computer, input.id, "SixbPg")
+      const queued = queuedTurnOnComputer(active, input.computer)
+      if (queued) {
+        await tx`
+          UPDATE agent_runs SET spec = ${JSON.stringify(queued.spec)}::text::jsonb
+          WHERE project_id = ${input.projectId} AND id = ${queued.id}
+        `
+      }
+      if (thread.runsOn !== "computer") {
+        await tx`
+          UPDATE agent_threads
+          SET sandbox_state = jsonb_set(sandbox_state, '{status}', '"unavailable"'::jsonb)
+          WHERE project_id = ${input.projectId}
+            AND parent_thread_id = ${input.id}
+            AND sandbox_state->>'status' IN ('new', 'ready')
+        `
+      }
       const movedAt = movesComputerPlace(thread, input.computer)
         ? (input.movedAt ?? new Date())
         : null
       const [assigned] = await tx<AgentThreadRow[]>`
         UPDATE agent_threads
-        SET computer_id = ${input.computer.id},
+        SET runs_on = 'computer',
+          computer_id = ${input.computer.id},
           computer_name = ${input.computer.name},
           computer_folder = ${input.computer.folder},
           moved_at = COALESCE(${movedAt}::timestamptz, moved_at)

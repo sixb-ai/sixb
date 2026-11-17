@@ -104,7 +104,7 @@ function seeded(messages: readonly AgentMessage[], runs: readonly AgentRun[]): Q
   queryClient.setQueryData(
     listAgentThreadRunsOptions({
       path: { threadId: thread.id },
-      query: { limit: "50", order: "desc" },
+      query: { order: "desc" },
     }).queryKey,
     { runs: [...runs], hasMore: false, total: runs.length }
   )

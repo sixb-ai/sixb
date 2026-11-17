@@ -28,6 +28,7 @@ import {
 import { heldInCard } from "../delegation/model"
 import { useAgentMessages } from "../i18n"
 import { principalKey } from "../message-authors"
+import type { TranscriptMove } from "../moves"
 import { openQuestion } from "../questions/interpret"
 import { type QuestionTurn, QuestionTurnContext } from "../questions/question-card"
 import { CONTEXT_LIMIT_EXCEEDED } from "../run-presentation"
@@ -71,7 +72,13 @@ export interface TranscriptProps {
    */
   readonly delegation?: TranscriptDelegation
   /** Where the conversation moved, after which saved message: the files from before stayed. */
-  readonly moved?: { readonly afterMessageId: string; readonly label: string } | null
+  readonly moved?: {
+    readonly afterMessageId: string
+    readonly label: string
+    readonly place?: "cloud" | "computer"
+  } | null
+  /** Every workspace transition across the conversation, keyed by the message before the move. */
+  readonly moves?: ReadonlyMap<string, TranscriptMove>
   /**
    * Where its background commands run and what is known of them now, each a card under the work
    * that started it. Without it, a command its turn no longer runs reads as last seen running.
@@ -170,6 +177,7 @@ function TranscriptView({
   onNewThread,
   approvals,
   moved,
+  moves,
   onAnswer,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   // Messages one person sends in a row name them once; an answer in between names them again.
@@ -269,6 +277,10 @@ function TranscriptView({
                 message.runId && lastOfRun.get(message.runId) === message.key
                   ? unshown.byRun.get(message.runId)
                   : undefined
+              // Where the conversation moved after this message: the files it worked on stayed.
+              const move =
+                (message.id ? moves?.get(message.id) : undefined) ??
+                (moved && message.id === moved.afterMessageId ? moved : undefined)
               return (
                 <Fragment key={message.key}>
                   {index === trailingAt ? trailingCards : null}
@@ -302,9 +314,9 @@ function TranscriptView({
                       <ApprovalCards calls={calls} />
                     </MessageScrollerItem>
                   ) : null}
-                  {moved && message.id === moved.afterMessageId ? (
-                    <MessageScrollerItem messageId="moved">
-                      <MovedMarker label={moved.label} />
+                  {move ? (
+                    <MessageScrollerItem messageId={`moved:${message.id ?? message.key}`}>
+                      <MovedMarker label={move.label} place={move.place} />
                     </MessageScrollerItem>
                   ) : null}
                 </Fragment>

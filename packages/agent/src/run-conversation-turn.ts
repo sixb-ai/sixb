@@ -113,7 +113,8 @@ export async function runConversationTurn(input: {
           )
         }
         runner.startChild(child, family, environment.networkPolicy)
-      }
+      },
+      prepared.thread?.movedAt
     )
     // The Agent's own: its children, and its questions to the user, which end the turn.
     const frameworkTools = [...(await delegation.createTools()), createAskUserTool()]

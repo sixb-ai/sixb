@@ -8,6 +8,7 @@ import {
   renderAgentSystemPrompt,
   renderCurrentTime,
   renderWorkflowOutputFinalizerPrompt,
+  renderWorkspaceMovedTag,
   sentSettings,
   type WorkspaceInstructionsFile,
   withCurrentTime,
@@ -52,17 +53,15 @@ describe("agent system prompt", () => {
     }
   })
 
-  // Guard proof: drop workspaceMovedAt from renderAgentSystemPrompt's sandbox_state; a turn after
-  // its conversation moved to the cloud reads earlier file paths as if they were still there.
-  test("tells a turn its conversation moved, and the files earlier calls used stayed behind", () => {
-    const workspaceMovedAt = "2026-10-31T12:00:00.000Z"
-    const prompt = renderPrompt({ mode: "conversation", skills: [], workspaceMovedAt })
-    expect(prompt).toContain(
-      `<sandbox_state>\nThis conversation moved to this workspace at ${workspaceMovedAt}.`
-    )
-    expect(prompt).toContain("are not here")
-    expect(prompt).toContain("Conversation history and attachments remain available")
-    expect(prompt).toContain("stayed in the workspace it moved from")
+  // A move closes the user message that crossed it, where the history around it stays cacheable.
+  // That the system prompt stays the same across moves is checked where a turn builds it: see the
+  // worker's "a conversation back in a workspace sends the prompt that workspace sent before".
+  test("tells the model where a move left the files it worked on", () => {
+    const tag = renderWorkspaceMovedTag()
+    expect(tag.startsWith("<sixb_workspace_moved>\n")).toBe(true)
+    expect(tag.endsWith("\n</sixb_workspace_moved>")).toBe(true)
+    expect(tag).toContain("stayed in the workspace it moved from")
+    expect(tag).toContain("conversation history, artifacts and attachments remain available")
   })
 
   test.each([

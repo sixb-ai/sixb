@@ -5385,7 +5385,7 @@ export const listAgentComputersOptions = (options?: Options<ListAgentComputersDa
 /**
  * Move a thread from your computer to the cloud
  *
- * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
+ * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any, and its owner can move it to a computer or folder again later. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
  */
 export const moveAgentThreadToCloudMutation = (
   options?: Partial<Options<MoveAgentThreadToCloudData>>
@@ -5414,7 +5414,7 @@ export const moveAgentThreadToCloudMutation = (
 /**
  * Move a thread to one of your computers, in a folder there
  *
- * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.
+ * Its turns run there alone from now on, in that folder: only `sixb` open in it claims them. Its owner moves it from the cloud or from another folder or computer, as often as they need; files from where it ran before stay there. Refused while a turn runs or waits on approvals.
  */
 export const moveAgentThreadToComputerMutation = (
   options?: Partial<Options<MoveAgentThreadToComputerData>>

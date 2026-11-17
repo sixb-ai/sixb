@@ -21,6 +21,7 @@ import {
   listAgentThreadRuns,
   listAgentThreads,
   listModels,
+  moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   postAgentThreadMessage,
   setAgentThreadApprovalMode,
@@ -44,6 +45,7 @@ import {
   pickedAnswer,
   shortPath,
 } from "./format"
+import { folderName, movedNotice, placeNames } from "./moves"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
 import {
@@ -101,6 +103,8 @@ export function Workspace(props: WorkspaceProps) {
   } | null>(null)
   const [quitArmed, setQuitArmed] = useState(false)
   const draft = useRef<(() => boolean) | null>(null)
+  // The open conversation's moves, which take the place of where new ones start in ctrl+p.
+  const threadMoves = useRef<readonly PaletteItem[] | null>(null)
 
   const setSettings = useCallback((change: (current: Settings) => Settings) => {
     setSettingsState((current) => {
@@ -389,6 +393,7 @@ export function Workspace(props: WorkspaceProps) {
             threadId={screen.threadId}
             approval={approval}
             onThreadRead={readApproval}
+            paletteMoves={threadMoves}
           />
         )}
         {notice || quitArmed ? (
@@ -420,6 +425,7 @@ export function Workspace(props: WorkspaceProps) {
               models,
               newConversation: () => setScreen({ kind: "home" }),
               open: setDialog,
+              threadMoves: openThreadId === null ? null : threadMoves.current,
               setPlace: (place) => setSettings((current) => ({ ...current, place })),
               toggleKeepAwake: () =>
                 setSettings((current) => {
@@ -754,6 +760,8 @@ function ThreadView(
     readonly approval: ThreadApproval | null
     /** The thread as read; `raised` after "always", which raised its mode there. */
     readonly onThreadRead: (thread: Thread, raised: boolean) => void
+    /** Where it lists its moves for the ctrl+p palette while it is open. */
+    readonly paletteMoves: { current: readonly PaletteItem[] | null }
   }
 ) {
   const { connection, runner, colors, syntax, settings, models, threadId } = props
@@ -766,26 +774,15 @@ function ThreadView(
   const [context, setContext] = useState<ContextUse | null>(null)
   const [live, setLive] = useState<LiveRun | null>(null)
   const [stopArmed, setStopArmed] = useState(false)
+  const [moveArmed, setMoveArmed] = useState(false)
   const [typed, setTyped] = useState("")
   const [contextOpen, setContextOpen] = useState(false)
   const [stopOpen, setStopOpen] = useState(false)
-  // A conversation adds what only it can show: what it uses of its model's context.
-  const slashCommands = useMemo(
-    () => [
-      ...props.slashCommands,
-      {
-        name: "context",
-        description: "What the conversation uses of the model's context",
-        run: () => setContextOpen(true),
-      },
-    ],
-    [props.slashCommands]
-  )
-  const slash = useSlashMenu(slashCommands, typed)
   const scroll = useRef<ScrollBoxRenderable>(null)
 
   const mine = thread !== null && owns(connection, thread)
   const onComputer = thread?.runsOn === "computer"
+  const names = placeNames({ thread, computerId: props.computerId, mine })
 
   // The commands its turns left running here, ticking while they run.
   const [background, setBackground] = useState<readonly BackgroundCommand[]>(() =>
@@ -871,17 +868,133 @@ function ThreadView(
     if (activeRunId && runsHere && queued && continueFromWeb)
       void runner.claimElsewhere(activeRunId)
   }, [activeRunId, runsHere, queued, continueFromWeb, runner])
+
+  // A turn holds the conversation where it is: say what frees it, not the server's words.
+  const moveRefused = (error: unknown) => {
+    const busy =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "active_run_exists"
+    if (!busy) return props.say(errorText(error), "error")
+
+    props.say(
+      approvals.length > 0
+        ? "A request waits for your approval: answer it, then press ctrl+g twice to move it."
+        : "A reply is running: press esc twice to stop it, then ctrl+g twice to move it.",
+      "error"
+    )
+  }
+
   // Its turns move to this computer, which alone claims them from now on, and to this folder.
   const moveHere = async () => {
+    const moved = movedNotice(names, runs, { id: props.computerId, folder: runner.folder })
     const { error } = await moveAgentThreadToComputer({
       client,
       path: { threadId },
       body: { computer: { ...(await thisComputer()), folder: runner.folder } },
     })
-    if (error) return props.say(errorText(error), "error")
+    if (error) return moveRefused(error)
+
     void reload()
-    props.say("Its turns now run in this folder")
+    props.say(moved)
   }
+  // And back to the cloud, from where they can move anywhere again.
+  const moveCloud = async () => {
+    const moved = movedNotice(names, runs, "cloud")
+    const { error } = await moveAgentThreadToCloud({ client, path: { threadId } })
+    if (error) return moveRefused(error)
+
+    void reload()
+    props.say(moved)
+  }
+
+  const canMoveHere = mine && (!onComputer || !here)
+  const canMoveCloud = mine && onComputer
+
+  // In a conversation, /here and /cloud move it: they take the place of the home screen's, which
+  // choose where new conversations start. One that cannot move says why, and the word never
+  // reaches the agent.
+  const moveCommand = (
+    name: string,
+    to: string,
+    canMove: boolean,
+    move: () => Promise<void>
+  ): SlashCommand => {
+    // Not read yet, it cannot tell where it runs or whose it is: it moves nothing until then.
+    if (thread === null) {
+      return {
+        name,
+        description: `Move this conversation to ${to}`,
+        run: () => props.say("Reading the conversation…"),
+      }
+    }
+
+    const description = canMove
+      ? `Move this conversation to ${to}`
+      : mine
+        ? `This conversation runs in ${to}`
+        : "Only its owner can move this conversation"
+
+    return { name, description, run: () => (canMove ? void move() : props.say(description)) }
+  }
+  const hereCommand = moveCommand("here", "this folder", canMoveHere, moveHere)
+  const cloudCommand = moveCommand("cloud", "the cloud", canMoveCloud, moveCloud)
+  const moveCommands: Readonly<Record<string, SlashCommand>> = {
+    here: hereCommand,
+    cloud: cloudCommand,
+  }
+
+  // ctrl+g moves it where its hint says: to this folder, else back to the cloud. Pressed twice, as
+  // esc stops a turn: leaving the cloud retires its paused sub-agents' workspaces there, which a
+  // stray key must not do. Not ctrl+f, which the composer reads as a step to the right.
+  const keyMove = canMoveHere
+    ? { name: "here", to: "this folder", move: moveHere }
+    : canMoveCloud
+      ? { name: "cloud", to: "the cloud", move: moveCloud }
+      : null
+  const moveByKey = () => {
+    if (!keyMove) return
+    if (!moveArmed) {
+      setMoveArmed(true)
+      setTimeout(() => setMoveArmed(false), 2_000)
+      return
+    }
+
+    setMoveArmed(false)
+    void keyMove.move()
+  }
+
+  // The ctrl+p palette lists the moves that can happen now, in the slash menu's words. Why the
+  // others can't is the slash menu's to say, where each command's name tells them apart.
+  const { paletteMoves } = props
+  useEffect(() => {
+    const possible = [
+      ...(canMoveHere ? [hereCommand] : []),
+      ...(canMoveCloud ? [cloudCommand] : []),
+    ]
+    paletteMoves.current = possible.map((command) => ({
+      id: command.name,
+      group: "Agent",
+      label: command.description,
+      ...(command.name === keyMove?.name ? { keys: "ctrl+g" } : {}),
+      run: command.run,
+    }))
+    return () => {
+      paletteMoves.current = null
+    }
+  })
+
+  // A conversation adds what only it can show: its context use.
+  const slashCommands = [
+    ...props.slashCommands.map((command) => moveCommands[command.name] ?? command),
+    {
+      name: "context",
+      description: "What the conversation uses of the model's context",
+      run: () => setContextOpen(true),
+    },
+  ]
+  const slash = useSlashMenu(slashCommands, typed)
 
   useEffect(() => {
     void reload()
@@ -992,9 +1105,7 @@ function ThreadView(
     if (key.name === "down" && slash.move(1)) return
     if (key.name === "escape") return void stop()
     if (key.ctrl && key.name === "x" && runningBackground.length > 0) return setStopOpen(true)
-    if (key.ctrl && key.name === "f" && onComputer && mine && !here) {
-      return void moveHere()
-    }
+    if (key.ctrl && key.name === "g") return moveByKey()
     if (key.name === "pageup") scroll.current?.scrollBy(-10)
     if (key.name === "pagedown") scroll.current?.scrollBy(10)
   })
@@ -1003,7 +1114,7 @@ function ThreadView(
     if (slash.run(text)) return true
     if (!thread) return false
     if (onComputer && mine && !here) {
-      props.say("It works in another folder: press ctrl+f to move it here first.")
+      props.say("It works in another folder: press ctrl+g twice to move it here first.")
       return false
     }
     const { data, error } = await postAgentThreadMessage({
@@ -1067,6 +1178,13 @@ function ThreadView(
       : placeStatus
   const runningSince = runs.find((run) => run.id === activeRunId)?.startedAt
 
+  // The footer names the move ctrl+g makes, in the room its folder leaves: the panel's padding,
+  // the hint itself and `ctrl+p commands` take 46 columns. From another folder the notice above
+  // the composer names it instead.
+  const footerMove =
+    width < 64 || !mine ? null : !onComputer ? "move here" : here ? "move to cloud" : null
+  const footerFolder = footerMove ? Math.max(12, Math.min(36, width - 46)) : 36
+
   return (
     <box flexDirection="column" flexGrow={1} paddingTop={1}>
       <box
@@ -1106,7 +1224,8 @@ function ThreadView(
           live={live}
           approvals={approvals}
           modelNames={modelNames}
-          computerRuns={onComputer}
+          thread={thread}
+          names={names}
           width={width}
           approvalChoice={choice}
           {...(onComputer ? { folder: runner.folder } : {})}
@@ -1128,6 +1247,7 @@ function ThreadView(
                         onComputer,
                         mine,
                         here,
+                        ...(place ? { folder: folderName(place.folder) } : {}),
                         continueFromWeb,
                         runningHere: activeRunId !== null && runner.runs(activeRunId),
                       })
@@ -1151,9 +1271,9 @@ function ThreadView(
                   ? `It runs on ${clip(place.name, 40)}.`
                   : `It works in ${shortPath(place.folder, homedir(), 48)}.`}
             </span>
-            <span fg={colors.muted}>{"  Its turns run there: "}</span>
-            <span fg={colors.text}>ctrl+f</span>
-            <span fg={colors.muted}> moves it to this folder</span>
+            <span fg={colors.muted}>{"  Press "}</span>
+            <span fg={colors.text}>ctrl+g</span>
+            <span fg={colors.muted}> twice to move it to this folder.</span>
           </text>
         ) : null}
         {runningBackground.length > 0 ? (
@@ -1175,10 +1295,27 @@ function ThreadView(
           onSubmit={send}
         />
         <box flexDirection="row" justifyContent="space-between" paddingTop={1}>
-          <text fg={colors.faint}>
-            {onComputer ? shortPath(runner.folder, homedir(), 40) : "Runs in the cloud"}
-          </text>
-          <text>
+          {moveArmed && keyMove ? (
+            <text wrapMode="none" flexShrink={1} fg={colors.amber}>
+              {`Press ctrl+g again to move it to ${keyMove.to}`}
+            </text>
+          ) : (
+            <text wrapMode="none" flexShrink={1}>
+              <span fg={colors.faint}>
+                {onComputer
+                  ? shortPath(runner.folder, homedir(), footerFolder)
+                  : "Runs in the cloud"}
+              </span>
+              {footerMove ? (
+                <>
+                  <span fg={colors.faint}>{"  ·  "}</span>
+                  <span fg={colors.text}>ctrl+g</span>
+                  <span fg={colors.muted}>{` ${footerMove}`}</span>
+                </>
+              ) : null}
+            </text>
+          )}
+          <text flexShrink={0}>
             <span fg={colors.text}>ctrl+p</span>
             <span fg={colors.muted}> commands</span>
           </text>
@@ -1258,6 +1395,8 @@ export function activityLabel(
     readonly onComputer: boolean
     readonly mine: boolean
     readonly here: boolean
+    /** The name of the folder it works in, when it isn't this one. */
+    readonly folder?: string
     readonly continueFromWeb: boolean
     readonly runningHere: boolean
   }
@@ -1266,7 +1405,9 @@ export function activityLabel(
   if (run?.status === "queued") {
     if (!where.onComputer) return "Starting"
     if (!where.mine) return "Waiting for its owner's computer"
-    if (!where.here) return "Waiting for sixb in its folder"
+    if (!where.here) {
+      return where.folder ? `Waiting for ${where.folder} to be available` : "Waiting for its folder"
+    }
     return where.continueFromWeb || where.runningHere
       ? "Starting"
       : "Waiting: messages from the web are off"
@@ -1323,6 +1464,8 @@ function commandItems(input: {
   readonly newConversation: () => void
   readonly open: (dialog: Dialog) => void
   readonly setPlace: (place: Settings["place"]) => void
+  /** In a conversation, its moves, in place of where new conversations run. */
+  readonly threadMoves: readonly PaletteItem[] | null
   /** Whether your messages from the web, or another device, run in this folder. */
   readonly toggleContinueFromWeb: () => void
   readonly toggleKeepAwake: () => void
@@ -1369,16 +1512,18 @@ function commandItems(input: {
       keys: "shift+tab",
       run: () => input.open("permissions"),
     },
-    {
-      id: "place",
-      group: "Agent",
-      label:
-        settings.place === "computer"
-          ? "Run new conversations in the cloud"
-          : `Run new conversations on ${placeLabel("computer")}`,
-      keys: "tab",
-      run: () => input.setPlace(settings.place === "computer" ? "cloud" : "computer"),
-    },
+    ...(input.threadMoves ?? [
+      {
+        id: "place",
+        group: "Agent",
+        label:
+          settings.place === "computer"
+            ? "Run new conversations in the cloud"
+            : `Run new conversations on ${placeLabel("computer")}`,
+        keys: "tab",
+        run: () => input.setPlace(settings.place === "computer" ? "cloud" : "computer"),
+      },
+    ]),
     {
       id: "continue-from-web",
       group: "Agent",

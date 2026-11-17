@@ -1,6 +1,6 @@
 import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelCachingIntent, ModelMessage, ModelReasoning } from "@sixb/core/models"
-import type { SentSettings } from "./agent-prompt"
+import { renderWorkspaceMovedTag, type SentSettings } from "./agent-prompt"
 import {
   attachmentKey,
   type PreparedAgentAttachmentContext,
@@ -28,6 +28,9 @@ export function conversationModelMessages(input: {
 }): ModelMessage[] {
   const { threadContext, attachmentContext } = input
   const sentTimes = userMessageTimes(threadContext.history, input.project)
+  const movedIds = threadContext.history.movedMessageIds
+    ? new Set(threadContext.history.movedMessageIds)
+    : undefined
   const authors = input.conversation
     ? conversationAuthors({
         conversation: input.conversation,
@@ -36,12 +39,16 @@ export function conversationModelMessages(input: {
     : undefined
 
   return toModelMessages(threadContext.modelMessages, {
-    // When, then who wrote it: `<sixb_author>` stays the message's last tag. Who takes part is in
-    // the system prompt, so no message changes when the next one comes.
+    // Workspace transition, then when, then who wrote it: `<sixb_author>` stays the message's last
+    // tag, and every piece comes from stored data so cached prefixes stay byte-exact across moves.
     userMessageSuffix: (message) => {
       if (!message.id) return undefined
 
-      const closing = [sentTimes.get(message.id), authors?.byMessageId.get(message.id)]
+      const closing = [
+        movedIds?.has(message.id) ? renderWorkspaceMovedTag() : undefined,
+        sentTimes.get(message.id),
+        authors?.byMessageId.get(message.id),
+      ]
       return closing.filter(Boolean).join("\n") || undefined
     },
     fileText: ({ message, partIndex }) =>

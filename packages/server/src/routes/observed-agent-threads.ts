@@ -159,7 +159,7 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
           }
 
           return AgentRunListResponseSchema.parse({
-            runs: result.runs.map(serializeAgentRun),
+            runs: result.runs.map((run) => serializeAgentRun(run)),
             hasMore: result.hasMore,
             total: result.total,
           })

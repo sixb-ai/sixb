@@ -98,8 +98,6 @@ export interface RenderAgentSystemPromptInput {
   /** Ontology reference files to list; omitted, the prompt does not mention them. */
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   readonly sandboxResetAt?: string
-  /** When the conversation's turns moved to this workspace, from a computer or another folder. */
-  readonly workspaceMovedAt?: string
   readonly workspace?: AgentWorkspacePromptContext
   readonly facts?: AgentRuntimeFacts
   /**
@@ -233,14 +231,7 @@ function renderAgentSystemPromptSections(
     ]),
     promptSectionParts(
       "sandbox_state",
-      system(
-        [
-          input.workspaceMovedAt && renderWorkspaceMove(input.workspaceMovedAt),
-          input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode),
-        ]
-          .filter(Boolean)
-          .join("\n\n")
-      )
+      system(input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode))
     ),
     promptSectionParts(
       "agent_instructions",
@@ -308,9 +299,18 @@ function promptSectionParts(
   return [{ part: tagPart, text: `<${tag}>\n` }, ...body, { part: tagPart, text: `\n</${tag}>` }]
 }
 
-/** What a turn is told once its conversation moved here: from a computer, or another folder. */
-function renderWorkspaceMove(movedAt: string): string {
-  return `This conversation moved to this workspace at ${movedAt}. The files and paths that earlier tool calls used were in the workspace it moved from and are not here. Conversation history and attachments remain available. Inspect this workspace before relying on earlier filesystem results. Whenever you report that this workspace is empty or that a file is missing, add that files from before the move stayed in the workspace it moved from.`
+/**
+ * Marks a user message sent after the conversation moved to another workspace (between the cloud
+ * and a computer, or between folders). It closes the message rather than the system prompt, so a
+ * thread that returns to a workspace keeps that workspace's prompt, and the cached prefix that
+ * follows it, byte for byte.
+ */
+export function renderWorkspaceMovedTag(): string {
+  return [
+    "<sixb_workspace_moved>",
+    "This conversation moved to a different workspace before this message. Files, paths and local processes from before this message stayed in the workspace it moved from and are not here; conversation history, artifacts and attachments remain available. Inspect the current workspace before relying on earlier filesystem results, and when reporting a missing file from before this move, note that it stayed in the previous workspace.",
+    "</sixb_workspace_moved>",
+  ].join("\n")
 }
 
 /** What a run is told once its thread's workspace was lost and created again. */

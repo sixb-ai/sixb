@@ -11,12 +11,7 @@ import {
   ComposerMenuHeader,
   ComposerMenuScroll,
 } from "./composer-menu"
-import { shownFolder } from "./computer-place"
-
-/** A folder's last name: what tells it apart in a chip. */
-function folderName(folder: string): string {
-  return folder.split("/").filter(Boolean).at(-1) ?? folder
-}
+import { folderName, shownFolder } from "./computer-place"
 
 /**
  * Where a new conversation runs, as a quiet line under the input: set once for the conversation, and
@@ -64,7 +59,7 @@ export function ComposerPlace({
         <button
           type="button"
           disabled={disabled}
-          aria-label={messages.placeChip(described)}
+          aria-label={messages.placeChip(described, null)}
           aria-haspopup="dialog"
           aria-expanded={open}
           title={described}

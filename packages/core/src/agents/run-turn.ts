@@ -8,6 +8,7 @@ import type {
   AgentThreadRecord,
   SubagentRunRecord,
 } from "../storage/agents"
+import { runPlaceKey } from "../storage/agents/provider"
 import type { AiModelCallUsageRecord } from "../storage/ai-usage"
 import type { ExecutionRecord } from "../storage/executions/types"
 import { isPausedSubagentRun } from "./approvals"
@@ -50,6 +51,12 @@ export interface AgentTurnHistory {
    * project that predates it.
    */
   readonly sentLocales?: Readonly<Record<string, string>>
+  /**
+   * Retained user messages where the conversation changed workspace (between the cloud, computers
+   * or folders) since the message before. Stored run history decides it, so the system prompt
+   * carries no move timestamp and cached prefixes hold across round-trip moves.
+   */
+  readonly movedMessageIds?: readonly string[]
   /**
    * The model call that ended the latest assistant message after the checkpoint: what a token
    * estimate anchors on, as the provider counted it. None when that message's run compacted the
@@ -106,11 +113,17 @@ export interface AgentTurnHistoryHost {
 /** A conversation's history: its latest checkpoint and the messages after it. */
 export async function readAgentTurnHistory(
   host: AgentTurnHistoryHost,
-  threadId: string
+  threadId: string,
+  options?: { readonly thread?: AgentThreadRecord | null }
 ): Promise<AgentTurnHistory> {
-  const { checkpoint, messages } = await readRetainedHistory(host, threadId)
+  const [{ checkpoint, messages }, thread] = await Promise.all([
+    readRetainedHistory(host, threadId),
+    options && "thread" in options
+      ? Promise.resolve(options.thread ?? null)
+      : host.storage.agents.threads.getById({ projectId: host.projectId, id: threadId }),
+  ])
   const [sent, usageAnchor] = await Promise.all([
-    readSentSettings(host, threadId, messages),
+    readSentSettings(host, threadId, messages, checkpoint, thread),
     readUsageAnchor(host, messages, checkpoint),
   ])
   return { checkpoint, messages, ...sent, ...(usageAnchor ? { usageAnchor } : {}) }
@@ -148,10 +161,10 @@ async function readTurnContext(
   execution: ExecutionRecord | null
 ): Promise<AgentTurnContext> {
   const { projectId } = host
-  const [thread, participants, history] = await Promise.all([
-    host.storage.agents.threads.getById({ projectId, id: run.threadId }),
+  const thread = await host.storage.agents.threads.getById({ projectId, id: run.threadId })
+  const [participants, history] = await Promise.all([
     host.storage.agents.threads.listParticipants({ projectId, threadIds: [run.threadId] }),
-    readAgentTurnHistory(host, run.threadId),
+    readAgentTurnHistory(host, run.threadId, { thread }),
   ])
   const readers = await readReaders(host, participants)
   const named: Principal[] = [
@@ -180,10 +193,10 @@ async function readChildContext(
 ): Promise<AgentChildContext> {
   const { projectId } = host
   const agents = host.storage.agents
-  const [parent, thread, history, runs] = await Promise.all([
+  const thread = await agents.threads.getById({ projectId, id: run.threadId })
+  const [parent, history, runs] = await Promise.all([
     agents.runs.getById({ projectId, id: run.parentRunId }),
-    agents.threads.getById({ projectId, id: run.threadId }),
-    readAgentTurnHistory(host, run.threadId),
+    readAgentTurnHistory(host, run.threadId, { thread }),
     listSubagentThreadRuns(agents, { projectId, threadId: run.threadId }),
   ])
   const [conversation, task] = await Promise.all([
@@ -259,28 +272,44 @@ function readUser(host: AgentRunSessionHost, id: string) {
 }
 
 /**
- * The time zone and locale each retained user message was sent in: those of the run that answered
- * it, as its requester's settings froze them.
+ * The time zone, locale and workspace transitions of each retained user message: read from the
+ * runs that answered them, so every later turn replays the exact same bytes.
  */
 async function readSentSettings(
   host: AgentTurnHistoryHost,
   threadId: string,
-  messages: readonly AgentMessageRecord[]
-): Promise<Pick<AgentTurnHistory, "sentTimeZones" | "sentLocales">> {
+  messages: readonly AgentMessageRecord[],
+  checkpoint: AgentContextCheckpointRecord | null,
+  thread: AgentThreadRecord | null
+): Promise<Pick<AgentTurnHistory, "sentTimeZones" | "sentLocales" | "movedMessageIds">> {
   const userMessages = messages.filter((message) => message.role === "user")
   const oldest = userMessages[0]
-  if (!oldest) return { sentTimeZones: {}, sentLocales: {} }
+  if (!oldest || thread?.kind === "subagent") return { sentTimeZones: {}, sentLocales: {} }
 
-  // A run starts after its trigger message, so this window holds every run that answered one.
-  const { runs } = await host.storage.agents.runs.list({
-    projectId: host.projectId,
-    threadId,
-    kinds: ["conversation"],
-    startedAfter: new Date(oldest.createdAt.getTime() - 1),
-  })
+  // A run starts after its trigger message, so this window holds every run that answered one;
+  // after a compaction, also check the latest summarized turn to catch a move right across it.
+  const [{ runs }, earlier] = await Promise.all([
+    host.storage.agents.runs.list({
+      projectId: host.projectId,
+      threadId,
+      kinds: ["conversation"],
+      startedAfter: new Date(oldest.createdAt.getTime() - 1),
+    }),
+    checkpoint
+      ? host.storage.agents.runs.list({
+          projectId: host.projectId,
+          threadId,
+          kinds: ["conversation"],
+          startedBefore: new Date(oldest.createdAt.getTime()),
+          order: "desc",
+          limit: 5,
+        })
+      : Promise.resolve({ runs: [] }),
+  ])
   const retained = new Set(userMessages.map((message) => message.id))
   const zones: Record<string, string> = {}
   const locales: Record<string, string> = {}
+  const places: Record<string, string> = {}
   for (const message of userMessages) {
     // A message a turn read mid-run keeps the settings it was rendered with, so a later turn closes
     // it with the same `<sixb_current_time>`.
@@ -288,13 +317,71 @@ async function readSentSettings(
     if (typeof metadata?.timeZone === "string") zones[message.id] = metadata.timeZone
     if (typeof metadata?.locale === "string") locales[message.id] = metadata.locale
   }
-  for (const run of runs) {
+  // Oldest first so a retried turn's latest run records where the message ultimately ran.
+  for (const run of [...runs].reverse()) {
     if (run.kind !== "conversation" || !retained.has(run.triggerMessageId)) continue
 
     if (run.spec?.timeZone) zones[run.triggerMessageId] = run.spec.timeZone
     if (run.spec?.locale) locales[run.triggerMessageId] = run.spec.locale
+    places[run.triggerMessageId] = runPlaceKey(run.spec)
   }
-  return { sentTimeZones: zones, sentLocales: locales }
+
+  // The latest turn the summary holds. It may have started after the oldest message kept, one sent
+  // while it waited: look for it in both lists.
+  const priorRun = [...runs, ...earlier.runs]
+    .filter((run) => run.kind === "conversation" && !retained.has(run.triggerMessageId))
+    .sort((left, right) => startOf(right) - startOf(left))[0]
+  const movedMessageIds = detectMovedMessages({
+    userMessages,
+    checkpoint,
+    places,
+    priorPlace: priorRun?.kind === "conversation" ? runPlaceKey(priorRun.spec) : undefined,
+  })
+  return {
+    sentTimeZones: zones,
+    sentLocales: locales,
+    ...(movedMessageIds.length > 0 ? { movedMessageIds } : {}),
+  }
+}
+
+/** When a run started, or was admitted when it never did: the order the run lists sort by. */
+function startOf(run: AgentRunRecord): number {
+  return (run.startedAt ?? run.createdAt).getTime()
+}
+
+/**
+ * The user messages that ran in another workspace than the one before them. Only runs decide it,
+ * never the thread's latest move, so a message keeps its note, or its lack of one, at every later
+ * turn: a round trip with no turn in between changes nothing, and the workspace it comes back to
+ * reads its cached prefix again.
+ */
+function detectMovedMessages(input: {
+  readonly userMessages: readonly AgentMessageRecord[]
+  readonly checkpoint: AgentContextCheckpointRecord | null
+  readonly places: Readonly<Record<string, string>>
+  readonly priorPlace: string | undefined
+}): readonly string[] {
+  const moved: string[] = []
+  let previous = input.priorPlace
+
+  // A message with no run of its own, such as one sent into a turn that runs, decides nothing.
+  // Before any run of the thread, though, such messages are a fork's copies, answered in its
+  // source's workspace, as is a summary with no run before it: the fork's first turn starts
+  // elsewhere.
+  let inherited = previous === undefined && input.checkpoint !== null
+
+  for (const message of input.userMessages) {
+    const place = input.places[message.id]
+    if (place === undefined) {
+      inherited = true
+      continue
+    }
+
+    const crossed = previous === undefined ? inherited : previous !== place
+    if (crossed) moved.push(message.id)
+    previous = place
+  }
+  return moved
 }
 
 /**

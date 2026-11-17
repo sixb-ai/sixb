@@ -215,6 +215,33 @@ describe("what a finished turn starts", () => {
     ).toHaveLength(1)
   })
 
+  test("starts it where its thread runs now, down to the folder", async () => {
+    // Proven by removal: record only `runsOn` in inPlace (request.ts), as before folders were
+    // kept; the turn loses its folder, so the next turn reads a move that never happened.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "succeeded" }, (id) =>
+      queueMessage(sixb, id, { id: "inb_1" })
+    )
+    // Its owner takes it to their computer before the turn's end starts what waits.
+    const laptop = { id: "cmp_laptop", name: "Ava's MacBook", folder: "/Users/ava/app" }
+    await sixb.agent.threads.moveToComputer(thread.id, laptop)
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    const started = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId: thread.id,
+      statuses: ["queued"],
+    })
+    expect(started.runs.map((next) => next.kind === "conversation" && next.spec)).toEqual([
+      expect.objectContaining({
+        runsOn: "computer",
+        computer: { id: "cmp_laptop", folder: "/Users/ava/app" },
+      }),
+    ])
+  })
+
   test("starts nothing after a turn that was stopped", async () => {
     const { host, ...deps } = setup()
     const sixb = await userScope(host, "owner")

@@ -11,6 +11,7 @@ import { question } from "../models/decision/questions"
 import { supportsQuestion } from "../models/decision/validation"
 import { RuntimeError } from "../runtime/errors"
 import type { ConversationAgentRunRecord } from "../storage/agents"
+import { type AgentTurnPlace, runPlaceKey } from "../storage/agents/provider"
 
 /** Moving up needs no confidence: a turn goes to `heavy` from this probability. */
 const HEAVY_FROM = 0.4
@@ -58,8 +59,14 @@ export interface TurnModelChoice {
 }
 
 export interface TurnModelRouter {
-  /** The model of a turn that names none, given the thread's previous turn. */
-  choose(text: string, previous: ConversationAgentRunRecord | undefined): Promise<TurnModelChoice>
+  /**
+   * The model of a turn that names none, given the thread's previous turn and where this one runs.
+   */
+  choose(
+    text: string,
+    previous: ConversationAgentRunRecord | undefined,
+    place: AgentTurnPlace
+  ): Promise<TurnModelChoice>
 }
 
 /**
@@ -86,14 +93,14 @@ export function createTurnModelRouter(
   if (!language || language.tiers.length === 0 || !models?.decision) return undefined
 
   return {
-    async choose(text, previous) {
+    async choose(text, previous, place) {
       // Files sent alone leave nothing to judge: the turn aims for standard, and the cache rule
       // keeps a warm thread on its model.
       const tierProbabilities = text.trim() ? await askTier(decision, text) : undefined
       const tier = tierProbabilities ? tierFor(tierProbabilities) : "standard"
 
       return {
-        model: turnModel(language, tier, previous),
+        model: turnModel(language, tier, previous, place),
         ...(tierProbabilities ? { tierProbabilities } : {}),
       }
     },
@@ -148,10 +155,11 @@ function tierFor(probabilities: LanguageModelTierProbabilities): LanguageModelTi
 function turnModel(
   language: LanguageModelCatalog,
   tier: LanguageModelTier,
-  previous: ConversationAgentRunRecord | undefined
+  previous: ConversationAgentRunRecord | undefined,
+  place: AgentTurnPlace
 ): LanguageModelEntry {
   const target = language.getByTier(tier)
-  const last = previous && previousTurn(language, previous)
+  const last = previous && previousTurn(language, previous, place)
   if (!last) return target
 
   const change = tierRank(target.tier ?? tier) - tierRank(last.tier)
@@ -170,7 +178,8 @@ interface PreviousTurn {
 /** An older run without a tier takes its model's; one without either counts as no turn at all. */
 function previousTurn(
   language: LanguageModelCatalog,
-  run: ConversationAgentRunRecord
+  run: ConversationAgentRunRecord,
+  place: AgentTurnPlace
 ): PreviousTurn | undefined {
   if (!run.spec) return undefined
 
@@ -178,9 +187,16 @@ function previousTurn(
   const tier = run.spec.tier ?? model?.tier
   if (tier === undefined) return undefined
 
-  // A run that never recorded its end counts from its start, or from its admission.
+  // A run that never recorded its end counts from its start, or from its admission. A turn in
+  // another workspace sent another system prompt, so its cache does not hold this turn's; one
+  // where this turn runs does, however the thread moved in between.
   const lastCallAt = run.completedAt ?? run.startedAt ?? run.createdAt
-  return { model, tier, cacheWarm: Date.now() - lastCallAt.getTime() < PROMPT_CACHE_TTL_MS }
+  const samePlace = runPlaceKey(run.spec) === runPlaceKey(place)
+  return {
+    model,
+    tier,
+    cacheWarm: samePlace && Date.now() - lastCallAt.getTime() < PROMPT_CACHE_TTL_MS,
+  }
 }
 
 function tierRank(tier: LanguageModelTier): number {

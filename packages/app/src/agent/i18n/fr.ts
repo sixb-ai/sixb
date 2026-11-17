@@ -5,6 +5,9 @@ const number = (value: number) => value.toLocaleString("fr")
 const count = (value: number, one: string, many = `${one}s`) =>
   `${number(value)} ${plural("fr", value, { one, other: many })}`
 const quoted = (name: string) => `« ${name} »`
+/** « de » before a name, elided before a vowel: l’ordinateur d’Anthony, de Bob. */
+const ofName = (name: string) =>
+  /^[aeiouyàâäæéèêëîïôöœùûü]/i.test(name) ? `d’${name}` : `de ${name}`
 
 function lowercaseFirst(value: string): string {
   return value ? `${value[0]?.toLowerCase()}${value.slice(1)}` : value
@@ -1000,18 +1003,30 @@ export const fr: Translation<AgentMessages> = {
     },
   },
   computer: {
-    online: "Connecté",
-    offline: "Non connecté",
-    offlineNotice: (computer, folder) =>
-      `${computer} est hors ligne. Votre message attendra que ${folder} y soit connecté.`,
+    online: "disponible",
+    offline: "indisponible",
+    folderUnavailable: (folder, computer) =>
+      `${folder} n’est pas disponible sur ${computer} pour le moment. Ouvrez Sixb dessus pour continuer, ou continuez dans le cloud.`,
+    messageWaiting: (folder, computer) =>
+      `Votre message attend ${folder} sur ${computer}. Ouvrez Sixb dessus, ou continuez dans le cloud.`,
     noFolder:
-      "Cette conversation n’a pas encore de dossier. Ouvrez sixb dans son dossier et appuyez sur ctrl+f, ou continuez dans le cloud.",
+      "Cette conversation n’a pas encore de dossier. Choisissez-en un dans le menu en haut, ou continuez dans le cloud.",
     offlineHere: (folder) =>
-      `Pas encore en cours ici. Votre message attendra que cet ordinateur soit connecté dans ${folder}.`,
-    runHere: "Exécuter sur cet ordinateur",
-    placeTitle: "Où cette conversation s'exécute",
-    placeChip: (place) => `S'exécute dans ${place}. Changer l'emplacement`,
+      `Les messages de l’app ne s’exécutent pas encore dans ${folder} sur cet ordinateur.`,
+    runHere: "Les exécuter ici",
+    placeTitle: "Où cette conversation s’exécute",
+    placeChip: (place, status) =>
+      `S’exécute dans ${place}${status ? `, ${status}` : ""}. Changer l’emplacement`,
+    noFolderChip: "Pas encore de dossier. Choisir où cette conversation s’exécute",
     cloud: "Cloud",
+    cloudDescription: "Tourne même quand vos ordinateurs sont éteints",
+    thisComputer: "Cet ordinateur",
+    checkingComputers: "Recherche d’ordinateurs connectés…",
+    noComputers:
+      "Aucun de vos ordinateurs n’est connecté. Ouvrez Sixb sur l’un d’eux pour y déplacer cette conversation.",
+    offlineLabel: "Hors ligne",
+    offlineMenuHint:
+      "Indisponible pour le moment. Les messages l’attendent, ou choisissez un autre emplacement.",
     chooseFolder: "Choisir un dossier…",
     chooseFolderShort: "Choisir un dossier",
     forgetFolder: (folder) => `Ne plus exécuter les messages dans ${folder}`,
@@ -1019,16 +1034,37 @@ export const fr: Translation<AgentMessages> = {
     continueInCloud: "Continuer dans le cloud",
     moving: "Déplacement…",
     moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
-    moveBusy: "Un tour est en cours ou attend votre approbation. Arrêtez-le ou répondez d’abord.",
-    confirmTitle: "Continuer dans le cloud ?",
-    confirmDescription:
-      "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et elle ne pourra pas revenir.",
+    moveSwitchFailed: "Impossible de changer où cette conversation s’exécute. Réessayez.",
+    moveBusy:
+      "Une réponse est en cours ou attend une approbation. Arrêtez-la ou répondez à la demande, puis réessayez.",
+    moveWhileRunning:
+      "Une réponse est en cours. Arrêtez-la ou laissez-la se terminer pour déplacer cette conversation.",
+    moveWhileApproval:
+      "Une demande attend une approbation. Vous pourrez déplacer cette conversation une fois la demande décidée.",
+    confirmTitle: "Exécuter votre message en attente dans le cloud ?",
+    confirmDescription: (folder) =>
+      folder
+        ? `Dans le cloud, l’agent ne verra pas les fichiers de ${folder}. Vous pourrez y ramener la conversation dès que ${folder} sera de nouveau disponible.`
+        : "Dans le cloud, l’agent ne verra pas les fichiers de l’ordinateur. Vous pourrez y ramener la conversation dès qu’il sera de nouveau disponible.",
+    confirmAction: "Exécuter dans le cloud",
     cancel: "Annuler",
-    movedToCloud: "Déplacée vers le cloud. Les fichiers d’avant sont restés sur l’ordinateur.",
-    movedToFolder: (folder) =>
-      `Déplacée vers ${folder}. Les fichiers d’avant sont restés où ils étaient.`,
-    movedElsewhere:
-      "Déplacée vers un autre dossier. Les fichiers d’avant sont restés où ils étaient.",
+    placeOn: (folder, computer) => `${folder} sur ${computer}`,
+    cloudPlace: "le cloud",
+    movedToCloud: (from) =>
+      from
+        ? `Déplacée vers le cloud. Les fichiers de ${from} restent sur place.`
+        : "Déplacée vers le cloud. Les fichiers de l’ordinateur restent sur place.",
+    movedToFolder: (place) => `Déplacée vers ${place}. Les fichiers du cloud restent sur place.`,
+    movedToComputer: (owner) =>
+      `Déplacée vers ${owner ? `l’ordinateur ${ofName(owner)}` : "l’ordinateur"}. Les fichiers du cloud restent sur place.`,
+    movedBetweenFolders: (folder, from) =>
+      `Déplacée de ${from} vers ${folder}. Les fichiers de ${from} restent sur place.`,
+    movedElsewhere: (place) =>
+      `Déplacée vers ${place ?? "un autre dossier"}. Les fichiers d’avant restent où ils étaient.`,
+    continuedIn: (place) =>
+      `Poursuivie dans ${place}. Les fichiers de la conversation d’origine restent avec elle.`,
+    continuedOnComputer: (owner) =>
+      `Poursuivie sur ${owner ? `l’ordinateur ${ofName(owner)}` : "l’ordinateur"}. Les fichiers de la conversation d’origine restent avec elle.`,
   },
   sharing: {
     share: "Partager le fil",
@@ -1068,7 +1104,7 @@ export const fr: Translation<AgentMessages> = {
     cancel: "Annuler",
     close: "Fermer",
     sharedBy: (owner) => `Fil de ${owner}`,
-    onComputer: (owner) => `Tourne sur l’ordinateur de ${owner} : vous pouvez le suivre ici`,
+    onComputer: (owner) => `Tourne sur l’ordinateur ${ofName(owner)} : vous pouvez le suivre ici`,
     answering: (name) => `L’agent répond à ${name}…`,
     continueMine: "Continuer dans mon propre fil",
     continuing: "Copie…",

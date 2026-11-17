@@ -15,6 +15,8 @@ import {
   ArrowRight,
   ChevronRight,
   Clock3,
+  Cloud,
+  Folder,
   type LucideIcon,
   Plus,
   RotateCcw,
@@ -242,10 +244,23 @@ export function ThinkingMarker({
   )
 }
 
-/** Where the conversation moved: the files earlier turns worked on stayed behind. */
-export function MovedMarker({ label }: { readonly label: string }) {
+/**
+ * Where the conversation moved: the files earlier turns worked on stayed behind. Set apart, with
+ * where it went as its icon, so it reads as an event of the conversation, not the reply's end.
+ */
+export function MovedMarker({
+  label,
+  place = "computer",
+}: {
+  readonly label: string
+  readonly place?: "cloud" | "computer"
+}) {
+  const Icon = place === "cloud" ? Cloud : Folder
   return (
-    <Marker role="note">
+    <Marker role="note" className="mt-2 items-start text-[13px]">
+      <MarkerIcon className="mt-px flex size-4 items-center justify-center">
+        <Icon className="size-3.5" strokeWidth={1.9} />
+      </MarkerIcon>
       <MarkerContent>{label}</MarkerContent>
     </Marker>
   )
