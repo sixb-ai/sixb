@@ -3,14 +3,17 @@
 A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
-- **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
+- **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name, create one from a branch, tag or commit, delete one
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
 - **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
-- **Pull requests** — list a repository's pull requests, get one with its merge state and size, list its reviews
+- **Pull requests** — list a repository's pull requests, get one with its merge state and size, read the files it changes with their patches and the commits on its branch, merge one, review it, and read or write the inline comments on its diff
+- **Checks** — read a commit's, branch's or tag's check runs and the combined commit status GitHub rolls them up into
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
-- **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
+- **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files, compare two refs
+- **Contents** — read a file, a symlink, a submodule or a directory at a branch, tag or commit, and a file's raw bytes
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
+- **Actions** — read workflows, runs, their jobs, logs and artifacts, re-run or cancel a run, and start one by hand
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
 
@@ -81,12 +84,15 @@ export const githubConnector = defineConnector(
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
 repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
-need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`. Branches and commits need
-`Contents: read`. Releases need `Contents: read`, or
-`Contents: read & write` to create, update or delete them and their assets. Organization people
-APIs require `Members: read`. Public user profiles
-and public organization membership can be queried without that organization permission, but private
-membership visibility depends on the authenticated user's organization access.
+need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests
+need `Pull requests: read`, or `Pull requests: read & write` to merge, review or comment on one. Branches, commits and
+contents need `Contents: read`, or `Contents: read & write` to create or delete a branch. Check runs and
+commit statuses need `Checks: read`. Releases need `Contents: read`, or `Contents: read & write`
+to create, update or delete them and their assets. GitHub Actions need `Actions: read`, or
+`Actions: read & write` to re-run or cancel runs. Organization people APIs require
+`Members: read`. Public user profiles and public organization membership can be queried without
+that organization permission, but private membership visibility depends on the authenticated
+user's organization access.
 
 ## Sandbox access
 
@@ -150,13 +156,32 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).get()`         | `GET /repos/{owner}/{repo}`                   |
 | `gh.repo({ owner, repo }).branches.list()` | `GET /repos/{owner}/{repo}/branches`        |
 | `gh.repo({ owner, repo }).branches.get(branch)` | `GET /repos/{owner}/{repo}/branches/{branch}` |
+| `gh.repo({ owner, repo }).branches.create({ name, from })` | `POST /repos/{owner}/{repo}/git/refs` |
+| `gh.repo({ owner, repo }).branches.delete(branch)` | `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}` |
 | `gh.repo({ owner, repo }).pulls.list()` | `GET /repos/{owner}/{repo}/pulls`             |
+| `gh.repo({ owner, repo }).pulls.create()` | `POST /repos/{owner}/{repo}/pulls`         |
+| `gh.repo({ owner, repo }).pulls.requestReviewers(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` |
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
+| `gh.repo({ owner, repo }).pulls.files(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/files` |
+| `gh.repo({ owner, repo }).pulls.commits(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/commits` |
+| `gh.repo({ owner, repo }).pulls.merge(number)` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).pulls.reviews.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).pulls.reviews.submit(number, reviewId)` | `POST /repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events` |
+| `gh.repo({ owner, repo }).pulls.comments.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/comments` |
+| `gh.repo({ owner, repo }).pulls.comments.create(number)` | `POST /repos/{owner}/{repo}/pulls/{number}/comments` |
+| `gh.repo({ owner, repo }).pulls.comments.reply(commentId)` | `POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies` |
+| `gh.repo({ owner, repo }).pulls.comments.update(commentId)` | `PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}` |
+| `gh.repo({ owner, repo }).pulls.comments.delete(commentId)` | `DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}` |
+| `gh.repo({ owner, repo }).checks.list(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` |
+| `gh.repo({ owner, repo }).checks.status(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}/status` |
 | `gh.repo({ owner, repo }).stacks.list()` | `GET /repos/{owner}/{repo}/stacks`            |
 | `gh.repo({ owner, repo }).stacks.get(number)` | `GET /repos/{owner}/{repo}/stacks/{number}` |
 | `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
 | `gh.repo({ owner, repo }).commits.get(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}` |
+| `gh.repo({ owner, repo }).compare({ base, head })` | `GET /repos/{owner}/{repo}/compare/{base}...{head}` |
+| `gh.repo({ owner, repo }).contents.get(path, { ref })` | `GET /repos/{owner}/{repo}/contents/{path}` |
+| `gh.repo({ owner, repo }).contents.raw(path, { ref })` | `GET /repos/{owner}/{repo}/contents/{path}` (raw) |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
 | `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
 | `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
@@ -200,6 +225,19 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).releases.reactions.list(releaseId)` | `GET /repos/{owner}/{repo}/releases/{id}/reactions` |
 | `gh.repo({ owner, repo }).releases.reactions.create(releaseId)` | `POST /repos/{owner}/{repo}/releases/{id}/reactions` |
 | `gh.repo({ owner, repo }).releases.reactions.delete(releaseId, id)` | `DELETE /repos/{owner}/{repo}/releases/{id}/reactions/{reaction_id}` |
+| `gh.repo({ owner, repo }).actions.workflows.list()` | `GET /repos/{owner}/{repo}/actions/workflows` |
+| `gh.repo({ owner, repo }).actions.workflows.get(idOrFile)` | `GET /repos/{owner}/{repo}/actions/workflows/{id}` |
+| `gh.repo({ owner, repo }).actions.workflows.dispatch(idOrFile)` | `POST /repos/{owner}/{repo}/actions/workflows/{id}/dispatches` |
+| `gh.repo({ owner, repo }).actions.runs.list()` | `GET /repos/{owner}/{repo}/actions/runs`, or `…/workflows/{id}/runs` with `workflow` |
+| `gh.repo({ owner, repo }).actions.runs.get(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}`, or `…/attempts/{n}` |
+| `gh.repo({ owner, repo }).actions.runs.jobs(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs` |
+| `gh.repo({ owner, repo }).actions.runs.artifacts(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts` |
+| `gh.repo({ owner, repo }).actions.runs.logs(runId)` | `GET /repos/{owner}/{repo}/actions/runs/{id}/logs` |
+| `gh.repo({ owner, repo }).actions.runs.rerun(runId)` | `POST /repos/{owner}/{repo}/actions/runs/{id}/rerun`, or `…/rerun-failed-jobs` |
+| `gh.repo({ owner, repo }).actions.runs.cancel(runId)` | `POST /repos/{owner}/{repo}/actions/runs/{id}/cancel` |
+| `gh.repo({ owner, repo }).actions.jobs.get(jobId)` | `GET /repos/{owner}/{repo}/actions/jobs/{id}` |
+| `gh.repo({ owner, repo }).actions.jobs.logs(jobId)` | `GET /repos/{owner}/{repo}/actions/jobs/{id}/logs` |
+| `gh.repo({ owner, repo }).actions.artifacts.download(id)` | `GET /repos/{owner}/{repo}/actions/artifacts/{id}/zip` |
 | `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
 | `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
 | `gh.users.getAuthenticated()`             | `GET /user`                                      |
@@ -297,14 +335,149 @@ or rulesets, `false` only the others. Each item carries the branch `name`, the t
 `commit.sha` and `protected`. `branches.get()` accepts names containing `/` and adds
 `_links.html`, the branch's web page.
 
+`branches.create({ name, from })` creates a branch at the commit `from` names, which may be a
+branch, a tag or a SHA. GitHub creates a ref from a commit SHA, so the client resolves `from` to
+one first and the call costs two requests. `branches.delete(name)` removes a branch; GitHub
+refuses the default branch. A name containing `/` is sent as its own path segments, so the slash
+stays a slash. Both refuse a name Git would before requesting it: a full ref, whitespace, `..`,
+`@{`, a leading `/` or `-`, a trailing `/` or `.lock`, or any of `~ ^ : ? * [ \ |`.
+
 Pull request calls accept a `signal` to abort the request. `pulls.list()` returns open pull
 requests unless `state` is `closed` or `all`; filter by `head` (`owner:branch`) or `base`, and
 sort by `created`, `updated`, `popularity` or `long-running`. A merged pull request is `closed`
 with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while GitHub computes it),
-`merged_by`, comment and commit counts, and line and file counts. `pulls.reviews.list()` returns
+`merged_by`, comment and commit counts, and line and file counts. `mergeable_state` is GitHub's own
+verdict: `clean`, `dirty` for a conflict, `blocked` by a rule, `behind` its base, `unstable` with a
+failing check, `draft`, or `unknown` while it computes. `requested_reviewers` names the people asked
+to review and `requested_teams` the teams. `pulls.reviews.list()` returns
 each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
+
+**Reviewing.** `pulls.reviews.create(number, { event })` submits a review: `APPROVE`,
+`REQUEST_CHANGES` or `COMMENT`. GitHub requires a summary for the last two and refuses an `event` it
+does not know, so the client refuses both before requesting. `commitId` reviews one commit, and
+`comments` posts inline comments as part of the same review, which is how a reviewer leaves several
+line comments with one verdict. `DISMISSED` and `PENDING` are states GitHub reports, not events it
+accepts.
+
+Leave `event` out and the review stays pending instead, so comments can be collected while reading
+the diff. `pulls.reviews.submit(number, reviewId, { event })` submits it afterwards, and the client
+refuses a submit without a verdict, which GitHub answers with a 422.
+
+```ts
+await repo.pulls.reviews.create(1086, {
+  event: "REQUEST_CHANGES",
+  body: "One fix before this goes in.",
+  comments: [{ path: "src/login.ts", line: 42, side: "RIGHT", body: "This drops the error." }],
+})
+```
+
+**Inline comments.** `pulls.comments.list(number)` returns the comments on the diff, with the
+`path` and `line` each is on and the `side` that line counts on (`RIGHT` for the file as changed,
+`LEFT` for it as it was), `start_line` when it spans a range, the `diff_hunk` it quotes, the
+`commit_id` it was left on, `in_reply_to_id` for a thread's answers and `pull_request_review_id` for
+the review it was posted with. `position` and `original_position` count the line in the diff as it
+was left, which is how an outdated comment keeps its place after a push. `since` narrows the list to
+what changed, `sort` and `direction` order it, and `bodyFormat` asks for the body as GitHub rendered
+it. `pulls.comments.create(number, { path, body })` comments on a line outside a review, and
+needs `line` with an optional `side` (`RIGHT`, the file as changed, by default) or `position`, a
+line counted in the diff. `pulls.comments.reply(commentId, { body })` answers a comment in its
+thread, `update(commentId, { body })` changes one and `delete(commentId)` removes it.
+
+**Reading the diff.** `pulls.files(number)` returns the files the pull request changes, each with
+its `status` (`added`, `removed`, `modified`, `renamed`, `copied`, `changed` or `unchanged`), its
+`additions`, `deletions` and `changes`, the `previous_filename` of a rename, and `patch`: the
+unified diff with its hunk headers, which is what a review reads. GitHub leaves `patch` out when it
+will not render one, as it does for a binary file, so read the file itself then. One response holds
+3000 files at most, 30 a page unless `pageSize` says otherwise. `pulls.commits(number)` lists the
+commits on its branch, oldest first.
+
+```ts
+const files = await repo.pulls.files(1086, { pageSize: 100 })
+const changed = files.items.filter((file) => file.status !== "unchanged")
+```
+
+**Opening one.** `pulls.create({ title, head, base })` opens a pull request from `head` into
+`base`, with `body`, `draft`, `maintainerCanModify` and `issue` to turn an issue into one.
+`requestReviewers(number, { reviewers })` asks users to review, and `teamReviewers` asks teams by
+slug; GitHub answers with the pull request.
+
+**Merging.** `pulls.merge(number, { method })` merges with `merge` (the default), `squash` or
+`rebase`, and takes `commitTitle`, `commitMessage` and `sha`, the last of which merges only while
+the head branch is still at that commit. GitHub's refusals are answers rather than failures, so
+they come back as a result and only a status GitHub does not document for a merge throws:
+
+| Status | `reason`         | Means                                                              |
+| ------ | ---------------- | ------------------------------------------------------------------ |
+| 405    | `not_mergeable`  | a required review or check is missing, or the branches conflict     |
+| 409    | `head_changed`   | the head branch moved since it was read                             |
+| 403    | `forbidden`      | a branch protection rule or ruleset, or a token without write access |
+| 404    | `not_found`      | no such pull request, or the token cannot see it                    |
+| 422    | `invalid`        | GitHub refused the input, such as a merge method the repository forbids |
+
+```ts
+const merge = await repo.pulls.merge(1086, { method: "squash" })
+if (merge.merged) console.log("merged as", merge.sha)
+else if (merge.reason === "not_mergeable") console.log("waiting:", merge.message)
+```
+
+**Checks.** `checks.list(ref)` returns a commit's check runs, which is where a workflow's jobs
+appear, with `checkName`, `status` (`queued`, `in_progress`, `completed`) and `filter` (`latest`
+for the newest run of each name, `all` for every attempt) narrowing them. Each run names its
+`status`, its `conclusion` once complete, its `output`, the `app` that ran it and the pull requests
+it belongs to. `checks.status(ref)` returns the older Commit Status API's rollup: its `state` is
+`failure` when any context reports an error or a failure, `pending` when one is pending or none was
+ever posted, and `success` when all are. `ref` is a commit SHA, a branch or a tag, and names
+containing `/` work.
+
+```ts
+const { items: runs } = await repo.checks.list("feature/login")
+const failing = runs.filter((run) => run.conclusion === "failure").map((run) => run.name)
+const status = await repo.checks.status("feature/login")
+```
+
+### Actions
+
+Workflow runs, their jobs and steps, logs and artifacts. Each run names the branch and commit it ran
+on, and the pull requests GitHub matched it to: link it to your own objects from those.
+
+```ts
+const actions = gh.repo({ owner: "acme", repo: "web" }).actions
+
+// Backfill a week of CI runs, page by page.
+let pageToken: string | undefined
+do {
+  const page = await actions.runs.list({ workflow: "ci.yml", created: ">=2026-11-08", pageToken })
+  for (const run of page.items) {
+    // `pull_requests` is empty for a run from a fork: match it by head_branch or head_sha.
+    console.log(run.id, run.status, run.conclusion, run.head_branch, run.head_sha, run.pull_requests)
+  }
+  pageToken = page.nextPageToken
+} while (pageToken)
+
+const { items: jobs } = await actions.runs.jobs(runId, { filter: "latest" })
+const log = await (await actions.jobs.logs(jobs[0].id)).text()
+await actions.runs.rerun(runId, { failedOnly: true })
+```
+
+Lists come back as pages like every other list, though GitHub wraps Actions lists in an object.
+`workflows.dispatch(workflow, { ref })` starts a manual run on `ref`, a branch or tag, with the
+`inputs` the workflow declares. GitHub takes every input value as a string, so the client refuses
+anything else before requesting. GitHub answers with nothing, so read the run back from
+`runs.list({ branch: ref, event: "workflow_dispatch" })`.
+
+```ts
+await actions.workflows.dispatch("deploy.yml", {
+  ref: "main",
+  inputs: { environment: "production" },
+})
+```
+
+Logs and artifacts are downloads (`Response`): GitHub redirects them to storage signed for that one
+download, which is fetched without the token. `runs.logs` is a zip of every job's log; `jobs.logs` is
+one job's, as text. To follow runs as they happen, handle the `workflow_run` and `workflow_job`
+webhook events (see [Webhooks](#webhooks)).
 
 ### Stacks
 
@@ -387,6 +560,29 @@ the default branch, or from `sha` (a branch or commit), and filters by `path`, `
 committer as Git recorded them) and the matching GitHub accounts in `author` and `committer`,
 which are `null` when no account has that email. `commits.get()` accepts a SHA, branch or tag,
 names containing `/` included, and adds `stats` and the changed `files` with their patches.
+
+`compare({ base, head })` reads two refs against each other: their `status` (`ahead`, `behind`,
+`diverged`, `identical`), `ahead_by` and `behind_by`, the commits between them, and up to 300 files
+with their patches. It counts the diff from the two refs' merge base unless `diff` is `two-dot`,
+which counts from `base` itself; a pull request shows the three-dot one. Refs may contain `/`, such
+as `feature/login`.
+
+```ts
+// What landed since a review started.
+const since = await repo.compare({ base: reviewSha, head: pull.head.sha })
+```
+
+**Contents.** `contents.get(path, { ref })` reads a path at a branch, tag or commit: a file with
+its `content` in base64, a symlink with its `target`, a submodule, or a directory's entries as an
+array. Omit `path` to list the root. GitHub answers a file over 1 MB with an empty `content` and
+`encoding: "none"`, and refuses one over 100 MB, so `contents.raw(path, { ref })` returns the bytes
+as a `Response` instead. A symlink pointing at a file in the same repository is answered with that
+file's content, and a path that walks up out of the repository is refused before the request.
+
+```ts
+const file = await repo.contents.get("src/login.ts", { ref: pull.head.sha })
+const text = file.type === "file" ? Buffer.from(file.content, "base64").toString("utf8") : ""
+```
 
 Release calls accept a `signal` to abort the request. `releases.list()` returns
 newest first and includes drafts only when the token can push to the repository;

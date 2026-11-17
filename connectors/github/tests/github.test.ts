@@ -1551,3 +1551,860 @@ function captureWarnings(run: () => void): string[] {
   }
   return warnings
 }
+
+describe("GitHub Actions", () => {
+  const run = { id: 5, head_branch: "feature/login", head_sha: "abc", pull_requests: [] }
+
+  // A sync backfills runs page by page, filtered as GitHub filters them. Removal proof: drop a
+  // filter from runFilters, or read the page with readPage; the query or the items go missing.
+  test("lists runs with every filter, unwrapping GitHub's page and following its next link", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json(
+            { total_count: 2, workflow_runs: [run] },
+            nextLink("https://api.github.com/repos/acme/web/actions/runs?page=2")
+          )
+        : json({ total_count: 2, workflow_runs: [{ ...run, id: 6 }] })
+    )
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    const first = await runs.list({
+      branch: "feature/login",
+      event: "pull_request",
+      status: "failure",
+      actor: "octocat",
+      headSha: "abc",
+      created: ">=2026-11-01",
+      checkSuiteId: 42,
+      excludePullRequests: true,
+      pageSize: 100,
+    })
+    const second = await runs.list({ pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/actions/runs")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      branch: "feature/login",
+      event: "pull_request",
+      status: "failure",
+      actor: "octocat",
+      head_sha: "abc",
+      created: ">=2026-11-01",
+      check_suite_id: "42",
+      exclude_pull_requests: "true",
+      per_page: "100",
+    })
+    expect(first).toMatchObject({ items: [run], hasMore: true })
+    expect(first.nextPageToken).toBe(pageToken("/repos/acme/web/actions/runs?page=2"))
+    expect(calls[1]?.url.href).toBe("https://api.github.com/repos/acme/web/actions/runs?page=2")
+    expect(second).toMatchObject({ items: [{ id: 6 }], hasMore: false })
+  })
+
+  test("lists one workflow's runs, by file name or id", async () => {
+    const calls = record(() => json({ total_count: 0, workflow_runs: [] }))
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    await runs.list({ workflow: "ci.yml" })
+    await runs.list({ workflow: 161335 })
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/actions/workflows/ci.yml/runs",
+      "/repos/acme/web/actions/workflows/161335/runs",
+    ])
+  })
+
+  test("reads workflows, a run at an attempt, its jobs and its artifacts", async () => {
+    const calls = record((request) => {
+      const path = request.url.pathname
+      if (path.endsWith("/workflows")) return json({ total_count: 1, workflows: [{ id: 1 }] })
+      if (path.endsWith("/jobs")) return json({ total_count: 1, jobs: [{ id: 9, steps: [] }] })
+      if (path.endsWith("/artifacts")) return json({ total_count: 1, artifacts: [{ id: 3 }] })
+      return json({ id: 1 })
+    })
+    const actions = (await connect()).repo(webRepo).actions
+
+    expect((await actions.workflows.list()).items).toEqual([{ id: 1 }] as never)
+    await actions.workflows.get("release.yml")
+    await actions.runs.get(5)
+    await actions.runs.get(5, { attempt: 2 })
+    expect((await actions.runs.jobs(5, { filter: "all" })).items).toEqual([
+      { id: 9, steps: [] },
+    ] as never)
+    // An attempt names its jobs exactly, so `filter` does not apply.
+    await actions.runs.jobs(5, { attempt: 2, filter: "all" })
+    expect((await actions.runs.artifacts(5, { name: "coverage" })).items).toEqual([
+      { id: 3 },
+    ] as never)
+    await actions.jobs.get(9)
+
+    expect(calls.map((call) => `${call.url.pathname}${call.url.search}`)).toEqual([
+      "/repos/acme/web/actions/workflows",
+      "/repos/acme/web/actions/workflows/release.yml",
+      "/repos/acme/web/actions/runs/5",
+      "/repos/acme/web/actions/runs/5/attempts/2",
+      "/repos/acme/web/actions/runs/5/jobs?filter=all",
+      "/repos/acme/web/actions/runs/5/attempts/2/jobs",
+      "/repos/acme/web/actions/runs/5/artifacts?name=coverage",
+      "/repos/acme/web/actions/jobs/9",
+    ])
+  })
+
+  // Removal proof: always post to /rerun; a failed-only re-run then repeats every job.
+  test("re-runs all jobs or only the failed ones, and cancels", async () => {
+    const calls = record(
+      (request) =>
+        new Response(null, { status: request.url.pathname.endsWith("/cancel") ? 202 : 201 })
+    )
+    const runs = (await connect()).repo(webRepo).actions.runs
+
+    await runs.rerun(5)
+    await runs.rerun(5, { failedOnly: true, enableDebugLogging: true })
+    await runs.cancel(5)
+
+    expect(calls.map((call) => [call.method, call.url.pathname, call.body])).toEqual([
+      ["POST", "/repos/acme/web/actions/runs/5/rerun", {}],
+      ["POST", "/repos/acme/web/actions/runs/5/rerun-failed-jobs", { enable_debug_logging: true }],
+      ["POST", "/repos/acme/web/actions/runs/5/cancel", {}],
+    ])
+  })
+
+  // GitHub redirects every log and artifact to storage signed for that one download. Removal
+  // proof: fetch the redirect through context.http; the second request then carries the token.
+  test.each([
+    [
+      "a job's log",
+      (c: GitHubClient) => c.repo(webRepo).actions.jobs.logs(9),
+      "/actions/jobs/9/logs",
+    ],
+    [
+      "a run's logs",
+      (c: GitHubClient) => c.repo(webRepo).actions.runs.logs(5),
+      "/actions/runs/5/logs",
+    ],
+    [
+      "an attempt's logs",
+      (c: GitHubClient) => c.repo(webRepo).actions.runs.logs(5, { attempt: 2 }),
+      "/actions/runs/5/attempts/2/logs",
+    ],
+    [
+      "an artifact",
+      (c: GitHubClient) => c.repo(webRepo).actions.artifacts.download(3),
+      "/actions/artifacts/3/zip",
+    ],
+  ] as const)("downloads %s from GitHub's storage redirect without the token", async (_label, download, path) => {
+    const storage = "https://pipelines.actions.githubusercontent.com/logs?sig=abc"
+    const calls = record((_, index) =>
+      index === 1
+        ? new Response(null, { status: 302, headers: { location: storage } })
+        : new Response("2026-11-15T00:00:00Z Run bun test")
+    )
+
+    const response = await download(await connect())
+
+    expect(calls[0]?.url.pathname).toBe(`/repos/acme/web${path}`)
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer t")
+    expect(calls[1]?.url.href).toBe(storage)
+    expect(calls[1]?.headers.get("authorization")).toBeNull()
+    expect(await response.text()).toBe("2026-11-15T00:00:00Z Run bun test")
+  })
+
+  // GitHub answers a dispatch with 204 and no run, so the caller reads it back from runs.list().
+  test("starts a workflow on a branch or tag with its inputs", async () => {
+    const calls = record(() => new Response(null, { status: 204 }))
+    const workflows = (await connect()).repo(webRepo).actions.workflows
+
+    await workflows.dispatch("deploy.yml", { ref: "main", inputs: { environment: "production" } })
+    await workflows.dispatch(161335, { ref: "v1.2.0" })
+
+    expect(calls.map((call) => [call.method, call.url.pathname, call.body])).toEqual([
+      [
+        "POST",
+        "/repos/acme/web/actions/workflows/deploy.yml/dispatches",
+        { ref: "main", inputs: { environment: "production" } },
+      ],
+      ["POST", "/repos/acme/web/actions/workflows/161335/dispatches", { ref: "v1.2.0" }],
+    ])
+  })
+
+  // A number reaches GitHub as a JSON number and the dispatch fails, so the client refuses it first.
+  test("refuses a dispatch without a ref, or with an input that is not a string", async () => {
+    const calls = record()
+    const workflows = (await connect()).repo(webRepo).actions.workflows
+
+    await expect(workflows.dispatch("ci.yml", { ref: " " })).rejects.toThrow("ref")
+    await expect(
+      workflows.dispatch("ci.yml", { ref: "main", inputs: { count: 3 } as never })
+    ).rejects.toThrow("inputs.count")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("refuses a page without its list, and ids that are not ids", async () => {
+    record(() => json({ total_count: 0 }))
+    const actions = (await connect()).repo(webRepo).actions
+
+    expect(await actions.runs.list().catch((caught: unknown) => caught)).toBeInstanceOf(
+      GitHubApiError
+    )
+    await expect(actions.runs.get(1.5)).rejects.toThrow("runId")
+    await expect(actions.workflows.get("")).rejects.toThrow("workflow")
+  })
+
+  test("narrows workflow_run and workflow_job deliveries to their payloads", () => {
+    const seen: string[] = []
+    const onEvent = ({ event }: GitHubEventContext) => {
+      if (event.name === "workflow_run") {
+        seen.push(
+          `${event.payload.workflow_run.head_branch}@${event.payload.workflow_run.head_sha}`
+        )
+      }
+      if (event.name === "workflow_job") seen.push(event.payload.workflow_job.name)
+    }
+
+    onEvent({
+      event: {
+        name: "workflow_run",
+        deliveryId: "d1",
+        action: "completed",
+        payload: { workflow_run: { head_branch: "main", head_sha: "abc" } } as never,
+      },
+    } as unknown as GitHubEventContext)
+
+    expect(seen).toEqual(["main@abc"])
+  })
+})
+
+describe("pull request merges", () => {
+  // Removal proof: throw on 405 and 409 instead of reading them as answers; a merge gate then has
+  // to catch to learn why it did not merge.
+  test("merges with the body it was given, and reads each refusal as an answer", async () => {
+    const calls = record((_, index) => {
+      if (index === 1) {
+        return json({ sha: "merge-sha", merged: true, message: "Pull Request successfully merged" })
+      }
+      return json(
+        { message: `refused ${index}` },
+        { status: [0, 0, 405, 409, 403, 404, 422][index] }
+      )
+    })
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    expect(
+      await pulls.merge(7, {
+        method: "squash",
+        commitTitle: "Fix the login",
+        commitMessage: "It was broken.",
+        sha: "abc",
+      })
+    ).toEqual({ merged: true, sha: "merge-sha", message: "Pull Request successfully merged" })
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "PUT",
+      "/repos/acme/web/pulls/7/merge",
+    ])
+    expect(calls[0]?.body).toEqual({
+      commit_title: "Fix the login",
+      commit_message: "It was broken.",
+      sha: "abc",
+      merge_method: "squash",
+    })
+
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "not_mergeable" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "head_changed" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "forbidden" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "not_found" })
+    expect(await pulls.merge(7)).toMatchObject({ merged: false, reason: "invalid" })
+    expect(calls[1]?.body).toEqual({
+      commit_title: undefined,
+      commit_message: undefined,
+      sha: undefined,
+      merge_method: undefined,
+    })
+  })
+
+  test("reads a 200 that did not merge as a refusal, and throws on a status it cannot name", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json({ merged: false, message: "Not mergeable" })
+        : json({ message: "Server Error" }, { status: 500 })
+    )
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    expect(await pulls.merge(7)).toEqual({
+      merged: false,
+      reason: "not_mergeable",
+      message: "Not mergeable",
+    })
+    expect(await pulls.merge(7).catch((caught: unknown) => caught)).toBeInstanceOf(GitHubApiError)
+    expect(calls).toHaveLength(2)
+  })
+})
+
+describe("checks", () => {
+  const run = { id: 9, name: "ci / test", status: "completed", conclusion: "failure" }
+
+  // Removal proof: drop a filter, or read the page with readPage; the query or the items go missing.
+  test("lists a commit's check runs with every filter, unwrapping the page and following its next link", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json(
+            { total_count: 2, check_runs: [run] },
+            nextLink("https://api.github.com/repos/acme/web/commits/abc/check-runs?page=2")
+          )
+        : json({ total_count: 2, check_runs: [{ ...run, id: 10 }] })
+    )
+    const checks = (await connect()).repo(webRepo).checks
+
+    const first = await checks.list("abc", {
+      checkName: "ci / test",
+      status: "completed",
+      filter: "all",
+      pageSize: 100,
+    })
+    const second = await checks.list("abc", { pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/abc/check-runs")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      check_name: "ci / test",
+      status: "completed",
+      filter: "all",
+      per_page: "100",
+    })
+    expect(first).toMatchObject({ items: [run], hasMore: true })
+    expect(second).toMatchObject({ items: [{ id: 10 }], hasMore: false })
+  })
+
+  test("reads the combined commit status, for a ref that contains a slash too", async () => {
+    const calls = record(() => json({ state: "failure", sha: "abc", total_count: 1, statuses: [] }))
+    const checks = (await connect()).repo(webRepo).checks
+
+    const status = await checks.status("feature/login")
+
+    expect(status.state).toBe("failure")
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/feature%2Flogin/status")
+  })
+
+  test("refuses an empty ref before requesting", async () => {
+    const calls = record()
+    const checks = (await connect()).repo(webRepo).checks
+
+    await expect(checks.list("")).rejects.toThrow("ref")
+    await expect(checks.status("  ")).rejects.toThrow("ref")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("branch and pull request writes", () => {
+  // Removal proof: post the branch or tag name as the ref's sha; GitHub then answers 422, because
+  // a ref is created from a commit.
+  test("creates a branch at the commit a branch, tag or SHA names", async () => {
+    const calls = record((_, index) =>
+      index === 1
+        ? json({ sha: "commit-sha" })
+        : json({ ref: "refs/heads/feature/login", object: { sha: "commit-sha", type: "commit" } })
+    )
+    const branches = (await connect()).repo(webRepo).branches
+
+    const ref = await branches.create({ name: "feature/login", from: "release/1.2" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/commits/release%2F1.2")
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual(["POST", "/repos/acme/web/git/refs"])
+    expect(calls[1]?.body).toEqual({ ref: "refs/heads/feature/login", sha: "commit-sha" })
+    expect(ref.ref).toBe("refs/heads/feature/login")
+  })
+
+  // A ref's slash is a path separator, so the name's own slashes are sent as segments.
+  test("deletes a branch, keeping a slash in its name a slash", async () => {
+    const calls = record(() => new Response(null, { status: 204 }))
+
+    await (await connect()).repo(webRepo).branches.delete("feature/login")
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "DELETE",
+      "/repos/acme/web/git/refs/heads/feature/login",
+    ])
+  })
+
+  // GitHub answers a bad ref with a 422 that names nothing a caller can act on.
+  test("refuses a branch name Git would, before requesting", async () => {
+    const calls = record()
+    const branches = (await connect()).repo(webRepo).branches
+
+    for (const name of ["refs/heads/x", "feature login", "a..b", "-dash", "trail.lock", "br~1"]) {
+      expect(await branches.create({ name, from: "main" }).catch((e: unknown) => e)).toBeInstanceOf(
+        Error
+      )
+      await expect(branches.delete(name)).rejects.toThrow("branch name")
+    }
+    await expect(branches.create({ name: "  ", from: "main" })).rejects.toThrow("name")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("opens a pull request, and asks users and teams to review it", async () => {
+    const calls = record(() => json({ id: 7, number: 7 }))
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    const created = await pulls.create({
+      title: "Fix the login",
+      head: "feature/login",
+      base: "main",
+      body: "It was broken.",
+      draft: true,
+      maintainerCanModify: true,
+      issue: 42,
+    })
+    const reviewed = await pulls.requestReviewers(7, {
+      reviewers: ["octocat"],
+      teamReviewers: ["platform"],
+    })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual(["POST", "/repos/acme/web/pulls"])
+    expect(calls[0]?.body).toEqual({
+      title: "Fix the login",
+      head: "feature/login",
+      base: "main",
+      body: "It was broken.",
+      draft: true,
+      maintainer_can_modify: true,
+      issue: 42,
+    })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/requested_reviewers",
+    ])
+    expect(calls[1]?.body).toEqual({ reviewers: ["octocat"], team_reviewers: ["platform"] })
+    expect(created.number).toBe(7)
+    expect(reviewed.number).toBe(7)
+  })
+
+  test("refuses a pull request without its branches, or reviewers with nobody to ask", async () => {
+    const calls = record()
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    await expect(pulls.create({ title: "Fix", head: "", base: "main" })).rejects.toThrow("head")
+    await expect(pulls.create({ title: "", head: "feature", base: "main" })).rejects.toThrow(
+      "title"
+    )
+    await expect(pulls.requestReviewers(7, {})).rejects.toThrow("reviewers or teamReviewers")
+    await expect(pulls.requestReviewers(7, { reviewers: [""] })).rejects.toThrow("reviewers")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("reviews and inline comments", () => {
+  test("submits a review with its verdict, summary and inline comments", async () => {
+    const calls = record(() => json({ id: 11, state: "CHANGES_REQUESTED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    const review = await reviews.create(7, {
+      event: "REQUEST_CHANGES",
+      body: "One fix before this goes in.",
+      commitId: "abc",
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "This drops the error.",
+          line: 42,
+          side: "RIGHT",
+          startLine: 40,
+          startSide: "LEFT",
+        },
+      ],
+    })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/reviews",
+    ])
+    expect(calls[0]?.body).toEqual({
+      commit_id: "abc",
+      body: "One fix before this goes in.",
+      event: "REQUEST_CHANGES",
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "This drops the error.",
+          line: 42,
+          side: "RIGHT",
+          start_line: 40,
+          start_side: "LEFT",
+          position: undefined,
+        },
+      ],
+    })
+    expect(review.state).toBe("CHANGES_REQUESTED")
+  })
+
+  // A summary is required for a comment or a change request, and GitHub answers a bare 422 without.
+  test("approves without a summary, and refuses a review GitHub would", async () => {
+    const calls = record(() => json({ id: 11, state: "APPROVED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    await reviews.create(7, { event: "APPROVE" })
+
+    expect(calls[0]?.body).toEqual({
+      commit_id: undefined,
+      body: undefined,
+      event: "APPROVE",
+      comments: undefined,
+    })
+    await expect(reviews.create(7, { event: "COMMENT" })).rejects.toThrow("body")
+    await expect(reviews.create(7, { event: "DISMISS" as never })).rejects.toThrow("event")
+    await expect(
+      reviews.create(7, { event: "COMMENT", body: "x", comments: [{ path: "a.ts", body: "y" }] })
+    ).rejects.toThrow("line or position")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("lists, writes and answers inline comments", async () => {
+    const calls = record(() => json({ id: 5, body: "x" }))
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    await comments.list(7, {
+      sort: "updated",
+      direction: "desc",
+      since: "2026-11-01T00:00:00Z",
+      pageSize: 50,
+    })
+    await comments.create(7, {
+      path: "src/login.ts",
+      body: "Here",
+      line: 42,
+      side: "LEFT",
+      startLine: 40,
+      startSide: "RIGHT",
+      commitId: "abc",
+      position: 3,
+    })
+    await comments.reply(5, { body: "Answer" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/comments")
+    expect(Object.fromEntries(calls[0]?.url.searchParams ?? [])).toEqual({
+      sort: "updated",
+      direction: "desc",
+      since: "2026-11-01T00:00:00Z",
+      per_page: "50",
+    })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/comments",
+    ])
+    expect(calls[1]?.body).toEqual({
+      body: "Here",
+      path: "src/login.ts",
+      commit_id: "abc",
+      line: 42,
+      side: "LEFT",
+      start_line: 40,
+      start_side: "RIGHT",
+      position: 3,
+    })
+    expect([calls[2]?.method, calls[2]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/comments/5/replies",
+    ])
+    expect(calls[2]?.body).toEqual({ body: "Answer" })
+  })
+
+  test("refuses a comment with nowhere to go, and an id that is not one", async () => {
+    const calls = record()
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    await expect(comments.create(7, { path: "src/a.ts", body: "x" })).rejects.toThrow(
+      "line or position"
+    )
+    await expect(comments.create(7, { path: "", body: "x", line: 1 })).rejects.toThrow("path")
+    await expect(comments.reply(0, { body: "x" })).rejects.toThrow("commentId")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("the diff a review reads", () => {
+  // Removal proof: read the pull request's commits for its files; each commit's patch is only that
+  // commit's change, and a file changed twice would appear twice.
+  test("lists the files a pull request changes, with each patch, a page at a time", async () => {
+    const file = {
+      sha: "blob-sha",
+      filename: "src/login.ts",
+      status: "modified",
+      additions: 2,
+      deletions: 1,
+      changes: 3,
+      blob_url: "https://github.com/acme/web/blob/abc/src/login.ts",
+      raw_url: "https://github.com/acme/web/raw/abc/src/login.ts",
+      contents_url: "https://api.github.com/repos/acme/web/contents/src/login.ts?ref=abc",
+      patch: "@@ -40,3 +40,4 @@\n const a = 1\n-const b = 2\n+const b = 3\n+const c = 4",
+    }
+    const calls = record((_, index) =>
+      index === 1
+        ? json([file], nextLink("https://api.github.com/repos/acme/web/pulls/7/files?page=2"))
+        : json([{ ...file, filename: "src/router.ts" }])
+    )
+    const pulls = (await connect()).repo(webRepo).pulls
+
+    const first = await pulls.files(7, { pageSize: 100 })
+    const second = await pulls.files(7, { pageToken: first.nextPageToken })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/files")
+    expect(calls[0]?.url.searchParams.get("per_page")).toBe("100")
+    expect(first).toMatchObject({ items: [file], hasMore: true })
+    expect(second).toMatchObject({ items: [{ filename: "src/router.ts" }], hasMore: false })
+  })
+
+  // GitHub leaves `patch` out for a binary file, so a caller has to be able to see that it is gone.
+  test("keeps a file whose patch GitHub left out, and its previous name", async () => {
+    const calls = record(() =>
+      json([
+        { sha: "s", filename: "logo.png", status: "added", additions: 0, deletions: 0, changes: 0 },
+        { sha: "s", filename: "src/app.ts", status: "renamed", previous_filename: "src/main.ts" },
+      ])
+    )
+
+    const page = await (await connect()).repo(webRepo).pulls.files(7)
+
+    expect(page.items[0]?.patch).toBeUndefined()
+    expect(page.items[0]?.status).toBe("added")
+    expect(page.items[1]?.previous_filename).toBe("src/main.ts")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("lists a pull request's commits, oldest first", async () => {
+    const calls = record(() => json([{ sha: "abc", commit: { message: "Fix" } }]))
+
+    const page = await (await connect()).repo(webRepo).pulls.commits(7, { pageSize: 50 })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/pulls/7/commits")
+    expect(calls[0]?.url.searchParams.get("per_page")).toBe("50")
+    expect(page.items[0]?.sha).toBe("abc")
+  })
+
+  test("reads where a comment sits in the diff, and the review it came with", async () => {
+    record(() =>
+      json([
+        {
+          id: 5,
+          path: "src/login.ts",
+          line: null,
+          original_line: 42,
+          side: "RIGHT",
+          start_line: 40,
+          position: 3,
+          original_position: 3,
+          in_reply_to_id: 4,
+          pull_request_review_id: 11,
+          diff_hunk: "@@ -40,3 +40,4 @@",
+        },
+      ])
+    )
+
+    const page = await (await connect()).repo(webRepo).pulls.comments.list(7)
+
+    expect(page.items[0]).toMatchObject({
+      original_line: 42,
+      start_line: 40,
+      position: 3,
+      pull_request_review_id: 11,
+      in_reply_to_id: 4,
+    })
+  })
+
+  test("asks for a comment's body in the requested format", async () => {
+    const calls = record(() => json([]))
+
+    await (await connect()).repo(webRepo).pulls.comments.list(7, { bodyFormat: "html" })
+
+    expect(calls[0]?.headers.get("accept")).toBe("application/vnd.github.html+json")
+  })
+})
+
+describe("comparing two refs", () => {
+  const compare = {
+    status: "ahead",
+    ahead_by: 2,
+    behind_by: 0,
+    total_commits: 2,
+    commits: [{ sha: "abc" }],
+    files: [{ filename: "src/login.ts", status: "modified", patch: "@@ -1 +1 @@" }],
+  }
+
+  // A pull request shows the three-dot diff, so that is what a caller gets unless it asks otherwise.
+  test("counts from the merge base by default, and from the base itself when asked", async () => {
+    const calls = record(() => json(compare))
+    const repo = (await connect()).repo(webRepo)
+
+    const threeDot = await repo.compare({ base: "main", head: "feature/login" })
+    await repo.compare({ base: "main", head: "feature/login" }, { diff: "two-dot" })
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/compare/main...feature/login",
+      "/repos/acme/web/compare/main..feature/login",
+    ])
+    expect(threeDot).toMatchObject({ status: "ahead", ahead_by: 2 })
+    expect(threeDot.files[0]?.patch).toBe("@@ -1 +1 @@")
+  })
+
+  test("reads one side of the comparison and its merge base", async () => {
+    record(() =>
+      json({ base_commit: { sha: "base-sha" }, merge_base_commit: { sha: "merge-sha" } })
+    )
+
+    const result = await (await connect()).repo(webRepo).compare({ base: "v1.0.0", head: "v1.1.0" })
+
+    expect(result.base_commit.sha).toBe("base-sha")
+    expect(result.merge_base_commit.sha).toBe("merge-sha")
+  })
+
+  // A ref that walks up the path would ask GitHub for another repository's files.
+  test("refuses an empty ref, and a segment that walks up the path", async () => {
+    const calls = record()
+    const repo = (await connect()).repo(webRepo)
+
+    await expect(repo.compare({ base: "", head: "main" })).rejects.toThrow("base")
+    await expect(repo.compare({ base: "main", head: "../acme/other" })).rejects.toThrow("segment")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("reading a file at a ref", () => {
+  test("reads a file, its base64 content, at the ref it was asked for", async () => {
+    const calls = record(() =>
+      json({ type: "file", encoding: "base64", content: "aGVsbG8=", path: "src/login.ts" })
+    )
+
+    const file = await (await connect())
+      .repo(webRepo)
+      .contents.get("src/login.ts", { ref: "feature/login" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/contents/src/login.ts")
+    expect(calls[0]?.url.searchParams.get("ref")).toBe("feature/login")
+    expect(file).toMatchObject({ type: "file", encoding: "base64", content: "aGVsbG8=" })
+  })
+
+  test("reads a directory, and the root without a path", async () => {
+    const calls = record(() =>
+      json([{ type: "file", name: "login.ts", path: "src/login.ts", size: 42 }])
+    )
+    const contents = (await connect()).repo(webRepo).contents
+
+    const entries = await contents.get("src")
+    const root = await contents.get()
+    await contents.get("")
+
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      "/repos/acme/web/contents/src",
+      "/repos/acme/web/contents",
+      "/repos/acme/web/contents",
+    ])
+    expect(Array.isArray(entries)).toBe(true)
+    expect(Array.isArray(root)).toBe(true)
+  })
+
+  // A file over 1 MB comes back with an empty content, so its bytes have to be asked for.
+  test("reads a file's raw bytes, asking GitHub for them without its JSON", async () => {
+    const calls = record(() => new Response("const a = 1\n"))
+
+    const response = await (await connect())
+      .repo(webRepo)
+      .contents.raw("src/login.ts", { ref: "abc" })
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/contents/src/login.ts")
+    expect(calls[0]?.url.searchParams.get("ref")).toBe("abc")
+    expect(calls[0]?.headers.get("accept")).toBe("application/vnd.github.raw+json")
+    expect(await response.text()).toBe("const a = 1\n")
+  })
+
+  test("refuses a path that walks up out of the repository", async () => {
+    const calls = record()
+    const contents = (await connect()).repo(webRepo).contents
+
+    await expect(contents.get("../../other/secret.ts")).rejects.toThrow("segment")
+    await expect(contents.raw("src/../secret.ts")).rejects.toThrow("segment")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("a review that stays open until it is submitted", () => {
+  // Removal proof: require an event on create; a reviewer can then only post a verdict, never
+  // collect comments and decide after reading the whole diff.
+  test("keeps a review pending when it carries no verdict", async () => {
+    const calls = record(() => json({ id: 11, state: "PENDING", body: "Note to self" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    const review = await reviews.create(7, {
+      body: "Note to self",
+      comments: [{ path: "src/login.ts", body: "Check this", line: 42 }],
+    })
+
+    expect(calls[0]?.body).toEqual({
+      commit_id: undefined,
+      body: "Note to self",
+      event: undefined,
+      comments: [
+        {
+          path: "src/login.ts",
+          body: "Check this",
+          line: 42,
+          side: undefined,
+          start_line: undefined,
+          start_side: undefined,
+          position: undefined,
+        },
+      ],
+    })
+    expect(review.state).toBe("PENDING")
+  })
+
+  test("submits a pending review with the verdict GitHub requires", async () => {
+    const calls = record(() => json({ id: 11, state: "CHANGES_REQUESTED" }))
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    // The event is REQUEST_CHANGES; CHANGES_REQUESTED is the state the review then reads as.
+    const review = await reviews.submit(7, 11, { event: "REQUEST_CHANGES", body: "One fix." })
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "POST",
+      "/repos/acme/web/pulls/7/reviews/11/events",
+    ])
+    expect(calls[0]?.body).toEqual({ event: "REQUEST_CHANGES", body: "One fix." })
+    expect(review.state).toBe("CHANGES_REQUESTED")
+  })
+
+  // A pending review is submitted with a verdict, so a submit without one is refused before the
+  // request rather than answered with a 422.
+  test("refuses a submit without a verdict, or with one GitHub does not know", async () => {
+    const calls = record()
+    const reviews = (await connect()).repo(webRepo).pulls.reviews
+
+    await expect(reviews.submit(7, 11, {} as never)).rejects.toThrow("event")
+    await expect(reviews.submit(7, 11, { event: "DISMISS" as never })).rejects.toThrow("event")
+    await expect(reviews.submit(7, 0, { event: "COMMENT", body: "x" })).rejects.toThrow("reviewId")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("edits and deletes a comment", async () => {
+    const calls = record((_, index) =>
+      index === 1 ? json({ id: 5, body: "Fixed." }) : new Response(null, { status: 204 })
+    )
+    const comments = (await connect()).repo(webRepo).pulls.comments
+
+    const updated = await comments.update(5, { body: "Fixed." })
+    await comments.delete(5)
+
+    expect([calls[0]?.method, calls[0]?.url.pathname]).toEqual([
+      "PATCH",
+      "/repos/acme/web/pulls/comments/5",
+    ])
+    expect(calls[0]?.body).toEqual({ body: "Fixed." })
+    expect([calls[1]?.method, calls[1]?.url.pathname]).toEqual([
+      "DELETE",
+      "/repos/acme/web/pulls/comments/5",
+    ])
+    expect(updated.body).toBe("Fixed.")
+  })
+
+  test("refuses to empty a comment's body", async () => {
+    const calls = record()
+
+    await expect(
+      (await connect()).repo(webRepo).pulls.comments.update(5, { body: "  " })
+    ).rejects.toThrow("body")
+    expect(calls).toHaveLength(0)
+  })
+})

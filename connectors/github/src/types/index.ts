@@ -1,3 +1,27 @@
+export type {
+  DispatchWorkflowInput,
+  GitHubWorkflow,
+  GitHubWorkflowArtifact,
+  GitHubWorkflowConclusion,
+  GitHubWorkflowJob,
+  GitHubWorkflowJobStep,
+  GitHubWorkflowRef,
+  GitHubWorkflowRun,
+  GitHubWorkflowRunPullRequest,
+  GitHubWorkflowRunPullRequestRef,
+  GitHubWorkflowRunRepository,
+  GitHubWorkflowRunStatus,
+  ListWorkflowArtifactsOptions,
+  ListWorkflowJobsOptions,
+  ListWorkflowRunsOptions,
+  RepositoryActionsApi,
+  RepositoryWorkflowArtifactsApi,
+  RepositoryWorkflowJobsApi,
+  RepositoryWorkflowRunsApi,
+  RepositoryWorkflowsApi,
+  RerunWorkflowRunOptions,
+  WorkflowRunAttemptOptions,
+} from "./actions"
 export type { ListAssigneesOptions, RepositoryAssigneesApi } from "./assignees"
 export type {
   GitHubAttachment,
@@ -13,6 +37,21 @@ export type {
   ListBranchesOptions,
   RepositoryBranchesApi,
 } from "./branches"
+export type {
+  GitHubCheckRun,
+  GitHubCheckRunApp,
+  GitHubCheckRunConclusion,
+  GitHubCheckRunOutput,
+  GitHubCheckRunPullRequest,
+  GitHubCheckRunStatus,
+  GitHubCheckRunStatusFilter,
+  GitHubCheckRunSuiteRef,
+  GitHubCombinedStatus,
+  GitHubCommitStatus,
+  GitHubCommitStatusState,
+  ListCheckRunsOptions,
+  RepositoryChecksApi,
+} from "./checks"
 export type { GitHubClient, GitHubOrganizationScope, GitHubRepositoryScope } from "./client"
 export type {
   GitHubCommit,
@@ -30,6 +69,23 @@ export type {
   GitHubRequestOptions,
   GitHubUser,
 } from "./common"
+export type {
+  CompareOptions,
+  CompareRefs,
+  GitHubCompare,
+  GitHubCompareStatus,
+  RepositoryCompareApi,
+} from "./compare"
+export type {
+  GetContentsOptions,
+  GitHubContent,
+  GitHubContentEntry,
+  GitHubContentFile,
+  GitHubContentSubmodule,
+  GitHubContentSymlink,
+  RepositoryContentsApi,
+} from "./contents"
+export type { GitHubDiffEntry, GitHubDiffStatus } from "./diff"
 export type {
   CreateIssueCommentInput,
   GitHubIssueComment,
@@ -95,18 +151,39 @@ export type {
   GitHubStaticAuthOptions,
 } from "./options"
 export type {
+  CreatePullRequestCommentInput,
+  CreatePullRequestInput,
+  CreatePullRequestReviewCommentInput,
+  CreatePullRequestReviewInput,
   GetPullRequestOptions,
   GitHubPullRequest,
   GitHubPullRequestBranch,
+  GitHubPullRequestComment,
+  GitHubPullRequestCommentSide,
   GitHubPullRequestDetail,
+  GitHubPullRequestMergeableState,
+  GitHubPullRequestMergeMethod,
+  GitHubPullRequestMergeRefusal,
+  GitHubPullRequestMergeResult,
+  GitHubPullRequestRequestedTeam,
   GitHubPullRequestReview,
+  GitHubPullRequestReviewEvent,
   GitHubPullRequestReviewState,
   GitHubPullRequestSort,
   GitHubPullRequestState,
+  ListPullRequestCommentsOptions,
+  ListPullRequestCommitsOptions,
+  ListPullRequestFilesOptions,
   ListPullRequestReviewsOptions,
   ListPullRequestsOptions,
+  MergePullRequestInput,
+  ReplyToPullRequestCommentInput,
+  RepositoryPullRequestCommentsApi,
   RepositoryPullRequestReviewsApi,
   RepositoryPullRequestsApi,
+  RequestReviewersInput,
+  SubmitPullRequestReviewInput,
+  UpdatePullRequestCommentInput,
 } from "./pulls"
 export type {
   CreateReleaseInput,

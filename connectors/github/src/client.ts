@@ -1,8 +1,12 @@
 import type { RestClient } from "@sixb/connector-rest"
+import { createRepositoryActionsApi } from "./resources/actions"
 import { createRepositoryAssigneesApi } from "./resources/assignees"
 import { createGitHubAttachmentsApi } from "./resources/attachments"
 import { createRepositoryBranchesApi } from "./resources/branches"
+import { createRepositoryChecksApi } from "./resources/checks"
 import { createRepositoryCommitsApi } from "./resources/commits"
+import { createRepositoryCompareApi } from "./resources/compare"
+import { createRepositoryContentsApi } from "./resources/contents"
 import {
   createAuthenticatedUserIssuesApi,
   createOrganizationIssuesApi,
@@ -37,9 +41,13 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
     attachments: createGitHubAttachmentsApi(context),
     repo: (target) => ({
       ...createRepositoryApi(context, target),
+      actions: createRepositoryActionsApi(context, target),
       assignees: createRepositoryAssigneesApi(context, target),
       branches: createRepositoryBranchesApi(context, target),
+      checks: createRepositoryChecksApi(context, target),
       commits: createRepositoryCommitsApi(context, target),
+      ...createRepositoryCompareApi(context, target),
+      contents: createRepositoryContentsApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
       labels: createRepositoryLabelsApi(context, target),
       milestones: createRepositoryMilestonesApi(context, target),
