@@ -150,7 +150,7 @@ To build your own sidebar, use the same parts with the `@sixb/ui` sidebar compon
 | --- | --- |
 | `SearchCommand` | A **Search** button, and ⌘K anywhere: your `pages`, Artifacts, every section page the person may open, and objects as they type |
 | `SectionNav` | The open section's pages with a link back, and its `fallback` everywhere else |
-| `UserMenu` | The person, Artifacts, the sections they may open, theme switching, and sign-out |
+| `UserMenu` | The person, Artifacts, the sections they may open, theme switching, the [desktop app](desktop.md#distribute-it) once it's released, and sign-out |
 | `AgentDock` | The project's agent, collapsed beside the page until opened; nothing without an agent |
 
 Wrap your own navigation in `SectionNav` so that opening the Console or Settings swaps it for the

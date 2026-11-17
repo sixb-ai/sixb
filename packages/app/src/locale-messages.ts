@@ -33,6 +33,7 @@ export const en = {
     // Names the menu's button when sign-in is off and nobody is signed in.
     signInOff: "Sign-in off",
     theme: "Theme",
+    downloadForMac: "Download for Mac",
     signOut: "Sign out",
   },
   search: {
@@ -130,6 +131,7 @@ export const fr: Translation<AppMessages> = {
   userMenu: {
     signInOff: "Connexion désactivée",
     theme: "Thème",
+    downloadForMac: "Télécharger pour Mac",
     signOut: "Se déconnecter",
   },
   search: {

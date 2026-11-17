@@ -856,8 +856,13 @@ async function desktopReleaseResponse(
   if (!desktopDir) return notFoundResponse()
   const resolvedPath = resolveStaticPath(desktopDir, pathname.slice(desktopReleasesRoute.length))
   if (!resolvedPath || !(await Bun.file(resolvedPath).exists())) return notFoundResponse()
-  // Each release reuses the names of the last, so a cached copy is checked again before use.
-  return staticFileResponse(request, resolvedPath, { "cache-control": "no-cache" })
+  return staticFileResponse(request, resolvedPath, {
+    // Each release reuses the names of the last, so a cached copy is checked again before use.
+    "cache-control": "no-cache",
+    // Without a file name, which Bun would otherwise add and browsers would prefer: the web app's
+    // link names the download after the app.
+    "content-disposition": "attachment",
+  })
 }
 
 async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {

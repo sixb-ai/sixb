@@ -323,6 +323,7 @@ describe("createCustomApp.start", () => {
       const head = await fetch(url("/darwin/install.dmg"), { method: "HEAD" })
       expect(head.status).toBe(200)
       expect(head.headers.get("cache-control")).toBe("no-cache")
+      expect(head.headers.get("content-disposition")).toBe("attachment")
 
       // A download that was cut off picks up where it stopped.
       const rest = await fetch(url("/darwin/install.dmg"), { headers: { range: "bytes=4-" } })
