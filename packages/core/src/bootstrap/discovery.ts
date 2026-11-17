@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
 import { isConnectorDefinition } from "../connectors"
 import { isDatasetDefinition } from "../datasets"
+import { type DefinitionFiles, recordDefinitionFile } from "../manifest/files"
 import type { OntologyDocumentInput, OntologySource } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
@@ -44,6 +45,8 @@ export interface DiscoveredOntologyModule {
 export interface DiscoveredOntology {
   readonly sources: readonly OntologySource[]
   readonly modules: readonly DiscoveredOntologyModule[]
+  /** The file of each object type and value type. */
+  readonly files: DefinitionFiles
 }
 
 export async function discoverOntologySources(projectRoot: string): Promise<DiscoveredOntology> {
@@ -53,28 +56,38 @@ export async function discoverOntologySources(projectRoot: string): Promise<Disc
   const objectTypes: ObjectTypeWithPropertyTokens[] = []
   const valueTypes: ValueType[] = []
   const modules: DiscoveredOntologyModule[] = []
+  const files = new Map<string, string>()
   const seen = new Set<unknown>()
 
   for (const loaded of loadedModules) {
     const objectTypeIds: string[] = []
+    const file = toPosix(loaded.path)
     for (const candidate of loaded.exports) {
       const first = !seen.has(candidate)
       seen.add(candidate)
 
       if (isOntologyDocumentInput(candidate)) {
         objectTypeIds.push(...candidate.objectTypes.map((objectType) => objectType.id))
+        for (const objectType of candidate.objectTypes) {
+          recordDefinitionFile(files, "objectType", objectType.id, file)
+        }
+        for (const valueType of candidate.valueTypes ?? []) {
+          recordDefinitionFile(files, "valueType", valueType.id, file)
+        }
         if (first) ontologyDocuments.push(candidate)
         continue
       }
 
       if (isObjectTypeWithPropertyTokens(candidate)) {
         objectTypeIds.push(candidate.id)
+        recordDefinitionFile(files, "objectType", candidate.id, file)
         if (first) objectTypes.push(candidate)
         continue
       }
 
-      if (isValueType(candidate) && first) {
-        valueTypes.push(candidate)
+      if (isValueType(candidate)) {
+        recordDefinitionFile(files, "valueType", candidate.id, file)
+        if (first) valueTypes.push(candidate)
       }
     }
     modules.push({
@@ -93,7 +106,7 @@ export async function discoverOntologySources(projectRoot: string): Promise<Disc
     })
   }
 
-  return { sources: discoveredSources, modules }
+  return { sources: discoveredSources, modules, files }
 }
 
 export type DiscoveryModuleKind =
@@ -213,35 +226,54 @@ export async function listProjectModules(projectRoot: string): Promise<readonly 
 type DefinitionFromFamily<TFamily> =
   TFamily extends DefinitionDiscoveryFamily<infer TDefinition> ? TDefinition : never
 
-export type DiscoveredProjectDefinitions = {
+type DiscoveredDefinitionFamilies = {
   readonly [TKey in keyof typeof definitionDiscoveryRegistry]: readonly DefinitionFromFamily<
     (typeof definitionDiscoveryRegistry)[TKey]
   >[]
 }
 
+export type DiscoveredProjectDefinitions = DiscoveredDefinitionFamilies & {
+  /** The file of each discovered definition. */
+  readonly files: DefinitionFiles
+}
+
 export async function discoverProjectDefinitions(
   projectRoot: string
 ): Promise<DiscoveredProjectDefinitions> {
+  const files = new Map<string, string>()
   const entries = await Promise.all(
     Object.entries(definitionDiscoveryRegistry).map(async ([key, family]) => {
-      const definitions = await discoverDefinitionFamily(projectRoot, family)
+      const definitions = await discoverDefinitionFamily(projectRoot, family, files)
       return [key, definitions] as const
     })
   )
 
   // Object.fromEntries erases literal keys. Every entry above comes from the exact registry and its
   // definitions have passed that entry's type guard, so restoring the mapped result type is safe.
-  return Object.fromEntries(entries) as DiscoveredProjectDefinitions
+  const families = Object.fromEntries(entries) as DiscoveredDefinitionFamilies
+  return { ...families, files }
 }
 
 async function discoverDefinitionFamily(
   projectRoot: string,
-  family: DefinitionDiscoveryFamily<unknown>
+  family: DefinitionDiscoveryFamily<unknown>,
+  files: Map<string, string>
 ): Promise<readonly unknown[]> {
   const loadedModules = await loadFamilyModules(projectRoot, family.kind, family.directory)
-  const exportedCandidates = new Set(loadedModules.flatMap((loaded) => loaded.exports))
+  const definitions = new Set<unknown>()
 
-  return [...exportedCandidates].filter(family.isDefinition)
+  for (const loaded of loadedModules) {
+    for (const candidate of loaded.exports) {
+      if (!family.isDefinition(candidate)) continue
+      definitions.add(candidate)
+      const id = isRecord(candidate) ? candidate.id : undefined
+      if (typeof id === "string") {
+        recordDefinitionFile(files, family.kind, id, toPosix(loaded.path))
+      }
+    }
+  }
+
+  return [...definitions]
 }
 
 /**

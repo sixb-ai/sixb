@@ -21,6 +21,7 @@ import type { LoggerProvider } from "../logging"
 import type { ObservabilityOptions } from "../logging/service"
 import type { OntologyMaintenanceOptions } from "../maintenance"
 import type { LakeMaintenanceOptions } from "../maintenance/lake-retention"
+import { registerDefinitionFiles } from "../manifest/files"
 import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
@@ -132,7 +133,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
   // used to *replace* discovery instead, silently and undocumented.
-  return new SixbHost<TParams>({
+  const host = new SixbHost<TParams>({
     id: options.id,
     locale: options.locale,
     timeZone: options.timeZone,
@@ -177,4 +178,6 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     shares: [...(options.shares ?? []), ...definitions.shares],
     auth: options.auth,
   })
+  registerDefinitionFiles(host, new Map([...discoveredOntology.files, ...definitions.files]))
+  return host
 }
