@@ -25,14 +25,21 @@ const MAX_PERIODS = 10_000
 const hourMs = 60 * 60 * 1000
 const dayMs = 24 * hourMs
 
-/** The canonical IANA name of a time zone (`europe/paris` → `Europe/Paris`), or `undefined`. */
+/**
+ * The canonical IANA name of a time zone (`europe/paris` → `Europe/Paris`), or `undefined`.
+ *
+ * A UTC offset such as `+05:30` is refused even where `Intl` takes it: it names no zone, and
+ * PostgreSQL reads it the POSIX way, five and a half hours west of UTC.
+ */
 export function canonicalTimeZone(value: unknown): string | undefined {
   if (typeof value !== "string" || value.trim() !== value || value === "") return undefined
+  let timeZone: string
   try {
-    return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone
+    timeZone = new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone
   } catch {
     return undefined
   }
+  return /^[+-]/.test(timeZone) ? undefined : timeZone
 }
 
 // Buckets are formatted for every call and every period of a range, so one formatter per zone is

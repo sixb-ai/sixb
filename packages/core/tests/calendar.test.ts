@@ -107,4 +107,12 @@ describe("calendar periods", () => {
     expect(canonicalTimeZone("Mars/Olympus")).toBeUndefined()
     expect(canonicalTimeZone("  UTC")).toBeUndefined()
   })
+
+  // Removal proof: return what Intl resolves again; `+05:30` is taken, and PostgreSQL buckets a
+  // query in it as if it were five and a half hours behind UTC.
+  test("refuse a UTC offset, which names no zone", () => {
+    expect(canonicalTimeZone("+05:30")).toBeUndefined()
+    expect(canonicalTimeZone("-0300")).toBeUndefined()
+    expect(canonicalTimeZone("Etc/GMT+5")).toBe("Etc/GMT+5")
+  })
 })
