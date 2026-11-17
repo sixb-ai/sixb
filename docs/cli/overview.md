@@ -124,6 +124,7 @@ Run these from your project root:
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
+| `sixb diff` | [Compare](#compare-with-production) this project's definitions with the deployed instance's. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
@@ -145,6 +146,34 @@ Common project options:
 | `--host <host>` | Bind host. Development defaults to loopback. |
 | `--api-port <port>` | Set the development API port. |
 | `--outdir <path>` | Change the build output directory. |
+
+## Compare with production
+
+`sixb diff` loads this checkout and compares its definitions with those of the instance your
+profile points at, usually production. It lists what a deploy would add, change or remove, and
+what that deploy would do to stored data:
+
+```text
+▰ sixb diff  against api.example.com · a41f9c2
+
++ Vendor             object type  ontology/vendor.ts
+~ Invoice            object type  ontology/invoice.ts
+~ approveInvoice     action       actions/approve.ts
+
+On ship
+· invoices projection rebuilds
+· bills dataset gains vendor_tax_id
+
+✓ 3 changes · 1 projection to build
+```
+
+A definition counts as changed when what it declares changes, or, for one with code such as an
+action's handler, when its file does. A definition you build differently per environment, from
+`NODE_ENV` for example, shows as changed against production. When the lake would refuse a dataset
+change, such as a new primary key, `sixb diff` names it and exits with `1`, so it can gate a
+deploy. `--json` prints the comparison as JSON.
+
+The instance answers to anyone who can open its Console, and to their access tokens.
 
 ## Production services
 

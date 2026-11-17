@@ -237,6 +237,7 @@ export type LocalCommandId =
   | "worker"
   | "worker-group"
   | "check"
+  | "diff"
   | "run"
   | "typegen"
   | "build"
@@ -543,6 +544,10 @@ const commandTree: readonly CommandNode[] = [
     rootHelpLabel: "worker-group [types...]",
   }),
   command("check", "Validate project configuration and health", { options: ["entry"] }),
+  command("diff", "Compare this project's definitions with the deployed instance's", {
+    usage: "sixb diff [--entry <path>] [--profile <name>] [--json]",
+    options: ["entry", ...CONNECTION_OPTIONS, "json"],
+  }),
   command("run", "Run a script against the project, here or in production", {
     usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
     options: ["entry", "deployed", "yes"],
@@ -767,7 +772,7 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   readonly compact?: boolean
 }[] = [
   { title: "Agent", names: ["agent", "connect"] },
-  { title: "Develop", names: ["init", "dev", "env", "check", "run", "typegen", "build"] },
+  { title: "Develop", names: ["init", "dev", "env", "check", "diff", "run", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
     title: "Run in production",
@@ -861,6 +866,7 @@ export function wantsManagementJson(args: readonly string[]): boolean {
       "deploy",
       "agent",
       "connect",
+      "diff",
     ].includes(args[0] ?? "") &&
     args.some((argument) => argument === "--json" || argument.startsWith("--json="))
   )

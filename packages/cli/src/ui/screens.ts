@@ -1,3 +1,10 @@
+import type {
+  DatasetShipStep,
+  DefinitionChange,
+  DefinitionKind,
+  ManifestDiff,
+  ProjectionShipStep,
+} from "@sixb/core/internal/manifest"
 import type { LakeRetentionReport } from "@sixb/core/lake-storage"
 import {
   CLI_EXAMPLES,
@@ -429,6 +436,104 @@ export function lakeCheckView({
   warnings?: readonly string[]
 }): string {
   return screen(headline("ok", "Lake definitions compatible", projectId), warningLines(warnings))
+}
+
+const KIND_LABELS: Record<DefinitionKind, string> = {
+  objectType: "object type",
+  valueType: "value type",
+  action: "action",
+  connector: "connector",
+  dataset: "dataset",
+  group: "group",
+  instructions: "instructions",
+  marking: "marking",
+  membershipPolicy: "membership policy",
+  pipeline: "pipeline",
+  projection: "projection",
+  role: "role",
+  rule: "rule",
+  schedule: "schedule",
+  share: "share",
+  skill: "skill",
+  sync: "sync",
+  tool: "tool",
+  workflow: "workflow",
+}
+
+const CHANGE_MARKS: Record<DefinitionChange["change"], string> = {
+  added: tone.ok("+"),
+  changed: tone.warn("~"),
+  removed: tone.fail("−"),
+}
+
+/**
+ * What this checkout changes against a deployed instance, then what deploying it would do to
+ * stored data. A dataset change storage refuses is the one failure: the deploy would stop there.
+ */
+export function diffView({
+  apiUrl,
+  commit,
+  diff,
+}: {
+  apiUrl: string
+  commit: string | null
+  diff: ManifestDiff
+}): string {
+  const host = URL.canParse(apiUrl) ? new URL(apiUrl).host : apiUrl
+  const against = commit ? `${host} ${glyph.dot} ${commit.slice(0, 7)}` : host
+  const { changes, plan } = diff
+  const refused = plan.datasets.filter((step) => step.change === "refused")
+  const steps = [
+    ...plan.projections.map(projectionStep),
+    ...plan.datasets.filter((step) => step.change !== "refused").map(datasetStep),
+  ]
+
+  const idWidth = Math.max(0, ...changes.map((change) => visibleWidth(change.id))) + 2
+  const kindWidth =
+    Math.max(0, ...changes.map((change) => visibleWidth(KIND_LABELS[change.kind]))) + 2
+  const changeLines = changes.map((change) =>
+    `${CHANGE_MARKS[change.change]} ${pad(change.id, idWidth)}${tone.muted(pad(KIND_LABELS[change.kind], kindWidth))}${tone.faint(change.file ?? "")}`.trimEnd()
+  )
+
+  const rebuilds = plan.projections.filter((step) => step.change !== "remove").length
+  return screen(
+    header("diff", `against ${against}`),
+    changeLines.length > 0 ? changeLines.join("\n") : null,
+    steps.length > 0 ? section("On ship", steps.join("\n")) : null,
+    refused.length > 0
+      ? refused
+          .map((step) =>
+            marked(tone.fail(glyph.fail), step.change === "refused" ? step.reason : "")
+          )
+          .join("\n")
+      : null,
+    refused.length > 0
+      ? headline("fail", "Storage would refuse this deploy", plural(refused.length, "dataset"))
+      : changes.length === 0 && steps.length === 0
+        ? headline("ok", "No changes", against)
+        : headline(
+            "ok",
+            plural(changes.length, "change"),
+            rebuilds > 0 ? `${plural(rebuilds, "projection")} to build` : undefined
+          )
+  )
+}
+
+function projectionStep(step: ProjectionShipStep): string {
+  const verb = { build: "builds", rebuild: "rebuilds", remove: "is no longer defined" }[step.change]
+  return `${tone.muted(glyph.dot)} ${step.id} projection ${verb}`
+}
+
+function datasetStep(step: DatasetShipStep): string {
+  const what =
+    step.change === "addColumns"
+      ? `gains ${step.columns.join(", ")}`
+      : step.change === "create"
+        ? "is created"
+        : step.change === "remove"
+          ? "is no longer defined"
+          : "changes its description or partitioning"
+  return `${tone.muted(glyph.dot)} ${step.id} dataset ${what}`
 }
 
 export function lakeCleanupView({

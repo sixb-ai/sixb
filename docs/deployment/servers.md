@@ -53,7 +53,7 @@ It lists every process with its command, address, and environment.
 | `services` | Turn services off or adjust them. |
 | `processes` | Long-running scripts of your own, supervised alongside the services. |
 
-Every service gets `NODE_ENV=production` and the [public origins](overview.md#configure-public-origins) of the API and the app, so you do not set those yourself.
+Every service gets `NODE_ENV=production`, the [public origins](overview.md#configure-public-origins) of the API and the app, and `SIXB_COMMIT`, the commit it runs, so you do not set those yourself. [`sixb diff`](../cli/overview.md#compare-with-production) shows that commit.
 
 ### The SSH target
 

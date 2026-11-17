@@ -337,6 +337,18 @@ async function main(): Promise<void> {
       break
     }
 
+    case "diff": {
+      const { runDiff } = await import("./commands/diff")
+      await runDiff({
+        entry: getFlag("entry"),
+        apiUrl: getFlag("api-url"),
+        token: getFlag("token"),
+        profile: getFlag("profile"),
+        json: hasFlag("json"),
+      })
+      break
+    }
+
     case "typegen": {
       const { runTypegen } = await import("./commands/typegen")
       await runTypegen({ entry: getFlag("entry") })
