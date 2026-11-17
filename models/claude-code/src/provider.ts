@@ -59,6 +59,12 @@ export interface ClaudeCodeOptions {
    * Claude Code, so a Claude subscription it is signed in with pays for the calls.
    */
   readonly apiKey?: ValueSource<string | undefined>
+  /**
+   * A token from `claude setup-token`, which signs Claude Code in where nobody signs in to it, such
+   * as the server the project's agent worker runs on. Claude Code also reads it from
+   * `CLAUDE_CODE_OAUTH_TOKEN` itself.
+   */
+  readonly oauthToken?: ValueSource<string | undefined>
   /** The Claude Code executable to run, such as the `claude` on your PATH. Defaults to the SDK's. */
   readonly executable?: string
   /** Variables for Claude Code, over the ones it inherits from this process. */
@@ -164,12 +170,13 @@ class ClaudeCodeRuntime {
     delete inherited.ANTHROPIC_API_KEY
     delete inherited.ANTHROPIC_AUTH_TOKEN
 
-    const apiKey =
-      typeof this.options.apiKey === "function" ? this.options.apiKey() : this.options.apiKey
+    const apiKey = read(this.options.apiKey)
+    const oauthToken = read(this.options.oauthToken)
     return {
       ...inherited,
       ...this.options.env,
       ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+      ...(oauthToken ? { CLAUDE_CODE_OAUTH_TOKEN: oauthToken } : {}),
       CLAUDE_AGENT_SDK_CLIENT_APP: "sixb",
     }
   }
@@ -555,6 +562,10 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
 
 function isMissingSession(error: unknown): boolean {
   return error instanceof ModelProviderError && /no conversation found/i.test(error.message)
+}
+
+function read(source: ValueSource<string | undefined>): string | undefined {
+  return typeof source === "function" ? source() : source
 }
 
 function errorMessage(error: unknown): string {

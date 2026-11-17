@@ -238,7 +238,7 @@ export class ClaudeCodeStream {
       .join(" ")
     const detail =
       code === "authentication_failed"
-        ? "Claude Code is not signed in: run `claude` and sign in with /login."
+        ? "Claude Code is not signed in here: on a computer, run `claude` and sign in with /login; on a server, set CLAUDE_CODE_OAUTH_TOKEN to a token from `claude setup-token`."
         : text || `Claude Code reported '${code}'.`
 
     return new ModelProviderError(`${ERROR_PREFIX} ${detail}`, PROVIDER_ID, this.options.modelId, {

@@ -61,9 +61,17 @@ The project then never starts Claude Code: a call made anywhere else fails, sayi
 on a computer. Its model list is only the definitions passed in `models`.
 
 To run it in the cloud as well, sign Claude Code in where the agent worker runs: run
-`claude setup-token` and set the token it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the worker's
-environment. Every cloud turn then uses that one sign-in. Claude Code does not run inside the run's
-sandbox: it runs no tools there, and the sandboxes Sixb supports cannot stream a process's input.
+`claude setup-token` on your computer, and set the token it prints as `CLAUDE_CODE_OAUTH_TOKEN` in
+the worker's environment, or pass it as `oauthToken`:
+
+```ts
+const claudeCode = createClaudeCode({ oauthToken: () => process.env.CLAUDE_CODE_OAUTH_TOKEN })
+```
+
+Turns on people's computers still use their own Claude Code; every other call uses that one
+sign-in. The SDK installs Claude Code for Linux, macOS and Windows with the package, so the server
+needs nothing else. Claude Code runs beside the worker, not inside the run's sandbox: it runs no
+tools, and a token there would be readable by the agent's commands.
 
 ## Models
 
@@ -82,6 +90,8 @@ const provider = createClaudeCode({
   executable: "/usr/local/bin/claude",
   // Bill an API key instead of Claude Code's sign-in.
   apiKey: () => process.env.CLAUDE_CODE_API_KEY,
+  // Sign in with a token from `claude setup-token`, where nobody signs in to Claude Code.
+  oauthToken: () => process.env.CLAUDE_CODE_OAUTH_TOKEN,
   // Where Claude Code runs, and so where its sessions are filed under ~/.claude/projects.
   cwd: "/tmp/sixb-claude-code",
 })

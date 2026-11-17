@@ -189,7 +189,7 @@ describe("ClaudeCodeStream", () => {
     expect(error).toBeInstanceOf(ModelProviderError)
     expect(error).toMatchObject({
       message:
-        "[SixbClaudeCode] Claude Code is not signed in: run `claude` and sign in with /login.",
+        "[SixbClaudeCode] Claude Code is not signed in here: on a computer, run `claude` and sign in with /login; on a server, set CLAUDE_CODE_OAUTH_TOKEN to a token from `claude setup-token`.",
       code: "authentication_failed",
       retryable: false,
     })
