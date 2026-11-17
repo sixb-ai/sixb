@@ -74,6 +74,21 @@ export function sandboxProjectDirectory(session: Sandbox, hasSource: boolean): S
           path: posix.isAbsolute(file.path) ? file.path : posix.join(workingDirectory, file.path),
         }))
       ),
+    ...(session.start
+      ? {
+          start: (
+            command: string,
+            args?: readonly string[],
+            options?: { cwd?: string; env?: Readonly<Record<string, string>> }
+          ) =>
+            session.start!(command, args, {
+              ...options,
+              cwd: posix.resolve(workingDirectory, options?.cwd ?? "."),
+            }),
+        }
+      : {}),
+    ...(session.url ? { url: session.url.bind(session) } : {}),
+    ...(session.keepAlive ? { keepAlive: session.keepAlive.bind(session) } : {}),
     stop: () => session.stop(),
     destroy: () => session.destroy(),
   }

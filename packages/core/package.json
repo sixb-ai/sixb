@@ -299,6 +299,12 @@
       "import": "./dist/logging/internal.js",
       "default": "./dist/logging/internal.js"
     },
+    "./internal/branches": {
+      "types": "./dist/branches/index.d.ts",
+      "bun": "./src/branches/index.ts",
+      "import": "./dist/branches/index.js",
+      "default": "./dist/branches/index.js"
+    },
     "./internal/manifest": {
       "types": "./dist/manifest/index.d.ts",
       "bun": "./src/manifest/index.ts",

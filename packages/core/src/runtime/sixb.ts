@@ -11,6 +11,7 @@ import { type AiUsageRuntime, createAiUsageRuntime } from "../ai-usage"
 import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
+import { createProjectBranches, registerProjectBranches } from "../branches/execution"
 import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
 import type { ConnectorConnectionProcess } from "../connectors/connections/contracts"
 import { createConnectorConnectionsRuntime } from "../connectors/connections/execution"
@@ -40,6 +41,7 @@ import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/exec
 import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/execution"
 import { createRulesRuntime, type RulesRuntime } from "../rules/execution"
 import type { SandboxDefinition } from "../sandboxes/configuration"
+import type { ProjectSource } from "../sandboxes/source"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
 import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
@@ -96,6 +98,7 @@ export interface SixbDependencies {
   readonly datasetVersionMarkings: DatasetVersionMarkings
   readonly datasetIngest: DatasetIngestRuntime
   readonly definitionsManifest: () => Promise<DefinitionsManifest>
+  readonly source?: ProjectSource
 }
 
 export function createBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
@@ -120,6 +123,14 @@ export function createBoundSixb<TParams extends Record<string, unknown> = Record
   registerDefinitionsManifestReader(
     sixb,
     createDefinitionsManifestReader(runtime, dependencies.definitionsManifest)
+  )
+  registerProjectBranches(
+    sixb,
+    createProjectBranches(runtime, {
+      source: dependencies.source,
+      storage: runtime.storage.branches,
+      requestedBy: execution.requestedBy?.id ?? null,
+    })
   )
   registerRequestPreparation(sixb, runtime, execution, dependencies.definitions.workflows)
   if (dependencies.connectorConnections) {

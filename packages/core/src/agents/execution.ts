@@ -84,7 +84,7 @@ import {
   withdrawAgentInboxItem,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
-import { normalizeSandboxBinding } from "./sandbox"
+import { assertMayWorkOnProjectBranch, normalizeSandboxBinding } from "./sandbox"
 import { publishAgentThreadMoved } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import {
@@ -967,6 +967,7 @@ export function createAgentRuntime<
           input.sandbox === undefined
             ? undefined
             : normalizeSandboxBinding(sandbox?.definition, input.sandbox, runtime.ontology)
+        assertMayWorkOnProjectBranch(runtime, sandbox?.definition, binding)
         const created = await storage.threads.create({
           ...(binding === undefined ? {} : { sandboxParams: binding }),
           id: input.id ?? createAgentThreadId(),

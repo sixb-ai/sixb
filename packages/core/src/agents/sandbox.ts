@@ -1,12 +1,28 @@
+import { assertAuthorized } from "../authorization"
 import { getInvalidJsonValueReason, isPlainRecord } from "../json"
 import { OntologyValidationError } from "../ontology/errors"
 import type { OntologyRegistry } from "../ontology/registry"
+import type { SixbRuntimeContext } from "../runtime/types"
 import { type SandboxDefinition, sandboxBindingParams } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
 import { assertBranchName, isProjectBranchBinding } from "../sandboxes/source"
 import { normalizeParams } from "../shared/params/validation"
 import type { AgentThreadSandboxParams } from "../storage/agents/types"
 import { AgentRequestError } from "./errors"
+
+/**
+ * A thread on a branch of the project's own repository can push to it: starting one takes
+ * `can.manage(project.source)`, beyond running the agent.
+ */
+export function assertMayWorkOnProjectBranch(
+  runtime: SixbRuntimeContext,
+  definition: Pick<SandboxDefinition, "source"> | undefined,
+  params: AgentThreadSandboxParams | undefined
+): void {
+  if (definition?.source && params !== undefined && isProjectBranchBinding(params)) {
+    assertAuthorized(runtime, { kind: "source.manage" })
+  }
+}
 
 export function normalizeSandboxBinding(
   definition: Pick<SandboxDefinition, "params" | "source"> | undefined,

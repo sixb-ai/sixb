@@ -1,31 +1,14 @@
 import { timingSafeEqual } from "node:crypto"
+import {
+  BRANCH_KEY_HEADER,
+  BRANCH_STATUS_PATH,
+  type BranchRuntimeStatus,
+} from "@sixb/core/internal/branches"
 import { type ForwardedSocket, forwardRequest, forwardWebSocket } from "@sixb/server"
 import type { Server, ServerWebSocket } from "bun"
 import type { DevChildMessage } from "./dev-messages"
 import type { DevReporter } from "./dev-supervisor"
 import { errorMessage } from "./errors"
-
-/** The key a branch runtime asks every request for, set in its environment. */
-export const BRANCH_KEY_ENV = "SIXB_BRANCH_KEY"
-
-/** The header the project's server adds to every request it forwards to a branch. */
-export const BRANCH_KEY_HEADER = "x-sixb-branch-key"
-
-/** Where a branch's supervisor answers, whatever state the project is in. */
-export const BRANCH_STATUS_PATH = "/__sixb/branch"
-
-/** What a branch runtime serves right now: the generation the supervisor last started. */
-export interface BranchRuntimeStatus {
-  readonly branch: string
-  /** Counts restarts: every source change that reaches the checkout starts a new generation. */
-  readonly generation: number
-  readonly state: "starting" | "ready" | "failed"
-  /** The checkout's commit when the generation started. */
-  readonly commit: string | null
-  /** The generation's definitions manifest hash, once it serves. */
-  readonly manifest: string | null
-  readonly error: { readonly message: string; readonly file?: string } | null
-}
 
 interface SocketData {
   readonly path: string

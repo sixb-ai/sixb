@@ -643,6 +643,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       datasetVersionMarkings: this.datasetVersionMarkings,
       datasetIngest: this.datasetIngest,
       definitionsManifest: () => readDefinitionsManifest(this),
+      ...(this.source && this.sandboxes ? { source: this.source } : {}),
     }
   }
 }

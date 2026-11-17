@@ -37,6 +37,7 @@ import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
+import { BranchRuntimes } from "./branches"
 import { workerChildren } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
 import { runnerContext } from "./execution-context"
@@ -90,6 +91,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
    */
   private readonly pendingTeardowns = new Set<Promise<void>>()
+  /** The project's branch runtimes, when it names its source and has sandboxes to run them in. */
+  private readonly branches: BranchRuntimes | null
 
   constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
@@ -104,6 +107,18 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     this.leaseMs = leaseMs
+    const { source, sandboxes } = host
+    const branches = host.storage.branches
+    this.branches =
+      source && sandboxes && branches
+        ? new BranchRuntimes({
+            id: host.id,
+            source,
+            sandboxes,
+            branches,
+            ...(host.sandboxDefinition ? { sandboxDefinition: host.sandboxDefinition } : {}),
+          })
+        : null
     const hasAgentWork =
       host.definitions.models?.language !== undefined ||
       host.definitions.workflows
@@ -128,20 +143,18 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
-    if (this.context) {
-      const context = this.context
-      const stopDispatch = new AbortController()
-      const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
-      const dispatchLoop = this.runDispatchLoop(context, workerSignal)
-      try {
-        await super.run(workerSignal)
-      } finally {
-        stopDispatch.abort()
-        await dispatchLoop
-      }
-      return
+    const stopLoops = new AbortController()
+    const workerSignal = AbortSignal.any([signal, stopLoops.signal])
+    const loops = [
+      ...(this.context ? [this.runDispatchLoop(this.context, workerSignal)] : []),
+      ...(this.branches ? [this.branches.run(workerSignal)] : []),
+    ]
+    try {
+      await super.run(workerSignal)
+    } finally {
+      stopLoops.abort()
+      await Promise.all(loops)
     }
-    await super.run(signal)
   }
 
   override async stop(): Promise<void> {

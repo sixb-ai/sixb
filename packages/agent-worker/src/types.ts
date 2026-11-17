@@ -2,6 +2,7 @@ import type { AgentExecutionContext, AgentRunSettings } from "@sixb/agent"
 import type {
   Broker,
   DomainEventLog,
+  ProjectSource,
   Queues,
   SandboxDefinition,
   SandboxFactory,
@@ -50,6 +51,8 @@ export interface AgentWorkerHost extends AgentExecutionHost {
     "workflows" | "ontology" | "security" | "models" | "tools" | "agent"
   >
   readonly sandboxes?: SandboxFactory
+  /** Where the project's own code lives: its branches get runtimes of their own. */
+  readonly source?: ProjectSource
   readonly logging?: LoggingService
 }
 

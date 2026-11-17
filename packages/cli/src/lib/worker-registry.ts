@@ -286,7 +286,13 @@ export function omittedWorkerWarnings(
 export function agentWorkerRequired(sixb: LoadedSixbHost): boolean {
   const { storage } = sixb
   const canRecoverAccounting = Boolean(storage.aiUsage && storage.aiCosts && storage.aiLimits)
-  return canRecoverAccounting || (agentRuntimeRequired(sixb.definitions) && Boolean(storage.agents))
+  // The agent worker also keeps the project's branches running: it holds the sandbox factory.
+  const runsBranches = Boolean(sixb.source && sixb.sandboxes && storage.branches)
+  return (
+    canRecoverAccounting ||
+    runsBranches ||
+    (agentRuntimeRequired(sixb.definitions) && Boolean(storage.agents))
+  )
 }
 
 /** Only agent execution needs a sandbox and an API origin; accounting recovery does not. */

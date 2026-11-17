@@ -8,7 +8,7 @@ import type { SandboxNetworkPolicy, SandboxNetworkTarget } from "@sixb/core/sand
  */
 export function workspaceNetwork(
   policy: SandboxNetworkPolicy | undefined,
-  apiOrigin: string,
+  apiOrigin: string | undefined,
   repositoryOrigin?: string,
   credentialOrigins: readonly string[] = []
 ): SandboxNetworkPolicy {
@@ -22,7 +22,7 @@ export function workspaceNetwork(
   }
 
   const required: SandboxNetworkTarget[] = [
-    { name: "sixb-api", origin: apiOrigin },
+    ...(apiOrigin ? [{ name: "sixb-api", origin: apiOrigin }] : []),
     ...(repositoryOrigin ? [{ name: "workspace-repository", origin: repositoryOrigin }] : []),
     ...credentialOrigins.map((origin) => ({ name: "workspace-auth", origin })),
   ]

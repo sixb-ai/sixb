@@ -156,3 +156,31 @@ test("sends no command for unsafe source input or after cancellation, and none p
   ).rejects.toThrow("initialization failed")
   expect(f.commands).toHaveLength(1)
 })
+
+test("a checkout's sandbox still serves: start runs in the checkout, url and keepAlive pass through", async () => {
+  const started: { command: string; cwd?: string }[] = []
+  const kept: number[] = []
+  const session: Sandbox = {
+    ...fixture().sandbox,
+    start: async (command, _args, options) => {
+      started.push({ command, cwd: options?.cwd })
+      return { exited: Promise.resolve(0), kill: async () => {} }
+    },
+    url: (port) => `http://127.0.0.1:${port}`,
+    keepAlive: async (ms) => {
+      kept.push(ms)
+    },
+  }
+  // Drop the passthrough in sandboxProjectDirectory and a branch's runtime has nowhere to start.
+  const project = sandboxProjectDirectory(session, true)
+  await project.start?.("sixb", [], { cwd: "apps/ops" })
+  await project.start?.("sixb")
+  await project.keepAlive?.(60_000)
+
+  expect(started).toEqual([
+    { command: "sixb", cwd: "/guest/repository/apps/ops" },
+    { command: "sixb", cwd: "/guest/repository" },
+  ])
+  expect(project.url?.(4310)).toBe("http://127.0.0.1:4310")
+  expect(kept).toEqual([60_000])
+})

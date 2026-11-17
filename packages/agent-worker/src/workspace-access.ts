@@ -18,9 +18,10 @@ interface WorkspaceAccessInput {
   /** The factory's source authentication, when it declares one. */
   readonly auth?: SandboxSourceAuth
   readonly factory: Pick<SandboxFactory, "supportsRequestCredentials">
-  readonly apiOrigin: string
+  /** Absent for a sandbox that never calls the Sixb API, such as a branch's runtime. */
+  readonly apiOrigin?: string
   /** The run's credential for the Sixb API, added outside the guest. */
-  readonly apiCredential: SandboxRequestCredential
+  readonly apiCredential?: SandboxRequestCredential
   readonly signal: AbortSignal
   readonly assertOwner: () => Promise<void>
   readonly onAuthFailure: (error: Error) => void
@@ -56,7 +57,11 @@ export class WorkspaceAccess {
 
   /** The run's API credential and the first grant's requests. */
   get requestCredentials(): readonly SandboxRequestCredential[] {
-    return [this.input.apiCredential, ...(this.credentials ?? [])]
+    return [...this.alongside, ...(this.credentials ?? [])]
+  }
+
+  private get alongside(): readonly SandboxRequestCredential[] {
+    return this.input.apiCredential ? [this.input.apiCredential] : []
   }
 
   /**
@@ -77,7 +82,7 @@ export class WorkspaceAccess {
     this.auth = new WorkspaceAuthSession({
       auth,
       source: recipe.source,
-      alongside: [this.input.apiCredential],
+      alongside: this.alongside,
       signal,
       assertOwner,
       onFailure: onAuthFailure,

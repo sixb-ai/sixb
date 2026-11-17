@@ -10,7 +10,7 @@ import type { ArtifactStorage, CopyArtifactInput } from "../storage/artifacts/ty
 import type { Storage } from "../storage/types"
 import { AgentRequestError } from "./errors"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
-import { normalizeSandboxBinding } from "./sandbox"
+import { assertMayWorkOnProjectBranch, normalizeSandboxBinding } from "./sandbox"
 
 /**
  * Copy a thread of the caller's, or one shared with them, into a new thread the caller owns alone.
@@ -44,6 +44,7 @@ export async function forkAgentThread(
     source.sandboxParams === undefined
       ? undefined
       : normalizeSandboxBinding(sandbox?.definition, source.sandboxParams, runtime.ontology)
+  assertMayWorkOnProjectBranch(runtime, sandbox?.definition, sandboxParams)
 
   try {
     // One transaction: a fork that fails leaves no copy behind, and none copied is missing.

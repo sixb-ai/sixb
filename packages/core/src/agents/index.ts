@@ -4,6 +4,7 @@ export {
   sandboxCredentialIssue,
   staticSandboxRecipe,
 } from "../sandboxes/configuration"
+export { assertBranchName, projectSourceEnvironment } from "../sandboxes/source"
 export {
   AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
   AGENT_TOKEN_RATE_SAMPLES,

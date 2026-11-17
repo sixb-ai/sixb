@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { projectFileOf } from "../src/commands/dev-runner"
 import {
   BRANCH_KEY_HEADER,
   BRANCH_STATUS_PATH,
   type BranchRuntimeStatus,
-  startBranchFront,
-} from "../src/lib/dev-branch"
+} from "@sixb/core/internal/branches"
+import { projectFileOf } from "../src/commands/dev-runner"
+import { startBranchFront } from "../src/lib/dev-branch"
 
 const KEY = "k".repeat(40)
 
