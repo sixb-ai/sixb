@@ -382,18 +382,28 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
             )
             ELSE identities.expand_at
           END
-        FROM unnest(
-          ${sql.array(identities.map((identity) => identity.kind))}::text[],
-          ${sql.array(identities.map((identity) => identity.key))}::text[],
-          ${sql.array(identities.map((identity) => identity.classified))}::boolean[],
-          ${sql.array(identities.map((identity) => identity.change))}::text[],
-          ${sql.array(existence.map((value) => value.plannedExists))}::boolean[],
-          ${sql.array(existence.map((value) => value.flips))}::boolean[]
-        ) AS planned(entity_kind, identity_key, classified, change, planned_exists, flips)
-        WHERE identities.version_id = ${versionId}
-          AND identities.entity_kind = planned.entity_kind
-          AND identities.identity_key = planned.identity_key
-          AND identities.read_revision IS NOT NULL AND identities.planned_revision IS NULL
+        FROM (
+          -- Each key is sought by its index, whatever the plan tables' statistics say: they are
+          -- taken before any revision was read, and would have every identity scanned per key.
+          SELECT planned.*, target.ctid AS target
+          FROM unnest(
+            ${sql.array(identities.map((identity) => identity.kind))}::text[],
+            ${sql.array(identities.map((identity) => identity.key))}::text[],
+            ${sql.array(identities.map((identity) => identity.classified))}::boolean[],
+            ${sql.array(identities.map((identity) => identity.change))}::text[],
+            ${sql.array(existence.map((value) => value.plannedExists))}::boolean[],
+            ${sql.array(existence.map((value) => value.flips))}::boolean[]
+          ) AS planned(entity_kind, identity_key, classified, change, planned_exists, flips)
+          CROSS JOIN LATERAL (
+            SELECT ctid FROM ${sql(IDENTITIES)}
+            WHERE version_id = ${versionId} AND entity_kind = planned.entity_kind
+              AND identity_key = planned.identity_key COLLATE "C"
+              AND read_revision IS NOT NULL AND planned_revision IS NULL
+            -- Keeps the planner from flattening the lookup into a join it would reorder.
+            OFFSET 0
+          ) AS target
+        ) AS planned
+        WHERE identities.ctid = planned.target
       `
       if (planned.count !== identities.length) {
         throw new MaterializationValidationError(
