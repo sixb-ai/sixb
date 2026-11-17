@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import type {
   DeployContext,
   DeployControlAction,
+  DeployDesktopRelease,
   DeployLogsOptions,
   DeployRelease,
   DeployScript,
@@ -11,8 +12,10 @@ import type {
 import { deploymentLayout } from "./layout"
 import {
   renderDeployScript,
+  renderPrepareDesktopScript,
   renderPrepareScript,
   renderReceiveScript,
+  renderServeDesktopScript,
   STEP_MARKER,
 } from "./scripts"
 import { stripTerminalControl } from "./server/logs"
@@ -62,6 +65,39 @@ export async function deployRelease(
   context.report({ type: "step", index: 0, status: "done" })
 
   await runReportingSteps(shell, script, context)
+}
+
+/**
+ * Uploads one system's desktop release beside the one served, then serves it instead. It holds no
+ * deploy lock: a deploy leaves `desktop/` alone, and the app reads it on every request.
+ */
+export async function publishDesktopRelease(
+  shell: RemoteShell,
+  name: string,
+  release: DeployDesktopRelease
+): Promise<void> {
+  const [incoming] = await capture(shell, renderPrepareDesktopScript(name, release.platform))
+  if (!incoming) throw new Error("[SshTarget] The server did not report where to upload to.")
+
+  // macOS's tar otherwise adds a `._` file of metadata beside each file it archives.
+  const tar = Bun.spawn(["tar", "--no-xattrs", "-c", "-f", "-", "-C", release.dir, "."], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  })
+  const [, exitCode, errors] = await Promise.all([
+    shell.run(renderReceiveScript(incoming, "."), { stdin: tar.stdout }).catch((error) => {
+      // Nothing reads what it writes any more.
+      tar.kill()
+      throw error
+    }),
+    tar.exited,
+    new Response(tar.stderr).text(),
+  ])
+  if (exitCode !== 0) {
+    throw new Error(`[SshTarget] Could not archive ${release.dir}: ${errors.trim()}`)
+  }
+  await shell.run(renderServeDesktopScript(name, release.platform, incoming))
 }
 
 /** Runs the deploy script, turning its step markers into progress and the rest into output. */

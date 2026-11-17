@@ -32,11 +32,13 @@ const ambientFrameOrigins = process.env.SIXB_APP_FRAME_ORIGINS
 
 beforeEach(() => {
   delete process.env.SIXB_APP_FRAME_ORIGINS
+  delete process.env.SIXB_DESKTOP_DIR
 })
 
 afterEach(() => {
   if (ambientFrameOrigins === undefined) delete process.env.SIXB_APP_FRAME_ORIGINS
   else process.env.SIXB_APP_FRAME_ORIGINS = ambientFrameOrigins
+  delete process.env.SIXB_DESKTOP_DIR
 })
 
 async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
@@ -290,6 +292,50 @@ describe("createCustomApp.start", () => {
         "/__sixb/assets/connector-icons/..%2F..%2Fpackage.json",
       ]) {
         expect((await fetch(`http://127.0.0.1:${port}${path}`)).status).toBe(404)
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+
+  // Reproduce: drop the `/__sixb/desktop/` branch from start(), and the download is answered with
+  // the app's page.
+  test("serves the desktop app's releases from SIXB_DESKTOP_DIR, and nothing without it", async () => {
+    const desktop = join(tempRoot, "desktop")
+    await mkdir(join(desktop, "darwin"), { recursive: true })
+    await writeFile(join(desktop, "darwin", "install.dmg"), "0123456789")
+    await writeFile(join(tempRoot, "secret.txt"), "not served")
+
+    const unset = await (await createCustomApp({ rootDir: tempRoot })).start({ port: 0 })
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${unset.port}/__sixb/desktop/darwin/install.dmg`
+      )
+      expect(response.status).toBe(404)
+    } finally {
+      await unset.stop()
+    }
+
+    process.env.SIXB_DESKTOP_DIR = desktop
+    const server = await (await createCustomApp({ rootDir: tempRoot })).start({ port: 0 })
+    const url = (path: string) => `http://127.0.0.1:${server.port}/__sixb/desktop${path}`
+    try {
+      const head = await fetch(url("/darwin/install.dmg"), { method: "HEAD" })
+      expect(head.status).toBe(200)
+      expect(head.headers.get("cache-control")).toBe("no-cache")
+
+      // A download that was cut off picks up where it stopped.
+      const rest = await fetch(url("/darwin/install.dmg"), { headers: { range: "bytes=4-" } })
+      expect(rest.status).toBe(206)
+      expect(await rest.text()).toBe("456789")
+
+      for (const path of [
+        "/win32/install.exe",
+        "/darwin",
+        "/..%2Fsecret.txt",
+        "/darwin/..%2F..%2Fsecret.txt",
+      ]) {
+        expect((await fetch(url(path))).status, path).toBe(404)
       }
     } finally {
       await server.stop()

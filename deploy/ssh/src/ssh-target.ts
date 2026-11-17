@@ -8,6 +8,7 @@ import type {
   DeployCiCredential,
   DeployContext,
   DeployControlAction,
+  DeployDesktopRelease,
   DeployHttpServiceName,
   DeployListenAddress,
   DeployLogsOptions,
@@ -26,6 +27,7 @@ import { ENV_TOKEN_FILE } from "./layout"
 import {
   controlServices,
   deployRelease,
+  publishDesktopRelease,
   readStatus,
   runDeployScript,
   streamLogs,
@@ -120,6 +122,10 @@ export class SshTarget implements DeployTarget {
 
   run(script: DeployScript, context: DeployOperationContext): Promise<number> {
     return this.#connected((shell) => runDeployScript(shell, context.name, script))
+  }
+
+  publishDesktop(release: DeployDesktopRelease, context: DeployOperationContext): Promise<void> {
+    return this.#connected((shell) => publishDesktopRelease(shell, context.name, release))
   }
 
   async check(release: DeployRelease, context: DeployCheckContext): Promise<DeployCheck[]> {

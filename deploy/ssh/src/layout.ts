@@ -8,6 +8,7 @@ import { posix } from "node:path"
  *   ~/<name>/env-token the read-only token a deploy pulls `.env` with, if it has a source
  *   ~/<name>/deploy    lock, uploads, file list, release record, process manifest, ctl
  *   ~/<name>/run       supervisor state, control requests, and logs
+ *   ~/<name>/desktop   the desktop app's release for each system, which the app serves
  *   ~/.sixb/bun/<v>    Bun, shared by the user's projects that pin the same version
  */
 export const ENV_TOKEN_FILE = "env-token"
@@ -27,6 +28,7 @@ export interface DeploymentLayout {
   readonly ctl: string
   readonly runDir: string
   readonly logDir: string
+  readonly desktopDir: string
   readonly bunDir: string
   readonly bun: string
   readonly unitName: string
@@ -64,6 +66,7 @@ export function deploymentLayout(input: {
     ctl: posix.join(deployDir, "ctl"),
     runDir,
     logDir: posix.join(runDir, "logs"),
+    desktopDir: posix.join(root, "desktop"),
     bunDir,
     bun: posix.join(bunDir, "bun"),
     unitName,

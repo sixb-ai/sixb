@@ -142,6 +142,12 @@ export interface DeployTarget {
    * exit code; rejects only when the target cannot run it.
    */
   run?(script: DeployScript, context: DeployOperationContext): Promise<number>
+  /**
+   * Replaces what the deployment serves of one system's desktop app with the files in
+   * `release.dir`, all at once. The app serves them at `/__sixb/desktop/<platform>/` from the
+   * folder `SIXB_DESKTOP_DIR` names.
+   */
+  publishDesktop?(release: DeployDesktopRelease, context: DeployOperationContext): Promise<void>
   /** Who may deploy and operate the deployment, for a target reached with keys. */
   readonly access?: DeployAccess
   /** Credentials for a CI job that deploys, for a target reached with keys. */
@@ -354,6 +360,14 @@ export interface DeployLogsOptions {
 export type DeployControlAction = "restart" | "start" | "stop"
 
 /** A script `sixb run --deployed` runs on the deployment. */
+/** One system's desktop app, as `sixb desktop release` built it. */
+export interface DeployDesktopRelease {
+  readonly platform: "darwin" | "win32"
+  readonly version: string
+  /** A local folder of the files to serve, as they are. */
+  readonly dir: string
+}
+
 export interface DeployScript {
   /**
    * Its path relative to the project, with forward slashes. It runs from there in the deployed
