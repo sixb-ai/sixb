@@ -7,6 +7,7 @@ Install it in a project, and the `sixb` CLI does the rest:
 bun add -d @sixb/desktop
 bun sixb dev --desktop      # the dev server, and the app in a desktop window
 bun sixb desktop build      # the deployed app, packaged for this machine
+bun sixb desktop release    # built, signed and published to the deployment
 ```
 
 See [Desktop App](https://docs.sixb.ai/apps/desktop) for what the desktop app takes from the app,
