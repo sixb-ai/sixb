@@ -31,6 +31,7 @@ import {
   modelPalette,
   money,
   percent,
+  periodKey,
   priorRange,
   rangeLabel,
   readFilters,
@@ -62,15 +63,17 @@ export function SettingsUsagePage({
   const rangeId = params.get("range")
   // The range ends with the current period; choosing a range again moves it to now.
   const range = useMemo(() => spendRange(rangeId, timeZone), [rangeId, timeZone])
-  const filters = useMemo(() => readFilters(params), [params])
+  const filters = useMemo(() => readFilters(params, range), [params, range])
 
   const update = (change: (next: URLSearchParams) => void) => {
     const next = new URLSearchParams(params)
     change(next)
     setParams(next, { replace: true })
   }
-  const setFilter = (key: FilterKey, value: string | undefined) =>
+  const setFilter = (key: FilterKey, filter: string | undefined) =>
     update((next) => {
+      // A picked bar is spelled as its date, so the link opens the same day in another zone.
+      const value = key === "day" && filter !== undefined ? periodKey(filter, range) : filter
       if (value === undefined || next.get(key) === value) next.delete(key)
       else next.set(key, value)
       // A model belongs to its provider; the two are one filter.

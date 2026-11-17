@@ -6,8 +6,11 @@ import type {
 import {
   addCalendarPeriods,
   type CalendarPeriod,
+  calendarPeriodStart,
   calendarPeriods,
   canonicalTimeZone,
+  wallClockAt,
+  wallClockInstant,
 } from "@sixb/core/calendar"
 import { amountFor, nanosToNumber, type Overview } from "./format"
 
@@ -70,9 +73,9 @@ export function spendRange(id: string | null, timeZone: string, now = Date.now()
   }
 }
 
-/** The filters that narrow every number on the page, as the address spells them. */
+/** The filters that narrow every number on the page, read from the address. */
 export interface SpendFilters {
-  /** The start of one bar: a day, an hour or a week. */
+  /** The start of one bar: a day, an hour or a week. The address spells it with `periodKey`. */
   readonly day?: string
   readonly provider?: string
   readonly model?: string
@@ -109,14 +112,43 @@ const modelKinds: readonly ModelKind[] = [
   "web-search",
 ]
 
-export function readFilters(params: URLSearchParams): SpendFilters {
+/**
+ * How the address names a bar: its date on the reader's calendar, with its hour when bars are
+ * hours. A link to November 14 opens November 14 for a reader in any zone.
+ */
+export function periodKey(start: string, range: Pick<SpendRange, "bucket" | "timeZone">): string {
+  const wallClock = wallClockAt(new Date(start), range.timeZone)
+  return range.bucket === "hour" ? wallClock.slice(0, 16) : wallClock.slice(0, 10)
+}
+
+/** The start of the bar a `periodKey` names on the reader's calendar, if it names a date. */
+function periodStart(
+  key: string,
+  range: Pick<SpendRange, "bucket" | "timeZone">
+): string | undefined {
+  // A date, or a date and an hour; anything after them, such as an older link's zone, is ignored.
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):\d{2})?/.exec(key)
+  if (!match) return undefined
+
+  const wallClock = `${match[1]}T${match[2] ?? "00"}:00:00.000Z`
+  if (Number.isNaN(Date.parse(wallClock))) return undefined
+
+  const at = wallClockInstant(wallClock, range.timeZone)
+  return calendarPeriodStart(at, range.bucket, range.timeZone).toISOString()
+}
+
+export function readFilters(
+  params: URLSearchParams,
+  range: Pick<SpendRange, "bucket" | "timeZone">
+): SpendFilters {
   const value = (key: FilterKey) => params.get(key)?.trim() || undefined
+  const day = value("day") && periodStart(value("day")!, range)
   const kind = value("kind")
   const price = value("price")
   const source = value("source")
   const person = value("person")
   return {
-    ...(value("day") && !Number.isNaN(Date.parse(value("day")!)) ? { day: value("day") } : {}),
+    ...(day ? { day } : {}),
     ...(value("provider") ? { provider: value("provider") } : {}),
     ...(value("model") ? { model: value("model") } : {}),
     ...(person && /^(none|user:.+|serviceAccount:.+)$/.test(person) ? { person } : {}),

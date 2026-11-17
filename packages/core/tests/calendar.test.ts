@@ -4,6 +4,7 @@ import {
   calendarPeriodStart,
   calendarPeriods,
   canonicalTimeZone,
+  wallClockAt,
   wallClockInstant,
 } from "../src/calendar"
 
@@ -96,6 +97,9 @@ describe("calendar periods", () => {
       "2026-11-14T12:00:00.000Z"
     )
     expect(() => wallClockInstant("yesterday")).toThrow("is not a wall clock time")
+    expect(wallClockAt(at("2026-11-14T05:00:00.000Z"), "America/New_York")).toBe(
+      "2026-11-14T00:00:00.000Z"
+    )
   })
 
   test("name a zone canonically, or not at all", () => {

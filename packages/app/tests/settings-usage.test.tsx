@@ -26,6 +26,7 @@ import {
   modelColors,
   modelPalette,
   otherModelColor,
+  periodKey,
   priorRange,
   rangeLabel,
   rangePeriods,
@@ -245,7 +246,8 @@ describe("Usage › Spend", () => {
         price: "unpriceable",
         provider: "anthropic",
         model: "claude-opus-5.5",
-      })
+      }),
+      spendRange("7d", "UTC", Date.parse(now))
     )
     expect(filters).toEqual({
       person: "user:usr_1",
@@ -254,7 +256,38 @@ describe("Usage › Spend", () => {
       provider: "anthropic",
       model: "claude-opus-5.5",
     })
-    expect(readFilters(new URLSearchParams({ person: "someone", source: "chats" }))).toEqual({})
+    expect(
+      readFilters(
+        new URLSearchParams({ person: "someone", source: "chats" }),
+        spendRange("7d", "UTC", Date.parse(now))
+      )
+    ).toEqual({})
+  })
+
+  // Removal proof: spell the picked bar as the instant it starts again; the link from Paris opens
+  // in New York on November 13, from 6 pm, with no bar picked.
+  test("a link to a day opens that day in the reader's zone", () => {
+    const at = Date.parse("2026-11-16T15:00:00.000Z")
+    const paris = spendRange("7d", "Europe/Paris", at)
+    const picked = rangePeriods(paris)[4]!
+    expect(picked).toBe("2026-11-13T23:00:00.000Z")
+    expect(periodKey(picked, paris)).toBe("2026-11-14")
+
+    const newYork = spendRange("7d", "America/New_York", at)
+    const { day } = readFilters(new URLSearchParams({ day: periodKey(picked, paris) }), newYork)
+    expect(day).toBe("2026-11-14T05:00:00.000Z")
+    expect(rangePeriods(newYork)).toContain("2026-11-14T05:00:00.000Z")
+
+    // An hour keeps its hour, and a week bar is named by any of its days.
+    const kolkata = spendRange("24h", "Asia/Kolkata", Date.parse("2026-10-30T18:00:00.000Z"))
+    expect(periodKey("2026-10-30T17:30:00.000Z", kolkata)).toBe("2026-10-30T23:00")
+    expect(readFilters(new URLSearchParams({ day: "2026-10-30T23:00" }), kolkata).day).toBe(
+      "2026-10-30T17:30:00.000Z"
+    )
+    const quarter = spendRange("90d", "UTC", Date.parse(now))
+    expect(readFilters(new URLSearchParams({ day: "2026-10-29" }), quarter).day).toBe(
+      "2026-10-26T00:00:00.000Z"
+    )
   })
 
   test("the eight costliest models keep their own colors; the rest share a gray", () => {

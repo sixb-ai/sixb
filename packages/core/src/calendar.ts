@@ -96,6 +96,14 @@ function instantOf(wallClock: number, timeZone: string): Date {
 }
 
 /**
+ * The zone's wall clock at an instant, spelled as `wallClockInstant` reads it back:
+ * `2026-11-14T05:00:00.000Z` in America/New_York is `2026-11-14T00:00:00.000Z`.
+ */
+export function wallClockAt(at: Date, timeZone = DEFAULT_PROJECT_TIME_ZONE): string {
+  return new Date(wallClockOf(at, timeZone)).toISOString()
+}
+
+/**
  * The instant a zone's wall clock names.
  *
  * `wallClock` is an ISO 8601 string whose `Z` marks the wall clock rather than UTC, as a provider
