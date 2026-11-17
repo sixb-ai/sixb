@@ -21,7 +21,12 @@ import {
   type AgentRunSession,
   createAgentThreadSandboxName,
 } from "@sixb/core/internal/agents"
-import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
+import {
+  SandboxNotRunningError,
+  SandboxRequestRefusedError,
+  SandboxStateUnavailableError,
+  sandboxProjectDirectory,
+} from "@sixb/core/sandboxes"
 import type {
   AgentThreadRecord,
   ConversationAgentRunRecord,
@@ -395,6 +400,9 @@ class PersistentSandboxSession {
         return session.status
       },
       workingDirectory: session.workingDirectory,
+      ...(session.maxCommandTimeout === undefined
+        ? {}
+        : { maxCommandTimeout: session.maxCommandTimeout }),
       ...(session.credentialedUrl
         ? { credentialedUrl: session.credentialedUrl.bind(session) }
         : {}),
@@ -421,7 +429,7 @@ class PersistentSandboxSession {
       } catch (error) {
         // A transport rejection does not prove the VM rejected the operation. A late write
         // could race transient-file cleanup, so this name must not become reusable.
-        this.uncertainOperation = true
+        if (!provesNothingRan(error)) this.uncertainOperation = true
         throw error
       }
     })()
@@ -562,6 +570,15 @@ class PersistentSandboxSession {
   private wait(operation: Promise<Sandbox>): Promise<Sandbox> {
     return waitForAbort(bounded(operation), this.input.signal)
   }
+}
+
+/**
+ * Whether a rejected operation certainly did nothing: the provider refused it before anything ran,
+ * or the sandbox was not running, so nothing can still run in it. Anything else, a timeout, a reset
+ * or no answer at all, may have reached the VM.
+ */
+function provesNothingRan(error: unknown): boolean {
+  return error instanceof SandboxRequestRefusedError || error instanceof SandboxNotRunningError
 }
 
 function acquisitionError(error: unknown): Error {

@@ -43,6 +43,15 @@ Factories define environments; threads retain immutable parameters; runs provide
 - Request origins are read from the first grant, so renewals must keep to the same origins: a
   provider rejects a credential for an origin the network does not allow.
 
+- A save is refused only by an operation that may have reached the VM: a timeout, a reset or no
+  answer. A provider throws `SandboxRequestRefusedError` for a request it refused before anything
+  ran (an HTTP 4xx, its own validation), and that, like `SandboxNotRunningError`, leaves the
+  workspace saveable. A run whose save fails keeps its outcome and its own error, with a
+  `workspace_not_saved` diagnostic.
+- Each provider declares `maxCommandTimeout` and caps a longer timeout to it: Vercel refuses more
+  than five hours, and a timer fires at once past 2³¹−1 ms (`MAX_TIMER_DELAY_MS`). A background
+  command is held for that long at most.
+
 ## V1 limits
 
 Vercel requests can outlive their worker: storage fencing cannot cancel provider-side work.

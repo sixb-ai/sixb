@@ -2,6 +2,7 @@ import { AgentToolPublicError } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
+import type { AgentRunDiagnostic } from "@sixb/core/storage"
 
 /** A thread could not complete its required preflight compaction. */
 export class AgentContextCompactionError extends Error {
@@ -75,11 +76,26 @@ export class AgentToolOutputError extends AgentToolPublicError {
   }
 }
 
-/** Failed preservation is a failure even when the run was also cancelled. */
+/**
+ * The workspace could not be saved as the run ended: it waits for recovery. The run's own outcome
+ * stands beside it, recorded with a `workspace_not_saved` diagnostic: an answer that finished is
+ * still an answer, and a turn that failed keeps its own error ({@link turnError}).
+ */
 export class AgentEnvironmentSaveError extends Error {
   readonly name = "AgentEnvironmentSaveError"
 
-  constructor() {
+  constructor(
+    /** What ended the turn before its save failed, when something did. */
+    readonly turnError?: unknown
+  ) {
     super("[SixbAgent] Sandbox save or cleanup could not be confirmed. Recovery is required.")
   }
 }
+
+/** What a run whose workspace could not be saved carries, whatever its outcome. */
+export const WORKSPACE_NOT_SAVED_DIAGNOSTIC = {
+  code: "workspace_not_saved",
+  severity: "warning",
+  scope: "run",
+  message: "The workspace could not be saved when this run ended; it waits for recovery.",
+} as const satisfies AgentRunDiagnostic

@@ -291,6 +291,8 @@ export const fr: Translation<AgentMessages> = {
       "J’ai atteint la limite d’étapes avant de produire une réponse finale. Il suffit de me demander de continuer pour reprendre ce travail.",
     output_limit_reached:
       "J’ai manqué de place pour terminer cette réponse. Il suffit de me demander de continuer, ou de baisser le niveau de raisonnement.",
+    workspace_not_saved:
+      "L’espace de travail n’a pas pu être enregistré à la fin de cette réponse.",
     unknown: "Un problème est survenu pendant cette réponse.",
   },
   activity: {

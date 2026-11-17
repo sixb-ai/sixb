@@ -1,5 +1,9 @@
 import type { AgentMessagePart, JsonValue } from "@sixb/core"
-import { AgentToolPublicError, SandboxNotRunningError } from "@sixb/core"
+import {
+  AgentToolPublicError,
+  SandboxNotRunningError,
+  SandboxRequestRefusedError,
+} from "@sixb/core"
 import {
   type AgentToolCall,
   type AgentToolCallFile,
@@ -273,11 +277,16 @@ const SANDBOX_STOPPED_TOOL_TEXT =
 
 /**
  * Expose only failures that the tool author explicitly marked as safe for the model and storage,
- * and a stopped sandbox, in fixed words, even when the tool wrapped it.
+ * a stopped sandbox, in fixed words, even when the tool wrapped it, and a request the sandbox
+ * refused, whose message providers keep safe to show: nothing ran, and the model can change what
+ * it asked for.
  */
 export function agentToolErrorText(error: unknown, fallback = "An error occurred."): string {
   if (error instanceof AgentToolPublicError) return error.message
   if (foundSandboxStopped(error)) return SANDBOX_STOPPED_TOOL_TEXT
+  if (error instanceof SandboxRequestRefusedError) {
+    return `The sandbox refused it, so nothing ran: ${error.message.replace(/^\[Sandbox\]\s*/, "")}`
+  }
   return fallback
 }
 

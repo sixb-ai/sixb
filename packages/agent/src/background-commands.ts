@@ -1,6 +1,13 @@
 import { randomBytes } from "node:crypto"
 import { posix } from "node:path"
-import { AgentToolPublicError, type CommandResult, type Sandbox } from "@sixb/core"
+import {
+  AgentToolPublicError,
+  type CommandResult,
+  type Sandbox,
+  SandboxError,
+  SandboxNotRunningError,
+  SandboxRequestRefusedError,
+} from "@sixb/core"
 import { waitForAbort } from "./abort"
 import { commandDirectory, LOGIN_SHELL_SCRIPT_IN_DIRECTORY } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
@@ -22,8 +29,8 @@ const MAX_RUNNING = 16
 const OUTPUT_MAX_BYTES = 20_000
 
 /**
- * The held call's own bound, under every provider's 32-bit timer: a command that runs a week is
- * stopped like any other.
+ * The held call's own bound, or the sandbox's longest command timeout where that is shorter (five
+ * hours on Vercel): a command that runs that long is stopped there, and says so.
  */
 const HELD_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -46,6 +53,10 @@ export interface BackgroundCommandState {
    * SIGKILL), or absent when its sandbox went away under it.
    */
   readonly exitCode?: number
+  /** It ran until its time limit, the longest a command runs in its sandbox, and was stopped. */
+  readonly timedOut?: true
+  /** Its time limit, in milliseconds, once it reached it. */
+  readonly timeoutMs?: number
   /** ISO timestamps. */
   readonly startedAt: string
   readonly endedAt?: string
@@ -65,6 +76,8 @@ interface BackgroundCommand {
   readonly id: string
   readonly command: string
   readonly startedAt: Date
+  /** The held call's timeout: its time limit. */
+  readonly timeoutMs: number
   readonly paths: { readonly output: string; readonly pid: string; readonly exit: string }
   /** The sandbox it runs in, which signals it: a later run may have another. */
   readonly sandbox: Sandbox
@@ -79,8 +92,12 @@ interface BackgroundCommand {
   status: BackgroundCommandStatus
   exitCode?: number
   endedAt?: Date
+  /** It ran until its time limit. */
+  timedOut?: boolean
   /** What the wrapper or the sandbox said, when it could not start the command. */
   failure?: string
+  /** What its sandbox threw before it started, when that is the sandbox stopping: rethrown. */
+  startError?: SandboxNotRunningError
   /** Its stop, once asked for. */
   stopping?: Promise<void>
   /** How many bytes of its output the agent has read. */
@@ -144,6 +161,7 @@ export class BackgroundCommands {
     // The pid file names the start that wrote it: a file an earlier start left is never read.
     const nonce = randomBytes(8).toString("hex")
     const abort = new AbortController()
+    const timeoutMs = Math.min(HELD_TIMEOUT_MS, sandbox.maxCommandTimeout ?? HELD_TIMEOUT_MS)
 
     const held = sandbox.runCommand(
       "bash",
@@ -160,7 +178,7 @@ export class BackgroundCommands {
       ],
       {
         ...(handle.env === undefined ? {} : { env: handle.env }),
-        timeout: HELD_TIMEOUT_MS,
+        timeout: timeoutMs,
         signal: abort.signal,
       }
     )
@@ -171,7 +189,7 @@ export class BackgroundCommands {
     // Its group is known once the wrapper wrote it, which it does first: until then nothing could
     // signal it, so a stop and `start` itself wait for it, or for its end without one.
     const started = Promise.race([
-      readGroup(sandbox, paths.pid, nonce, handle.env).then(
+      readGroup(sandbox, paths.pid, nonce, handle.env, abort.signal).then(
         (group) => {
           if (group !== undefined) entry.group = group
         },
@@ -183,6 +201,7 @@ export class BackgroundCommands {
       id,
       command: input.command,
       startedAt: new Date(),
+      timeoutMs,
       paths,
       sandbox,
       abort,
@@ -201,10 +220,14 @@ export class BackgroundCommands {
       throw error
     }
 
-    if (entry.failure !== undefined) {
+    if (entry.failure !== undefined || entry.startError !== undefined) {
+      // Nothing waits for a pid file now.
+      abort.abort()
       this.#commands.delete(id)
       this.options.onChange?.()
-      throw new AgentToolPublicError(`[SixbAgent] The command could not start: ${entry.failure}`)
+      // A stopped sandbox ends the turn, as any of its tools that meets it does.
+      if (entry.startError) throw entry.startError
+      throw new AgentToolPublicError(`[SixbAgent] ${entry.failure}`)
     }
     if (entry.status !== "running") entry.reported = true
 
@@ -386,26 +409,46 @@ export class BackgroundCommands {
     if (!result) {
       // Its sandbox went away under it, or never ran it.
       entry.status = "stopped"
+      if (entry.group === undefined) {
+        if (error instanceof SandboxNotRunningError) entry.startError = error
+        else entry.failure = startFailure(error)
+      }
       console.warn(`[SixbAgent] Background command ${entry.id} ended with its sandbox:`, error)
       this.options.onChange?.()
       return
     }
 
     entry.exitCode = result.exitCode
-    // Stopped when a signal of its stop ended it, as its exit code says; one that exited by itself
-    // meanwhile, or caught the signal and exited, exited.
+    entry.timedOut = result.timedOut === true
+    // Stopped when a signal of its stop, or its time limit, ended it, as its exit code says; one
+    // that exited by itself meanwhile, or caught the signal and exited, exited.
     entry.status =
-      entry.stopping !== undefined && (result.exitCode > 128 || entry.abort.signal.aborted)
+      entry.timedOut ||
+      (entry.stopping !== undefined && (result.exitCode > 128 || entry.abort.signal.aborted))
         ? "stopped"
         : "exited"
     // The wrapper writes nothing of its own unless it, or the sandbox, could not run it.
-    if (result.stderr.trim() && entry.group === undefined) entry.failure = result.stderr.trim()
+    if (result.stderr.trim() && entry.group === undefined) {
+      entry.failure = `The command could not start: ${result.stderr.trim()}`
+    }
 
     // Past its bound, the held call's abort stopped the wrapper, not the group it started.
     if (result.timedOut) void signalGroup(entry, "KILL")
 
     this.options.onChange?.()
   }
+}
+
+/**
+ * Why a command's start failed, as the model reads it. A refusal proves nothing ran; any other
+ * failure leaves that open. A provider's own errors say what it was told; anything else stays
+ * unsaid, as it may carry request details.
+ */
+function startFailure(error: unknown): string {
+  const reason =
+    error instanceof SandboxError ? error.message.replace(/^\[Sandbox\]\s*/, "") : undefined
+  if (error instanceof SandboxRequestRefusedError) return `The command could not start: ${reason}`
+  return `The sandbox did not confirm the command started${reason ? `: ${reason}` : "."} It may be running: check before starting it again.`
 }
 
 /** A command's state, as its tools return it. */
@@ -415,6 +458,7 @@ function state(entry: BackgroundCommand): BackgroundCommandState {
     command: entry.command,
     status: entry.status,
     ...(entry.exitCode === undefined ? {} : { exitCode: entry.exitCode }),
+    ...(entry.timedOut ? { timedOut: true as const, timeoutMs: entry.timeoutMs } : {}),
     startedAt: entry.startedAt.toISOString(),
     ...(entry.endedAt === undefined ? {} : { endedAt: entry.endedAt.toISOString() }),
     outputPath: entry.paths.output,
@@ -426,12 +470,13 @@ async function readGroup(
   sandbox: Sandbox,
   path: string,
   nonce: string,
-  env: Readonly<Record<string, string>> | undefined
+  env: Readonly<Record<string, string>> | undefined,
+  signal: AbortSignal
 ): Promise<number | undefined> {
   const result = await sandbox.runCommand(
     "bash",
     ["-c", GROUP_SCRIPT, "sixb-background", path, nonce],
-    { ...(env === undefined ? {} : { env }), timeout: CONTROL_TIMEOUT_MS }
+    { ...(env === undefined ? {} : { env }), timeout: CONTROL_TIMEOUT_MS, signal }
   )
   const group = Number(result.stdout.trim())
   return result.exitCode === 0 && Number.isSafeInteger(group) && group > 1 ? group : undefined

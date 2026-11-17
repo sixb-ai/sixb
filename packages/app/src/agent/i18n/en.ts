@@ -305,6 +305,7 @@ export const en = {
       "I reached the step limit before producing a final answer. Ask me to continue and I can use the work above as context.",
     output_limit_reached:
       "I ran out of room before finishing this answer. Ask me to continue, or lower the reasoning level.",
+    workspace_not_saved: "The workspace couldn’t be saved when this response ended.",
     unknown: "Something went wrong during this response.",
   } satisfies Record<AgentRunDiagnosticCode | "unknown", string>,
   activity: {

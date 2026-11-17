@@ -58,7 +58,7 @@ import {
 } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
 import { conversationModelMessages } from "./conversation-messages"
-import { isLostExecution } from "./errors"
+import { AgentEnvironmentSaveError, isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { InlineImageBudget } from "./inline-images"
 import { type ConversationReaders, conversationAuthors } from "./message-authors"
@@ -473,6 +473,10 @@ export async function createConversationAgentEnvironment(
     // the worker records the run's terminal outcome; a lost execution must touch nothing.
     try {
       if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
+    } catch (saveError) {
+      // The preparation's own error is what ended the turn: it stays, beside the failed save.
+      if (saveError instanceof AgentEnvironmentSaveError) throw new AgentEnvironmentSaveError(error)
+      throw saveError
     } finally {
       // A workspace the summary acquired goes back as the environment would have given it.
       if (environment) await environment.dispose()

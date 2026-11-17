@@ -255,6 +255,43 @@ describe("background commands", () => {
     expect(read.output).not.toContain("ran")
   })
 
+  // On Vercel a command runs five hours at most. Removal proof: hold the call for HELD_TIMEOUT_MS
+  // alone in BackgroundCommands.start; it outlives the sandbox's limit and never ends here.
+  test("end at the sandbox's longest command timeout, and say so", async () => {
+    const limited: Sandbox = {
+      id: sandbox.id,
+      provider: sandbox.provider,
+      status: sandbox.status,
+      workingDirectory: sandbox.workingDirectory,
+      maxCommandTimeout: 2_000,
+      runCommand: (command, args, options) => sandbox.runCommand(command, args, options),
+      writeFiles: (files) => sandbox.writeFiles(files),
+      stop: () => sandbox.stop(),
+      destroy: () => sandbox.destroy(),
+    }
+    const notices = new BackgroundNotices(commands)
+    notices.take()
+    // The limit's timer starts with the command: fake from the start, turned with the real loop.
+    jest.useFakeTimers()
+    let started: BackgroundCommandState | undefined
+    void commands
+      .start({ handle: { ...handle, sandbox: limited }, command: "sleep 30" })
+      .then((state) => {
+        started = state
+      })
+    // Its start waits on real I/O alone: no fake time passes until it returned.
+    for (let turn = 0; started === undefined && turn < 1_000_000; turn += 1) await loopTurn()
+    const { id } = started as BackgroundCommandState
+    await until(() => commands.get(id).status !== "running", 500)
+
+    expect(commands.get(id)).toMatchObject({
+      status: "stopped",
+      timedOut: true,
+      timeoutMs: 2_000,
+    })
+    expect(notices.take()).toContain("was stopped at its time limit of 2s")
+  })
+
   test("run in the directory named, relative to the workspace", async () => {
     mkdirSync(join(root, "nested"))
     const started = await commands.start({ handle, command: "pwd -P", cwd: "nested" })

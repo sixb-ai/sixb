@@ -137,8 +137,9 @@ function endedLine(command: BackgroundCommandState): string {
   const ran = formatDuration(
     new Date(command.endedAt ?? command.startedAt).getTime() - new Date(command.startedAt).getTime()
   )
-  const how =
-    command.status === "stopped"
+  const how = command.timedOut
+    ? `was stopped at its time limit of ${formatDuration(command.timeoutMs ?? 0)}`
+    : command.status === "stopped"
       ? "was stopped"
       : `exited with code ${command.exitCode ?? "unknown"}`
   return `Background command ${command.id} (\`${shortCommand(command.command)}\`) ${how} after ${ran}. Output: ${command.outputPath}`

@@ -120,6 +120,7 @@ import {
   exec,
   initializeSandboxEnvironment,
   SandboxNotRunningError,
+  SandboxRequestRefusedError,
   SandboxStateUnavailableError,
   sandboxConfig,
 } from "@sixb/core/sandboxes"
@@ -3842,9 +3843,13 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       await completion.wait()
+      // The answer finished: it stands, and says its workspace waits for recovery.
       expect(
         await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
-      ).toMatchObject({ status: "failed" })
+      ).toMatchObject({
+        status: "succeeded",
+        diagnostics: [expect.objectContaining({ code: "workspace_not_saved" })],
+      })
       expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
       await expect(
         requestAgent(host, { threadId: thread.id, text: "Again" })
@@ -3916,7 +3921,10 @@ describe("AgentWorker", () => {
       await completion.wait()
       expect(
         await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: first.run.id })
-      ).toMatchObject({ status: "failed" })
+      ).toMatchObject({
+        status: "succeeded",
+        diagnostics: [expect.objectContaining({ code: "workspace_not_saved" })],
+      })
     } finally {
       await worker.stop()
       completion.restore()
@@ -4415,6 +4423,212 @@ describe("AgentWorker", () => {
       // Both shell scripts take the directory just before the command.
       expect(call?.args.at(-2)).toBe(join(sandbox.workingDirectory, "repository", "packages/api"))
     })
+  })
+
+  // Vercel answers a request it will not run with HTTP 400, in about 20 ms, before any process
+  // starts; its provider throws SandboxRequestRefusedError. Each turn here meets such a refusal and
+  // still ends with its answer, its workspace saved as `ready`. A failure that may have reached the
+  // VM still blocks it: see "blocks a workspace whose VM the provider stopped".
+  describe("a sandbox that refuses a request before anything runs", () => {
+    /** Vercel's limit, which its provider declares. */
+    const MAX_COMMAND_TIMEOUT_MS = 5 * 60 * 60 * 1000
+
+    /** As the Vercel provider reports Vercel's 400. */
+    function refusal(reason: string): SandboxRequestRefusedError {
+      return new SandboxRequestRefusedError(
+        `[Sandbox] Vercel refused the command (HTTP 400 bad_request): ${reason}`
+      )
+    }
+
+    /** Whether a call is a background command's held call: the one that runs it. */
+    function isHeldCall(args: readonly string[]): boolean {
+      return args[2] === "sixb-background" && args.length === 9
+    }
+
+    /** A persistent sandbox that refuses what `refuse` names a reason for. */
+    function refusingSandbox(
+      refuse: (args: readonly string[], options: RunCommandOptions) => string | undefined
+    ) {
+      const sandbox = Object.assign(new BackgroundSandbox("refusing", []), {
+        setRequestCredentials: async () => {},
+        maxCommandTimeout: MAX_COMMAND_TIMEOUT_MS,
+      })
+      const runCommand = sandbox.runCommand.bind(sandbox)
+      sandbox.runCommand = async (command, args = [], options = {}) => {
+        const reason = refuse(args, options)
+        // A held call is never recorded by BackgroundSandbox itself.
+        if (reason !== undefined || isHeldCall(args))
+          sandbox.commands.push({ command, args, options })
+        if (reason !== undefined) throw refusal(reason)
+        return runCommand(command, args, options)
+      }
+      return sandbox
+    }
+
+    /** One turn whose model makes this bash call, then answers; what the model read back. */
+    async function runTurn(sandbox: RecordingSandbox, bash: Record<string, unknown>) {
+      const toolOutputs: string[] = []
+      const model = new WorkerTestModel({
+        modelId: "mock-model",
+        stream: async (options) => {
+          const last = options.messages.at(-1)
+          if (last?.role !== "tool") return toolCallStream("refused", "bash", bash)
+          toolOutputs.push(JSON.stringify(last.content))
+          return answerStream("Done")
+        },
+      })
+      const host = buildSixb(
+        model,
+        new InMemoryBroker(),
+        {
+          supportsRequestCredentials: true,
+          create: async () => sandbox,
+          resume: async () => {
+            sandbox.status = "running"
+            return sandbox
+          },
+        },
+        {
+          sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } },
+        }
+      )
+      const sdk = createTestSixb(host)
+      const thread = await sdk.agent.threads.create({ sandbox: {} })
+      const requested = await requestAgent(host, { threadId: thread.id, text: "Go" })
+      const completion = observeQueueSettlement(host.queues.agents)
+      const worker = new AgentWorker(host, workerOptions())
+      await worker.start()
+      try {
+        await completion.wait()
+      } finally {
+        await worker.stop()
+        completion.restore()
+      }
+      return {
+        run: await agentStorageOf(host).runs.getById({
+          projectId: PROJECT_ID,
+          id: requested.run.id,
+        }),
+        workspace: (await sdk.agent.threads.getById(thread.id))?.sandboxState,
+        toolOutput: toolOutputs.join(""),
+      }
+    }
+
+    // Prod, Nov 15–17: every background command asked Vercel for a 7-day timeout, and every one
+    // was refused. Removal proof: hold the call for HELD_TIMEOUT_MS alone in
+    // BackgroundCommands.start; the sandbox refuses it, and the command never runs.
+    test("starts a background command within the sandbox's longest command timeout", async () => {
+      const sandbox = refusingSandbox((args, options) =>
+        isHeldCall(args) && (options.timeout ?? 0) > MAX_COMMAND_TIMEOUT_MS
+          ? "timeout must be less than or equal to 18000000"
+          : undefined
+      )
+
+      const { run, workspace, toolOutput } = await runTurn(sandbox, {
+        command: "bun dev",
+        run_in_background: true,
+      })
+
+      expect(run).toMatchObject({ status: "succeeded" })
+      expect(run?.diagnostics).toBeUndefined()
+      expect(workspace?.status).toBe("ready")
+      expect(toolOutput).toContain('"status":"running"')
+      const held = sandbox.commands.find((call) => isHeldCall(call.args))
+      expect(held?.options.timeout).toBe(MAX_COMMAND_TIMEOUT_MS)
+    })
+
+    // The model once read `status: "stopped"` and an empty log, and went on as if the command ran.
+    // Removal proof: leave a rejected held call without its failure in BackgroundCommands' #end;
+    // the tool returns the command as stopped.
+    test("reports a background command the sandbox refused to start, with its reason", async () => {
+      const reason = "failed to start process: exec format error"
+      const sandbox = refusingSandbox((args) => (isHeldCall(args) ? reason : undefined))
+
+      const { run, workspace, toolOutput } = await runTurn(sandbox, {
+        command: "./server",
+        run_in_background: true,
+      })
+
+      expect(run).toMatchObject({ status: "succeeded" })
+      expect(workspace?.status).toBe("ready")
+      expect(toolOutput).toContain("The command could not start")
+      expect(toolOutput).toContain(reason)
+      expect(toolOutput).not.toContain("stopped")
+    })
+
+    // Removal proof: mark every rejection uncertain in PersistentSandboxSession.track again; the
+    // save refuses the workspace and blocks it.
+    test("saves the workspace after a foreground command is refused", async () => {
+      const reason = "env value too large"
+      const sandbox = refusingSandbox((args) =>
+        args.some((arg) => arg.includes("npm test")) ? reason : undefined
+      )
+
+      const { run, workspace, toolOutput } = await runTurn(sandbox, { command: "npm test" })
+
+      expect(run).toMatchObject({ status: "succeeded" })
+      expect(run?.diagnostics).toBeUndefined()
+      expect(workspace?.status).toBe("ready")
+      expect(toolOutput).toContain(`The sandbox refused it, so nothing ran:`)
+      expect(toolOutput).toContain(reason)
+    })
+  })
+
+  // A turn that failed, and whose save failed too, once read only "Agent execution failed.": the
+  // save's error replaced its own. Removal proof: set `error = saveError` again in
+  // runConversationTurn's catch; the run's error is the save's.
+  test("keeps a failed turn's own error when its workspace cannot be saved either", async () => {
+    const sandbox = Object.assign(new RecordingSandbox("save-after-failure"), {
+      setRequestCredentials: async () => {},
+    })
+    sandbox.stop = async () => {
+      throw new Error("snapshot failed")
+    }
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        throw new ModelProviderError("[test] The model is overloaded.", "mock", "mock-model", {
+          status: 400,
+        })
+      },
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async () => sandbox,
+        resume: async () => sandbox,
+      },
+      { sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } } }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+      errors.mockRestore()
+    }
+
+    const run = await agentStorageOf(host).runs.getById({
+      projectId: PROJECT_ID,
+      id: requested.run.id,
+    })
+    expect(run).toMatchObject({
+      status: "failed",
+      diagnostics: [expect.objectContaining({ code: "workspace_not_saved" })],
+    })
+    // The model's failure, as the run reads it: not the save's.
+    expect(run?.error?.message).toContain("Upstream request returned HTTP 400")
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
   })
 
   test("rejects an invalid authentication guest environment before provisioning", async () => {
