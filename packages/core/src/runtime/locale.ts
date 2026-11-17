@@ -14,13 +14,3 @@ export function canonicalLocale(value: unknown): string | undefined {
     return undefined
   }
 }
-
-/** The canonical IANA name of a time zone (`europe/paris` → `Europe/Paris`), or `undefined`. */
-export function canonicalTimeZone(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.trim() !== value || value === "") return undefined
-  try {
-    return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone
-  } catch {
-    return undefined
-  }
-}

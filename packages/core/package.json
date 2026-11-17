@@ -83,6 +83,12 @@
       "import": "./dist/broker/index.js",
       "default": "./dist/broker/index.js"
     },
+    "./calendar": {
+      "types": "./dist/calendar.d.ts",
+      "bun": "./src/calendar.ts",
+      "import": "./dist/calendar.js",
+      "default": "./dist/calendar.js"
+    },
     "./deploy": {
       "types": "./dist/deploy/index.d.ts",
       "bun": "./src/deploy/index.ts",

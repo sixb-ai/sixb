@@ -339,6 +339,47 @@ describe("AI accounting routes", () => {
     })
   })
 
+  // Removal proof: drop timeZone from the overview query schema or route; the bars fall back to
+  // UTC days and the refused zone is answered as if it were UTC.
+  test("buckets a series on the calendar of the requested time zone", async () => {
+    const app = await createApp()
+    const starts = async (timeZone?: string) => {
+      const response = await app.handle(
+        new Request(
+          "http://localhost/api/ai/accounting/overview?" +
+            new URLSearchParams({
+              from: "2026-09-10T00:00:00.000Z",
+              to: "2026-09-11T00:00:00.000Z",
+              bucket: "day",
+              ...(timeZone === undefined ? {} : { timeZone }),
+            })
+        )
+      )
+      expect(response.status).toBe(200)
+      const overview = (await response.json()) as { series: { start: string }[] }
+      return overview.series.map((period) => period.start)
+    }
+    expect(await starts()).toEqual(["2026-09-10T00:00:00.000Z"])
+    // Tokyo begins its tenth at 15:00 UTC on the ninth, so the same call is in the first bar.
+    expect(await starts("Asia/Tokyo")).toEqual([
+      "2026-09-09T15:00:00.000Z",
+      "2026-09-10T15:00:00.000Z",
+    ])
+
+    const refused = await app.handle(
+      new Request(
+        "http://localhost/api/ai/accounting/overview?" +
+          new URLSearchParams({
+            from: "2026-09-10T00:00:00.000Z",
+            to: "2026-09-11T00:00:00.000Z",
+            bucket: "day",
+            timeZone: "Mars/Olympus",
+          })
+      )
+    )
+    expect(refused.status).toBe(422)
+  })
+
   // Removal proof: drop accountingFilters from the overview route, requesterDetails' names, or
   // the prompts from serializeGroup; the matching expectation then fails.
   test("names who asked, narrows to a person, source or kind, and says what a turn asked", async () => {

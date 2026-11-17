@@ -3,6 +3,15 @@ import type {
   ListAiModelCallGroupsResponse,
   ListAiModelCallsResponse,
 } from "@sixb/client"
+import {
+  addCalendarPeriods,
+  type CalendarPeriod,
+  calendarPeriodStart,
+  calendarPeriods,
+  canonicalTimeZone,
+  wallClockAt,
+  wallClockInstant,
+} from "@sixb/core/calendar"
 import { amountFor, nanosToNumber, type Overview } from "./format"
 
 /**
@@ -17,44 +26,56 @@ export type Call = ListAiModelCallsResponse["items"][number]
 export type ModelKind = NonNullable<Overview["kinds"][number]["modelKind"]>
 type OverviewQuery = GetAiAccountingOverviewData["query"]
 
-const hourMs = 60 * 60 * 1000
-const dayMs = 24 * hourMs
-
+/**
+ * The ranges the page offers: `periods` whole hours or days of the reader's calendar, ending with
+ * the current one, drawn in `bucket` bars. The 90 days end today, so their first and last weeks
+ * are partial.
+ */
 export const spendRanges = [
-  { id: "24h", bucket: "hour", ms: dayMs, period: "day" },
-  { id: "7d", bucket: "day", ms: 7 * dayMs, period: "week" },
-  { id: "30d", bucket: "day", ms: 30 * dayMs, period: "month" },
-  { id: "90d", bucket: "week", ms: 91 * dayMs, period: "quarter" },
+  { id: "24h", unit: "hour", periods: 24, bucket: "hour", period: "day" },
+  { id: "7d", unit: "day", periods: 7, bucket: "day", period: "week" },
+  { id: "30d", unit: "day", periods: 30, bucket: "day", period: "month" },
+  { id: "90d", unit: "day", periods: 91, bucket: "week", period: "quarter" },
 ] as const
 
 type SpendRangeId = (typeof spendRanges)[number]["id"]
-export type Bucket = (typeof spendRanges)[number]["bucket"]
+export type Bucket = CalendarPeriod
 
 export interface SpendRange {
   readonly id: SpendRangeId
   readonly from: string
   readonly to: string
+  /** What the range is counted in, and what the period it compares with steps back by. */
+  readonly unit: (typeof spendRanges)[number]["unit"]
   readonly bucket: Bucket
   readonly period: (typeof spendRanges)[number]["period"]
+  /** The zone whose days, weeks or hours the bars are, and which the API buckets by. */
+  readonly timeZone: string
 }
 
-/** A range that ends with the current hour or day, so its bars are whole UTC periods. */
-export function spendRange(id: string | null, now = Date.now()): SpendRange {
+/** The reader's IANA zone, whose calendar the page follows; UTC when this browser cannot name one. */
+export function viewerTimeZone(): string {
+  return canonicalTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? "UTC"
+}
+
+/** A range that ends with the current hour or day, never later, on the zone's calendar. */
+export function spendRange(id: string | null, timeZone: string, now = Date.now()): SpendRange {
   const preset = spendRanges.find((range) => range.id === id) ?? spendRanges[1]
-  const unit = preset.bucket === "hour" ? hourMs : dayMs
-  const to = Math.floor(now / unit) * unit + unit
+  const to = addCalendarPeriods(new Date(now), preset.unit, 1, timeZone)
   return {
     id: preset.id,
-    from: new Date(to - preset.ms).toISOString(),
-    to: new Date(to).toISOString(),
+    from: addCalendarPeriods(to, preset.unit, -preset.periods, timeZone).toISOString(),
+    to: to.toISOString(),
+    unit: preset.unit,
     bucket: preset.bucket,
     period: preset.period,
+    timeZone,
   }
 }
 
-/** The filters that narrow every number on the page, as the address spells them. */
+/** The filters that narrow every number on the page, read from the address. */
 export interface SpendFilters {
-  /** The start of one bar: a day, an hour or a week. */
+  /** The start of one bar: a day, an hour or a week. The address spells it with `periodKey`. */
   readonly day?: string
   readonly provider?: string
   readonly model?: string
@@ -91,14 +112,43 @@ const modelKinds: readonly ModelKind[] = [
   "web-search",
 ]
 
-export function readFilters(params: URLSearchParams): SpendFilters {
+/**
+ * How the address names a bar: its date on the reader's calendar, with its hour when bars are
+ * hours. A link to November 14 opens November 14 for a reader in any zone.
+ */
+export function periodKey(start: string, range: Pick<SpendRange, "bucket" | "timeZone">): string {
+  const wallClock = wallClockAt(new Date(start), range.timeZone)
+  return range.bucket === "hour" ? wallClock.slice(0, 16) : wallClock.slice(0, 10)
+}
+
+/** The start of the bar a `periodKey` names on the reader's calendar, if it names a date. */
+function periodStart(
+  key: string,
+  range: Pick<SpendRange, "bucket" | "timeZone">
+): string | undefined {
+  // A date, or a date and an hour; anything after them, such as an older link's zone, is ignored.
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):\d{2})?/.exec(key)
+  if (!match) return undefined
+
+  const wallClock = `${match[1]}T${match[2] ?? "00"}:00:00.000Z`
+  if (Number.isNaN(Date.parse(wallClock))) return undefined
+
+  const at = wallClockInstant(wallClock, range.timeZone)
+  return calendarPeriodStart(at, range.bucket, range.timeZone).toISOString()
+}
+
+export function readFilters(
+  params: URLSearchParams,
+  range: Pick<SpendRange, "bucket" | "timeZone">
+): SpendFilters {
   const value = (key: FilterKey) => params.get(key)?.trim() || undefined
+  const day = value("day") && periodStart(value("day")!, range)
   const kind = value("kind")
   const price = value("price")
   const source = value("source")
   const person = value("person")
   return {
-    ...(value("day") && !Number.isNaN(Date.parse(value("day")!)) ? { day: value("day") } : {}),
+    ...(day ? { day } : {}),
     ...(value("provider") ? { provider: value("provider") } : {}),
     ...(value("model") ? { model: value("model") } : {}),
     ...(person && /^(none|user:.+|serviceAccount:.+)$/.test(person) ? { person } : {}),
@@ -125,25 +175,33 @@ export function apiFilters(
   }
 }
 
-function bucketMs(bucket: Bucket): number {
-  return bucket === "hour" ? hourMs : bucket === "day" ? dayMs : 7 * dayMs
-}
-
 /** The range every number is read over: the chosen bar when a day is picked, else the range. */
 export function activeRange(range: SpendRange, filters: SpendFilters) {
   if (!filters.day) return { from: range.from, to: range.to }
-  const start = Date.parse(filters.day)
+  const start = new Date(filters.day)
+  const end = addCalendarPeriods(start, range.bucket, 1, range.timeZone)
+
+  // A week bar can begin before the range and end after it; the numbers stay inside it.
   return {
-    from: new Date(start).toISOString(),
-    to: new Date(Math.min(start + bucketMs(range.bucket), Date.parse(range.to))).toISOString(),
+    from: new Date(Math.max(start.getTime(), Date.parse(range.from))).toISOString(),
+    to: new Date(Math.min(end.getTime(), Date.parse(range.to))).toISOString(),
   }
 }
 
-/** The period before, as long: the previous bar for a picked day, else the previous range. */
-export function priorRange(range: { readonly from: string; readonly to: string }) {
-  const from = Date.parse(range.from)
-  const span = Date.parse(range.to) - from
-  return { from: new Date(from - span).toISOString(), to: new Date(from).toISOString() }
+/**
+ * The as many hours or days just before: the previous bar for a picked day, else the previous
+ * range, so a range that has not finished its last day compares with one as long.
+ */
+export function priorRange(
+  active: { readonly from: string; readonly to: string },
+  range: Pick<SpendRange, "unit" | "timeZone">
+) {
+  const from = new Date(active.from)
+  const count = calendarPeriods(from, new Date(active.to), range.unit, range.timeZone).length
+  return {
+    from: addCalendarPeriods(from, range.unit, -count, range.timeZone).toISOString(),
+    to: active.from,
+  }
 }
 
 // ── Numbers ───────────────────────────────────────────────────────────
@@ -241,42 +299,52 @@ export function sharePercent(value: number, locale = "en"): string {
 }
 
 /**
- * Where the range's bars start, as the server buckets them: whole UTC hours or days, and weeks
- * from Monday. The chart lays out its bars from these before their numbers arrive.
+ * Where the range's bars start, as the server buckets them: whole periods of the zone's calendar.
+ * The chart lays out its bars from these before their numbers arrive.
  */
-export function rangePeriods(range: Pick<SpendRange, "from" | "to" | "bucket">): string[] {
-  const first = new Date(range.from)
-  first.setUTCMinutes(0, 0, 0)
-  if (range.bucket !== "hour") first.setUTCHours(0)
-  if (range.bucket === "week") first.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7))
-  const starts: string[] = []
-  for (let at = first.getTime(); at < Date.parse(range.to); at += bucketMs(range.bucket)) {
-    starts.push(new Date(at).toISOString())
-  }
-  return starts
+export function rangePeriods(
+  range: Pick<SpendRange, "from" | "to" | "bucket" | "timeZone">
+): string[] {
+  return calendarPeriods(
+    new Date(range.from),
+    new Date(range.to),
+    range.bucket,
+    range.timeZone
+  ).map((period) => period.start.toISOString())
 }
 
-/** A bar's label: its hour, its day, or the week it starts. Buckets are UTC periods. */
-export function bucketLabel(start: string, bucket: Bucket, locale = "en"): string {
+/** A bar's label: its hour, its day, or the week it starts, on the zone's calendar. */
+export function bucketLabel(
+  start: string,
+  bucket: Bucket,
+  locale: string,
+  timeZone: string
+): string {
   const date = new Date(start)
   if (bucket === "hour") {
-    return date.toLocaleTimeString(locale, { hour: "numeric", timeZone: "UTC" })
+    return date.toLocaleTimeString(locale, { hour: "numeric", timeZone })
   }
-  return date.toLocaleDateString(locale, { month: "short", day: "numeric", timeZone: "UTC" })
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric", timeZone })
 }
 
 /** "Oct 23 – 29", "Oct 28 – Nov 3", or one day when the range is one. */
-export function rangeLabel(range: { readonly from: string; readonly to: string }, locale = "en") {
+export function rangeLabel(
+  range: { readonly from: string; readonly to: string },
+  locale: string,
+  timeZone: string
+) {
   const from = new Date(range.from)
   const last = new Date(Date.parse(range.to) - 1)
   const day = (date: Date, month: boolean) =>
     date.toLocaleDateString(locale, {
       ...(month ? { month: "short" } : {}),
       day: "numeric",
-      timeZone: "UTC",
+      timeZone,
     })
-  if (from.toISOString().slice(0, 10) === last.toISOString().slice(0, 10)) return day(from, true)
-  const sameMonth = from.getUTCMonth() === last.getUTCMonth()
+  if (day(from, true) === day(last, true)) return day(from, true)
+  const month = (date: Date) =>
+    date.toLocaleDateString(locale, { month: "short", year: "numeric", timeZone })
+  const sameMonth = month(from) === month(last)
   return `${day(from, true)} – ${day(last, !sameMonth)}`
 }
 

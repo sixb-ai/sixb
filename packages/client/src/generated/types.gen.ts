@@ -2331,6 +2331,10 @@ export type GetAiAccountingOverviewData = {
       | "reranking"
       | "web-search"
     bucket: "hour" | "day" | "week"
+    /**
+     * The IANA time zone whose days, weeks or hours the periods follow, such as America/New_York; UTC when absent
+     */
+    timeZone?: string
   }
   url: "/api/ai/accounting/overview"
 }

@@ -2,6 +2,23 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- The Usage page counts days, weeks and hours on the reader's calendar rather than UTC's, so its
+  last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
+  link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
+  series on the `timeZone` its query names, UTC when it names none.
+
+### Upgrade notes
+
+- `getAiAccountingOverview` takes an optional `timeZone`, an IANA name, and returns its periods on
+  that calendar instead of always UTC's. Settings › Usage sends the browser's.
+- A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's
+  `timeZone`, a project's `timeZone` and the agent's requester zone. Name the zone instead, such as
+  `"Asia/Kolkata"`.
+
 ## 2026-11-17 — Sixb 0.2.5
 
 0.2.5 lets people steer or queue messages while the Agent works, adds designed documents that

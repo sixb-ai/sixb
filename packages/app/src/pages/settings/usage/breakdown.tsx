@@ -83,9 +83,10 @@ export function Breakdown({
     ...(lens === "model" ? { provider: undefined, model: undefined } : { [lens]: undefined }),
   }
   const active = activeRange(range, filters)
+  const earlier = priorRange(active, range)
   const base = useQuery({
     ...getAiAccountingOverviewOptions({
-      query: { ...active, bucket: range.bucket, ...apiFilters(others) },
+      query: { ...active, bucket: range.bucket, timeZone: range.timeZone, ...apiFilters(others) },
     }),
     retry: false,
   })
@@ -102,6 +103,7 @@ export function Breakdown({
           from: range.from,
           to: range.to,
           bucket: range.bucket,
+          timeZone: range.timeZone,
           ...apiFilters({ ...others, ...row.narrow, day: undefined }),
         },
       }),
@@ -112,8 +114,9 @@ export function Breakdown({
     queries: shown.map((row) => ({
       ...getAiAccountingOverviewOptions({
         query: {
-          ...priorRange(active),
+          ...earlier,
           bucket: range.bucket,
+          timeZone: range.timeZone,
           ...apiFilters({ ...others, ...row.narrow }),
         },
       }),

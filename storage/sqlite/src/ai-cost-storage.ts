@@ -1,3 +1,4 @@
+import { calendarPeriods } from "@sixb/core/calendar"
 import {
   type AiAccountingAggregateFragment,
   type AiAccountingRecordSetItem,
@@ -92,6 +93,11 @@ export class SqliteAiCostStorage implements AiCostStorage {
 
   async queryProjectOverview(input: QueryAiAccountingOverviewInput): Promise<AiAccountingOverview> {
     const query = normalizeAiAccountingQuery(input)
+    const boundaries = JSON.stringify(
+      calendarPeriods(query.from, query.to, input.bucket, query.timeZone).map((period) =>
+        period.start.toISOString()
+      )
+    )
     const rows = this.connection.db
       .query(SQLITE_ACCOUNTING_OVERVIEW_SQL)
       .all(
@@ -103,8 +109,8 @@ export class SqliteAiCostStorage implements AiCostStorage {
         query.modelId ?? null,
         query.modelId ?? null,
         ...sqliteAccountingFilterParameters(query),
-        input.bucket,
-        input.bucket
+        boundaries,
+        boundaries
       ) as AggregateRow[]
     return buildAiAccountingOverviewFromFragments(input, rows.map(aggregateFragmentFromRow))
   }
@@ -253,6 +259,19 @@ const SQLITE_ACCOUNTING_LIST_PAGE_SQL = `
   LIMIT ? OFFSET ?
 `
 
+/**
+ * The period a call belongs to: the latest start at or before it, from the starts the caller
+ * computed on the zone's calendar. SQLite has no time zone support, so unlike PostgreSQL it cannot
+ * read a call's wall clock; a repeated hour at the end of daylight saving time can therefore land
+ * in the period after it.
+ */
+const SQLITE_ACCOUNTING_BUCKET = `(
+    SELECT boundary.value FROM json_each(?) AS boundary
+    WHERE boundary.value <= occurred_at
+    ORDER BY boundary.value DESC
+    LIMIT 1
+  )`
+
 const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
   WITH classified AS (
     SELECT usage.provider_id,
@@ -321,29 +340,10 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       filtered.*
     FROM filtered
     UNION ALL
-    SELECT 'series', NULL, NULL, NULL,
-      CASE ?
-        WHEN 'hour' THEN strftime('%Y-%m-%dT%H:00:00.000Z', occurred_at)
-        WHEN 'day' THEN strftime('%Y-%m-%dT00:00:00.000Z', occurred_at)
-        ELSE strftime(
-          '%Y-%m-%dT00:00:00.000Z',
-          occurred_at,
-          printf('-%d days', (CAST(strftime('%w', occurred_at) AS INTEGER) + 6) % 7)
-        )
-      END,
-      filtered.*
+    SELECT 'series', NULL, NULL, NULL, ${SQLITE_ACCOUNTING_BUCKET}, filtered.*
     FROM filtered
     UNION ALL
-    SELECT 'modelSeries', provider_id, requested_model_id, NULL,
-      CASE ?
-        WHEN 'hour' THEN strftime('%Y-%m-%dT%H:00:00.000Z', occurred_at)
-        WHEN 'day' THEN strftime('%Y-%m-%dT00:00:00.000Z', occurred_at)
-        ELSE strftime(
-          '%Y-%m-%dT00:00:00.000Z',
-          occurred_at,
-          printf('-%d days', (CAST(strftime('%w', occurred_at) AS INTEGER) + 6) % 7)
-        )
-      END,
+    SELECT 'modelSeries', provider_id, requested_model_id, NULL, ${SQLITE_ACCOUNTING_BUCKET},
       filtered.*
     FROM filtered
     UNION ALL

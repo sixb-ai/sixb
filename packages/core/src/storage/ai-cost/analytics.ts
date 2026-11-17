@@ -1,4 +1,6 @@
+import { calendarPeriodStart, calendarPeriods, canonicalTimeZone } from "../../calendar"
 import { MODEL_KINDS, type ModelKind } from "../../models/definitions"
+import { DEFAULT_PROJECT_TIME_ZONE } from "../../runtime/locale"
 import { type AiModelCallUsageRecord, normalizeAiModelCallUsage } from "../ai-usage"
 import type {
   AiAccountingAgentBreakdown,
@@ -26,7 +28,6 @@ import type {
 
 const DEFAULT_MODEL_CALL_PAGE_SIZE = 50
 const MAX_MODEL_CALL_PAGE_SIZE = 200
-const MAX_CHART_BUCKETS = 10_000
 
 /** One joined immutable model-call row used by in-memory analytics and bounded SQL pages. */
 export interface AiAccountingRecordSetItem {
@@ -41,6 +42,8 @@ export interface NormalizedAiAccountingQuery extends AiAccountingFilters {
   readonly projectId: string
   readonly from: Date
   readonly to: Date
+  /** The IANA zone whose calendar a series buckets by. */
+  readonly timeZone: string
 }
 
 export interface NormalizedAiModelCallAccountingQuery extends NormalizedAiAccountingQuery {
@@ -123,10 +126,21 @@ export function normalizeAiAccountingQuery(
     assertNonBlank(input.source.workflowId, "accounting source workflowId")
   }
   if (input.modelKind !== undefined) aiAccountingModelKind(input.modelKind)
+  const requestedTimeZone = "timeZone" in input ? input.timeZone : undefined
+  const timeZone =
+    requestedTimeZone === undefined
+      ? DEFAULT_PROJECT_TIME_ZONE
+      : canonicalTimeZone(requestedTimeZone)
+  if (timeZone === undefined) {
+    throw new TypeError(
+      `[Sixb] AI accounting timeZone must be an IANA time zone such as 'Europe/Paris'; received ${JSON.stringify(requestedTimeZone)}.`
+    )
+  }
   return {
     projectId: input.projectId,
     from: new Date(input.from),
     to: new Date(input.to),
+    timeZone,
     ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
     ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
     ...(input.requester === undefined ? {} : { requester: input.requester }),
@@ -210,7 +224,7 @@ export function buildAiAccountingOverview(
   const query = normalizeAiAccountingQuery(input)
   assertAiAccountingBucket(input.bucket)
   const items = Array.from(source).filter((item) => aiAccountingItemMatchesQuery(item, query))
-  const periods = accountingPeriods(query.from, query.to, input.bucket)
+  const periods = calendarPeriods(query.from, query.to, input.bucket, query.timeZone)
   const periodItems = new Map<number, AiAccountingRecordSetItem[]>(
     periods.map((period) => [period.start.getTime(), []])
   )
@@ -223,7 +237,11 @@ export function buildAiAccountingOverview(
   const workflowItems = new Map<string, AiAccountingRecordSetItem[]>()
 
   for (const item of items) {
-    const periodStart = aiAccountingBucketStart(item.usage.occurredAt, input.bucket).getTime()
+    const periodStart = calendarPeriodStart(
+      item.usage.occurredAt,
+      input.bucket,
+      query.timeZone
+    ).getTime()
     periodItems.get(periodStart)?.push(item)
     const modelKey = JSON.stringify([item.usage.providerId, item.usage.requestedModelId])
     appendGrouped(modelItems, modelKey, item)
@@ -334,7 +352,7 @@ export function buildAiAccountingOverviewFromFragments(
   fragments: Iterable<AiAccountingAggregateFragment>
 ): AiAccountingOverview {
   const query = normalizeAiAccountingQuery(input)
-  const periods = accountingPeriods(query.from, query.to, input.bucket)
+  const periods = calendarPeriods(query.from, query.to, input.bucket, query.timeZone)
   const totals = aggregateFragmentAccumulator()
   const series = new Map<number, AggregateFragmentAccumulator>(
     periods.map((period) => [period.start.getTime(), aggregateFragmentAccumulator()])
@@ -507,19 +525,6 @@ export function toAccountingItem(item: AiAccountingRecordSetItem): AiModelCallAc
     ...(item.cost === undefined ? {} : { cost: item.cost }),
     valuationStatus: item.cost?.status ?? "unvalued",
   }
-}
-
-export function aiAccountingBucketStart(at: Date, bucket: AiAccountingBucket): Date {
-  assertDate(at, "accounting bucket timestamp")
-  assertAiAccountingBucket(bucket)
-  const start = new Date(at)
-  start.setUTCMinutes(0, 0, 0)
-  if (bucket === "hour") return start
-  start.setUTCHours(0)
-  if (bucket === "day") return start
-  const mondayOffset = (start.getUTCDay() + 6) % 7
-  start.setUTCDate(start.getUTCDate() - mondayOffset)
-  return start
 }
 
 function aggregateAccountingItems(
@@ -749,32 +754,6 @@ function requiredFragmentDate(value: Date | undefined, field: string): Date {
   if (value === undefined) throw new TypeError(`[Sixb] AI accounting SQL ${field} is missing.`)
   assertDate(value, field)
   return value
-}
-
-function accountingPeriods(
-  from: Date,
-  to: Date,
-  bucket: AiAccountingBucket
-): Array<{ start: Date; end: Date }> {
-  const result: Array<{ start: Date; end: Date }> = []
-  let cursor = aiAccountingBucketStart(from, bucket)
-  while (cursor.getTime() < to.getTime()) {
-    if (result.length >= MAX_CHART_BUCKETS) {
-      throw new RangeError(`[Sixb] AI accounting query exceeds ${MAX_CHART_BUCKETS} chart buckets.`)
-    }
-    const next = nextBucket(cursor, bucket)
-    result.push({ start: new Date(cursor), end: next })
-    cursor = next
-  }
-  return result
-}
-
-function nextBucket(start: Date, bucket: AiAccountingBucket): Date {
-  const next = new Date(start)
-  if (bucket === "hour") next.setUTCHours(next.getUTCHours() + 1)
-  else if (bucket === "day") next.setUTCDate(next.getUTCDate() + 1)
-  else next.setUTCDate(next.getUTCDate() + 7)
-  return next
 }
 
 function appendGrouped<TKey extends string | number>(

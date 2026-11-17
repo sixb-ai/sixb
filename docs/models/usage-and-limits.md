@@ -15,6 +15,9 @@ they cost over the last 24 hours, 7, 30 or 90 days. **Spend** shows:
 | Breakdown | Spend by model, source (agent chats, each workflow, actions), person or kind of model, with its change and trend |
 | Conversations and runs | Every conversation, workflow run and action run that called a model. Open one for its turns or steps, then a call to see how it was priced |
 
+Days, weeks and hours follow the browser you read the page in, so the last bar is your today and a
+picked day is one of your days. Limits are the exception: they reset on UTC calendar months.
+
 Clicking a day, a model or a breakdown row filters the whole page to it. The filters are kept
 in the address, so a filtered page can be shared. A conversation's title and turns show only to
 people who can open it; everyone who can see usage sees its totals.

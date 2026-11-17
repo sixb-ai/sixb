@@ -7,6 +7,7 @@ import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import type { BlobStorage } from "../blob-storage/types"
 import { isValidFileRef } from "../blob-storage/validation"
+import { canonicalTimeZone } from "../calendar"
 import {
   canInheritAgentRequestAuthorization,
   createInheritedAgentExecutionRecord,
@@ -22,7 +23,7 @@ import type {
 } from "../models"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import { resolveLanguageModel } from "../models/resolve"
-import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
+import { canonicalLocale } from "../runtime/locale"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentApprovalMode,

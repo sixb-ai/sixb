@@ -23,6 +23,7 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { canonicalTimeZone } from "../calendar"
 import { registerConnectorConnectionCallbackProcess } from "../connectors/connections/capability"
 import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
 import { ConnectorService } from "../connectors/service"
@@ -125,12 +126,7 @@ import { WebhookRegistry, WebhookValidationError } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
 import type { SixbDefinitions } from "./definitions"
 import { RuntimeError } from "./errors"
-import {
-  canonicalLocale,
-  canonicalTimeZone,
-  DEFAULT_PROJECT_LOCALE,
-  DEFAULT_PROJECT_TIME_ZONE,
-} from "./locale"
+import { canonicalLocale, DEFAULT_PROJECT_LOCALE, DEFAULT_PROJECT_TIME_ZONE } from "./locale"
 import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
