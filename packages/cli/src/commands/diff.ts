@@ -1,17 +1,26 @@
 import { dirname, resolve } from "node:path"
 import { writeJson } from "@sixb/cli-core"
-import { type GetDefinitionsManifestResponse, getDefinitionsManifest } from "@sixb/client"
+import {
+  createSixbClient,
+  type GetDefinitionsManifestResponse,
+  getDefinitionsManifest,
+  type SixbClient,
+} from "@sixb/client"
 import type { DatasetDefinition } from "@sixb/core"
 import {
   buildDefinitionsManifest,
   type DefinitionsManifest,
   diffManifests,
 } from "@sixb/core/internal/manifest"
-import { createCliSixbClient, unwrapSixbApiResult } from "../lib/api-client"
+import {
+  createCliSixbClient,
+  type SixbApiClientConfig,
+  unwrapSixbApiResult,
+} from "../lib/api-client"
 import { assertDeclaredEnv } from "../lib/env-config"
+import { SixbApiError, SixbCliError } from "../lib/errors"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveProfileApiClientConfig } from "../lib/profile-api-client"
-import { stopSixbProviders } from "../lib/runtime"
 import { diffView, renderStatic } from "../ui"
 
 export interface DiffOptions {
@@ -26,19 +35,17 @@ export interface DiffOptions {
 export async function runDiff(options: DiffOptions = {}): Promise<void> {
   const entry = resolve(options.entry ?? "sixb.config.ts")
   const config = await resolveProfileApiClientConfig(options)
-  // First, so a missing login fails before the project loads.
-  const base = toManifest(
-    unwrapSixbApiResult(await getDefinitionsManifest({ client: createCliSixbClient(config) }))
-  )
+  // An instance with sign-in off needs no token; one that needs it answers 401 and says so.
+  const client = config.token
+    ? createCliSixbClient(config)
+    : createSixbClient({ baseUrl: config.apiUrl })
+  // First, so an unreachable or refusing instance fails before the project loads.
+  const base = toManifest(await readManifest(client, config))
 
   await assertDeclaredEnv(dirname(entry))
-  const sixb = await loadSixbFromEntry(entry)
-  let head: DefinitionsManifest
-  try {
-    head = await buildDefinitionsManifest(sixb, { commit: null })
-  } finally {
-    await stopSixbProviders(sixb)
-  }
+  // Definitions only: storage is never opened, so nothing is stopped either. Stopping would drain
+  // the outbox, which reads a database this command has no reason to touch.
+  const head = await buildDefinitionsManifest(await loadSixbFromEntry(entry), { commit: null })
 
   const diff = diffManifests(base, head)
   if (diff.plan.datasets.some((step) => step.change === "refused")) process.exitCode = 1
@@ -48,8 +55,24 @@ export async function runDiff(options: DiffOptions = {}): Promise<void> {
   } else {
     await renderStatic(diffView({ apiUrl: config.apiUrl, commit: base.commit, diff }))
   }
-  // Loading the project can leave a client retrying a server it never reached; the answer is out.
+  // Providers the config created may hold the process open; the answer is out.
   process.exit(process.exitCode ?? 0)
+}
+
+async function readManifest(
+  client: SixbClient,
+  config: SixbApiClientConfig
+): Promise<GetDefinitionsManifestResponse> {
+  try {
+    return unwrapSixbApiResult(await getDefinitionsManifest({ client }))
+  } catch (error) {
+    if (error instanceof SixbApiError && error.status === 401 && !config.token) {
+      throw new SixbCliError(`[SixbCLI] ${config.apiUrl} needs you to sign in.`, {
+        remediation: `Run \`sixb login ${config.apiUrl}\`, or set SIXB_API_URL and SIXB_API_TOKEN.`,
+      })
+    }
+    throw error
+  }
 }
 
 function toManifest(response: GetDefinitionsManifestResponse): DefinitionsManifest {
