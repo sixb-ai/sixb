@@ -102,6 +102,32 @@ describe("agent system prompt", () => {
   })
 
   test.each([
+    ["write", true],
+    ["read", false],
+  ] as const)("tells a thread on a branch of the project to push each checked step (access=%s)", (authenticatedAccess, pushes) => {
+    // Drop the projectBranch case in renderWorkspaceChangeRule and a branch thread never pushes,
+    // so its runtime never shows the change.
+    const prompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      workspace: {
+        workingDirectory: "/workspace/repository",
+        retention: "persistent",
+        source: {
+          type: "git",
+          url: "https://github.com/acme/operations.git",
+          authenticatedAccess,
+          projectBranch: "vendor-invoices",
+        },
+      },
+    })
+    expect(prompt.includes('on branch "vendor-invoices". Its runtime serves what is pushed')).toBe(
+      pushes
+    )
+    expect(prompt.includes("Do not commit or push unless the user requests it.")).toBe(!pushes)
+  })
+
+  test.each([
     undefined,
     "read",
     "write",

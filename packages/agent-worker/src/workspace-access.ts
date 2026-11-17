@@ -142,6 +142,9 @@ export class WorkspaceAccess {
               type: source.type,
               url: this.sourceUrl.href,
               ...(this.auth ? { authenticatedAccess: source.access ?? "read" } : {}),
+              ...(this.input.recipe.env?.SIXB_SOURCE_BRANCH
+                ? { projectBranch: this.input.recipe.env.SIXB_SOURCE_BRANCH }
+                : {}),
             },
           }
         : {}),

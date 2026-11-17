@@ -154,6 +154,11 @@ export interface AgentWorkspacePromptContext {
     readonly type: "git"
     readonly url: string
     readonly authenticatedAccess?: "read" | "write"
+    /**
+     * Set when the checkout is a branch of the project's own repository: its runtime serves what
+     * is pushed to that branch, for the people working with the agent to see.
+     */
+    readonly projectBranch?: string
   }
   /**
    * The instruction files the workspace carries, its repository's root first, as read when it was
@@ -857,16 +862,23 @@ function renderWorkspaceSource(
               `Authenticated access: ${source.authenticatedAccess === "write" ? "read and write" : "read"}.`,
             ]
           : []),
-        renderWorkspaceChangeRule(retention, source.authenticatedAccess),
+        renderWorkspaceChangeRule(retention, source),
       ]
   }
 }
 
-/** A thread's checkout follows the user; a run's is discarded, so only a push keeps its work. */
+/**
+ * A thread's checkout follows the user; a run's is discarded, so only a push keeps its work. A
+ * branch of the project is the exception: a push is how the user sees the change running.
+ */
 function renderWorkspaceChangeRule(
   retention: AgentWorkspacePromptContext["retention"],
-  access: NonNullable<AgentWorkspacePromptContext["source"]>["authenticatedAccess"]
+  source: NonNullable<AgentWorkspacePromptContext["source"]>
 ): string {
+  const access = source.authenticatedAccess
+  if (source.projectBranch !== undefined && access === "write") {
+    return `This is the project's own code, on branch ${quoteWorkspaceValue(source.projectBranch)}. Its runtime serves what is pushed to that branch: once a change checks out here (types, tests), commit it with a message that says what changed and push it, one step at a time, so the user sees each step running.`
+  }
   if (retention === "persistent") return "Do not commit or push unless the user requests it."
 
   return access === "write"
