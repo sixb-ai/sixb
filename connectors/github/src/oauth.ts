@@ -113,11 +113,20 @@ export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL):
         )
       },
 
+      /**
+       * Revokes this authorization's access token, never the person's grant. GitHub keeps one grant
+       * per person and App, and deleting it ends every token issued under it: the one a second
+       * connection just stored, another slot's, another project's on the same App. Sixb revokes the
+       * older authorization once a newer one replaces it, so a grant-wide revoke would end both.
+       *
+       * The refresh token has no revocation endpoint of its own. Sixb deletes its copy, and the
+       * person can still remove the App from their GitHub settings.
+       */
       async revoke(context, credentials) {
         let response: Response
         try {
           response = await fetch(
-            new URL(`applications/${encodeURIComponent(clientId)}/grant`, apiBase),
+            new URL(`applications/${encodeURIComponent(clientId)}/token`, apiBase),
             {
               method: "DELETE",
               redirect: "error",
@@ -134,15 +143,17 @@ export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL):
         } catch (error) {
           throw new ConnectorOAuthError(
             "retryable",
-            "[SixbGitHub] GitHub grant revocation failed.",
+            "[SixbGitHub] GitHub token revocation failed.",
             { cause: error }
           )
         }
-        // 404 means the grant was already revoked on GitHub.
+
+        // 404: the token is no longer valid, because it expired or was already revoked.
         if (response.status === 204 || response.status === 404) return
+
         throw new ConnectorOAuthError(
           response.status === 429 || response.status >= 500 ? "retryable" : "terminal",
-          `[SixbGitHub] GitHub rejected grant revocation (${response.status}).`
+          `[SixbGitHub] GitHub rejected token revocation (${response.status}).`
         )
       },
     },

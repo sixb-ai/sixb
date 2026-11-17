@@ -5,7 +5,18 @@ import {
   ConnectorOAuthError,
   type ConnectorOAuthErrorKind,
   defineConnector,
+  InMemoryStorage,
 } from "@sixb/core"
+import { createConnectorCredentialProtectorFromKey } from "../../../packages/core/src/connectors/credentials"
+import { ConnectorService } from "../../../packages/core/src/connectors/service"
+import {
+  callbackUrl,
+  encryptionKey,
+  managementCommand,
+  projectOwner,
+  requireConnectionProcess,
+  seedConnectorActors,
+} from "../../../packages/core/tests/connector-connections.fixture"
 import { type GitHubConnector, type GitHubOAuthConnector, github } from "../src/github"
 import { githubOAuth } from "../src/sandbox"
 import type { GitHubOAuthOptions } from "../src/types/options"
@@ -275,7 +286,7 @@ describe("github managed OAuth", () => {
     ).toBe("terminal")
   })
 
-  test("discovers the authenticated GitHub user and revokes grants idempotently", async () => {
+  test("discovers the authenticated GitHub user and revokes only its own token, idempotently", async () => {
     const calls: { url: string; init?: RequestInit }[] = []
     let revokeStatus = 204
     globalThis.fetch = Object.assign(
@@ -290,7 +301,7 @@ describe("github managed OAuth", () => {
             avatar_url: "https://avatars.githubusercontent.com/u/4242",
           })
         }
-        if (url.endsWith("/applications/Iv1.github123/grant")) {
+        if (url.endsWith("/applications/Iv1.github123/token")) {
           return new Response(null, { status: revokeStatus })
         }
         throw new Error(`Unexpected URL: ${url}`)
@@ -358,6 +369,107 @@ describe("github managed OAuth", () => {
     const user = await client.users.getAuthenticated()
     expect(invalidated).toBe(1)
     expect((user as unknown as { auth: string }).auth).toBe("Bearer ghu_fresh")
+  })
+})
+
+/**
+ * GitHub's side of one person's grant to the App. Every token the token endpoint issues lives under
+ * that grant: deleting the grant ends all of them, deleting a token ends only that one.
+ */
+function githubGrant() {
+  const live = new Set<string>()
+  let issued = 0
+
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const bearer = new Headers(init?.headers).get("Authorization")?.replace(/^Bearer /, "")
+
+      if (url.href === "https://github.com/login/oauth/access_token") {
+        issued += 1
+        live.add(`ghu_${issued}`)
+        return Response.json({
+          access_token: `ghu_${issued}`,
+          refresh_token: `ghr_${issued}`,
+          expires_in: 28_800,
+          token_type: "bearer",
+          scope: "",
+        })
+      }
+
+      if (url.href === "https://api.github.com/user") {
+        if (!bearer || !live.has(bearer)) return Response.json({}, { status: 401 })
+        return Response.json({ id: 4242, login: "adalovelace" })
+      }
+
+      if (url.href === "https://api.github.com/applications/Iv1.github123/grant") {
+        live.clear()
+        return new Response(null, { status: 204 })
+      }
+
+      if (url.href === "https://api.github.com/applications/Iv1.github123/token") {
+        const { access_token } = JSON.parse(String(init?.body))
+        return new Response(null, { status: live.delete(access_token) ? 204 : 404 })
+      }
+
+      throw new Error(`Unexpected URL: ${url.href}`)
+    },
+    { preconnect() {} }
+  ) as typeof fetch
+
+  return { isLive: (token: string) => live.has(token) }
+}
+
+describe("connections that share a person's GitHub grant", () => {
+  test("connecting an account again leaves the new connection's token valid", async () => {
+    // Regression proof: revoke with DELETE /applications/{client_id}/grant in oauth.ts; GitHub
+    // ends ghu_2 along with ghu_1 and the stored token is dead.
+    const grant = githubGrant()
+    const definition = defineConnector("social", connector())
+    const storage = new InMemoryStorage()
+    await seedConnectorActors(storage, "project", new Date())
+
+    const service = new ConnectorService("project", [definition], {
+      storage,
+      credentialProtector: createConnectorCredentialProtectorFromKey(encryptionKey),
+    })
+    const process = requireConnectionProcess(service)
+
+    const connect = async () => {
+      const started = await process.startAuthorization(managementCommand(), definition.id, {
+        owner: projectOwner,
+        slot: "social",
+        redirectUri: callbackUrl,
+      })
+      const { authorizationId } = await process.completeAuthorization(
+        managementCommand(),
+        definition.id,
+        {
+          state: new URL(started.authorizationUrl).searchParams.get("state")!,
+          code: "authorization-code",
+          redirectUri: callbackUrl,
+        }
+      )
+      await process.selectAccount(managementCommand(), definition.id, {
+        authorizationId,
+        accountId: "4242",
+        owner: projectOwner,
+        slot: "social",
+      })
+    }
+
+    // The same GitHub account, connected twice: the second authorization replaces the first,
+    // and Sixb revokes the first.
+    await connect()
+    await connect()
+
+    const stored = await service
+      .createConnectionTokenSource(definition, { owner: projectOwner, slot: "social" })
+      .get()
+
+    expect(stored.accessToken).toBe("ghu_2")
+    expect(grant.isLive("ghu_1")).toBe(false)
+    expect(grant.isLive("ghu_2")).toBe(true)
   })
 })
 
