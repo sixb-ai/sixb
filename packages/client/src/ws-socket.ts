@@ -22,6 +22,11 @@ import { getSixbSessionAccessToken, SixbSessionEndedError } from "./session"
 const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
 const DEFAULT_READY_TIMEOUT_MS = 10_000
+/** RFC 6455 Service Restart: sent when a server drains so clients hop silently to the new slot. */
+export const SERVICE_RESTART_CLOSE_CODE = 1012
+const SERVICE_RESTART_MIN_DELAY_MS = 50
+const SERVICE_RESTART_JITTER_MS = 100
+const SERVICE_RESTART_GRACE_MS = 1_500
 
 export interface ReconnectingSocketState {
   readonly connected: boolean
@@ -112,11 +117,21 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   let state = INITIAL_STATE
   let stopped = false
   let openedOnce = false
+  let handingOff = false
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let handoffTimer: ReturnType<typeof setTimeout> | null = null
   let connectionGeneration = 0
   // Reconnects since the last connection that was ready, for the backoff.
   let failures = 0
+
+  const clearHandoff = () => {
+    handingOff = false
+    if (handoffTimer) {
+      clearTimeout(handoffTimer)
+      handoffTimer = null
+    }
+  }
 
   const setState = (next: ReconnectingSocketState) => {
     state = next
@@ -130,12 +145,17 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     },
   }
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (serviceRestart = false) => {
     if (!reconnect || stopped || reconnectTimer) return
-    const delay = options.maxReconnectDelayMs
-      ? Math.min(options.maxReconnectDelayMs, reconnectDelayMs * 2 ** failures)
-      : reconnectDelayMs
-    failures += 1
+    const delay = serviceRestart
+      ? Math.min(
+          reconnectDelayMs,
+          SERVICE_RESTART_MIN_DELAY_MS + Math.floor(Math.random() * SERVICE_RESTART_JITTER_MS)
+        )
+      : options.maxReconnectDelayMs
+        ? Math.min(options.maxReconnectDelayMs, reconnectDelayMs * 2 ** failures)
+        : reconnectDelayMs
+    if (!serviceRestart) failures += 1
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       void connect()
@@ -145,7 +165,11 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   const connect = async () => {
     if (stopped) return
     const generation = ++connectionGeneration
-    setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
+    setState({
+      connected: false,
+      reconnecting: !handingOff && (openedOnce || state.reconnecting),
+      error: null,
+    })
 
     let protocols: readonly string[] | undefined
     let accessToken: string | null = null
@@ -161,6 +185,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       }
     } catch (error) {
       if (stopped || generation !== connectionGeneration) return
+      clearHandoff()
       sink.reportError(error instanceof Error ? error.message : String(error))
       const retry =
         reconnect &&
@@ -193,13 +218,17 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     ws.onopen = () => {
       if (stopped) return
       openedOnce = true
-      if (!options.readyWhen) failures = 0
+      if (!options.readyWhen) {
+        failures = 0
+        clearHandoff()
+      }
       setState({ connected: true, reconnecting: false, error: null })
       if (!options.subscribeWhen) subscribe()
       if (options.readyWhen) {
         readyTimer = setTimeout(
           () => {
             if (stopped || socket !== ws) return
+            clearHandoff()
             try {
               sink.reportError(
                 options.readyTimeoutMessage ?? "Websocket protocol handshake timed out."
@@ -218,6 +247,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       if (options.subscribeWhen?.(messageEvent.data)) subscribe()
       if (options.readyWhen?.(messageEvent.data)) {
         clearReadyTimer()
+        clearHandoff()
         failures = 0
       }
       options.onMessage(messageEvent.data, sink)
@@ -225,6 +255,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
 
     ws.onerror = () => {
       if (stopped) return
+      clearHandoff()
       sink.reportError(options.connectionErrorMessage)
     }
 
@@ -237,6 +268,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
 
       // The shared link ended: the server would refuse every reconnect.
       if (event?.code === SHARED_ACCESS_ENDED_CLOSE_CODE) {
+        clearHandoff()
         stopped = true
         sink.reportError(SHARED_ACCESS_ENDED)
         setState({ connected: false, reconnecting: false, error: SHARED_ACCESS_ENDED })
@@ -244,6 +276,28 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
         return
       }
 
+      // Planned server restart (1012): hop immediately with jitter and suppress the reconnecting
+      // indicator during the brief handoff unless the new server fails to answer in time.
+      if (
+        reconnect &&
+        event?.code === SERVICE_RESTART_CLOSE_CODE &&
+        !handingOff &&
+        failures === 0
+      ) {
+        handingOff = true
+        handoffTimer = setTimeout(() => {
+          handoffTimer = null
+          if (!stopped && handingOff && !state.connected) {
+            handingOff = false
+            setState({ connected: false, reconnecting: true, error: state.error })
+          }
+        }, SERVICE_RESTART_GRACE_MS)
+        setState({ connected: false, reconnecting: false, error: state.error })
+        scheduleReconnect(true)
+        return
+      }
+
+      clearHandoff()
       setState({ connected: false, reconnecting: reconnect, error: state.error })
       scheduleReconnect()
     }
@@ -261,6 +315,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     close() {
       stopped = true
       connectionGeneration += 1
+      clearHandoff()
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

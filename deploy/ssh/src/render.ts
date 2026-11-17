@@ -153,6 +153,7 @@ export function renderCaddySnippet(release: DeployRelease): string {
         ...(service.name === "api" ? compressJson() : []),
         `\treverse_proxy ${service.http.host}:${service.http.port} {`,
         "\t\tlb_try_duration 5s",
+        ...(service.name === "api" ? keepWebSocketsThroughReload(service) : []),
         "\t}",
         ...(pages ? updatePageOnProxyErrors() : []),
         "}",
@@ -160,6 +161,17 @@ export function renderCaddySnippet(release: DeployRelease): string {
     ]
   })
   return [`# ${GENERATED}`, "", sites.join("\n\n"), ""].join("\n")
+}
+
+/**
+ * A reload closes every WebSocket Caddy proxies unless it is told to wait, and each deploy reloads
+ * Caddy before the old API retires. Kept open, a browser's socket stays on the retiring API, which
+ * closes it with 1012 so the page reconnects without showing a drop. The wait covers the API's
+ * whole retiring window; the API closes its sockets as soon as it starts draining.
+ */
+function keepWebSocketsThroughReload(service: DeployReleaseService): string[] {
+  const seconds = retiringKillTimeoutMs(service.process.killTimeoutMs) / 1000
+  return [`\t\tstream_close_delay ${seconds}s`]
 }
 
 /**

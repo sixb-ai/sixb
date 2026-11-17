@@ -49,6 +49,13 @@ export function renderCheckScript(input: {
     'if [ -n "$missing" ]; then emit server.tools fixable "missing:$missing"',
     'else emit server.tools ok "Caddy $(caddy version 2>/dev/null | cut -d" " -f1), git, curl, unzip"; fi',
     "",
+    // The routes keep WebSockets open through a reload with `stream_close_delay`, new in Caddy 2.7.
+    "if command -v caddy > /dev/null; then",
+    '  caddy_version="$(caddy version 2>/dev/null | cut -d" " -f1 | sed "s/^v//")"',
+    '  if [ "$(printf "%s\\n" 2.7.0 "$caddy_version" | sort -V | head -n 1)" = 2.7.0 ]; then emit server.caddy ok "$caddy_version"',
+    '  else emit server.caddy manual "$caddy_version is older than 2.7"; fi',
+    "fi",
+    "",
     'if [ -e "/var/lib/systemd/linger/$USER" ]; then emit server.linger ok "on for $USER"',
     'else emit server.linger fixable "off for $USER: services would stop when you log out"; fi',
     "",
@@ -174,6 +181,7 @@ const LABELS: Readonly<Record<string, string>> = {
   "server.os": "Server",
   "server.tools": "Server tools",
   "server.linger": "Services at boot",
+  "server.caddy": "Caddy version",
   "server.reload": "Caddy reload",
   "server.routes": "Caddy routes",
   "server.admin-api": "Caddy admin API",
@@ -205,6 +213,13 @@ function describe(
     return {
       ...check,
       remedy: "Give this service another port in the target's `ports` or `standbyPorts`.",
+    }
+  }
+  if (id === "server.caddy") {
+    return {
+      ...check,
+      remedy:
+        "Upgrade Caddy from its own apt repository: https://caddyserver.com/docs/install#debian-ubuntu-raspbian",
     }
   }
   if (id === "server.admin-api") {

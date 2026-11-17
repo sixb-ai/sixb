@@ -71,6 +71,8 @@ import {
 
 // Clients send only subscription messages; Bun's default would buffer up to 16 MB for one.
 export const MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
+/** RFC 6455 Service Restart: tells clients to hand off immediately to the new release. */
+const SERVICE_RESTART_CLOSE_CODE = 1012
 
 export interface SixbServerOptions {
   host: SixbHostView
@@ -692,7 +694,7 @@ function startApiServer(
     closeWebSockets: () => {
       for (const ws of [...openSockets]) {
         try {
-          ws.close(1001, "Server stopping")
+          ws.close(SERVICE_RESTART_CLOSE_CODE, "Service Restart")
         } catch {
           // Already closed.
         }

@@ -199,11 +199,28 @@ describe("deployment files", () => {
         "\t}",
         "\treverse_proxy 127.0.0.1:3002 {",
         "\t\tlb_try_duration 5s",
+        "\t\tstream_close_delay 300s",
         "\t}",
         "}",
       ].join("\n")
     )
     expect(snippet.match(/\tencode /g)?.length).toBe(1)
+  })
+
+  // Reproduce: leave `stream_close_delay` out of the API's site; Caddy's reload then closes every
+  // open WebSocket with 1001 before the retiring API can send 1012, and each page shows a drop.
+  test("keep the API's WebSockets on the retiring release through Caddy's reload", () => {
+    const api = release.services[0]
+    if (!api) throw new Error("The fixture has an api service.")
+
+    const longTurns: DeployRelease = {
+      ...release,
+      services: [{ ...api, process: { ...api.process, killTimeoutMs: 900_000 } }],
+    }
+
+    expect(renderCaddySnippet(release)).toContain("\t\tstream_close_delay 300s\n")
+    expect(renderCaddySnippet(release).match(/stream_close_delay/g)?.length).toBe(1)
+    expect(renderCaddySnippet(longTurns)).toContain("\t\tstream_close_delay 900s\n")
   })
 })
 

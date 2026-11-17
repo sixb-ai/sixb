@@ -101,9 +101,11 @@ class FakeWebSocket {
     this.sent.push(data)
   }
 
-  close(): void {
+  close(code?: number): void {
     this.closed = true
-    this.onclose?.()
+    ;(this.onclose as ((event?: { readonly code?: number }) => void) | null)?.(
+      code === undefined ? undefined : { code }
+    )
   }
 }
 
@@ -229,5 +231,65 @@ describe("createAgentRunSocket", () => {
     expect(received).toEqual(["running"])
 
     socket.close()
+  })
+
+  // Guard proof: drop the `SERVICE_RESTART_CLOSE_CODE` branch in `ws-socket.ts`; `reconnecting`
+  // flips to true at once and the socket waits the full 1000ms reconnect delay.
+  test("hands off silently on 1012 Service Restart and resumes from the latest cursor", () => {
+    jest.useFakeTimers()
+    try {
+      const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
+      const socket = createAgentRunSocket({
+        runId: "run-1",
+        onEvent: () => {},
+        onStateChange: (state) => states.push(state),
+      })
+
+      const ws1 = FakeWebSocket.instances[0]!
+      ws1.onopen?.()
+      ws1.onmessage?.({ data: agentRecordFrame("c1") })
+
+      ws1.close(1012)
+      expect(states.some((state) => state.reconnecting)).toBe(false)
+
+      jest.advanceTimersByTime(150)
+      expect(FakeWebSocket.instances).toHaveLength(2)
+      const ws2 = FakeWebSocket.instances[1]!
+      ws2.onopen?.()
+
+      expect(JSON.parse(ws2.sent[0]!)).toEqual({
+        type: "subscribe",
+        runId: "run-1",
+        afterCursor: "c1",
+      })
+      expect(states.some((state) => state.reconnecting)).toBe(false)
+      socket.close()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("surfaces reconnecting when a 1012 Service Restart does not recover in time", () => {
+    jest.useFakeTimers()
+    try {
+      const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
+      const socket = createAgentRunSocket({
+        runId: "run-1",
+        onEvent: () => {},
+        onStateChange: (state) => states.push(state),
+      })
+
+      FakeWebSocket.instances[0]!.onopen?.()
+      FakeWebSocket.instances[0]!.close(1012)
+
+      jest.advanceTimersByTime(1_499)
+      expect(states.at(-1)?.reconnecting).toBe(false)
+
+      jest.advanceTimersByTime(1)
+      expect(states.at(-1)?.reconnecting).toBe(true)
+      socket.close()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })
