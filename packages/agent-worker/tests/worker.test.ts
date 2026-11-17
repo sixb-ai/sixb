@@ -3873,30 +3873,45 @@ describe("AgentWorker", () => {
   })
 
   // The provider stopped the sandbox mid-turn, at its session's time limit for one. The model once
-  // retried `echo` thirty times in a dead sandbox, and the turn still read succeeded. Removal
-  // proof: drop the SandboxNotRunningError rethrow in the model loop; the model is called again.
-  test("ends a turn whose sandbox stopped, saying so, without calling the model again", async () => {
+  // retried `echo` thirty times in a dead sandbox, and the turn still read succeeded. Every tool
+  // ends the turn, wrapped errors included: `read` wraps what the sandbox threw. Removal proof: drop
+  // `onSandboxStopped` from createConversationAgentEnvironment; the model is called a second time.
+  test.each([
+    { tool: "bash", input: { command: "npm test" }, sent: "npm test" },
+    { tool: "read", input: { path: "notes/plan.md" }, sent: "notes/plan.md" },
+  ])("ends a turn whose sandbox stopped under $tool, saying so", async ({ tool, input, sent }) => {
     const sandbox = new RecordingSandbox("stopped-mid-turn")
     const runCommand = sandbox.runCommand.bind(sandbox)
     sandbox.runCommand = async (command, args = [], options) => {
-      if (args.some((arg) => arg.includes("npm test"))) {
+      if (args.some((arg) => arg.includes(sent))) {
         sandbox.status = "stopped"
         throw new SandboxNotRunningError("[Sandbox] sandbox stopped-mid-turn stopped.")
       }
       return runCommand(command, args, options)
     }
+
+    // Asked again, the model would answer: a turn that goes on succeeds, and the test says so.
     let modelCalls = 0
     const model = new WorkerTestModel({
       modelId: "mock-model",
       stream: async () => {
         modelCalls++
+        if (modelCalls > 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "I could not do it." },
+            { type: "text-end", id: "t" },
+            finish("stop"),
+          ])
+        }
         return stream([
           { type: "stream-start", warnings: [] },
           {
             type: "tool-call",
-            toolCallId: `bash-${modelCalls}`,
-            toolName: "bash",
-            input: JSON.stringify({ command: "npm test" }),
+            toolCallId: `${tool}-1`,
+            toolName: tool,
+            input: JSON.stringify(input),
           },
           finish("tool-calls"),
         ])
@@ -3923,14 +3938,21 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       id: requested.run.id,
     })
-    expect(run).toMatchObject({ status: "failed", error: { code: "agent.execution_failed" } })
-    expect(run?.error?.message).toContain("The sandbox stopped")
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "agent.execution_failed",
+        message: expect.stringContaining("send a message to go on"),
+      },
+    })
+
+    // The step that found it stopped is kept, with what the model read.
     const messages = await listMessages(agentStorageOf(host), requested.run.threadId)
     const parts = messages.flatMap((message) => (message.role === "assistant" ? message.parts : []))
     expect(parts).toContainEqual(
       expect.objectContaining({
         type: "tool-call",
-        toolName: "bash",
+        toolName: tool,
         state: "output-error",
         errorText: "The sandbox stopped: commands and files are no longer available in it.",
       })

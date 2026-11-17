@@ -1,4 +1,5 @@
-import type { Sandbox } from "@sixb/core"
+import { type Sandbox, SandboxNotRunningError } from "@sixb/core"
+import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
 import type { BackgroundCommands } from "./background-commands"
@@ -101,4 +102,53 @@ export async function acquireRunSandbox(
   if (instructions.length === 0) return acquired
 
   return { ...acquired, promptContext: { ...promptContext, instructions } }
+}
+
+/**
+ * The run's sandbox, which calls `onStopped` each time a command or a file write finds that its
+ * provider stopped it, such as at the end of a Vercel session. Whichever tool met it, nothing more
+ * runs in it: the run ends instead of the model retrying there.
+ */
+export function endsWhenStopped(
+  session: Sandbox,
+  onStopped: (error: SandboxNotRunningError) => void
+): Sandbox {
+  // Watched beside its caller, which gets the provider's own promise: its wait gains no step, and
+  // the run has ended before the caller reads the failure.
+  const watch = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = operation()
+    result.catch((error: unknown) => {
+      if (error instanceof SandboxNotRunningError) onStopped(error)
+    })
+    return result
+  }
+
+  return {
+    id: session.id,
+    provider: session.provider,
+    get status() {
+      return session.status
+    },
+    workingDirectory: session.workingDirectory,
+    ...(session.setRequestCredentials
+      ? { setRequestCredentials: session.setRequestCredentials.bind(session) }
+      : {}),
+    ...(session.credentialedUrl ? { credentialedUrl: session.credentialedUrl.bind(session) } : {}),
+    runCommand: (command, args, options) => watch(() => session.runCommand(command, args, options)),
+    writeFiles: (files) => watch(() => session.writeFiles(files)),
+    stop: () => session.stop(),
+    destroy: () => session.destroy(),
+  }
+}
+
+/** Why a run whose sandbox stopped ended, in the words its run and its reader see. */
+export function sandboxStoppedError(cause: SandboxNotRunningError, message: string): Error {
+  return withFailureMessage(
+    createSixbError(
+      "agent.execution_failed",
+      "[SixbAgent] The run's sandbox stopped; nothing more can run in it.",
+      { cause }
+    ),
+    message
+  )
 }
