@@ -6,6 +6,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ### Highlights
 
+- Projections publish to PostgreSQL faster: a full projection of 50k objects takes 9.5 s instead of
+  13.2 s, one with 50k links 25 s instead of 35 s, and a 10% change 1.9 s instead of 2.4 s, with
+  `@sixb/pg`. Plans in flight when it migrates start over.
 - Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
   portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
   ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
