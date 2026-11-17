@@ -31,6 +31,7 @@ import {
   VercelSandbox,
   type VercelSandboxClient,
 } from "./vercel-sandbox"
+import { sessionExpiry } from "./vercel-session"
 
 export type VercelSandboxRuntime = "node26" | "node24" | "node22" | "python3.13"
 
@@ -393,6 +394,10 @@ export async function createVercelSandbox(
     get status() {
       return session.status
     },
+    get expiresAt() {
+      return sessionExpiry(session)
+    },
+    extendTimeout: (durationMs) => session.extendTimeout(durationMs),
     runCommand: (command) => session.runCommand({ ...command, args: [...(command.args ?? [])] }),
     writeFiles: (files, opts) => session.writeFiles([...files], opts),
     stop: (opts) => session.stop(opts),

@@ -13,6 +13,7 @@ import {
   type SandboxStatus,
 } from "@sixb/core"
 import {
+  cappedCommandTimeout,
   exec,
   GUEST_COMMAND_UID,
   GUEST_CREDENTIALS_ENV,
@@ -20,6 +21,7 @@ import {
   type GuestCommand,
   guestCredentialedUrl,
   guestCredentialsCommands,
+  MAX_TIMER_DELAY_MS,
   unprivilegedGuestArgv,
 } from "@sixb/core/sandboxes"
 import {
@@ -67,6 +69,8 @@ const DEFAULT_WORKING_DIRECTORY = "/workspace"
 export class SmolvmSandbox implements Sandbox {
   readonly id: string
   readonly provider = "smolvm"
+  /** Commands are timed with a timer, which holds no longer delay. */
+  readonly maxCommandTimeout = MAX_TIMER_DELAY_MS
   readonly workingDirectory: string
 
   private currentStatus: SandboxStatus = "running"
@@ -207,7 +211,10 @@ export class SmolvmSandbox implements Sandbox {
 
     const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
     const cwd = posix.resolve(this.workingDirectory, options.cwd ?? ".")
-    const timeoutMs = options.timeout ?? this.defaultTimeoutMs
+    const timeoutMs = cappedCommandTimeout(
+      options.timeout ?? this.defaultTimeoutMs,
+      this.maxCommandTimeout
+    )
 
     const controller = new AbortController()
     const onUserAbort = (): void => controller.abort()

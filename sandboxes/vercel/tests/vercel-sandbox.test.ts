@@ -1,5 +1,5 @@
 import { describe, expect, jest, test } from "bun:test"
-import { SandboxError, SandboxNotRunningError } from "@sixb/core"
+import { SandboxError, SandboxNotRunningError, SandboxRequestRefusedError } from "@sixb/core"
 import { APIError } from "@vercel/sandbox"
 import type {
   VercelCommandClient,
@@ -7,7 +7,14 @@ import type {
   VercelRunCommandParams,
   VercelSandboxClient,
 } from "../src/vercel-sandbox"
-import { COMMAND_MARKER, KILLED_COMMAND_GRACE_MS, VercelSandbox } from "../src/vercel-sandbox"
+import {
+  COMMAND_MARKER,
+  KEEP_ALIVE_EXTENSION_MS,
+  KEEP_ALIVE_INTERVAL_MS,
+  KILLED_COMMAND_GRACE_MS,
+  VERCEL_MAX_COMMAND_TIMEOUT_MS,
+  VercelSandbox,
+} from "../src/vercel-sandbox"
 import {
   DEFAULT_VERCEL_SANDBOX_RUNTIME,
   type VercelCreateSandbox,
@@ -114,6 +121,97 @@ class FakeVercelClient implements VercelSandboxClient {
     this.deleteCalls += 1
   }
 }
+
+/** A client whose session ends at `expiresAt`, extended as Vercel extends it. */
+class ExpiringClient extends FakeVercelClient {
+  readonly extensions: number[] = []
+  /** What the next extension throws. */
+  extendFailure: unknown
+
+  constructor(public expiresAt: Date) {
+    super()
+  }
+
+  readonly extendTimeout = async (durationMs: number): Promise<void> => {
+    this.extensions.push(durationMs)
+    if (this.extendFailure) throw this.extendFailure
+    this.expiresAt = new Date(this.expiresAt.getTime() + durationMs)
+  }
+}
+
+// Nothing extended a session while a turn ran: a long turn outlived its VM, and every later
+// command failed. These drive the keepalive with fake timers.
+describe("VercelSandbox keepalive", () => {
+  // Removal proof: drop the interval in the constructor; the session is never extended.
+  test("extends a session that is about to end, for as long as the sandbox is open", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
+    try {
+      const client = new ExpiringClient(new Date("2026-11-17T19:05:00Z"))
+      const sandbox = new VercelSandbox({ client })
+
+      jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
+      await settle()
+      expect(client.extensions).toEqual([KEEP_ALIVE_EXTENSION_MS])
+
+      // Plenty left: nothing to do.
+      jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
+      await settle()
+      expect(client.extensions).toHaveLength(1)
+
+      await sandbox.stop()
+      jest.advanceTimersByTime(60 * KEEP_ALIVE_INTERVAL_MS)
+      await settle()
+      expect(client.extensions).toHaveLength(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Removal proof: drop the isSessionStopped branch in keepAlive; the next command reaches Vercel.
+  test("a session Vercel ended stops the sandbox, so the next call fails at once", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
+    try {
+      const client = new ExpiringClient(new Date("2026-11-17T19:02:00Z"))
+      client.extendFailure = new APIError(new Response(null, { status: 410 }), {
+        json: { error: { code: "sandbox_stopped" } },
+      })
+      const sandbox = new VercelSandbox({ client })
+
+      jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
+      await settle()
+
+      expect(sandbox.status).toBe("stopped")
+      await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(
+        SandboxNotRunningError
+      )
+      expect(client.commands).toHaveLength(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("stops asking once Vercel will not extend further, and keeps running", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const client = new ExpiringClient(new Date("2026-11-17T19:02:00Z"))
+      client.extendFailure = new APIError(new Response(null, { status: 400 }), {
+        json: { error: { code: "bad_request", message: "exceeds the plan's maximum" } },
+      })
+      const sandbox = new VercelSandbox({ client })
+
+      jest.advanceTimersByTime(3 * KEEP_ALIVE_INTERVAL_MS)
+      await settle()
+
+      expect(client.extensions).toHaveLength(1)
+      expect(sandbox.status).toBe("running")
+      expect(String(warn.mock.calls[0]?.[0])).toContain("would not extend the session")
+    } finally {
+      warn.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+})
 
 describe("VercelSandbox", () => {
   // Regression check: replace cwd resolution in runCommand with
@@ -304,6 +402,62 @@ describe("VercelSandbox", () => {
     expect(error).toBeInstanceOf(SandboxError)
     expect(error).not.toBeInstanceOf(SandboxNotRunningError)
     expect(sandbox.status).toBe("running")
+  })
+
+  // Prod, Nov 15–17: a background command asked for a 7-day timeout and Vercel answered 400 in
+  // 20 ms, every time. Removal proof: pass `options.timeout` to Vercel uncapped again.
+  test("caps a command's timeout at Vercel's five hours", async () => {
+    const client = new FakeVercelClient()
+    const sandbox = new VercelSandbox({ client })
+
+    await sandbox.runCommand("sleep", ["1"], { timeout: 7 * 24 * 60 * 60 * 1000 })
+
+    expect(sandbox.maxCommandTimeout).toBe(5 * 60 * 60 * 1000)
+    expect(client.commands[0].timeoutMs).toBe(VERCEL_MAX_COMMAND_TIMEOUT_MS)
+  })
+
+  // A 4xx answer to a start proves the command never ran, so a caller may go on as if it had not
+  // asked. Removal proof: drop the refusal branch from runCommand; the error is a plain
+  // SandboxError, which a persistent workspace must treat as uncertain.
+  test("a command Vercel refuses to start is a refusal that says why", async () => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status: 400 }), {
+      message: "Status code 400 is not ok",
+      json: { error: { code: "bad_request", message: "timeout must be at most 18000000" } },
+    })
+    const sandbox = new VercelSandbox({ client })
+
+    const error = await sandbox.runCommand("echo", ["hi"]).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(SandboxRequestRefusedError)
+    expect((error as Error).message).toBe(
+      "[Sandbox] Vercel refused the command (HTTP 400 bad_request): timeout must be at most 18000000"
+    )
+    expect(sandbox.status).toBe("running")
+  })
+
+  test.each([
+    ["a server error", 500],
+    ["a request timeout", 408],
+  ])("%s is not a refusal: the command may have started", async (_label, status) => {
+    const client = new FakeVercelClient()
+    client.failWith = new APIError(new Response(null, { status }), { json: {} })
+    const sandbox = new VercelSandbox({ client })
+
+    const error = await sandbox.runCommand("echo", ["hi"]).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(error).not.toBeInstanceOf(SandboxRequestRefusedError)
+  })
+
+  test("a file path outside the working directory is refused before anything is sent", async () => {
+    const client = new FakeVercelClient()
+    const sandbox = new VercelSandbox({ client })
+
+    await expect(
+      sandbox.writeFiles([{ path: "../../etc/passwd", contents: "x" }])
+    ).rejects.toBeInstanceOf(SandboxRequestRefusedError)
+    expect(client.writes).toHaveLength(0)
   })
 
   test("stop and destroy are idempotent and reject further work", async () => {

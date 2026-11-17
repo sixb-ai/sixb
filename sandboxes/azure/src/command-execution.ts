@@ -4,12 +4,14 @@ import { posix } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import {
   type CommandResult,
+  MAX_TIMER_DELAY_MS,
   type RunCommandOptions,
   SandboxError,
+  SandboxRequestRefusedError,
   type SandboxSessionOptions,
 } from "@sixb/core/sandboxes"
 import type { AzureSandboxClient } from "./azure-client"
-import { positiveMilliseconds, withLifecycleDeadline } from "./lifecycle"
+import { withLifecycleDeadline } from "./lifecycle"
 
 const DEFAULT_COMMAND_TIMEOUT = 300_000
 const CONTROL_ENV = "/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8"
@@ -75,10 +77,23 @@ export function validateEnvironment(env: Readonly<Record<string, string>> | unde
           !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0")
       ))
   ) {
-    throw new SandboxError(
+    throw new SandboxRequestRefusedError(
       "[Sandbox] Azure env requires string values and non-empty names without '=' or NUL."
     )
   }
+}
+
+/**
+ * A command's timeout, capped at the supervisor's 32-bit limit, as `positiveMilliseconds` checks
+ * the factory's. A timeout that is not a positive whole number of milliseconds is refused.
+ */
+function commandTimeout(timeout: number): number {
+  if (!Number.isInteger(timeout) || timeout < 1) {
+    throw new SandboxRequestRefusedError(
+      "[Sandbox] Azure timeout must be a positive whole number of milliseconds."
+    )
+  }
+  return Math.min(timeout, MAX_TIMER_DELAY_MS)
 }
 
 interface CommandInput {
@@ -95,16 +110,20 @@ export function resolveCommand(
   options: RunCommandOptions
 ): CommandInput {
   if (typeof command !== "string" || !command || command.includes("\0")) {
-    throw new SandboxError(
+    throw new SandboxRequestRefusedError(
       "[Sandbox] Azure command must be a non-empty executable name/path without NUL."
     )
   }
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
-    throw new SandboxError("[Sandbox] Azure command arguments must be strings without NUL.")
+    throw new SandboxRequestRefusedError(
+      "[Sandbox] Azure command arguments must be strings without NUL."
+    )
   }
   const cwd = options.cwd ?? defaults.workingDirectory
   if (typeof cwd !== "string" || !cwd || cwd.includes("\0"))
-    throw new SandboxError("[Sandbox] Azure cwd must be a non-empty path without NUL.")
+    throw new SandboxRequestRefusedError(
+      "[Sandbox] Azure cwd must be a non-empty path without NUL."
+    )
   validateEnvironment(options.env)
   return {
     command,
@@ -121,10 +140,7 @@ export function resolveCommand(
       ...defaults.env,
       ...options.env,
     },
-    timeoutMs: positiveMilliseconds(
-      options.timeout ?? defaults.timeout ?? DEFAULT_COMMAND_TIMEOUT,
-      "timeout"
-    ),
+    timeoutMs: commandTimeout(options.timeout ?? defaults.timeout ?? DEFAULT_COMMAND_TIMEOUT),
   }
 }
 

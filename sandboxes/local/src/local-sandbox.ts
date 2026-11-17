@@ -15,7 +15,7 @@ import {
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
-import { exec } from "@sixb/core/sandboxes"
+import { cappedCommandTimeout, exec, MAX_TIMER_DELAY_MS } from "@sixb/core/sandboxes"
 import { CredentialForwarder } from "./credential-forwarder"
 import { buildBwrapArgv, type DeniedPath } from "./isolation/bwrap"
 import {
@@ -49,6 +49,8 @@ type ResolvedDeniedPath = Pick<DeniedPath, "path"> & Partial<Pick<DeniedPath, "k
 export class LocalSandbox implements Sandbox {
   readonly id: string
   readonly provider = "local"
+  /** Commands are timed with a timer, which holds no longer delay. */
+  readonly maxCommandTimeout = MAX_TIMER_DELAY_MS
   readonly workingDirectory: string
 
   private currentStatus: SandboxStatus
@@ -174,7 +176,10 @@ export class LocalSandbox implements Sandbox {
     const argv = this.buildArgv(command, args)
     const env = this.mergeEnv(options.env)
     const cwd = resolve(this.workingDirectory, options.cwd ?? ".")
-    const timeoutMs = options.timeout ?? this.defaultTimeoutMs
+    const timeoutMs = cappedCommandTimeout(
+      options.timeout ?? this.defaultTimeoutMs,
+      this.maxCommandTimeout
+    )
 
     const controller = new AbortController()
     const onUserAbort = (): void => controller.abort()

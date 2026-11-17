@@ -27,9 +27,12 @@ export {
   sandboxProjectDirectory,
 } from "./environment"
 export {
+  cappedCommandTimeout,
+  MAX_TIMER_DELAY_MS,
   SandboxError,
   SandboxIsolationUnavailableError,
   SandboxNotRunningError,
+  SandboxRequestRefusedError,
   SandboxStateUnavailableError,
   SandboxTimeoutError,
 } from "./errors"

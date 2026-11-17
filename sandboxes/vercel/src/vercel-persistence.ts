@@ -7,11 +7,13 @@ import {
 import { APIError, type Session, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { withRequestCredentials } from "./network"
 import { VercelSandbox, type VercelSandboxClient } from "./vercel-sandbox"
+import { sessionExpiry } from "./vercel-session"
 
 type PersistentSession = Pick<
   Session,
   "sessionId" | "status" | "cwd" | "runCommand" | "writeFiles" | "stop" | "update"
->
+> &
+  Partial<Pick<Session, "createdAt" | "timeout" | "extendTimeout">>
 
 export interface VercelPersistentClient {
   readonly name: string
@@ -112,6 +114,10 @@ export async function bindPersistentSandbox(
     get status() {
       return session.status
     },
+    get expiresAt() {
+      return sessionExpiry(session)
+    },
+    ...(session.extendTimeout ? { extendTimeout: session.extendTimeout.bind(session) } : {}),
     runCommand: (params) => session.runCommand({ ...params, args: [...(params.args ?? [])] }),
     writeFiles: (files) =>
       session.writeFiles(

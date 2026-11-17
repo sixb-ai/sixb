@@ -61,6 +61,9 @@ export function sandboxProjectDirectory(session: Sandbox, hasSource: boolean): S
       return session.status
     },
     workingDirectory,
+    ...(session.maxCommandTimeout === undefined
+      ? {}
+      : { maxCommandTimeout: session.maxCommandTimeout }),
     ...(session.setRequestCredentials
       ? { setRequestCredentials: session.setRequestCredentials.bind(session) }
       : {}),

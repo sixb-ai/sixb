@@ -12,12 +12,14 @@ import {
   type SandboxStatus,
 } from "@sixb/core"
 import {
+  cappedCommandTimeout,
   GUEST_COMMAND_UID,
   GUEST_CREDENTIALS_ENV,
   GUEST_FORWARDER_NOT_RUNNING,
   type GuestCommand,
   guestCredentialedUrl,
   guestCredentialsCommands,
+  MAX_TIMER_DELAY_MS,
   unprivilegedGuestArgv,
 } from "@sixb/core/sandboxes"
 import {
@@ -67,6 +69,8 @@ const WRITE_FILE_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" && cat > "$1" && if 
 export class AppleContainerSandbox implements Sandbox {
   readonly id: string
   readonly provider = "apple-container"
+  /** Commands are timed with a timer, which holds no longer delay. */
+  readonly maxCommandTimeout = MAX_TIMER_DELAY_MS
   readonly workingDirectory: string
 
   private currentStatus: SandboxStatus = "running"
@@ -252,7 +256,10 @@ export class AppleContainerSandbox implements Sandbox {
         }),
         cwd: process.cwd(),
         env: hostEnv(),
-        timeoutMs: options.timeout ?? this.defaultTimeoutMs,
+        timeoutMs: cappedCommandTimeout(
+          options.timeout ?? this.defaultTimeoutMs,
+          this.maxCommandTimeout
+        ),
         signal: controller.signal,
       })
     } finally {

@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 import {
   type CommandResult,
+  cappedCommandTimeout,
   GUEST_CREDENTIAL_PATHS,
   GUEST_FORWARDER_NOT_RUNNING,
   guestCredentialedUrl,
   guestCredentialsCommands,
+  MAX_TIMER_DELAY_MS,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
@@ -50,6 +52,8 @@ export interface BoxdSandboxOptions {
 export class BoxdSandbox implements Sandbox {
   readonly id: string
   readonly provider = "boxd"
+  /** Commands are timed with a timer, which holds no longer delay. */
+  readonly maxCommandTimeout = MAX_TIMER_DELAY_MS
   readonly workingDirectory: string
   /** The machine's name, which is what a persistent sandbox resumes by. */
   readonly machineName: string
@@ -111,7 +115,10 @@ export class BoxdSandbox implements Sandbox {
     const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
     assertGuestEnv(env)
     const cwd = posix.resolve(this.workingDirectory, options.cwd ?? ".")
-    const timeoutMs = options.timeout ?? this.defaultTimeoutMs
+    const timeoutMs = cappedCommandTimeout(
+      options.timeout ?? this.defaultTimeoutMs,
+      this.maxCommandTimeout
+    )
     return this.collect(unprivilegedCommand(cwd, env, command, args), timeoutMs, options.signal)
   }
 

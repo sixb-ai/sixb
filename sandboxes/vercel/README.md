@@ -76,6 +76,10 @@ await resumed.stop()
 - Run env is supplied per command, not stored as named VM defaults. VM creation defaults to
   deny-all; the current session receives the requested network policy. Stop closes network access
   and checks the returned snapshot belongs to that session and was successfully created.
+- A command Vercel answers with a 4xx before it starts throws `SandboxRequestRefusedError`, with
+  Vercel's reason: nothing ran, so a persistent workspace stays saveable. A 5xx, a 408 or no answer
+  may have started it and stays a plain `SandboxError`. A 410 `sandbox_stopped`, from a command or
+  from the session's extension, stops the handle: every later call fails without reaching Vercel.
 - Failure during setup stops an acquired session without deleting the saved state. An uncertain
   provider request may require inspecting the named resource before retrying; there is no automatic
   destructive recovery. A failed stop remains failed on subsequent calls.
@@ -154,8 +158,8 @@ new VercelSandboxFactory({
 | `source` | — | Common Sixb HTTPS Git source; credentials and provider-specific clone options are not accepted. |
 | `resources` | Vercel default | `{ vcpus }`; memory is 2048 MB per vCPU. |
 | `ports` | `[]` | Ports to expose through Vercel sandbox domains. |
-| `sessionTimeoutMs` | Vercel default | Sandbox session lifetime; separate from Sixb's per-command timeout. |
-| `timeout` | — | Default Sixb per-command timeout, in ms. A timed-out or aborted command is killed with everything it started, found by its `SIXB_SANDBOX_COMMAND` environment variable; the call returns at most 5 seconds later. |
+| `sessionTimeoutMs` | Vercel default | Sandbox session lifetime at creation; separate from Sixb's per-command timeout. An open sandbox extends its session by 15 minutes whenever less than 5 are left, up to your plan's maximum, until it is stopped or destroyed. |
+| `timeout` | — | Default Sixb per-command timeout, in ms, capped at Vercel's 5 hours (`maxCommandTimeout`). A timed-out or aborted command is killed with everything it started, found by its `SIXB_SANDBOX_COMMAND` environment variable; the call returns at most 5 seconds later. |
 | `setupTimeoutMs` | `30_000` | Timeout for provider setup commands like creating a custom working directory. |
 | `snapshotExpiration` | Vercel default | Snapshot TTL in ms for named persistent creation. Does not enable persistence. |
 | `keepLastSnapshots` | Vercel default | Provider retention policy, e.g. `{ count: 1 }`. |
