@@ -7,6 +7,7 @@ import type {
   SandboxSourceCredentials,
 } from "@sixb/core/sandboxes"
 import { createAppJwtSigner } from "./app-auth"
+import { type GitHubOAuthClient, githubOAuthClientOf } from "./oauth-client"
 
 export interface GitHubAppOptions {
   readonly appId: string
@@ -18,15 +19,11 @@ export interface GitHubAppOptions {
 }
 
 export interface GitHubOAuthSandboxOptions {
-  /** Registered GitHub OAuth connector whose connection supplies the user's token. */
-  readonly connector: SandboxOAuthConnector
-  /** GitHub App client ID used to scope and revoke per-run tokens. */
-  readonly clientId: string
   /**
-   * GitHub App client secret used to scope and revoke per-run tokens.
-   * Never supplied to a sandbox or resolver result.
+   * The registered `github({ auth: { oauth } })` connector. Its connection supplies the user's
+   * token, and its OAuth client scopes and revokes each run's token.
    */
-  readonly clientSecret: string
+  readonly connector: SandboxOAuthConnector
   /**
    * Connection slot to read for the user (or project when `owner` is `"project"`).
    * Defaults to `"default"`.
@@ -204,13 +201,13 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
  * from the connected user while keeping repository isolation and per-run revocation.
  */
 export function githubOAuth(options: GitHubOAuthSandboxOptions): SandboxSourceAuth {
-  const connector = parseOAuthConnector(options.connector)
-  const clientId = parseClientId(options.clientId)
-  const clientSecret = parseClientSecret(options.clientSecret)
+  const { connector, client } = parseOAuthConnector(options.connector)
   const slot = parseSlot(options.slot)
   const ownerMode = parseOwnerMode(options.owner)
   const fallback = parseFallback(options.fallback)
-  const basicAuth = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+
+  // The client that issued the person's token is the only one GitHub lets scope or revoke it.
+  const { clientId, authorization: basicAuth } = client
   const encodedClientId = encodeURIComponent(clientId)
 
   return Object.freeze({
@@ -354,33 +351,33 @@ function parseAccess(source: SandboxSourceAuthInput["source"]): Access {
   return access
 }
 
-function parseOAuthConnector(value: unknown): SandboxOAuthConnector {
+function parseOAuthConnector(value: unknown): {
+  connector: SandboxOAuthConnector
+  client: GitHubOAuthClient
+} {
+  const client = record(value) ? githubOAuthClientOf(value.adapter) : undefined
   if (
     !record(value) ||
     value.kind !== "connector" ||
     typeof value.id !== "string" ||
     !value.id.trim() ||
-    !record(value.adapter) ||
-    !record(value.adapter.authentication) ||
-    value.adapter.authentication.type !== "oauth2"
+    !client
   ) {
-    throw new Error("[SixbGitHub] Sandbox OAuth requires a GitHub OAuth connector definition.")
+    throw new Error(
+      "[SixbGitHub] Sandbox OAuth requires a GitHub OAuth connector: one defined with " +
+        "github({ auth: { oauth } })."
+    )
   }
-  return value as unknown as SandboxOAuthConnector
-}
 
-function parseClientId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_.-]+$/.test(value)) {
-    throw new Error("[SixbGitHub] OAuth client ID must be a non-empty identifier.")
+  // Scoped tokens exist on github.com only, and `repository()` accepts github.com URLs only.
+  if (client.apiBaseUrl !== `${API}/`) {
+    throw new Error(
+      "[SixbGitHub] Sandbox OAuth supports github.com only; the connector's baseUrl points " +
+        "to another GitHub host."
+    )
   }
-  return value
-}
 
-function parseClientSecret(value: unknown): string {
-  if (typeof value !== "string" || !value.trim() || /[\r\n]/.test(value)) {
-    throw new Error("[SixbGitHub] OAuth client secret must be a non-empty string.")
-  }
-  return value
+  return { connector: value as unknown as SandboxOAuthConnector, client }
 }
 
 function parseSlot(value: string | undefined): string {

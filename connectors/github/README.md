@@ -93,7 +93,7 @@ membership visibility depends on the authenticated user's organization access.
 `@sixb/connector-github/sandbox` provides two `auth` helpers for sandbox factories (see [repository authentication](../../docs/sandboxes/overview.md#repository-authentication)):
 
 - `githubApp({ appId, privateKey })`: mints repository-scoped App installation tokens and attributes commits to the App's bot account.
-- `githubOAuth({ connector, clientId, clientSecret, slot?, owner?, fallback? })`: mints repository-scoped user tokens from the requester's GitHub App OAuth connection and attributes commits and pull requests to that user. With write access it can also attach files to issues and pull requests, which GitHub refuses an App installation token for.
+- `githubOAuth({ connector, slot?, owner?, fallback? })`: mints repository-scoped user tokens from the requester's GitHub App OAuth connection, with the connector's own client ID and secret, and attributes commits and pull requests to that user. With write access it can also attach files to issues and pull requests, which GitHub refuses an App installation token for.
 
 ```ts
 import { githubApp, githubOAuth } from "@sixb/connector-github/sandbox"
@@ -101,8 +101,6 @@ import { githubConnector } from "./connectors/github"
 
 const auth = githubOAuth({
   connector: githubConnector,
-  clientId: process.env.GITHUB_CLIENT_ID!,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
   // Optional: used only when no user requested the run (such as a scheduled workflow step)
   fallback: githubApp({
     appId: process.env.GITHUB_APP_ID!,

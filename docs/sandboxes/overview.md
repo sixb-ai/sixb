@@ -168,8 +168,6 @@ import { githubConnector } from "./connectors/github"
 const factory = new VercelSandboxFactory({
   auth: githubOAuth({
     connector: githubConnector,
-    clientId: process.env.GITHUB_CLIENT_ID!,
-    clientSecret: process.env.GITHUB_CLIENT_SECRET!,
     // Optional: used only for automated runs not started by a user
     fallback: githubApp({
       appId: process.env.GITHUB_APP_ID!,

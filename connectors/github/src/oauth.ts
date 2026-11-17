@@ -7,6 +7,7 @@ import {
   type ConnectorOAuthErrorKind,
 } from "@sixb/core"
 import { githubWebOrigin } from "./http"
+import type { GitHubOAuthClient } from "./oauth-client"
 import type { GitHubOAuthOptions } from "./types/options"
 
 const GITHUB_API_VERSION = "2022-11-28"
@@ -20,6 +21,7 @@ export interface GitHubOAuth {
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
   ): Promise<readonly ConnectorAccountCandidate[]>
+  readonly client: GitHubOAuthClient
 }
 
 export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL): GitHubOAuth {
@@ -185,6 +187,8 @@ export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL):
       }
       return [githubAccount(body)]
     },
+
+    client: Object.freeze({ clientId, apiBaseUrl: apiBase.href, authorization: basicAuth }),
   }
 }
 

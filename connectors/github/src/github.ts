@@ -10,6 +10,7 @@ import { createAppInstallationTokenSource, type InstallationTokenHandle } from "
 import { createGitHubClient } from "./client"
 import { assertNonEmpty } from "./http"
 import { createGitHubOAuth } from "./oauth"
+import { registerGitHubOAuthClient } from "./oauth-client"
 import type { GitHubClient } from "./types/client"
 import type {
   GitHubCommonOptions,
@@ -42,8 +43,11 @@ export function github(
   const webhooks = resolveWebhooks(options)
 
   if (isOAuthOptions(options)) {
-    const { authentication, discoverAccounts } = createGitHubOAuth(options.auth.oauth, apiBaseUrl)
-    return {
+    const { authentication, discoverAccounts, client } = createGitHubOAuth(
+      options.auth.oauth,
+      apiBaseUrl
+    )
+    const adapter: GitHubOAuthConnector = {
       type: "github",
       authentication,
       discoverAccounts,
@@ -60,6 +64,11 @@ export function github(
         })
       },
     }
+
+    // `githubOAuth()` scopes each run's token with this same client.
+    registerGitHubOAuthClient(adapter, client)
+
+    return adapter
   }
 
   if (options.auth && "app" in options.auth && options.auth.app !== undefined) {

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
+import { defineConnector } from "@sixb/core"
 import type { ConnectorAccessToken, SandboxOAuthConnector } from "@sixb/core/sandboxes"
+import { github } from "../src/github"
 import { githubApp, githubOAuth } from "../src/sandbox"
 
 // The key size is not under test; 1024 bits keeps key generation off the clock (2048 takes ~100ms).
@@ -387,11 +389,11 @@ describe("GitHub App workspace auth", () => {
   })
 })
 
-const OAUTH_CONNECTOR: SandboxOAuthConnector = {
-  kind: "connector",
-  id: "github",
-  adapter: { authentication: { type: "oauth2" } },
-}
+const OAUTH = { clientId: "Iv1.client123", clientSecret: "super-secret-value" }
+
+const OAUTH_CONNECTOR = defineConnector("github", github({ auth: { oauth: OAUTH } }), {
+  owners: ["project", "user"],
+})
 
 const USER_IDENTITY = {
   GIT_AUTHOR_NAME: "Ada Lovelace",
@@ -464,8 +466,6 @@ function oauthFixture(
 
   const auth = githubOAuth({
     connector: OAUTH_CONNECTOR,
-    clientId: "Iv1.client123",
-    clientSecret: "super-secret-value",
     ...(options.owner === undefined ? {} : { owner: options.owner }),
     ...(options.slot === undefined ? {} : { slot: options.slot }),
     ...(options.fallback === undefined ? {} : { fallback: options.fallback }),
@@ -705,18 +705,20 @@ describe("GitHub OAuth workspace auth", () => {
   })
 
   test("validates configuration before serving any request", () => {
-    expect(() =>
-      githubOAuth({
-        connector: { kind: "connector", id: "gh", adapter: {} } as unknown as SandboxOAuthConnector,
-        clientId: "Iv1.client",
-        clientSecret: "secret",
-      })
-    ).toThrow("requires a GitHub OAuth connector")
-    expect(() =>
-      githubOAuth({ connector: OAUTH_CONNECTOR, clientId: "bad:id", clientSecret: "secret" })
-    ).toThrow("OAuth client ID")
-    expect(() =>
-      githubOAuth({ connector: OAUTH_CONNECTOR, clientId: "Iv1.ok", clientSecret: "bad\nsecret" })
-    ).toThrow("OAuth client secret")
+    // An OAuth connector that github() did not build has no GitHub client to scope tokens with.
+    const foreign: SandboxOAuthConnector = {
+      kind: "connector",
+      id: "github",
+      adapter: { authentication: { type: "oauth2" } },
+    }
+    expect(() => githubOAuth({ connector: foreign })).toThrow("requires a GitHub OAuth connector")
+
+    const enterprise = defineConnector(
+      "github-enterprise",
+      github({ auth: { oauth: OAUTH }, baseUrl: "https://api.acme.ghe.com" })
+    )
+    expect(() => githubOAuth({ connector: enterprise })).toThrow("supports github.com only")
+
+    expect(() => githubOAuth({ connector: OAUTH_CONNECTOR, slot: " " })).toThrow("Connection slot")
   })
 })

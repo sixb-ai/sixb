@@ -478,19 +478,13 @@ describe("githubOAuth connector type wiring", () => {
     const oauthConnector = defineConnector("github", connector(), { owners: ["user"] })
     const staticConnector = defineConnector("github-static", github({ token: "ghp_static" }))
 
-    const sandboxAuth = githubOAuth({
-      connector: oauthConnector,
-      clientId: OAUTH.clientId,
-      clientSecret: OAUTH.clientSecret,
-    })
+    const sandboxAuth = githubOAuth({ connector: oauthConnector })
     expect(typeof sandboxAuth.authorize).toBe("function")
 
     expect(() =>
       githubOAuth({
         // @ts-expect-error: static GitHub connectors do not use OAuth connections
         connector: staticConnector,
-        clientId: OAUTH.clientId,
-        clientSecret: OAUTH.clientSecret,
       })
     ).toThrow("requires a GitHub OAuth connector")
   })
