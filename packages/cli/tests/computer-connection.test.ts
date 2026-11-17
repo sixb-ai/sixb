@@ -344,4 +344,76 @@ describe("a connected computer", () => {
     jest.useRealTimers()
     await computer.stop()
   })
+
+  // Guard proof: drop onThreadMoved from ComputerConnection.start; a conversation moved into a
+  // connected folder with a queued turn waits up to twenty seconds for the next session renewal,
+  // and this test times out waiting for the offer.
+  test("offers a moved conversation to its new folder at once", async () => {
+    // Resolved by the offer itself: the test waits for it, not for time to pass.
+    let offer: (thread: unknown) => void = () => {}
+    const firstOffer = new Promise<unknown>((resolve) => {
+      offer = resolve
+    })
+    const offered = spyOn(LocalRunner.prototype, "offer").mockImplementation(async (thread) => {
+      offer(thread)
+    })
+    const a = await folder("a")
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request, serving) {
+        const { pathname } = new URL(request.url)
+        if (pathname === "/ws/agents") {
+          return serving.upgrade(request) ? undefined : new Response(null, { status: 426 })
+        }
+        if (pathname === "/api/agent-threads/thr_moved") {
+          return Response.json({
+            id: "thr_moved",
+            runsOn: "computer",
+            computer: { id: "cmp_1", name: "Mac", folder: a, online: true },
+            activeRunId: "run_waiting",
+          })
+        }
+        if (request.method === "DELETE") return new Response(null, { status: 204 })
+        return Response.json({ expiresAt: "2026-11-14T10:01:00.000Z", waiting: [] })
+      },
+      websocket: {
+        message(socket) {
+          socket.send(
+            JSON.stringify({
+              type: "activity",
+              event: {
+                schemaVersion: 1,
+                type: "agent.thread.moved",
+                projectId: "p",
+                ownerPrincipal: { type: "user", id: "usr_ava" },
+                threadId: "thr_moved",
+                occurredAt: "2026-11-14T10:00:00.000Z",
+              },
+            })
+          )
+        },
+      },
+    })
+    try {
+      const origin = `http://127.0.0.1:${server.port}`
+      const client = createSixbClient({ baseUrl: origin })
+      const connection: Connection = {
+        ...THIS_PROJECT,
+        client,
+        user: { id: "usr_ava", email: "ava@example.test", name: "Ava" },
+        authorization: async () => "",
+      }
+      const computer = new ComputerConnection(connection, () => {}, false)
+      await computer.start()
+
+      expect(await firstOffer).toMatchObject({ id: "thr_moved", activeRunId: "run_waiting" })
+      expect(offered.mock.calls).toHaveLength(1)
+      await computer.stop()
+    } finally {
+      offered.mockRestore()
+      server.stop(true)
+    }
+  })
 })

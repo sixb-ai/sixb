@@ -1,4 +1,4 @@
-import type { FrameEmbed, FrameEvent } from "@sixb/core/artifacts"
+import type { FrameEmbed, FrameEvent, FrameStart } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../frame"
@@ -114,19 +114,35 @@ const PAGE_WIDTH = 1280
  * page's own theme. It fades in over the page's face, which stays if it never loads.
  */
 export function PageScreen({ version }: { readonly version: ArtifactVersion }) {
+  return <FrameScreen version={version} width={PAGE_WIDTH} />
+}
+
+/**
+ * The top of a version that opens in a frame, laid out `width` pixels wide and scaled down to the
+ * card, in its own theme, over its face.
+ */
+export function FrameScreen({
+  version,
+  width,
+  start,
+}: {
+  readonly version: ArtifactVersion
+  readonly width: number
+  readonly start?: FrameStart
+}) {
   const theme = artifactThemeAttributes(useArtifactTheme(version))
   const box = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(0)
   useLayoutEffect(() => {
     const element = box.current
     if (!element) return
-    const measure = () => setScale(element.clientWidth / PAGE_WIDTH)
+    const measure = () => setScale(element.clientWidth / width)
     measure()
     if (typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [width])
   return (
     <div
       ref={box}
@@ -137,11 +153,12 @@ export function PageScreen({ version }: { readonly version: ArtifactVersion }) {
       {scale > 0 ? (
         <div
           className="absolute top-0 left-0 origin-top-left"
-          style={{ width: PAGE_WIDTH, height: `${100 / scale}%`, transform: `scale(${scale})` }}
+          style={{ width, height: `${100 / scale}%`, transform: `scale(${scale})` }}
         >
           <ArtifactFrame
             version={version}
             title={version.title}
+            {...(start ? { start } : {})}
             decorative
             className="absolute inset-0"
           />

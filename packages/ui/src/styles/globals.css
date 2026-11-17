@@ -880,14 +880,14 @@
 
 /*
  * Markdown / prose rendering style. Shared by the docs site (build-time HTML from `Bun.markdown`
- * + Shiki) and by runtime markdown (the `Markdown` component, e.g. agent responses). Standard
- * markdown elements are styled directly; the `.code-block`/`.shiki` rules only apply to docs'
- * highlighted output, while the generic `pre`/`code` rules cover runtime-rendered code blocks.
+ * + Shiki) and by runtime markdown (the `Markdown` component, e.g. agent responses).
  */
 .prose {
+  min-width: 0;
   color: var(--foreground);
   font-size: 16px;
   line-height: 1.7;
+  overflow-wrap: break-word;
 }
 
 .prose > :first-child {
@@ -898,14 +898,16 @@
   margin-bottom: 0;
 }
 
-.prose :is(h1, h2, h3, h4)[id] {
+.prose :is(h1, h2, h3, h4, h5, h6)[id] {
   scroll-margin-top: 80px;
 }
 
 .prose h1,
 .prose h2,
 .prose h3,
-.prose h4 {
+.prose h4,
+.prose h5,
+.prose h6 {
   color: var(--foreground);
   letter-spacing: -0.011em;
   line-height: 1.25;
@@ -935,6 +937,25 @@
   font-weight: 650;
 }
 
+.prose h5 {
+  margin: 20px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.prose h6 {
+  margin: 18px 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.prose :is(h1, h2, h3, h4) + :is(h2, h3, h4, h5, h6) {
+  margin-top: 14px;
+}
+
 .prose p,
 .prose ul,
 .prose ol,
@@ -953,16 +974,102 @@
   list-style: disc;
 }
 
+.prose ul ul {
+  list-style-type: circle;
+}
+
+.prose ul ul ul {
+  list-style-type: square;
+}
+
 .prose ol {
   list-style: decimal;
+}
+
+.prose ol ol {
+  list-style-type: lower-alpha;
+}
+
+.prose ol ol ol {
+  list-style-type: lower-roman;
 }
 
 .prose li {
   margin: 6px 0;
 }
 
+.prose li > :first-child {
+  margin-top: 0;
+}
+
+.prose li > :last-child {
+  margin-bottom: 0;
+}
+
+.prose li > :is(ul, ol) {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.prose li:has(> .code-block, > .prose-table, > pre) {
+  margin-bottom: 12px;
+}
+
 .prose li::marker {
   color: var(--muted-foreground);
+}
+
+/* GFM task lists — suppress bullet markers and style disabled checkboxes cleanly in both themes. */
+.prose ul.contains-task-list,
+.prose ul:has(> li.task-list-item) {
+  padding-left: 0;
+  list-style: none;
+}
+
+.prose li > ul.contains-task-list,
+.prose li > ul:has(> li.task-list-item) {
+  padding-left: 22px;
+}
+
+.prose li.task-list-item {
+  position: relative;
+  padding-left: 24px;
+  list-style: none;
+}
+
+.prose li.task-list-item::marker {
+  content: "";
+}
+
+.prose li.task-list-item > input[type="checkbox"],
+.prose li.task-list-item > p:first-child > input[type="checkbox"] {
+  position: absolute;
+  top: 0.3em;
+  left: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1.5px solid color-mix(in oklab, var(--foreground) 28%, var(--border));
+  border-radius: 4px;
+  background-color: var(--card);
+  pointer-events: none;
+}
+
+.prose li.task-list-item > input[type="checkbox"]:checked,
+.prose li.task-list-item > p:first-child > input[type="checkbox"]:checked {
+  border-color: var(--foreground);
+  background-color: var(--foreground);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.2 6.5 11.2 12.5 4.8' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+}
+
+.dark .prose li.task-list-item > input[type="checkbox"]:checked,
+.dark .prose li.task-list-item > p:first-child > input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.2 6.5 11.2 12.5 4.8' stroke='%230a0a0a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .prose a {
@@ -978,8 +1085,48 @@
   text-decoration-color: var(--foreground);
 }
 
+.prose a:has(> img) {
+  text-decoration: none;
+}
+
 .prose strong {
   font-weight: 650;
+}
+
+.prose del {
+  color: var(--muted-foreground);
+  text-decoration-color: color-mix(in oklch, var(--muted-foreground) 65%, transparent);
+}
+
+.prose :is(sup, sub) {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.prose a[data-footnote-ref] {
+  padding: 0 2px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+
+.prose a[data-footnote-ref]:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+.prose a[data-footnote-backref] {
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.prose section[data-footnotes] {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .prose hr {
@@ -994,17 +1141,38 @@
   color: var(--muted-foreground);
 }
 
-/* Inline code */
+.prose blockquote > :first-child {
+  margin-top: 0;
+}
+
+.prose blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.prose blockquote blockquote {
+  margin-top: 10px;
+}
+
+/* Inline code — translucent ink tint so it stays distinct inside muted callouts and cards. */
 .prose :not(pre) > code {
   border-radius: 5px;
-  background: var(--muted);
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
   color: var(--foreground);
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.15em 0.4em;
+  overflow-wrap: break-word;
 }
 
-/* Generic (non-highlighted) code block — used by runtime-rendered markdown. */
+.dark .prose :not(pre) > code {
+  background: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+.prose :is(h1, h2, h3, h4, h5, h6) > code {
+  font-weight: 500;
+}
+
+/* Generic (non-highlighted) code block. */
 .prose pre {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -1026,13 +1194,26 @@
   white-space: pre;
 }
 
-/* Code block — docs Shiki output. */
+/* Code block — Shiki and fenced block output. */
 .prose .code-block {
+  position: relative;
   margin: 0 0 20px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--background);
+}
+
+.dark .prose .code-block {
+  background: var(--card);
+}
+
+.prose .code-block-bare {
+  background: color-mix(in oklab, var(--muted) 55%, var(--card));
+}
+
+.prose .code-block-bare pre.shiki {
+  padding-right: 44px;
 }
 
 .prose .code-bar {
@@ -1057,7 +1238,7 @@
   min-width: 18px;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 4px;
   background: var(--foreground);
   color: var(--background);
@@ -1092,8 +1273,19 @@
   transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
 }
 
+.prose .code-copy-floating {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  background: color-mix(in oklab, var(--card) 85%, transparent);
+  box-shadow: 0 0 0 1px var(--border);
+  opacity: 0;
+}
+
 .prose .code-block:hover .code-copy,
-.prose .code-copy:focus-visible {
+.prose .code-copy:focus-visible,
+.prose .code-copy.is-copied {
   opacity: 1;
 }
 
@@ -1170,14 +1362,23 @@
 }
 
 .prose .prose-table[data-hidden-end] {
+  -webkit-mask-image: linear-gradient(to left, transparent, black 2.5rem);
   mask-image: linear-gradient(to left, transparent, black 2.5rem);
 }
 
 .prose .prose-table[data-hidden-start] {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 2.5rem);
   mask-image: linear-gradient(to right, transparent, black 2.5rem);
 }
 
 .prose .prose-table[data-hidden-start][data-hidden-end] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 2.5rem,
+    black calc(100% - 2.5rem),
+    transparent
+  );
   mask-image: linear-gradient(
     to right,
     transparent,
@@ -1206,6 +1407,19 @@
   vertical-align: top;
 }
 
+.prose thead th {
+  border-bottom-color: color-mix(in oklab, var(--foreground) 16%, var(--border));
+}
+
+.prose :is(th, td)[align="center"] {
+  text-align: center;
+}
+
+.prose :is(th, td)[align="right"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .prose th:first-child,
 .prose td:first-child {
   padding-left: 0;
@@ -1221,7 +1435,17 @@
   color: var(--foreground);
 }
 
+.prose td:not(.whitespace-nowrap) {
+  min-width: 6rem;
+}
+
 .prose img {
   max-width: 100%;
+  height: auto;
   border-radius: 12px;
+}
+
+.prose > :last-child,
+.prose :is(li, blockquote) > :last-child {
+  margin-bottom: 0;
 }

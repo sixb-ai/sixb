@@ -1443,12 +1443,18 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Regression proof: drop the guests' count from a provider's createComment; the guest past
-    // the cap is then stored.
-    test("keeps a guest's comment under the name they gave, up to what guests may write", async () => {
+    // Regression proofs: drop the guests' count from a provider's createComment; the guest past
+    // the cap is then stored. Drop `author_grant_id` from what it writes or reads; the guest comes
+    // back without the link whose guests read their thread.
+    test("keeps a guest's comment under the name they gave and the link they came through, up to what guests may write", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        const guest = { type: "guest" as const, id: "shs_visitor", name: "Ava Martin" }
+        const guest = {
+          type: "guest" as const,
+          id: "shs_visitor",
+          name: "Ava Martin",
+          grantId: "shg_kickoff",
+        }
         const comment = (id: string, author: ArtifactCommentAuthor) =>
           artifacts.createComment({
             projectId,
@@ -1464,6 +1470,9 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(
           await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_guest_0" })
         ).toMatchObject({ author: guest })
+        expect((await artifacts.listComments({ projectId, id: "art_report" }))[0]?.author).toEqual(
+          guest
+        )
 
         for (let index = 1; index < ARTIFACT_COMMENT_LIMITS.maxGuestComments; index += 1) {
           await comment(`cmt_guest_${index}`, { ...guest, id: `shs_visitor_${index % 3}` })
@@ -1718,6 +1727,65 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(
           await artifacts.listBoardPreviews({ projectId: otherProjectId, renderKeys: [welcome] })
         ).toEqual([])
+      })
+    })
+
+    test("keeps a PDF by render key, the first one kept staying", async () => {
+      await withStorage(async (artifacts) => {
+        const renderKey = "c".repeat(64)
+        const pdf = (seed: string, pages: number, createdAt = t0) => ({
+          projectId,
+          renderKey,
+          file: fileRef(seed, "application/pdf"),
+          pages,
+          createdAt,
+        })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toBeNull()
+
+        await artifacts.putPdf(pdf("1", 6))
+        // A key names what the document prints: a second PDF of it prints the same.
+        await artifacts.putPdf(pdf("2", 6, at(1)))
+
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(pdf("1", 6))
+        expect(await artifacts.getPdf({ projectId: otherProjectId, renderKey })).toBeNull()
+        expect(await artifacts.getPdf({ projectId, renderKey: "d".repeat(64) })).toBeNull()
+
+        // A PDF kept stays: neither a failure nor clearing one replaces it.
+        await artifacts.putPdf({ projectId, renderKey, failure: "No browser.", createdAt: at(2) })
+        await artifacts.clearPdfFailure({ projectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(pdf("1", 6))
+      })
+    })
+
+    test("keeps why a PDF could not be printed, until one prints or it is cleared", async () => {
+      await withStorage(async (artifacts) => {
+        const renderKey = "e".repeat(64)
+        const failure = (reason: string, createdAt = t0) => ({
+          projectId,
+          renderKey,
+          failure: reason,
+          createdAt,
+        })
+        await artifacts.putPdf(failure("No browser."))
+        await artifacts.putPdf(failure("Timed out.", at(1)))
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(failure("No browser."))
+        await artifacts.clearPdfFailure({ projectId: otherProjectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(failure("No browser."))
+
+        await artifacts.clearPdfFailure({ projectId, renderKey })
+        expect(await artifacts.getPdf({ projectId, renderKey })).toBeNull()
+
+        // A PDF printed after all replaces the failure.
+        await artifacts.putPdf(failure("No browser."))
+        const printed = {
+          projectId,
+          renderKey,
+          file: fileRef("1", "application/pdf"),
+          pages: 2,
+          createdAt: at(2),
+        }
+        await artifacts.putPdf(printed)
+        expect(await artifacts.getPdf({ projectId, renderKey })).toEqual(printed)
       })
     })
 

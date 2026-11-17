@@ -6,14 +6,14 @@ Each artifact has a page in your app where its owner reads it.
 
 ## Kinds
 
-| Kind       | What it holds                                                          |
-| ---------- | ---------------------------------------------------------------------- |
-| `document` | A Markdown report in `document.md`, with its images beside it          |
-| `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
-| `slides`   | A deck: `index.html` with one `<section class="slide">` per slide      |
-| `page`     | A web page: `index.html` and its scripts, styles, images, and data     |
-| `canvas`   | An endless board of boards, sections, notes, shapes, and arrows        |
-| `file`     | One file, shown as its type allows or offered for download             |
+| Kind       | What it holds                                                           |
+| ---------- | ----------------------------------------------------------------------- |
+| `document` | A Markdown report in `document.md`, or designed HTML in `document.html` |
+| `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts  |
+| `slides`   | A deck: `index.html` with one `<section class="slide">` per slide       |
+| `page`     | A web page: `index.html` and its scripts, styles, images, and data      |
+| `canvas`   | An endless board of boards, sections, notes, shapes, and arrows         |
+| `file`     | One file, shown as its type allows or offered for download              |
 
 ## Publish an artifact
 
@@ -109,7 +109,10 @@ publishes it when it is what you asked for.
 
 ## Edit in the app
 
-Sheets and canvases are edited where they open: press **Edit** on the latest version.
+A Markdown document is typed into as it opens, like a page of notes: whoever may change it clicks
+and types, with no **Edit** to press. Sheets, canvases, and
+[designed documents](#design-a-document) are edited where they open: press **Edit** on the latest
+version.
 
 A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
 **Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
@@ -117,9 +120,24 @@ numbered version in the version menu. ⌘S saves, and leaving with changes asks 
 changed the sheet while you were editing, the save stops and says so: open what they saved, or save
 yours over it.
 
-A canvas is edited live, with everyone who has it open: there is no draft to save. The header keeps
-Undo, Redo, and **Done**, your changes are saved as you make them, and everyone's are merged. See
-[Edit a canvas live](#edit-a-canvas-live).
+A document or a canvas is edited live, with everyone who has it open: there is no draft to save.
+Your changes are saved as you make them, and everyone's are merged. See [Edit live](#edit-live).
+
+| In a Markdown document | |
+| --- | --- |
+| Write | Click anywhere and type. `#`, `-`, `1.`, `[]`, `>`, ` ``` ` and `---` at the start of a line make a heading, a list, a to-do, a quote, code, or a divider |
+| `/` | On any line: text, headings, lists, to-dos, a quote, a callout, a warning, code, a table, an image, a divider, found by typing their name |
+| Blocks | The handle beside a block adds one below, drags it, and turns it into another kind, duplicates, moves, or deletes it; ⌘D duplicates, ⌥⇧↑ and ⌥⇧↓ move |
+| Words | Select them for bold, italic, strikethrough, code, or a link (⌘K); ⌘Z and ⇧⌘Z undo and redo your own changes |
+| Images | Paste, drop, or choose one from `/`: it is added to the document under `images/`; type its caption under it |
+| Paste | Markdown pasted as text becomes its blocks; what you copy is Markdown |
+| Together | Everyone editing sees the others' carets and selections, named, in their colors |
+
+It reads as it always did: its first heading is the title and the paragraph after it the lede, in
+one centered column, with embedded artifacts in place. What it does not edit, front matter, a
+footnote, raw HTML, or a list mixing to-dos and plain items, is kept as written. Once someone
+edits it, `document.md` is written as the editor writes Markdown (`-` bullets, `*emphasis*`, `#`
+headings), and an Agent's later changes merge with theirs whichever way it writes them.
 
 | In a sheet | |
 | --- | --- |
@@ -135,15 +153,34 @@ Undo, Redo, and **Done**, your changes are saved as you make them, and everyone'
 | Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
 | Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
 
+| In a designed document | |
+| --- | --- |
+| Write | Click anywhere and type. Enter starts a paragraph, or the next item of a list; an empty item ends the list |
+| `/` | Text, headings, lists, a quote, a table, an image, a divider, or a page break, made as the page makes its own: a new heading or table looks like the others |
+| Blocks | The handle beside a block adds one below, drags it, and turns it into another kind, duplicates, moves, or deletes it; ⌘D duplicates, ⌥⇧↑ and ⌥⇧↓ move |
+| Words | Select them for bold, italic, strikethrough, code, or a link (⌘K); ⌘Z and ⇧⌘Z undo and redo your own changes |
+| Tables | Type in a cell; Tab and ⇧Tab move to the next and the one before |
+| Images | Paste, drop, or choose one from `/`: it is added to the document under `images/` |
+| Together | Everyone editing sees the others' carets and selections, named, in their colors |
+| View | One sheet while you edit, page breaks marked; its pages again once your changes are saved |
+
+It stays in its own design: what you type is styled by the document's stylesheets, and keys never
+merge two parts of its layout, a section into the one before it or a cell into the next. Its HTML
+changes only where you edit: the rest is written back exactly as it was. A field of
+[live data](#show-live-data-in-a-document), a repeated row, or markup the editor does not model, such as an SVG, is
+kept as written and moves as a whole. A document whose HTML the editor cannot hold as blocks, one
+with no `<body>` tag or with markup after `</body>`, is edited word by word instead, as a board is,
+until a change makes it one it can.
+
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.
 
-## Edit a canvas live
+## Edit live
 
-A canvas is edited by everyone at once over `/ws/artifacts`. Each person sees the others' changes
-as they make them, and who else is there.
+A document, Markdown or designed, or a canvas is edited by everyone at once over `/ws/artifacts`.
+Each person sees the others' changes as they make them, and who else is there.
 
-- Whoever may change the canvas edits it; whoever may only read it watches.
+- Whoever may change the artifact edits it; whoever may only read it watches.
 - Changes are written to the current version about 1.5 seconds after the last one, at most every
   10 seconds while someone keeps editing, and when the last editor leaves. Each write is a normal
   change, by the last person who edited, and sends `artifact.updated`.
@@ -160,10 +197,10 @@ on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
 `@sixb/client/artifact-live` the socket. The [WebSockets](../websockets/overview.md#live-artifacts)
 page lists the messages.
 
-### Edit what a board shows
+### Edit what a page shows
 
-A board's HTML stays yours to write. What its source holds can also be changed in place: words,
-pictures, and inline styles.
+A canvas's boards are edited in place. A board's HTML stays yours to write. What its source holds
+can also be changed in place: words, pictures, and inline styles.
 
 - Each element in a board's source has an address, its path from the `<body>`, such as
   `body>main:0>h1:0`. What a script builds, such as a chart drawn from live data, has none and
@@ -227,7 +264,10 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 - A visitor of a [shared link](../auth/shared-access.md#share-an-objects-artifacts) to an object
   that holds the artifact comments as a guest: `author.type` is `guest` and `authorName` the name
   they gave. Only someone who may change the artifact resolves or deletes a guest's comment.
-- Each change sends `artifact.commented` to whoever reads the artifact.
+- A guest reads only the threads started by a guest of the same link, with every reply in them,
+  yours included. Threads your team starts stay internal: to a guest, they do not exist.
+- Each change sends `artifact.commented` to whoever reads its thread. In a guest's thread, it
+  names the link as `shareGrantId`.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters; guests write at most 200
   of them.
 - `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
@@ -240,12 +280,114 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 A document is Markdown with tables, footnotes, and task lists. A few conventions shape its page:
 
 - The first `#` heading is the title, and the paragraph after it is the lede.
-- `## ` and `### ` headings form the outline beside the page.
+- `## ` and `### ` headings are its sections, which a link can open at.
 - A quote that starts with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]`
   becomes a callout.
 - An image with a title alone in its paragraph becomes a figure, and the title becomes its
   caption: `![Revenue by region](figures/revenue.png "Revenue by region, Q3")`.
 - Table columns of figures align right.
+
+### Design a document
+
+When a document should look like your business's own, such as a proposal, a contract, or a letter,
+write it as HTML in `document.html` with its own stylesheets, fonts, and images beside it. It
+renders exactly as they say, on white paper. An `@page` rule with a size gives it pages:
+
+```text
+proposal/
+├── document.html
+├── design.css        @page { size: letter; margin: 0.75in 0.85in; }
+├── fonts/brand.woff2
+└── images/logo.svg
+```
+
+- It shows as the pages it prints on. On a phone, where those would be too small to read, it is one
+  sheet whose text wraps to the screen, with a gap where each page breaks.
+- Pages break where its CSS says: `break-before: page` starts a new page, and `break-inside: avoid`
+  keeps a block whole.
+- It may hold any markup that lays out text, tables, figures, and pictures, styled by any CSS.
+  Nothing in it runs: publishing refuses scripts, `on…` handlers, `<iframe>`, `<form>`, and
+  `<base>`.
+- Its images are files in the artifact or another artifact's, and its stylesheets are files in the
+  artifact or on a CDN such as Google Fonts.
+- Its headings form its outline and the sections an address names, as a Markdown document's do.
+- Its words are [edited in place](#edit-in-the-app) in the app, live, by everyone at once.
+- A version holds everything it shows: to share a design between documents, keep it in a
+  [skill](../models/tools-and-authorization.md#add-a-skill) and copy its files into each one.
+
+### Show live data in a document
+
+A designed document an object [holds](#hold-an-artifact-in-an-object), such as a contract's
+proposal, shows that object's values and its [queries'](#declare-a-query) rows as each reader reads
+them. Name the object's type, then mark each value, with the text it shows until it is read:
+
+```html
+<head><meta name="sixb:object-type" content="Contract"></head>
+<h1 data-sixb-field="client.name">Example Landscaping</h1>
+<span data-sixb-field="fee" data-format="money" data-currency-field="currency">$4,000</span>
+<tr data-sixb-each="query:past-work">
+  <td data-sixb-field="title">Phase 1</td>
+  <td data-sixb-field="signedAt" data-format="date">March 2, 2026</td>
+</tr>
+```
+
+| Markup | Shows |
+| --- | --- |
+| `data-sixb-field="number"` | A property of the object that holds it |
+| `data-sixb-field="client.name"` | A property of what one of its links reaches |
+| `data-sixb-field="scope.services[job-flow].amount"` | A list's item, by its `id` |
+| `data-sixb-each="milestones"` | The element once per item of a list or a link; fields inside read the item |
+| `data-sixb-each="query:past-work"` | The element once per row of `queries/past-work.json` |
+| `data-sixb-field="query:past-work.total"` | How many rows the query matched |
+| `data-sixb-each="query:by-status.facets.status"` | The element once per facet value; fields `value` and `count` |
+| `data-format="money"`, `number`, `percent`, `date` | Formatted for `<html lang>`; `money` takes `data-currency="USD"` or `data-currency-field` |
+
+- The object is the one of that type that holds the document, as the reader reads it. When none
+  does, as with a template, or several do, its fields keep their written text, and so does
+  anything the reader can't read. A value they are not cleared for shows `•••`.
+- A query can start from that object: `{ "kind": "traverse", "input": { "kind": "holder" }, … }`.
+- Values update as the objects change. While its words are edited in place, it shows the written
+  text, and fields take no typing.
+- Publishing warns `field_unknown` for a field that reads nothing the type holds, and refuses a
+  document whose author can't read the type.
+- [Creating a version](#versions-and-restore-points) writes the values in, as whoever creates it
+  reads them: everyone who reads or prints that version sees those values, including ones they
+  could not read live. Its fields stay marked, so the next version shows live data again, with
+  those values as its written text. A repeated element is written once per item, and its copies,
+  one after the other, read as one.
+- An open version's PDF shows the values whoever asks reads.
+- Fields can't go on `<style>`, `<title>`, `<textarea>` and other elements whose text isn't markup.
+- `sixb.artifacts.query(id, "holder")` reads the object, with what the links its fields read
+  through reach.
+- A document computes nothing: a total or an instalment is a property the object keeps.
+
+### Print a document to PDF
+
+A designed document downloads as a PDF: **Download** › **PDF** in the app. It prints in Chromium,
+on the paper its `@page` rule sets, with its backgrounds, once its fonts and images have loaded.
+Its `document.html` is not offered: without its stylesheets and pictures, it would not look like
+the document.
+
+```ts
+const pdf = await sixb.artifacts.pdf(artifactId) // { status: "printing" }, then:
+// { status: "ready", file: FileRef, pages: 6 }
+```
+
+- The first ask prints it, which takes a few seconds: ask again until it is `ready`. Over HTTP,
+  `POST /api/artifacts/{id}/versions/{version}/pdf` answers the same, and `GET` on the same path
+  downloads it.
+- The [`render` worker](../cli/overview.md) prints it in a sandbox of the project, whose image needs
+  Node.js and Playwright's Chromium, as the Sixb agent image has. `sixb dev` and
+  `sixb worker-group` start the worker when the project has a sandbox provider. A sandbox without a
+  browser is a failure that says so.
+- A PDF is kept for what the version prints: a version restored or frozen as it was finds it, and
+  a change to any of its files prints it anew.
+- When it could not be printed, asking answers `{ status: "failed", reason }` until you ask with
+  `{ retry: true }` (`?retry=true` over HTTP), which prints it again.
+- A project without a [sandbox provider](../sandboxes/overview.md) prints nothing: asking fails
+  with `pdf_unavailable`, and the app offers no download.
+- Write the rules a phone lays it out by as `@media screen and (max-width: …)`: paper as narrow as A5
+  would match a rule without `screen` when printed.
 
 ## Write a sheet
 
@@ -570,11 +712,11 @@ pins, shown in place of the board until it runs, in the reader's mode. Each come
 while the board is drawn small. While it is rendered, the board shows its outline, or its last
 preview when it changed, and the viewer shows the new one as soon as it is ready.
 
-- The Agent's check takes them as it publishes. A version published otherwise, such as one whose
-  boards were resized in the app, is pictured by the agent worker in a blank sandbox of the
-  project, which reaches only the CDNs a board may load from; without sandboxes, boards have no
-  preview. The worker waits until the canvas has not been written for 15 seconds, so a canvas
-  edited live is pictured once, as it is when people pause.
+- The [`render` worker](../cli/overview.md) pictures them in a blank sandbox of the project, which
+  reaches only the CDNs a board may load from, however the version was published: by the Agent,
+  in the app, or over the API. Without sandboxes, boards have no preview. The worker waits until
+  the canvas has not been written for 15 seconds, so a canvas edited live is pictured once, as it
+  is when people pause.
 - A preview is named by what the board shows: its HTML, the files it can load, and its size, in
   its canvas. Moving a board keeps its preview, whoever saves the canvas; resizing it or changing
   what it loads renders a new one. A board kept as it was keeps the picture it was first given.
@@ -590,10 +732,10 @@ preview when it changed, and the viewer shows the new one as soon as it is ready
 
 ## Declare a query
 
-A sheet, a page, a deck, or a canvas can hold queries over your objects rather than a copy of
-them. Each is a file `queries/<name>.json` holding what `sixb objects query --file` runs, and each
-reader runs it with their own rights: they get the objects they can view, without the marked
-properties they are not cleared for.
+A sheet, a page, a deck, a canvas, or a designed document can hold queries over your objects
+rather than a copy of them. Each is a file `queries/<name>.json` holding what `sixb objects query
+--file` runs, and each reader runs it with their own rights: they get the objects they can view,
+without the marked properties they are not cleared for.
 
 File: `queries/overdue.json`
 
@@ -613,7 +755,8 @@ File: `queries/overdue.json`
   "limit": 10 }] }` to count rows by value, as `sixb objects facets --file` takes it.
 - Publishing runs each query once as its author and refuses one they could not run, naming the
   file and where in it. `page`, `vector`, and `rerank` are refused: Sixb pages the result, and a
-  search would bill every reader who opens the artifact. A document holds no queries.
+  search would bill every reader who opens the artifact. A Markdown document holds no queries; a
+  [designed one](#show-live-data-in-a-document) does.
 - A query returns only what its author can read: one that would return a marked property they
   are not cleared for, on its rows or on an object an `expand` attaches, or member profiles they
   may not view, is refused. Use a `project` node to leave those properties out.

@@ -240,7 +240,9 @@ export class SubagentCoordinator {
      * it claims the child's run, opens its session and environment, and records its fate.
      * Starting a run already running is a no-op.
      */
-    private readonly startChild: (run: SubagentRunRecord, family: FamilyMailbox) => void
+    private readonly startChild: (run: SubagentRunRecord, family: FamilyMailbox) => void,
+    /** When the parent conversation last moved workspaces, so paused child sandboxes know. */
+    private readonly movedAt?: Date
   ) {
     this.models = delegation.models
   }
@@ -293,7 +295,8 @@ export class SubagentCoordinator {
     for (const { child, outcomes } of paused) {
       signal.throwIfAborted()
       await this.clearDeadAttempts(child, signal)
-      const { spec, continuation } = this.continuationOf(child, outcomes)
+      const keepsWorkspace = await this.childKeepsWorkspace(child)
+      const { spec, continuation } = this.continuationOf(child, outcomes, keepsWorkspace)
       await this.admitInTurn(() =>
         this.admit(
           createSubagentRunId(this.parentRun.id, child.spawnKey),
@@ -621,7 +624,8 @@ export class SubagentCoordinator {
         )
       }
       await this.clearDeadAttempts(paused, signal)
-      const { spec, continuation } = this.continuationOf(paused, [answer])
+      const keepsWorkspace = await this.childKeepsWorkspace(paused)
+      const { spec, continuation } = this.continuationOf(paused, [answer], keepsWorkspace)
       return this.admit(runId, key, spec, signal, continuation)
     })
 
@@ -887,13 +891,27 @@ export class SubagentCoordinator {
   }
 
   /**
+   * Whether a paused child finds its workspace where it left it: its provider keeps them, the
+   * conversation did not move to a computer since it paused, and it did not move to another
+   * workspace before that pause ended.
+   */
+  private async childKeepsWorkspace(paused: SubagentRunRecord): Promise<boolean> {
+    if (!this.context.keepsChildWorkspaces) return false
+    const parent = await this.session.children.get(paused.parentRunId)
+    if (parent?.kind === "conversation" && parent.spec?.runsOn === "computer") return false
+    const pausedAt = paused.completedAt ?? paused.startedAt ?? paused.createdAt
+    return !this.movedAt || this.movedAt.getTime() <= pausedAt.getTime()
+  }
+
+  /**
    * The run of this turn that continues `paused` in its thread: its model, task and files, this
    * turn's mode, and a trigger of what it goes on with (the outcomes of its calls, or
    * its parent's answer), what came back to its sandbox and when it continues.
    */
   private continuationOf(
     paused: SubagentRunRecord,
-    goesOnWith: readonly AgentMessagePart[]
+    goesOnWith: readonly AgentMessagePart[],
+    keepsWorkspace: boolean
   ): {
     readonly spec: SubagentRunSpec
     readonly continuation: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
@@ -910,7 +928,7 @@ export class SubagentCoordinator {
     const parts = continuationTrigger({
       goesOnWith,
       paused,
-      keepsWorkspace: this.context.keepsChildWorkspaces,
+      keepsWorkspace,
       createdAt,
       settings: sentSettings(spec, this.context),
     })

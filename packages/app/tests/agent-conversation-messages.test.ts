@@ -123,6 +123,87 @@ describe("the conversation's messages", () => {
     ])
   })
 
+  // Removal proof: return to one live reply after every message (drop the inbox reads from
+  // liveMessages); the read message joins the conversation only once the turn ends, under the
+  // whole reply.
+  test("a message the turn read sits where it read it, and stays there once saved", () => {
+    const steer = {
+      id: "msg_steer",
+      authorPrincipal: bob,
+      parts: [{ type: "text" as const, text: "Use the Q3 numbers" }],
+      createdAt: at,
+    }
+    const streaming = live({
+      parts: [
+        { kind: "text", text: "Q2 shows a dip." },
+        { kind: "text", text: "With Q3, it recovers." },
+      ],
+      partKeys: ["text#1#a", "text#2#b"],
+      inboxReads: [{ at: 1, messages: [steer] }],
+    })
+
+    const during = merge({ messages: [question], live: streaming })
+    expect(during.map(({ key, role, status }) => ({ key, role, status }))).toEqual([
+      { key: "message:msg_question", role: "user", status: "complete" },
+      { key: "run:run_1", role: "assistant", status: "streaming" },
+      { key: "message:msg_steer", role: "user", status: "streaming" },
+      { key: "run:run_1:after:msg_steer", role: "assistant", status: "streaming" },
+    ])
+    expect(during[2]).toMatchObject({
+      author: { id: bob.id },
+      parts: [{ type: "text", text: "Use the Q3 numbers" }],
+    })
+    // Only the reply still being written streams its text.
+    expect(during[1]?.parts).toEqual([{ type: "text", text: "Q2 shows a dip.", streaming: false }])
+    expect(during[3]?.parts).toEqual([
+      { type: "text", text: "With Q3, it recovers.", streaming: true },
+    ])
+
+    // The turn ended: its saved messages take the same rows, in the same order.
+    const after = merge({
+      messages: [
+        question,
+        saved({ ...answer, id: "msg_a1", parts: [{ type: "text", text: "Q2 shows a dip." }] }),
+        saved({ id: "msg_steer", role: "user", authorPrincipal: bob, parts: steer.parts }),
+        saved({
+          ...answer,
+          id: "msg_a2",
+          parts: [{ type: "text", text: "With Q3, it recovers." }],
+        }),
+      ],
+      live: { ...streaming, active: false, finishStatus: "succeeded" },
+    })
+    expect(after.map((message) => message.key)).toEqual(during.map((message) => message.key))
+
+    // Stopped, the turn says so once, under its last reply, as its live copy did.
+    const stopped = merge({
+      messages: [
+        question,
+        saved({ ...answer, id: "msg_a1" }),
+        saved({ id: "msg_steer", role: "user", authorPrincipal: bob, parts: steer.parts }),
+        saved({ ...answer, id: "msg_a2" }),
+      ],
+      runs: [{ id: "run_1", status: "cancelled" } as AgentRun],
+    })
+    expect(stopped.map((message) => message.unfinished)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      "cancelled",
+    ])
+  })
+
+  test("a message read before the reply's first words opens the reply under it", () => {
+    const steer = { id: "msg_steer", authorPrincipal: bob, parts: [], createdAt: at }
+    const streaming = live({ inboxReads: [{ at: 0, messages: [steer] }] })
+
+    expect(keys({ messages: [question], live: streaming })).toEqual([
+      "message:msg_question",
+      "message:msg_steer",
+      "run:run_1",
+    ])
+  })
+
   test("an interrupted turn that saved nothing drops what it streamed", () => {
     const interrupted: AgentRun = {
       id: "run_1",

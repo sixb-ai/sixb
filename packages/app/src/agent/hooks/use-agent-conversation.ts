@@ -11,18 +11,20 @@ import {
   getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
+  listAgentComputersOptions,
   listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
+  listAgentThreadInboxQueryKey,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
   listModelsOptions,
-  moveAgentThreadToCloudMutation,
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
+  restoreAgentThreadSandboxMutation,
   retryAgentRunMutation,
   setAgentThreadApprovalModeMutation,
   stopAgentBackgroundCommandMutation,
@@ -32,7 +34,7 @@ import {
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
 import {
   type AgentApproval,
@@ -47,10 +49,16 @@ import {
 } from "../approvals"
 import type { TranscriptBackground } from "../background/context"
 import type { ComposerProps } from "../components/composer"
-import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
+import { type ComputerOfflineNoticeProps, folderName } from "../components/computer-place"
+import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
-import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
+import {
+  type AgentConversationTurn,
+  conversationMessages,
+  conversationTurn,
+  type PendingUserMessage,
+} from "../conversation"
 import type { TranscriptDelegation } from "../delegation/context"
 import { projectDictation } from "../dictation"
 import { useAgentMessages } from "../i18n"
@@ -62,6 +70,7 @@ import {
   preferenceWithReasoning,
   resolveModelSelection,
 } from "../model-selection"
+import { transcriptMoves } from "../moves"
 import { openQuestion } from "../questions/interpret"
 import type { QuestionComposerProps } from "../questions/question-composer"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
@@ -89,6 +98,7 @@ import {
 import type {
   AgentContextEntryInput,
   AgentFileRef,
+  AgentMessageDelivery,
   AgentRun,
   AgentThreadSandboxParams,
   LanguageModel,
@@ -99,6 +109,7 @@ import {
   useNewThreadPlace,
 } from "./use-new-thread-place"
 import { useAgentThreadLists } from "./use-thread-lists"
+import { useThreadPlace } from "./use-thread-place"
 import { useThreadStream } from "./use-thread-stream"
 
 interface PendingSend {
@@ -144,6 +155,7 @@ export type ConversationComposerProps = Pick<
   | "disabled"
   | "pending"
   | "running"
+  | "steerable"
   | "stopping"
   | "onStop"
   | "hint"
@@ -158,10 +170,12 @@ export type ConversationComposerProps = Pick<
   | "usingDefaultModel"
   | "onResetModelSelection"
   | "modelRouting"
+  | "draftKey"
   | "draft"
   | "draftAttachments"
   | "draftContext"
   | "draftNonce"
+  | "draftReseedKey"
   | "insertion"
   | "onInserted"
   | "approvalMode"
@@ -320,10 +334,11 @@ export function useAgentConversation({
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
   const authors = messagesQuery.data?.authors
+  // Every run, as every message is read: the transcript marks each move from the runs either side.
   const runsQuery = useQuery({
     ...listAgentThreadRunsOptions({
       path: { threadId: threadId ?? "" },
-      query: { limit: "50", order: "desc" },
+      query: { order: "desc" },
     }),
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
@@ -388,7 +403,9 @@ export function useAgentConversation({
     attachments: readonly AgentFileRef[]
     context: readonly AgentContextEntryInput[]
     nonce: number
-  }>({ text: "", attachments: [], context: [], nonce: 0 })
+    /** The conversation the message was for, whichever one is open when it comes back. */
+    draftKey: string
+  }>({ text: "", attachments: [], context: [], nonce: 0, draftKey: "draft" })
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
   const stopRef = useRef<(approval: AgentApproval) => Promise<void>>(async () => {})
   const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {
@@ -402,6 +419,8 @@ export function useAgentConversation({
   } | null>(null)
   /** The thread whose answer Continue is asking for, until the API accepts or refuses it. */
   const [continuingThreadId, setContinuingThreadId] = useState<string | null>(null)
+  /** The thread whose sandbox its owner just resumed, until its cut-short turn runs again. */
+  const [resumedThreadId, setResumedThreadId] = useState<string | null>(null)
 
   const pendingRun =
     pendingSend && threadId !== null && pendingSend.run.threadId === threadId
@@ -412,6 +431,11 @@ export function useAgentConversation({
       ? selectActiveRunId({ pendingRun, threadActiveRunId: thread?.activeRunId ?? null, latestRun })
       : null
   const { live, run: streamRun, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  // What the turn read as it answered leaves the tray: the transcript shows it where it was read.
+  const readMessageIds = useMemo(
+    () => new Set(live.inboxReads.flatMap((read) => read.messages.map((message) => message.id))),
+    [live.inboxReads]
+  )
   // A compaction that ended changed what the conversation weighs: measure it again.
   const wasCompactingRef = useRef(false)
   useEffect(() => {
@@ -470,7 +494,7 @@ export function useAgentConversation({
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
-  const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
+  const restoreSandbox = useMutation(restoreAgentThreadSandboxMutation())
   const stopBackgroundCommand = useMutation(stopAgentBackgroundCommandMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
   // Each runs after the one before, so the last choice is the one the server keeps.
@@ -536,38 +560,58 @@ export function useAgentConversation({
   const send = async (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery: AgentMessageDelivery = "auto"
   ) => {
-    if (isRunning) return
+    // A running turn takes the message as a steer, a queued turn, or one that stops it. A chat that
+    // does not say where it goes sends it where Enter would: into the reader's own answer, or after
+    // the answer in flight when it is someone else's or carries a file, which no step reads.
+    // The thread that a message starts is always a turn, whatever the composer said.
+    const where: AgentMessageDelivery =
+      isRunning && delivery === "auto"
+        ? attachments.length === 0 && !requestedBySomeoneElse(activeRun, user)
+          ? "steer"
+          : "queue"
+        : delivery
     setSendError(null)
     const targetThreadId = threadId
     const key = `sent:${++sentMessageCount}`
     let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
-        setPendingUser({
-          key,
-          threadId: targetThreadId,
-          text,
-          attachments,
-          context,
-          messageId: null,
-        })
+        // A message for the running turn waits in the inbox, which the tray shows: only one that
+        // starts a turn is the transcript's next message.
+        if (where === "auto") {
+          setPendingUser({
+            key,
+            threadId: targetThreadId,
+            text,
+            attachments,
+            context,
+            messageId: null,
+          })
+        }
         const response = await sendWithRequesterSettings((settings) =>
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
             body: {
               ...messageBody(text, attachments, context, modelSelection.request, settings),
               ...turnApprovalMode,
+              ...(where === "auto" ? {} : { delivery: where }),
             },
           })
         )
-        recordAcceptedSend(response.run, key)
+        if (response.run) recordAcceptedSend(response.run, key)
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: listAgentThreadMessagesQueryKey({ path: { threadId: targetThreadId } }),
           }),
           queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+          // A message that waits beside the running turn is in the thread's inbox, not its
+          // transcript: the tray reads it from there.
+          queryClient.invalidateQueries({
+            queryKey: listAgentThreadInboxQueryKey({ path: { threadId: targetThreadId } }),
+          }),
         ])
         return
       }
@@ -582,7 +626,13 @@ export function useAgentConversation({
       }
       if (!place) {
         // They cancelled choosing a folder: nothing was sent, and their message goes back.
-        setDraftReseed((current) => ({ text, attachments, context, nonce: current.nonce + 1 }))
+        setDraftReseed((current) => ({
+          text,
+          attachments,
+          context,
+          nonce: current.nonce + 1,
+          draftKey: "draft",
+        }))
         return
       }
       const title = deriveTitle(text, attachments)
@@ -614,7 +664,7 @@ export function useAgentConversation({
           },
         })
       )
-      recordAcceptedSend(response.run, key)
+      if (response.run) recordAcceptedSend(response.run, key)
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -628,6 +678,7 @@ export function useAgentConversation({
         attachments,
         context,
         nonce: current.nonce + 1,
+        draftKey: createdThreadId ?? targetThreadId ?? "draft",
       }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
@@ -701,6 +752,10 @@ export function useAgentConversation({
       }),
       queryClient.invalidateQueries({
         queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
+      }),
+      // A turn that ended read its steers, or started what was queued behind it.
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadInboxQueryKey({ path: { threadId } }),
       }),
     ])
 
@@ -807,8 +862,10 @@ export function useAgentConversation({
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
       setContinuingThreadId(null)
-      watchRun(response.run)
-      setPendingSend({ run: response.run, anchor: true })
+      if (response.run) {
+        watchRun(response.run)
+        setPendingSend({ run: response.run, anchor: true })
+      }
       await refreshThread(threadId)
     } catch (error) {
       setContinuingThreadId(null)
@@ -817,31 +874,18 @@ export function useAgentConversation({
     }
   }
 
-  const handleContinueInCloud = () => {
-    if (!thread || thread.runsOn !== "computer" || access !== "owner") return
-    moveToCloud.mutate(
-      { path: { threadId: thread.id } },
-      {
-        onSuccess: (moved) => {
-          queryClient.setQueryData(getAgentThreadQueryKey({ path: { threadId: moved.id } }), moved)
-          void queryClient.invalidateQueries({
-            queryKey: listAgentThreadRunsQueryKey({ path: { threadId: moved.id } }),
-          })
-          void refreshThreads()
-        },
-      }
-    )
-  }
-
-  const handleRecreateSandbox = () => {
+  /** Recover the thread's sandbox as its owner chose: fresh, or as the failed save left it. */
+  const recoverSandbox = (recovery: typeof recreateSandbox | typeof restoreSandbox) => {
     if (!thread?.sandboxState || isRunning || access !== "owner") return
-    recreateSandbox.mutate(
+    recovery.mutate(
       {
         path: { threadId: thread.id },
         body: { expectedSandboxName: thread.sandboxState.name },
       },
       {
         onSuccess: () => {
+          if (recovery === restoreSandbox) setResumedThreadId(thread.id)
+
           void queryClient.invalidateQueries({
             queryKey: getAgentThreadQueryKey({ path: { threadId: thread.id } }),
           })
@@ -899,6 +943,7 @@ export function useAgentConversation({
   }, [])
 
   const sandboxRecovery =
+    thread?.runsOn !== "computer" &&
     thread?.sandboxState &&
     !isRunning &&
     ["busy", "blocked", "unavailable"].includes(thread.sandboxState.status)
@@ -937,6 +982,7 @@ export function useAgentConversation({
   // A turn that never answered can run again, by whoever asked for it, once the sandbox works,
   // unless it would fail the same way: a conversation too long for its model.
   const canRetry =
+    !(access === "participant" && thread?.runsOn === "computer") &&
     !sandboxRecovery &&
     ((presentation.kind === "failed" && presentation.run.error?.code !== CONTEXT_LIMIT_EXCEEDED) ||
       ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
@@ -949,6 +995,22 @@ export function useAgentConversation({
     messages: savedMessages,
     latestRun,
   })
+
+  // Resuming the sandbox picks the cut-short turn up again, once the thread reads ready: it goes
+  // on where it stopped, or runs again when it had not got anywhere.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Continue and Retry check their own state
+  useEffect(() => {
+    if (resumedThreadId === null) return
+    if (resumedThreadId !== threadId) {
+      setResumedThreadId(null)
+      return
+    }
+    if (sandboxRecovery) return
+
+    setResumedThreadId(null)
+    if (canContinue) void continueTurn()
+    else if (canRetry) retry()
+  }, [resumedThreadId, threadId, sandboxRecovery, canContinue, canRetry])
 
   const reader = user
     ? { type: "user" as const, id: user.id, displayName: user.displayName }
@@ -965,7 +1027,25 @@ export function useAgentConversation({
     presentation,
   })
 
-  const turn = conversationTurn({
+  const answeringAuthor = useMemo(
+    () =>
+      answeringFor
+        ? {
+            type: answeringFor.type,
+            id: answeringFor.id,
+            ...(answeringForName === undefined ? {} : { displayName: answeringForName }),
+            isReader: false,
+          }
+        : null,
+    [answeringFor, answeringForName]
+  )
+  const continuingHere = continuingThreadId !== null && continuingThreadId === threadId
+  const waitingForComputer =
+    computerOffline && thread?.computer
+      ? agentMessages.computer.placeOn(folderName(thread.computer.folder), thread.computer.name)
+      : null
+  const streamReconnecting = live.active && reconnecting
+  const nextTurn = conversationTurn({
     presentation,
     activeRunId,
     canStop,
@@ -973,21 +1053,17 @@ export function useAgentConversation({
     canContinue,
     stopping,
     retrying: retryRun.isPending,
-    continuing: continuingThreadId !== null && continuingThreadId === threadId,
+    continuing: continuingHere,
     waitingLonger,
-    waitingFor: computerOffline ? (thread?.computer?.name ?? null) : null,
+    waitingFor: waitingForComputer,
     compacting: live.compacting,
     contextFull: live.contextFull,
-    reconnecting: live.active && reconnecting,
-    answeringFor: answeringFor
-      ? {
-          type: answeringFor.type,
-          id: answeringFor.id,
-          ...(answeringForName === undefined ? {} : { displayName: answeringForName }),
-          isReader: false,
-        }
-      : null,
+    reconnecting: streamReconnecting,
+    answeringFor: answeringAuthor,
   })
+  const prevTurnRef = useRef(nextTurn)
+  if (!sameTurn(prevTurnRef.current, nextTurn)) prevTurnRef.current = nextTurn
+  const turn = prevTurnRef.current
 
   /**
    * Stop a turn paused on held calls, as Stop does a running one: its waiting calls are set aside,
@@ -1053,27 +1129,40 @@ export function useAgentConversation({
     [runs, access, user]
   )
 
-  // Where the conversation moved, after the last message saved before then: the files earlier
-  // turns worked on stayed behind.
-  const movedAt = thread?.movedAt
-  const savedBefore = movedAt
-    ? new Set(savedMessages.filter((saved) => saved.createdAt <= movedAt).map(({ id }) => id))
-    : null
-  // The last one the transcript shows: not every saved message is drawn.
-  const movedAfterId =
-    savedBefore && messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
-  const moved =
-    thread && movedAfterId
-      ? {
-          afterMessageId: movedAfterId,
-          label:
-            thread.runsOn !== "computer"
-              ? agentMessages.computer.movedToCloud
-              : thread.computer
-                ? agentMessages.computer.movedToFolder(shownFolder(thread.computer.folder))
-                : agentMessages.computer.movedElsewhere,
-        }
-      : null
+  // The names of the reader's computers, where they're already known: a run keeps only the id.
+  const listedComputers = useQuery({ ...listAgentComputersOptions(), enabled: false }).data
+  const computerNames = useMemo(() => {
+    const names = new Map(
+      (listedComputers?.computers ?? []).map((computer) => [computer.id, computer.name])
+    )
+    if (thread?.computer) names.set(thread.computer.id, thread.computer.name)
+    return names
+  }, [listedComputers, thread?.computer])
+
+  // Where the conversation moved, at every turn that ran elsewhere than the one before and where it
+  // runs now: the files earlier turns worked on stayed behind.
+  const { moved, moves } = useMemo(
+    () =>
+      transcriptMoves({
+        thread,
+        savedMessages,
+        shownIds: new Set(messages.flatMap((message) => (message.id !== null ? [message.id] : []))),
+        runs,
+        messages: agentMessages.computer,
+        computerNames,
+        ownerName: thread && access === "participant" ? personName(threadOwner(thread)) : null,
+      }),
+    [access, agentMessages.computer, computerNames, messages, runs, savedMessages, thread]
+  )
+
+  const hasPendingApprovals =
+    isAwaitingApproval(latestRun) &&
+    approvals.some((approval) => approval.status === "pending" && approval.runId === latestRun?.id)
+  // A computer's conversation moves with a turn still queued for it; the cloud's, once none is.
+  const replyRunning = thread?.runsOn === "computer" ? activeRun?.status === "running" : isRunning
+  const placeBusy = hasPendingApprovals ? "approval" : replyRunning ? "running" : null
+  const messageWaiting = thread?.runsOn === "computer" && activeRun?.status === "queued"
+  const place = useThreadPlace({ thread, access, busy: placeBusy, waiting: messageWaiting })
 
   // Its background commands: what its owner's sixb reports of them, and their Stop, to its owner
   // alone, as the computer is theirs. A command started in a folder runs on there once the thread
@@ -1105,104 +1194,255 @@ export function useAgentConversation({
   const [questionSetAside, setQuestionSetAside] = useState<string | null>(null)
   const asked = threadId !== null ? openQuestion(messages, turn) : null
   const asking = asked !== null && questionSetAside !== asked.messageKey ? asked : null
-  const questionProps: QuestionComposerProps | null = asking
-    ? {
-        questions: asking.questions,
-        onAnswer: (text) => void send(text, [], []),
-        onDismiss: () => setQuestionSetAside(asking.messageKey),
-      }
-    : null
-
-  const transcriptProps: TranscriptProps = {
-    threadId,
-    messages,
-    moved,
-    turn,
-    anchorCurrentTurn,
-    onRetry: canRetry ? retry : undefined,
-    onContinue: canContinue ? continueTurn : undefined,
-    approvals: transcriptApprovals,
-    approvalOutcomes,
-    delegation: transcriptDelegation,
-    background: transcriptBackground,
+  // Stable callbacks so streaming chunks never invalidate memoized Composer or Transcript controls.
+  const actionsRef = useRef({
+    send,
+    stop,
+    retry,
+    continueTurn,
+    selectModel,
+    selectReasoning,
+    resetReasoning,
+    resetModelSelection,
+    setApprovalMode,
+  })
+  actionsRef.current = {
+    send,
+    stop,
+    retry,
+    continueTurn,
+    selectModel,
+    selectReasoning,
+    resetReasoning,
+    resetModelSelection,
+    setApprovalMode,
   }
+  const stableSend = useCallback<ComposerProps["onSend"]>(
+    (text, attachments, context, delivery) =>
+      void actionsRef.current.send(text, attachments, context, delivery),
+    []
+  )
+  const stableStop = useCallback(() => actionsRef.current.stop(), [])
+  const stableRetry = useCallback(() => actionsRef.current.retry(), [])
+  const stableContinue = useCallback(() => void actionsRef.current.continueTurn(), [])
+  const stableSelectModel = useCallback(
+    (model: LanguageModel) => actionsRef.current.selectModel(model),
+    []
+  )
+  const stableSelectReasoning = useCallback(
+    (reasoning: ModelReasoningLevel) => actionsRef.current.selectReasoning(reasoning),
+    []
+  )
+  const stableResetReasoning = useCallback(() => actionsRef.current.resetReasoning(), [])
+  const stableResetModelSelection = useCallback(() => actionsRef.current.resetModelSelection(), [])
+  const stableSetApprovalMode = useCallback(
+    (mode: AgentApprovalMode) => actionsRef.current.setApprovalMode(mode),
+    []
+  )
+  const stableAnswerQuestion = useCallback(
+    (text: string) => void actionsRef.current.send(text, [], []),
+    []
+  )
 
-  const modelControlsProps = {
-    models,
-    selectedModel,
-    selectedReasoning,
-    modelsLoading: modelsQuery.isLoading,
-    modelsError: modelsQuery.isError,
-    onSelectModel: selectModel,
-    onSelectReasoning: selectReasoning,
-    onResetReasoning: resetReasoning,
-    usingDefaultModel: modelSelection.request === undefined,
-    onResetModelSelection: resetModelSelection,
-    modelRouting: modelsQuery.data?.languageRouting,
-  }
+  const askingKey = asking?.messageKey ?? null
+  const dismissQuestion = useCallback(() => {
+    if (askingKey) setQuestionSetAside(askingKey)
+  }, [askingKey])
 
-  const composerProps: ConversationComposerProps = {
-    onSend: send,
-    ...(threadId === null && !newThreadSandbox && (newThreadPlace || newThreadPlaceWaiting)
-      ? { newThreadPlace: newThreadPlace ?? "waiting" }
-      : {}),
-    error: currentSendError
-      ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
-      : undefined,
-    // Whoever's answer is in flight, the reader writes the next message, and sends it once it ends.
-    disabled: Boolean(sandboxRecovery),
-    hint: answeringName
-      ? agentMessages.sharing.answering(answeringName)
-      : othersWaiting
-        ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
-        : undefined,
-    pending: composerPending,
-    running: isRunning,
-    stopping,
-    onStop: canStop ? stop : undefined,
-    ...modelControlsProps,
-    draft: draftReseed.text,
-    draftAttachments: draftReseed.attachments,
-    draftContext: draftReseed.context,
-    draftNonce: draftReseed.nonce,
-    approvalMode,
-    onApprovalModeChange: setApprovalMode,
-    awaitingApproval,
-    dictation: projectDictation(modelsQuery.data),
-    contextMeter: {
-      context: threadId !== null ? contextQuery.data : undefined,
-      modelName: meteredModelName(models, contextQuery.data?.model),
+  const questionProps: QuestionComposerProps | null = useMemo(
+    () =>
+      asking
+        ? {
+            questions: asking.questions,
+            onAnswer: stableAnswerQuestion,
+            onDismiss: dismissQuestion,
+          }
+        : null,
+    [asking, stableAnswerQuestion, dismissQuestion]
+  )
+
+  const movedAfterMessageId = moved?.afterMessageId ?? null
+  const movedLabel = moved?.label ?? null
+  const stableMoved = useMemo(
+    () =>
+      movedAfterMessageId && movedLabel
+        ? { afterMessageId: movedAfterMessageId, label: movedLabel }
+        : null,
+    [movedAfterMessageId, movedLabel]
+  )
+
+  const transcriptProps: TranscriptProps = useMemo(
+    () => ({
+      threadId,
+      messages,
+      moved: stableMoved,
+      moves,
+      turn,
+      anchorCurrentTurn,
+      onRetry: canRetry ? stableRetry : undefined,
+      onContinue: canContinue ? stableContinue : undefined,
+      approvals: transcriptApprovals,
+      approvalOutcomes,
+      delegation: transcriptDelegation,
+      background: transcriptBackground,
+    }),
+    [
+      threadId,
+      messages,
+      stableMoved,
+      moves,
+      turn,
+      anchorCurrentTurn,
+      canRetry,
+      stableRetry,
+      canContinue,
+      stableContinue,
+      transcriptApprovals,
+      approvalOutcomes,
+      transcriptDelegation,
+      transcriptBackground,
+    ]
+  )
+
+  const meterContext = threadId !== null ? contextQuery.data : undefined
+  const meterModelName = meteredModelName(models, contextQuery.data?.model)
+  const contextMeter = useMemo(
+    () => ({
+      context: meterContext,
+      modelName: meterModelName,
       condensing: live.compacting,
-    },
-  }
+    }),
+    [meterContext, meterModelName, live.compacting]
+  )
 
-  const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
-  const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
-    ? {
-        computer: thread?.computer ?? null,
-        // One mutation serves every conversation this view opens: only this one's state shows.
-        pending: movingThisThread && moveToCloud.isPending,
-        error:
-          !movingThisThread || !moveToCloud.isError
-            ? null
-            : isSixbApiError(moveToCloud.error) && moveToCloud.error.code === "active_run_exists"
-              ? "busy"
-              : "failed",
-        onContinueInCloud: handleContinueInCloud,
-        ...(desktopComputer && thread?.computer && thread.computer.id === desktopComputerId
-          ? {
-              onRunHere: () =>
-                void desktopComputer.allowFolder(thread.computer?.folder ?? "").catch(() => {}),
-            }
-          : {}),
-      }
-    : null
+  const composerError = currentSendError
+    ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
+    : undefined
+  const composerHint = answeringName
+    ? agentMessages.sharing.answering(answeringName)
+    : othersWaiting
+      ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
+      : undefined
+  const resolvedNewThreadPlace =
+    threadId === null && !newThreadSandbox && (newThreadPlace || newThreadPlaceWaiting)
+      ? (newThreadPlace ?? "waiting")
+      : undefined
+  const usingDefaultModel = modelSelection.request === undefined
+  const modelRouting = modelsQuery.data?.languageRouting
+  const dictationRecognizer = projectDictation(modelsQuery.data)
+  const composerDisabled = Boolean(sandboxRecovery)
+  const steerable = !requestedBySomeoneElse(activeRun, user)
+
+  const composerProps: ConversationComposerProps = useMemo(
+    () => ({
+      onSend: stableSend,
+      ...(resolvedNewThreadPlace ? { newThreadPlace: resolvedNewThreadPlace } : {}),
+      error: composerError,
+      // Whoever's answer is in flight, the reader writes the next message.
+      disabled: composerDisabled,
+      hint: composerHint,
+      pending: composerPending,
+      running: isRunning,
+      // Only the turn the reader asked for takes a steer; another person's takes a queued message.
+      steerable,
+      stopping,
+      onStop: canStop ? stableStop : undefined,
+      models,
+      selectedModel,
+      selectedReasoning,
+      modelsLoading: modelsQuery.isLoading,
+      modelsError: modelsQuery.isError,
+      onSelectModel: stableSelectModel,
+      onSelectReasoning: stableSelectReasoning,
+      onResetReasoning: stableResetReasoning,
+      usingDefaultModel,
+      onResetModelSelection: stableResetModelSelection,
+      modelRouting,
+      draftKey: threadId ?? "draft",
+      draft: draftReseed.text,
+      draftAttachments: draftReseed.attachments,
+      draftContext: draftReseed.context,
+      draftNonce: draftReseed.nonce,
+      draftReseedKey: draftReseed.draftKey,
+      approvalMode,
+      onApprovalModeChange: stableSetApprovalMode,
+      awaitingApproval,
+      dictation: dictationRecognizer,
+      contextMeter,
+    }),
+    [
+      stableSend,
+      resolvedNewThreadPlace,
+      composerError,
+      composerDisabled,
+      composerHint,
+      composerPending,
+      isRunning,
+      steerable,
+      stopping,
+      canStop,
+      stableStop,
+      models,
+      selectedModel,
+      selectedReasoning,
+      modelsQuery.isLoading,
+      modelsQuery.isError,
+      stableSelectModel,
+      stableSelectReasoning,
+      stableResetReasoning,
+      usingDefaultModel,
+      stableResetModelSelection,
+      modelRouting,
+      threadId,
+      draftReseed,
+      approvalMode,
+      stableSetApprovalMode,
+      awaitingApproval,
+      dictationRecognizer,
+      contextMeter,
+    ]
+  )
+
+  const pendingProps: PendingMessagesProps = useMemo(
+    () => ({ threadId, steerable, read: readMessageIds }),
+    [threadId, steerable, readMessageIds]
+  )
+
+  // The header's move to the cloud, from the notice: one move, one state, wherever it's asked.
+  const computerNoticeProps: ComputerOfflineNoticeProps | null =
+    computerOffline && place
+      ? {
+          computer: thread?.computer ?? null,
+          waiting: messageWaiting,
+          pending: place.movingTo === "cloud",
+          moving: place.pending,
+          busy: place.busy,
+          error: place.cloudError,
+          onContinueInCloud: place.moveToCloud,
+          ...(desktopComputer && thread?.computer && thread.computer.id === desktopComputerId
+            ? {
+                onRunHere: () =>
+                  void desktopComputer.allowFolder(thread.computer?.folder ?? "").catch(() => {}),
+              }
+            : {}),
+        }
+      : null
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
     ? {
-        pending: recreateSandbox.isPending,
+        pending: recreateSandbox.isPending || restoreSandbox.isPending,
         error: recreateSandbox.isError,
-        onRecreate: handleRecreateSandbox,
+        onRecreate: () => recoverSandbox(recreateSandbox),
+        // Only a workspace its run finished preparing has files to go on from.
+        ...(sandboxRecovery.status !== "unavailable" && sandboxRecovery.initialized
+          ? {
+              restore: {
+                pending: restoreSandbox.isPending,
+                error: restoreSandbox.isError,
+                onRestore: () => recoverSandbox(restoreSandbox),
+              },
+            }
+          : {}),
         canRecreate: access === "owner",
         owner: thread ? personName(threadOwner(thread)) : "",
       }
@@ -1281,8 +1521,12 @@ export function useAgentConversation({
      * until the reader answers it or sets it aside.
      */
     questionProps,
+    /** Spread into `<PendingMessages>`, above the composer: what waits beside the running turn. */
+    pendingProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
+    /** Where the reader's own conversation runs, and how to switch it between cloud and computer. */
+    place,
     /** Where the reader's own conversation runs on their computer, for its badge. */
     computer: access === "owner" ? (thread?.computer ?? null) : null,
     /** Spread into `<ComputerOfflineNotice>` while its computer is offline. */
@@ -1471,4 +1715,14 @@ function useExtendedWaitingStatus(run: Pick<AgentRun, "status" | "createdAt"> | 
   }, [run])
 
   return visible
+}
+
+function sameTurn(a: AgentConversationTurn, b: AgentConversationTurn): boolean {
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    if (!Object.is(Reflect.get(a, key), Reflect.get(b, key))) return false
+  }
+  return true
 }

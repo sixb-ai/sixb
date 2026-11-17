@@ -10,6 +10,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
@@ -22,6 +23,8 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
   ArtifactRestorePointRecord,
@@ -98,7 +101,8 @@ const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS update
 const COMMENT_COLUMNS = `
   project_id AS projectId, artifact_id AS artifactId, id, parent_id AS parentId, anchor, body,
   author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
-  author_name AS authorName, created_at AS createdAt, resolved_at AS resolvedAt,
+  author_name AS authorName, author_grant_id AS authorGrantId, created_at AS createdAt,
+  resolved_at AS resolvedAt,
   resolved_by_principal_type AS resolvedByPrincipalType,
   resolved_by_principal_id AS resolvedByPrincipalId,
   origin_thread_id AS originThreadId, origin_run_id AS originRunId
@@ -106,6 +110,9 @@ const COMMENT_COLUMNS = `
 
 const BOARD_PREVIEW_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, theme, size, file, created_at AS createdAt"
+
+const PDF_COLUMNS =
+  "project_id AS projectId, render_key AS renderKey, file, pages, failure, created_at AS createdAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -714,6 +721,42 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     })
   }
 
+  async getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null> {
+    const row = this.db
+      .query(`SELECT ${PDF_COLUMNS} FROM artifact_pdfs WHERE project_id = ? AND render_key = ?`)
+      .get(input.projectId, input.renderKey) as Row | null
+    return row ? parseArtifactPdfRow(row) : null
+  }
+
+  async putPdf(input: ArtifactPdfRecord): Promise<void> {
+    const printed = "failure" in input ? null : input
+    this.db
+      .query(
+        `INSERT INTO artifact_pdfs (project_id, render_key, file, pages, failure, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, render_key) DO UPDATE SET
+           file = excluded.file, pages = excluded.pages, failure = NULL,
+           created_at = excluded.created_at
+         WHERE artifact_pdfs.failure IS NOT NULL AND excluded.failure IS NULL`
+      )
+      .run(
+        input.projectId,
+        input.renderKey,
+        printed ? JSON.stringify(printed.file) : null,
+        printed ? printed.pages : null,
+        "failure" in input ? input.failure : null,
+        input.createdAt.toISOString()
+      )
+  }
+
+  async clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void> {
+    this.db
+      .query(
+        "DELETE FROM artifact_pdfs WHERE project_id = ? AND render_key = ? AND failure IS NOT NULL"
+      )
+      .run(input.projectId, input.renderKey)
+  }
+
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
     return runImmediateTransaction(this.db, () => {
       const artifact = this.db
@@ -759,12 +802,14 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           : { point: { x: input.anchor.point.x, y: input.anchor.point.y } }),
         revision: input.anchor.revision,
       }
+      const guest = input.author.type === "guest" ? input.author : undefined
       const row = this.db
         .query(
           `INSERT INTO artifact_comments (
             project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-            author_principal_id, author_name, created_at, origin_thread_id, origin_run_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            author_principal_id, author_name, author_grant_id, created_at, origin_thread_id,
+            origin_run_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           RETURNING ${COMMENT_COLUMNS}`
         )
         .get(
@@ -776,7 +821,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.body,
           input.author.type,
           input.author.id,
-          input.author.type === "guest" ? input.author.name : null,
+          guest?.name ?? null,
+          guest?.grantId ?? null,
           input.createdAt.toISOString(),
           input.origin?.threadId ?? null,
           input.origin?.runId ?? null

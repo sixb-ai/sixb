@@ -63,6 +63,11 @@ export type TransitionAgentThreadSandboxInput = {
       readonly expectedSandboxName: string
       readonly name: string
     }
+  | {
+      /** Go on in the sandbox a failed save left, as its owner chose: the one named `name`. */
+      readonly action: "restore"
+      readonly name: string
+    }
 )
 
 /**
@@ -447,6 +452,11 @@ export interface ConversationAgentRunSpec {
   readonly approvalMode?: AgentApprovalMode
   /** Its thread's `runsOn` when it was asked for: a computer's turn never reaches the agent queue. */
   readonly runsOn?: "computer"
+  /**
+   * Which computer and folder the turn ran in: captured with `runsOn: "computer"` and updated if a
+   * queued turn moves to another folder before starting.
+   */
+  readonly computer?: AgentThreadPlace
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
@@ -791,8 +801,9 @@ export interface AgentThreadStore {
   /** Whether the user took part until now. */
   removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
   /**
-   * Move a computer's thread to another computer or folder, and return the thread after. A cloud
-   * thread runs on none, and is refused.
+   * Move a conversation thread to a computer and folder, from the cloud or from another computer or
+   * folder, and return the thread after. Refused while a turn holds a cloud thread or runs on its
+   * computer.
    */
   assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord>
   /**
@@ -1362,6 +1373,167 @@ export interface AgentTokenRateStore {
   }): Promise<readonly AgentTokenRateRecord[]>
 }
 
+// -- agent_thread_inbox: mid-run steers and queued follow-up messages -------------------------
+
+export const AGENT_INBOX_MODES = ["steer", "queue"] as const
+export type AgentInboxMode = (typeof AGENT_INBOX_MODES)[number]
+
+/** Maximum pending items one conversation thread holds in its inbox at once. */
+export const AGENT_THREAD_INBOX_MAX_ITEMS = 50
+
+/** Optional per-turn overrides carried by a queued or immediate inbox item. */
+export interface AgentInboxSpec {
+  readonly model?: LanguageModelRef
+  readonly reasoning?: AgentReasoning
+  readonly approvalMode?: AgentApprovalMode
+}
+
+/** Claim recorded when a running conversation turn drains a `steer` item at a step boundary. */
+export interface AgentInboxClaim {
+  readonly runId: string
+  readonly executionToken: string
+  readonly stepIndex: number
+  readonly afterAnswer?: boolean
+}
+
+export interface AgentInboxItemRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly threadId: string
+  /** Stable id reserved for `agent_messages` once this item is delivered. */
+  readonly messageId: string
+  readonly seq: number
+  readonly authorPrincipal: Principal
+  readonly mode: AgentInboxMode
+  readonly parts: readonly AgentMessagePart[]
+  readonly spec?: AgentInboxSpec
+  readonly timeZone?: string
+  readonly locale?: string
+  /** Marked by Send now so `afterAgentRunFinished` dispatches it across a user cancel. */
+  readonly immediate?: boolean
+  /**
+   * The execution of the request that sent it. A turn that starts it without a request of its
+   * sender's runs as a child of this one, with the sender's grants as they are then.
+   */
+  readonly executionId?: string
+  readonly claimedBy?: AgentInboxClaim
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+export interface EnqueueAgentInboxItemInput {
+  readonly id: string
+  readonly projectId: string
+  readonly threadId: string
+  readonly messageId: string
+  readonly authorPrincipal: Principal
+  readonly mode: AgentInboxMode
+  readonly parts: readonly AgentMessagePart[]
+  readonly spec?: AgentInboxSpec
+  readonly timeZone?: string
+  readonly locale?: string
+  readonly immediate?: boolean
+  readonly executionId?: string
+  readonly createdAt?: Date
+}
+
+export interface EnqueueAgentInboxItemResult {
+  readonly item: AgentInboxItemRecord
+  readonly created: boolean
+}
+
+export interface ListAgentInboxItemsInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Whether items already claimed by a running step are included; defaults to `true`. */
+  readonly includeClaimed?: boolean
+}
+
+export interface UpdateAgentInboxItemInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly id: string
+  readonly mode?: AgentInboxMode
+  readonly parts?: readonly AgentMessagePart[]
+  readonly spec?: AgentInboxSpec | null
+  readonly immediate?: boolean
+  readonly updatedAt?: Date
+}
+
+export interface RemoveAgentInboxItemInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly id: string
+}
+
+export interface TakeAgentInboxSteersInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly runId: string
+  readonly executionToken: string
+  readonly stepIndex: number
+  readonly afterAnswer?: boolean
+  /**
+   * The run's requester: a turn runs as them, so it reads only the steers they sent. Another
+   * participant's steer waits for a turn of theirs.
+   */
+  readonly authorPrincipal: Principal
+}
+
+export interface ConsumeClaimedAgentInboxInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly runId: string
+  readonly executionToken: string
+  /** Message ids persisted into `agent_messages`; other claims of this run are released. */
+  readonly messageIds: readonly string[]
+}
+
+export interface TakeNextQueuedAgentInboxInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** When `true`, only an item marked `immediate` is popped (used after a user cancel). */
+  readonly onlyImmediate?: boolean
+  /**
+   * Only an item this person sent: a turn runs as its requester, so it starts the messages they
+   * sent, and another participant's waits for a turn of theirs.
+   */
+  readonly authorPrincipal?: Principal
+}
+
+export interface ListWaitingAgentInboxThreadsInput {
+  readonly projectId: string
+  /** Only threads holding an item created before this: newer ones a turn's end is still starting. */
+  readonly createdBefore: Date
+  /** Page after this thread id, in id order. */
+  readonly afterThreadId?: string
+  readonly limit: number
+}
+
+export interface AgentInboxStore {
+  enqueue(input: EnqueueAgentInboxItemInput): Promise<EnqueueAgentInboxItemResult>
+  getById(params: { projectId: string; id: string }): Promise<AgentInboxItemRecord | null>
+  list(input: ListAgentInboxItemsInput): Promise<readonly AgentInboxItemRecord[]>
+  /** Update an unclaimed inbox item; throws `invalid_state` when already claimed. */
+  update(input: UpdateAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
+  /** Remove an unclaimed inbox item; throws `invalid_state` when already claimed. */
+  remove(input: RemoveAgentInboxItemInput): Promise<AgentInboxItemRecord | null>
+  /**
+   * Fenced by `(runId, executionToken)`: claim the non-immediate steers `authorPrincipal` sent, in
+   * FIFO order. The thread's running turn holds it, so a claim any other execution left behind (one
+   * this run replaced, or a turn whose release failed) was never written, and is taken over.
+   */
+  takeSteers(input: TakeAgentInboxSteersInput): Promise<readonly AgentInboxItemRecord[]>
+  /** Consume persisted claims of `(runId, executionToken)` and release any unwritten ones. */
+  consumeClaimed(input: ConsumeClaimedAgentInboxInput): Promise<readonly AgentInboxItemRecord[]>
+  /** Release remaining claims held by `runId` after an interrupted, failed, or cancelled turn. */
+  releaseClaimed(input: { projectId: string; runId: string }): Promise<number>
+  /** Pop the next unclaimed item when `thread.activeRunId` is null; null when busy or empty. */
+  takeNextQueued(input: TakeNextQueuedAgentInboxInput): Promise<AgentInboxItemRecord | null>
+  /** Ids of threads no turn holds whose inbox still holds an item, for the repair pass. */
+  listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]>
+}
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly runs: AgentRunStore
@@ -1372,4 +1544,5 @@ export interface AgentStorage {
   readonly approvalModes: AgentApprovalModeStore
   readonly computers: AgentComputerSessionStore
   readonly tokenRates: AgentTokenRateStore
+  readonly inbox: AgentInboxStore
 }

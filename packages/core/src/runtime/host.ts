@@ -309,6 +309,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.connectorService = new ConnectorService(this.projectId, connectors, {
       storage: this.storage,
       credentialProtector,
+      events: this.eventService,
     })
     if (this.connectorService.connectionProcess) {
       registerConnectorConnectionCallbackProcess(
@@ -608,7 +609,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         definition: this.sandboxDefinition,
         supportsPersistence: typeof this.sandboxes?.resume === "function",
       },
-      rendersBoardPreviews: this.sandboxes !== undefined,
+      rendersInSandboxes: this.sandboxes !== undefined,
       logging: this.logging,
       activity: this.activity,
       connectorService: this.connectorService,

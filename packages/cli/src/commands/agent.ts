@@ -92,7 +92,7 @@ export async function runAgent(options: {
   const place = thread.computer
   if (onComputer && !place) {
     throw new Error(
-      "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+f."
+      "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+g twice."
     )
   }
   const here = onComputer && place?.id === (await thisComputerId()) && place.folder === folder
@@ -127,6 +127,9 @@ export async function runAgent(options: {
       },
       throwOnError: true,
     })
+    if (!posted.run) {
+      throw new Error("[SixbCli] A sent message started no turn: the thread already had one.")
+    }
     let runId: string | null = posted.run.id
     if (options.detach) {
       if (onComputer && !thread.computer?.online) step(tone.faint(waitingNote(thread.computer)))

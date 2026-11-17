@@ -186,6 +186,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Recent log lines to print (default: 100)",
     kind: "string",
   },
+  check: {
+    syntax: "--check",
+    summary: "Only report pending migrations, exiting with 3 when there are some",
+    kind: "boolean",
+  },
   "dry-run": {
     syntax: "--dry-run",
     summary: "Show what would change without changing it",
@@ -583,7 +588,7 @@ const commandTree: readonly CommandNode[] = [
       ),
       command("db:migrate", "Run database migrations ahead of a role", {
         path: ["db", "migrate"],
-        options: ["entry"],
+        options: ["entry", "check"],
         rootHelpLabel: "db migrate",
       }),
     ],

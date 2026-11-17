@@ -16,9 +16,11 @@ import {
   AGENT_PRESENCE_MS,
   artifactLiveStream,
   artifactPresenceStream,
+  keepsDocument,
   loadArtifactDocument,
   mergeIntoDocument,
   parseArtifactLiveRecord,
+  readChange,
   readDocumentState,
   readLiveFiles,
   sameArtifactFiles,
@@ -132,6 +134,8 @@ export class LiveRoom {
   private shadow: Y.Doc
   private state: ArtifactLiveSaveState = "saved"
   private error: string | undefined
+  /** The last write-back was refused for what the document holds: it waits for a change. */
+  private refused = false
   /** The last write-back's failure, which a loss of the changes reports. */
   private failure: unknown
   private attempts = 0
@@ -187,7 +191,7 @@ export class LiveRoom {
     const storage = requireArtifacts(host)
     const artifact = await storage.get({ projectId: host.projectId, id: artifactId })
     if (!artifact) return "not_found"
-    if (artifact.kind !== "canvas") return "not_live"
+    if (!keepsDocument(artifact.kind)) return "not_live"
 
     const version = await storage.getVersion({
       projectId: host.projectId,
@@ -520,6 +524,7 @@ export class LiveRoom {
     this.savedSnapshot = written
     this.attempts = 0
     this.error = undefined
+    this.refused = false
     this.failure = undefined
     this.setState(this.dirty ? "unsaved" : "saved", true)
     if (this.dirty && !this.idle) this.idle = setTimeout(() => this.save(), SAVE_IDLE_MS)
@@ -536,9 +541,10 @@ export class LiveRoom {
     this.attempts += 1
     this.error = error instanceof Error ? error.message : String(error)
     this.failure = error
+    const code = error instanceof ArtifactRequestError ? error.code : undefined
+    this.refused = code === "invalid_artifact"
     this.setState("failed", true)
 
-    const code = error instanceof ArtifactRequestError ? error.code : undefined
     if (code === "artifact_not_found") {
       for (const member of [...this.members.values()]) {
         member.connection.send({ type: "left", artifactId: this.artifactId, reason: "not_found" })
@@ -665,13 +671,14 @@ export class LiveRoom {
    */
   private readable(bytes: Uint8Array): boolean {
     try {
-      syncProtocol.readSyncMessage(
-        decoding.createDecoder(bytes),
-        encoding.createEncoder(),
-        this.shadow,
-        null
+      readChange(this.shadow, () =>
+        syncProtocol.readSyncMessage(
+          decoding.createDecoder(bytes),
+          encoding.createEncoder(),
+          this.shadow,
+          null
+        )
       )
-      documentFiles(this.shadow)
       return true
     } catch {
       this.shadow.destroy()
@@ -902,6 +909,7 @@ export class LiveRoom {
       revision: this.synced.revision,
       snapshot: encodeLiveData(this.savedSnapshot),
       ...(this.state === "failed" && this.error ? { error: this.error } : {}),
+      ...(this.state === "failed" && this.refused ? { refused: true as const } : {}),
     }
   }
 

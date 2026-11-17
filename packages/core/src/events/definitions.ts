@@ -1,5 +1,6 @@
 import { EventsError } from "./errors"
 import type { ArtifactEvent } from "./types/artifacts"
+import type { ConnectorEvent } from "./types/connectors"
 import type { DatasetEvent } from "./types/datasets"
 import type { DomainEvent, DomainEventDraft } from "./types/index"
 import type { LinkEvent } from "./types/links"
@@ -208,6 +209,18 @@ export const ARTIFACT_EVENT_DEFINITIONS = defineEventGroup<ArtifactEvent>({
   },
 })
 
+// One stream per connection, so its connects and disconnects stay in order.
+export const CONNECTOR_EVENT_DEFINITIONS = defineEventGroup<ConnectorEvent>({
+  "connector.connection.connected": {
+    topic: "connectors",
+    partitionKey: (payload) => payload.connection.id,
+  },
+  "connector.connection.disconnected": {
+    topic: "connectors",
+    partitionKey: (payload) => payload.connection.id,
+  },
+})
+
 export const EVENT_DEFINITIONS = {
   ...OBJECT_EVENT_DEFINITIONS,
   ...TELEMETRY_EVENT_DEFINITIONS,
@@ -220,6 +233,7 @@ export const EVENT_DEFINITIONS = {
   ...RULE_EVENT_DEFINITIONS,
   ...USER_EVENT_DEFINITIONS,
   ...ARTIFACT_EVENT_DEFINITIONS,
+  ...CONNECTOR_EVENT_DEFINITIONS,
 } as const satisfies EventDefinitionMap
 
 export const EVENT_TYPES = Object.keys(EVENT_DEFINITIONS) as readonly DomainEvent["type"][]

@@ -139,6 +139,13 @@ turn N's last request sent, on every storage:
   `read` pages by itself, and `glob` and `grep` cap what they return: they are never saved; a
   sandbox or store that cannot take the file leaves the model the part's copy. A cleared preview
   points at the file.
+- **Workspace moves close the user message that crossed them.** Moving a thread between the cloud,
+  computers or folders appends `<sixb_workspace_moved>` to the first user message in the new
+  workspace, ahead of `<sixb_current_time>` and `<sixb_author>`. Only each run's stored place
+  decides it, never the thread's latest move, so no later move adds or removes a note: a round trip
+  with no turn in between marks nothing, and a fork's first turn is marked, its copies having no
+  run in the fork. The system prompt carries no move timestamp, so returning to a workspace within
+  its one-hour cache TTL reuses its cached prefix byte for byte.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
@@ -348,6 +355,59 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   its run works in a thread an earlier turn spawned.
 - A decision made while the turn still runs takes effect once it pauses: it then resumes at once,
   and the child continues in the next turn.
+
+## Steering a running turn
+
+A message the reader sends while a turn runs is steered into it: it waits in the thread's inbox
+(`agent_thread_inbox`) and the turn reads it at a step boundary, so the model adjusts before its
+next call. A message that should wait for the next turn is queued instead, and a child is steered by
+its parent with `message_agent` (see [messages to a child](#messages-to-a-child)).
+
+- **Where it waits.** `storage.agents.inbox` holds it, not `agent_messages`: a turn writes the
+  messages it read when it finishes, so the thread's `seq` order stays the order the model read.
+  A message edited or withdrawn before a step claims it never reaches the conversation.
+- **When the turn reads it.** At each step boundary (`turn-inbox.ts`), after the step's tools
+  settled: `prepareStep` claims the unclaimed `steer` items and appends them to that request, and
+  `beforeComplete` claims the ones that came while the model answered, which the loop follows with
+  one more step (`afterAnswer`). The claim records the run, its execution token and the step, so a
+  step that reads twice reads once.
+- **Whose steers it reads.** A turn runs as its requester, so it claims only the steers they sent,
+  whatever was checked when each was sent. Another participant's steer, one a stopped turn left or
+  one made on an idle thread, waits for a turn of its author.
+- **What the model reads.** Each steer is one user message, closed with when it was sent and who
+  wrote it, projected from the item alone: a steer carries text and context, never a file, whose
+  text a later turn would derive from the attachments it prepares.
+- **What the conversation keeps.** The turn's steps are sliced around each delivery, so
+  `agent_messages` holds `[assistant, user, assistant]`, and the next turn's request sends those
+  bytes. `session.finish` consumes the claims it wrote in the same transaction as the messages and
+  the run's end; a steer no step answered is released, and reads as unread in the thread again.
+- **What a viewer sees meanwhile.** The session publishes `agent.inbox.read` on the run's stream
+  as it claims the steers, from the stored items, after what the run streamed before them (over
+  HTTP, the runner's queued records are sent first). The app draws each message there, between
+  the reply before and the reply after, with the keys their saved copies take at the end.
+
+## Queueing a turn
+
+A message that should wait starts the next turn instead of steering the running one.
+
+- **Where it waits.** In the same thread inbox, with `mode: "queue"`, until the thread is idle
+  (`thread.activeRunId === null`). It is not in the conversation until then, so the running turn's
+  request never reads it.
+- **What starts it.** `afterAgentRunFinished` (`run-after-finish.ts`), once a turn ends: a message
+  sent now (`immediate`, which is what Send now sets) starts whatever ended the turn; a message
+  queued for later starts only once the turn answered. A turn that stopped, failed, or asked the
+  requester a question starts neither, so nothing runs on top of a question or a failure. A turn
+  paused on held calls resumes first, and its end starts what waits; only a message sent now passes
+  it, and sets its held calls aside as a message typed in the chat does.
+- **How it starts.** `startQueuedAgentTurnFromInbox` (`request.ts`) pops the item in the same
+  transaction that writes its message and its run. The finished turn's model and reasoning carry
+  over unless the message names others.
+- **Who starts it.** Each message starts as a turn of its sender's own. The item records the
+  request that sent it (`executionId`), and the turn runs as that request's child, with the
+  sender's grants as they are now: what the request would have started on an idle thread. The
+  finished turn's requester goes first, then each other participant by their oldest message. One
+  whose credential ended, or who can no longer run turns in the thread, waits for a request of
+  theirs: on an idle thread, an action on their own message (Send now, a steer, an edit) starts it.
 
 ## Messages to a child
 

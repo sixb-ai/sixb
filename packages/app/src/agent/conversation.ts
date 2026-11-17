@@ -1,6 +1,6 @@
 import { type FileSource, messageFileSource } from "../artifacts/file-source"
 import { isApprovalOutcomeMessage } from "./approvals"
-import type { LiveRunState } from "./live-run"
+import type { LiveInboxRead, LiveRunState } from "./live-run"
 import { knownName, type MessageAuthor, principalKey } from "./message-authors"
 import {
   type NormalizedFile,
@@ -80,8 +80,9 @@ export interface AgentConversationMessage {
   readonly id: string | null
   readonly role: "user" | "assistant"
   /**
-   * `pending`: sent, not saved yet. `streaming`: a reply that still comes from its run, until its
-   * saved copy replaces it. `complete`: everything else.
+   * `pending`: sent, not saved yet. `streaming`: from the run's live stream until its saved copy
+   * replaces it: the reply, and a message the run read while answering, where it read it.
+   * `complete`: everything else.
    */
   readonly status: "pending" | "streaming" | "complete"
   /** The run that wrote a reply. */
@@ -153,26 +154,48 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   for (const run of input.runs ?? []) {
     if (run.status === "failed" || run.status === "cancelled") ended.set(run.id, run.status)
   }
+  // A turn that read messages as it answered holds a reply on each side of them: only its last one
+  // says how the turn ended, as its live copy did.
+  const lastReplyOfRun = new Map<string, string>()
+  for (const message of input.messages) {
+    if (message.role === "assistant" && message.runId !== null) {
+      lastReplyOfRun.set(message.runId, message.id)
+    }
+  }
 
+  let lastUserMessageId: string | null = null
   for (const message of input.messages) {
     if (message.role === "system") continue
 
     savedIds.add(message.id)
     if (message.role === "assistant" && message.runId !== null) answeredRuns.add(message.runId)
+    if (message.role === "user") lastUserMessageId = message.id
 
     // Continue writes the model a message the reader never wrote: nothing to draw. Neither is the
     // one a decision resumes a turn with: its calls' cards say how they ended, and the resumed
     // answer stays right under the one it continues.
     if (isContinuation(message) || isApprovalOutcomeMessage(message)) continue
 
-    // One reply per run: a second one, which nothing writes today, keeps a key of its own.
+    // A run's reply after a message it read keeps the key its live copy had (see liveMessages).
     const preferred = savedKey(message, input.sentKeys)
-    const key = keys.has(preferred) ? `message:${message.id}` : preferred
+    const after =
+      message.role === "assistant" && lastUserMessageId !== null
+        ? `${preferred}:after:${lastUserMessageId}`
+        : null
+    const key = !keys.has(preferred)
+      ? preferred
+      : after !== null && !keys.has(after)
+        ? after
+        : `message:${message.id}`
     keys.add(key)
 
     const saved = savedMessage(message, key, authorOf(message.authorPrincipal, input), input)
     const unfinished =
-      message.role === "assistant" && message.runId !== null ? ended.get(message.runId) : undefined
+      message.role === "assistant" &&
+      message.runId !== null &&
+      lastReplyOfRun.get(message.runId) === message.id
+        ? ended.get(message.runId)
+        : undefined
     result.push(unfinished ? unfinishedMessage(saved, unfinished) : saved)
   }
 
@@ -181,8 +204,7 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
     result.push(pendingMessage(pending, input))
   }
 
-  const live = liveReply(input, savedIds, answeredRuns)
-  if (live) result.push(live)
+  result.push(...liveMessages(input, savedIds, answeredRuns))
 
   return result
 }
@@ -239,7 +261,7 @@ interface SavedEntry {
   readonly message: AgentConversationMessage
 }
 
-const savedEntries = new WeakMap<AgentMessage, SavedEntry>()
+const savedEntries = new WeakMap<AgentMessage, readonly SavedEntry[]>()
 
 function savedMessage(
   message: AgentMessage,
@@ -248,15 +270,11 @@ function savedMessage(
   input: ConversationMessagesInput
 ): AgentConversationMessage {
   const observed = Boolean(input.observed)
-  const cached = savedEntries.get(message)
-  if (
-    cached &&
-    cached.key === key &&
-    cached.observed === observed &&
-    sameAuthor(cached.author, author)
-  ) {
-    return cached.message
-  }
+  const existing = savedEntries.get(message)
+  const hit = existing?.find(
+    (entry) => entry.key === key && entry.observed === observed && sameAuthor(entry.author, author)
+  )
+  if (hit) return hit.message
 
   const fileSource = (fileRef: AgentFileRef, path: string) =>
     messageFileSource({
@@ -284,7 +302,8 @@ function savedMessage(
     ...(message.compaction ? { compaction: message.compaction } : {}),
   }
 
-  savedEntries.set(message, { key, author, observed, message: converted })
+  const nextEntry: SavedEntry = { key, author, observed, message: converted }
+  savedEntries.set(message, existing ? [nextEntry, ...existing.slice(0, 1)] : [nextEntry])
   return converted
 }
 
@@ -418,76 +437,186 @@ function pendingMessage(
   }
 }
 
-/** The reply streaming in, until its saved copy is in the conversation. */
-function liveReply(
+/**
+ * The reply streaming in, until its saved copies are in the conversation. A message the run read as
+ * it answered sits where it read it, between the reply before and the reply after, as the thread
+ * holds them once the turn ends; each keeps the key its saved copy will have.
+ */
+function liveMessages(
   input: ConversationMessagesInput,
   savedIds: ReadonlySet<string>,
   answeredRuns: ReadonlySet<string>
-): AgentConversationMessage | null {
+): AgentConversationMessage[] {
   const live = input.live
-  if (!live || live.runId === null || live.parts.length === 0) return null
-  if (live.finalizedMessageId !== null && savedIds.has(live.finalizedMessageId)) return null
-  if (answeredRuns.has(live.runId)) return null
+  if (!live || live.runId === null) return []
+  if (live.parts.length === 0 && live.inboxReads.length === 0) return []
+  if (live.finalizedMessageId !== null && savedIds.has(live.finalizedMessageId)) return []
+  if (answeredRuns.has(live.runId)) return []
 
   // A worker that stopped mid-turn saved none of what it streamed.
   const presentation = input.presentation
-  if (presentation.kind === "interrupted" && !presentation.hasProgress) return null
+  if (presentation.kind === "interrupted" && !presentation.hasProgress) return []
 
+  const runId = live.runId
   const unfinished =
     live.finishStatus === "failed" || live.finishStatus === "cancelled"
       ? live.finishStatus
       : undefined
+  // Saved but not read back yet: the reply keeps its live shape until the copy replaces it.
+  const status = live.active || live.finalizedMessageId !== null ? "streaming" : "complete"
+
+  const result: AgentConversationMessage[] = []
+  let replied = false
+  let lastRead: string | null = null
+  const reply = (from: number, to: number, last: boolean) => {
+    const parts = liveParts(live, from, to, last)
+    if (parts.length === 0) return
+
+    result.push({
+      key: replied && lastRead !== null ? `run:${runId}:after:${lastRead}` : `run:${runId}`,
+      id: null,
+      role: "assistant",
+      status,
+      runId,
+      parts,
+      context: [],
+      diagnostics: [],
+      ...(last && unfinished ? { unfinished } : {}),
+    })
+    replied = true
+  }
+
+  let from = 0
+  for (const read of live.inboxReads) {
+    reply(from, read.at, false)
+    from = read.at
+
+    for (const message of read.messages) {
+      if (savedIds.has(message.id)) continue
+
+      result.push(readMessage(message, input))
+      lastRead = message.id
+    }
+  }
+  reply(from, live.parts.length, true)
+
+  return result
+}
+
+/** A message the run read as it answered, drawn as the thread will hold it. */
+function readMessage(
+  message: LiveInboxRead["messages"][number],
+  input: ConversationMessagesInput
+): AgentConversationMessage {
+  const author = authorOf(message.authorPrincipal, input)
 
   return {
-    key: `run:${live.runId}`,
+    key: `message:${message.id}`,
     id: null,
-    role: "assistant",
-    // Saved but not read back yet: the reply keeps its live shape until the copy replaces it.
-    status: live.active || live.finalizedMessageId !== null ? "streaming" : "complete",
-    runId: live.runId,
-    parts: liveParts(live),
-    context: [],
+    role: "user",
+    status: "streaming",
+    runId: null,
+    ...(author ? { author } : {}),
+    parts: message.parts.flatMap((part) =>
+      part.type === "text" ? [{ type: "text" as const, text: part.text, streaming: false }] : []
+    ),
+    context: message.parts.flatMap((part) =>
+      part.type === "context"
+        ? [{ context: part.context as AgentContextInput, origin: part.origin }]
+        : []
+    ),
     diagnostics: [],
-    ...(unfinished ? { unfinished } : {}),
   }
 }
 
-/** The live parts. Text streams in spans the built-in chat joins, so they join here too. */
-function liveParts(live: LiveRunState): AgentConversationPart[] {
+const liveNonTextParts = new WeakMap<
+  NormalizedPart,
+  { readonly key: string | undefined; readonly part: AgentConversationPart }
+>()
+const liveSettledTextParts = new WeakMap<NormalizedPart, AgentConversationPart>()
+
+/**
+ * The live parts from `from` to `to`. Text streams in spans the built-in chat joins, so they join
+ * here too; the model is still writing the text the `last` ones end on.
+ */
+function liveParts(
+  live: LiveRunState,
+  from: number,
+  to: number,
+  last: boolean
+): AgentConversationPart[] {
   const result: AgentConversationPart[] = []
 
-  live.parts.forEach((part, index) => {
+  live.parts.slice(from, to).forEach((part, offset) => {
     switch (part.kind) {
       case "text": {
         const previous = result.at(-1)
         if (previous?.type === "text") {
           result[result.length - 1] = { ...previous, text: previous.text + part.text }
         } else {
-          result.push({ type: "text", text: part.text, streaming: false })
+          const cached = liveSettledTextParts.get(part)
+          if (cached) {
+            result.push(cached)
+          } else {
+            const created: AgentConversationPart = {
+              type: "text",
+              text: part.text,
+              streaming: false,
+            }
+            liveSettledTextParts.set(part, created)
+            result.push(created)
+          }
         }
         return
       }
 
-      case "reasoning":
-        result.push({ type: "reasoning", text: part.text, streaming: part.streaming })
+      case "reasoning": {
+        const cached = liveNonTextParts.get(part)
+        if (cached) {
+          result.push(cached.part)
+          return
+        }
+        const created: AgentConversationPart = {
+          type: "reasoning",
+          text: part.text,
+          streaming: part.streaming,
+        }
+        liveNonTextParts.set(part, { key: undefined, part: created })
+        result.push(created)
         return
+      }
 
       case "tool": {
-        const key = live.partKeys[index]
+        const key = live.partKeys[from + offset]
+        const cached = liveNonTextParts.get(part)
+        if (cached && cached.key === key) {
+          result.push(cached.part)
+          return
+        }
         const toolCallId = key?.startsWith("tool#") ? key.slice("tool#".length) : undefined
-        result.push({
+        const created: AgentConversationPart = {
           type: "tool",
           toolName: part.tool.toolName,
           ...(toolCallId === undefined ? {} : { toolCallId }),
           ...toolViewProps(part.tool),
           ...(part.tool.files ? { files: part.tool.files.map(fileOf) } : {}),
-        })
+        }
+        liveNonTextParts.set(part, { key, part: created })
+        result.push(created)
         return
       }
 
-      case "file":
-        result.push({ type: "file", ...fileOf(part) })
+      case "file": {
+        const cached = liveNonTextParts.get(part)
+        if (cached) {
+          result.push(cached.part)
+          return
+        }
+        const created: AgentConversationPart = { type: "file", ...fileOf(part) }
+        liveNonTextParts.set(part, { key: undefined, part: created })
+        result.push(created)
         return
+      }
 
       case "step-start":
         return
@@ -497,10 +626,9 @@ function liveParts(live: LiveRunState): AgentConversationPart[] {
     }
   })
 
-  // The model is still writing the text it ended on.
-  const last = result.at(-1)
-  if (live.active && last?.type === "text") {
-    result[result.length - 1] = { ...last, streaming: true }
+  const end = result.at(-1)
+  if (last && live.active && end?.type === "text") {
+    result[result.length - 1] = { ...end, streaming: true }
   }
 
   return result
@@ -516,31 +644,49 @@ function fileOf(file: NormalizedFile): AgentConversationFile {
  * The parts as the built-in chat draws them. Two text parts in a row were two steps, which the
  * chat keeps apart with the step boundary between them.
  */
+const normalizedPartEntries = new WeakMap<AgentConversationPart, NormalizedPart>()
+const normalizedToolEntries = new WeakMap<AgentConversationToolPart, NormalizedTool>()
+const STEP_START_PART: NormalizedPart = { kind: "step-start" }
+
 export function normalizedParts(parts: readonly AgentConversationPart[]): NormalizedPart[] {
   const result: NormalizedPart[] = []
 
   for (const part of parts) {
+    if (part.type === "text" && result.at(-1)?.kind === "text") {
+      result.push(STEP_START_PART)
+    }
+
+    const cached = normalizedPartEntries.get(part)
+    if (cached) {
+      result.push(cached)
+      continue
+    }
+
+    let created: NormalizedPart
     switch (part.type) {
       case "text":
-        if (result.at(-1)?.kind === "text") result.push({ kind: "step-start" })
-        result.push({ kind: "text", text: part.text })
+        created = { kind: "text", text: part.text }
         break
 
       case "reasoning":
-        result.push({ kind: "reasoning", text: part.text, streaming: part.streaming })
+        created = { kind: "reasoning", text: part.text, streaming: part.streaming }
         break
 
       case "tool":
-        result.push({ kind: "tool", tool: normalizedTool(part) })
+        created = { kind: "tool", tool: normalizedTool(part) }
         break
 
       case "file":
-        result.push({ kind: "file", ...fileOf(part) })
+        created = { kind: "file", ...fileOf(part) }
         break
 
       default:
         part satisfies never
+        continue
     }
+
+    normalizedPartEntries.set(part, created)
+    result.push(created)
   }
 
   return result
@@ -548,7 +694,10 @@ export function normalizedParts(parts: readonly AgentConversationPart[]): Normal
 
 /** A tool part as the built-in tool views read it. */
 export function normalizedTool(part: AgentConversationToolPart): NormalizedTool {
+  const cached = normalizedToolEntries.get(part)
+  if (cached) return cached
   const { type: _type, toolCallId: _toolCallId, ...tool } = part
+  normalizedToolEntries.set(part, tool)
   return tool
 }
 

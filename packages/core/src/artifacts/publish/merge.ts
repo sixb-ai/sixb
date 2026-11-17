@@ -9,11 +9,11 @@ import { documentFiles, type LiveFiles, mergeIntoDocument } from "../live/docume
 import { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "../live/files"
 import { keepsDocument, loadArtifactDocument, storeArtifactDocument } from "../live/state"
 
-// A canvas is edited by many at once, and keeps its content as a Yjs document (see
-// ../live/state.ts). Every write to one is made into that document: a live editor's as the Yjs
-// update it holds, any other as the changes from the files it was made from to its own. A write
-// made from an earlier revision is so merged, not refused, and whatever was written meanwhile
-// stays. Any other kind keeps the conflict check.
+// A canvas, or a designed document, is edited by many at once, and keeps its content as a Yjs
+// document (see ../live/state.ts). Every write to one is made into that document: a live editor's
+// as the Yjs update it holds, any other as the changes from the files it was made from to its own.
+// A write made from an earlier revision is so merged, not refused, and whatever was written
+// meanwhile stays. Anything else keeps the conflict check.
 
 /** How many times a merged write starts over when another lands between its merge and its store. */
 const MERGE_ATTEMPTS = 3
@@ -49,10 +49,10 @@ export interface MergedArtifactWrite {
 }
 
 /**
- * The write to store. One to a canvas is made into the artifact's document, which is stored with
- * it, and is based on the latest revision; one that moved past its base is merged into what the
- * latest version holds now. A write whose base files are not known is left as it is, for the
- * conflict check to refuse.
+ * The write to store. One to an artifact that keeps a document is made into that document, which
+ * is stored with it, and is based on the latest revision; one that moved past its base is merged
+ * into what the latest version holds now. A write whose base files are not known is left as it is,
+ * for the conflict check to refuse.
  */
 export async function mergeArtifactWrite(
   context: {
@@ -141,7 +141,9 @@ export async function withMergedWrite<T>(
     try {
       return await store(merged)
     } catch (error) {
-      if (!isMoved(error) || !keepsDocument(write.kind) || attempt === MERGE_ATTEMPTS) throw error
+      if (!isMoved(error) || !keepsDocument(write.kind) || attempt === MERGE_ATTEMPTS) {
+        throw error
+      }
     }
   }
 }
@@ -210,7 +212,7 @@ export async function withDocumentHolding<T>(
 }
 
 /**
- * The documents of the canvases a retry of a turn puts back, by id: each one the undo will put
+ * The documents of the artifacts a retry of a turn puts back, by id: each one the undo will put
  * back, as the turn's restore point holds it. Made before the undo, at the revision it requires,
  * so the undo can store them: one written meanwhile is not undone, and its document goes unused.
  */
@@ -238,7 +240,7 @@ export async function undoneTurnDocuments(
       ...(point ? { point } : {}),
       ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
     })
-    if (!point || !undoable) continue
+    if (!point || !undoable || !keepsDocument(artifact.kind)) continue
 
     const held = await documentHolding(context, artifact.id, point.files)
     if (held?.baseRevision === artifact.revision) documents[artifact.id] = held.document

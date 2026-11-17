@@ -1,8 +1,15 @@
+import type {
+  DocumentData,
+  DocumentQueryResult,
+  DocumentReads,
+  DocumentTree,
+} from "./document-data"
+
 /**
  * The runtime the frame injects before anything else in an entry's `<head>`. It is served as this
- * function's own source, `(${frameRuntime})()`, so it imports nothing and names nothing outside
- * itself: the protocol string and the keys repeat what `protocol.ts` declares, and a test holds
- * the two together. Its tag names the layout, `data-sixb-layout`.
+ * function's own source, `(${frameRuntime})(${documentData})`, so it imports nothing but types and
+ * names nothing outside itself: the protocol string and the keys repeat what `protocol.ts`
+ * declares, and a test holds the two together. Its tag names the layout, `data-sixb-layout`.
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
  * what draws its own colors; answers the app's requests; and tells the app about the links the
@@ -13,6 +20,20 @@
  * `sixb-fill` show that slide alone filling the frame, as a thumbnail or an embed does; it tells
  * the app about keys and picks in the overview. A page scrolls as it is: it reports the embeds
  * near its view as it scrolls, and its height as it changes.
+ *
+ * A designed document scrolls as a page does, as one sheet of its paper (`data-sixb-paper`). With
+ * `sixb-pages` it is cut into pages instead, once its fonts and images have loaded: its content
+ * goes into a flow laid out in columns as wide and tall as the paper's content box, a forced page
+ * break becomes a column break, and each column shows on a sheet of its own. The first sheet keeps
+ * the original, which is what assistive technology reads; a sheet in view, or next to one, holds
+ * a copy of it, made as it comes near and dropped once it is far. It reports how many pages it
+ * made. `sixb-section=<slug>` opens it at the heading publishing named so.
+ *
+ * Its fields and repeated elements show live data, as `documentData`, which the runtime is given,
+ * walks them: once it has read the object that holds the document and the queries they name, as
+ * the reader, from the document as published, before it is cut into pages; and again, cut anew,
+ * whenever one of those changes. Opened on its own, it reads them as `sixb.query` does. Served for
+ * editing, it shows what is written in them, which takes no typing.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
@@ -43,9 +64,16 @@
  * in place, and the frame sends through the port what moves the canvas, their wheel turns unless
  * the page scrolls them, a finger's drag, Space held to drag, and the zooming above, and the words
  * of what they press, for the canvas to follow the arrow they label.
+ *
+ * A designed document served for editing may be handed its editor with `editor`: the script the
+ * app sends runs once, leaving a start function the runtime takes at once, and is handed the port
+ * that came with the request and the body, which it edits in place. From then on a click on a link
+ * places the caret rather than following it.
  */
-export function frameRuntime(): void {
+export function frameRuntime(data?: () => DocumentData): void {
   const PROTOCOL = "sixb-frame/1"
+  /** Where the editor's script leaves its start, as the app's frame editor names it. */
+  const EDITOR_GLOBAL = "__sixbFrameEditor"
   const WIDTH = 1280
   const HEIGHT = 720
   const KEYS = [
@@ -97,11 +125,33 @@ export function frameRuntime(): void {
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
-  const deck = script?.getAttribute("data-sixb-layout") !== "page"
+  const layout = script?.getAttribute("data-sixb-layout") ?? "deck"
+  const deck = layout === "deck"
+  const designed = layout === "document"
   const start = new URLSearchParams(window.location.hash.slice(1))
   if (deck) {
     root.classList.add("sixb-deck")
     root.dataset.mode = start.has("sixb-fill") ? "fill" : "slide"
+  }
+  /** A designed document's paper, `[width, height, top, right, bottom, left]` in pixels. */
+  const paper = (script?.getAttribute("data-sixb-paper") ?? "")
+    .split(" ")
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value >= 0)
+  const hasPaper = paper.length === 6 && (paper[0] ?? 0) > 0 && (paper[1] ?? 0) > 0
+  const paged = designed && hasPaper && start.has("sixb-pages")
+  if (designed) {
+    root.classList.add("sixb-document")
+    if (hasPaper) {
+      const [width, height, top, right, bottom, left] = paper
+      root.style.setProperty("--sixb-paper-width", `${width}px`)
+      root.style.setProperty("--sixb-paper-height", `${height}px`)
+      root.style.setProperty("--sixb-paper-margin-top", `${top}px`)
+      root.style.setProperty("--sixb-paper-margin-right", `${right}px`)
+      root.style.setProperty("--sixb-paper-margin-bottom", `${bottom}px`)
+      root.style.setProperty("--sixb-paper-margin-left", `${left}px`)
+    }
+    if (paged) root.classList.add("sixb-pages")
   }
   let current = Number(start.get("sixb-slide")) || 1
 
@@ -182,7 +232,8 @@ export function frameRuntime(): void {
         (element) => {
           const id = idOf(element)
           const rect = element.getBoundingClientRect()
-          return near(rect)
+          // Cut into pages, every page holds every embed: only the one its page shows counts.
+          return near(rect) && (!paged || shownOnItsPage(element))
             ? [
                 {
                   id,
@@ -199,6 +250,191 @@ export function frameRuntime(): void {
       reported = next
       post({ event: "embeds", params: { embeds } })
     })
+  }
+
+  // ── A designed document's pages ─────────────────────────────────────
+
+  /** Break values that start a new page, each a column break in the flow. */
+  const PAGE_BREAKS = ["page", "left", "right", "recto", "verso"]
+  /** Between columns of the flow, so nothing on one page bleeds into the next. */
+  const COLUMN_GAP = 64
+
+  /**
+   * Whether an element in a page's copy of the flow is on that page: inside its content box, which
+   * clips the rest. Anything not in a page is shown.
+   */
+  const shownOnItsPage = (element: Element): boolean => {
+    const box = element.closest(".sixb-paper-content")
+    if (!box) return true
+    const rect = element.getBoundingClientRect()
+    const page = box.getBoundingClientRect()
+    return (
+      rect.right > page.left &&
+      rect.left < page.right &&
+      rect.bottom > page.top &&
+      rect.top < page.bottom
+    )
+  }
+
+  /** How many sheets on each side of one in view hold their copy of the flow too. */
+  const NEAR_PAGES = 1
+
+  /** The flow the first sheet holds, the document as published; null until it is cut. */
+  let flow: HTMLElement | null = null
+  /** How far apart the flow's columns are, one a page. */
+  let stride = 0
+  /** Which sheets are in view, which keeps a copy of the flow in each sheet near them. */
+  let sheetsInView: IntersectionObserver | null = null
+
+  /** The sheet of page `index`'s copy of the flow, made if it has none: moved to show its column. */
+  const pageCopy = (index: number): Element | null => {
+    if (index === 0 || !flow) return flow
+    const content = document.querySelector(`.sixb-paper[data-page="${index + 1}"] > div`)
+    if (!content) return null
+    if (content.firstElementChild) return content.firstElementChild
+    const copy = flow.cloneNode(true) as HTMLElement
+    copy.style.transform = `translateX(${-index * stride}px)`
+    copy.setAttribute("aria-hidden", "true")
+    copy.inert = true
+    content.append(copy)
+    return copy
+  }
+
+  /** What a selector finds where a reader sees it: cut into pages, the copy on the page it is on. */
+  const shownCopy = (selector: string): Element | null => {
+    const found = (flow ?? document).querySelector(selector)
+    if (!found || !flow) return found
+    // Its first fragment's column, which is its page.
+    const box = flow.getBoundingClientRect()
+    const scale = box.width / flow.offsetWidth || 1
+    const left = (found.getClientRects()[0] ?? found.getBoundingClientRect()).left
+    const copy = pageCopy(Math.max(0, Math.floor((left - box.left) / scale / stride)))
+    if (!copy || copy === flow) return found
+    // The same element in the copy, by where it sits in the flow.
+    const path: number[] = []
+    for (let at: Element = found; at !== flow && at.parentElement; at = at.parentElement) {
+      path.unshift(Array.prototype.indexOf.call(at.parentElement.children, at))
+    }
+    return path.reduce<Element | undefined>((node, index) => node?.children[index], copy) ?? found
+  }
+
+  /** The pages, scaled down to fit a frame narrower than the paper, never up. */
+  const fitPages = () => {
+    const width = paper[0] ?? 0
+    const room = window.innerWidth - 32
+    root.style.setProperty("--sixb-zoom", String(width > room ? Math.max(0.2, room / width) : 1))
+  }
+
+  /**
+   * Cuts the document into pages. The first sheet holds the flow; each other sheet holds a copy of
+   * it, moved to show its column, only while it is in view or next to a sheet that is: a long
+   * document holds a few copies at a time, never one a page.
+   */
+  const paginate = () => {
+    sheetsInView?.disconnect()
+    const body = document.body
+    const [width = 0, height = 0, top = 0, right = 0, bottom = 0, left = 0] = paper
+    const contentWidth = Math.max(1, width - left - right)
+    const contentHeight = Math.max(1, height - top - bottom)
+    const cut = document.createElement("div")
+    cut.className = "sixb-flow"
+    cut.style.cssText = `width:${contentWidth}px;height:${contentHeight}px;column-width:${contentWidth}px;column-gap:${COLUMN_GAP}px;column-fill:auto;`
+    cut.append(...Array.from(body.childNodes))
+    body.append(cut)
+    // Every style read before any is written, so the flow is laid out once.
+    const breaks = Array.from(cut.querySelectorAll<HTMLElement>("*")).map((element) => {
+      const style = getComputedStyle(element)
+      return [element, style.breakBefore, style.breakAfter] as const
+    })
+    for (const [element, before, after] of breaks) {
+      if (PAGE_BREAKS.includes(before)) element.style.breakBefore = "column"
+      if (PAGE_BREAKS.includes(after)) element.style.breakAfter = "column"
+    }
+    flow = cut
+    stride = contentWidth + COLUMN_GAP
+    const count = Math.max(1, Math.ceil((cut.scrollWidth + COLUMN_GAP - 1) / stride))
+    const pages = document.createElement("div")
+    pages.className = "sixb-pages"
+    const sheets = Array.from({ length: count }, (_, index) => {
+      const page = document.createElement("article")
+      page.className = "sixb-paper"
+      page.dataset.page = String(index + 1)
+      page.setAttribute("aria-label", `Page ${index + 1} of ${count}`)
+      const content = document.createElement("div")
+      content.className = "sixb-paper-content"
+      if (index === 0) content.append(cut)
+      page.append(content)
+      return page
+    })
+    pages.append(...sheets)
+    body.replaceChildren(pages)
+    fitPages()
+
+    const shown = new Set<number>()
+    sheetsInView = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const index = Number((entry.target as HTMLElement).dataset.page) - 1
+        if (entry.isIntersecting) shown.add(index)
+        else shown.delete(index)
+      }
+      for (const [index, sheet] of sheets.entries()) {
+        if (index === 0) continue
+        if ([...shown].some((each) => Math.abs(each - index) <= NEAR_PAGES)) pageCopy(index)
+        else sheet.firstElementChild?.replaceChildren()
+      }
+      reportEmbeds()
+    })
+    for (const sheet of sheets) sheetsInView.observe(sheet)
+    root.setAttribute("data-sixb-pages", String(count))
+  }
+
+  /**
+   * As one sheet, a forced page break shows as a gap between sheets, so its sections still read
+   * apart: a divider before what starts a page, or after what ends one. None at the top, and none
+   * inside a flex or grid box, where an element of its own would move what is laid out there.
+   */
+  const markBreaks = () => {
+    const body = document.body
+    if (!body) return
+    const divider = () => {
+      const element = document.createElement("div")
+      element.className = "sixb-page-break"
+      element.setAttribute("aria-hidden", "true")
+      return element
+    }
+    const placed = (element: Element) =>
+      element.previousElementSibling?.classList.contains("sixb-page-break") ||
+      element.previousElementSibling === null
+    for (const element of Array.from(body.querySelectorAll<HTMLElement>("*"))) {
+      const parent = element.parentElement
+      if (!parent || /flex|grid/.test(getComputedStyle(parent).display)) continue
+      const style = getComputedStyle(element)
+      if (PAGE_BREAKS.includes(style.breakBefore) && !placed(element) && element.offsetTop > 0) {
+        element.before(divider())
+      }
+      const next = element.nextElementSibling
+      if (PAGE_BREAKS.includes(style.breakAfter) && next && !placed(next)) element.after(divider())
+    }
+  }
+
+  /** Waits for what moves text, its fonts and images, a while at most. */
+  const settled = (): Promise<void> => {
+    const images = Array.from(document.images, (image) => {
+      // Cut into pages, an image below the view is laid out on its page all the same: it waits
+      // for no scrolling to load.
+      if (paged) image.loading = "eager"
+      return image.complete ? Promise.resolve() : image.decode().catch(() => {})
+    })
+    const fonts = document.fonts?.ready ?? Promise.resolve()
+    const loaded = Promise.all([fonts, ...images]).then(() => {})
+    return Promise.race([loaded, new Promise<void>((resolve) => setTimeout(resolve, 5000))])
+  }
+
+  /** Scrolls to the section the start names, in the page that shows it. */
+  const openSection = () => {
+    const section = start.get("sixb-section")
+    if (!section) return
+    shownCopy(`[data-sixb-section="${CSS.escape(section)}"]`)?.scrollIntoView({ block: "start" })
   }
 
   /**
@@ -341,6 +577,41 @@ export function frameRuntime(): void {
     return next
   }
 
+  /**
+   * Collapses the whitespace in a text element's words as CSS showed it, in place: a browser lays
+   * out what takes typing as `pre-wrap`, where the line breaks and indents of its source would
+   * show. Each run is replaced on its own, from the end, so the caret the click placed stays where
+   * it was. What the reader types is merged into the source, which keeps its own whitespace.
+   */
+  const collapseSpaces = (element: Element) => {
+    // 4 is NodeFilter.SHOW_TEXT: text nodes alone.
+    const walker = document.createTreeWalker(element, 4)
+    const nodes: Text[] = []
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+    // At the start of the block, whitespace shows as nothing, as after a space.
+    let after = true
+    const runs: { node: Text; start: number; length: number; with: string }[] = []
+    for (const node of nodes) {
+      for (const run of node.data.matchAll(/[ \t\n\r\f]+|[^ \t\n\r\f]+/g)) {
+        const index = run.index ?? 0
+        if (!/^[ \t\n\r\f]/.test(run[0])) {
+          after = false
+          continue
+        }
+        const shown = after ? "" : " "
+        if (run[0] !== shown) runs.push({ node, start: index, length: run[0].length, with: shown })
+        after = true
+      }
+    }
+    // At its end, whitespace shows as nothing either.
+    const last = runs.at(-1)
+    if (last && last.with === " " && last.start + last.length === last.node.data.length) {
+      const trailing = nodes.slice(nodes.indexOf(last.node) + 1).every((node) => node.data === "")
+      if (trailing) last.with = ""
+    }
+    for (const run of runs.reverse()) run.node.replaceData(run.start, run.length, run.with)
+  }
+
   const stopTyping = () => {
     const element = typing
     if (!element) return
@@ -407,6 +678,12 @@ export function frameRuntime(): void {
       postPort({ event: "edit.select", params: { target, at } })
       if (typable && element instanceof HTMLElement && target.kind === "text") {
         typing = element
+        // Unless the page keeps its whitespace, as `pre`, `pre-wrap` and `break-spaces` do. Its
+        // words are still the source's, only spaced as they show: it still takes typing.
+        if (!/^(pre|pre-wrap|break-spaces)$/.test(getComputedStyle(element).whiteSpace)) {
+          collapseSpaces(element)
+          element.setAttribute(WORDS, wordsHash(element.textContent ?? ""))
+        }
         typedFrom = element.textContent ?? ""
         element.setAttribute("contenteditable", "plaintext-only")
         element.focus()
@@ -711,8 +988,32 @@ export function frameRuntime(): void {
   window.addEventListener("keyup", onSpace, true)
   window.addEventListener("blur", () => holdSpace(false))
 
+  /** The port the app handed over with `editor`, for the editor alone. */
+  let editorPort: MessagePort | null = null
+  let editorOn = false
+  const startEditor = (code: string) => {
+    if (editorOn) throw new Error("The editor is already running.")
+    if (!designed || !new URLSearchParams(window.location.search).has("sixb-edit")) {
+      throw new Error("Only a designed document served for editing takes an editor.")
+    }
+    if (!editorPort || !document.body) throw new Error("The editor needs its port and a body.")
+    const script = document.createElement("script")
+    script.textContent = code
+    document.head.append(script)
+    script.remove()
+    const scope = window as unknown as Record<string, unknown>
+    const start = scope[EDITOR_GLOBAL]
+    delete scope[EDITOR_GLOBAL]
+    if (typeof start !== "function") throw new Error("The editor did not start.")
+    editorOn = true
+    start({ port: editorPort, body: document.body })
+  }
+
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
+      case "editor":
+        startEditor(String(params.code ?? ""))
+        return
       case "theme": {
         // In the theme's layer, not inline: the deck's own CSS, unlayered, still wins.
         const tokens = (params.tokens ?? {}) as Record<string, string>
@@ -929,6 +1230,7 @@ export function frameRuntime(): void {
       event.stopImmediatePropagation()
       const port = event.ports?.[0]
       if ((data.method === "edit" || data.method === "canvas") && port) appPort = port
+      if (data.method === "editor" && port) editorPort = port
       try {
         handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
         post({ id: data.id })
@@ -950,6 +1252,8 @@ export function frameRuntime(): void {
   })
 
   document.addEventListener("click", (event) => {
+    // The editor's own: a click there places the caret.
+    if (editorOn) return
     const target = event.target as HTMLElement | null
 
     // A button, or a link within the page, by its words: on a canvas, an opened board follows the
@@ -965,6 +1269,17 @@ export function frameRuntime(): void {
     const link = target?.closest<HTMLAnchorElement>("a[href]")
     if (link) {
       const href = link.getAttribute("href") ?? ""
+      // Cut into pages, what a link within the document names is on every page: it moves to the
+      // copy its page shows.
+      if (paged && href.length > 1 && href.startsWith("#") && !event.defaultPrevented) {
+        const id = decodeURIComponent(href.slice(1))
+        const shown = shownCopy(`[id="${CSS.escape(id)}"], [name="${CSS.escape(id)}"]`)
+        if (shown) {
+          event.preventDefault()
+          shown.scrollIntoView({ block: "start" })
+        }
+        return
+      }
       // A link within the page moves through it, and one the page's own script handled is its.
       if (href.startsWith("#") || event.defaultPrevented) return
 
@@ -989,9 +1304,101 @@ export function frameRuntime(): void {
 
   window.addEventListener("resize", () => {
     if (deck) fit()
+    if (paged) fitPages()
     reportEmbeds()
   })
+  /** A designed document's live data, but not while it is served for editing. */
+  const live =
+    designed && data && !new URLSearchParams(window.location.search).has("sixb-edit")
+      ? data()
+      : null
+  const tree: DocumentTree<Element> = {
+    children: (node) => Array.from(node.children),
+    attribute: (node, name) => node.getAttribute(name),
+    setAttribute: (node, name, value) => node.setAttribute(name, value),
+    removeAttribute: (node, name) => node.removeAttribute(name),
+    setText: (node, text) => {
+      node.textContent = text
+    },
+    clone: (node) => node.cloneNode(true) as Element,
+    replace: (node, nodes) => node.replaceWith(...nodes),
+  }
+  /** The body as published, which each read of the data is shown in, and what it reads. */
+  let published: Node | null = null
+  let reads: DocumentReads | null = null
+  /** Which read of the data is the latest: an earlier one that answers later shows nothing. */
+  let showing = 0
+
+  /** Reads the data the fields show and shows it, from the body as published. */
+  const showData = async (): Promise<boolean> => {
+    const body = document.body
+    if (!live || !body) return false
+    reads ??= live.reads(live.marks(body, tree))
+    if (!reads.holder && reads.queries.length === 0) return false
+    published ??= body.cloneNode(true)
+    const read = ++showing
+
+    // What the reader may not read keeps its written text.
+    const answer = (name: string) =>
+      query(name).then(
+        (result) => result as DocumentQueryResult,
+        () => undefined
+      )
+    const [holder, ...results] = await Promise.all([
+      reads.holder ? answer("holder") : undefined,
+      ...reads.queries.map(answer),
+    ])
+    if (read !== showing) return false
+    const queries: Record<string, DocumentQueryResult> = {}
+    reads.queries.forEach((name, index) => {
+      const result = results[index]
+      if (result) queries[name] = result
+    })
+    const row = holder?.objects?.[0]
+    body.replaceChildren(...Array.from(published.cloneNode(true).childNodes))
+    live.fill(body, tree, {
+      sources: { ...(row ? { holder: row } : {}), queries },
+      lang: root.lang,
+    })
+    return true
+  }
+  if (live) {
+    window.addEventListener("sixb:query", (event) => {
+      const name = (event as CustomEvent<{ name?: unknown }>).detail?.name
+      const shows = name === "holder" ? reads?.holder : reads?.queries.includes(String(name))
+      if (!shows) return
+      showData().then(async (shown) => {
+        if (!shown) return
+        if (paged) {
+          // Not yet cut, it is cut once it first settles; cut, it is cut anew once this has.
+          if (!root.hasAttribute("data-sixb-pages")) return
+          await settled()
+          paginate()
+        } else {
+          markBreaks()
+        }
+        reportSize()
+        reportEmbeds()
+      })
+    })
+  }
+
   const ready = () => {
+    if (paged) {
+      showData()
+        .then(settled)
+        .then(() => {
+          paginate()
+          openSection()
+          reportSize()
+          reportEmbeds()
+        })
+    } else if (designed) {
+      showData().then(() => {
+        markBreaks()
+        settled().then(openSection)
+      })
+    }
     if (!deck) {
       post({ event: "ready", params: {} })
       window.addEventListener("scroll", reportEmbeds, { passive: true })

@@ -14,6 +14,7 @@ import type {
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
   ArtifactKind,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointRecord,
   ArtifactStateEntry,
@@ -205,6 +206,22 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
     createdAt: date(row.createdAt, "createdAt", where),
     expiresAt: date(row.expiresAt, "expiresAt", where),
   }
+}
+
+export function parseArtifactPdfRow(row: Row): ArtifactPdfRecord {
+  const renderKey = text(row.renderKey, "renderKey", "PDF")
+  const where = `PDF '${renderKey}'`
+  const kept = {
+    projectId: text(row.projectId, "projectId", where),
+    renderKey,
+    createdAt: date(row.createdAt, "createdAt", where),
+  }
+  if (row.failure !== null && row.failure !== undefined) {
+    return { ...kept, failure: text(row.failure, "failure", where) }
+  }
+  const file = json(row.file, "file", where)
+  if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
+  return { ...kept, file, pages: positiveInteger(row.pages, "pages", where) }
 }
 
 export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewRecord {
@@ -446,10 +463,15 @@ function principal(type: unknown, id: unknown, column: string, where: string): P
   return { type: type as Principal["type"], id: text(id, column, where) }
 }
 
-/** A comment's author: a principal, or a guest with the name they gave and nothing else. */
+/**
+ * A comment's author: a principal, or a guest with the name they gave and the link they came
+ * through, and nothing else.
+ */
 function commentAuthor(row: Row, where: string): ArtifactCommentAuthor {
   if (row.authorPrincipalType !== "guest") {
-    if (row.authorName != null) throw corrupt(where, "a principal's comment keeps a guest's name")
+    if (row.authorName != null || row.authorGrantId != null) {
+      throw corrupt(where, "a principal's comment keeps a guest's name or link")
+    }
     return principal(row.authorPrincipalType, row.authorPrincipalId, "author", where)
   }
 
@@ -457,6 +479,7 @@ function commentAuthor(row: Row, where: string): ArtifactCommentAuthor {
     type: "guest",
     id: text(row.authorPrincipalId, "author", where),
     name: text(row.authorName, "authorName", where),
+    grantId: text(row.authorGrantId, "authorGrantId", where),
   }
 }
 

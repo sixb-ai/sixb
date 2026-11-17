@@ -17,6 +17,34 @@ const ArtifactFileSchema = z.object({
 const DocumentOutlineSchema = z.object({
   kind: z.literal("document"),
   headings: z.array(z.object({ depth: z.number().int(), text: z.string(), slug: z.string() })),
+  format: z
+    .literal("html")
+    .optional()
+    .describe("html for a designed document, document.html with its own stylesheets"),
+  paper: z
+    .object({
+      width: z.number(),
+      height: z.number(),
+      margin: z.object({
+        top: z.number(),
+        right: z.number(),
+        bottom: z.number(),
+        left: z.number(),
+      }),
+    })
+    .optional()
+    .describe(
+      "The sheet a designed document's @page rule sets, in CSS pixels: its size and margins"
+    ),
+  holder: z
+    .object({
+      objectTypeId: z.string(),
+      links: z.array(z.string()).describe("The holder's links its fields read through"),
+    })
+    .optional()
+    .describe(
+      'The object a designed document shows live data of, as <meta name="sixb:object-type"> names its type: the one object of that type that holds the document'
+    ),
 })
 
 const SheetOutlineSchema = z.object({
@@ -145,7 +173,44 @@ export const ArtifactVersionSchema = z.object({
     .describe(
       "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
     ),
+  printable: z
+    .boolean()
+    .optional()
+    .describe(
+      "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
+    ),
 })
+
+const ArtifactPdfKeySchema = z
+  .string()
+  .regex(/^sha256:[0-9a-f]{64}$/)
+  .describe(
+    "The values a document that shows live data prints: ask with it again, and get that PDF with it, whatever the values are by then"
+  )
+
+export const ArtifactPdfResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    pages: z.number().int().min(1).describe("How many pages it printed on"),
+    key: ArtifactPdfKeySchema.optional(),
+  }),
+  z.object({ status: z.literal("printing"), key: ArtifactPdfKeySchema.optional() }),
+  z.object({
+    status: z.literal("failed"),
+    reason: z.string().describe("Why it could not be printed"),
+    key: ArtifactPdfKeySchema.optional(),
+  }),
+])
+
+export const ArtifactPdfQuerySchema = z.object({
+  retry: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("true asks again for a PDF that could not be printed, instead of hearing why"),
+  key: ArtifactPdfKeySchema.optional(),
+})
+
+export const ArtifactPdfDownloadQuerySchema = z.object({ key: ArtifactPdfKeySchema.optional() })
 
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   version: true,
@@ -391,7 +456,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({

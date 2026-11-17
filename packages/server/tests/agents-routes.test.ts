@@ -271,6 +271,62 @@ describe("agent routes", () => {
     expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
   })
 
+  test("restores a prepared workspace only for its owner, once its run ended", async () => {
+    const { app, storage, sixb } = createApp({ sandbox: true, auth: true })
+    const owner = await seedSession(storage, "restore-owner")
+    const stranger = await seedSession(storage, "restore-stranger")
+    await storage.agents.threads.create({
+      projectId: sixb.id,
+      id: "restore",
+      ownerPrincipal: { type: "user", id: "restore-owner" },
+      sandboxParams: { clientId: "acme" },
+    })
+    await createStartedRun(storage, {
+      projectId: sixb.id,
+      id: "restore-run",
+      threadId: "restore",
+      triggerMessageId: "trigger",
+      execution: testExecution("restore-token"),
+    })
+    const owned = {
+      projectId: sixb.id,
+      id: "restore",
+      runId: "restore-run",
+      executionToken: "restore-token",
+      name: "kept-name",
+    }
+    await storage.agents.threads.transitionSandbox({
+      ...owned,
+      action: "acquire",
+      sourceFingerprint: "a".repeat(64),
+    })
+    await storage.agents.threads.transitionSandbox({
+      ...owned,
+      action: "settle",
+      status: "blocked",
+      initialized: true,
+    })
+    const path = "/api/agent-threads/restore/sandbox/restore"
+    const body = { expectedSandboxName: "kept-name" }
+    expect((await app.fetch(jsonRequest(path, "POST", body, stranger.csrfHeaders))).status).toBe(
+      404
+    )
+    expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
+    await storage.agents.runs.finish({
+      projectId: sixb.id,
+      id: "restore-run",
+      executionToken: "restore-token",
+      status: "failed",
+    })
+
+    const response = await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      sandboxState: { name: "kept-name", status: "ready", initialized: true },
+    })
+    expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
+  })
+
   test("round-trips validated workspace bindings and admits fresh workspace runs", async () => {
     const { app, storage, sixb } = createApp({ sandbox: true })
     const created = await app.fetch(

@@ -188,21 +188,33 @@ export type {
   RunModelLoopInput,
 } from "./model-loop"
 export { runModelLoop } from "./model-loop"
+export { registerAgentQueuedTurn, startQueuedAgentTurn } from "./queued-turn"
 export { agent } from "./reference"
 export {
+  AGENT_MESSAGE_DELIVERIES,
+  type AgentMessageDelivery,
+  type AgentQueuedTurnStart,
   isRetryableAgentRun,
+  type PromoteAgentInboxItemInput,
+  promoteAgentInboxItem,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
   retryAgentRun,
+  type SendAgentMessageInput,
+  type SendAgentMessageResult,
+  sendAgentMessage,
+  startQueuedAgentTurnFromInbox,
+  withdrawAgentInboxItem,
 } from "./request"
-export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
+export {
+  afterAgentRunFinished,
+  repairAgentInboxes,
+  stopAgentRunChild,
+} from "./run-after-finish"
 export type {
   AgentRunArtifactPublish,
   AgentRunArtifacts,
-  AgentRunBoardPreviews,
-  AgentRunMissingPreview,
-  AgentRunVersion,
 } from "./run-artifacts"
 export { agentRunArtifacts } from "./run-artifacts"
 export type {
@@ -259,6 +271,7 @@ export type {
   AgentRunCheckpoint,
   AgentRunFileStore,
   AgentRunHeldCalls,
+  AgentRunInbox,
   AgentRunModels,
   AgentRunOutcome,
   AgentRunPeople,
@@ -313,6 +326,7 @@ export type {
   AgentTurnContext,
   AgentTurnHistory,
 } from "./run-turn"
+export { readAgentTurnHistory } from "./run-turn"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,

@@ -36,7 +36,14 @@ export type DeploySingletonServiceName = "orchestrator" | "rules"
 
 export type DeployServiceName = DeployHttpServiceName | DeploySingletonServiceName | "workers"
 
-export type DeployWorkerType = "sync" | "agent" | "pipeline" | "projection" | "workflow" | "lake"
+export type DeployWorkerType =
+  | "sync"
+  | "agent"
+  | "pipeline"
+  | "projection"
+  | "workflow"
+  | "lake"
+  | "render"
 
 export interface DeployServicesConfig {
   readonly api?: boolean | DeployHttpServiceConfig
@@ -237,7 +244,10 @@ export interface DeployRelease {
     readonly env?: DeployCommand
     /** Runs while the previous release still serves. */
     readonly build: readonly DeployCommand[]
-    /** Runs after the services stop and before they start again. */
+    /**
+     * Runs before the new release starts. The SSH target keeps the previous release serving
+     * meanwhile, unless storage migrations are pending: then the services stop first.
+     */
     readonly beforeStart: readonly DeployCommand[]
   }
   readonly services: readonly DeployReleaseService[]

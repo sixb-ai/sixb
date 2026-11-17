@@ -27,12 +27,16 @@ type PersonalConnector = ReturnType<typeof createHarness>["connector"]
 const member = (id: User) => managementCommand(sessions[id], { principalId: id, manage: false })
 const manager = () => managementCommand("another-session", { principalId: "user-a" })
 
-/** One person authorizes with their own account and fills their own `default` slot. */
-async function connectOwn(harness: ReturnType<typeof createHarness>, userId: User) {
+/** One person authorizes with their own account and fills one of their slots. */
+async function connectOwn(
+  harness: ReturnType<typeof createHarness>,
+  userId: User,
+  slot = "default"
+) {
   const command = member(userId)
   const started = await harness.process.startAuthorization(command, connectorId, {
     owner: userOwner(userId),
-    slot: "default",
+    slot,
     redirectUri: callbackUrl,
   })
   const { authorizationId } = await harness.process.completeAuthorization(command, connectorId, {
@@ -44,7 +48,7 @@ async function connectOwn(harness: ReturnType<typeof createHarness>, userId: Use
     authorizationId,
     accountId: "account-a",
     owner: userOwner(userId),
-    slot: "default",
+    slot,
   })
 }
 
@@ -229,6 +233,22 @@ describe("personal connector connections", () => {
     })
   })
 
+  // Removal proof: pass an empty list from accountsConnectedElsewhere; the first revocation is
+  // told the account is gone, and Microsoft deletes the subscription the other slot still uses.
+  test("revoking one grant tells the connector which accounts other grants keep connected", async () => {
+    const harness = createHarness({ owners: ["user"] })
+    const work = await connectOwn(harness, "user-a", "work")
+    const home = await connectOwn(harness, "user-a", "default")
+
+    await harness.process.revokeConnection(member("user-a"), connectorId, work.id)
+    await harness.process.revokeConnection(member("user-a"), connectorId, home.id)
+
+    expect(harness.revocations()).toEqual([
+      { connectedAccountIds: ["account-a"] },
+      { connectedAccountIds: [] },
+    ])
+  })
+
   test("a project-only connector still requires can.manage", async () => {
     // Removal proof: let assertConnectorConnectionCommandAccess admit everyone; the member lists.
     const harness = createHarness()
@@ -387,6 +407,34 @@ describe("personal connections in actions and workflows", () => {
 
     expect((await open(await eventWorkflow(), connector, "user-a")).accountId).toBe("account-a")
     expect((await open(await action(), connector, "user-b")).accountId).toBe("account-b")
+  })
+
+  // Removal proof: return true from mayUsePersonalConnection; Ada's own run lists Ben's account.
+  test("listing connections follows the same rule as opening one", async () => {
+    const { action, eventWorkflow, connector } = await personalHost()
+    // Listed by connection id, which is random here; sorted by account to compare.
+    const listed = async (sixb: Sixb) =>
+      (
+        await Promise.all(
+          (
+            await sixb.connector.connections(connector).list()
+          ).map(async (handle) => [handle.connection.owner, (await handle.client()).accountId])
+        )
+      ).sort((left, right) => String(left[1]).localeCompare(String(right[1])))
+
+    expect(await listed(await eventWorkflow())).toEqual([
+      [userOwner("user-a"), "account-a"],
+      [userOwner("user-b"), "account-b"],
+    ])
+    expect(await listed(await action(userOwner("user-a")))).toEqual([
+      [userOwner("user-a"), "account-a"],
+    ])
+    expect(await listed(await action({ type: "serviceAccount", id: "service-a" }))).toEqual([])
+
+    const byAccount = await (await eventWorkflow()).connector
+      .connections(connector)
+      .forAccount("account-b")
+    expect(byAccount.map(({ connection }) => connection.owner)).toEqual([userOwner("user-b")])
   })
 
   test("a person without a connection in that slot reads as not found", async () => {

@@ -28,8 +28,8 @@ rotates its token, then records it `cancelled` and `interrupted`. A worker's rep
 and so does the API server every 30 seconds, for runners with no worker behind them: a run ends
 without a queue job coming back for it.
 
-What follows a turn's end, its children still at work stopped and a turn paused on calls already
-decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
+What follows a turn's end, its children still at work stopped, its unread steers released and a turn
+paused on calls already decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
 the API's both run it.
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
@@ -73,6 +73,10 @@ callTool(call)                         one call of a project tool the run offers
                                        the run and stopped with it, the files it puts stored within
                                        the run's budget and returned for the runner to copy in
 events · heldCalls                     live records (best effort) and the approvals that hold a run
+inbox.takeSteers()                     the thread's mid-run steers its requester sent, claimed by
+                                       this run and step; a conversation's alone, never a child's;
+                                       what it claims is published on the run's stream
+                                       (`agent.inbox.read`)
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
                                        docs, a turn's delegation models and the bytes per token its

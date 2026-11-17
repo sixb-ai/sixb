@@ -10,11 +10,6 @@ Sixb packages are versioned independently. Each release entry names the packages
   last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
   link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
   series on the `timeZone` its query names, UTC when it names none.
-- Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
-  portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
-  ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
-  `results` and `cost_per_result`. Marketing API limits (codes 80000–80014) are retried like
-  Graph throttling.
 
 ### Upgrade notes
 
@@ -23,9 +18,88 @@ Sixb packages are versioned independently. Each release entry names the packages
 - A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's
   `timeZone`, a project's `timeZone` and the agent's requester zone. Name the zone instead, such as
   `"Asia/Kolkata"`.
+
+## 2026-11-17 — Sixb 0.2.5
+
+0.2.5 lets people steer or queue messages while the Agent works, adds designed documents that
+print to PDF and show live data, runs one-off scripts against a deployment with `sixb run`, and
+brings connection events, the boxd sandbox provider, the CallTrackingMetrics connector and Azure AI
+Foundry image, speech, transcription, rerank and decision models.
+
+### Highlights
+
+- Send a message while a turn runs: `steer` reaches it at its next step, `queue` starts once it
+  ends, and `send_now` stops it and starts. `POST /api/agent-threads/:threadId/messages` takes
+  `delivery`, `…/inbox` routes read and change what waits, and the composer and the terminal
+  offer all three.
+- Design a `document` artifact as HTML with its own stylesheets: it shows as the pages it prints
+  on, downloads as a PDF, fills its fields with live data from the object that holds it and from
+  its queries, and is edited in place like a page of notes, together.
+- The new `@sixb/render-worker` prints PDFs and pictures canvas boards in a blank sandbox, on a
+  `renders` lane of its own, whoever wrote the version.
+- Run a one-off script against the project with `sixb run scripts/fix.ts`, or on the deployment
+  with `--deployed`, instead of shipping a throwaway Action.
+- Start work when someone connects or disconnects an account with
+  `events.connector(c).connected()` and `.disconnected()`, and list a connector's connections with
+  `sixb.connector.connections(c).list()`. Microsoft sends Graph change notifications for people's
+  own accounts, and `ensureSubscription` keeps a subscription alive.
+- Remove Action-created objects the source no longer has with `.whenMissing("remove")` on a
+  projection.
+- Find files and text with the Agent's `glob` and `grep`. A sandbox whose save failed can be
+  resumed with "Resume previous sandbox" or `sixb.agent.threads.restoreSandbox()`.
+- A shared link's guest reads only the comment threads its link's guests started, and members see
+  which those are.
+- Run Agent commands in boxd microVMs with `@sixb/sandboxes-boxd`, and read CallTrackingMetrics
+  calls with `@sixb/connector-ctm`.
+- Read Meta ad accounts and their delivery with `@sixb/connector-meta`'s `client.ads`: a business
+  portfolio's owned, partner-shared and pending ad accounts, `/me/adaccounts`, campaigns, ad sets,
+  ads and creatives, and Ads Insights by level, day and breakdown, including Ads Manager's
+  `results` and `cost_per_result`. Marketing API limits (codes 80000–80014) are retried like
+  Graph throttling.
+- Register an Azure AI Foundry deployment of `Microsoft-Decision-1` in `models.decision` with
+  `@sixb/azure-ai-foundry`'s `foundry.decision("decision-1")`. `sixb.models.decision.evaluate()`
+  and chat's Auto tier routing then run inside your Azure tenant, priced at Azure's USD 0.042 per
+  million input tokens. `@sixb/typesafe` and Foundry share one System One codec.
+- Register an Azure AI Foundry transcription deployment in `models.audio.transcription` with
+  `@sixb/azure-ai-foundry`'s `foundry.transcription("transcribe")`: `gpt-4o-transcribe`,
+  `gpt-4o-mini-transcribe`, `gpt-transcribe` and `whisper` are priced at Azure's retail rates, by
+  token or audio second; `gpt-4o-transcribe-diarize`, which has no retail price, returns its text
+  at unknown cost.
+- Rerank search results with an Azure AI Foundry Cohere deployment through `@sixb/azure-ai-foundry`'s
+  `foundry.reranking("rerank")`. Rerank v5 is priced at Azure's USD 0.02 (fast) and 0.05 (pro) per
+  million input tokens; Rerank v4.0, billed per search, runs at unknown cost.
+- Generate speech with an Azure AI Foundry `gpt-4o-mini-tts` deployment in `models.audio.speech`
+  through `@sixb/azure-ai-foundry`'s `foundry.speech("tts")`, in MP3, Opus, AAC, FLAC or WAV,
+  priced at Azure's USD 0.60 per million text tokens and USD 12 per million audio tokens.
+- Generate and edit images with an Azure AI Foundry GPT Image, FLUX.1 Kontext [pro] or FLUX1.1 [pro]
+  deployment in `models.image` through `@sixb/azure-ai-foundry`'s `foundry.image("image")`.
+  Generations are priced at Azure's retail rates, per token or per image; GPT Image edits run at
+  unknown cost.
+- The chat folds its composer on narrow screens, keeps unsent drafts and open artifacts per
+  conversation, follows live work steps, and renders Markdown without re-rendering messages.
+
+### Upgrade notes
+
+- Run the migrations: PostgreSQL `103-script-executions` to `106-agent-thread-inbox`, SQLite
+  `100-script-executions` to `103-agent-thread-inbox`.
+- Add `render` to any worker list you set yourself, or a `sixb worker render` process, in a
+  project with a sandbox provider. `sixb worker-group` with no types includes it. Until then,
+  canvas boards get no new pictures and PDFs wait.
+- `Queues` gains a required `renders` lane, so a third-party queues provider must implement it.
 - `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
   omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
   `"ads"` too.
+
+### Package versions
+
+- `0.2.5`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/app`, `@sixb/ui`, `@sixb/cli`,
+  `@sixb/agent`, `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`, `@sixb/ducklake`,
+  `@sixb/lake-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`, `@sixb/queues-bullmq`,
+  `@sixb/deploy-ssh`, `@sixb/model-protocols`, `@sixb/anthropic`, `@sixb/azure-ai-foundry`,
+  `@sixb/vercel-ai-gateway`, `@sixb/typesafe`, `@sixb/connector-meta`,
+  `@sixb/connector-microsoft`, and `@sixb/render-worker`, `@sixb/sandboxes-boxd` and
+  `@sixb/connector-ctm` (new).
 
 ## 2026-11-12 — Sixb 0.2.4
 

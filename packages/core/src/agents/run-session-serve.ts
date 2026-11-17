@@ -71,6 +71,8 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   renewLease: (session, [leaseExpiresAt]) => renew(session, capLease(leaseExpiresAt as string)),
   "heldCalls.holdsRun": (session) => session.heldCalls.holdsRun(),
   "heldCalls.pausesAfterStep": (session) => session.heldCalls.pausesAfterStep(),
+  "inbox.takeSteers": (session, [input]) =>
+    session.inbox.takeSteers(input as Parameters<AgentRunSession["inbox"]["takeSteers"]>[0]),
   "children.get": (session, [runId]) => session.children.get(runId as string),
   "children.getMany": (session, [runIds]) => session.children.getMany(runIds as string[]),
   "children.inConversation": (session, [input]) =>
@@ -111,14 +113,6 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   "artifacts.publish": (session, [input]) =>
     session.artifacts.publish(input as Parameters<AgentRunSession["artifacts"]["publish"]>[0]),
   "artifacts.turnWrites": (session) => session.artifacts.turnWrites(),
-  "artifacts.storePreviews": (session, [input]) =>
-    session.artifacts.storePreviews(
-      input as Parameters<AgentRunSession["artifacts"]["storePreviews"]>[0]
-    ),
-  "artifacts.missingPreviews": (session, [input]) =>
-    session.artifacts.missingPreviews(
-      input as Parameters<AgentRunSession["artifacts"]["missingPreviews"]>[0]
-    ),
   callTool: (session, [call, options], signal) =>
     session.callTool(call as Parameters<AgentRunSession["callTool"]>[0], {
       ...((options ?? {}) as { maxFileBytes?: number; contextDirectory?: string }),

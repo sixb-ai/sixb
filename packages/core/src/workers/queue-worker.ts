@@ -79,19 +79,30 @@ export abstract class QueueWorker<
     return this.config.claimLimit
   }
 
+  /**
+   * Stops claiming new jobs and waits for in-flight jobs to finish. When `timeoutMs` elapses
+   * first, aborts remaining jobs through `stop()` and returns `false`.
+   */
+  async drain(timeoutMs?: number): Promise<boolean> {
+    if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0)) {
+      throw new Error("[SixbQueueWorker] Drain timeout must be a non-negative finite number.")
+    }
+    return this.drainRunning(timeoutMs)
+  }
+
   protected async run(signal: AbortSignal): Promise<void> {
     const inFlight = new Set<Promise<void>>()
     let runError: unknown = null
-    // A claim waits for work, so a failed job must also end the wait it would otherwise sit in.
+    // A claim waits for work, so a failed job or a drain must also end the wait it sits in.
     const failed = new AbortController()
-    const claimSignal = AbortSignal.any([signal, failed.signal])
+    const claimSignal = AbortSignal.any([signal, this.drainSignal, failed.signal])
 
     try {
-      while (!signal.aborted && !runError) {
-        while (!signal.aborted && !runError && inFlight.size >= this.config.claimLimit) {
+      while (!claimSignal.aborted && !runError) {
+        while (!claimSignal.aborted && !runError && inFlight.size >= this.config.claimLimit) {
           await Promise.race(inFlight)
         }
-        if (runError || signal.aborted) {
+        if (runError || claimSignal.aborted) {
           continue
         }
 

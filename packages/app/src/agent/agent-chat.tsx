@@ -3,12 +3,12 @@ import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { MessagesSquare } from "lucide-react"
-import { type ReactNode, useEffect, useId } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useMemo } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { takeAgentDraft } from "../artifacts/view-context"
 import { ArtifactPanelRoot } from "./artifact-panel"
-import { ComputerBadge, ComputerOfflineNotice } from "./components/computer-place"
+import { ComputerOfflineNotice, ThreadPlaceControl } from "./components/computer-place"
 import { ConversationPanel } from "./components/conversation-panel"
 import { SandboxRecovery } from "./components/sandbox-recovery"
 import { SharedThreadNotice } from "./components/shared-thread-notice"
@@ -23,7 +23,10 @@ import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
 import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
 import { personName, threadOwner } from "./sharing"
+import { ThreadStateContext, threadStateStoreFor } from "./thread-state"
 import type { AgentContextInput, AgentThreadSandboxParams } from "./types"
+
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -42,7 +45,10 @@ export interface AgentChatProps {
   readonly splitArtifacts?: boolean
   /** The open artifact when the host keeps it in its route; files stay local. */
   readonly artifactTarget?: ArtifactTarget | null
-  readonly onArtifactTargetChange?: (target: ArtifactTarget | null) => void
+  readonly onArtifactTargetChange?: (
+    target: ArtifactTarget | null,
+    options?: { readonly replace?: boolean }
+  ) => void
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
   /**
@@ -66,7 +72,7 @@ export function AgentChat({
   onNavigateThread,
   onOpenThreads,
   className,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   welcomeContent,
   artifactHost,
@@ -92,6 +98,7 @@ export function AgentChat({
   // What an artifact on its own page asked the Agent before coming here starts the input, when
   // it was this person, in this project, a moment ago.
   const queries = useQueryClient()
+  const threadState = useMemo(() => threadStateStoreFor(queries), [queries])
   useEffect(() => {
     let current = true
     Promise.all([
@@ -135,7 +142,7 @@ export function AgentChat({
   const conversationHeaderActions =
     threadId || hostHeaderActions ? (
       <>
-        {conversation.computer ? <ComputerBadge computer={conversation.computer} /> : null}
+        {conversation.place ? <ThreadPlaceControl place={conversation.place} /> : null}
         {threadId ? <ThreadArtifactsMenu threadId={threadId} /> : null}
         {sharingThread ? (
           <ThreadPeople
@@ -148,6 +155,18 @@ export function AgentChat({
         {hostHeaderActions}
       </>
     ) : null
+
+  const showNewThreadControls = threadId === null ? newThreadControls : undefined
+  const mergedComposerProps = useMemo(
+    () => ({
+      ...conversation.composerProps,
+      ...(dictation ? {} : { dictation: undefined }),
+      ...(showNewThreadControls ? { newThreadControls: showNewThreadControls } : {}),
+      ...(insertion ? { insertion } : {}),
+      onInserted: inserted,
+    }),
+    [conversation.composerProps, dictation, showNewThreadControls, insertion, inserted]
+  )
 
   let content: ReactNode
   let controlsInConversationHeader = false
@@ -189,14 +208,9 @@ export function AgentChat({
       <ConversationPanel
         agent={conversation.currentAgent}
         transcript={conversation.transcriptProps}
-        composer={{
-          ...conversation.composerProps,
-          ...(dictation ? {} : { dictation: undefined }),
-          ...(threadId === null && newThreadControls ? { newThreadControls } : {}),
-          ...(insertion ? { insertion } : {}),
-          onInserted: inserted,
-        }}
+        composer={mergedComposerProps}
         question={conversation.questionProps}
+        pending={conversation.pendingProps}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}
@@ -227,36 +241,41 @@ export function AgentChat({
   }
 
   // An artifact opened from here names who published each version, from this conversation's people.
-  const artifactPeople = (author: { readonly type: string; readonly id: string }) =>
-    knownName(author, currentThread, conversation.authors)
+  const artifactPeople = useCallback(
+    (author: { readonly type: string; readonly id: string }) =>
+      knownName(author, currentThread, conversation.authors),
+    [currentThread, conversation.authors]
+  )
 
   return (
-    <ArtifactPeopleContext.Provider value={artifactPeople}>
-      <ArtifactPanelRoot
-        compact={compact}
-        split={splitArtifacts}
-        overlayHost={artifactHost}
-        scopeKey={threadId ?? "draft"}
-        routeTarget={artifactTarget}
-        onRouteTargetChange={onArtifactTargetChange}
-        {...(readOnly ? {} : { onAgentDraft: insert })}
-      >
-        <div
-          data-agent-panel={compact ? "" : undefined}
-          className={cn("relative flex h-full min-h-0 flex-col", className)}
+    <ThreadStateContext.Provider value={threadState}>
+      <ArtifactPeopleContext.Provider value={artifactPeople}>
+        <ArtifactPanelRoot
+          compact={compact}
+          split={splitArtifacts}
+          overlayHost={artifactHost}
+          scopeKey={threadId ?? "draft"}
+          routeTarget={artifactTarget}
+          onRouteTargetChange={onArtifactTargetChange}
+          {...(readOnly ? {} : { onAgentDraft: insert })}
         >
-          {!controlsInConversationHeader && conversationHeaderActions ? (
-            <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
-              {conversationHeaderActions}
-            </div>
-          ) : null}
-          <MessageAuthorsContext.Provider value={authors}>
-            <main className="min-h-0 min-w-0 flex-1">{content}</main>
-          </MessageAuthorsContext.Provider>
-          <Toaster id={toasterId} position="top-center" />
-        </div>
-      </ArtifactPanelRoot>
-    </ArtifactPeopleContext.Provider>
+          <div
+            data-agent-panel={compact ? "" : undefined}
+            className={cn("relative flex h-full min-h-0 flex-col", className)}
+          >
+            {!controlsInConversationHeader && conversationHeaderActions ? (
+              <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
+                {conversationHeaderActions}
+              </div>
+            ) : null}
+            <MessageAuthorsContext.Provider value={authors}>
+              <main className="min-h-0 min-w-0 flex-1">{content}</main>
+            </MessageAuthorsContext.Provider>
+            <Toaster id={toasterId} position="top-center" />
+          </div>
+        </ArtifactPanelRoot>
+      </ArtifactPeopleContext.Provider>
+    </ThreadStateContext.Provider>
   )
 }
 

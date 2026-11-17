@@ -19,7 +19,7 @@ import {
 import { useDictation } from "@sixb/ui/hooks"
 import type { SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   ArrowUp,
@@ -34,6 +34,7 @@ import {
 import {
   type ClipboardEvent,
   type KeyboardEvent,
+  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -46,7 +47,8 @@ import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
-import type { AgentFileRef, LanguageModel } from "../types"
+import { type ThreadStateStore, useThreadStateStore } from "../thread-state"
+import type { AgentFileRef, AgentMessageDelivery, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
   type AgentContextMention,
@@ -74,10 +76,16 @@ import { ContextPicker } from "./context-picker"
 import { DictationBar } from "./dictation-bar"
 
 export interface ComposerProps {
+  /**
+   * `delivery` says where the message goes while a turn runs: into it, behind it, or after stopping
+   * it. It is `auto` when nothing runs; passed on as `auto` or left out while a turn runs,
+   * `useAgentConversation` sends it where Enter would.
+   */
   readonly onSend: (
     text: string,
     attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
+    context: readonly AgentContextEntryInput[],
+    delivery?: AgentMessageDelivery
   ) => void
   readonly disabled?: boolean
   readonly pending?: boolean
@@ -89,6 +97,11 @@ export interface ComposerProps {
   readonly running?: boolean
   /** A stop has been requested and we're waiting for the run to end. */
   readonly stopping?: boolean
+  /**
+   * The running turn is the reader's own, so a message sent into it steers it. Another person's
+   * turn takes no steer: the message queues for the reader's own turn instead.
+   */
+  readonly steerable?: boolean
   readonly onStop?: () => void
   readonly models?: readonly LanguageModel[]
   readonly selectedModel?: LanguageModel
@@ -111,6 +124,8 @@ export interface ComposerProps {
   readonly hint?: string
   /** A failed send, kept within the same width constraint as the input. */
   readonly error?: string
+  /** Key under which unsent text, attachments, and explicit @ context persist per thread. */
+  readonly draftKey?: string
   /**
    * Text to restore into the input, e.g. after a failed send so the user does not lose it.
    * Applied whenever `draftNonce` changes to a non-zero value, so re-sending the same text works.
@@ -121,10 +136,15 @@ export interface ComposerProps {
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
   /**
+   * The `draftKey` the restored draft belongs to. Another conversation's input leaves it alone:
+   * it waits in its own conversation's stored draft.
+   */
+  readonly draftReseedKey?: string
+  /**
    * What an artifact hands the conversation, such as the comments the reader asks the Agent to
    * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
-   * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
-   * is sent.
+   * one of the same identity, and its words follow the reader's own on a line of their own.
+   * Nothing is sent.
    */
   readonly insertion?: {
     readonly text: string
@@ -188,7 +208,18 @@ type ComposerAttachment =
       readonly sizeBytes: number
     }
 
+interface UnlandedAttachment {
+  readonly draftKey: string | undefined
+  readonly attachment: ComposerAttachment
+}
+
 const MAX_HEIGHT_PX = 200
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
+
+/** The width as laid out, to the fraction of a pixel where the text breaks. */
+function widthOf(element: Element | null): number {
+  return element?.getBoundingClientRect().width ?? 0
+}
 
 // The microphone and Cancel: round, quiet until hovered.
 const ICON_BUTTON_CLASS_NAME = cn(
@@ -210,12 +241,13 @@ export function composerCanFocus({
   return !disabled && !pending
 }
 
-export function Composer({
+export const Composer = memo(function Composer({
   onSend,
   disabled,
   pending,
   running,
   stopping,
+  steerable = true,
   onStop,
   models = [],
   selectedModel,
@@ -232,19 +264,21 @@ export function Composer({
   className,
   hint,
   error,
+  draftKey,
   draft,
   draftAttachments,
   draftContext,
   draftNonce,
+  draftReseedKey,
   insertion,
   onInserted,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   approvalMode,
   onApprovalModeChange,
   awaitingApproval = false,
   dictation,
-  commands = [],
+  commands: customCommands = [],
   contextMeter,
   newThreadPlace,
   newThreadControls,
@@ -252,10 +286,15 @@ export function Composer({
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
   const unnamedContext = agentMessages.context.unnamed
-  const [value, setValue] = useState("")
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const queryClient = useQueryClient()
+  const threadState = useThreadStateStore(queryClient)
+  const [loadedDraftKey, setLoadedDraftKey] = useState(draftKey)
+  const [value, setValue] = useState(() => readInitialDraftText(threadState, draftKey))
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
+    readInitialDraftAttachments(threadState, draftKey)
+  )
   const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
-    ambientContext.map((context) => ({ context, origin: "ambient" }))
+    readInitialDraftContext(threadState, draftKey, ambientContext)
   )
   const [mention, setMention] = useState<AgentContextMention | null>(null)
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
@@ -271,11 +310,16 @@ export function Composer({
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sizerRef = useRef<HTMLSpanElement>(null)
-  // The text's width in a single row, measured while it has one.
-  const inlineWidthRef = useRef(0)
+  const spacerRef = useRef<HTMLSpanElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
+  // Each file that has not landed, still uploading or failed, and the conversation it was attached
+  // in. A stored draft keeps only landed files: these come back with their conversation, and one
+  // landing after the reader left joins that conversation's draft.
+  const unlandedRef = useRef(new Map<string, UnlandedAttachment>())
+  const draftKeyRef = useRef(draftKey)
+  draftKeyRef.current = draftKey
   // The transcript is appended to the text as it was when dictation started, so the input stays
   // read-only until it lands. Recording ends only when the reader stops it: no restarts. A
   // composer disabled meanwhile, by someone else's turn, only keeps a new dictation from starting.
@@ -317,27 +361,82 @@ export function Composer({
     }))
   }, [ambientContext, contextSearch.data?.items, mention, unnamedContext])
 
+  if (loadedDraftKey !== draftKey) {
+    setLoadedDraftKey(draftKey)
+    setValue(readInitialDraftText(threadState, draftKey))
+    setAttachments([
+      ...readInitialDraftAttachments(threadState, draftKey),
+      ...unlandedAttachments(unlandedRef.current, draftKey),
+    ])
+    setContextEntries(readInitialDraftContext(threadState, draftKey, ambientContext))
+    setMention(null)
+    setDismissedMention(null)
+    setDismissedCommand(null)
+    setActiveCommand(0)
+  }
+
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
-  const readyAttachments = attachments.flatMap((attachment) =>
-    attachment.status === "ready" ? [attachment.fileRef] : []
-  )
+  const readyAttachments = useMemo(() => readyAttachmentFiles(attachments), [attachments])
+  const explicitContext = useMemo(() => explicitEntries(contextEntries), [contextEntries])
+
+  useEffect(() => {
+    if (!draftKey || loadedDraftKey !== draftKey) return
+    threadState.writeDraft(draftKey, {
+      text: value,
+      attachments: readyAttachments,
+      explicitContext,
+    })
+  }, [threadState, draftKey, loadedDraftKey, value, readyAttachments, explicitContext])
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
   const commandText = commandQuery(value)
+  const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
+  const changeApprovalMode = useCallback(
+    (mode: AgentApprovalMode) => {
+      onApprovalModeChange?.(mode)
+      setModeAnnouncement(
+        agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
+      )
+    },
+    [onApprovalModeChange, agentMessages.approvalModes]
+  )
+  const availableCommands = useMemo(
+    (): readonly ComposerCommand[] => [
+      ...builtInCommands({
+        models,
+        onSelectModel: choosesModel ? onSelectModel : undefined,
+        onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
+        onApprovalModeChange: showPermissions ? changeApprovalMode : undefined,
+        messages: agentMessages.commands,
+      }),
+      ...customCommands,
+    ],
+    [
+      models,
+      choosesModel,
+      onSelectModel,
+      onResetModelSelection,
+      showPermissions,
+      changeApprovalMode,
+      agentMessages.commands,
+      customCommands,
+    ]
+  )
   const commandMatches =
     commandText === null || dismissedCommand === value || voice.isActive
       ? []
-      : matchCommands(allCommands(), commandText).slice(0, 6)
+      : matchCommands(availableCommands, commandText).slice(0, 6)
   const commandsOpen = commandMatches.length > 0
   // Files alone are a message too.
+  // A message sent while a turn runs steers it, so the input stays usable: the reader corrects the
+  // answer they are watching rather than waiting for it.
   const canSend =
     (value.trim().length > 0 || readyAttachments.length > 0) &&
     mention === null &&
     !commandsOpen &&
     !disabled &&
     !pending &&
-    !running &&
     !uploading &&
     !voice.isActive &&
     failedCount === 0
@@ -365,10 +464,20 @@ export function Composer({
 
   // Reseed the input on demand (a failed send hands the text and already-uploaded attachments back).
   // Keyed on the nonce so restoring the same draft twice still fires; ignored on mount (nonce 0) so
-  // it never clobbers a fresh draft.
+  // it never clobbers a fresh draft. One for another conversation goes to that one's stored draft.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseed only when the nonce changes
   useEffect(() => {
     if (!draftNonce) return
+
+    if (draftReseedKey !== undefined && draftReseedKey !== draftKey) {
+      threadState.writeDraft(draftReseedKey, {
+        text: draft ?? "",
+        attachments: draftAttachments ?? [],
+        explicitContext: explicitEntries(draftContext ?? []),
+      })
+      return
+    }
+
     setValue(draft ?? "")
     setAttachments(
       (draftAttachments ?? []).map((fileRef) => ({
@@ -391,7 +500,7 @@ export function Composer({
     textareaRef.current?.focus()
   }, [draftNonce])
 
-  // What an artifact hands the input: its context as a chip, its words in an empty input, the
+  // What an artifact hands the input: its context as a chip, its words after the reader's, the
   // caret after what the input holds.
   // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
   useEffect(() => {
@@ -404,7 +513,7 @@ export function Composer({
         { context, origin: "explicit" },
       ])
     }
-    setValue((current) => (current.trim() ? current : text))
+    setValue((current) => withInsertedText(current, text))
     onInserted?.(insertion.nonce)
     requestAnimationFrame(() => {
       const input = textareaRef.current
@@ -413,6 +522,11 @@ export function Composer({
       input.setSelectionRange(input.value.length, input.value.length)
     })
   }, [insertion?.nonce])
+
+  // A dictation belongs to the conversation it started in: opening another one ends it, before
+  // its transcript can replace that conversation's draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ends only when the conversation changes
+  useLayoutEffect(() => () => voice.abort(), [draftKey])
 
   // However a dictation ends, the focus returns to the input, the caret after any transcript.
   useEffect(() => {
@@ -442,26 +556,47 @@ export function Composer({
     }
   }, [disabled, pending])
 
-  // A draft that no longer fits in one row beside the controls takes a row of its own, with the
-  // controls under it. The row's width is measured while the draft still has it, so the box only
-  // folds back once the text fits there again.
+  const placeholderText =
+    voice.status === "stopping"
+      ? messages.dictationTranscribing
+      : voice.isActive
+        ? messages.dictationListening
+        : awaitingApproval
+          ? agentMessages.approvals.composerPlaceholder
+          : (placeholder ?? messages.placeholder)
+
+  // Text that no longer fits in one row beside the controls takes a row of its own, with the
+  // controls under it. The text is the draft or the placeholder, whichever is wider.
   const expanded =
     wraps ||
     value.includes("\n") ||
     attachments.length > 0 ||
     contextEntries.length > 0 ||
     (voice.isActive && value.trim().length > 0)
+
+  // Whether the text is wider than the room the controls leave it in their row. That room is the
+  // textarea's while it shares the row, and the spacer's, in its place beside `+`, once the text
+  // has a row of its own.
+  const textWraps = (textarea: HTMLTextAreaElement) => {
+    // The dictation bar holds the row, and a transcript already gets a row of its own.
+    if (voice.isActive) return false
+
+    // Not laid out, as in a hidden panel: there is nothing to measure yet.
+    if (!rootRef.current?.clientWidth) return wraps
+
+    const room = widthOf(expanded ? spacerRef.current : textarea)
+    return widthOf(sizerRef.current) > room
+  }
+
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
   // render a scrollbar in browsers configured to always show scroll bars.
   const measure = () => {
     const el = textareaRef.current
     if (!el) return
-    if (!expanded) inlineWidthRef.current = el.clientWidth
-    const sizer = sizerRef.current
-    setWraps(
-      sizer !== null && inlineWidthRef.current > 0 && sizer.offsetWidth > inlineWidthRef.current
-    )
+
+    setWraps(textWraps(el))
+
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
@@ -469,34 +604,60 @@ export function Composer({
   const measureRef = useRef(measure)
   measureRef.current = measure
 
+  // Measured before paint whenever the text changes, or the models land and the settings chip
+  // names one, so the box never shows the wrong shape for a frame.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
-  useLayoutEffect(measure, [value, attachments.length, contextEntries.length, expanded])
+  useLayoutEffect(measure, [
+    value,
+    placeholderText,
+    voice.isActive,
+    modelsLoading,
+    attachments.length,
+    contextEntries.length,
+    expanded,
+  ])
 
-  // The row's width changes without the text changing: the model label settles after the first
-  // render, or the window resizes. A height measured at the old width would keep a wrapped
-  // placeholder's two lines.
+  // The room changes without the text changing: a run starts or stops, a model is picked, or the
+  // window resizes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the spacer is drawn anew once dictation ends
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    let width = el.clientWidth
+
+    const spacer = spacerRef.current
+    let textWidth = widthOf(el)
+    let spacerWidth = widthOf(spacer)
     let frame = 0
     // Measuring resizes the textarea, so it waits a frame rather than resize inside the callback.
     const observer = new ResizeObserver(() => {
-      if (el.clientWidth === width) return
-      width = el.clientWidth
+      const nextTextWidth = widthOf(el)
+      const nextSpacerWidth = widthOf(spacer)
+      if (nextTextWidth === textWidth && nextSpacerWidth === spacerWidth) return
+      textWidth = nextTextWidth
+      spacerWidth = nextSpacerWidth
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => measureRef.current())
     })
     observer.observe(el)
+    if (spacer) observer.observe(spacer)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(frame)
     }
-  }, [])
+  }, [voice.isActive])
 
-  const submit = () => {
+  // While a turn runs, a message goes somewhere: the send button does what Enter does. A file
+  // never goes into the answer in flight, which reads text at its next step: it goes after it.
+  const deliveryOf = (delivery: AgentMessageDelivery): AgentMessageDelivery => {
+    if (!running) return "auto"
+    const where = delivery === "auto" ? (steerable ? "steer" : "queue") : delivery
+    return where === "steer" && readyAttachments.length > 0 ? "queue" : where
+  }
+
+  const submit = (delivery: AgentMessageDelivery = "auto") => {
     if (!canSend) return
-    onSend(value.trim(), readyAttachments, contextEntries)
+    onSend(value.trim(), readyAttachments, contextEntries, deliveryOf(delivery))
+    if (draftKey) threadState.clearDraft(draftKey)
     setValue("")
     voice.reset()
     setAttachments([])
@@ -534,37 +695,51 @@ export function Composer({
         mediaType: file.type || undefined,
         sizeBytes: file.size,
       }
+      unlandedRef.current.set(id, { draftKey: draftKeyRef.current, attachment: pendingAttachment })
       setAttachments((current) => [...current, pendingAttachment])
+
+      const settle = (settled: ComposerAttachment) => {
+        const unlanded = unlandedRef.current.get(id)
+        // The reader removed it while it uploaded.
+        if (!unlanded) return
+
+        if (settled.status === "ready") unlandedRef.current.delete(id)
+        else unlandedRef.current.set(id, { ...unlanded, attachment: settled })
+
+        if (unlanded.draftKey === draftKeyRef.current) {
+          setAttachments((current) =>
+            current.map((attachment) => (attachment.id === id ? settled : attachment))
+          )
+          return
+        }
+
+        // The reader opened another conversation meanwhile: the file joins the draft of the one
+        // it was attached in.
+        if (unlanded.draftKey && settled.status === "ready") {
+          const stored = threadState.readDraft(unlanded.draftKey)
+          threadState.writeDraft(unlanded.draftKey, {
+            text: stored?.text ?? "",
+            attachments: [...(stored?.attachments ?? []), settled.fileRef],
+            explicitContext: stored?.explicitContext ?? [],
+          })
+        }
+      }
 
       uploadFile
         .mutateAsync({ file, fileName: file.name })
-        .then((fileRef) => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? { id, status: "ready", fileRef: fileRef as AgentFileRef }
-                : attachment
-            )
-          )
-        })
+        .then((fileRef) => settle({ id, status: "ready", fileRef: fileRef as AgentFileRef }))
         // The API explains failures to developers; the composer shows its own message.
-        .catch(() => {
-          setAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === id
-                ? {
-                    id,
-                    status: "error",
-                    fileName: file.name,
-                    mediaType: file.type || undefined,
-                    sizeBytes: file.size,
-                  }
-                : attachment
-            )
-          )
-        })
+        .catch(() =>
+          settle({
+            id,
+            status: "error",
+            fileName: file.name,
+            mediaType: file.type || undefined,
+            sizeBytes: file.size,
+          })
+        )
     },
-    [uploadFile]
+    [uploadFile, threadState]
   )
 
   const handleFilesSelected = useCallback(
@@ -649,6 +824,7 @@ export function Composer({
   }, [canAttachFiles, compact, handleFilesSelected])
 
   const removeAttachment = (id: string) => {
+    unlandedRef.current.delete(id)
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
   }
 
@@ -707,28 +883,6 @@ export function Composer({
       textarea.selectionStart = next.caret
       textarea.selectionEnd = next.caret
     })
-  }
-
-  const changeApprovalMode = (mode: AgentApprovalMode) => {
-    onApprovalModeChange?.(mode)
-    setModeAnnouncement(
-      agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
-    )
-  }
-
-  function allCommands(): readonly ComposerCommand[] {
-    const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
-    return [
-      ...builtInCommands({
-        models,
-        onSelectModel: choosesModel ? onSelectModel : undefined,
-        onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
-        // Called on Enter, long after the render that lists it.
-        onApprovalModeChange: showPermissions ? (mode) => changeApprovalMode(mode) : undefined,
-        messages: agentMessages.commands,
-      }),
-      ...commands,
-    ]
   }
 
   const runCommand = (command: ComposerCommand) => {
@@ -846,6 +1000,27 @@ export function Composer({
         return
       }
     }
+    // While a turn runs, Enter sends as always: a steer into the reader's own answer, a queued message
+    // behind another's. Tab queues a draft for the next turn instead, and the modifier sends it now.
+    // An empty composer leaves Tab to move focus.
+    if (running) {
+      if (event.key === "Tab" && canSend && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault()
+        submit("queue")
+        return
+      }
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        submit(steerable ? "send_now" : "queue")
+        return
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault()
+        submit(steerable ? "steer" : "queue")
+        return
+      }
+      return
+    }
     if (event.key !== "Enter") return
     if (event.shiftKey) return
     event.preventDefault()
@@ -909,8 +1084,9 @@ export function Composer({
             onRun={runCommand}
           />
           {/*
-            One row while the draft fits beside the controls; once it doesn't, the draft gets a row
-            of its own and the controls sit under it. Attachments and context lead, on their own row.
+            One row while the text fits beside the controls; once it doesn't, the text gets a row
+            of its own and the controls sit under it. Attachments and context lead, on their own
+            row.
           */}
           <div
             data-dragging={draggingFiles || undefined}
@@ -920,16 +1096,22 @@ export function Composer({
             data-focus-on-tap=""
             className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
           >
-            {/* The draft on one line, to tell when it stops fitting there. */}
+            {/*
+              The text on one line, to tell when it stops fitting beside the controls: as wide as
+              the draft or the placeholder, whichever is wider, so a box folded for its placeholder
+              doesn't snap back into the row at the first letter typed.
+            */}
             <span
               aria-hidden="true"
               className="pointer-events-none invisible absolute inset-0 overflow-hidden"
             >
               <span
                 ref={sizerRef}
-                className="absolute whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
+                data-composer-sizer=""
+                className="absolute grid whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
               >
-                {value}
+                <span>{value}</span>
+                <span>{placeholderText}</span>
               </span>
             </span>
             {contextEntries.length > 0 || attachments.length > 0 ? (
@@ -965,12 +1147,14 @@ export function Composer({
                   onAddFiles={canAttachFiles ? () => fileInputRef.current?.click() : undefined}
                   onMention={() => insertAtCaret("@")}
                   onCommand={
-                    value.length === 0 && allCommands().length > 0
+                    value.length === 0 && availableCommands.length > 0
                       ? () => insertAtCaret("/")
                       : undefined
                   }
                 />
                 <span
+                  ref={spacerRef}
+                  data-composer-spacer=""
                   aria-hidden="true"
                   className="hidden flex-1 group-data-[expanded]/composer:block"
                 />
@@ -995,15 +1179,7 @@ export function Composer({
               disabled={disabled}
               readOnly={voice.isActive}
               rows={1}
-              placeholder={
-                voice.status === "stopping"
-                  ? messages.dictationTranscribing
-                  : voice.isActive
-                    ? messages.dictationListening
-                    : awaitingApproval
-                      ? agentMessages.approvals.composerPlaceholder
-                      : (placeholder ?? messages.placeholder)
-              }
+              placeholder={placeholderText}
               aria-label={messages.message}
               className={cn(
                 "max-h-[200px] min-h-10 min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-2 py-2 text-[16px] leading-6 tracking-[-0.012em] shadow-none placeholder:text-muted-foreground focus-visible:ring-0 md:text-[16px] dark:bg-transparent",
@@ -1050,7 +1226,8 @@ export function Composer({
                     )}
                   />
                 ) : null}
-                {running && onStop ? (
+                {/* Stop while there is nothing to send; a draft turns it back into send. */}
+                {running && onStop && !hasDraft ? (
                   <button
                     type="button"
                     onClick={onStop}
@@ -1067,9 +1244,17 @@ export function Composer({
                 ) : showSend ? (
                   <button
                     type="button"
-                    onClick={submit}
+                    onClick={() => submit()}
                     disabled={!canSend}
                     aria-label={messages.send}
+                    // While an answer runs, where the message goes.
+                    title={
+                      running
+                        ? deliveryOf("auto") === "steer"
+                          ? messages.steer
+                          : messages.queue
+                        : undefined
+                    }
                     className={SEND_BUTTON_CLASS_NAME}
                   >
                     {pending || uploading ? (
@@ -1119,7 +1304,7 @@ export function Composer({
       </div>
     </div>
   )
-}
+})
 
 function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
   const messages = useAgentMessages().composer
@@ -1264,4 +1449,57 @@ function contextLabel(label: string): { readonly label?: string } {
         ? `${trimmed.slice(0, MAX_AGENT_CONTEXT_LABEL_LENGTH - 1).trimEnd()}…`
         : trimmed,
   }
+}
+
+/** A draft restored with its conversation keeps its words; the handed ones come after them, once. */
+function withInsertedText(current: string, text: string): string {
+  if (!current.trim()) return text
+  if (!text || current.includes(text)) return current
+  return `${current.trimEnd()}\n${text}`
+}
+
+function readInitialDraftText(store: ThreadStateStore, draftKey: string | undefined): string {
+  return draftKey ? (store.readDraft(draftKey)?.text ?? "") : ""
+}
+
+function readInitialDraftAttachments(
+  store: ThreadStateStore,
+  draftKey: string | undefined
+): ComposerAttachment[] {
+  if (!draftKey) return []
+  return (store.readDraft(draftKey)?.attachments ?? []).map((fileRef) => ({
+    id: attachmentId(),
+    status: "ready",
+    fileRef,
+  }))
+}
+
+function unlandedAttachments(
+  unlanded: ReadonlyMap<string, UnlandedAttachment>,
+  draftKey: string | undefined
+): ComposerAttachment[] {
+  return [...unlanded.values()].flatMap((entry) =>
+    entry.draftKey === draftKey ? [entry.attachment] : []
+  )
+}
+
+function readInitialDraftContext(
+  store: ThreadStateStore,
+  draftKey: string | undefined,
+  ambientContext: readonly AgentContextInput[]
+): AgentContextEntryInput[] {
+  const explicit = draftKey ? (store.readDraft(draftKey)?.explicitContext ?? []) : []
+  const explicitIds = new Set(explicit.map((entry) => agentContextIdentity(entry.context)))
+  const ambient = ambientContext
+    .filter((context) => !explicitIds.has(agentContextIdentity(context)))
+    .map((context) => ({ context, origin: "ambient" as const }))
+  return [...ambient, ...explicit]
+}
+
+function readyAttachmentFiles(attachments: readonly ComposerAttachment[]): AgentFileRef[] {
+  return attachments.flatMap((item) => (item.status === "ready" ? [item.fileRef] : []))
+}
+
+function explicitEntries(entries: readonly AgentContextEntryInput[]): AgentContextEntryInput[] {
+  return entries.filter((entry) => entry.origin === "explicit")
 }

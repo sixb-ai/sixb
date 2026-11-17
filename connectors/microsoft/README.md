@@ -145,8 +145,103 @@ What to expect:
 | Account | `id` is the person's Entra object id; `label` is the name they sign in with (`preferred_username`), the same claim Entra sign-in matches Sixb members by |
 | Refresh | Entra issues a new refresh token on every refresh; the connector stores it |
 | Reconnect | Needed when the grant is revoked, expires after 90 days unused, or a sign-in policy requires the person (`invalid_grant`, `interaction_required`). A configuration error such as a wrong secret never disconnects anyone |
-| Disconnect | Deletes the stored grant. Entra has no endpoint for an app to revoke one person's refresh token |
-| Change notifications | `webhookSecret` and `onEvent` stay with the application modes |
+| Disconnect | Deletes the stored grant. Entra has no endpoint for an app to revoke one person's refresh token. With `webhookSecret` set, also deletes the person's subscriptions to this connector |
+| Change notifications | `webhookSecret` and `onEvent`, with each person's connections: see [Notifications from people's accounts](#notifications-from-peoples-accounts) |
+
+### Notifications from people's accounts
+
+Each person subscribes to their own mailbox, and `onEvent` gets the connections of the person whose
+subscription sent the notification:
+
+```ts
+// connectors/outlook.ts
+export const INBOX = {
+  folderId: "inbox",
+  changeTypes: ["created", "updated", "deleted"],
+  notificationUrl: "https://<sixb-api-origin>/api/webhooks/outlook/events",
+} as const
+
+export const outlook = defineConnector(
+  "outlook",
+  microsoft({
+    auth: { oauth },
+    webhookSecret: process.env.MICROSOFT_WEBHOOK_SECRET!, // 1–128 characters
+    async onEvent({ event, accountId, connections, sixb }) {
+      if (connections.length === 0) return // They disconnected; the subscription expires on its own.
+      if (event.kind === "change" || event.lifecycleEvent === "missed")
+        return recordMailboxChange(sixb, event, connections) // Your durable signal.
+
+      // Only lifecycle events need their token. If they must reconnect, skip it: throwing would
+      // fail the whole batch, other people's notifications included. The nightly run catches up.
+      const graph = await connections[0]?.client().catch(() => undefined)
+      if (!graph) return
+      if (event.lifecycleEvent === "reauthorizationRequired")
+        return graph.subscriptions.reauthorize(event.subscriptionId)
+      await graph.mail.ensureSubscription(accountId, INBOX) // subscriptionRemoved
+    },
+  }),
+  { owners: ["user"] }
+)
+```
+
+A workflow subscribes each person as soon as they connect, and a nightly one keeps everyone
+subscribed. `ensureSubscription` stores nothing: it finds the person's subscription in Graph, keeps
+it while more than three days are left, renews it to six days, or creates it:
+
+```ts
+// workflows/outlook-subscriptions.ts
+const keepSubscribed = defineWorkflowStep("keep-subscribed")
+  .input({ connectionId: "string" }) // "" means everyone
+  .output({ failed: "integer" })
+  .run(async ({ input, sixb, logger }) => {
+    let failed = 0
+    for (const { connection, client } of await sixb.connector.connections(outlook).list()) {
+      if (input.connectionId && connection.id !== input.connectionId) continue
+      try {
+        await (await client()).mail.ensureSubscription(connection.account.id, INBOX)
+      } catch (error) {
+        failed++ // For example, they need to reconnect. The next run tries again.
+        logger.warn("Outlook subscription failed", { connectionId: connection.id, error: String(error) })
+      }
+    }
+    if (failed > 0) throw new Error(`${failed} Outlook subscription(s) could not be kept.`)
+    return { failed }
+  })
+
+export const subscribeOnConnect = defineWorkflow("outlook-subscribe")
+  .input({ connectionId: "string" })
+  .when(defineSchedule("outlook-connected").on(events.connector(outlook).connected()), ({ event }) => ({
+    connectionId: event.connection.id,
+  }))
+  .then(keepSubscribed)
+
+export const renewNightly = defineWorkflow("outlook-renew")
+  .input({})
+  .when(defineSchedule("outlook-renew-nightly").cron("0 3 * * *"))
+  .then(keepSubscribed, () => ({ connectionId: "" }))
+```
+
+| Moment | What happens |
+| --- | --- |
+| Someone connects or reconnects | `outlook-subscribe` subscribes their inbox |
+| Every night | `outlook-renew` renews subscriptions with under three days left and recreates missing ones |
+| Graph asks to reauthorize, or removed a subscription | `onEvent` reauthorizes or recreates it with that person's client |
+| Someone disconnects, is revoked or suspended | Their subscriptions to this connector are deleted while their token still works, unless the same account stays connected in another slot |
+
+- **Only the person's own token** can renew, reauthorize or delete their subscription, so use one of
+  `connections`. `event.accountId` is their Entra object id.
+- **The nightly run is the backstop.** A missed connection event, a failed run or an expired
+  subscription is caught within a day. Graph lists subscriptions at 25 requests every 20 seconds per
+  application and tenant, so a run over 500 people takes about seven minutes.
+- **Only their own mailbox.** Delegated subscriptions can't watch shared mailboxes, and `*.Shared`
+  permissions can't subscribe.
+- **Calendar events** work through `subscriptions.ensure` on `users/{account id}/events` with
+  `Calendars.Read`; contacts through `contacts.ensureSubscription`.
+- **How a notification is traced to a person.** Each subscription's `clientState` names the person's
+  account and is signed with `webhookSecret`. A value made for one person can't name another.
+- **Rotating `webhookSecret`** invalidates every existing subscription. Recreate them.
+- **Subscriptions left behind** after a disconnect expire within seven days, and their notifications
+  reach `onEvent` with no connections.
 
 ## Authentication
 
@@ -386,6 +481,7 @@ Calendar/Teams operations, rules, mailbox settings and MIME composition are outs
 ### Mail webhooks
 
 Configure a callback on your connector. Mail notifications require application mail-read access.
+For people's own mailboxes, see [Notifications from people's accounts](#notifications-from-peoples-accounts).
 
 ```ts
 export default defineConnector("microsoft", microsoft({
@@ -418,6 +514,10 @@ await client.subscriptions.renew(
 // When no longer needed:
 await client.subscriptions.delete(subscription.id)
 ```
+
+Or let a nightly Sixb schedule call `client.mail.ensureSubscription(mailbox, options)`, which keeps,
+renews or creates the mailbox's subscription and stores nothing; see
+[Notifications from people's accounts](#notifications-from-peoples-accounts).
 
 | Event | Queued work |
 | --- | --- |
@@ -846,8 +946,10 @@ bun test ./connectors/microsoft/tests/directory-users.e2e.ts
 ## Graph subscriptions
 
 `client.subscriptions` manages Graph v1.0 basic HTTPS notifications using the connector's
-existing authentication. It exposes `create`, `get`, `list`, `listAll`, `update`, `renew`, `delete` and
-`reauthorize`. `renew(id, expiration)` delegates to `update(id, { expirationDateTime: expiration })`.
+existing authentication. It exposes `create`, `ensure`, `get`, `list`, `listAll`, `update`, `renew`,
+`delete` and `reauthorize`. `ensure(input, { renewWithinMs?, lifetimeMs? })` keeps one subscription
+alive without storing anything, as [above](#notifications-from-peoples-accounts); the rest of this
+section is for subscriptions you track yourself. `renew(id, expiration)` delegates to `update(id, { expirationDateTime: expiration })`.
 Listing does not accept OData options; with application authentication it returns
 subscriptions owned by the calling application, not every subscription in the tenant.
 
@@ -858,9 +960,9 @@ const subscription = await client.subscriptions.create({
   notificationUrl: "https://app.example.com/api/webhooks/microsoft/events",
   lifecycleNotificationUrl: "https://app.example.com/api/webhooks/microsoft/events",
   expirationDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-  clientState: process.env.MICROSOFT_WEBHOOK_SECRET!, // Same secret as the built-in receiver.
+  // clientState defaults to the value the built-in receiver accepts.
 })
-// Persist the returned ID and expiration, the expected resource/URLs, and clientState securely.
+// Persist the returned ID and expiration and the expected resource/URLs.
 
 // Run before expiration from an application-owned scheduled job, under a per-subscription lock.
 const renewed = await client.subscriptions.update(subscription.id, {
@@ -896,8 +998,9 @@ The connector does not own the subscription database, distributed lock, or sched
 ### Receiver and permissions
 
 The built-in `onEvent` receiver above handles validation and `clientState` verification for basic
-Graph notifications, including SharePoint. When using it with generic `create`, pass the configured
-`webhookSecret` as `clientState` and map subscription IDs to authorized tenant/resources in the callback.
+Graph notifications, including SharePoint. With generic `create`, leave `clientState` out: the
+connector sends the value its receiver accepts. Map subscription IDs to authorized tenant/resources
+in the callback.
 
 Provision the HTTPS receiver **before** creating the subscription. For Graph's validation POST,
 return the decoded `validationToken` query parameter as plain text with HTTP 200 within ten seconds.

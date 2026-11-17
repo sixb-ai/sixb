@@ -128,7 +128,7 @@ function conversationCache() {
     cache.setQueryData(
       listAgentThreadRunsQueryKey({
         path: { threadId: id },
-        query: { limit: "50", order: "desc" },
+        query: { order: "desc" },
       }),
       { runs: [] }
     )

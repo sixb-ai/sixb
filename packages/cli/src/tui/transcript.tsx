@@ -1,10 +1,15 @@
 /** @jsxImportSource @opentui/react */
 import { CodeRenderable, type MarkdownOptions, type SyntaxStyle } from "@opentui/core"
 import { useRenderer } from "@opentui/react"
-import type { ListAgentThreadApprovalsResponses, ListAgentThreadRunsResponses } from "@sixb/client"
-import { useEffect, useState } from "react"
+import type {
+  GetAgentThreadResponses,
+  ListAgentThreadApprovalsResponses,
+  ListAgentThreadRunsResponses,
+} from "@sixb/client"
+import { Fragment, type ReactNode, useEffect, useState } from "react"
 import { duration, friendlyPath, plural, runFailureText, type ToolLine, toolLine } from "./format"
 import { steadyMarkdown } from "./markdown"
+import { type PlaceNames, placeName, runPlace, transcriptMoves } from "./moves"
 import {
   type ApprovalOutcome,
   approvalOutcomes,
@@ -12,7 +17,6 @@ import {
   type Part,
   type ShownMessage,
 } from "./parts"
-import { placeLabel } from "./settings"
 import type { TuiColors } from "./theme"
 import { BOLD, ITALIC, useNow, useSpinner } from "./ui"
 
@@ -32,7 +36,8 @@ export function Transcript({
   live,
   approvals,
   modelNames,
-  computerRuns,
+  thread,
+  names,
   width,
   folder,
   approvalChoice,
@@ -44,8 +49,16 @@ export function Transcript({
   readonly live: LiveRun | null
   readonly approvals: readonly Approval[]
   readonly modelNames: ModelNames
-  /** Whether the thread's turns run on its owner's computer. */
-  readonly computerRuns: boolean
+  /**
+   * Where the conversation runs now, when it last moved, and when it began: a fork's copies
+   * predate it.
+   */
+  readonly thread: Pick<
+    GetAgentThreadResponses[200],
+    "runsOn" | "computer" | "movedAt" | "createdAt"
+  > | null
+  /** The computers' and owner's names its places are written with. */
+  readonly names: PlaceNames
   /** The terminal's width: rows that must stay one line are cut to it. */
   readonly width: number
   /** The folder a computer's turns work in: paths in it are shown relative to it. */
@@ -61,17 +74,39 @@ export function Transcript({
   const liveShown =
     live &&
     !messages.some((message) => message.runId === live.runId && message.role === "assistant")
+
+  // Each turn says where it ran, and a line marks every move between two of them.
+  const moves = transcriptMoves({
+    thread,
+    messages,
+    shownIds: new Set(shown.map((message) => message.id)),
+    runs,
+    names,
+  })
+  const withMove = (message: ShownMessage, body: ReactNode) => {
+    const moved = moves.get(message.id)
+    return (
+      <Fragment key={message.id}>
+        {body}
+        {moved ? <text fg={colors.faint}>{`◇ ${moved}`}</text> : null}
+      </Fragment>
+    )
+  }
+
   return (
     <box flexDirection="column" gap={1}>
       {shown.map((message, index) => {
-        if (message.role === "user")
-          return <UserMessage key={message.id} colors={colors} message={message} />
+        if (message.role === "user") {
+          return withMove(message, <UserMessage colors={colors} message={message} />)
+        }
+
         const next = shown[index + 1]
         // A turn's meta goes under its last message: a resumed turn answers in several.
         const lastOfRun = !next || next.runId !== message.runId
         const run = message.runId ? runsById.get(message.runId) : undefined
-        return (
-          <box key={message.id} flexDirection="column" gap={1}>
+        return withMove(
+          message,
+          <box flexDirection="column" gap={1}>
             {message.compaction ? (
               <CompactionLine colors={colors} contextFull={message.compaction.contextFull} />
             ) : null}
@@ -89,7 +124,7 @@ export function Transcript({
                 colors={colors}
                 run={run}
                 modelNames={modelNames}
-                computerRuns={computerRuns}
+                place={placeName(runPlace(run), names)}
                 waiting={approvals.some((approval) => approval.runId === run.id)}
               />
             ) : null}
@@ -467,13 +502,14 @@ function RunMeta({
   colors,
   run,
   modelNames,
-  computerRuns,
+  place,
   waiting,
 }: {
   readonly colors: TuiColors
   readonly run: Run
   readonly modelNames: ModelNames
-  readonly computerRuns: boolean
+  /** Where it ran: `Cloud`, or a folder and its computer. */
+  readonly place: string
   /** One of its calls still waits for the person. */
   readonly waiting: boolean
 }) {
@@ -500,7 +536,7 @@ function RunMeta({
   return (
     <text>
       <span fg={colors.blue}>{"   ▰ "}</span>
-      <span fg={colors.text}>{placeLabel(computerRuns ? "computer" : "cloud")}</span>
+      <span fg={colors.text}>{place}</span>
       {items.map((item) => (
         <span key={item} fg={colors.muted}>{` · ${item}`}</span>
       ))}

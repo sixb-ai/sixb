@@ -163,6 +163,8 @@ describe("OpenAPI docs", () => {
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
       ["post", "/api/agent-threads"],
       ["post", "/api/agent-threads/{threadId}/messages"],
+      ["patch", "/api/agent-threads/{threadId}/inbox/{itemId}"],
+      ["delete", "/api/agent-threads/{threadId}/inbox/{itemId}"],
       ["post", "/api/connectors/{connectorId}/connection-runs"],
       ["post", "/api/connectors/{connectorId}/connection-runs/{runId}/selection"],
       ["post", "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize"],

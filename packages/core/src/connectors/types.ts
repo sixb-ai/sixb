@@ -90,6 +90,21 @@ export interface ConnectorConnectionMetadata extends ConnectorConnectionSelector
   readonly account: ConnectorAccountCandidate
 }
 
+/** One connection a run may use, and the client that acts with its account. */
+export interface ConnectorConnectionHandle<TClient = unknown> {
+  readonly connection: ConnectorConnectionMetadata
+  /** First call rechecks the connection and creates its client; later calls reuse that client. */
+  client(): Promise<TClient>
+}
+
+/** The connections of one OAuth connector that the current run may use. */
+export interface ConnectorConnections<TClient = unknown> {
+  /** Every connection the run may use, ordered by id. */
+  list(): Promise<readonly ConnectorConnectionHandle<TClient>[]>
+  /** Those whose account has this id; an unknown account returns an empty array. */
+  forAccount(accountId: string): Promise<readonly ConnectorConnectionHandle<TClient>[]>
+}
+
 /** Credential protection required when an OAuth connector uses durable connection storage. */
 export interface ConnectorConnectionOptions {
   /** Canonical base64url encoding of exactly 32 random bytes, shared by storage replicas. */
@@ -169,7 +184,20 @@ export interface ConnectorOAuth2Authentication {
    * Revokes the grant idempotently. An already revoked or invalid grant must resolve successfully
    * so Sixb can converge after losing an earlier provider response.
    */
-  revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
+  revoke?(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials,
+    revocation?: ConnectorOAuthRevocation
+  ): Promise<void> | void
+}
+
+/** What the connector still reaches once one grant is revoked. */
+export interface ConnectorOAuthRevocation {
+  /**
+   * Accounts still connected through another grant, such as the same account in a second slot.
+   * Provider state those accounts share with the revoked grant is still in use.
+   */
+  readonly connectedAccountIds: readonly string[]
 }
 
 export interface OAuthConnectorAdapter<TType extends string = string, TClient = unknown> {

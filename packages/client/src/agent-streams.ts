@@ -23,6 +23,7 @@ export type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
   AgentComputerActivityEvent,
+  AgentInboxReadMessage,
   AgentRunActivityEvent,
   AgentRunFailure,
   AgentRunStreamEvent,

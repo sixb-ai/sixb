@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
+import { Composer, PendingMessages } from "../src"
 import { AgentChat } from "../src/agent/agent-chat"
 import { AgentThreads } from "../src/agent/components/agent-threads"
 import { useAgentConversation } from "../src/agent/hooks/use-agent-conversation"
@@ -185,10 +186,27 @@ const screenshotRef = {
   mediaType: "image/png",
 }
 
+function inboxItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "inb_1",
+    projectId: "proj",
+    threadId: "thr_1",
+    messageId: "msg_9",
+    seq: 1,
+    authorPrincipal: bob,
+    mode: "queue",
+    parts: [{ type: "text", text: "Add the Halden renewal" }],
+    createdAt: at,
+    updatedAt: at,
+    ...overrides,
+  }
+}
+
 function run(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
     projectId: "proj",
+    kind: "conversation",
     threadId: "thr_1",
     triggerMessageId: "msg_1",
     status: "succeeded",
@@ -225,6 +243,10 @@ interface Scenario {
   postGate?: Promise<void>
   /** The members `GET /api/users` lists; without them the reader may not read the directory. */
   directory?: readonly Record<string, unknown>[]
+  /** What waits in the thread's inbox beside the running turn. */
+  inbox?: readonly Record<string, unknown>[]
+  /** How a change to a waiting message is refused. */
+  inboxRefusal?: { readonly status: number; readonly code: string }
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -303,6 +325,18 @@ function api(scenario: Scenario, requests: string[]) {
       )
     }
 
+    if (url.pathname === "/api/agent-threads/thr_1/inbox") {
+      return Response.json({ items: scenario.inbox ?? [] })
+    }
+    if (url.pathname.startsWith("/api/agent-threads/thr_1/inbox/")) {
+      const refusal = scenario.inboxRefusal
+      if (!refusal) return Response.json({ item: scenario.inbox?.[0] })
+      return Response.json(
+        { error: "[Sixb] refused", code: refusal.code },
+        { status: refusal.status }
+      )
+    }
+
     if (url.pathname === "/api/agent-threads/thr_1/runs") {
       return Response.json({ runs: scenario.runs, hasMore: false, total: scenario.runs.length })
     }
@@ -342,6 +376,12 @@ function api(scenario: Scenario, requests: string[]) {
       }
       const { runsOn: _runsOn, computer: _computer, ...cloud } = scenario.thread
       scenario.thread = { ...cloud, movedAt: "2026-10-21T10:00:00.000Z" }
+      return Response.json(scenario.thread)
+    }
+    // Its owner resumes the sandbox a failed save left: the thread reads ready again.
+    if (url.pathname === "/api/agent-threads/thr_1/sandbox/restore") {
+      const sandboxState = scenario.thread.sandboxState as Record<string, unknown>
+      scenario.thread = { ...scenario.thread, sandboxState: { ...sandboxState, status: "ready" } }
       return Response.json(scenario.thread)
     }
     if (url.pathname === "/api/agent-threads/thr_1/fork") {
@@ -807,23 +847,25 @@ describe("a conversation on its owner's computer", () => {
     })
 
     expect(await view.findByText("Alice's MacBook Pro")).toBeDefined()
-    expect(view.getByText("· ~/q3")).toBeDefined()
-    expect(view.getByText("Connected")).toBeDefined()
+    expect(view.getByText("q3")).toBeDefined()
+    expect(
+      view.getByRole("button", { name: /^Runs in q3 on Alice's MacBook Pro, available\./ })
+    ).toBeDefined()
     expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
     expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
   })
 
-  // Guard proof: render shownFolder in ComputerBadge; a deep folder crowds the computer's name out
-  // of the badge, and the whole path still doesn't fit.
-  test("keeps a deep folder short in the badge, and whole in its title", async () => {
+  // Guard proof: render shownFolder in ComputerFolderName; the header writes a path, which reads as
+  // a command line to someone who never used one, and crowds out the computer's name.
+  test("names the folder in the header, and gives its path in the tooltip", async () => {
     const folder = "/Users/alice/work/q3"
     const { view } = renderChat("alice", {
       thread: thread({ runsOn: "computer", computer: { ...laptop, folder, online: true } }),
     })
 
     const name = await view.findByText("Alice's MacBook Pro")
-    expect(view.getByText("· ~/…/q3")).toBeDefined()
-    expect(name.parentElement?.getAttribute("title")).toBe(`Alice's MacBook Pro · ${folder}`)
+    expect(view.getByText("q3")).toBeDefined()
+    expect(name.parentElement?.getAttribute("title")).toBe("Alice's MacBook Pro · ~/work/q3")
     expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
   })
 
@@ -832,6 +874,8 @@ describe("a conversation on its owner's computer", () => {
   test("marks the move after the last message it shows, hidden ones aside", async () => {
     const { view } = renderChat("alice", {
       thread: thread({ movedAt: "2099-01-01T00:00:00.000Z" }),
+      // Its last turn ran on the computer.
+      runs: [run({ runsOn: "computer" })],
       messages: [
         ...messages,
         {
@@ -851,7 +895,7 @@ describe("a conversation on its owner's computer", () => {
     })
 
     expect(
-      await view.findByText("Moved to the cloud. Files from before stayed on the computer.")
+      await view.findByText("Moved to the cloud. The computer's files stay behind.")
     ).toBeDefined()
   })
 
@@ -862,13 +906,12 @@ describe("a conversation on its owner's computer", () => {
       thread: thread({ runsOn: "computer", computer: { ...laptop, online: false } }),
       moveRefused: true,
     })
+    // Nothing waits: it moves at once, and the server refuses.
     fireEvent.click(await view.findByRole("button", { name: "Continue in the cloud" }))
-    const dialog = within(await view.findByRole("alertdialog"))
-    fireEvent.click(dialog.getByRole("button", { name: "Continue in the cloud" }))
 
     expect(
       await view.findByText(
-        "A turn is running or waiting for your approval. Stop or answer it first."
+        "A reply is in progress or waiting for approval. Stop it or answer the request, then try again."
       )
     ).toBeDefined()
     expect(view.queryByText("Could not move it to the cloud. Try again.")).toBeNull()
@@ -905,7 +948,80 @@ describe("a conversation on its owner's computer", () => {
     await waitFor(() => expect(view.queryByText("Alice's MacBook Pro") === null).toBe(true))
   })
 
-  // Guard proof: drop the DELETE from handleContinueInCloud, or `computerOffline` from the
+  // Guard proofs: render the composer only while the reader can write, in ConversationPanel (Bob's
+  // draft goes when Alice moves the conversation to her computer, and isn't there when it's back);
+  // drop `readOnly` from the hidden composer's `disabled` (a file Bob drops on the page meanwhile
+  // uploads unseen, to wait in his draft).
+  test("keeps a participant's draft while its owner moves it to her computer and back", async () => {
+    const { view, state, requests } = renderChat("bob")
+    const composer = (await view.findByRole("textbox", { name: "Message" })) as HTMLTextAreaElement
+    type(composer, "Can we split Acme by region?")
+    const activity = await subscribeActivity()
+
+    // A file dropped on the conversation, where the composer listens for it even while hidden.
+    const drop = (name: string) => {
+      const event = new Event("drop", { bubbles: true, cancelable: true })
+      const file = new File(["%PDF"], name, { type: "application/pdf" })
+      Object.defineProperty(event, "dataTransfer", { value: { types: ["Files"], files: [file] } })
+      act(() => {
+        view.getByText("Why did Acme slip?").dispatchEvent(event)
+      })
+    }
+    const uploads = () => requests.filter((entry) => entry.startsWith("POST /api/files")).length
+    drop("acme-by-region.pdf")
+    await waitFor(() => expect(uploads()).toBe(1))
+
+    const moved = async (to: Record<string, unknown>) => {
+      state.thread = { ...state.thread, ...to, movedAt: "2026-10-21T10:00:00.000Z" }
+      await act(async () => {
+        activity.onmessage?.({
+          data: JSON.stringify({
+            type: "activity",
+            event: {
+              schemaVersion: 1,
+              type: "agent.thread.moved",
+              projectId: "p",
+              ownerPrincipal: { type: "user", id: "alice" },
+              threadId: "thr_1",
+              occurredAt: "2026-10-21T10:00:00.000Z",
+            },
+          }),
+        })
+      })
+    }
+
+    await moved({ runsOn: "computer" })
+    expect(
+      await view.findByText("Runs on Alice Martin's computer: you can follow it here")
+    ).toBeDefined()
+    drop("unseen.pdf")
+
+    const { runsOn: _runsOn, ...cloud } = state.thread
+    state.thread = cloud
+    await moved({})
+    await waitFor(() => expect(view.queryByText(/you can follow it here/) === null).toBe(true))
+    const back = view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
+    expect(back.value).toBe("Can we split Acme by region?")
+    // By now the file dropped while it only followed would have gone, as the first one did.
+    expect(uploads()).toBe(1)
+  })
+
+  // Guard proof: pass `waiting: true` to ComputerOfflineNotice whatever the turns; the owner looks
+  // for a message that never waited.
+  test("offline with nothing waiting, it says how to go on, not that a message waits", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ runsOn: "computer", computer: { ...laptop, online: false } }),
+    })
+
+    expect(
+      await view.findByText(
+        "q3 isn't available on Alice's MacBook Pro right now. Open Sixb there to continue, or continue in the cloud."
+      )
+    ).toBeDefined()
+    expect(view.queryByText(/Your message is waiting/)).toBeNull()
+  })
+
+  // Guard proof: drop the DELETE from useThreadPlace's runInCloud, or `computerOffline` from the
   // notice; the turn waits for a computer nobody opens, and the owner has no way on.
   test("offline, its turn waits for the computer, or the whole conversation moves to the cloud", async () => {
     const queued = run({
@@ -925,49 +1041,51 @@ describe("a conversation on its owner's computer", () => {
 
     expect(
       await view.findByText(
-        "Alice's MacBook Pro is offline. Your message waits until ~/q3 is connected there."
+        "Your message is waiting for q3 on Alice's MacBook Pro. Open Sixb there, or continue in the cloud."
       )
     ).toBeDefined()
-    expect(await view.findByText("Waiting for Alice's MacBook Pro…")).toBeDefined()
+    expect(await view.findByText("Waiting for q3 on Alice's MacBook Pro…")).toBeDefined()
 
+    // A message waits: it asks first, as the message would run apart from the folder's files.
     fireEvent.click(view.getByRole("button", { name: "Continue in the cloud" }))
     const dialog = within(await view.findByRole("alertdialog"))
-    expect(dialog.getByText("Continue in the cloud?")).toBeDefined()
-    fireEvent.click(dialog.getByRole("button", { name: "Continue in the cloud" }))
+    expect(dialog.getByText("Run your waiting message in the cloud?")).toBeDefined()
+    fireEvent.click(dialog.getByRole("button", { name: "Run in the cloud" }))
 
+    // No turn ran on the computer: back where its last turn ran, it marks no move.
     await waitFor(() => expect(requests).toContain("DELETE /api/agent-threads/thr_1/computer"))
-    expect(
-      await view.findByText("Moved to the cloud. Files from before stayed on the computer.")
-    ).toBeDefined()
     await waitFor(() =>
       expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
     )
     expect(view.queryByText("Alice's MacBook Pro")).toBeNull()
-    expect(view.queryByText("Waiting for Alice's MacBook Pro…")).toBeNull()
+    expect(view.queryByText("Waiting for q3 on Alice's MacBook Pro…")).toBeNull()
   })
 })
 
 describe("who acts on a turn", () => {
   // Removal proof: disable the composer on every running turn in useAgentConversation; the field
   // is disabled.
-  test("while someone else's answer streams, the reader keeps typing but cannot send yet", async () => {
-    const { view } = renderChat("bob", {
+  test("while someone else's answer streams, the reader's message queues for their own turn", async () => {
+    const { view, requests } = renderChat("bob", {
       thread: thread({ activeRunId: "run_2" }),
       runs: [run({ id: "run_2", status: "running", triggerMessageId: "msg_3" })],
     })
 
-    expect(await view.findByText("Alice Martin is getting an answer…")).toBeDefined()
+    expect(await view.findByText(/Alice Martin is getting an answer/)).toBeDefined()
     const composer = view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
     expect(composer.disabled).toBe(false)
 
     type(composer, "And Globex?")
-    expect((view.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(
-      true
-    )
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "Enter" })
+    })
+    // A turn someone else asked for takes no steer: the message waits for their own turn.
+    const body = await posted(requests, "POST /api/agent-threads/thr_1/messages")
+    expect(body).toMatchObject({ text: "And Globex?", delivery: "queue" })
   })
 
   // Removal proof: disable the composer again while the reader's own answer runs.
-  test("while their own answer streams, the reader writes the next message", async () => {
+  test("while their own answer streams, the reader writes the next message and can send it", async () => {
     const { view } = renderChat("alice", {
       thread: thread({ activeRunId: "run_2" }),
       runs: [
@@ -981,7 +1099,9 @@ describe("who acts on a turn", () => {
 
     type(composer, "And Globex?")
     expect(composer.value).toBe("And Globex?")
-    expect(view.queryByRole("button", { name: "Send message" })).toBeNull()
+    // A draft turns Stop back into Send, which steers the answer in flight.
+    expect(view.getByRole("button", { name: "Send message" })).toBeDefined()
+    expect(view.queryByRole("button", { name: "Stop generating" })).toBeNull()
   })
 
   // Removal proof: pass stop unconditionally as composerProps.onStop in useAgentConversation.
@@ -1047,18 +1167,38 @@ describe("who acts on a turn", () => {
     const participant = renderChat("bob", stuck)
     expect(
       await participant.view.findByText(
-        "Only Alice Martin can start this conversation with a fresh sandbox."
+        "Only Alice Martin can choose how this conversation goes on."
       )
     ).toBeDefined()
     expect(
-      participant.view.queryByRole("button", { name: "Start with a fresh sandbox" })
+      participant.view.queryByRole("button", { name: "Start over without the files" })
     ).toBeNull()
     participant.view.unmount()
 
     const owner = renderChat("alice", stuck)
     expect(
-      await owner.view.findByRole("button", { name: "Start with a fresh sandbox" })
+      await owner.view.findByRole("button", { name: "Start over without the files" })
     ).toBeDefined()
+  })
+
+  // Removal proof: drop setResumedThreadId from recoverSandbox in useAgentConversation; the
+  // sandbox is resumed, and the turn waits for another message.
+  test("resuming a stuck sandbox runs its cut-short turn again", async () => {
+    const { view, requests } = renderChat("alice", {
+      thread: thread({ sandboxState: { name: "sbx_1", status: "blocked", initialized: true } }),
+      runs: [run({ id: "run_2", status: "failed", requestedBy: alice })],
+    })
+
+    fireEvent.click(await view.findByRole("button", { name: "Pick up where it left off" }))
+
+    await waitFor(() =>
+      expect(requests).toContain("POST /api/agent-threads/thr_1/runs/run_2/retry")
+    )
+    expect(requests.indexOf("POST /api/agent-threads/thr_1/runs/run_2/retry")).toBeGreaterThan(
+      requests.findIndex((entry) =>
+        entry.startsWith("POST /api/agent-threads/thr_1/sandbox/restore")
+      )
+    )
   })
 
   // Removal proof: return "send" for every 409 from sendFailure; the generic line shows instead.
@@ -1102,8 +1242,94 @@ describe("who acts on a turn", () => {
     fireEvent.click(view.getByRole("button", { name: "Send message" }))
 
     expect(
-      await view.findByText("This conversation's sandbox must be recovered before another answer.")
+      await view.findByText("Choose how the agent goes on before sending another message.")
     ).toBeDefined()
+  })
+
+  // Removal proof: drop `steerable` from the PendingMessages that ConversationPanel renders; Bob's
+  // waiting message offers to steer Alice's answer and to send now, which the server refuses.
+  test("in someone else's answer, the reader's waiting message can only be withdrawn", async () => {
+    const { view } = renderChat("bob", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: bob, mode: "queue" })],
+    })
+
+    expect(await view.findByRole("button", { name: "Withdraw this message" })).toBeDefined()
+    expect(view.queryByRole("button", { name: "Add to this answer" })).toBeNull()
+    expect(view.queryByRole("button", { name: "Stop this answer and send now" })).toBeNull()
+  })
+
+  // Removal proof: drop the queue action from PendingMessage; a steer cannot be put off until the
+  // answer ends, and by touch, where nothing hovers, the menu offers nothing but icons' meanings.
+  test("by touch, a waiting message's menu names where it goes and moves it after the answer", async () => {
+    const { view, requests } = renderChat("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "steer" })],
+    })
+
+    const menu = await view.findByRole("button", { name: "Change this message" })
+    fireEvent.pointerDown(menu, { button: 0, ctrlKey: false })
+    const sheet = within(await view.findByRole("menu"))
+    expect(sheet.getByText("Adds to this answer")).toBeDefined()
+    fireEvent.click(sheet.getByRole("menuitem", { name: "Send once this answer ends" }))
+
+    const body = await posted(requests, "PATCH /api/agent-threads/thr_1/inbox/inb_1")
+    expect(body).toEqual({ delivery: "queue" })
+  })
+
+  // Removal proof: return early again in useAgentConversation's send on `auto` while a turn runs;
+  // the wrapper written before the composer said where a message goes loses it, its draft cleared.
+  test("a chat of its own shows what waits, and a send that leaves out where still goes", async () => {
+    const { requests, queryClient } = serve("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "queue" })],
+    })
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <OwnChat />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(await view.findByText("Add the Halden renewal")).toBeDefined()
+    expect(await view.findByRole("button", { name: "Stop generating" })).toBeDefined()
+    const composer = view.getByRole("textbox", { name: "Message" })
+    type(composer, "And Globex?")
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "Enter" })
+    })
+
+    const body = await posted(requests, "POST /api/agent-threads/thr_1/messages")
+    expect(body).toMatchObject({ text: "And Globex?", delivery: "steer" })
+  })
+
+  // Removal proof: drop `onError` from the tray's mutations; the click changes nothing and the tray
+  // says nothing.
+  test("a change the server refuses says why nothing changed", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+      inbox: [inboxItem({ authorPrincipal: alice, mode: "queue" })],
+      inboxRefusal: { status: 403, code: "not_run_requester" },
+    })
+
+    fireEvent.click(await view.findByRole("button", { name: "Stop this answer and send now" }))
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "Only the person who asked for this answer can change or stop it. Yours goes after it."
+    )
   })
 })
 
@@ -1155,6 +1381,24 @@ async function posted(
   const sent = () => requests.find((entry) => entry.startsWith(`${route} {`))
   await waitFor(() => expect(sent()).toBeDefined())
   return JSON.parse(sent()!.slice(route.length + 1))
+}
+
+/**
+ * A chat built from `@sixb/app` as the public docs show, whose send was wrapped before the composer
+ * said where a message goes: it passes on three arguments.
+ */
+function OwnChat() {
+  const conversation = useAgentConversation({ threadId: "thr_1", onThreadCreated: () => {} })
+  const { onSend } = conversation.composerProps
+  return (
+    <>
+      <PendingMessages {...conversation.pendingProps} />
+      <Composer
+        {...conversation.composerProps}
+        onSend={(text, attachments, context) => onSend(text, attachments, context)}
+      />
+    </>
+  )
 }
 
 /** A chat of the reader's own, which reads the conversation's turn and errors as data. */

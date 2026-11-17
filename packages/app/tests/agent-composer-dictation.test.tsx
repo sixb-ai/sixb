@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import { installDom } from "./helpers/dom"
+import { composerLayout } from "./helpers/layout"
 
 installDom([
   "document",
@@ -75,6 +76,12 @@ function renderComposer(props: Partial<ComposerProps>) {
   return { ...view, rerender, input }
 }
 
+/** Types as the reader does: the draft is kept once the key is up. */
+function type(view: ReturnType<typeof renderComposer>, value: string) {
+  fireEvent.input(view.input(), { target: { value } })
+  fireEvent.keyUp(view.input(), { key: value.at(-1) ?? "a" })
+}
+
 /** Presses the microphone and opens it: the recording bar is up. */
 function startDictation(view: ReturnType<typeof renderComposer>, session: () => FakeSession) {
   fireEvent.click(view.getByLabelText("Start dictation"))
@@ -136,6 +143,30 @@ describe("Composer dictation", () => {
     expect(sessions[0]?.stopped).toBe(true)
   })
 
+  // Removal proof: drop the layout effect that aborts the dictation when `draftKey` changes; B's
+  // input becomes A's text and transcript, under the recording bar A started.
+  test("opening another conversation ends a dictation, leaving that conversation's draft alone", () => {
+    const { recognizer, sessions } = fakeRecognizer()
+    const view = renderComposer({ dictation: recognizer, draftKey: "thr_b" })
+    type(view, "Relancer Globex")
+    view.rerender({ draftKey: "thr_a" })
+    type(view, "Note :")
+    startDictation(view, () => sessions[0]!)
+    fireEvent.click(view.getByLabelText("Done"))
+
+    view.rerender({ draftKey: "thr_b" })
+    act(() => {
+      sessions[0]?.handlers.onResult?.({ transcript: "appeler Alice", isFinal: true })
+      sessions[0]?.handlers.onEnd?.()
+    })
+
+    expect(view.input().value).toBe("Relancer Globex")
+    expect(view.queryByLabelText("Done")).toBeNull()
+    expect(sessions[0]?.aborted).toBe(true)
+    view.rerender({ draftKey: "thr_a" })
+    expect(view.input().value).toBe("Note :")
+  })
+
   test("a disabled composer does not start a dictation", () => {
     const { recognizer, sessions } = fakeRecognizer()
     const view = renderComposer({ dictation: recognizer, disabled: true })
@@ -143,5 +174,36 @@ describe("Composer dictation", () => {
     fireEvent.click(view.getByLabelText("Start dictation"))
 
     expect(sessions).toHaveLength(0)
+  })
+
+  // Removal proof: drop the `voice.isActive` check from the composer's `textWraps`, and the field
+  // an empty box hides while dictating measures 0 wide, so the box folds around the bar; or drop
+  // `voice.isActive` from the ResizeObserver effect's dependencies, and it keeps watching the
+  // spacer dictation took away, so the box never unfolds.
+  test("an empty box dictates on one row, and folds with the room once dictation ends", () => {
+    let room = 80
+    const layout = composerLayout(() => room)
+
+    try {
+      const { recognizer, sessions } = fakeRecognizer()
+      const view = renderComposer({ dictation: recognizer, placeholder: "Ask anything" })
+      const expanded = () =>
+        view.input().closest(".sixb-composer-surface")?.hasAttribute("data-expanded")
+      expect(expanded()).toBe(true)
+
+      startDictation(view, () => sessions[0]!)
+      layout.resize()
+      expect(expanded()).toBe(false)
+
+      fireEvent.click(view.getByLabelText("Cancel dictation"))
+      layout.resize()
+      expect(expanded()).toBe(true)
+
+      room = 180
+      layout.resize()
+      expect(expanded()).toBe(false)
+    } finally {
+      layout.restore()
+    }
   })
 })

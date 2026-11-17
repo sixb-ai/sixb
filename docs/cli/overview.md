@@ -25,6 +25,7 @@ sixb
 | --- | --- |
 | `enter` | Send. `shift+enter` starts a new line. |
 | `tab` | Where new conversations run: this computer, or the cloud. |
+| `ctrl+g` twice | In a conversation, move it to this folder, or one that runs here back to the cloud. `/here` and `/cloud` do it too. |
 | `shift+tab` | What the agent may do without asking: Ask first, Allow edits, Full access. In a conversation, it is your mode there, as in the app. |
 | `ctrl+o` | The model, and how hard it thinks. `ctrl+t` steps through its effort levels. |
 | `ctrl+l` | Open a conversation. `ctrl+n` starts a new one. |
@@ -37,8 +38,10 @@ They can't read your Sixb sign-in, `~/.ssh`, or `~/.aws`, and never hold a crede
 adds the run's own to its requests to your API. A conversation that runs on your computer takes
 messages from you alone, and works on the computer and in the folder it started in: `sixb` open
 there runs its turns. Opened from another folder or another of your computers, it says where it
-works; `ctrl+f` moves it here, and only here runs its turns from then on. Quitting, or closing the
-terminal, stops a turn running here: it ends interrupted, and runs again only if you retry it.
+works; `ctrl+g` moves it here, and only here runs its turns from then on. There, `ctrl+g` hands it
+back to the cloud, from where any of your computers, or the app, can move it on again. The first
+press says where it will go, and the second moves it. Quitting, or closing the terminal, stops a
+turn running here: it ends interrupted, and runs again only if you retry it.
 A command the agent runs in the background, such as a dev server, keeps running after its turn,
 until it exits, the agent stops it, or you quit `sixb` there.
 
@@ -48,10 +51,12 @@ up to the repository's root: see
 
 In the app, such a conversation shows its computer and folder, and whether `sixb` is open there.
 A message you send from the app runs on your computer as one typed in `sixb` does, in the
-permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the
-cloud** moves the conversation to the cloud instead, for good: the waiting message runs there,
-and the files in the folder stay on your computer. A conversation moves only once no turn is
-running or waiting for your approval.
+permission mode the app sends it with; while `sixb` is closed, it waits for it. The place in the
+conversation's header moves it between the cloud and a folder on any of your computers, as often
+as you need: only the folder it works in now holds its files, and the transcript marks each move.
+A conversation in the cloud shows that place once `sixb` is open on one of your computers, or
+once it has run on one. Moving a waiting message to the cloud asks first, as it then runs without
+the folder's files. A conversation moves only once no turn is running or waiting for your approval.
 
 Messages from the app run only in folders you've chosen on this computer. Turn on **Messages from
 the web** in `ctrl+p` to choose this one, and off again to forget it. Until then a message waits, or
@@ -126,6 +131,7 @@ Run these from your project root:
 | `sixb check` | Validate the project and check provider health. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
+| `sixb db migrate --check` | Report pending storage migrations without applying them; exits `3` when there are some. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
 | `sixb lake rejected` | Print, as JSON, the [ingested changes](../datasets/ingestion.md#where-it-runs-and-what-can-fail) refused after `ingest` answered, kept for a week. `--dataset <id>` shows one dataset's. |
@@ -159,7 +165,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | `sixb worker <type>` | Execute one kind of background job. |
 | `sixb worker-group [types...]` | Run several worker types in one process. |
 
-Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, and `lake`. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work.
+Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, `lake`, and `render`, which pictures canvas boards and [prints designed documents to PDF](../artifacts/overview.md#print-a-document-to-pdf) in the project's sandboxes. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work, `render` among it when the project has a sandbox provider.
 
 Public-origin flags have matching environment variables:
 
@@ -184,7 +190,7 @@ sixb worker sync --concurrency 2
 sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
 ```
 
-Agent workers default to 8 concurrent jobs, lake workers to 4, and other types to 1. The same per-type options work with `sixb dev`.
+Agent workers default to 8 concurrent jobs, lake workers to 4, render workers to 2, and other types to 1. The same per-type options work with `sixb dev`.
 
 Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the environment. Command flags take precedence. Replicas multiply the total concurrency.
 

@@ -2,16 +2,19 @@ import * as Y from "yjs"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ArtifactDocument, ArtifactFile, ArtifactRecord } from "../../storage/artifacts/types"
 import type { ArtifactKind } from "../kinds"
-import { createArtifactDocument, documentFiles, mergeIntoDocument } from "./document"
+import { createArtifactDocument, documentFiles, holdPage, mergeIntoDocument } from "./document"
 import { readLiveFiles } from "./files"
 
 // An artifact's document as storage keeps it: its whole Yjs state in one blob, replaced by every
 // write. Everyone who loads it, a server holding it live or a write merging into it, continues
 // the same history, so their changes merge as Yjs merges concurrent edits.
 
-/** Whether a kind is edited live, and so keeps its content as a document. */
+/**
+ * Whether an artifact is edited live, and so keeps its content as a document: a canvas, and a
+ * document, Markdown or designed, which people edit in place.
+ */
 export function keepsDocument(kind: ArtifactKind): boolean {
-  return kind === "canvas"
+  return kind === "canvas" || kind === "document"
 }
 
 /**
@@ -33,12 +36,13 @@ export async function loadArtifactDocument(
 ): Promise<Y.Doc> {
   const doc = new Y.Doc()
   const stored = artifact.document
+  const clientID = madeClientId(artifact.id, stored, files)
   if (stored?.revision === artifact.revision) {
     Y.applyUpdate(doc, await readDocumentState(blobStorage, stored.file))
+    holdPage(doc, clientID)
     return doc
   }
 
-  const clientID = madeClientId(artifact.id, stored, files)
   const live = await readLiveFiles(blobStorage, files)
   let made: Y.Doc
   if (stored) {
@@ -52,6 +56,7 @@ export async function loadArtifactDocument(
 
   Y.applyUpdate(doc, Y.encodeStateAsUpdate(made))
   made.destroy()
+  holdPage(doc, clientID)
   return doc
 }
 

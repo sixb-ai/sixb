@@ -5,6 +5,9 @@ const number = (value: number) => value.toLocaleString("fr")
 const count = (value: number, one: string, many = `${one}s`) =>
   `${number(value)} ${plural("fr", value, { one, other: many })}`
 const quoted = (name: string) => `« ${name} »`
+/** « de » before a name, elided before a vowel: l’ordinateur d’Anthony, de Bob. */
+const ofName = (name: string) =>
+  /^[aeiouyàâäæéèêëîïôöœùûü]/i.test(name) ? `d’${name}` : `de ${name}`
 
 function lowercaseFirst(value: string): string {
   return value ? `${value[0]?.toLowerCase()}${value.slice(1)}` : value
@@ -44,8 +47,7 @@ export const fr: Translation<AgentMessages> = {
       "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",
     computerUnavailable:
       "Cet ordinateur ne peut pas exécuter l’agent pour le moment. Réessayez, ou choisissez Cloud ci-dessous.",
-    sandboxUnavailable:
-      "L’environnement de cette conversation doit être récupéré avant une nouvelle réponse.",
+    sandboxUnavailable: "Choisissez comment l’agent continue avant d’envoyer un autre message.",
     retryFailed: "Impossible de relancer cette réponse. Réessayez.",
     stopFailed: "Impossible d’arrêter cette réponse. Réessayez.",
     removed: "Vous ne participez plus à ce fil.",
@@ -75,6 +77,20 @@ export const fr: Translation<AgentMessages> = {
     add: "Ajouter des fichiers et plus",
     mention: "Mentionner un enregistrement",
     commands: "Commandes",
+    /** The messages waiting beside a running turn. */
+    steerPending: "S’ajoute à cette réponse",
+    queuePending: "Envoyé à la fin de cette réponse",
+    sendNowPending: "Envoyé maintenant",
+    waitingFile: "Un fichier",
+    steer: "Ajouter à cette réponse",
+    queue: "Envoyer à la fin de cette réponse",
+    sendNow: "Arrêter cette réponse et envoyer",
+    withdraw: "Retirer ce message",
+    messageActions: "Modifier ce message",
+    changeFailed: "Impossible de modifier ce message. Réessayez.",
+    withdrawFailed: "Impossible de retirer ce message. Réessayez.",
+    notYourAnswer:
+      "Seule la personne qui a demandé cette réponse peut la modifier ou l’arrêter. Le vôtre partira après.",
   },
   commands: {
     list: "Commandes",
@@ -288,6 +304,7 @@ export const fr: Translation<AgentMessages> = {
     messageAgentFailed: (key) => `Impossible d’envoyer un message à ${key}`,
     reasoning: "Raisonnement",
     steps: (steps) => count(steps, "étape"),
+    latest: "Dernières étapes",
     searchFailedHint: "La recherche web a échoué. Voir le détail du travail.",
     noSources: "Aucune source trouvée.",
     running: "en cours",
@@ -929,19 +946,23 @@ export const fr: Translation<AgentMessages> = {
       project ? "Enregistré dans la mémoire du projet" : "Enregistré en mémoire",
   },
   sandbox: {
-    title: "Récupération de l’environnement requise",
-    description:
-      "La récupération a échoué ou l’opération précédente n’a pas pu être confirmée. La reprise automatique est bloquée pour protéger le travail en cours.",
-    recreateFailed: "Impossible de recréer l’environnement. Rechargez la page et réessayez.",
-    recreating: "Recréation…",
-    startFresh: "Repartir d’un nouvel environnement",
-    confirmTitle: "Repartir d’un nouvel environnement ?",
+    title: "L’agent a été interrompu",
+    description: "Son travail s’est arrêté avant d’être enregistré.",
+    recreateFailed: "Impossible de repartir de zéro. Rechargez la page et réessayez.",
+    recreating: "Préparation…",
+    startFresh: "Repartir sans les fichiers",
+    confirmTitle: "Repartir sans les fichiers ?",
     confirmDescription:
-      "La prochaine exécution initialisera un nouvel environnement. Les fichiers locaux de l’espace de travail précédent ne seront pas copiés. L’historique de la conversation et les pièces jointes publiées restent disponibles. L’environnement précédent n’est pas supprimé et reste soumis à la politique de conservation du fournisseur.",
+      "L’agent continuera sans les fichiers créés dans cette conversation. Vos messages et les pièces jointes publiées restent disponibles.",
     cancel: "Annuler",
-    create: "Créer un nouvel environnement",
+    create: "Repartir de zéro",
     ownerOnly: (owner) =>
-      `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
+      `${owner} est la seule personne à pouvoir choisir comment cette conversation continue.`,
+    resume: "Reprendre où il s’était arrêté",
+    resuming: "Reprise…",
+    resumeHint: "Ses fichiers sont conservés, mais sa dernière modification peut être inachevée.",
+    resumeFailed:
+      "Impossible de reprendre où il s’était arrêté. Rechargez la page et réessayez, ou repartez sans les fichiers.",
   },
   background: {
     card: (command) => `Commande en arrière-plan : ${command}`,
@@ -982,18 +1003,30 @@ export const fr: Translation<AgentMessages> = {
     },
   },
   computer: {
-    online: "Connecté",
-    offline: "Non connecté",
-    offlineNotice: (computer, folder) =>
-      `${computer} est hors ligne. Votre message attendra que ${folder} y soit connecté.`,
+    online: "disponible",
+    offline: "indisponible",
+    folderUnavailable: (folder, computer) =>
+      `${folder} n’est pas disponible sur ${computer} pour le moment. Ouvrez Sixb dessus pour continuer, ou continuez dans le cloud.`,
+    messageWaiting: (folder, computer) =>
+      `Votre message attend ${folder} sur ${computer}. Ouvrez Sixb dessus, ou continuez dans le cloud.`,
     noFolder:
-      "Cette conversation n’a pas encore de dossier. Ouvrez sixb dans son dossier et appuyez sur ctrl+f, ou continuez dans le cloud.",
+      "Cette conversation n’a pas encore de dossier. Choisissez-en un dans le menu en haut, ou continuez dans le cloud.",
     offlineHere: (folder) =>
-      `Pas encore en cours ici. Votre message attendra que cet ordinateur soit connecté dans ${folder}.`,
-    runHere: "Exécuter sur cet ordinateur",
-    placeTitle: "Où cette conversation s'exécute",
-    placeChip: (place) => `S'exécute dans ${place}. Changer l'emplacement`,
+      `Les messages de l’app ne s’exécutent pas encore dans ${folder} sur cet ordinateur.`,
+    runHere: "Les exécuter ici",
+    placeTitle: "Où cette conversation s’exécute",
+    placeChip: (place, status) =>
+      `S’exécute dans ${place}${status ? `, ${status}` : ""}. Changer l’emplacement`,
+    noFolderChip: "Pas encore de dossier. Choisir où cette conversation s’exécute",
     cloud: "Cloud",
+    cloudDescription: "Tourne même quand vos ordinateurs sont éteints",
+    thisComputer: "Cet ordinateur",
+    checkingComputers: "Recherche d’ordinateurs connectés…",
+    noComputers:
+      "Aucun de vos ordinateurs n’est connecté. Ouvrez Sixb sur l’un d’eux pour y déplacer cette conversation.",
+    offlineLabel: "Hors ligne",
+    offlineMenuHint:
+      "Indisponible pour le moment. Les messages l’attendent, ou choisissez un autre emplacement.",
     chooseFolder: "Choisir un dossier…",
     chooseFolderShort: "Choisir un dossier",
     forgetFolder: (folder) => `Ne plus exécuter les messages dans ${folder}`,
@@ -1001,16 +1034,37 @@ export const fr: Translation<AgentMessages> = {
     continueInCloud: "Continuer dans le cloud",
     moving: "Déplacement…",
     moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
-    moveBusy: "Un tour est en cours ou attend votre approbation. Arrêtez-le ou répondez d’abord.",
-    confirmTitle: "Continuer dans le cloud ?",
-    confirmDescription:
-      "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et elle ne pourra pas revenir.",
+    moveSwitchFailed: "Impossible de changer où cette conversation s’exécute. Réessayez.",
+    moveBusy:
+      "Une réponse est en cours ou attend une approbation. Arrêtez-la ou répondez à la demande, puis réessayez.",
+    moveWhileRunning:
+      "Une réponse est en cours. Arrêtez-la ou laissez-la se terminer pour déplacer cette conversation.",
+    moveWhileApproval:
+      "Une demande attend une approbation. Vous pourrez déplacer cette conversation une fois la demande décidée.",
+    confirmTitle: "Exécuter votre message en attente dans le cloud ?",
+    confirmDescription: (folder) =>
+      folder
+        ? `Dans le cloud, l’agent ne verra pas les fichiers de ${folder}. Vous pourrez y ramener la conversation dès que ${folder} sera de nouveau disponible.`
+        : "Dans le cloud, l’agent ne verra pas les fichiers de l’ordinateur. Vous pourrez y ramener la conversation dès qu’il sera de nouveau disponible.",
+    confirmAction: "Exécuter dans le cloud",
     cancel: "Annuler",
-    movedToCloud: "Déplacée vers le cloud. Les fichiers d’avant sont restés sur l’ordinateur.",
-    movedToFolder: (folder) =>
-      `Déplacée vers ${folder}. Les fichiers d’avant sont restés où ils étaient.`,
-    movedElsewhere:
-      "Déplacée vers un autre dossier. Les fichiers d’avant sont restés où ils étaient.",
+    placeOn: (folder, computer) => `${folder} sur ${computer}`,
+    cloudPlace: "le cloud",
+    movedToCloud: (from) =>
+      from
+        ? `Déplacée vers le cloud. Les fichiers de ${from} restent sur place.`
+        : "Déplacée vers le cloud. Les fichiers de l’ordinateur restent sur place.",
+    movedToFolder: (place) => `Déplacée vers ${place}. Les fichiers du cloud restent sur place.`,
+    movedToComputer: (owner) =>
+      `Déplacée vers ${owner ? `l’ordinateur ${ofName(owner)}` : "l’ordinateur"}. Les fichiers du cloud restent sur place.`,
+    movedBetweenFolders: (folder, from) =>
+      `Déplacée de ${from} vers ${folder}. Les fichiers de ${from} restent sur place.`,
+    movedElsewhere: (place) =>
+      `Déplacée vers ${place ?? "un autre dossier"}. Les fichiers d’avant restent où ils étaient.`,
+    continuedIn: (place) =>
+      `Poursuivie dans ${place}. Les fichiers de la conversation d’origine restent avec elle.`,
+    continuedOnComputer: (owner) =>
+      `Poursuivie sur ${owner ? `l’ordinateur ${ofName(owner)}` : "l’ordinateur"}. Les fichiers de la conversation d’origine restent avec elle.`,
   },
   sharing: {
     share: "Partager le fil",
@@ -1050,7 +1104,7 @@ export const fr: Translation<AgentMessages> = {
     cancel: "Annuler",
     close: "Fermer",
     sharedBy: (owner) => `Fil de ${owner}`,
-    onComputer: (owner) => `Tourne sur l’ordinateur de ${owner} : vous pouvez le suivre ici`,
+    onComputer: (owner) => `Tourne sur l’ordinateur ${ofName(owner)} : vous pouvez le suivre ici`,
     answering: (name) => `L’agent répond à ${name}…`,
     continueMine: "Continuer dans mon propre fil",
     continuing: "Copie…",

@@ -42,12 +42,22 @@ function createFixtureStorage(logStorageMigrate: boolean, logStoragePrepare: boo
   const migrator: StorageMigrator = {
     adapterId: "FixtureStorage",
     latestVersion: 1,
+    // `SIXB_CLI_TEST_MIGRATION_STATE` sets the state a test needs `sixb db migrate --check` to read.
     async status() {
+      const state = process.env.SIXB_CLI_TEST_MIGRATION_STATE ?? "current"
+      if (state === "current") {
+        return { adapterId: "FixtureStorage", latestVersion: 1, appliedVersion: 1, state }
+      }
+
+      if (state !== "pending" && state !== "dirty") {
+        throw new Error(`Unknown SIXB_CLI_TEST_MIGRATION_STATE: ${state}`)
+      }
       return {
         adapterId: "FixtureStorage",
         latestVersion: 1,
-        appliedVersion: 1,
-        state: "current" as const,
+        appliedVersion: 0,
+        state,
+        reason: `The fixture is ${state}.`,
       }
     },
     async migrate() {

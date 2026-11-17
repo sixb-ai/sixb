@@ -1,14 +1,17 @@
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
-import type { ReactNode } from "react"
+import { memo, type ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
+import { PendingMessages, type PendingMessagesProps } from "./pending-messages"
 import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
+
+const EMPTY_AMBIENT_CONTEXT: readonly AgentContextInput[] = []
 
 export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
@@ -22,6 +25,8 @@ export interface ConversationPanelProps {
   readonly composer: ConversationComposerProps & Pick<ComposerProps, "newThreadControls">
   /** The Agent's question, which takes the composer's place while set. */
   readonly question?: QuestionComposerProps | null
+  /** What waits beside the running turn, above the composer. */
+  readonly pending?: PendingMessagesProps
   readonly messagesLoading: boolean
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */
@@ -46,6 +51,7 @@ export function ConversationPanel({
   transcript,
   composer,
   question = null,
+  pending,
   messagesLoading,
   messagesError,
   currentThread,
@@ -54,7 +60,7 @@ export function ConversationPanel({
   onNewChat,
   onOpenThreads,
   composerPlaceholder,
-  ambientContext = [],
+  ambientContext = EMPTY_AMBIENT_CONTEXT,
   compact = false,
   welcomeContent,
   headerActions,
@@ -72,62 +78,54 @@ export function ConversationPanel({
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
   // A reader who cannot write here cannot answer: the reply shows the question as waiting.
   const asking = readOnly ? null : question
-  const renderComposer = (wideClassName?: string) =>
-    readOnly ? (
-      // Where the composer would end, so the notice keeps its place at the foot of the pane.
-      <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
-    ) : (
-      <>
-        {asking ? (
-          <QuestionComposer
-            // The question is the conversation's last message: a new one starts over.
-            key={transcript.messages.at(-1)?.key}
-            {...asking}
-            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+  const renderComposer = (wideClassName?: string) => (
+    <>
+      {readOnly ? (
+        // Where the composer would end, so the notice keeps its place at the foot of the pane.
+        <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
+      ) : null}
+      {asking ? (
+        <QuestionComposer
+          // The question is the conversation's last message: a new one starts over.
+          key={transcript.messages.at(-1)?.key}
+          {...asking}
+          className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+        />
+      ) : null}
+      {/* Kept while the question asks, or while the reader can only follow, as when its owner moves
+          the conversation to their computer: a draft written before is still there after. */}
+      <div className="contents" hidden={asking !== null || readOnly}>
+        {readOnly ? null : (
+          <PendingMessages
+            threadId={currentThread?.id ?? null}
+            {...pending}
+            className={compact ? "px-4 pb-2" : cn("pb-2", wideClassName)}
           />
-        ) : null}
-        {/* Kept while the question asks, so a draft written before it is still there after. */}
-        <div className={asking ? "hidden" : "contents"}>
-          <Composer
-            {...composer}
-            placeholder={composerPlaceholder}
-            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-            ambientContext={ambientContext}
-            compact={compact}
-          />
-        </div>
-      </>
-    )
-
-  const threadsButton = onOpenThreads ? (
-    <ThreadsButton
-      currentThreadId={currentThread?.id ?? null}
-      runningThreadCount={runningThreadCount}
-      waitingThreadIds={waitingThreadIds}
-      onOpen={onOpenThreads}
-    />
-  ) : null
+        )}
+        <Composer
+          {...composer}
+          // Hidden, it keeps its draft and takes nothing more: not even a file dropped on the page.
+          disabled={composer.disabled || readOnly}
+          placeholder={composerPlaceholder}
+          className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+          ambientContext={ambientContext}
+          compact={compact}
+        />
+      </div>
+    </>
+  )
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-thread-id={currentThread?.id}>
-      <header
-        data-agent-conversation-header=""
-        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
-      >
-        <div className="ml-auto flex items-center gap-1">
-          {headerActions}
-          {threadsButton}
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            onClick={onNewChat}
-            aria-label={labels.threads.new}
-            className="[&_svg]:size-5"
-          >
-            <Plus />
-          </Button>
-        </div>
-      </header>
+      <ConversationHeader
+        compact={compact}
+        currentThreadId={currentThread?.id ?? null}
+        runningThreadCount={runningThreadCount}
+        waitingThreadIds={waitingThreadIds}
+        headerActions={headerActions}
+        onOpenThreads={onOpenThreads}
+        onNewChat={onNewChat}
+      />
 
       {showWelcome ? (
         <div
@@ -235,3 +233,50 @@ function LoadingInline({ label }: { label: string }) {
     </div>
   )
 }
+
+const ConversationHeader = memo(function ConversationHeader({
+  compact,
+  currentThreadId,
+  runningThreadCount,
+  waitingThreadIds,
+  headerActions,
+  onOpenThreads,
+  onNewChat,
+}: {
+  readonly compact: boolean
+  readonly currentThreadId: string | null
+  readonly runningThreadCount: number
+  readonly waitingThreadIds?: ReadonlySet<string>
+  readonly headerActions?: ReactNode
+  readonly onOpenThreads?: () => void
+  readonly onNewChat: () => void
+}) {
+  const labels = useAgentMessages()
+  return (
+    <header
+      data-agent-conversation-header=""
+      className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
+    >
+      <div className="ml-auto flex items-center gap-1">
+        {headerActions}
+        {onOpenThreads ? (
+          <ThreadsButton
+            currentThreadId={currentThreadId}
+            runningThreadCount={runningThreadCount}
+            waitingThreadIds={waitingThreadIds}
+            onOpen={onOpenThreads}
+          />
+        ) : null}
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          onClick={onNewChat}
+          aria-label={labels.threads.new}
+          className="[&_svg]:size-5"
+        >
+          <Plus />
+        </Button>
+      </div>
+    </header>
+  )
+})

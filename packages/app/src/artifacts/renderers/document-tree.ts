@@ -34,6 +34,15 @@ export function rehypeArtifactDocument() {
   }
 }
 
+/** Turns `> [!NOTE]` (and TIP, IMPORTANT, WARNING, CAUTION) quotes into callout asides. */
+export function rehypeCallouts() {
+  return (tree: TreeRoot) => {
+    visitElements(tree, (element) => {
+      if (element.tagName === "blockquote") shapeCallout(element)
+    })
+  }
+}
+
 function markTitleAndLede(tree: TreeRoot): void {
   const elements = tree.children.filter(isElement)
   const [first, second] = elements

@@ -61,7 +61,8 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 | --- | --- | --- |
 | `host` | | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
 | `user` | `"sixb"` | The account the services run as. Never `root`. See [Several projects on one server](server-access.md#several-projects-on-one-server). |
-| `ports` | app 3001, API 3002 | The local port each domain is forwarded to. Give each project on a server its own. |
+| `ports` | app 3001, API 3002 | The primary local ports each domain is forwarded to. A project also uses its `standbyPorts`, so give the next project on a server ports 20 higher. |
+| `standbyPorts` | `ports` + 10 (app 3011, API 3012) | Second local port pair used to boot and verify a new release before Caddy switches traffic. |
 
 ### Services
 
@@ -120,7 +121,7 @@ Setup logs in as that account only when the server needs something, and:
 - lets the deploy account reload Caddy, and nothing else that needs root;
 - adds your admin account to the deploy account's group, so it can read the projects without `sudo`.
 
-`--key <file>` authorizes a different public key than the one SSH uses for the server. On a server where Caddy already serves other sites, setup keeps its configuration, adds one import line, and saves the previous file as `/etc/caddy/Caddyfile.before-sixb-deploy`. Setup reports an SSH server that accepts passwords, or a firewall that blocks ports 80 and 443, but changes neither.
+`--key <file>` authorizes a different public key than the one SSH uses for the server. A Caddy already on the server must be 2.7 or later, and `sixb deploy check` stops on an older one. On a server where Caddy already serves other sites, setup keeps its configuration, adds one import line, and saves the previous file as `/etc/caddy/Caddyfile.before-sixb-deploy`. Setup reports an SSH server that accepts passwords, or a firewall that blocks ports 80 and 443, but changes neither.
 
 Setup is safe to run again. More projects under the same deploy account need no admin login.
 
@@ -143,7 +144,7 @@ ssh sixb@203.0.113.10 'install -m 600 /dev/null ~/shop/code/.env'
 ssh -t sixb@203.0.113.10 'nano ~/shop/code/.env'
 ```
 
-For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
+For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
 
 ## Deploy
 
@@ -158,15 +159,13 @@ Only committed files are sent, with submodules at their recorded commits. Uncomm
 A deploy:
 
 1. Checks the server.
-2. Sends the commit and updates the project's files. The server's `.env`, `.sixb/`, and `node_modules/` stay.
-3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build`.
-4. Updates the routes. Caddy must accept them first; otherwise the deploy stops and the previous routes keep working.
-5. Stops the services, runs `sixb db migrate`, `sixb check`, and `sixb lake check`, and starts the services again.
-6. Waits for the API's `/ready`, and fails if a process exits in its first seconds.
+2. Unpacks the commit into its own `releases/<id>` directory and links it to the server's `.env`.
+3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward so open tabs never `404`).
+4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving. When the new release brings storage migrations, the services stop first, since the previous release cannot run against the new schema: that deploy has a short downtime.
+5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.
+6. Validates and reloads the Caddy routes onto the new slot, swaps `orchestrator` and `rules`, and drains the retiring `api` and `workers` in the background so in-flight requests and agent turns finish cleanly.
 
-The services are down during step 5. Meanwhile, browsers opening your app get an "Updates in progress" page.
-
-A deploy that fails before the services stop leaves them running. One that fails later leaves them stopped until a deploy succeeds: fix the cause and deploy again, or deploy the previous commit with `--ref`. Two deploys of the same project never overlap; the second waits for the first.
+A deploy that fails before the new release takes over discards it, and the live release keeps serving, unless a migration stopped it in step 4. A check that fails after that leaves the new release serving: the deploy says so, and `sixb deploy status` names its commit. Two deploys of the same project never overlap; the second waits for the first.
 
 ## Operate the deployment
 

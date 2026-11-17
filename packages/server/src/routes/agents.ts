@@ -20,6 +20,7 @@ import {
   type AgentBackgroundCommandRef,
   type AgentComputerBackgroundCommand,
   type AgentContextCheckpointRecord,
+  type AgentInboxItemRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentStorage,
@@ -48,6 +49,8 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AddAgentThreadParticipantsBodySchema,
   AgentDescriptorSchema,
+  AgentInboxItemSchema,
+  AgentInboxListResponseSchema,
   AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
   AgentMessageSchema,
@@ -59,6 +62,7 @@ import {
   AgentRunSchema,
   AgentThreadContextQuerySchema,
   AgentThreadContextSchema,
+  AgentThreadInboxParamsSchema,
   AgentThreadListQuerySchema,
   AgentThreadListResponseSchema,
   AgentThreadParamsSchema,
@@ -71,6 +75,8 @@ import {
   PostAgentMessageBodySchema,
   PostAgentMessageResponseSchema,
   RetryAgentRunResponseSchema,
+  UpdateAgentInboxItemBodySchema,
+  UpdateAgentInboxItemResponseSchema,
 } from "../schemas/agents"
 import { AiUsageLimitErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -252,7 +258,35 @@ function serializeMessage(
   })
 }
 
-export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRunSchema.parse> {
+export function serializeAgentInboxItem(
+  item: AgentInboxItemRecord
+): ReturnType<typeof AgentInboxItemSchema.parse> {
+  return AgentInboxItemSchema.parse({
+    id: item.id,
+    projectId: item.projectId,
+    threadId: item.threadId,
+    messageId: item.messageId,
+    seq: item.seq,
+    authorPrincipal: item.authorPrincipal,
+    mode: item.mode,
+    parts: item.parts,
+    spec: item.spec,
+    timeZone: item.timeZone,
+    locale: item.locale,
+    immediate: item.immediate === true ? true : undefined,
+    createdAt: toIsoString(item.createdAt),
+    updatedAt: toIsoString(item.updatedAt),
+  })
+}
+
+/**
+ * A run as the API returns it. `ownerReads`: its thread's owner reads it, and alone sees the folder
+ * on their computer it runs in, as with the thread's own `computer`.
+ */
+export function serializeAgentRun(
+  run: AgentRunView,
+  { ownerReads = false }: { readonly ownerReads?: boolean } = {}
+): ReturnType<typeof AgentRunSchema.parse> {
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
@@ -267,6 +301,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     reasoning: run.spec?.reasoning,
     approvalMode: run.spec?.approvalMode,
     runsOn: run.kind === "conversation" ? run.spec?.runsOn : undefined,
+    computer: ownerReads && run.kind === "conversation" ? run.spec?.computer : undefined,
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
@@ -299,6 +334,27 @@ async function getAgentMessageFileContentThread(params: {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
   return params.authState.sixb.agent.threads.getById(params.threadId)
+}
+
+/**
+ * An inbox route's error: a message a turn already read, or an inbox already full, is a conflict.
+ * The provider's message names the run, so it stays out of the answer.
+ */
+function handleAgentInboxRouteError(
+  error: unknown,
+  set: { status?: number | string; headers?: unknown }
+):
+  | ReturnType<typeof handleAgentRouteError>
+  | { readonly error: string; readonly code: "invalid_state" | "inbox_limit" } {
+  if (error instanceof AgentStorageError && error.code === "invalid_state") {
+    set.status = 409
+    return { error: "A turn already read this message", code: error.code }
+  }
+  if (error instanceof AgentStorageError && error.code === "inbox_limit") {
+    set.status = 409
+    return { error: "Too many messages are waiting in this conversation", code: error.code }
+  }
+  return handleAgentRouteError(error, set)
 }
 
 export function handleAgentRouteError(
@@ -845,6 +901,43 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+    .post(
+      "/api/agent-threads/:threadId/sandbox/restore",
+      async (context) => {
+        try {
+          const sixb = requireRequestSixb(context)
+          const thread = await sixb.agent.threads.restoreSandbox(
+            context.params.threadId,
+            context.body
+          )
+          return serializeThread(host, thread, requestActor(sixb))
+        } catch (error) {
+          if (error instanceof AgentStorageError && error.code === "invalid_state") {
+            context.set.status = 409
+            return { error: "Sandbox state changed or a run is active. Reload and try again." }
+          }
+          return handleAgentRouteError(error, context.set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        body: z.object({ expectedSandboxName: z.string().min(1) }).strict(),
+        response: {
+          200: AgentThreadSchema,
+          400: ErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+        },
+        detail: {
+          summary:
+            "Explicitly go on in the workspace a failed save left, with its files as they were",
+          operationId: "restoreAgentThreadSandbox",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
     .get(
       "/api/agent-threads/:threadId/messages",
       async (context) => {
@@ -959,14 +1052,19 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             context: parsed.context,
             messageId: parsed.messageId,
           }
-          const result = await sixb.agent.runs.request(requestInput)
+          const sent = await sixb.agent.runs.send({
+            ...requestInput,
+            delivery: parsed.delivery,
+          })
 
           set.status = 202
-          return PostAgentMessageResponseSchema.parse({
-            run: serializeAgentRun(result.run),
-          })
+          return PostAgentMessageResponseSchema.parse(
+            sent.kind === "turn"
+              ? { run: serializeAgentRun(sent.run) }
+              : { item: serializeAgentInboxItem(sent.item) }
+          )
         } catch (error) {
-          return handleAgentRouteError(error, set)
+          return handleAgentInboxRouteError(error, set)
         }
       },
       {
@@ -986,6 +1084,114 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Post an agent thread message",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "postAgentThreadMessage",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/agent-threads/:threadId/inbox",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const items = await sixb.agent.inbox.list(params.threadId)
+          return AgentInboxListResponseSchema.parse({
+            items: items.map(serializeAgentInboxItem),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        response: {
+          200: AgentInboxListResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "List agent thread inbox messages",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "listAgentThreadInbox",
+          security: accessTokenSecurityRequirement("listAgentThreadInbox"),
+        },
+      }
+    )
+    .patch(
+      "/api/agent-threads/:threadId/inbox/:itemId",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const parsed = UpdateAgentInboxItemBodySchema.parse(body)
+          const item = await sixb.agent.inbox.update(params.threadId, params.itemId, parsed)
+          return UpdateAgentInboxItemResponseSchema.parse({
+            item: serializeAgentInboxItem(item),
+          })
+        } catch (error) {
+          return handleAgentInboxRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadInboxParamsSchema,
+        body: UpdateAgentInboxItemBodySchema,
+        response: {
+          200: UpdateAgentInboxItemResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Update a waiting agent thread message",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "updateAgentThreadInboxItem",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .delete(
+      "/api/agent-threads/:threadId/inbox/:itemId",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          await sixb.agent.inbox.remove(params.threadId, params.itemId)
+
+          set.status = 204
+          return
+        } catch (error) {
+          return handleAgentInboxRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadInboxParamsSchema,
+        response: {
+          204: z.void(),
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Withdraw a waiting agent thread message",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "withdrawAgentThreadInboxItem",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
@@ -1205,19 +1411,26 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const parsed = AgentRunListQuerySchema.parse(query)
-          const result = await sixb.agent.runs.listForThread(params.threadId, {
-            statuses: parsed.status ? [parsed.status] : undefined,
-            limit: parseOptionalInt(parsed.limit),
-            offset: parseOptionalInt(parsed.offset),
-            order: parsed.order,
-          })
+          const [result, thread] = await Promise.all([
+            sixb.agent.runs.listForThread(params.threadId, {
+              statuses: parsed.status ? [parsed.status] : undefined,
+              limit: parseOptionalInt(parsed.limit),
+              offset: parseOptionalInt(parsed.offset),
+              order: parsed.order,
+            }),
+            storage.threads.getById({ projectId: host.id, id: params.threadId }),
+          ])
           if (!result) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
+          // Its owner reads where each turn ran, down to the folder: the app marks every move.
+          const ownerReads =
+            thread !== null && principalsEqual(thread.ownerPrincipal, requestActor(sixb))
+
           return AgentRunListResponseSchema.parse({
-            runs: result.runs.map(serializeAgentRun),
+            runs: result.runs.map((run) => serializeAgentRun(run, { ownerReads })),
             hasMore: result.hasMore,
             total: result.total,
           })

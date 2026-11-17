@@ -327,6 +327,25 @@ export const sixb = createSixb({
 })
 ```
 
+To keep model traffic in your Azure tenant, deploy `Microsoft-Decision-1` in Azure AI Foundry and
+register the deployment with `@sixb/azure-ai-foundry`:
+
+```ts
+import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
+
+const foundry = createAzureAIFoundry({
+  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
+})
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    decision: [foundry.decision("decision-1")], // Your deployment's name.
+  },
+})
+```
+
 The first decision model is the default; pass `model` to `evaluate()` to run another one, listed or
 not. Decision models need neither a language model nor a sandbox.
 
@@ -424,6 +443,25 @@ export const sixb = createSixb({
 })
 ```
 
+To keep audio in your Azure tenant, deploy a transcription model such as `gpt-4o-transcribe` in
+Azure AI Foundry and register the deployment with `@sixb/azure-ai-foundry`:
+
+```ts
+import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
+
+const foundry = createAzureAIFoundry({
+  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
+})
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    audio: { transcription: [foundry.transcription("transcribe")] }, // Your deployment's name.
+  },
+})
+```
+
 Use an ordinary workflow step or an action's writeback/effects handler:
 
 ```ts
@@ -479,6 +517,9 @@ export const sixb = createSixb({
 
 A `description` says when to pick a model; without one, the provider's own description applies.
 
+To generate images inside your Azure tenant, deploy GPT Image or FLUX.1 Kontext [pro] in Azure AI
+Foundry and register it with `@sixb/azure-ai-foundry`'s `foundry.image("image")`.
+
 Generate images in a workflow step or an action's writeback/effects handler:
 
 ```ts
@@ -525,6 +566,9 @@ const { file, cost } = await sixb.models.audio.speak({
   mediaType: "audio/mpeg",
 })
 ```
+
+To generate speech inside your Azure tenant, deploy `gpt-4o-mini-tts` in Azure AI Foundry and
+register it with `@sixb/azure-ai-foundry`'s `foundry.speech("tts", { voice: "coral" })`.
 
 `file` is the generated audio as a `FileRef` in the project's blob storage. A request without a `voice` uses the voice
 the binding sets, so you can switch models without changing calls. Pass `model` to run another
@@ -692,6 +736,9 @@ models: {
 ```
 
 Registration does not change search behavior. Each query must choose its reranking model.
+
+To rerank inside your Azure tenant, deploy a Cohere rerank model in Azure AI Foundry and register
+it with `@sixb/azure-ai-foundry`'s `foundry.reranking("rerank")`, your deployment's name.
 
 ## Web search models
 

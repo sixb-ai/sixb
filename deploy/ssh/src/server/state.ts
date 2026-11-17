@@ -1,4 +1,5 @@
 import { readFile, rename, writeFile } from "node:fs/promises"
+import type { DeploySlot } from "../layout"
 
 export type ProcessInstanceStatus = "starting" | "running" | "stopping" | "stopped" | "exited"
 
@@ -8,7 +9,12 @@ export interface ProcessState {
   readonly name: string
   readonly supervisorPid: number
   readonly updatedAt: string
+  readonly slot?: DeploySlot
   readonly instances: readonly ProcessInstanceState[]
+  /** Overlap-safe instances of a candidate release waiting to cut over. */
+  readonly staged?: readonly ProcessInstanceState[]
+  /** Release `cwd`s still held by background-draining processes after a cutover. */
+  readonly retiringCwds?: readonly string[]
 }
 
 export interface ProcessInstanceState {
@@ -66,7 +72,7 @@ export function parseProcessState(value: unknown, source = "process state"): Pro
   if (!state || state.version !== 1 || !Array.isArray(state.instances)) {
     throw new Error(`[SshTarget] ${source} is not a supervisor state file`)
   }
-  for (const instance of state.instances) {
+  for (const instance of [...state.instances, ...(state.staged ?? [])]) {
     if (!STATUSES.includes(instance.status)) {
       throw new Error(`[SshTarget] ${source} has an instance with status '${instance.status}'`)
     }
@@ -84,5 +90,5 @@ export function isPidRunning(pid: number): boolean {
 }
 
 export function isMissing(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT"
+  return (error as NodeJS.ErrnoException | null)?.code === "ENOENT"
 }

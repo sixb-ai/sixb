@@ -92,6 +92,41 @@ describe("layout warnings", () => {
     ])
   })
 
+  test("name a designed document's problems on its sheet, or on a phone when only there", () => {
+    const colors: [string, string] = ["#c86f3d", "#ffffff"]
+    const contrast = { code: "contrast", slide: undefined, selector: "span.number" } as const
+    const warnings = layoutWarnings(
+      [
+        problem({ ...contrast, text: "01", ratio: 3.62, colors }),
+        problem({ ...contrast, view: "phone", text: "01", ratio: 3.62, colors }),
+        problem({
+          code: "wide",
+          slide: undefined,
+          view: "phone",
+          selector: "img",
+          text: "img",
+          rect: { x: 249, y: 171, width: 210, height: 210 },
+        }),
+      ],
+      "document"
+    )
+    // Reproduce by dropping `checked`: the phone's problem reads as a web page's, and the sheet's
+    // contrast as only a phone's.
+    expect(warnings).toEqual([
+      {
+        code: "layout_wide",
+        part: "phone",
+        message:
+          "On a phone (390px): img “img” runs past the screen's right edge at 249,171 (210×210), so the document scrolls sideways; let it wrap, or stack it in an @media screen and (max-width: 600px) rule.",
+      },
+      {
+        code: "layout_contrast",
+        message:
+          "In the document: span.number “01” has a contrast of 3.62:1 (#c86f3d on #ffffff), under WCAG AA in light mode.",
+      },
+    ])
+  })
+
   test("stop at twelve, and say how many more the screenshots show", () => {
     const warnings = layoutWarnings(
       Array.from({ length: 15 }, (_, index) =>
@@ -166,7 +201,6 @@ describe("the layout check", () => {
     })
     expect(await check(handle)).toEqual({
       status: "checked",
-      previews: [],
       screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
       warnings: [
         {
@@ -215,7 +249,7 @@ describe("the layout check", () => {
       dark: false,
       tokens: { "--foreground": "#2b2b2b", "--background": "#fafafa" },
     })
-    expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
+    expect(written.filter((path) => path.startsWith(library))).toHaveLength(6)
     expect(written.filter((path) => path.endsWith("/entries/index.html"))).toHaveLength(2)
   })
 
@@ -235,7 +269,6 @@ describe("the layout check", () => {
     )
     expect(result).toEqual({
       status: "checked",
-      previews: [],
       screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
       warnings: [
         {
@@ -307,7 +340,6 @@ exports.chromium = {
       expect(requested).toEqual([{ deadline: "500", timeout: 600 }])
       expect(result).toEqual({
         status: "checked",
-        previews: [],
         screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
         warnings: [
           {
@@ -345,7 +377,6 @@ exports.chromium = {
     })
     expect(await check(handle, { layout: "page" })).toEqual({
       status: "checked",
-      previews: [],
       screenshots: [
         ".sixb/agent/checks/art_0000000000-v1/desktop.png",
         ".sixb/agent/checks/art_0000000000-v1/phone.png",
@@ -406,7 +437,6 @@ exports.chromium = {
     })
     expect(result).toEqual({
       status: "checked",
-      previews: [],
       screenshots: [
         ".sixb/agent/checks/art_0000000000-v1/boards/welcome.png",
         ".sixb/agent/checks/art_0000000000-v1/boards/region.png",
@@ -421,8 +451,8 @@ exports.chromium = {
       ],
     })
     expect(JSON.parse(readFileSync(join(output, "boards.json"), "utf8"))).toEqual([
-      { id: "welcome", file: "boards/welcome.html", w: 390, h: 844, pictured: false },
-      { id: "region", file: "boards/region.html", w: 390, h: 844, pictured: false },
+      { id: "welcome", file: "boards/welcome.html", w: 390, h: 844 },
+      { id: "region", file: "boards/region.html", w: 390, h: 844 },
     ])
     expect(JSON.parse(readFileSync(join(output, "entries.json"), "utf8"))).toEqual({
       "boards/welcome.html": "entries/boards/welcome.html",
@@ -434,7 +464,7 @@ exports.chromium = {
     expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_LAYOUT: "canvas" })
   })
 
-  test("pictures the boards that need it, names one that stopped answering, and draws the canvas", async () => {
+  test("names a board that stopped answering, one too small for its page, and draws the canvas", async () => {
     const output = join(root, ".sixb/agent/checks/art_0000000000-v2")
     const html = new TextEncoder().encode("<html><head></head><body>Board</body></html>")
     const { handle } = sandbox({
@@ -443,22 +473,7 @@ exports.chromium = {
         problems: [],
         errors: [],
         screenshots: [join(output, "boards/welcome.png")],
-        previews: [
-          {
-            board: "welcome",
-            theme: "light",
-            size: "full",
-            path: join(output, "boards/welcome.png"),
-          },
-          {
-            board: "welcome",
-            theme: "dark",
-            size: "small",
-            path: join(output, "boards/welcome.dark.small.webp"),
-          },
-        ],
         stalls: [{ board: "region", message: "board 'region' in light mode did not respond" }],
-        unpictured: [{ board: "pricing", reason: "pricing.css did not load (404)" }],
         oversized: [{ board: "deck", w: 520, h: 292, page: { w: 1280, h: 720 } }],
         overview: join(output, "overview.png"),
       }),
@@ -467,7 +482,7 @@ exports.chromium = {
       handle,
       layout: "canvas",
       boards: [
-        { id: "welcome", file: "welcome.html", w: 390, h: 844, html, pictured: true },
+        { id: "welcome", file: "welcome.html", w: 390, h: 844, html },
         { id: "region", file: "region.html", w: 390, h: 844, html },
       ],
       canvas: {
@@ -486,20 +501,6 @@ exports.chromium = {
 
     expect(result).toMatchObject({
       status: "checked",
-      previews: [
-        {
-          board: "welcome",
-          theme: "light",
-          size: "full",
-          path: join(output, "boards/welcome.png"),
-        },
-        {
-          board: "welcome",
-          theme: "dark",
-          size: "small",
-          path: join(output, "boards/welcome.dark.small.webp"),
-        },
-      ],
       overview: ".sixb/agent/checks/art_0000000000-v2/overview.png",
       warnings: [
         {
@@ -509,12 +510,6 @@ exports.chromium = {
             'Board \'deck\' is 520×292 but its page draws 1280×720, so the canvas, its preview and the opened board show only its top left. Set its "w" and "h" in canvas.json to 1280 and 720: the canvas\'s zoom draws it small, never a smaller board.',
         },
         {
-          code: "preview_not_taken",
-          part: "pricing",
-          message:
-            "Board 'pricing' has no preview: pricing.css did not load (404), and a picture of it would show it broken to every reader. It shows its outline until a version loads whole.",
-        },
-        {
           code: "layout_incomplete",
           part: "region",
           message:
@@ -522,11 +517,6 @@ exports.chromium = {
         },
       ],
     })
-    expect(
-      JSON.parse(readFileSync(join(output, "boards.json"), "utf8")).map(
-        (board: { pictured: boolean }) => board.pictured
-      )
-    ).toEqual([true, false])
 
     // The canvas as it opens: both boards' pictures, the arrow, and the note's words, escaped.
     const overview = readFileSync(join(output, "overview.html"), "utf8")

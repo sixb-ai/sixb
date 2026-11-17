@@ -1,5 +1,10 @@
 export type { SixbApiBrowserPolicy } from "./auth/browser-origin"
 export type { SixbAuthExperienceOptions } from "./auth/experience"
 export type { SixbSharedAccessOptions } from "./auth/shared-access"
-export { createSixbServer, SixbServer, type SixbServerOptions } from "./server"
+export {
+  createSixbServer,
+  SixbServer,
+  type SixbServerOptions,
+  type SixbServerStopOptions,
+} from "./server"
 export { requestTimingOptionsFromEnv, type SixbRequestTimingOptions } from "./utils/request-timing"

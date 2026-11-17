@@ -15,16 +15,19 @@ import {
   ArrowRight,
   ChevronRight,
   Clock3,
+  Cloud,
+  Folder,
   type LucideIcon,
   Plus,
   RotateCcw,
   Unplug,
 } from "lucide-react"
-import { memo, type ReactNode } from "react"
+import { memo, type ReactNode, useLayoutEffect, useRef } from "react"
 import type { FileSource } from "../../artifacts/file-source"
 import type { AgentConversationMessage } from "../conversation"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
+import { riseFromTray } from "../inbox-handoff"
 import { type AuthorLabel, useMessageAuthors } from "../message-authors"
 import { isContinuableDiagnostic } from "../run-presentation"
 import type { AgentFileRef } from "../types"
@@ -74,10 +77,19 @@ function UserMessage({
   const text = textOf(message)
   const files = message.parts.flatMap((part) => (part.type === "file" ? [part] : []))
   const pending = message.status === "pending"
+  const ref = useRef<HTMLDivElement>(null)
+
+  // A message the turn just read comes from the tray into its place; its saved copy, which keeps
+  // the row, stays put.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only as it first appears
+  useLayoutEffect(() => {
+    if (message.status === "streaming" && ref.current) riseFromTray(ref.current, message.key)
+  }, [])
+
   if (!text && files.length === 0 && message.context.length === 0) return null
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div ref={ref} className="flex flex-col items-end gap-1.5">
       {continued ? null : <AuthorLine author={authors?.labelOf(message.author)} />}
       <ContextChips
         entries={message.context}
@@ -232,10 +244,23 @@ export function ThinkingMarker({
   )
 }
 
-/** Where the conversation moved: the files earlier turns worked on stayed behind. */
-export function MovedMarker({ label }: { readonly label: string }) {
+/**
+ * Where the conversation moved: the files earlier turns worked on stayed behind. Set apart, with
+ * where it went as its icon, so it reads as an event of the conversation, not the reply's end.
+ */
+export function MovedMarker({
+  label,
+  place = "computer",
+}: {
+  readonly label: string
+  readonly place?: "cloud" | "computer"
+}) {
+  const Icon = place === "cloud" ? Cloud : Folder
   return (
-    <Marker role="note">
+    <Marker role="note" className="mt-2 items-start text-[13px]">
+      <MarkerIcon className="mt-px flex size-4 items-center justify-center">
+        <Icon className="size-3.5" strokeWidth={1.9} />
+      </MarkerIcon>
       <MarkerContent>{label}</MarkerContent>
     </Marker>
   )

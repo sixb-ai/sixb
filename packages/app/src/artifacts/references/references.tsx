@@ -19,6 +19,7 @@ import {
   createContext,
   lazy,
   type MouseEvent,
+  memo,
   type ReactNode,
   Suspense,
   useCallback,
@@ -39,8 +40,9 @@ import {
   useFileText,
   versionFileSource,
 } from "../queries"
-import { documentComponents } from "../renderers/document"
-import { rehypeArtifactDocument } from "../renderers/document-tree"
+import { isDesignedDocument } from "../renderers/designed-document"
+import { Callout, documentComponents, isCalloutKind } from "../renderers/document"
+import { rehypeArtifactDocument, rehypeCallouts } from "../renderers/document-tree"
 import { usePageEvents } from "../renderers/page"
 import { cellFormatter } from "../renderers/sheet/format"
 import { lockedCellLabel } from "../renderers/sheet/locked"
@@ -58,7 +60,7 @@ import {
 const SheetChart = lazy(() => import("../renderers/sheet/chart"))
 
 // Embeds come first, so a lone `artifact:` image is an embed rather than a captioned figure.
-const REPLY_PLUGINS = [rehypeArtifactEmbeds]
+const REPLY_PLUGINS = [rehypeArtifactEmbeds, rehypeCallouts]
 
 /** A whole sheet shows its first rows; a range shows as written, up to a page of rows. */
 const EMBED_ROWS = 12
@@ -116,8 +118,15 @@ export function withArtifactReferences(components: Components = {}): Components 
         return <ArtifactLink address={props.href}>{props.children}</ArtifactLink>
       }
       if (Anchor) return <Anchor {...props} />
-      const { node: _node, ...rest } = props
-      return <a {...rest} target="_blank" rel="noreferrer noopener" />
+      const { node: _node, href, ...rest } = props
+      const external = typeof href === "string" && !href.startsWith("#")
+      return (
+        <a
+          href={href}
+          {...(external ? { target: "_blank", rel: "noreferrer noopener" } : {})}
+          {...rest}
+        />
+      )
     },
     img(props) {
       if (typeof props.src === "string" && isArtifactAddress(props.src)) {
@@ -154,26 +163,47 @@ export function useOpenArtifactAddress(): (address: string) => void {
   )
 }
 
-/** Markdown with `artifact:` addresses resolved, as a chat reply renders it. */
-export function ReferencingMarkdown({
+function ReplyCallout({
+  node: _node,
+  children,
+  ...props
+}: ComponentProps<"aside"> & { readonly node?: unknown }) {
+  const callouts = useArtifactMessages().document.callouts
+  const kind = (props as Record<string, unknown>)["data-callout"]
+  if (!isCalloutKind(kind)) return <aside {...props}>{children}</aside>
+  return (
+    <Callout kind={kind} label={callouts[kind]}>
+      {children}
+    </Callout>
+  )
+}
+
+let defaultReferencingComponents: Components | null = null
+
+function getReferencingComponents(): Components {
+  defaultReferencingComponents ??= withArtifactReferences({ aside: ReplyCallout })
+  return defaultReferencingComponents
+}
+
+/** Markdown with `artifact:` addresses and callouts resolved, as a chat reply renders it. */
+export const ReferencingMarkdown = memo(function ReferencingMarkdown({
   children,
   className,
 }: {
   readonly children: string
   readonly className?: string
 }) {
-  const components = useMemo(() => withArtifactReferences(), [])
   return (
     <Markdown
       className={className}
-      components={components}
+      components={getReferencingComponents()}
       rehypePlugins={REPLY_PLUGINS}
       urlTransform={artifactUrlTransform}
     >
       {children}
     </Markdown>
   )
-}
+})
 
 /** A link to an artifact, or a part of one, that opens where the reader is. */
 export function ArtifactLink({
@@ -356,7 +386,12 @@ function EmbedBody({
     case "chart":
       return <ChartEmbed version={version} chart={part.chart} fill={fill} />
     case "section":
-      return <SectionEmbed version={version} slug={part.slug} />
+      // A designed document's section is laid out by its whole design: it opens from a card.
+      return isDesignedDocument(version) ? (
+        <CardEmbed version={version} address={address} />
+      ) : (
+        <SectionEmbed version={version} slug={part.slug} />
+      )
     case "file":
       return (
         <FileEmbed

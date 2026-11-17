@@ -20,6 +20,11 @@ export {
 } from "./agent-approval-storage-contract"
 export { createTestAgentExecution } from "./agent-execution"
 export {
+  type AgentInboxStorageContractStorage,
+  type AgentInboxStorageContractSuiteOptions,
+  runAgentInboxStorageContractSuite,
+} from "./agent-inbox-storage-contract"
+export {
   type AgentMemoryStorageContractStorage,
   type AgentMemoryStorageContractSuiteOptions,
   runAgentMemoryStorageContractSuite,

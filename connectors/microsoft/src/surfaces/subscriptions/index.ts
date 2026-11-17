@@ -1,4 +1,5 @@
 import type { RestRequestInit } from "@sixb/connector-rest"
+import type { ClientStateSource } from "../../client-state"
 import { MicrosoftApiError, MicrosoftAuthError, MicrosoftProtocolError } from "../../errors"
 import { checkEmpty, type MicrosoftHttp, readJson } from "../../http"
 import { allPages, page } from "../../pagination"
@@ -7,16 +8,32 @@ import type {
   MicrosoftSubscription,
   SubscriptionCreate,
   SubscriptionCreateOptions,
+  SubscriptionEnsureInput,
+  SubscriptionEnsureOptions,
+  SubscriptionEnsureResult,
   SubscriptionUpdate,
 } from "../../types/subscriptions"
 import { query, resource, segment } from "../../validation"
+import { ensureSubscription } from "./ensure"
 import { validateCreate, validateUpdate } from "./validation"
 
 export interface MicrosoftSubscriptionsResource {
+  /**
+   * Sends the connector's own clientState when `input` has none, so the built-in receiver accepts
+   * the subscription's notifications.
+   */
   create(
     input: SubscriptionCreate,
     options?: SubscriptionCreateOptions
   ): Promise<MicrosoftSubscription>
+  /**
+   * Keeps one subscription alive: keeps it while more than `renewWithinMs` is left, renews it,
+   * or creates it when Graph has none with this resource and URL. Call it on a schedule.
+   */
+  ensure(
+    input: SubscriptionEnsureInput,
+    options?: SubscriptionEnsureOptions
+  ): Promise<SubscriptionEnsureResult>
   get(id: string, options?: SelectOptions): Promise<MicrosoftSubscription>
   /** Graph does not support OData query options on this collection. */
   list(options?: RequestOptions): Promise<GraphPage<MicrosoftSubscription>>
@@ -76,16 +93,23 @@ async function mutate<T>(
 const subscription = async (response: Response): Promise<MicrosoftSubscription> =>
   resource(await readJson(response))
 
-export function subscriptionsResource(http: MicrosoftHttp): MicrosoftSubscriptionsResource {
+export function subscriptionsResource(
+  http: MicrosoftHttp,
+  clientState?: ClientStateSource
+): MicrosoftSubscriptionsResource {
   const api: MicrosoftSubscriptionsResource = {
     create(input, options) {
       validateCreate(input)
+      const body =
+        input.clientState === undefined && clientState !== undefined
+          ? { ...input, clientState: clientState() }
+          : input
       return mutate(
         http,
         "subscriptions",
         {
           method: "POST",
-          body: JSON.stringify(input),
+          body: JSON.stringify(body),
           signal: options?.signal,
           headers: {
             "Content-Type": "application/json",
@@ -95,6 +119,9 @@ export function subscriptionsResource(http: MicrosoftHttp): MicrosoftSubscriptio
         201,
         subscription
       )
+    },
+    ensure(input, options) {
+      return ensureSubscription(api, input, options)
     },
     async get(id, options) {
       return resource(await http.json(`${path(id)}${query(options)}`, { signal: options?.signal }))

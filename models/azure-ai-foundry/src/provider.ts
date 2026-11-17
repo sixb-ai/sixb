@@ -28,6 +28,11 @@ import {
 import { foundryChatEstimator, foundryChatUsage } from "./chat-accounting"
 import { type ChatRequestOptions, foundryChatRequest, validateChatOptions } from "./chat-request"
 import {
+  type AzureAIFoundryDecisionModel,
+  type AzureAIFoundryDecisionOptions,
+  createFoundryDecision,
+} from "./decision"
+import {
   type AzureAIFoundryCatalog,
   type AzureAIFoundryDeployment,
   type AzureAIFoundryDiscoveryOptions,
@@ -40,6 +45,12 @@ import {
   type AzureAIFoundryEmbeddingTransportOptions,
   createFoundryEmbedding,
 } from "./embedding"
+import {
+  type AzureAIFoundryImageModel,
+  type AzureAIFoundryImageOptions,
+  createFoundryImage,
+} from "./image"
+import { article, deploymentKind, KIND_BINDINGS } from "./kinds"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "./messages-accounting"
 import {
   foundryMessagesRequest,
@@ -48,7 +59,22 @@ import {
   validateMessagesOptions,
 } from "./messages-request"
 import { type RequestOptions, responsesRequest, validateOptions } from "./request"
+import {
+  type AzureAIFoundryRerankingModel,
+  type AzureAIFoundryRerankingOptions,
+  createFoundryReranking,
+} from "./reranking"
 import { resolveModel } from "./resolution"
+import {
+  type AzureAIFoundrySpeechModel,
+  type AzureAIFoundrySpeechOptions,
+  createFoundrySpeech,
+} from "./speech"
+import {
+  type AzureAIFoundryTranscriptionModel,
+  type AzureAIFoundryTranscriptionOptions,
+  createFoundryTranscription,
+} from "./transcription"
 import {
   abortable,
   type FoundryProtocol,
@@ -131,6 +157,25 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
     deploymentName: string,
     options: AzureAIFoundryEmbeddingOptions
   ): AzureAIFoundryEmbeddingModel
+  /** A deployment of a decision model, such as Microsoft-Decision-1, for `models.decision`. */
+  decision(
+    deploymentName: string,
+    options?: AzureAIFoundryDecisionOptions
+  ): AzureAIFoundryDecisionModel
+  /** A transcription deployment, such as gpt-4o-transcribe, for `models.audio.transcription`. */
+  transcription(
+    deploymentName: string,
+    options?: AzureAIFoundryTranscriptionOptions
+  ): AzureAIFoundryTranscriptionModel
+  /** A Cohere rerank deployment, such as Cohere-rerank-v5-fast, for `models.reranking`. */
+  reranking(
+    deploymentName: string,
+    options?: AzureAIFoundryRerankingOptions
+  ): AzureAIFoundryRerankingModel
+  /** A speech deployment, such as gpt-4o-mini-tts, for `models.audio.speech`. */
+  speech(deploymentName: string, options?: AzureAIFoundrySpeechOptions): AzureAIFoundrySpeechModel
+  /** An image deployment, such as gpt-image-1.5 or FLUX.1-Kontext-pro, for `models.image`. */
+  image(deploymentName: string, options?: AzureAIFoundryImageOptions): AzureAIFoundryImageModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -183,6 +228,16 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     model("messages", name, options)
   const chat = (name: string, options: AzureAIFoundryChatOptions = {}) =>
     model("chat", name, options)
+  const decision = (name: string, options: AzureAIFoundryDecisionOptions = {}) =>
+    createFoundryDecision(providerId, name, options, transport, deployments)
+  const transcription = (name: string, options: AzureAIFoundryTranscriptionOptions = {}) =>
+    createFoundryTranscription(providerId, name, options, transport, deployments)
+  const reranking = (name: string, options: AzureAIFoundryRerankingOptions = {}) =>
+    createFoundryReranking(providerId, name, options, transport, deployments)
+  const image = (name: string, options: AzureAIFoundryImageOptions = {}) =>
+    createFoundryImage(providerId, name, options, transport, deployments)
+  const speech = (name: string, options: AzureAIFoundrySpeechOptions = {}) =>
+    createFoundrySpeech(providerId, name, options, transport, deployments)
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
@@ -190,8 +245,9 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     const results: LanguageModelDefinition[] = []
     for (const deployment of records) {
       const name = deployment.name
+      // Listings hold language models; every other kind has its own binding.
       if (
-        isEmbeddingDeployment(deployment) ||
+        deploymentKind(deployment) !== "language" ||
         (await modelCatalog.getEmbedding(deployment.modelName, true))
       )
         continue
@@ -227,7 +283,19 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   }
   const auto = (name: string, options: AzureAIFoundryModelOptions = {}) =>
     model(undefined, name, options)
-  return Object.assign(auto, { providerId, catalog, responses, messages, chat, embedding })
+  return Object.assign(auto, {
+    providerId,
+    catalog,
+    responses,
+    messages,
+    chat,
+    embedding,
+    decision,
+    transcription,
+    reranking,
+    speech,
+    image,
+  })
 }
 
 class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryModel<Protocol> {
@@ -331,9 +399,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   async resolve(options?: { readonly offline?: boolean }): Promise<FoundryModel<Protocol>> {
     if (this.resolution) return this
     const resolution = await this.deployments.resolve(this.modelId, options?.offline === true)
-    if (isEmbeddingDeployment(resolution.deployment))
+    const kind = deploymentKind(resolution.deployment)
+    if (kind !== "language")
       throw new UnsupportedModelFeatureError(
-        `${PREFIX} Use foundry.embedding() for an embedding deployment.`
+        `${PREFIX} Use ${KIND_BINDINGS[kind]} for ${article(kind)} ${kind} deployment.`
       )
     let catalogModel: CatalogModel | undefined
     try {
@@ -505,12 +574,4 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       throw this.transport.redactFailure(response, error)
     }
   }
-}
-
-function isEmbeddingDeployment(deployment: AzureAIFoundryDeployment): boolean {
-  return (
-    deployment.capabilities.embeddings === "true" ||
-    deployment.capabilities.embedding === "true" ||
-    /^(text-embedding-|cohere-embed)/i.test(deployment.modelName)
-  )
 }

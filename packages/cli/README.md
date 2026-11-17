@@ -195,6 +195,7 @@ sixb worker pipeline
 sixb worker projection
 sixb worker workflow
 sixb worker lake
+sixb worker render
 
 # Development with custom entry and app port
 sixb dev --entry examples/mac-os/sixb.config.ts --port 8080
@@ -399,6 +400,7 @@ sixb worker sync
 sixb worker pipeline
 sixb worker projection
 sixb worker lake
+sixb worker render
 SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
 ```
 

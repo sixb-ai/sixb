@@ -46,10 +46,11 @@ import {
   serializeThreadRead,
 } from "./agents"
 
-// A computer's thread runs on one of its owner's computers, in one folder there: only `sixb` open
-// in that folder claims its turns. Each open `sixb` holds a session, a lease it renews, so the
-// thread reads as online while one is live, and its owner can send from anywhere. Moving it to
-// another folder, or to the cloud, is its owner's call.
+// A thread runs in the cloud, or on one of its owner's computers in one folder there: only
+// `sixb` open in that folder claims the turns of one that runs there. Each open `sixb` holds a
+// session, a lease it renews, so the thread reads as online while one is live, and its owner can
+// send from anywhere. Moving it between the cloud, a computer and a folder is its owner's call,
+// as often as they like.
 
 /** How long a session stays live without a renewal; `sixb` renews it three times as often. */
 const SESSION_MS = 60_000
@@ -188,7 +189,7 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Move a thread to one of your computers, in a folder there",
           description:
-            "A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.",
+            "Its turns run there alone from now on, in that folder: only `sixb` open in it claims them. Its owner moves it from the cloud or from another folder or computer, as often as they need; files from where it ran before stay there. Refused while a turn runs or waits on approvals.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "moveAgentThreadToComputer",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
@@ -222,7 +223,7 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Move a thread from your computer to the cloud",
           description:
-            "Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.",
+            "Its turns run in the cloud from now on, starting with the one waiting for the computer, if any, and its owner can move it to a computer or folder again later. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "moveAgentThreadToCloud",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,

@@ -142,6 +142,9 @@ const SHIPPED_MIGRATIONS = [
   "101-connector-connection-owners",
   "102-user-suspension-source",
   "103-script-executions",
+  "104-artifact-pdfs",
+  "105-guest-comment-links",
+  "106-agent-thread-inbox",
 ]
 
 const steps = postgresStorageMigrations.steps

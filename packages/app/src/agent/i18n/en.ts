@@ -50,7 +50,7 @@ export const en = {
     sendFailed: "Couldn't send your message. Please try again.",
     busy: "An answer is already in progress. Send yours when it finishes.",
     busyOther: "Someone else's message is being answered. Send yours when it finishes.",
-    sandboxUnavailable: "This conversation's sandbox must be recovered before another answer.",
+    sandboxUnavailable: "Choose how the agent goes on before sending another message.",
     computerUnavailable:
       "This computer can't run the agent right now. Try again, or choose Cloud below.",
     retryFailed: "Couldn't retry this answer. Try again.",
@@ -80,6 +80,20 @@ export const en = {
     add: "Add files and more",
     mention: "Mention a record",
     commands: "Commands",
+    /** The messages waiting beside a running turn. */
+    steerPending: "Adds to this answer",
+    queuePending: "Sent once this answer ends",
+    sendNowPending: "Sends now",
+    waitingFile: "A file",
+    steer: "Add to this answer",
+    queue: "Send once this answer ends",
+    sendNow: "Stop this answer and send now",
+    withdraw: "Withdraw this message",
+    messageActions: "Change this message",
+    changeFailed: "Couldn't change this message. Try again.",
+    withdrawFailed: "Couldn't withdraw this message. Try again.",
+    notYourAnswer:
+      "Only the person who asked for this answer can change or stop it. Yours goes after it.",
   },
   /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
   commands: {
@@ -307,6 +321,7 @@ export const en = {
     messageAgentFailed: (key: string) => `Could not message ${key}`,
     reasoning: "Reasoning",
     steps: (steps: number) => count(steps, "step"),
+    latest: "Latest",
     searchFailedHint: "Web search failed. See work details.",
     noSources: "No sources found.",
     running: "running",
@@ -895,18 +910,22 @@ export const en = {
     saved: (project: boolean): string => (project ? "Saved to project memory" : "Saved to memory"),
   },
   sandbox: {
-    title: "Sandbox recovery required",
-    description:
-      "Recovery failed or the previous operation could not be confirmed. Automatic resume is blocked to protect your work.",
-    recreateFailed: "Could not recreate the sandbox. Reload and try again.",
-    recreating: "Recreating…",
-    startFresh: "Start with a fresh sandbox",
-    confirmTitle: "Start with a fresh sandbox?",
+    title: "The agent was interrupted",
+    description: "Its work stopped before it could be saved.",
+    recreateFailed: "Couldn't start over. Reload the page and try again.",
+    recreating: "Starting over…",
+    startFresh: "Start over without the files",
+    confirmTitle: "Start over without the files?",
     confirmDescription:
-      "The next run will initialize a new environment. Local files from the previous workspace will not be copied. Conversation history and published attachments stay available. The previous sandbox is not deleted and remains subject to provider retention.",
+      "The agent will go on without the files it made in this conversation. Your messages and published attachments stay.",
     cancel: "Cancel",
-    create: "Create fresh sandbox",
-    ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
+    create: "Start over",
+    ownerOnly: (owner: string) => `Only ${owner} can choose how this conversation goes on.`,
+    resume: "Pick up where it left off",
+    resuming: "Picking up…",
+    resumeHint: "Its files are kept, but its last change may be unfinished.",
+    resumeFailed:
+      "Couldn't pick up where it left off. Reload the page and try again, or start over without the files.",
   },
   /** A command the agent runs in the background, as its card and its calls read. */
   background: {
@@ -940,36 +959,74 @@ export const en = {
   },
   /** A conversation that runs on its owner's computer, as its owner sees it. */
   computer: {
-    online: "Connected",
-    offline: "Not connected",
-    offlineNotice: (computer: string, folder: string) =>
-      `${computer} is offline. Your message waits until ${folder} is connected there.`,
+    online: "available",
+    offline: "not available",
+    /** Its folder isn't open on its computer: nothing waits for it. */
+    folderUnavailable: (folder: string, computer: string) =>
+      `${folder} isn't available on ${computer} right now. Open Sixb there to continue, or continue in the cloud.`,
+    /** Its folder isn't open on its computer, and a message waits for it. */
+    messageWaiting: (folder: string, computer: string) =>
+      `Your message is waiting for ${folder} on ${computer}. Open Sixb there, or continue in the cloud.`,
     noFolder:
-      "This conversation has no folder yet. Open sixb in its folder and press ctrl+f, or continue in the cloud.",
+      "This conversation has no folder yet. Choose one from the menu at the top, or continue in the cloud.",
     /** In a desktop app, about a conversation of this computer's. */
     offlineHere: (folder: string) =>
-      `Not running here yet. Your message waits until this computer is connected in ${folder}.`,
-    runHere: "Run on this computer",
+      `Messages from the app don't run in ${folder} on this computer yet.`,
+    runHere: "Run them here",
     waitingFor: (computer: string) => `Waiting for ${computer}`,
     /** Where a new conversation runs, in a desktop app. */
     placeTitle: "Where this conversation runs",
-    placeChip: (place: string) => `Runs in ${place}. Change where it runs`,
+    placeChip: (place: string, status: string | null) =>
+      `Runs in ${place}${status ? `, ${status}` : ""}. Change where it runs`,
+    noFolderChip: "No folder yet. Choose where this conversation runs",
     cloud: "Cloud",
+    cloudDescription: "Runs even when your computers are off",
+    thisComputer: "This computer",
+    checkingComputers: "Checking connected computers…",
+    noComputers:
+      "None of your computers is connected. Open Sixb on one to move this conversation there.",
+    offlineLabel: "Offline",
+    offlineMenuHint: "Not available right now. Messages wait for it, or choose another place.",
     chooseFolder: "Choose a folder…",
     chooseFolderShort: "Choose a folder",
     forgetFolder: (folder: string) => `Stop running messages in ${folder}`,
     continueInCloud: "Continue in the cloud",
     moving: "Moving…",
     moveFailed: "Could not move it to the cloud. Try again.",
-    moveBusy: "A turn is running or waiting for your approval. Stop or answer it first.",
-    confirmTitle: "Continue in the cloud?",
-    confirmDescription:
-      "This conversation will run in the cloud from now on, including any waiting message. Its folder's files stay on your computer, and it can't move back.",
+    moveSwitchFailed: "Could not switch where this conversation runs. Try again.",
+    moveBusy:
+      "A reply is in progress or waiting for approval. Stop it or answer the request, then try again.",
+    moveWhileRunning: "A reply is in progress. Stop it or let it finish to move this conversation.",
+    moveWhileApproval:
+      "A request is waiting for approval. You can move this conversation once it's decided.",
+    confirmTitle: "Run your waiting message in the cloud?",
+    confirmDescription: (folder: string | null) =>
+      folder
+        ? `In the cloud, the agent won't see the files in ${folder}. You can move the conversation back once ${folder} is available again.`
+        : "In the cloud, the agent won't see the computer's files. You can move the conversation back once it's available again.",
+    confirmAction: "Run in the cloud",
     cancel: "Cancel",
-    movedToCloud: "Moved to the cloud. Files from before stayed on the computer.",
-    movedToFolder: (folder: string) =>
-      `Moved to ${folder}. Files from before stayed where they were.`,
-    movedElsewhere: "Moved to another folder. Files from before stayed where they were.",
+    /** A folder on a computer, in running text. */
+    placeOn: (folder: string, computer: string) => `${folder} on ${computer}`,
+    cloudPlace: "the cloud",
+    movedToCloud: (from: string | null) =>
+      from
+        ? `Moved to the cloud. The files in ${from} stay behind.`
+        : "Moved to the cloud. The computer's files stay behind.",
+    movedToFolder: (place: string) => `Moved to ${place}. The cloud's files stay behind.`,
+    /** For someone the conversation is shared with, who isn't shown its folders. */
+    movedToComputer: (owner: string | null) =>
+      `Moved to ${owner ? `${owner}'s computer` : "the computer"}. The cloud's files stay behind.`,
+    movedBetweenFolders: (folder: string, from: string) =>
+      `Moved from ${from} to ${folder}. The files in ${from} stay behind.`,
+    movedElsewhere: (place: string | null) =>
+      `Moved to ${place ?? "another folder"}. Earlier files stay where they were.`,
+    /** A fork's first turn, in a workspace of its own. */
+    continuedIn: (place: string) =>
+      `Continued in ${place}. The original conversation's files stay with it.`,
+    /** A fork's first turn on a computer whose folder the reader isn't shown. */
+    continuedOnComputer: (owner: string | null) =>
+      `Continued on ${owner ? `${owner}'s computer` : "the computer"}. The original conversation's files stay with it.`,
   },
   /** A conversation its owner shares with other users of the project. */
   sharing: {

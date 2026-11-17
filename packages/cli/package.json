@@ -1,6 +1,6 @@
 {
   "name": "@sixb/cli",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Command-line interface for Sixb projects",
   "keywords": [
     "sixb",
@@ -41,6 +41,7 @@
     "@sixb/orchestrator": "workspace:*",
     "@sixb/pipeline-worker": "workspace:*",
     "@sixb/projection-worker": "workspace:*",
+    "@sixb/render-worker": "workspace:*",
     "@sixb/rules-worker": "workspace:*",
     "@sixb/sandboxes-local": "workspace:^",
     "@sixb/server": "workspace:*",

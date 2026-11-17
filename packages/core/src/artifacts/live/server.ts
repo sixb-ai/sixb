@@ -4,7 +4,7 @@
  */
 
 export { type LiveArtifactWrite, writeLiveArtifact } from "../execution"
-export { mergeIntoDocument } from "./document"
+export { mergeIntoDocument, readChange } from "./document"
 export { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "./files"
 export {
   AGENT_PRESENCE_MS,
@@ -13,4 +13,4 @@ export {
   artifactPresenceStream,
   parseArtifactLiveRecord,
 } from "./presence"
-export { loadArtifactDocument, readDocumentState } from "./state"
+export { keepsDocument, loadArtifactDocument, readDocumentState } from "./state"

@@ -20,15 +20,14 @@ import {
   AgentExecutionLostError,
   type AgentRunArtifacts,
   type AgentRunFileStore,
-  type AgentRunMissingPreview,
 } from "@sixb/core/internal/agents"
 import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   answerArtifactQueries,
+  DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
-  type RefusedBoardPreview,
 } from "@sixb/core/internal/artifacts/publish"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
@@ -42,9 +41,7 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
-import { storeCheckedPreviews } from "./board-previews"
 import {
-  type CheckedPreview,
   type CheckedQuery,
   checkLayout,
   type LayoutCheck,
@@ -221,7 +218,7 @@ async function publish(
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
-  // drop whatever was written since. A canvas is merged instead, from the copy's files.
+  // drop whatever was written since. A canvas or a document is merged instead, from the copy's files.
   const base =
     "artifactId" in request.target ? installed.baseOf(request.target.artifactId) : undefined
   const baseRevision =
@@ -279,8 +276,6 @@ async function publish(
         : { kind }),
       title: request.title,
       files,
-      // The layout check pictures a canvas's boards as it checks them.
-      rendersPreviews: kind === "canvas",
     })
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
@@ -339,9 +334,9 @@ async function publish(
       )
     }
   }
-  // A published deck, page, or canvas is laid out in the sandbox's browser, so the Agent sees what
-  // the reader will, and fixes it in its next update.
-  const layout = frameLayout(kind)
+  // A published deck, page, designed document, or canvas is laid out in the sandbox's browser, so
+  // the Agent sees what the reader will, and fixes it in its next update.
+  const layout = frameLayout(version)
   const { outline, entry } = version
   const root = layout ? sources.find((source) => source.path === entry) : undefined
   // A merged version is checked from its installed copy, which holds what it holds.
@@ -353,10 +348,6 @@ async function publish(
   const themeFile = checked?.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
-  // A reader sees a canvas's boards as pictures until they open one: the check takes those its
-  // boards miss, in every mode. A board kept as it was keeps the pictures it had.
-  const missing = outline.kind === "canvas" ? await missingPreviews(input.artifacts, published) : []
-  const pictured = new Set(missing.map(({ board }) => board))
   // What the check opens: a canvas's boards, each at its own size, or the entry.
   const pages =
     outline.kind === "canvas"
@@ -372,7 +363,6 @@ async function publish(
                     w: item.w,
                     h: item.h,
                     html,
-                    pictured: pictured.has(item.id),
                   },
                 ]
               : []
@@ -380,7 +370,11 @@ async function publish(
           ...canvasOf(bytesOf(CANVAS_FILE)),
         }
       : layout && bytesOf(entry)
-        ? { layout, entry: bytesOf(entry) as Uint8Array }
+        ? {
+            layout,
+            entry: bytesOf(entry) as Uint8Array,
+            ...(outline.kind === "document" && outline.paper ? { paper: outline.paper } : {}),
+          }
         : null
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
@@ -410,10 +404,6 @@ async function publish(
       check = { status: "skipped", reason: "the check failed in the sandbox" }
     }
   }
-  const previewWarnings =
-    check?.status === "checked" && missing.length > 0
-      ? await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
-      : []
   return {
     artifactId: artifact.id,
     // A new artifact, or a revision of one: what its summary and its row say.
@@ -432,7 +422,6 @@ async function publish(
       ...published.warnings,
       ...queries.warnings,
       ...(check?.status === "checked" ? check.warnings : []),
-      ...previewWarnings,
     ].map(({ code, message, part }) => ({
       code,
       message,
@@ -445,6 +434,7 @@ async function publish(
             check.status === "checked"
               ? {
                   screenshots: [...check.screenshots],
+                  ...(check.pages ? { pages: check.pages } : {}),
                   ...(check.overview ? { overview: check.overview } : {}),
                 }
               : { skipped: check.reason },
@@ -471,80 +461,6 @@ async function mergedFiles(
     )
     return undefined
   }
-}
-
-/**
- * The boards of the revision just written that miss a picture. A preview never costs a publish:
- * when they cannot be read, the check pictures none and the worker renders what is missing.
- */
-async function missingPreviews(
-  artifacts: Pick<AgentRunArtifacts, "missingPreviews">,
-  published: PublishedArtifact
-): Promise<readonly AgentRunMissingPreview[]> {
-  try {
-    return await artifacts.missingPreviews(writtenAt(published))
-  } catch (error) {
-    console.warn(
-      `[SixbAgent] Could not read which boards of '${published.artifact.id}' miss a preview:`,
-      error
-    )
-    return []
-  }
-}
-
-/**
- * Hands the pictures the check took over as the revision's previews, and warns of each board one
- * of whose pictures was not kept: it shows its outline in that size and mode. The write exists by
- * now, so a failure is only logged: the worker renders what is still missing, and an update
- * written since gets its own.
- */
-async function storePreviews(context: {
-  readonly input: PublishToolsInput
-  readonly handle: AgentSandboxHandle
-  readonly published: PublishedArtifact
-  readonly missing: readonly AgentRunMissingPreview[]
-  readonly checked: readonly CheckedPreview[]
-  readonly signal: AbortSignal
-}): Promise<LayoutWarning[]> {
-  const { input, published, signal } = context
-  try {
-    const { previews, dropped } = await storeCheckedPreviews({
-      handle: context.handle,
-      checked: context.checked,
-      missing: context.missing,
-      blobStorage: input.blobStorage,
-      signal,
-    })
-    const refused = await input.artifacts.storePreviews({ ...writtenAt(published), previews })
-    return unkeptPreviewWarnings([...dropped, ...refused])
-  } catch (error) {
-    if (signal.aborted) throw error
-    console.warn(
-      `[SixbAgent] Could not keep the previews of revision ${published.version.revision} of '${published.artifact.id}':`,
-      error
-    )
-    return []
-  }
-}
-
-/** The version a publish wrote, as it left its content. */
-function writtenAt({ artifact, version }: PublishedArtifact) {
-  return { artifactId: artifact.id, version: version.version, updatedAt: version.updatedAt }
-}
-
-/** One warning per board whose pictures were not all kept, naming each and why. */
-function unkeptPreviewWarnings(unkept: readonly RefusedBoardPreview[]): LayoutWarning[] {
-  const boards = [...new Set(unkept.map(({ board }) => board))]
-  return boards.map((board) => {
-    const pictures = unkept
-      .filter((picture) => picture.board === board)
-      .map(({ theme, size, reason }) => `the ${size} one in ${theme} mode (${reason})`)
-    return {
-      code: "preview_not_kept",
-      part: board,
-      message: `Board '${board}' has no preview for ${pictures.join(", ")}: readers see its outline there until they open it.`,
-    }
-  })
 }
 
 /** A canvas's items, for the check's picture of it as it opens; none when it cannot be read. */
@@ -577,8 +493,9 @@ async function checkedQueries(
 
   return {
     answers: Object.fromEntries(answers),
+    // A document no object holds yet shows its written text: none of its queries failed.
     warnings: answers.flatMap(([name, answer]) =>
-      "error" in answer
+      "error" in answer && name !== DOCUMENT_HOLDER_QUERY
         ? [
             {
               code: "query_failed",
@@ -800,7 +717,13 @@ async function listSources(
     })
     return [
       {
-        path: kind === "document" ? "document.md" : posix.basename(absolutePath),
+        // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
+        path:
+          kind === "document"
+            ? /\.html?$/i.test(absolutePath)
+              ? "document.html"
+              : "document.md"
+            : posix.basename(absolutePath),
         absolutePath,
         sizeBytes: bytes.byteLength,
         bytes,
@@ -903,7 +826,9 @@ function publishSummary(output: JsonValue): string {
             ? "Read index.html and its scripts closely."
             : kind === "canvas"
               ? "Read each board's HTML closely."
-              : "Read index.html slide by slide."
+              : kind === "document"
+                ? "Read document.html and its stylesheets closely: what fits the paper, and where each page breaks."
+                : "Read index.html slide by slide."
         }`
       )
     } else if (screenshots.length > 0) {
@@ -917,7 +842,13 @@ function publishSummary(output: JsonValue): string {
                   ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
                   : ""
               }`
-            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
+            : kind === "document"
+              ? documentShots(
+                  directory,
+                  screenshots,
+                  typeof check.pages === "number" ? check.pages : undefined
+                )
+              : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
       )
     }
   }
@@ -1009,4 +940,22 @@ function toPublishError(error: unknown, tool: ArtifactToolName, path?: string): 
 function publishError(tool: ArtifactToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
   return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
+}
+
+/**
+ * Where a designed document's screenshots are: its pages as they print, or its one sheet when it
+ * has no paper, and the top of it on a phone.
+ */
+function documentShots(
+  directory: string,
+  screenshots: readonly string[],
+  pages: number | undefined
+): string {
+  const shot = screenshots.filter((each) => posix.basename(each).startsWith("page-")).length
+  const phone = ` ${directory}/phone.png is its top 4000px on a phone (390px), where it shows as one sheet: check that nothing runs off the side.`
+  if (shot === 0) {
+    return `Layout check: the document as one sheet is ${directory}/document.png. It has no paper, so no pages: give its stylesheet an @page rule with a size to print it.${phone} Open them with read, fix what the warnings name, and update the artifact.`
+  }
+  const count = pages ?? shot
+  return `Layout check: each page as it prints is ${directory}/page-NN.png (${count} pages${count > shot ? `, the first ${shot} shot` : ""}).${phone} Open them with read, check where each page breaks and that nothing is cut off, fix what the warnings name, and update the artifact.`
 }

@@ -5,6 +5,7 @@ import {
   ModelProviderError,
 } from "@sixb/core/models"
 import { RequestDiagnostics } from "./diagnostics"
+import type { AzureAIFoundryModelMetadata } from "./provider"
 import type { FoundryProtocol } from "./transport"
 import { abortable, type FoundryTransport, requestId } from "./transport"
 import { object, PREFIX, positiveInteger } from "./util"
@@ -59,6 +60,23 @@ interface Snapshot {
 export interface ResolvedDeployment {
   readonly deployment: AzureAIFoundryDeployment
   readonly discoveredAt: string
+}
+
+/** What a resolved binding reports about its deployment; empty before resolution. */
+export function deploymentMetadata(resolution?: ResolvedDeployment): AzureAIFoundryModelMetadata {
+  const deployment = resolution?.deployment
+  return Object.freeze(
+    deployment
+      ? {
+          deployment,
+          modelName: deployment.modelName,
+          modelVersion: deployment.modelVersion,
+          publisher: deployment.modelPublisher,
+          sku: deployment.sku.name,
+          discoveredAt: resolution.discoveredAt,
+        }
+      : {}
+  )
 }
 
 interface DiscoverySettings {

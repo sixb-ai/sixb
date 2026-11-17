@@ -43,11 +43,13 @@ describe("an in-process run session", () => {
     const { host, storage, run } = await seedAgentRun()
     const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
     if (!session) throw new Error("Expected the run to be claimed.")
-    const finish = storage.agents.runs.finish.bind(storage.agents.runs)
+    // A finished turn settles its inbox, its messages and its end in one transaction, so the blip
+    // that proves the retry is the transaction's: storage is unavailable for the whole of it.
+    const transaction = storage.transaction.bind(storage)
     let failures = 1
-    storage.agents.runs.finish = async (input) => {
+    storage.transaction = async (run, options) => {
       if (failures-- > 0) throw new Error("storage blip")
-      return finish(input)
+      return transaction(run, options)
     }
 
     // One blip, absorbed.
@@ -57,7 +59,7 @@ describe("an in-process run session", () => {
     const stuck = await claimAgentRun(downHost, { run: other, leaseExpiresAt: LEASE })
     if (!stuck) throw new Error("Expected the run to be claimed.")
     let attempts = 0
-    down.agents.runs.finish = async () => {
+    down.transaction = async () => {
       attempts += 1
       throw new Error("storage down")
     }

@@ -437,12 +437,16 @@ function finish(unified: ModelFinishReason): WorkerTestStreamEvent {
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
  * reasoning + text. A stateful stream handler guarantees per-call ordering.
  */
-function toolThenAnswerModel(captureReplay?: (prompt: string) => void): WorkerTestModel {
+function toolThenAnswerModel(
+  captureReplay?: (prompt: string) => void,
+  beforeAnswer?: () => Promise<void>
+): WorkerTestModel {
   let call = 0
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (options) => {
       call += 1
+      if (call === 2) await beforeAnswer?.()
       if (call === 1) {
         return stream([
           { type: "stream-start", warnings: [] },
@@ -2744,6 +2748,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     approvalModes: agents.approvalModes,
     computers: agents.computers,
     tokenRates: agents.tokenRates,
+    inbox: agents.inbox,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2793,6 +2798,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     approvalModes: agents.approvalModes,
     computers: agents.computers,
     tokenRates: agents.tokenRates,
+    inbox: agents.inbox,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2839,6 +2845,7 @@ function withObservedAgentMessageAppendStorage(
     approvalModes: agents.approvalModes,
     computers: agents.computers,
     tokenRates: agents.tokenRates,
+    inbox: agents.inbox,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -3765,6 +3772,103 @@ describe("AgentWorker", () => {
       await worker.stop()
       completion.restore()
     }
+  })
+
+  // The provider ended the VM's session mid-turn, at its time limit: the save's cleanup command
+  // fails and the stop is refused, as the VM stopped already. Removal proof: let a refused stop
+  // skip the settle in preserve again; the workspace stays busy, which no owner can restore.
+  test("blocks a workspace whose VM the provider stopped, and goes on in it once its owner restores it", async () => {
+    const sandbox = Object.assign(new RecordingSandbox("expired-session"), {
+      setRequestCredentials: async () => {},
+    })
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    let expired = false
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (expired) throw new Error("sandbox session stopped")
+      return runCommand(command, args, options)
+    }
+    const stop = sandbox.stop.bind(sandbox)
+    sandbox.stop = async () => {
+      if (expired) throw new Error("sandbox session already stopped")
+      await stop()
+    }
+    let resumes = 0
+    // The session ends while the first turn works: its save then finds the VM gone.
+    let expireOnModelCall = true
+    const host = buildSixb(
+      answerModel(() => {
+        if (expireOnModelCall) expired = true
+        expireOnModelCall = false
+      }),
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          return sandbox
+        },
+        resume: async () => {
+          resumes++
+          expired = false
+          return sandbox
+        },
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => ({ source: { type: "git", url: "https://example.com/repository.git" } }),
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+
+    const first = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    let worker = new AgentWorker(host, workerOptions())
+    let completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: first.run.id })
+      ).toMatchObject({ status: "failed" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+    const blocked = (await sdk.agent.threads.getById(thread.id))?.sandboxState
+    expect(blocked).toMatchObject({ status: "blocked", initialized: true })
+    expect(
+      errors.mock.calls.some(([message]) => String(message).includes("could not be saved"))
+    ).toBe(true)
+    errors.mockRestore()
+
+    const restored = await sdk.agent.threads.restoreSandbox(thread.id, {
+      expectedSandboxName: blocked!.name,
+    })
+    expect(restored.sandboxState).toMatchObject({ name: blocked!.name, status: "ready" })
+
+    const second = await requestAgent(host, { threadId: thread.id, text: "Go on" })
+    worker = new AgentWorker(host, workerOptions())
+    completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: second.run.id })
+      ).toMatchObject({ status: "succeeded" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+    expect(resumes).toBe(1)
+    expect(sandbox.destroyed).toBe(false)
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toMatchObject({
+      name: blocked!.name,
+      status: "ready",
+    })
   })
 
   // SixbHost rejects such sandboxes at construction. A worker host is structural, so the worker
@@ -13478,6 +13582,34 @@ describe("AgentWorker", () => {
     ).toMatchObject({ activeRunId: null })
   })
 
+  test("drain lets a running turn finish as succeeded without claiming new turns", async () => {
+    // Regression proof: have `drain()` call `stop()` directly; the first turn ends cancelled with
+    // `finishReason: "interrupted"` instead of answering.
+    const controlled = controlledBlockingAnswerModel()
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+    const first = await requestAgent(sixb, { text: "first" })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    await controlled.waitForStarted(1)
+
+    const draining = worker.drain(10_000)
+    const second = await requestAgent(sixb, { text: "second" })
+
+    controlled.releaseAll()
+    expect(await draining).toBe(true)
+
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })).toMatchObject({
+      status: "succeeded",
+      finishReason: "stop",
+    })
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })).toMatchObject({
+      status: "queued",
+    })
+    expect(controlled.startedCount()).toBe(1)
+  })
+
   test("publishes UI chunks before appending the finalized assistant message", async () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -13567,6 +13699,9 @@ describe("AgentWorker", () => {
             throw new Error("sink down")
           },
           async publishUiChunk() {
+            throw new Error("sink down")
+          },
+          async publishInboxRead() {
             throw new Error("sink down")
           },
           async publishMessageFinalized() {
@@ -13940,7 +14075,11 @@ describe("AgentWorker", () => {
   })
 
   test("a stale worker records billable calls but cannot write the fenced run or message", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    // This worker started the run, and another delivery rotates its execution token while the
+    // model answers. Rotated before the first call, the turn's first inbox read is fenced and no
+    // call is made at all.
+    let rotateToken = async () => {}
+    const sixb = buildSixb(toolThenAnswerModel(undefined, () => rotateToken()))
     const storage = agentStorageOf(sixb)
 
     const {
@@ -13949,7 +14088,6 @@ describe("AgentWorker", () => {
       text: "echo hi",
     })
 
-    // This worker started the run, but another delivery rotated its execution token.
     const staleRun = requireConversationRun(
       await storage.runs.start({
         id: runId,
@@ -13957,11 +14095,13 @@ describe("AgentWorker", () => {
         execution: freshTestExecution(),
       })
     )
-    await storage.runs.reclaim({
-      projectId: PROJECT_ID,
-      id: runId,
-      execution: freshTestExecution(),
-    })
+    rotateToken = async () => {
+      await storage.runs.reclaim({
+        projectId: PROJECT_ID,
+        id: runId,
+        execution: freshTestExecution(),
+      })
+    }
 
     const promise = runTurnInSession({
       storage: workerStorageOf(sixb.storage),
@@ -15252,6 +15392,78 @@ describe("agent tools act as the requester", () => {
       expect(two.messages[0]).toEqual(one.messages[0])
       expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
     } finally {
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("a conversation back in a workspace sends the prompt that workspace sent before, byte for byte", async () => {
+    // Proven by removal: render the thread's movedAt in the system prompt again, as the
+    // `workspaceMovedAt` section did (pass it from createConversationAgentEnvironment). Every move
+    // rewrites it, so the third request, back in the cloud, no longer starts with the first's.
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return answerStream(`Answer ${requests.length}.`)
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-moving-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-moving-runs-")))
+    const laptop = { id: "laptop", name: "Laptop", folder }
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computer: async () => ({ id: laptop.id, name: laptop.name }),
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async () => new FolderReadingSandbox("computer"),
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+
+    const inTheCloud = async (threadId: string, text: string) => {
+      const { run } = await requestAgent(sixb, { threadId, text })
+      expect((await waitForTerminalRun(storage, run.id)).status).toBe("succeeded")
+    }
+    const onTheLaptop = async (threadId: string, text: string) => {
+      const { run } = await requestAgent(sixb, { threadId, text })
+      expect(await runner.runTurn(run.id, new AbortController().signal)).toBe(true)
+      await runner.drain()
+    }
+    const toTheLaptop = (threadId: string) =>
+      storage.threads.assignComputer({ projectId: PROJECT_ID, id: threadId, computer: laptop })
+    const toTheCloud = (threadId: string) =>
+      storage.threads.moveToCloud({ projectId: PROJECT_ID, id: threadId })
+
+    try {
+      const first = await requestAgent(sixb, { text: "Look at the orders." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      const { threadId } = first.run
+
+      await toTheLaptop(threadId)
+      await onTheLaptop(threadId, "Now the local report.")
+      await toTheCloud(threadId)
+      await inTheCloud(threadId, "Back to the orders.")
+      await toTheLaptop(threadId)
+      await onTheLaptop(threadId, "And the report again.")
+
+      const [cloud, laptopTurn, cloudAgain, laptopAgain] = requests
+      expect(requests).toHaveLength(4)
+      expect(systemPromptOf(laptopTurn?.messages)).not.toBe(systemPromptOf(cloud?.messages))
+
+      // Each workspace's prompt, and the history it cached, come back as they were sent.
+      expectReplayedPrefix(cloud, cloudAgain, model.providerId)
+      expectReplayedPrefix(laptopTurn, laptopAgain, model.providerId)
+    } finally {
+      await worker.stop()
       rmSync(folder, { recursive: true, force: true })
       rmSync(runFilesRoot, { recursive: true, force: true })
     }

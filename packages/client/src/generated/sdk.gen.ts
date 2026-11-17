@@ -192,6 +192,9 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentErrors,
   GetArtifactFileContentResponses,
+  GetArtifactPdfData,
+  GetArtifactPdfErrors,
+  GetArtifactPdfResponses,
   GetArtifactQueryData,
   GetArtifactQueryErrors,
   GetArtifactQueryResponses,
@@ -381,6 +384,9 @@ import type {
   ListAgentThreadChildrenData,
   ListAgentThreadChildrenErrors,
   ListAgentThreadChildrenResponses,
+  ListAgentThreadInboxData,
+  ListAgentThreadInboxErrors,
+  ListAgentThreadInboxResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -514,6 +520,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
+  PrintArtifactPdfData,
+  PrintArtifactPdfErrors,
+  PrintArtifactPdfResponses,
   QueryObjectLinksData,
   QueryObjectLinksErrors,
   QueryObjectLinksResponses,
@@ -553,6 +562,9 @@ import type {
   ResolveArtifactCommentData,
   ResolveArtifactCommentErrors,
   ResolveArtifactCommentResponses,
+  RestoreAgentThreadSandboxData,
+  RestoreAgentThreadSandboxErrors,
+  RestoreAgentThreadSandboxResponses,
   RestoreArtifactData,
   RestoreArtifactErrors,
   RestoreArtifactResponses,
@@ -625,6 +637,9 @@ import type {
   UpdateAgentPreferencesData,
   UpdateAgentPreferencesErrors,
   UpdateAgentPreferencesResponses,
+  UpdateAgentThreadInboxItemData,
+  UpdateAgentThreadInboxItemErrors,
+  UpdateAgentThreadInboxItemResponses,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyErrors,
   UpdateAiLimitPolicyResponses,
@@ -643,6 +658,9 @@ import type {
   UploadFileRawData,
   UploadFileRawErrors,
   UploadFileRawResponses,
+  WithdrawAgentThreadInboxItemData,
+  WithdrawAgentThreadInboxItemErrors,
+  WithdrawAgentThreadInboxItemResponses,
 } from "./types.gen"
 
 export type Options<
@@ -3098,6 +3116,29 @@ export const recreateAgentThreadSandbox = <ThrowOnError extends boolean = false>
   })
 
 /**
+ * Explicitly go on in the workspace a failed save left, with its files as they were
+ */
+export const restoreAgentThreadSandbox = <ThrowOnError extends boolean = false>(
+  options: Options<RestoreAgentThreadSandboxData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RestoreAgentThreadSandboxResponses,
+    RestoreAgentThreadSandboxErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/sandbox/restore",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
  * List agent thread messages
  */
 export const listAgentThreadMessages = <ThrowOnError extends boolean = false>(
@@ -3175,6 +3216,67 @@ export const headAgentMessageFileContent = <ThrowOnError extends boolean = false
     ],
     url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
     ...options,
+  })
+
+/**
+ * List agent thread inbox messages
+ */
+export const listAgentThreadInbox = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadInboxData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadInboxResponses,
+    ListAgentThreadInboxErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox",
+    ...options,
+  })
+
+/**
+ * Withdraw a waiting agent thread message
+ */
+export const withdrawAgentThreadInboxItem = <ThrowOnError extends boolean = false>(
+  options: Options<WithdrawAgentThreadInboxItemData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    WithdrawAgentThreadInboxItemResponses,
+    WithdrawAgentThreadInboxItemErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox/{itemId}",
+    ...options,
+  })
+
+/**
+ * Update a waiting agent thread message
+ */
+export const updateAgentThreadInboxItem = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAgentThreadInboxItemData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateAgentThreadInboxItemResponses,
+    UpdateAgentThreadInboxItemErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/inbox/{itemId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**
@@ -3363,7 +3465,7 @@ export const listAgentComputers = <ThrowOnError extends boolean = false>(
 /**
  * Move a thread from your computer to the cloud
  *
- * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
+ * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any, and its owner can move it to a computer or folder again later. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
  */
 export const moveAgentThreadToCloud = <ThrowOnError extends boolean = false>(
   options: Options<MoveAgentThreadToCloudData, ThrowOnError>
@@ -3384,7 +3486,7 @@ export const moveAgentThreadToCloud = <ThrowOnError extends boolean = false>(
 /**
  * Move a thread to one of your computers, in a folder there
  *
- * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.
+ * Its turns run there alone from now on, in that folder: only `sixb` open in it claims them. Its owner moves it from the cloud or from another folder or computer, as often as they need; files from where it ran before stay there. Refused while a turn runs or waits on approvals.
  */
 export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
   options: Options<MoveAgentThreadToComputerData, ThrowOnError>
@@ -4021,7 +4123,7 @@ export const freezeArtifactVersion = <ThrowOnError extends boolean = false>(
 /**
  * List an artifact's comments
  *
- * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.
+ * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them; a shared link's guest reads only the threads started by a guest of the same link, with every reply in them.
  */
 export const listArtifactComments = <ThrowOnError extends boolean = false>(
   options: Options<ListArtifactCommentsData, ThrowOnError>
@@ -4043,7 +4145,7 @@ export const listArtifactComments = <ThrowOnError extends boolean = false>(
 /**
  * Comment on an artifact
  *
- * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one), and replies only in a thread they read (404 comment_not_found otherwise). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers of the thread receive artifact.commented.
  */
 export const addArtifactComment = <ThrowOnError extends boolean = false>(
   options: Options<AddArtifactCommentData, ThrowOnError>
@@ -4244,6 +4346,43 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Get a designed document's PDF
+ *
+ * The version printed to PDF, with the values its fields read as the caller reads them, as a download named after the title it printed with: for a document that shows live data, those its POST's key names. 404 pdf_not_found until it is printed: ask for it with POST first. A frozen version's PDF never changes, and is cached as such.
+ */
+export const getArtifactPdf = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactPdfData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactPdfResponses, GetArtifactPdfErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/pdf",
+    ...options,
+  })
+
+/**
+ * Print a designed document to PDF
+ *
+ * Answers ready once the version is printed, and printing until then, having asked for it: ask again after a few seconds, then get it. Failed with why when it could not be printed; retry=true asks again. A document that shows live data answers with a key: ask again and get it with that key, which names the values the first ask printed. It prints as its stylesheets' @page rule lays it out, in a sandbox of the project. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a designed document; 501 pdf_unavailable in a project without sandboxes.
+ */
+export const printArtifactPdf = <ThrowOnError extends boolean = false>(
+  options: Options<PrintArtifactPdfData, ThrowOnError>
+) =>
+  (options.client ?? client).post<PrintArtifactPdfResponses, PrintArtifactPdfErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/pdf",
+    ...options,
+  })
+
+/**
  * Get the preview of a canvas's board
  *
  * A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such, as is one asked for at a revision; an open version's otherwise, and "latest", are revalidated. 404 preview_not_found until it is rendered, when it never will be, or when revision is not the version's current one: the version says which.
@@ -4268,7 +4407,7 @@ export const getArtifactBoardPreview = <ThrowOnError extends boolean = false>(
 /**
  * Run an artifact's query
  *
- * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.
+ * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid. A designed document's "holder" is the object that holds it, of the type it names, with the links its fields read through: 404 holder_not_found when no one such object the caller reads holds it.
  */
 export const getArtifactQuery = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactQueryData, ThrowOnError>

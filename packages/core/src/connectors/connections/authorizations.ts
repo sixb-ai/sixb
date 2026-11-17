@@ -27,6 +27,7 @@ import {
   assertCredentialMutationOperationActive,
   ConnectorCredentialMutationCoordinator,
 } from "./credential-mutations"
+import type { ConnectorConnectionEvents } from "./events"
 import type {
   CompleteConnectorReauthorizationInput,
   CompleteNewConnectorAuthorizationInput,
@@ -51,6 +52,7 @@ export interface ConnectorAuthorizationLifecycleOptions {
   readonly providerOperationTimeoutMs: number
   readonly refreshSkewMs: number
   readonly now: () => Date
+  readonly events: ConnectorConnectionEvents
 }
 
 export interface RevokeConnectorAuthorizationInput {
@@ -79,9 +81,11 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
   private readonly mutations: ConnectorCredentialMutationCoordinator
   private readonly credentials: ConnectorCredentialCodec
   private readonly tokens: ConnectorTokenAccess
+  private readonly events: ConnectorConnectionEvents
 
   constructor(options: ConnectorAuthorizationLifecycleOptions) {
     this.projectId = options.projectId
+    this.events = options.events
     this.storage = options.storage
     this.resolveDefinition = options.resolveDefinition
     this.accountSelectionTtlMs = positiveDuration(
@@ -243,9 +247,25 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
     input: CompleteConnectorReauthorizationInput
   ): Promise<ConnectorAuthorizationRecord> {
     this.assertRegistered(input.definition)
-    return this.mutations.runLocallySerialized(input.authorizationId, () =>
+    const authorization = await this.mutations.runLocallySerialized(input.authorizationId, () =>
       this.completeReauthorizationMutation(input)
     )
+    // The reauthorization has committed; failing to announce it must not report it as failed.
+    const connections = await this.storage
+      .listConnectionsByAuthorization({
+        projectId: this.projectId,
+        connectorId: input.definition.id,
+        authorizationId: authorization.id,
+      })
+      .catch((error: unknown) => {
+        console.warn("[Sixb] Reconnected connections could not be read to announce them.", error)
+        return []
+      })
+    await this.events.connected(
+      connections.filter((connection) => connection.status === "connected"),
+      "reconnected"
+    )
+    return authorization
   }
 
   async revokeAuthorization(
@@ -373,9 +393,15 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
         claim.authorization,
         async (executing, signal) => {
           if (definition.adapter.authentication.revoke && credentials) {
+            const connectedAccountIds = await this.accountsConnectedElsewhere(
+              definition.id,
+              claim.authorization.id
+            )
+
             await definition.adapter.authentication.revoke(
               this.adapterContext(definition.id, signal),
-              credentials
+              credentials,
+              { connectedAccountIds }
             )
           }
           return this.mutations.stageCredentialMutationRevocation(executing, signal)
@@ -590,6 +616,28 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
           )
       )
     )
+  }
+
+  /**
+   * The accounts another grant still keeps connected. A provider files some state under the
+   * account rather than the grant (a Graph subscription, for one), so the revoke hook leaves it
+   * to the connections still using it.
+   */
+  private async accountsConnectedElsewhere(
+    connectorId: string,
+    authorizationId: string
+  ): Promise<readonly string[]> {
+    const connections = await withConnectorStorageBoundary(
+      "Connector connections could not be read before revocation.",
+      () => this.storage.listConnections({ projectId: this.projectId, connectorId })
+    )
+
+    const accountIds = connections
+      .filter((connection) => connection.status === "connected")
+      .filter((connection) => connection.authorizationId !== authorizationId)
+      .map((connection) => connection.account.id)
+
+    return [...new Set(accountIds)].sort()
   }
 
   private adapterContext(connectorId: string, signal: AbortSignal) {

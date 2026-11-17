@@ -527,7 +527,7 @@ describe("an artifact edited live", () => {
     await marie.settle()
 
     const claimable = async () =>
-      (await context.queues.agents.claim({ projectId, workerId: "worker", limit: 10 })).map(
+      (await context.queues.renders.claim({ projectId, workerId: "worker", limit: 10 })).map(
         ({ job }) => ({ id: job.id, payload: job.payload })
       )
 
@@ -611,7 +611,9 @@ describe("an artifact edited live", () => {
     ])
   })
 
-  test("refuses whoever may not read the artifact, and an artifact that is not a canvas", async () => {
+  // Reproduce by refusing every kind but a canvas in LiveRoom.open: both documents are left as
+  // not_live too.
+  test("refuses whoever may not read the artifact, and one not edited live, but opens documents", async () => {
     const context = await setup()
     const rooms = context.rooms()
     const stranger = new Client(rooms, context.olivia, "art_0000000000", "x-1")
@@ -621,15 +623,35 @@ describe("an artifact edited live", () => {
     ])
 
     const { artifact } = await context.marie.artifacts.create({
+      kind: "file",
+      title: "Regions",
+      files: await context.put({ "regions.csv": "region,visits\nNorth,1284\n" }),
+    })
+    const file = new Client(rooms, context.marie, artifact.id, "marie-2")
+    await file.join()
+    expect(file.messages).toEqual([{ type: "left", artifactId: artifact.id, reason: "not_live" }])
+
+    const plan = await context.marie.artifacts.create({
       kind: "document",
       title: "Plan",
       files: await context.put({ "document.md": "# Plan\n" }),
     })
-    const document = new Client(rooms, context.marie, artifact.id, "marie-2")
-    await document.join()
-    expect(document.messages).toEqual([
-      { type: "left", artifactId: artifact.id, reason: "not_live" },
-    ])
+    const notes = new Client(rooms, context.marie, plan.artifact.id, "marie-4")
+    await notes.join()
+    await notes.settle()
+    expect(notes.messages[0]).toMatchObject({ type: "joined", access: "edit" })
+
+    const designed = await context.marie.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({
+        "document.html": "<!doctype html><html><body><h1>Proposal</h1></body></html>",
+      }),
+    })
+    const proposal = new Client(rooms, context.marie, designed.artifact.id, "marie-3")
+    await proposal.join()
+    await proposal.settle()
+    expect(proposal.messages[0]).toMatchObject({ type: "joined", access: "edit" })
   })
 
   // Guard proof: drop `written` from LiveRooms' events feed; the Agent's heading never reaches
@@ -836,7 +858,8 @@ describe("an artifact edited live", () => {
   })
 
   // Guard proof: clear `dirty` before the publish in LiveRoom.flush and leave it on failure; the
-  // note's words are lost once storage refuses the first write-back.
+  // note's words are lost once storage refuses the first write-back. Leave `refused` out of
+  // LiveRoom.status: what publishing refuses reads as tried again, though nothing tries it.
   test("says when a write-back fails, keeps the changes, and tries again", async () => {
     jest.useFakeTimers()
     const context = await setup()
@@ -861,6 +884,7 @@ describe("an artifact edited live", () => {
         state: "failed",
         error: "blob storage is unavailable",
       })
+      expect(marie.statuses().at(-1)).not.toHaveProperty("refused")
       expect((await context.latest()).revision).toBe(context.revision)
 
       jest.advanceTimersByTime(2_000)
@@ -878,6 +902,7 @@ describe("an artifact edited live", () => {
       expect(marie.statuses().at(-1)).toMatchObject({
         state: "failed",
         error: expect.stringContaining("note 'hi'"),
+        refused: true,
       })
       ;(marie.canvas.items.get("hi")?.get("text") as Y.Text).delete(0, 2_000)
       await marie.settle()

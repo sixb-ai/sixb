@@ -19,6 +19,10 @@ import { ARTIFACT_COMMENT_LIMITS } from "./limits"
 // Comments on an artifact: whoever reads it reads and adds them, a shared link's guest included;
 // their author, or whoever may change the artifact, resolves or deletes them, and only the latter a
 // guest's. Each change is announced to its readers.
+//
+// A thread is the team's unless a guest started it. A guest reads only the threads started by a
+// guest of the same link, themselves or whoever else opened it, with every reply, a member's
+// included: the team's threads are missing to them, as if there were none.
 
 /** A comment to add, or a reply. */
 export interface ArtifactCommentInput {
@@ -38,18 +42,22 @@ export interface ArtifactCommentInput {
 
 /** The comment methods of the artifacts runtime. */
 export interface ArtifactCommentsRuntime {
-  /** Every comment and reply, oldest first; `null` when the caller cannot read the artifact. */
+  /**
+   * Every comment and reply the caller reads, oldest first: a shared link's guest, only its link's
+   * threads. `null` when the caller cannot read the artifact.
+   */
   listComments(artifactId: string): Promise<ArtifactCommentRecord[] | null>
   /**
    * Adds a comment, or a reply, authored by the caller, who must read the artifact. A shared link's
    * guest writes it under the name they gave, and is refused with `name_required` until they give
    * one. Throws `invalid_comment` for words or an anchor that will not do, `comment_not_found` for
-   * a reply to no comment, and `comments_full`.
+   * a reply to no comment the caller reads, and `comments_full`.
    */
   addComment(artifactId: string, input: ArtifactCommentInput): Promise<ArtifactCommentRecord>
   /**
    * Marks a comment resolved, or opens it again. Its author or whoever may change the artifact
-   * may: anyone else, and every guest, is refused with `not_allowed`.
+   * may: anyone else, and every guest, is refused with `not_allowed`, or `comment_not_found` for a
+   * guest's comment they do not read.
    */
   resolveComment(
     artifactId: string,
@@ -72,11 +80,29 @@ export function createArtifactCommentsRuntime(input: {
   readonly author: () => Promise<ArtifactCommentAuthor>
   /** Who resolves or deletes one; throws `not_allowed` for a caller who never may. */
   readonly manager: () => Principal
+  /**
+   * For a shared link's guest, the link they came through, by its grant: they read only the
+   * threads its guests started. Without it, a member reads every thread.
+   */
+  readonly guest?: { readonly grantId?: string }
   readonly reach: (
     artifactId: string
   ) => Promise<{ readonly artifact: ArtifactRecord; readonly access: ArtifactAccess } | null>
 }): ArtifactCommentsRuntime {
-  const { projectId, events } = input
+  const { projectId, events, guest } = input
+
+  /** The thread a comment is in: the comment itself, or the one it replies to. */
+  const threadOf = (comment: ArtifactCommentRecord) =>
+    comment.parentId === undefined
+      ? Promise.resolve(comment)
+      : input
+          .storage()
+          .getComment({ projectId, artifactId: comment.artifactId, id: comment.parentId })
+
+  /** Whether the caller reads this thread: a member every one, a guest only its link's. */
+  const reads = (thread: ArtifactCommentRecord | null): thread is ArtifactCommentRecord =>
+    thread !== null &&
+    (!guest || (guest.grantId !== undefined && threadLink(thread) === guest.grantId))
 
   /** The artifact the caller reads; refused with why otherwise. */
   const readable = async (artifactId: string) => {
@@ -91,12 +117,16 @@ export function createArtifactCommentsRuntime(input: {
     return reached
   }
 
-  /** A comment the caller may resolve or delete: theirs, or one on an artifact they may change. */
+  /**
+   * A comment the caller may resolve or delete, with its thread: theirs, or one on an artifact they
+   * may change. One in a thread they do not read is missing.
+   */
   const managed = async (artifactId: string, commentId: string) => {
     const { access } = await readable(artifactId)
-    const manager = input.manager()
     const comment = await input.storage().getComment({ projectId, artifactId, id: commentId })
-    if (!comment) throw commentNotFound(artifactId, commentId)
+    const thread = comment ? await threadOf(comment) : null
+    if (!comment || !reads(thread)) throw commentNotFound(artifactId, commentId)
+    const manager = input.manager()
 
     // A guest's comment is managed by those who may change the artifact, never by a guest.
     const changes = access === "owner" || access === "update"
@@ -107,14 +137,23 @@ export function createArtifactCommentsRuntime(input: {
         "[Sixb] Only a comment's author, or whoever may change the artifact, resolves or deletes it."
       )
     }
-    return comment
+    return { comment, thread }
   }
 
   return {
     async listComments(artifactId) {
       const reached = await input.reach(artifactId)
       if (!reached || reached.access === "none") return null
-      return input.storage().listComments({ projectId, id: artifactId })
+
+      const comments = await input.storage().listComments({ projectId, id: artifactId })
+      if (!guest) return comments
+
+      const threads = new Set(
+        comments
+          .filter((comment) => comment.parentId === undefined && reads(comment))
+          .map((comment) => comment.id)
+      )
+      return comments.filter((comment) => threads.has(comment.parentId ?? comment.id))
     },
 
     async addComment(artifactId, comment) {
@@ -129,11 +168,12 @@ export function createArtifactCommentsRuntime(input: {
         )
       }
 
-      // A reply is about what it replies to.
+      // A reply is about what it replies to, in a thread the caller reads.
       let anchor: ArtifactCommentAnchor
+      let parent: ArtifactCommentRecord | null = null
       if (comment.parentId !== undefined) {
-        const parent = await storage.getComment({ projectId, artifactId, id: comment.parentId })
-        if (!parent) throw commentNotFound(artifactId, comment.parentId)
+        parent = await storage.getComment({ projectId, artifactId, id: comment.parentId })
+        if (!reads(parent)) throw commentNotFound(artifactId, comment.parentId)
         anchor = parent.anchor
       } else {
         anchor = await checkAnchor(storage, artifact, comment.anchor ?? {})
@@ -151,7 +191,7 @@ export function createArtifactCommentsRuntime(input: {
           ...(comment.origin ? { origin: comment.origin } : {}),
           createdAt: new Date(),
         })
-        await announceArtifactComment(events, created, "created")
+        await announceArtifactComment(events, created, threadLink(parent ?? created), "created")
         return created
       } catch (error) {
         throw commentRequestError(error)
@@ -159,7 +199,7 @@ export function createArtifactCommentsRuntime(input: {
     },
 
     async resolveComment(artifactId, commentId, resolved = true) {
-      await managed(artifactId, commentId)
+      const { thread } = await managed(artifactId, commentId)
       const changed = await input.storage().resolveComment({
         projectId,
         artifactId,
@@ -168,18 +208,31 @@ export function createArtifactCommentsRuntime(input: {
       })
       if (!changed) throw commentNotFound(artifactId, commentId)
 
-      await announceArtifactComment(events, changed, resolved ? "resolved" : "reopened")
+      await announceArtifactComment(
+        events,
+        changed,
+        threadLink(thread),
+        resolved ? "resolved" : "reopened"
+      )
       return changed
     },
 
     async deleteComment(artifactId, commentId) {
-      const comment = await managed(artifactId, commentId)
+      const { comment, thread } = await managed(artifactId, commentId)
       const deleted = await input.storage().deleteComment({ projectId, artifactId, id: commentId })
       if (!deleted) throw commentNotFound(artifactId, commentId)
 
-      await announceArtifactComment(events, comment, "deleted")
+      await announceArtifactComment(events, comment, threadLink(thread), "deleted")
     },
   }
+}
+
+/**
+ * The shared link whose guests read a thread, by its grant: the one its first comment's guest came
+ * through. None for a thread a member started, which is the team's.
+ */
+function threadLink(thread: Pick<ArtifactCommentRecord, "author">): string | undefined {
+  return thread.author.type === "guest" ? thread.author.grantId : undefined
 }
 
 /**

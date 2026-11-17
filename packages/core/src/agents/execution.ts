@@ -12,10 +12,12 @@ import type { SecurityDefinitionCatalog } from "../security"
 import type {
   AgentApprovalMode,
   AgentApprovalRecord,
+  AgentInboxItemRecord,
   AgentRunRecord,
   AgentStorage,
   AgentThreadComputer,
   AgentThreadRecord,
+  AgentThreadSandboxState,
   ConversationAgentRunRecord,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
@@ -64,14 +66,22 @@ import {
   addAgentThreadParticipants,
   removeAgentThreadParticipant,
 } from "./participants"
+import { registerAgentQueuedTurn } from "./queued-turn"
 import {
+  type AgentQueuedTurnStart,
   assertComputerPlaceRequest,
   dispatchAgentRun,
+  type PromoteAgentInboxItemInput,
+  promoteAgentInboxItem,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
   resumeAgentTurn,
   retryAgentRun,
+  type SendAgentMessageInput,
+  sendAgentMessage,
+  startQueuedAgentTurnFromInbox,
+  withdrawAgentInboxItem,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
@@ -118,6 +128,15 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
   {
     /** Start fresh after uncertain recovery; never deletes the previous sandbox. Owner only. */
     recreateSandbox(
+      threadId: string,
+      input: { readonly expectedSandboxName: string }
+    ): Promise<AgentThreadView>
+    /**
+     * Go on in the sandbox a failed save left, with its files as they were: only one its run
+     * finished preparing. The next run resumes it if the provider kept it, or starts fresh and says
+     * so if it did not. Owner only.
+     */
+    restoreSandbox(
       threadId: string,
       input: { readonly expectedSandboxName: string }
     ): Promise<AgentThreadView>
@@ -273,8 +292,35 @@ export interface ObservedAgentThreadsRuntime {
   getChild(threadId: string): Promise<AgentChildView | null>
 }
 
+/** What a message sent to a thread became: the turn it started, or the inbox item that waits. */
+export type ExecutionAgentSendResult =
+  | ({ readonly kind: "turn" } & ExecutionAgentRunResult)
+  | { readonly kind: "inbox"; readonly item: AgentInboxItemRecord }
+
+/** A message waiting in a thread's inbox, changed before a turn reads it. */
+export type AgentInboxMessageUpdate = Omit<PromoteAgentInboxItemInput, "threadId" | "itemId">
+
+/** The thread's messages that wait for a turn. */
+export interface AgentInboxRuntime {
+  /** Its unclaimed messages, oldest first. */
+  list(threadId: string): Promise<readonly AgentInboxItemRecord[]>
+  /** Edit, promote or send now one the caller sent. */
+  update(
+    threadId: string,
+    itemId: string,
+    input: AgentInboxMessageUpdate
+  ): Promise<AgentInboxItemRecord>
+  /** Take back one the caller sent, before a turn reads it. */
+  remove(threadId: string, itemId: string): Promise<void>
+}
+
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
+  /**
+   * Send a message delivered as asked: it starts a turn, steers the running one, waits for the next,
+   * or stops the running one and starts now.
+   */
+  send(input: SendAgentMessageInput): Promise<ExecutionAgentSendResult>
   /**
    * Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights.
    * A sub-agent's run is never retried: its turn decides whether to spawn it again.
@@ -344,6 +390,7 @@ export type AgentRuntime<TParams extends Record<string, unknown> = Record<string
   get(): AgentDescriptor | null
   readonly threads: AgentThreadsRuntime<TParams>
   readonly runs: AgentRunsRuntime
+  readonly inbox: AgentInboxRuntime
   /** Other users' conversations, read-only, with `can.observe(agent.threads)`. */
   readonly observed: ObservedAgentThreadsRuntime
   readonly memory: AgentMemoryRuntime
@@ -703,6 +750,29 @@ export function createAgentRuntime<
     }
   }
 
+  /**
+   * Start the next message the caller queued for the run's thread, as the caller, once the run
+   * ended. It never throws: what keeps the message from starting comes back as `closed`, and the
+   * message waits.
+   */
+  const startQueuedTurn = async (
+    runId: string,
+    options: { readonly onlyImmediate: boolean }
+  ): Promise<AgentQueuedTurnStart> => {
+    const agents = requireAgents()
+    const run = await agents.runs.getById({ projectId: runtime.projectId, id: runId })
+    if (run?.kind !== "conversation") return { status: "closed" }
+
+    try {
+      // Someone who left the thread no longer starts turns in it.
+      if (!(await rule.read(run.threadId))) return { status: "closed" }
+      return await startQueuedAgentTurnFromInbox(runtime, execution, run, options)
+    } catch (error) {
+      console.error(`[Sixb] Could not start a queued message of Agent run '${run.id}'.`, error)
+      return { status: "closed" }
+    }
+  }
+
   const preferences: AgentPreferencesRuntime = {
     get: async () => {
       const { approvalMode, approvalModeSource } = await defaultAgentApprovalMode(requireAgents(), {
@@ -726,19 +796,40 @@ export function createAgentRuntime<
     },
   }
 
-  const ownedComputerThread = async (threadId: string): Promise<AgentThreadRecord> => {
+  /** Move a conversation's sandbox out of recovery, as its owner chose: fresh, or as it was. */
+  const recoverSandbox = async (
+    threadId: string,
+    choice: "recreate" | "restore",
+    transition: (storage: AgentStorage) => Promise<AgentThreadSandboxState>
+  ): Promise<AgentThreadView> => {
     const readable = await rule.read(threadId)
     if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+    assertConversationThread(readable.thread)
+    if (readable.access !== "owner") {
+      throw new AgentRequestError(
+        "not_thread_owner",
+        `[Sixb] Only the owner of Agent thread '${threadId}' can ${choice} its sandbox.`
+      )
+    }
+
+    const storage = runtime.storage.agents
+    if (!storage) {
+      throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    }
+    const thread = readable.thread
+    const sandboxState = await transition(storage)
+    const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
+    return view ?? thread
+  }
+
+  const ownedMovableThread = async (threadId: string): Promise<AgentThreadRecord> => {
+    const readable = await rule.read(threadId)
+    if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+    assertConversationThread(readable.thread)
     if (readable.access !== "owner") {
       throw new AgentRequestError(
         "not_thread_owner",
         `[Sixb] Only the owner of Agent thread '${threadId}' moves it.`
-      )
-    }
-    if (readable.thread.runsOn !== "computer") {
-      throw new AgentRequestError(
-        "invalid_message",
-        `[Sixb] Agent thread '${threadId}' runs in the cloud, on no computer.`
       )
     }
     return readable.thread
@@ -766,7 +857,9 @@ export function createAgentRuntime<
         throw error instanceof AgentStorageError && error.code === "active_run_exists"
           ? new AgentRequestError(
               "active_run_exists",
-              "[Sixb] A turn is running on the computer: stop it, or let it end, first."
+              thread.runsOn === "computer"
+                ? "[Sixb] A turn is running on the computer: stop it, or let it end, first."
+                : "[Sixb] A turn is running in the cloud: stop it, or let it end, first."
             )
           : error
       })
@@ -796,37 +889,27 @@ export function createAgentRuntime<
     approvals,
     preferences,
     threads: {
-      recreateSandbox: async (threadId, input) => {
-        const readable = await rule.read(threadId)
-        if (!readable)
-          throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
-        assertConversationThread(readable.thread)
-        if (readable.access !== "owner") {
-          throw new AgentRequestError(
-            "not_thread_owner",
-            `[Sixb] Only the owner of Agent thread '${threadId}' can recreate its sandbox.`
-          )
-        }
-
-        const thread = readable.thread
-        const storage = runtime.storage.agents
-        if (!storage)
-          throw new AgentRequestError(
-            "storage_unavailable",
-            "[Sixb] Agent storage is not configured."
-          )
-        const sandboxState = await storage.threads.transitionSandbox({
-          projectId: runtime.projectId,
-          id: threadId,
-          action: "recreate",
-          expectedSandboxName: input.expectedSandboxName,
-          name: createAgentThreadSandboxName(runtime.projectId, threadId),
-        })
-        const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
-        return view ?? thread
-      },
+      recreateSandbox: (threadId, input) =>
+        recoverSandbox(threadId, "recreate", (storage) =>
+          storage.threads.transitionSandbox({
+            projectId: runtime.projectId,
+            id: threadId,
+            action: "recreate",
+            expectedSandboxName: input.expectedSandboxName,
+            name: createAgentThreadSandboxName(runtime.projectId, threadId),
+          })
+        ),
+      restoreSandbox: (threadId, input) =>
+        recoverSandbox(threadId, "restore", (storage) =>
+          storage.threads.transitionSandbox({
+            projectId: runtime.projectId,
+            id: threadId,
+            action: "restore",
+            name: input.expectedSandboxName,
+          })
+        ),
       moveToComputer: async (threadId, computer) => {
-        const thread = await ownedComputerThread(threadId)
+        const thread = await ownedMovableThread(threadId)
         const moves = movesComputerPlace(thread, computer)
         const moved = await moveThread(thread, moves, (agents) =>
           agents.threads.assignComputer({ projectId: runtime.projectId, id: threadId, computer })
@@ -836,7 +919,13 @@ export function createAgentRuntime<
         return view ?? moved
       },
       moveToCloud: async (threadId) => {
-        const thread = await ownedComputerThread(threadId)
+        const thread = await ownedMovableThread(threadId)
+        if (thread.runsOn !== "computer") {
+          throw new AgentRequestError(
+            "invalid_message",
+            `[Sixb] Agent thread '${threadId}' runs in the cloud, on no computer.`
+          )
+        }
         const { thread: moved, queued } = await moveThread(thread, true, (agents) =>
           agents.threads.moveToCloud({ projectId: runtime.projectId, id: threadId })
         )
@@ -962,7 +1051,58 @@ export function createAgentRuntime<
       getApprovalMode: getThreadApprovalMode,
       setApprovalMode: setThreadApprovalMode,
     },
+    inbox: {
+      list: async (threadId) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        return requireAgents().inbox.list({
+          projectId: runtime.projectId,
+          threadId: thread.id,
+          includeClaimed: false,
+        })
+      },
+      update: async (threadId, itemId, input) => {
+        if (!(await getVisibleThreadRecord(threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        return promoteAgentInboxItem(runtime, execution, { ...input, threadId, itemId })
+      },
+      remove: async (threadId, itemId) => {
+        if (!(await getVisibleThreadRecord(threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+        await withdrawAgentInboxItem(runtime, execution, { threadId, itemId })
+      },
+    },
     runs: {
+      send: async (input) => {
+        assertNoAgentSelector(input)
+        if (!getAgent()) {
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+        }
+        assertAuthorized(runtime, { kind: "agent.run" })
+        if (!(await getVisibleThreadRecord(input.threadId))) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${input.threadId}' not found.`
+          )
+        }
+        const result = await sendAgentMessage(runtime, execution, turnModels, input)
+        return result.kind === "turn"
+          ? { ...result, run: await attachRunView(runtime, result.run) }
+          : result
+      },
       request: async (input) => {
         assertNoAgentSelector(input)
         const agent = getAgent()
@@ -1019,6 +1159,7 @@ export function createAgentRuntime<
     observed: createObservedAgentThreadsRuntime(runtime),
   }
   registerAgentTurnResume(agentRuntime, resumeDecidedTurn)
+  registerAgentQueuedTurn(agentRuntime, startQueuedTurn)
   return agentRuntime
 }
 

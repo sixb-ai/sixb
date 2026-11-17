@@ -8,7 +8,9 @@ import {
   FRAME_REFERENCE_PREFIX,
   frameEntries,
   frameLayout,
+  frozenDocumentHtml,
   injectFrameAssets,
+  markDocumentSections,
   resolveArtifactFrame,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
@@ -31,9 +33,9 @@ interface FrameContext {
 /**
  * Serves a version's files to its sandboxed frame, under the token a frame link carries: the token
  * is the credential, so the route is public. Each entry gets its layout's kit and the runtime,
- * which are served beside the files. A canvas's board asked for with `?sixb-edit` is served for
- * editing: its static elements marked with their addresses. Hidden from OpenAPI: clients receive frame links, they
- * never build them.
+ * which are served beside the files. A canvas's board, or a designed document, asked for with
+ * `?sixb-edit` is served for editing: its static elements marked with their addresses. Hidden from
+ * OpenAPI: clients receive frame links, they never build them.
  */
 export function registerArtifactFrameRoutes(
   app: Elysia,
@@ -110,7 +112,7 @@ async function frameResponse(
   const file = version.files.find((candidate) => candidate.path === path)
   if (!file) return notFound()
 
-  const layout = frameLayout(version.outline.kind)
+  const layout = frameLayout(version)
   if (!lent && layout && frameEntries(version).includes(file.path)) {
     const opened = await openFileRef(host.blobStorage, file.file)
     if (!opened) return notFound()
@@ -119,16 +121,27 @@ async function frameResponse(
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
 
-    // A canvas's board served for editing has its static elements marked with their addresses,
-    // for the runtime to report and edit them by.
+    const { outline } = version
+    // A canvas's board, or a designed document, served for editing has its static elements
+    // marked with their addresses, for the runtime to report and edit them by.
     const editing =
-      version.outline.kind === "canvas" && new URL(request.url).searchParams.has("sixb-edit")
-    const source = editing ? annotateBoard(text) : text
+      (outline.kind === "canvas" || outline.kind === "document") &&
+      new URL(request.url).searchParams.has("sixb-edit")
+    const marked = editing ? annotateBoard(text) : text
+    // A frozen designed document shows the values written in when it was frozen: its fields are
+    // served unmarked, so its frame reads none again.
+    const shown =
+      outline.kind === "document" && version.frozenAt ? frozenDocumentHtml(marked) : marked
+    // A designed document's headings carry their sections' slugs, to open it at one, and its
+    // runtime gets its paper, to cut it into pages.
+    const source =
+      outline.kind === "document" ? markDocumentSections(shown, outline.headings) : shown
     return new Response(
       injectFrameAssets(
         rewriteFrameReferences(source, frame.targets, file.path),
         layout,
-        file.path
+        file.path,
+        outline.kind === "document" ? outline.paper : undefined
       ),
       { headers }
     )

@@ -51,6 +51,10 @@ export {
   type ContextPickerProps,
   type ContextPickerResult,
 } from "./agent/components/context-picker"
+export {
+  PendingMessages,
+  type PendingMessagesProps,
+} from "./agent/components/pending-messages"
 export { ProviderLogo, type ProviderLogoProps } from "./agent/components/provider-logo"
 export {
   ReasoningEffortSlider,
@@ -93,7 +97,9 @@ export {
 export type {
   AgentContextEntryInput,
   AgentFileRef,
+  AgentInboxItem,
   AgentMessage,
+  AgentMessageDelivery,
   AgentRun,
   AgentThread,
   AgentThreadContext,

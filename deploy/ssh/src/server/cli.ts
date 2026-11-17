@@ -12,10 +12,12 @@ import { runSupervisor, type SupervisorCommand, sendSupervisorCommand } from "./
  * script, which pins the Bun version and manifest. `sixb deploy` reaches it over SSH.
  *
  *   supervise                       run the deployment's processes (the systemd unit's command)
- *   status [--json] [--check]       --check exits 1 unless every process is running
+ *   status [--json] [--check] [--candidate]
  *   logs [service] [--tail n] [--follow]
  *   restart|start|stop [service]
- *   run <staged> <path> [args...]  run an uploaded script with `sixb run`; see ./run.ts
+ *   stage <candidate-manifest>
+ *   activate|discard
+ *   run <staged> <path> [args...]   run an uploaded script with `sixb run`; see ./run.ts
  */
 const argv = process.argv.slice(2)
 
@@ -40,7 +42,7 @@ async function main(): Promise<void> {
 
   const manifestPath = option("--manifest")
   if (!manifestPath) throw new Error("[SshTarget] --manifest is required.")
-  const [command, service] = positionals()
+  const [command, arg] = positionals()
 
   switch (command) {
     case "supervise":
@@ -50,7 +52,7 @@ async function main(): Promise<void> {
     case "status":
       return status(await loadProcessManifest(manifestPath))
     case "logs":
-      return logs(await loadProcessManifest(manifestPath), service)
+      return logs(await loadProcessManifest(manifestPath), arg)
     case "restart":
     case "start":
     case "stop":
@@ -58,9 +60,21 @@ async function main(): Promise<void> {
         await sendSupervisorCommand(
           await loadProcessManifest(manifestPath),
           command satisfies SupervisorCommand,
-          service
+          { service: arg }
         )
       )
+      return
+    case "stage":
+      if (!arg) throw new Error("[SshTarget] Usage: stage <candidate-manifest> --manifest <path>")
+      console.log(
+        await sendSupervisorCommand(await loadProcessManifest(manifestPath), "stage", {
+          manifestPath: arg,
+        })
+      )
+      return
+    case "activate":
+    case "discard":
+      console.log(await sendSupervisorCommand(await loadProcessManifest(manifestPath), command))
       return
     default:
       throw new Error(`[SshTarget] Unknown command '${command ?? ""}'.`)
@@ -70,11 +84,12 @@ async function main(): Promise<void> {
 async function status(manifest: ProcessManifest): Promise<void> {
   const state = await readProcessState(statePath(manifest))
   const running = state !== null && isPidRunning(state.supervisorPid)
+  const sourceInstances = flag("--candidate") ? (state?.staged ?? []) : (state?.instances ?? [])
   const report: DeployStatus = {
     release: await readRelease(manifest.releasePath),
     running,
     processes: running
-      ? state.instances.map((instance) => ({
+      ? sourceInstances.map((instance) => ({
           service: instance.service,
           instance: instance.instance,
           status: instance.status,
@@ -94,13 +109,19 @@ async function status(manifest: ProcessManifest): Promise<void> {
       (process) => process.status !== "running" || process.restarts > 0
     )
     if (!running) console.error("The supervisor is not running.")
+    else if (flag("--candidate") && report.processes.length === 0) {
+      console.error("No candidate processes are staged.")
+    }
     for (const process of down) {
       const label =
         process.instance === 0 ? process.service : `${process.service}#${process.instance}`
-      const state = process.status === "running" ? `restarted ${process.restarts}x` : process.status
-      console.error(`${label} ${state}${process.lastError ? `: ${process.lastError}` : ""}`)
+      const stateText =
+        process.status === "running" ? `restarted ${process.restarts}x` : process.status
+      console.error(`${label} ${stateText}${process.lastError ? `: ${process.lastError}` : ""}`)
     }
-    if (!running || down.length > 0) process.exit(1)
+    if (!running || down.length > 0 || (flag("--candidate") && report.processes.length === 0)) {
+      process.exit(1)
+    }
     return
   }
   console.log(JSON.stringify(report))

@@ -9,6 +9,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
@@ -22,6 +23,8 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactPdfKeyInput,
+  ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
   ArtifactRestorePointRecord,
@@ -103,7 +106,8 @@ const FRAME_GRANT_COLUMNS = `
 const COMMENT_COLUMNS = `
   project_id AS "projectId", artifact_id AS "artifactId", id, parent_id AS "parentId", anchor,
   body, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
-  author_name AS "authorName", created_at AS "createdAt", resolved_at AS "resolvedAt",
+  author_name AS "authorName", author_grant_id AS "authorGrantId",
+  created_at AS "createdAt", resolved_at AS "resolvedAt",
   resolved_by_principal_type AS "resolvedByPrincipalType",
   resolved_by_principal_id AS "resolvedByPrincipalId",
   origin_thread_id AS "originThreadId", origin_run_id AS "originRunId"
@@ -113,6 +117,11 @@ const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "upd
 
 const BOARD_PREVIEW_COLUMNS = `
   project_id AS "projectId", render_key AS "renderKey", theme, size, file,
+  created_at AS "createdAt"
+`
+
+const PDF_COLUMNS = `
+  project_id AS "projectId", render_key AS "renderKey", file, pages, failure,
   created_at AS "createdAt"
 `
 
@@ -709,6 +718,38 @@ export class PgArtifactStorage implements ArtifactStorage {
     })
   }
 
+  async getPdf(input: ArtifactPdfKeyInput): Promise<ArtifactPdfRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(PDF_COLUMNS)} FROM artifact_pdfs
+      WHERE project_id = ${input.projectId} AND render_key = ${input.renderKey}
+    `
+    return row ? parseArtifactPdfRow(row) : null
+  }
+
+  async putPdf(input: ArtifactPdfRecord): Promise<void> {
+    const printed = "failure" in input ? null : input
+    await this.sql`
+      INSERT INTO artifact_pdfs (project_id, render_key, file, pages, failure, created_at)
+      VALUES (
+        ${input.projectId}, ${input.renderKey},
+        ${printed ? JSON.stringify(printed.file) : null}::text::jsonb, ${printed?.pages ?? null},
+        ${"failure" in input ? input.failure : null}, ${input.createdAt}
+      )
+      ON CONFLICT (project_id, render_key) DO UPDATE SET
+        file = excluded.file, pages = excluded.pages, failure = NULL,
+        created_at = excluded.created_at
+      WHERE artifact_pdfs.failure IS NOT NULL AND excluded.failure IS NULL
+    `
+  }
+
+  async clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void> {
+    await this.sql`
+      DELETE FROM artifact_pdfs
+      WHERE project_id = ${input.projectId} AND render_key = ${input.renderKey}
+        AND failure IS NOT NULL
+    `
+  }
+
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       // Under the artifact's lock: two comments at once cannot both pass the limit.
@@ -739,15 +780,17 @@ export class PgArtifactStorage implements ArtifactStorage {
         throw artifactStorageErrors.guestCommentsFull(input.artifactId)
       }
 
+      const guest = input.author.type === "guest" ? input.author : undefined
       const [row] = await tx<PgRow[]>`
         INSERT INTO artifact_comments (
           project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-          author_principal_id, author_name, created_at, origin_thread_id, origin_run_id
+          author_principal_id, author_name, author_grant_id, created_at, origin_thread_id,
+          origin_run_id
         ) VALUES (
           ${input.projectId}, ${input.artifactId}, ${input.id}, ${input.parentId ?? null},
           ${JSON.stringify(commentAnchor(input.anchor))}::text::jsonb, ${input.body},
           ${input.author.type}, ${input.author.id},
-          ${input.author.type === "guest" ? input.author.name : null}, ${input.createdAt},
+          ${guest?.name ?? null}, ${guest?.grantId ?? null}, ${input.createdAt},
           ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}
         )
         RETURNING ${tx.unsafe(COMMENT_COLUMNS)}

@@ -9,6 +9,7 @@ import type {
   DeployStatus,
 } from "@sixb/core/deploy"
 import { deploymentLayout } from "./layout"
+import type { SlotPorts } from "./render"
 import {
   renderDeployScript,
   renderPrepareScript,
@@ -27,7 +28,8 @@ export async function deployRelease(
   user: string,
   release: DeployRelease,
   source: DeploySource,
-  context: DeployContext
+  context: DeployContext,
+  slotPorts?: SlotPorts
 ): Promise<void> {
   const prepared = await capture(shell, renderPrepareScript(release.name, source.commit))
   const [home, incoming] = prepared
@@ -46,6 +48,7 @@ export async function deployRelease(
     release,
     layout,
     incoming,
+    ...(slotPorts ? { slotPorts } : {}),
     record: {
       commit: source.commit,
       ref: source.ref,

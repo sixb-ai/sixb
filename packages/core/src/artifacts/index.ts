@@ -102,12 +102,15 @@ export {
   type CanvasOutlineItem,
   createHeadingSlugger,
   type DocumentHeading,
+  type DocumentHolder,
   type DocumentOutline,
   type FileOutline,
   type SheetOutline,
   type SheetSummary,
   type SlidesOutline,
 } from "./outline"
+export type { DocumentPaper } from "./paper"
+export { DOCUMENT_PDF_WAIT_MS } from "./pdf-job"
 export {
   type ArtifactFacetsQueryResult,
   type ArtifactObjectsQueryResult,

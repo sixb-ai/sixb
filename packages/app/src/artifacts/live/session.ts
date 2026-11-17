@@ -39,6 +39,8 @@ export interface LiveSave {
   readonly state: ArtifactLiveSaveState
   readonly revision: number
   readonly error?: string
+  /** Publishing refused what the document holds: it is not tried again until it changes. */
+  readonly refused?: true
 }
 
 export interface LiveArtifactState {
@@ -220,6 +222,10 @@ export class LiveArtifact {
   connected(): void {
     if (this.state.left) return
     this.joined = false
+    const others = [...this.awareness.getStates().keys()].filter(
+      (client) => client !== this.doc.clientID
+    )
+    awarenessProtocol.removeAwarenessStates(this.awareness, others, FROM_SERVER)
     this.send({ type: "join", artifactId: this.artifactId })
     this.update({ connection: "online" })
   }
@@ -270,11 +276,11 @@ export class LiveArtifact {
         return
       }
       case "status": {
-        const { state, revision, error } = message
+        const { state, revision, error, refused } = message
         const written = message.snapshot ? readSnapshot(message.snapshot) : null
         if (written) this.forget(written)
         this.update({
-          save: { state, revision, ...(error ? { error } : {}) },
+          save: { state, revision, ...(error ? { error } : {}), ...(refused ? { refused } : {}) },
           pending: state !== "saved",
         })
         return
@@ -513,6 +519,7 @@ function openLiveSocket(handlers: Parameters<LiveSocketFactory>[0]): ArtifactLiv
     onMessage: handlers.onMessage,
     onStateChange: (state) => {
       if (state.connected || !connected) return
+      if (!state.reconnecting && !state.error) return
       connected = false
       handlers.onClosed()
     },

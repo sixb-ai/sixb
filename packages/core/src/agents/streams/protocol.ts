@@ -1,7 +1,8 @@
+import type { Principal } from "../../auth"
 import type { Broker, BrokerStreamDefinition } from "../../broker"
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
-import { isPlainRecord, type JsonValue } from "../../json"
+import { isJsonValue, isPlainRecord, type JsonValue } from "../../json"
 import { isModelUiChunk, type ModelUiChunk } from "../../models/events"
 import {
   AGENT_APPROVAL_STATUSES,
@@ -13,6 +14,7 @@ import {
   type AgentRunRecord,
   type ConversationAgentRunRecord,
 } from "../../storage/agents/types"
+import type { AgentMessagePart } from "../message"
 
 export const AGENT_RUN_STREAM_SCHEMA_VERSION = 1 as const
 export const DEFAULT_AGENT_RUN_STREAM_RETENTION = {
@@ -422,6 +424,18 @@ export const AGENT_COMPACTION_FAILURE_CODES = [
 ] as const
 export type AgentCompactionFailureCode = (typeof AGENT_COMPACTION_FAILURE_CODES)[number]
 
+/**
+ * A message a turn read from its thread's inbox as it answered. The conversation holds it as a user
+ * message, with this id, where the turn read it: after what the run streamed before this record.
+ */
+export interface AgentInboxReadMessage {
+  /** The id the message is saved with once the turn ends. */
+  readonly id: string
+  readonly authorPrincipal: Principal
+  readonly parts: readonly AgentMessagePart[]
+  readonly createdAt: string
+}
+
 export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.run.started"
@@ -448,6 +462,10 @@ export type AgentRunStreamEvent =
       readonly type: "agent.ui.chunk"
       readonly chunkIndex: number
       readonly chunk: ModelUiChunk
+    })
+  | (AgentRunStreamEventBase & {
+      readonly type: "agent.inbox.read"
+      readonly messages: readonly AgentInboxReadMessage[]
     })
   | (AgentRunStreamEventBase & {
       readonly type: "agent.message.finalized"
@@ -546,6 +564,12 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
     case "agent.ui.chunk":
       // A chunk type this reader does not know fails here, so a newer producer's chunk is skipped.
       return Number.isInteger(value.chunkIndex) && isModelUiChunk(value.chunk)
+    case "agent.inbox.read":
+      return (
+        Array.isArray(value.messages) &&
+        value.messages.length > 0 &&
+        value.messages.every(isAgentInboxReadMessage)
+      )
     case "agent.message.finalized":
       return typeof value.messageId === "string"
     case "agent.run.finished":
@@ -557,6 +581,20 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
     default:
       return false
   }
+}
+
+function isAgentInboxReadMessage(value: unknown): value is AgentInboxReadMessage {
+  return (
+    isPlainRecord(value) &&
+    typeof value.id === "string" &&
+    isPlainRecord(value.authorPrincipal) &&
+    typeof value.authorPrincipal.type === "string" &&
+    typeof value.authorPrincipal.id === "string" &&
+    Array.isArray(value.parts) &&
+    value.parts.every((part) => isPlainRecord(part) && typeof part.type === "string") &&
+    isJsonValue(value.parts) &&
+    typeof value.createdAt === "string"
+  )
 }
 
 function isAgentContextCheckpointReason(value: unknown): value is AgentContextCheckpointReason {
@@ -598,6 +636,8 @@ export function agentRunStreamIdempotencyKey(event: AgentRunStreamEvent): string
       return `${event.runId}:${event.attempt}:compaction:${event.reason}:failed:${event.errorCode}`
     case "agent.ui.chunk":
       return `${event.runId}:${event.attempt}:chunk:${event.chunkIndex}`
+    case "agent.inbox.read":
+      return `${event.runId}:${event.attempt}:inbox:${event.messages.map((message) => message.id).join(",")}:read`
     case "agent.message.finalized":
       return `${event.runId}:${event.attempt}:message:${event.messageId}:finalized`
     case "agent.run.finished":

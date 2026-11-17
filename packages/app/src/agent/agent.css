@@ -35,6 +35,260 @@
   }
 }
 
+/* Agent replies and execution traces: proportioned for conversation rather than docs pages. */
+.prose.prose-chat {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.prose.prose-chat h1 {
+  margin: 22px 0 10px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  line-height: 1.3;
+}
+
+.prose.prose-chat h2 {
+  margin: 20px 0 8px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.014em;
+  line-height: 1.34;
+}
+
+.prose.prose-chat h3 {
+  margin: 16px 0 6px;
+  font-size: 15.5px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.38;
+}
+
+.prose.prose-chat h4 {
+  margin: 14px 0 4px;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.42;
+}
+
+.prose.prose-chat h5 {
+  margin: 12px 0 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.prose.prose-chat h6 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.prose.prose-chat :is(h1, h2, h3, h4) + :is(h2, h3, h4, h5, h6) {
+  margin-top: 10px;
+}
+
+.prose.prose-chat :is(p, ul, ol, table, blockquote, pre) {
+  margin: 0 0 12px;
+}
+
+.prose.prose-chat :is(.code-block, .prose-table) {
+  margin: 0 0 14px;
+}
+
+.prose.prose-chat li {
+  margin: 4px 0;
+}
+
+.prose.prose-chat li > :is(ul, ol) {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.prose.prose-chat li:has(> .code-block, > .prose-table, > pre) {
+  margin-bottom: 10px;
+}
+
+.prose.prose-chat hr {
+  margin: 20px 0;
+}
+
+.prose.prose-chat :is(.code-block pre.shiki, pre) {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.prose.prose-chat table {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose.prose-chat :is(th, td) {
+  padding: 8px 12px;
+}
+
+.prose.prose-chat :is(th, td):first-child {
+  padding-left: 0;
+}
+
+.prose.prose-chat :is(th, td):last-child {
+  padding-right: 0;
+}
+
+.prose.prose-chat .sixb-callout {
+  margin: 14px 0;
+  padding: 11px 14px;
+  font-size: 14px;
+}
+
+.prose.prose-chat section[data-footnotes] {
+  margin-top: 18px;
+  padding-top: 10px;
+  font-size: 12.5px;
+}
+
+.prose.prose-chat > :first-child {
+  margin-top: 0;
+}
+
+.prose.prose-chat > :last-child,
+.prose.prose-chat :is(li, blockquote, .sixb-callout-body) > :last-child {
+  margin-bottom: 0;
+}
+
+/* Work disclosure scroll container: soft edge fades only in directions with hidden steps. */
+.sixb-work-scroll[data-fade-top]:not([data-fade-bottom]) {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22px);
+  mask-image: linear-gradient(to bottom, transparent, #000 22px);
+}
+
+.sixb-work-scroll[data-fade-bottom]:not([data-fade-top]) {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+
+.sixb-work-scroll[data-fade-top][data-fade-bottom] {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 22px,
+    #000 calc(100% - 22px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 22px,
+    #000 calc(100% - 22px),
+    transparent
+  );
+}
+
+.sixb-work-latest {
+  background: color-mix(in oklab, var(--card) 86%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    0 0 0 0.5px rgb(0 0 0 / 0.12),
+    0 6px 16px -6px rgb(0 0 0 / 0.18);
+  animation: sixb-composer-pop 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:is(.dark *).sixb-work-latest {
+  background: color-mix(in oklab, var(--popover) 86%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    0 0 0 0.5px rgb(255 255 255 / 0.14),
+    0 6px 16px -6px rgb(0 0 0 / 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-work-latest {
+    animation: none;
+  }
+}
+
+/* Reasoning inside the work trace: quiet structured notes subordinate to the main reply. */
+.prose.sixb-reasoning-prose {
+  color: color-mix(in oklab, var(--muted-foreground) 88%, transparent);
+  font-size: 12.5px;
+  line-height: 1.58;
+}
+
+.prose.sixb-reasoning-prose :is(h1, h2, h3, h4, h5, h6) {
+  margin: 10px 0 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: color-mix(in oklab, var(--foreground) 76%, var(--muted-foreground));
+}
+
+.prose.sixb-reasoning-prose :is(p, ul, ol, blockquote, pre) {
+  margin: 0 0 7px;
+}
+
+.prose.sixb-reasoning-prose p:has(> strong:only-child) {
+  margin: 10px 0 2px;
+}
+
+.prose.sixb-reasoning-prose p > strong:only-child {
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground) 76%, var(--muted-foreground));
+}
+
+.prose.sixb-reasoning-prose strong {
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground) 72%, var(--muted-foreground));
+}
+
+.prose.sixb-reasoning-prose :is(ul, ol) {
+  padding-left: 18px;
+}
+
+.prose.sixb-reasoning-prose li {
+  margin: 2px 0;
+}
+
+.prose.sixb-reasoning-prose :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 11.5px;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  color: color-mix(in oklab, var(--foreground) 78%, var(--muted-foreground));
+}
+
+.dark .prose.sixb-reasoning-prose :not(pre) > code {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.prose.sixb-reasoning-prose :is(.code-block, .prose-table) {
+  margin: 4px 0 8px;
+}
+
+.prose.sixb-reasoning-prose :is(.code-block pre.shiki, pre) {
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.prose.sixb-reasoning-prose > :first-child {
+  margin-top: 0;
+}
+
+.prose.sixb-reasoning-prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose.sixb-reasoning-prose[data-streaming="true"] > :last-child::after {
+  content: " ▍";
+  opacity: 0.55;
+}
+
 /* What a fetched page said, inside its row: one reading size, headings marked by weight alone. */
 .prose.sixb-web-fetch {
   font-size: 13px;

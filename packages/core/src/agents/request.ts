@@ -28,6 +28,7 @@ import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentApprovalMode,
   type AgentApprovalRecord,
+  type AgentInboxItemRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadComputer,
@@ -35,6 +36,7 @@ import {
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
 } from "../storage/agents"
+import { type AgentTurnPlace, turnPlace } from "../storage/agents/provider"
 import {
   aiLimitSubjectsFromAttribution,
   aiUsageLimitExceededError,
@@ -54,16 +56,23 @@ import {
   resolveAgentApprovalMode,
   turnResumeReadiness,
 } from "./approvals"
+import { cancelAgentRun } from "./cancel"
 import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
-import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import {
+  createAgentInboxItemId,
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentThreadId,
+} from "./ids"
 import type { AgentMessagePart } from "./message"
 import type { TurnModelRouter } from "./model-routing"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
 import { assertConversationThread } from "./thread-access"
+import { turnAnsweredEveryMessage } from "./turn-answered"
 import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
 
 export interface RequestAgentRunInput {
@@ -199,6 +208,8 @@ export async function requestAgentRun(
     (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: existingThread?.id }))
       .approvalMode
 
+  const place = turnPlace(runsOn, existingThread ? existingThread.computer : input.computer)
+
   // Last before anything is written, so a message the checks above refuse never reaches the
   // decision model. Concurrent messages to an idle thread can still each ask before one of them is
   // refused with `active_run_exists` below.
@@ -208,15 +219,12 @@ export async function requestAgentRun(
           ...requested,
           projectId,
           threadId: existingThread?.id,
+          place,
           settings,
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({
-    ...selected,
-    approvalMode,
-    ...(runsOn === undefined ? {} : { runsOn }),
-  })
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
   const createdThread = existingThread === null
   const thread =
@@ -315,7 +323,7 @@ export async function retryAgentRun(
    */
   blobStorage?: Pick<BlobStorage, "open" | "put">
 ): Promise<RequestAgentRunResult> {
-  resolveExecutionScopeAuthorization(runtime.projectId, {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
   })
@@ -340,6 +348,16 @@ export async function retryAgentRun(
     )
   }
   assertSandboxExecutionAvailable(thread)
+  if (
+    authority.type === "principal" &&
+    thread.runsOn === "computer" &&
+    !principalsEqual(authority.context.principal, thread.ownerPrincipal)
+  ) {
+    throw new AgentRequestError(
+      "not_thread_owner",
+      `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can retry a turn in it.`
+    )
+  }
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
@@ -407,6 +425,513 @@ export async function retryAgentRun(
 export type AgentTurnResume =
   | { readonly status: "resumed"; readonly run: ConversationAgentRunRecord }
   | { readonly status: Exclude<AgentTurnReadiness, "ready"> }
+
+/** How a message sent to a thread is delivered while a turn runs. */
+export const AGENT_MESSAGE_DELIVERIES = ["auto", "steer", "queue", "send_now"] as const
+export type AgentMessageDelivery = (typeof AGENT_MESSAGE_DELIVERIES)[number]
+
+export interface SendAgentMessageInput
+  extends Omit<RequestAgentRunInput, "principal" | "continue"> {
+  readonly threadId: string
+  /**
+   * `auto` (the default) starts a turn, and refuses while another one runs. `steer` reaches the
+   * running turn at its next step. `queue` starts a turn once the running one ends. `send_now` stops
+   * the running turn and starts this message after it.
+   */
+  readonly delivery?: AgentMessageDelivery
+}
+
+/** What a message became: the turn it started, or the inbox item that waits for one. */
+export type SendAgentMessageResult =
+  | {
+      readonly kind: "turn"
+      readonly run: ConversationAgentRunRecord
+      readonly createdThread: boolean
+    }
+  | { readonly kind: "inbox"; readonly item: AgentInboxItemRecord }
+
+/**
+ * Send a message to a conversation, delivered as asked.
+ *
+ * A steer or a send-now reaches only the turn its requester asked for: it runs as them. Any reader
+ * may queue a message, which starts as a turn of their own.
+ */
+export async function sendAgentMessage(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  models: AgentRequestModels,
+  input: SendAgentMessageInput
+): Promise<SendAgentMessageResult> {
+  const delivery = input.delivery ?? "auto"
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+
+  const startTurn = async (): Promise<SendAgentMessageResult> => {
+    const { delivery: _delivery, ...request } = input
+    const result = await requestAgentRun(runtime, execution, models, request)
+    return { kind: "turn", run: result.run, createdThread: result.createdThread }
+  }
+
+  // Nothing runs, so there is nothing to steer or wait behind.
+  const activeId = thread.activeRunId
+  if (delivery === "auto" || activeId === null) return startTurn()
+
+  const active = await agents.runs.getById({ projectId, id: activeId })
+  const requester = active
+    ? (await runtime.storage.executions.getById({ projectId, id: active.executionId }))?.requestedBy
+    : undefined
+  const principal = messageAuthor(runtime, execution)
+  const requesterOfTurn = requester !== undefined && principalsEqual(requester, principal)
+
+  if (!requesterOfTurn && delivery !== "queue") {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they can steer it or send now. Queue the message for your own turn.`
+    )
+  }
+
+  const settings = requesterSettings(input)
+  const contextParts = await resolveAgentContextParts(runtime, input.context)
+  const trigger = deliveredParts(input, delivery)
+  const spec = {
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
+  }
+  // The request that sends it is recorded with it: a turn that starts it once this request is gone
+  // runs as that request's child, as a turn this request started would have.
+  assertRequestAuthorityCanRunAgent(runtime)
+  const request = await ensureExecutionRecord(
+    runtime.storage.executions,
+    executionRecordInputFromRuntime({
+      execution,
+      runtimeAuthorization: runtime.runtimeAuthorization,
+    })
+  )
+  const { item } = await agents.inbox.enqueue({
+    id: createAgentInboxItemId(),
+    projectId,
+    threadId: thread.id,
+    messageId: input.messageId ?? createAgentMessageId(),
+    authorPrincipal: principal,
+    mode: delivery === "steer" ? "steer" : "queue",
+    parts: [...contextParts, ...trigger],
+    ...(Object.keys(spec).length === 0 ? {} : { spec }),
+    ...settings,
+    ...(delivery === "send_now" ? { immediate: true } : {}),
+    executionId: request.id,
+  })
+
+  if (delivery === "send_now") {
+    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+  }
+  await startIfThreadIdle(runtime, execution, thread.id)
+  return { kind: "inbox", item }
+}
+
+/** What a message the caller sent may become once it waits in a thread's inbox. */
+export interface PromoteAgentInboxItemInput {
+  readonly threadId: string
+  readonly itemId: string
+  /** Edit what it says; its context and files stay as they are. */
+  readonly text?: string
+  readonly model?: LanguageModelRef
+  readonly reasoning?: AgentReasoning
+  readonly approvalMode?: AgentApprovalMode
+  /** Steer the running turn with it, or keep it for the next turn. */
+  readonly delivery?: "steer" | "queue"
+  /** Stop the turn it waits behind, and start it now. */
+  readonly immediate?: boolean
+}
+
+/**
+ * Change a message waiting in a thread's inbox, before a turn reads it: what it says, the model it
+ * asks for, where it goes, or that it goes now.
+ *
+ * Only the person who sent it may change it, and a message that steers or goes now reaches only the
+ * turn its own requester asked for.
+ */
+export async function promoteAgentInboxItem(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: PromoteAgentInboxItemInput
+): Promise<AgentInboxItemRecord> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+
+  const item = await agents.inbox.getById({ projectId, id: input.itemId })
+  if (!item || item.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${input.itemId}' is not waiting in thread '${thread.id}'.`
+    )
+  }
+  const principal = messageAuthor(runtime, execution)
+  if (!principalsEqual(item.authorPrincipal, principal)) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent inbox item '${item.id}' was sent by someone else: only they can change it.`
+    )
+  }
+
+  const active = thread.activeRunId
+    ? await agents.runs.getById({ projectId, id: thread.activeRunId })
+    : null
+  const delivery = input.delivery ?? item.mode
+  const turn = active?.kind === "conversation" ? active : null
+  if ((delivery === "steer" || input.immediate === true) && turn) {
+    if (!(await askedForTurn(runtime, turn, principal))) {
+      throw new AgentRequestError(
+        "not_run_requester",
+        `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they can steer it or send now. Keep the message queued for your own turn.`
+      )
+    }
+  }
+
+  const spec = {
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
+  }
+  const updated = await agents.inbox.update({
+    projectId,
+    threadId: thread.id,
+    id: item.id,
+    ...(input.delivery === undefined ? {} : { mode: input.delivery }),
+    ...(input.text === undefined
+      ? {}
+      : {
+          parts: [
+            { type: "text" as const, text: input.text },
+            ...item.parts.filter((part) => part.type !== "text"),
+          ],
+        }),
+    // What it does not name stays as it asked: a new reasoning keeps its model.
+    ...(Object.keys(spec).length === 0 ? {} : { spec: { ...item.spec, ...spec } }),
+    ...(input.immediate === true ? { immediate: true } : {}),
+  })
+  if (!updated) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${item.id}' is no longer waiting in thread '${thread.id}'.`
+    )
+  }
+  if (input.immediate === true && turn) {
+    await stopTurnBefore(runtime, execution, turn)
+  }
+  await startIfThreadIdle(runtime, execution, thread.id)
+  return updated
+}
+
+/**
+ * Take back a message waiting in a thread's inbox, before a turn reads it. Only the person who sent
+ * it may withdraw it.
+ */
+export async function withdrawAgentInboxItem(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: { readonly threadId: string; readonly itemId: string }
+): Promise<void> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' was not found.`
+    )
+  }
+  assertConversationThread(thread)
+  const item = await agents.inbox.getById({ projectId, id: input.itemId })
+  if (!item || item.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${input.itemId}' is not waiting in thread '${thread.id}'.`
+    )
+  }
+  if (!principalsEqual(item.authorPrincipal, messageAuthor(runtime, execution))) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent inbox item '${item.id}' was sent by someone else: only they can withdraw it.`
+    )
+  }
+  const removed = await agents.inbox.remove({ projectId, threadId: thread.id, id: item.id })
+  if (!removed) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] Agent inbox item '${item.id}' is no longer waiting in thread '${thread.id}': a turn read it.`
+    )
+  }
+}
+
+/** The person a message this request sends is from. */
+function messageAuthor(runtime: SixbRuntimeContext, execution: ExecutionContext): Principal {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  return authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
+}
+
+/** Whether the person asked for this turn, which alone may steer it or send now. */
+async function askedForTurn(
+  runtime: SixbRuntimeContext,
+  run: ConversationAgentRunRecord,
+  principal: Principal
+): Promise<boolean> {
+  const requester = (
+    await runtime.storage.executions.getById({ projectId: runtime.projectId, id: run.executionId })
+  )?.requestedBy
+  return requester !== undefined && principalsEqual(requester, principal)
+}
+
+/**
+ * Stop the turn a message waits behind, so the message starts now. A turn still running ends first,
+ * and its end starts the message (see afterAgentRunFinished); one that never started has no end to
+ * wait for, so it starts here.
+ */
+async function stopTurnBefore(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  active: ConversationAgentRunRecord
+): Promise<void> {
+  if (active.status === "running") {
+    await cancelAgentRun(runtime, active)
+    return
+  }
+  await cancelAgentRun(runtime, active).catch(() => undefined)
+  await startQueuedAgentTurnFromInbox(runtime, execution, active, { onlyImmediate: true })
+}
+
+/**
+ * Start what the caller left waiting once no turn holds the thread: the turn it waited behind ended
+ * before the message reached the inbox, or before a stop reached it, so that end read none of it,
+ * or it was someone else's, whose end starts their own messages first. It starts the caller's own
+ * turn, as them, by the rules a turn's end applies. A failure leaves the message waiting for the
+ * repair pass.
+ */
+async function startIfThreadIdle(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  threadId: string
+): Promise<void> {
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  try {
+    const thread = await agents.threads.getById({ projectId, id: threadId })
+    // A turn holds it: that turn's end starts the message.
+    if (!thread || thread.activeRunId !== null) return
+    const {
+      runs: [last],
+    } = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 1,
+    })
+    if (last?.kind !== "conversation") return
+    // A paused turn resumes first, and its end starts what waits: only a message sent now passes
+    // it, setting its held calls aside as a message typed in the chat would.
+    const onlyImmediate =
+      isAwaitingApprovalRun(last) || !(await turnAnsweredEveryMessage(agents, last))
+    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
+  } catch (error) {
+    console.error(
+      `[Sixb] Could not start what waits in Agent thread '${threadId}'; the repair pass retries.`,
+      error
+    )
+  }
+}
+
+/** The parts a message of its own carries: what it says, then the files it brings. */
+function deliveredParts(
+  input: Pick<SendAgentMessageInput, "text" | "attachments">,
+  delivery: AgentMessageDelivery
+): readonly AgentMessagePart[] {
+  if (delivery === "steer" && (input.attachments?.length ?? 0) > 0) {
+    throw new AgentRequestError(
+      "invalid_attachment",
+      "[Sixb] A message that steers a running turn carries no file: queue it for the next turn instead."
+    )
+  }
+  assertAttachments(input.attachments)
+  const text =
+    typeof input.text === "string" && input.text.trim().length > 0
+      ? [{ type: "text" as const, text: input.text }]
+      : []
+  const files = (input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef }))
+  if (text.length === 0 && files.length === 0) {
+    throw new AgentRequestError(
+      "invalid_message",
+      "[Sixb] An Agent message needs text or attachments."
+    )
+  }
+  return [...text, ...files]
+}
+
+/** Where a queued turn started from: the thread moved on, nothing waited, or it started. */
+export type AgentQueuedTurnStart =
+  | { readonly status: "started"; readonly run: ConversationAgentRunRecord }
+  | { readonly status: "nothing" }
+  | { readonly status: "closed" }
+
+/**
+ * Start the next message the execution's requester queued for this thread, as them, from
+ * `finishedRun`: a turn of the thread, whose model and reasoning carry over.
+ *
+ * It pops the item in the same transaction that writes its message and its run, so two turns
+ * ending at once start one between them. `onlyImmediate` starts only a message someone sent now,
+ * which is what a turn that did not answer (a stop, a failure) may follow.
+ */
+export async function startQueuedAgentTurnFromInbox(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  finishedRun: ConversationAgentRunRecord,
+  input: { readonly onlyImmediate: boolean }
+): Promise<AgentQueuedTurnStart> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+
+  // The finished turn's spec is where a queued message starts: its model and reasoning, unless the
+  // message names others. A turn too old to carry one has nothing to start from.
+  const kept = finishedRun.spec
+  if (!kept) return { status: "closed" }
+
+  const thread = await agents.threads.getById({ projectId, id: finishedRun.threadId })
+  if (!thread) return { status: "closed" }
+  assertSandboxExecutionAvailable(thread)
+  // Whom the turn runs as, and whose messages it starts: a turn starts only its requester's.
+  const principal = execution.requestedBy
+  if (!principal) return { status: "closed" }
+  // Its owner's computer runs its turns as its owner: another's message waits for one of theirs.
+  if (thread.runsOn === "computer" && !principalsEqual(principal, thread.ownerPrincipal)) {
+    return { status: "closed" }
+  }
+
+  const runId = createAgentRunId()
+  const durableExecution = await prepareResumedExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+
+  let started: ConversationAgentRunRecord | null
+  let superseded: readonly AgentApprovalRecord[] = []
+  try {
+    started = await runtime.storage.transaction(async (tx) => {
+      const agents = tx.agents
+      if (!agents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+      const item = await agents.inbox.takeNextQueued({
+        projectId,
+        threadId: thread.id,
+        onlyImmediate: input.onlyImmediate,
+        authorPrincipal: principal,
+      })
+      if (!item) return null
+
+      const inherited = await resolveAgentApprovalMode(agents, {
+        projectId,
+        principal,
+        threadId: thread.id,
+      })
+      const approvalMode = item.spec?.approvalMode ?? inherited.approvalMode
+      const spec = queuedConversationRunSpec(thread, kept, item, approvalMode)
+
+      await tx.executions.create(durableExecution)
+      // Like any message that starts a turn, it tells the model how its earlier calls ended, and
+      // sets aside the ones still waiting.
+      const reported = await reportAgentApprovals(agents, {
+        projectId,
+        threadId: thread.id,
+        messageId: item.messageId,
+      })
+      superseded = reported.superseded
+      await agents.messages.append({
+        id: item.messageId,
+        projectId,
+        threadId: thread.id,
+        runId: null,
+        role: "user",
+        parts: [...reported.parts, ...item.parts],
+        authorPrincipal: item.authorPrincipal,
+        createdAt: item.createdAt,
+        ...(item.timeZone === undefined && item.locale === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(item.timeZone === undefined ? {} : { timeZone: item.timeZone }),
+                ...(item.locale === undefined ? {} : { locale: item.locale }),
+              },
+            }),
+      })
+      return agents.runs.create({
+        id: runId,
+        projectId,
+        executionId: durableExecution.id,
+        threadId: thread.id,
+        triggerMessageId: item.messageId,
+        spec,
+      })
+    })
+  } catch (error) {
+    // A turn took the thread meanwhile: its end starts this message, or its requester does.
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      return { status: "closed" }
+    }
+    throw error
+  }
+  if (!started) return { status: "nothing" }
+
+  await announceAgentApprovals(runtime.broker, superseded)
+  await publishRunActivity(runtime, started)
+  await dispatchAgentRun(runtime, agents, runId)
+  return { status: "started", run: started }
+}
+
+/** A queued message's turn: the finished turn's spec, with the message's own choices over it. */
+function queuedConversationRunSpec(
+  thread: AgentThreadRecord,
+  kept: ConversationAgentRunSpec,
+  item: AgentInboxItemRecord,
+  approvalMode: AgentApprovalMode
+): ConversationAgentRunSpec {
+  const model = item.spec?.model ?? kept.model
+  const reasoning = item.spec?.reasoning ?? kept.reasoning
+  const timeZone = item.timeZone ?? kept.timeZone
+  const locale = item.locale ?? kept.locale
+  return inPlace(thread, {
+    model,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+    approvalMode,
+  })
+}
 
 /**
  * Resume a turn that paused on held calls, once its requester decided on all of them: a new turn
@@ -565,8 +1090,8 @@ function inPlace(
   thread: AgentThreadRecord,
   spec: ConversationAgentRunSpec
 ): ConversationAgentRunSpec {
-  const { runsOn: _runsOn, ...rest } = spec
-  return Object.freeze(thread.runsOn === undefined ? rest : { ...rest, runsOn: thread.runsOn })
+  const { runsOn: _runsOn, computer: _computer, ...rest } = spec
+  return Object.freeze({ ...rest, ...turnPlace(thread.runsOn, thread.computer) })
 }
 
 /** The paused turn's spec, with defaults for a model that has since left the catalog. */
@@ -643,6 +1168,8 @@ async function routedConversationRunSpec(
   input: RoutedTurn & {
     readonly projectId: string
     readonly threadId: string | undefined
+    /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
+    readonly place: AgentTurnPlace
     readonly settings: RequesterSettings
     readonly language: LanguageModelCatalog | undefined
   }
@@ -650,7 +1177,7 @@ async function routedConversationRunSpec(
   const previous = input.threadId
     ? await latestConversationRun(agents, input.projectId, input.threadId)
     : undefined
-  const choice = await input.router.choose(input.text, previous)
+  const choice = await input.router.choose(input.text, previous, input.place)
 
   return resolveConversationRunSpec({
     models: input.language,
@@ -731,10 +1258,14 @@ function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal)
 }
 
 function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.sandboxState && !["new", "ready"].includes(thread.sandboxState.status)) {
+  if (
+    thread.runsOn !== "computer" &&
+    thread.sandboxState &&
+    !["new", "ready"].includes(thread.sandboxState.status)
+  ) {
     throw new AgentRequestError(
       "sandbox_execution_unavailable",
-      "[Sixb] Sandbox recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
+      "[Sixb] Sandbox recovery is required before another run. Reload the thread, then resume its previous sandbox or recreate it to start fresh."
     )
   }
 }

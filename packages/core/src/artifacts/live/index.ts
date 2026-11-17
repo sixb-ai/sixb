@@ -5,6 +5,12 @@
  */
 
 export {
+  type BlockMark,
+  type BlockNode,
+  blocksToMarkdown,
+  markdownToBlocks,
+} from "./blocks"
+export {
   annotateBoard,
   applyBoardEditToText,
   type BoardChange,
@@ -33,6 +39,7 @@ export {
   type LiveFiles,
   mergeCanvasItem,
 } from "./document"
+export { isPageEntry, PAGE_BODY, PAGE_MARK_TAGS, PAGE_TEXT_TAGS, pageEntryHtml } from "./page"
 export {
   AGENT_AWARENESS_FIELD,
   ARTIFACT_LIVE_ROUTE,

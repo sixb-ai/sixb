@@ -142,6 +142,10 @@ bun run demo:artifacts      # publish sample artifacts and print their links
 its onboarding plan: a canvas held in `ServiceContract.onboardingPlan`, shown live on the contract's
 page. **Attach onboarding plan** on the contract's page in the Console attaches another.
 
+It also gives quote Q-881 its proposal: a designed document held in `Quote.proposal`, whose number,
+price, validity, customer and site are fields read from the quote, live, and whose cases at the site
+come from a query that starts from it (`scripts/quote-proposal/`).
+
 To review it with the customer, run Northline signed in (`NORTHLINE_AUTH=magic-link bun run
 dev:runtime`, after `demo:artifacts` with sign-in off) and press **Share with customer** on the
 contract's page: it copies a link, valid 14 days, that opens the contract without an account

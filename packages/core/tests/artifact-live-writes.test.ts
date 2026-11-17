@@ -342,28 +342,100 @@ describe("a write to a canvas made from an earlier revision", () => {
 describe("a write to another kind made from an earlier revision", () => {
   test("is refused as moved, as before", async () => {
     const context = setup()
-    const files = await context.put({ "document.md": "# Plan\n" })
+    const files = await context.put({ "regions.csv": "region,visits\nNorth,1284\n" })
     const { artifact } = await context.sixb.artifacts.create({
-      kind: "document",
-      title: "Plan",
+      kind: "file",
+      title: "Regions",
       files,
     })
     await context.sixb.artifacts.update(artifact.id, {
-      kind: "document",
-      title: "Plan",
-      files: await context.put({ "document.md": "# Plan, 2\n" }),
+      kind: "file",
+      title: "Regions",
+      files: await context.put({ "regions.csv": "region,visits\nNorth,1290\n" }),
     })
 
     const stale = await context.sixb.artifacts
       .update(artifact.id, {
-        kind: "document",
-        title: "Plan",
+        kind: "file",
+        title: "Regions",
         files,
         baseRevision: 1,
         baseFiles: files,
       })
       .catch((error: unknown) => error)
     expect(stale).toMatchObject({ code: "artifact_moved" })
+  })
+})
+
+describe("a designed document", () => {
+  const html = (heading: string, fee: string) =>
+    `<!doctype html><html><head><title>Plan</title></head><body><h1>${heading}</h1><p>A fixed fee of ${fee}.</p></body></html>`
+
+  // Reproduce by making keepsDocument answer for a canvas alone: the designed document keeps no
+  // document to edit live, and the stale save is refused with artifact_moved.
+  test("keeps a document, and merges a write made from an earlier revision, as a canvas does", async () => {
+    const context = setup()
+    const files = await context.put({ "document.html": html("Service proposal", "$4,000") })
+    const { artifact } = await context.sixb.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files,
+    })
+    expect((await context.latest(artifact.id)).artifact.document).toBeDefined()
+
+    await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({ "document.html": html("Service proposal", "$4,500") }),
+    })
+    const written = await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Proposal",
+      files: await context.put({ "document.html": html("Repair proposal", "$4,000") }),
+      baseRevision: 1,
+      baseFiles: files,
+    })
+
+    expect(written).toMatchObject({ merged: true, version: { revision: 3 } })
+    expect(await context.read(written.version.files, "document.html")).toBe(
+      html("Repair proposal", "$4,500")
+    )
+  })
+})
+
+describe("a Markdown document", () => {
+  // Reproduce by making keepsDocument answer for a canvas and a designed document alone: the
+  // Markdown document keeps no document to edit live, and the stale save is refused as moved.
+  test("keeps a document of its blocks, and merges a write made from an earlier revision", async () => {
+    const context = setup()
+    const plan = (lede: string, step: string) =>
+      `# Pilot plan\n\n${lede}\n\n- Install the app\n- ${step}\n`
+    const files = await context.put({ "document.md": plan("Three weeks in North.", "First job") })
+    const { artifact } = await context.sixb.artifacts.create({
+      kind: "document",
+      title: "Pilot plan",
+      files,
+    })
+    const doc = await context.load(artifact.id)
+    expect(doc.getMap("files").get("document.md")).toBeInstanceOf(Y.XmlFragment)
+
+    await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Pilot plan",
+      files: await context.put({ "document.md": plan("Four weeks in North.", "First job") }),
+    })
+    const written = await context.sixb.artifacts.update(artifact.id, {
+      kind: "document",
+      title: "Pilot plan",
+      files: await context.put({ "document.md": plan("Three weeks in North.", "First paid job") }),
+      baseRevision: 1,
+      baseFiles: files,
+    })
+
+    expect(written).toMatchObject({ merged: true, version: { revision: 3 } })
+    expect(await context.read(written.version.files, "document.md")).toBe(
+      plan("Four weeks in North.", "First paid job")
+    )
   })
 })
 
@@ -410,9 +482,9 @@ describe("a canvas's document", () => {
     const context = setup()
     const { published } = await canvas(context)
     const plan = await context.sixb.artifacts.create({
-      kind: "document",
+      kind: "file",
       title: "Plan",
-      files: await context.put({ "document.md": "# Plan\n" }),
+      files: await context.put({ "plan.txt": "Plan\n" }),
     })
     const doc = await context.load(published.artifact.id)
 

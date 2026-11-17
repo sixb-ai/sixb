@@ -295,7 +295,7 @@ describe("publishing a version that holds queries", () => {
     )
   })
 
-  test("refuses queries in a document, which shows a live sheet instead", async () => {
+  test("refuses queries in a Markdown document, which shows a live sheet instead", async () => {
     const { as, put } = setup()
 
     await expectRefused(
@@ -307,7 +307,7 @@ describe("publishing a version that holds queries", () => {
           await put("queries/open.json", JSON.stringify(open)),
         ],
       }),
-      "[Sixb] 'queries/open.json': a document runs no query. A document shows a live sheet instead."
+      "[Sixb] 'queries/open.json': a Markdown document runs no query. A Markdown document shows a live sheet instead; a designed one, document.html, runs queries."
     )
   })
 
@@ -668,13 +668,13 @@ describe("picturing a canvas's boards that read queries", () => {
     /** The answers the job that pictures the version's boards carries, once it is due. */
     const answers = async () => {
       jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
-      const claimed = await context.deps.queues.agents.claim({
+      const claimed = await context.deps.queues.renders.claim({
         projectId,
         workerId: "test",
         limit: 10,
       })
       const job = claimed[0]?.job
-      if (job?.type !== "agent.artifact-previews.requested" || !job.payload.queries) {
+      if (job?.type !== "artifact.previews.requested" || !job.payload.queries) {
         throw new Error("Expected a job that carries the version's query answers.")
       }
       const blob = await context.deps.blobStorage.open(job.payload.queries.blobId)

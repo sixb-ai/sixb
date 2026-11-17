@@ -55,8 +55,8 @@ const LOADED_READY_MS = 2_000
  * events of the protocol's shape. The app's theme goes in as tokens, read where the frame is
  * mounted, so an artifact's theme applies too.
  *
- * The frame stays hidden until its theme is applied, then fades in over `fallback`: until the
- * tokens arrive, a deck paints in the kit's light defaults, which flash on a dark page.
+ * The frame stays hidden until its theme is applied, then replaces `fallback`: until the tokens
+ * arrive, a deck paints in the kit's light defaults, which flash on a dark page.
  *
  * A page in it keeps data with `sixb.state`, and reads its version's queries with `sixb.query`: the
  * frame's calls are answered here, for the artifact and the version it shows and the signed-in
@@ -330,9 +330,17 @@ export function ArtifactFrame({
   const failed =
     reportsFailure && (source === undefined ? frame.isError : timedOut === source && !isReady)
 
+  // The frame is transparent: once it shows, nothing stays beneath it to show through where its
+  // page bounces past an end.
+  const beneath = failed ? (
+    <div className="absolute inset-0 flex">{failure}</div>
+  ) : shown === source ? null : (
+    fallback
+  )
+
   return (
     <div className={cn("relative min-h-0 min-w-0", className)}>
-      {failed ? <div className="absolute inset-0 flex">{failure}</div> : fallback}
+      {beneath}
       {source ? (
         <iframe
           ref={attach}

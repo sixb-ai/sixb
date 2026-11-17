@@ -5,6 +5,7 @@ import {
   type ConnectorDefinitionOptions,
   type ConnectorOAuth2Authentication,
   type ConnectorOAuthCredentials,
+  type ConnectorOAuthRevocation,
   defineConnector,
   type OAuthConnectorCodeExchangeInput,
   type SixbErrorCode,
@@ -50,6 +51,7 @@ export type HarnessOptions = Pick<
   | "credentialMutationLeaseMs"
   | "providerOperationTimeoutMs"
   | "refreshSkewMs"
+  | "events"
 > & {
   readonly systemRuntimeClock?: boolean
   readonly systemStorageClock?: boolean
@@ -86,6 +88,7 @@ export function createHarness(options: HarnessOptions = {}) {
   let providerRevoked = false
   const exchangedVerifiers: (string | undefined)[] = []
   const refreshInputs: ConnectorOAuthCredentials[] = []
+  const revocations: (ConnectorOAuthRevocation | undefined)[] = []
   const connectionSignals: AbortSignal[] = []
 
   const connector = defineConnector(
@@ -140,8 +143,9 @@ export function createHarness(options: HarnessOptions = {}) {
             expiresAt: new Date(now.getTime() + 60 * 60_000),
           }
         },
-        async revoke() {
+        async revoke(_context, _credentials, revocation) {
           revokeCount += 1
+          revocations.push(revocation)
           await revokeGate
           if (providerRevoked) return
           if (revokeError) throw revokeError
@@ -195,6 +199,7 @@ export function createHarness(options: HarnessOptions = {}) {
     credentialMutationLeaseMs: options.credentialMutationLeaseMs,
     providerOperationTimeoutMs: options.providerOperationTimeoutMs,
     refreshSkewMs: options.refreshSkewMs,
+    events: options.events,
   })
   const process = afterReady(requireConnectionProcess(service), ready)
 
@@ -252,6 +257,7 @@ export function createHarness(options: HarnessOptions = {}) {
     },
     now: () => new Date(now),
     counts: () => ({ exchangeCount, refreshCount, revokeCount }),
+    revocations: () => revocations,
     exchangedVerifiers,
     refreshInputs,
     connectionSignals,

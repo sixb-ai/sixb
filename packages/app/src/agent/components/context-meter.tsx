@@ -1,6 +1,6 @@
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { type ReactNode, useState } from "react"
+import { memo, type ReactNode, useState } from "react"
 import { formatRelativeTime, formatTokenCount, relativeTime } from "../format"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
@@ -78,7 +78,11 @@ const PART_COLORS: Readonly<Record<ContextPartName, string>> = {
  * conversation uses, the room left, the share read from cache and the last condensing. Nothing
  * shows before the first answer.
  */
-export function ContextMeter({ context, modelName, condensing = false }: ContextMeterProps) {
+export const ContextMeter = memo(function ContextMeter({
+  context,
+  modelName,
+  condensing = false,
+}: ContextMeterProps) {
   const messages = useAgentMessages().contextMeter
   const locale = useLocale()
   const [open, setOpen] = useState(false)
@@ -136,7 +140,7 @@ export function ContextMeter({ context, modelName, condensing = false }: Context
       />
     </ComposerMenu>
   )
-}
+})
 
 /** A share as the meter writes it: `2%`, `<1%` for a sliver, `104%` past the limit. */
 function sharePercent(share: number, locale: string): string {

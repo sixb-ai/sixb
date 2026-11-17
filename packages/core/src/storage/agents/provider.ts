@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util"
 import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../../agents/ids"
+import type { AgentMessagePart } from "../../agents/message"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
 import { isFileRef } from "../../blob-storage/validation"
@@ -9,9 +10,9 @@ import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
-import { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX } from "./types"
+import { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX, AGENT_THREAD_INBOX_MAX_ITEMS } from "./types"
 
-export { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX }
+export { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX, AGENT_THREAD_INBOX_MAX_ITEMS }
 
 import type {
   AddAgentThreadParticipantsInput,
@@ -22,6 +23,9 @@ import type {
   AgentBackgroundCommandRef,
   AgentComputerSessionRecord,
   AgentContextCheckpointRecord,
+  AgentInboxItemRecord,
+  AgentInboxMode,
+  AgentInboxSpec,
   AgentMemoryChange,
   AgentMessageRecord,
   AgentRunRecord,
@@ -32,10 +36,12 @@ import type {
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
   AgentTokenRateRecord,
+  ConsumeClaimedAgentInboxInput,
   ConversationAgentRunRecord,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  EnqueueAgentInboxItemInput,
   FinishAgentRunInput,
   ForkAgentThreadInput,
   ListAgentApprovalsInput,
@@ -45,11 +51,14 @@ import type {
   SubagentRunFile,
   SubagentRunRecord,
   SubagentRunResult,
+  TakeAgentInboxSteersInput,
   TransitionAgentThreadSandboxInput,
+  UpdateAgentInboxItemInput,
 } from "./types"
 import {
   AGENT_APPROVAL_MODES,
   AGENT_HOLDING_APPROVAL_MODES,
+  AGENT_INBOX_MODES,
   AGENT_MEMORY_HISTORY_DAYS,
   AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
   AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
@@ -89,6 +98,23 @@ export function transitionAgentThreadSandbox(
       status: "new",
       initialized: false,
       resetAt: new Date().toISOString(),
+    }
+  }
+  if (input.action === "restore") {
+    if (thread.activeRunId !== null) return fail("cannot be restored during an active run.")
+    if (!state || state.name !== input.name) return fail("changed; reload before restoring.")
+    if (state.status !== "busy" && state.status !== "blocked") {
+      return fail("does not require recovery.")
+    }
+    // Only a workspace its run finished preparing holds anything to go on from. A provider never
+    // resumes a VM that still runs, so the next run cannot reach a late operation of the last one.
+    if (!state.initialized) return fail("was never prepared; start fresh instead.")
+    return {
+      name: state.name,
+      status: "ready",
+      initialized: true,
+      ...(state.sourceFingerprint ? { sourceFingerprint: state.sourceFingerprint } : {}),
+      ...(state.resetAt ? { resetAt: state.resetAt } : {}),
     }
   }
   if (
@@ -440,6 +466,12 @@ export function assertConversationAgentRunSpec(
   }
   assertApprovalModeField(spec.approvalMode, "Conversational Agent run", prefix)
   assertRunsOn(spec.runsOn, "Conversational Agent run", prefix)
+  if (spec.computer !== undefined) {
+    if (spec.runsOn !== "computer") {
+      throw new AgentStorageError("invalid_input", `[${prefix}] Only a computer's turn names one.`)
+    }
+    assertAgentThreadPlace(spec.computer, prefix)
+  }
 }
 
 /** Validate where a thread or turn runs: `computer`, or absent for the cloud. */
@@ -449,6 +481,33 @@ export function assertRunsOn(value: unknown, subject: string, prefix = "Sixb"): 
       "invalid_input",
       `[${prefix}] ${subject} 'runsOn' must be "computer", or absent for the cloud.`
     )
+  }
+}
+
+/**
+ * Validate which computer and folder a turn ran in. Both are shown back to its owner, so neither
+ * holds a control character.
+ */
+export function assertAgentThreadPlace(
+  value: unknown,
+  prefix = "Sixb"
+): asserts value is AgentThreadPlace {
+  const place = value as Partial<AgentThreadPlace> | null
+  for (const [field, text, max] of [
+    ["id", place?.id, 200],
+    ["folder", place?.folder, 4096],
+  ] as const) {
+    if (
+      typeof text !== "string" ||
+      text.trim() === "" ||
+      text.length > max ||
+      CONTROL_CHARACTER.test(text)
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] A turn's computer '${field}' must be a non-blank string of at most ${max} characters, without control characters.`
+      )
+    }
   }
 }
 
@@ -569,8 +628,8 @@ export const CONTROL_CHARACTER =
   /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
 /**
- * Refuse to assign a computer to a thread that runs in the cloud, or does not exist, or to move one
- * while a turn runs in its folder.
+ * Refuse to assign a computer to a sub-agent's thread or one that does not exist, to move a cloud
+ * thread while a turn holds it, or to move a computer's thread while a turn runs in its folder.
  */
 export function assertAssignableComputer(
   thread: AgentThreadRecord | null,
@@ -582,11 +641,22 @@ export function assertAssignableComputer(
   if (!thread) {
     throw new AgentStorageError("thread_not_found", `[${prefix}] Agent thread '${id}' not found.`)
   }
-  if (thread.runsOn !== "computer") {
+  if (thread.kind !== "conversation") {
     throw new AgentStorageError(
       "invalid_input",
-      `[${prefix}] Agent thread '${id}' runs in the cloud: no computer runs its turns.`
+      `[${prefix}] Sub-agent thread '${id}' never runs on a computer.`
     )
+  }
+  if (thread.runsOn !== "computer") {
+    // A turn in flight, or one waiting for its computer, would be left where nothing runs it. A
+    // turn paused on held calls passes here: the caller refuses that, with its approvals in view.
+    if (activeRun?.status === "queued" || activeRun?.status === "running") {
+      throw new AgentStorageError(
+        "active_run_exists",
+        `[${prefix}] A turn of Agent thread '${id}' is in progress in the cloud: stop it, or let it end, first.`
+      )
+    }
+    return
   }
   if (movesComputerPlace(thread, computer)) assertNoTurnRunning(activeRun, id, prefix)
 }
@@ -677,13 +747,60 @@ export function queuedTurnInCloud(
 ): ConversationAgentRunRecord | undefined {
   if (active?.kind !== "conversation" || active.status !== "queued") return undefined
   if (active.spec?.runsOn !== "computer") return undefined
-  const { runsOn: _runsOn, ...cloud } = active.spec
+  const { runsOn: _runsOn, computer: _computer, ...cloud } = active.spec
   return { ...active, spec: cloud }
+}
+
+/** The queued turn of a computer's thread that moves to another folder, with its new place. */
+export function queuedTurnOnComputer(
+  active: AgentRunRecord | null,
+  computer: AgentThreadPlace
+): ConversationAgentRunRecord | undefined {
+  if (active?.kind !== "conversation" || active.status !== "queued") return undefined
+  if (active.spec?.runsOn !== "computer" || active.spec.computer === undefined) return undefined
+  const place = { id: computer.id, folder: computer.folder }
+  if (sameComputerPlace(active.spec.computer, place)) return undefined
+  return { ...active, spec: { ...active.spec, computer: place } }
+}
+
+/**
+ * Mark a paused sub-agent's saved cloud workspace unavailable when its conversation leaves the
+ * cloud: a continuation on the computer updates out/, so a later return to the cloud starts fresh.
+ */
+export function unavailableChildSandboxState(
+  state: AgentThreadSandboxState | undefined
+): AgentThreadSandboxState | undefined {
+  if (!state || (state.status !== "ready" && state.status !== "new")) return undefined
+  return { ...state, status: "unavailable" }
 }
 
 /** Whether two places are the same folder of the same computer, whatever they call it. */
 export function sameComputerPlace(a: AgentThreadPlace, b: AgentThreadPlace): boolean {
   return a.id === b.id && a.folder === b.folder
+}
+
+/** Where a turn runs, as its spec records it: the cloud, or a folder of its owner's computer. */
+export type AgentTurnPlace = Pick<ConversationAgentRunSpec, "runsOn" | "computer">
+
+/** The place a turn's spec records, from its thread's: the cloud, or a computer and its folder. */
+export function turnPlace(
+  runsOn: "computer" | undefined,
+  computer: AgentThreadPlace | undefined
+): AgentTurnPlace {
+  if (runsOn === undefined) return {}
+
+  return computer
+    ? { runsOn, computer: Object.freeze({ id: computer.id, folder: computer.folder }) }
+    : { runsOn }
+}
+
+/**
+ * The same key for two turns that ran in the same workspace: the cloud, or one folder of one
+ * computer. A computer's turn from before folders were kept ran in a folder nobody knows.
+ */
+export function runPlaceKey(spec: AgentTurnPlace | undefined): string {
+  if (spec?.runsOn !== "computer") return "cloud"
+  return spec.computer ? `computer:${spec.computer.id}:${spec.computer.folder}` : "computer"
 }
 
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {
@@ -1537,4 +1654,260 @@ export function agentApprovalMatches(
     (input.reported === undefined ||
       (approval.reportedInMessageId !== undefined) === input.reported)
   )
+}
+
+// -- agent_thread_inbox: shared validation and transitions ------------------------------------
+
+function assertNonEmptyText(value: unknown, field: string, prefix: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox '${field}' must not be empty.`
+    )
+  }
+}
+
+function assertPrincipalInput(principal: Principal, field: string, prefix: string): void {
+  if (
+    !isPlainRecord(principal) ||
+    !["user", "serviceAccount", "system"].includes(principal.type) ||
+    typeof principal.id !== "string" ||
+    principal.id.trim().length === 0
+  ) {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox '${field}' is invalid.`)
+  }
+}
+
+export function assertAgentInboxMode(
+  mode: unknown,
+  prefix = "Sixb"
+): asserts mode is AgentInboxMode {
+  if (!(AGENT_INBOX_MODES as readonly unknown[]).includes(mode)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox mode must be one of: ${AGENT_INBOX_MODES.join(", ")}.`
+    )
+  }
+}
+
+export function assertAgentInboxSpec(spec: AgentInboxSpec | undefined, prefix = "Sixb"): void {
+  if (spec === undefined) return
+  if (!isPlainRecord(spec)) {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox spec must be an object.`)
+  }
+  if (spec.model !== undefined) {
+    if (
+      !isPlainRecord(spec.model) ||
+      typeof spec.model.provider !== "string" ||
+      spec.model.provider.trim().length === 0 ||
+      typeof spec.model.modelId !== "string" ||
+      spec.model.modelId.trim().length === 0
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Agent inbox model reference must have non-empty provider and modelId.`
+      )
+    }
+  }
+  if (spec.reasoning !== undefined) {
+    const validLevel = (AGENT_REASONING_LEVELS as readonly unknown[]).includes(spec.reasoning)
+    if (!validLevel && !isModelReasoning(spec.reasoning)) {
+      throw new AgentStorageError("invalid_input", `[${prefix}] Agent inbox reasoning is invalid.`)
+    }
+  }
+  if (
+    spec.approvalMode !== undefined &&
+    !(AGENT_APPROVAL_MODES as readonly unknown[]).includes(spec.approvalMode)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox approvalMode must be one of: ${AGENT_APPROVAL_MODES.join(", ")}.`
+    )
+  }
+}
+
+export function assertEnqueueAgentInboxItemInput(
+  input: EnqueueAgentInboxItemInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.id, "id", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.messageId, "messageId", prefix)
+  assertPrincipalInput(input.authorPrincipal, "authorPrincipal", prefix)
+  assertAgentInboxMode(input.mode, prefix)
+  assertAgentInboxParts(input.parts, input.mode, prefix)
+  assertAgentInboxSpec(input.spec, prefix)
+  if (input.executionId !== undefined) assertNonEmptyText(input.executionId, "executionId", prefix)
+}
+
+/**
+ * A steer is read mid-turn, where nothing prepares its files: its bytes must be the ones a later
+ * replay of the saved message sends, so it carries no file part. A message with one waits for the
+ * next turn, where the turn prepares its attachments as it does the trigger's.
+ */
+function assertAgentInboxParts(
+  parts: readonly AgentMessagePart[] | undefined,
+  mode: AgentInboxMode,
+  prefix: string
+): void {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox 'parts' must be a non-empty array.`
+    )
+  }
+  if (mode === "steer" && parts.some((part) => part.type === "file")) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] An agent inbox 'steer' carries no file: queue it for the next turn instead.`
+    )
+  }
+}
+
+export function assertUpdateAgentInboxItemInput(
+  input: UpdateAgentInboxItemInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.id, "id", prefix)
+  if (input.mode !== undefined) assertAgentInboxMode(input.mode, prefix)
+  if (input.parts !== undefined) assertAgentInboxParts(input.parts, input.mode ?? "queue", prefix)
+  if (input.spec !== undefined && input.spec !== null) assertAgentInboxSpec(input.spec, prefix)
+}
+
+export function assertTakeAgentInboxSteersInput(
+  input: TakeAgentInboxSteersInput,
+  prefix = "Sixb"
+): void {
+  assertNonEmptyText(input.projectId, "projectId", prefix)
+  assertNonEmptyText(input.threadId, "threadId", prefix)
+  assertNonEmptyText(input.runId, "runId", prefix)
+  assertNonEmptyText(input.executionToken, "executionToken", prefix)
+  if (!Number.isInteger(input.stepIndex) || input.stepIndex < 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent inbox 'stepIndex' must be a non-negative integer.`
+    )
+  }
+  assertPrincipalInput(input.authorPrincipal, "authorPrincipal", prefix)
+}
+
+export function assertInboxThreadAcceptsItem(
+  thread: Pick<AgentThreadRecord, "id" | "kind" | "status"> | null,
+  threadId: string,
+  projectId: string,
+  existingCount: number,
+  prefix = "Sixb"
+): void {
+  if (!thread) {
+    throw new AgentStorageError(
+      "thread_not_found",
+      `[${prefix}] Agent thread '${threadId}' not found for project '${projectId}'.`
+    )
+  }
+  assertConversationThreadRow(thread, "holds inbox messages", prefix)
+  if (thread.status !== "active") {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Archived agent thread '${thread.id}' does not accept inbox messages.`
+    )
+  }
+  if (existingCount >= AGENT_THREAD_INBOX_MAX_ITEMS) {
+    throw new AgentStorageError(
+      "inbox_limit",
+      `[${prefix}] Agent thread '${thread.id}' can hold at most ${AGENT_THREAD_INBOX_MAX_ITEMS} pending inbox items.`
+    )
+  }
+}
+
+export function assertInboxRunOwnership(
+  run: Pick<AgentRunRecord, "id" | "kind" | "threadId" | "status" | "execution"> | null,
+  input: Pick<ConsumeClaimedAgentInboxInput, "projectId" | "threadId" | "runId" | "executionToken">,
+  prefix = "Sixb"
+): void {
+  if (
+    !run ||
+    run.kind !== "conversation" ||
+    run.threadId !== input.threadId ||
+    run.status !== "running" ||
+    run.execution?.token !== input.executionToken
+  ) {
+    throw new AgentStorageError(
+      "execution_lost",
+      `[${prefix}] Execution token is no longer current on agent run '${input.runId}'.`
+    )
+  }
+}
+
+export function newAgentInboxItemRecord(
+  input: EnqueueAgentInboxItemInput,
+  seq: number
+): AgentInboxItemRecord {
+  const createdAt = new Date(input.createdAt ?? new Date())
+  const normalizedSpec = normalizeInboxSpec(input.spec)
+  return {
+    id: input.id,
+    projectId: input.projectId,
+    threadId: input.threadId,
+    messageId: input.messageId,
+    seq,
+    authorPrincipal: structuredClone(input.authorPrincipal),
+    mode: input.mode,
+    parts: structuredClone(input.parts),
+    ...(normalizedSpec ? { spec: normalizedSpec } : {}),
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+    ...(input.locale ? { locale: input.locale } : {}),
+    ...(input.immediate ? { immediate: true } : {}),
+    ...(input.executionId ? { executionId: input.executionId } : {}),
+    createdAt,
+    updatedAt: new Date(createdAt),
+  }
+}
+
+export function updatedAgentInboxItemRecord(
+  current: AgentInboxItemRecord,
+  input: UpdateAgentInboxItemInput
+): AgentInboxItemRecord {
+  if (current.claimedBy !== undefined) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[Sixb] Agent inbox item '${current.id}' was already claimed by run '${current.claimedBy.runId}'.`
+    )
+  }
+  const nextSpec =
+    input.spec === undefined
+      ? current.spec
+      : input.spec === null
+        ? undefined
+        : normalizeInboxSpec(input.spec)
+  const nextImmediate = input.immediate === undefined ? current.immediate : input.immediate
+  const { spec: _oldSpec, immediate: _oldImmediate, ...base } = current
+  const mode = input.mode ?? current.mode
+  const parts =
+    input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts)
+  // Promoting a message that carries a file to a steer would read bytes a replay cannot send.
+  assertAgentInboxParts(parts, mode, "Sixb")
+  return {
+    ...base,
+    mode,
+    parts,
+    ...(nextSpec ? { spec: structuredClone(nextSpec) } : {}),
+    ...(nextImmediate ? { immediate: true } : {}),
+    updatedAt: new Date(input.updatedAt ?? new Date()),
+  }
+}
+
+function normalizeInboxSpec(spec: AgentInboxSpec | undefined): AgentInboxSpec | undefined {
+  if (!spec) return undefined
+  const out: {
+    model?: AgentInboxSpec["model"]
+    reasoning?: AgentInboxSpec["reasoning"]
+    approvalMode?: AgentInboxSpec["approvalMode"]
+  } = {}
+  if (spec.model !== undefined) out.model = structuredClone(spec.model)
+  if (spec.reasoning !== undefined) out.reasoning = structuredClone(spec.reasoning)
+  if (spec.approvalMode !== undefined) out.approvalMode = spec.approvalMode
+  return Object.keys(out).length > 0 ? out : undefined
 }

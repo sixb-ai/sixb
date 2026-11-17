@@ -1,6 +1,6 @@
 {
   "name": "@sixb/model-protocols",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Internal model protocol implementations for Sixb providers",
   "homepage": "https://sixb.ai",
   "bugs": {
@@ -33,6 +33,12 @@
       "bun": "./src/responses.ts",
       "import": "./dist/responses.js",
       "default": "./dist/responses.js"
+    },
+    "./systemone": {
+      "types": "./dist/systemone.d.ts",
+      "bun": "./src/systemone.ts",
+      "import": "./dist/systemone.js",
+      "default": "./dist/systemone.js"
     },
     "./models-dev": {
       "types": "./dist/models-dev.d.ts",

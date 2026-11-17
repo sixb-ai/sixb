@@ -86,6 +86,13 @@ export class ProjectionWorker extends RunWorker<
   override async start(): Promise<void> {
     await Promise.all([super.start(), this.vectorWorker?.start()])
   }
+  override async drain(timeoutMs?: number): Promise<boolean> {
+    const [projections, vectors] = await Promise.all([
+      super.drain(timeoutMs),
+      this.vectorWorker ? this.vectorWorker.drain(timeoutMs) : Promise.resolve(true),
+    ])
+    return projections && vectors
+  }
   override async stop(): Promise<void> {
     await Promise.all([super.stop(), this.vectorWorker?.stop()])
   }

@@ -5,6 +5,31 @@ import { object, PREFIX, positiveInteger } from "./util"
 
 export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
 export type FoundryProtocol = "responses" | "messages" | "chat"
+type FoundryRoute = FoundryProtocol | OneShotRoute
+/** Routes that answer in one body. A failure is never replayed: the call may have been billed. */
+type OneShotRoute =
+  | "embeddings"
+  | "decision"
+  | "transcription"
+  | "reranking"
+  | "speech"
+  | "image"
+  | "image-edit"
+const ONE_SHOT: ReadonlySet<FoundryRoute> = new Set<OneShotRoute>([
+  "embeddings",
+  "decision",
+  "transcription",
+  "reranking",
+  "speech",
+  "image",
+  "image-edit",
+])
+
+/** The GA data-plane version: the v1 API does not route audio deployments. */
+const AUDIO_API_VERSION = "2024-10-21"
+
+/** The first version with GPT Image; v1 does not route FLUX.1 Kontext edits. */
+const IMAGE_API_VERSION = "2025-04-01-preview"
 
 export interface TransportOptions {
   readonly endpoint: string
@@ -66,13 +91,13 @@ export class FoundryTransport {
   }
 
   async post(
-    body: string,
+    body: string | FormData,
     signal: AbortSignal,
     providerId: string,
     modelId: string,
-    protocol: FoundryProtocol | "embeddings" = "responses"
+    protocol: FoundryRoute = "responses"
   ): Promise<Response> {
-    const url = this.url(protocol)
+    const url = this.url(protocol, modelId)
     const diagnostics = new RequestDiagnostics()
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted()
@@ -81,8 +106,14 @@ export class FoundryTransport {
         diagnostics,
         protocol === "messages" ? "x-api-key" : "api-key"
       )
-      headers.set("content-type", "application/json")
-      headers.set("accept", protocol === "embeddings" ? "application/json" : "text/event-stream")
+      // fetch writes a multipart body's content type, boundary included.
+      if (typeof body === "string") headers.set("content-type", "application/json")
+      else headers.delete("content-type")
+      // Speech streams its audio as events: the only stream that reports usage.
+      headers.set(
+        "accept",
+        ONE_SHOT.has(protocol) && protocol !== "speech" ? "application/json" : "text/event-stream"
+      )
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
@@ -112,11 +143,8 @@ export class FoundryTransport {
         response,
         await httpError(response, providerId, modelId, signal)
       )
-      if (
-        protocol === "embeddings" ||
-        !error.retryable ||
-        attempt >= (this.options.maxRetries ?? 2)
-      )
+      // One-shot routes: the caller decides, from `retryable`, whether to replay.
+      if (ONE_SHOT.has(protocol) || !error.retryable || attempt >= (this.options.maxRetries ?? 2))
         throw error
       await wait(
         Math.min(error.retryAfterMs ?? 250 * 2 ** attempt, this.options.maxRetryDelayMs ?? 60_000),
@@ -159,11 +187,59 @@ export class FoundryTransport {
     return (this.options.fetch ?? fetch)(url, init)
   }
 
-  url(protocol: FoundryProtocol | "embeddings"): string {
+  url(protocol: FoundryRoute, deployment?: string): string {
     if (protocol === "embeddings") return `${this.baseUrl}/embeddings`
+    // Audio deployments answer on the resource origin, by deployment path.
+    if (protocol === "transcription")
+      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/audio/transcriptions?api-version=${AUDIO_API_VERSION}`
+    // Decision models answer on the resource origin; the project path does not route them.
+    if (protocol === "decision")
+      return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
+    // Image deployments answer on the resource origin, by deployment path.
+    if (protocol === "image" || protocol === "image-edit")
+      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/images/${protocol === "image" ? "generations" : "edits"}?api-version=${IMAGE_API_VERSION}`
+    // Cohere rerankers answer Cohere's v2 API on the resource origin.
+    if (protocol === "reranking")
+      return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
+    // Speech answers on the resource's v1 API; the project path does not route it.
+    if (protocol === "speech") return `${new URL(this.baseUrl).origin}/openai/v1/audio/speech`
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
+  }
+}
+
+/** Read a JSON body up to `maxBytes`; the reader is released on success, failure or abort. */
+export async function readJson(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number
+): Promise<unknown> {
+  return JSON.parse(await readText(response, signal, maxBytes))
+}
+
+/** Read a body as UTF-8 up to `maxBytes`; the reader is released on success, failure or abort. */
+export async function readText(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number
+): Promise<string> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error("Empty response")
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  try {
+    for (;;) {
+      const chunk = await abortable(() => reader.read(), signal)
+      if (chunk.done) break
+      bytes += chunk.value.length
+      if (bytes > maxBytes) throw new Error(`Response exceeds ${maxBytes} bytes`)
+      chunks.push(chunk.value)
+    }
+    return Buffer.concat(chunks).toString("utf8")
+  } finally {
+    void reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
@@ -231,7 +307,10 @@ async function httpError(
       }
       const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"))
       const error = object(object(parsed)?.error)
+      // Decision models reject some requests with `{ "detail": "..." }` instead of `error`.
+      const detail = object(parsed)?.detail
       if (typeof error?.message === "string") message = error.message
+      else if (typeof detail === "string") message = detail
       if (typeof error?.code === "string") code = error.code
       else if (typeof error?.type === "string") code = error.type
     } catch {

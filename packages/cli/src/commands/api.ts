@@ -1,10 +1,11 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
+import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { createSixbServer, requestTimingOptionsFromEnv, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixbHost } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
-import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { stopSixbProviders } from "../lib/runtime"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { printStopping, renderCliError, renderStatic, roleView, startTask } from "../ui"
@@ -95,18 +96,27 @@ export async function runApi(options: ApiOptions = {}) {
       })
     )
 
-    await runUntilSignal(async () => {
-      app.stop()
-      printStopping("api")
-      await stopQuietly(() => server?.stop() ?? Promise.resolve())
-      if (sixb) {
-        await stopSixbProviders(sixb)
+    await runUntilSignal(
+      async (signal) => {
+        app.stop()
+        printStopping("api")
+        const timeoutMs =
+          signal === "SIGTERM" ? resolveDrainTimeoutMs(ACTION_RUN_DRAIN_TIMEOUT_MS) : 0
+        await stopQuietly(() => server?.stop({ timeoutMs }) ?? Promise.resolve())
+        if (sixb) {
+          await stopSixbProviders(sixb)
+        }
+        sixb = null
+      },
+      {
+        onInterrupt: () => {
+          void stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
+        },
       }
-      sixb = null
-    })
+    )
   } catch (error) {
     app.stop()
-    await stopQuietly(() => server?.stop() ?? Promise.resolve())
+    await stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
     if (sixb) {
       await stopSixbProviders(sixb)
     }

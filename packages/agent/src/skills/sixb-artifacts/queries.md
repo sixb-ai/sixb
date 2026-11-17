@@ -3,7 +3,8 @@
 A query reads the project's objects each time the artifact is opened, as whoever opens it: they see
 the rows they may view, and a value they are not cleared for shows locked. Data from the project
 goes in a query, not a copy, so the artifact stays current: a sheet shows its rows (`sheet.md`, Live
-rows), and a page, a deck, or a canvas board reads them with `sixb.query` (`page.md`).
+rows), a page, a deck, or a canvas board reads them with `sixb.query` (`page.md`), and a designed
+document shows them in its fields (`document.md`, Live data).
 
 ## Write one
 

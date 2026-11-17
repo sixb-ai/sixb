@@ -88,4 +88,4 @@ its client. Inside your webhook handler:
 
 `ProviderClient` is your adapter's client type, and `handleProviderEvent` is your event handler.
 `connections.forAccount()` returns all matching connected accounts, or an empty array when none
-match. The top-level `client()` used in the first example is for connectors without managed OAuth.
+match; `connections.list()` returns every one. The top-level `client()` used in the first example is for connectors without managed OAuth.

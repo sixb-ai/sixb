@@ -62,15 +62,15 @@ export function LiveAvatars({ live }: { readonly live: LiveArtifact }) {
 }
 
 /** What the header says of an edit's write-back, as a document editor does. */
-export type LiveSaveLabel = "saved" | "saving" | "failed" | "offline"
+export type LiveSaveLabel = "saved" | "saving" | "failed" | "refused" | "offline"
 
 /**
- * Where what the reader changed is: saved, being saved, kept here while the socket is down, or
- * failed and tried again by the server.
+ * Where what the reader changed is: saved, being saved, kept here while the socket is down,
+ * failed and tried again by the server, or refused until someone changes it.
  */
 export function liveSaveLabel(state: LiveArtifactState): LiveSaveLabel {
   if (state.connection !== "online") return "offline"
-  if (state.save?.state === "failed") return "failed"
+  if (state.save?.state === "failed") return state.save.refused ? "refused" : "failed"
   if (state.pending || state.save?.state === "unsaved" || state.save?.state === "saving") {
     return "saving"
   }
@@ -79,28 +79,23 @@ export function liveSaveLabel(state: LiveArtifactState): LiveSaveLabel {
 
 /**
  * The save state, discreet beside the title: its words fold into the icon on a narrow header.
- * Only a failure is announced; offline with nothing kept, it says it is reconnecting.
+ * Only a failure or a refusal is announced; offline with nothing kept, it says it is reconnecting.
  */
 export function LiveSaveStatus({ state }: { readonly state: LiveArtifactState }) {
   const messages = useArtifactMessages().live
   const label = liveSaveLabel(state)
   const text = label === "offline" && !state.pending ? messages.reconnecting : messages[label]
+  const warns = label === "failed" || label === "refused"
   const Icon =
-    label === "saved"
-      ? Check
-      : label === "saving"
-        ? LoaderCircle
-        : label === "failed"
-          ? TriangleAlert
-          : CloudOff
+    label === "saved" ? Check : label === "saving" ? LoaderCircle : warns ? TriangleAlert : CloudOff
   return (
     <span
-      role={label === "failed" ? "status" : undefined}
+      role={warns ? "status" : undefined}
       title={text}
       data-save={label}
       className={cn(
         "flex h-5 shrink-0 items-center gap-1 text-xs whitespace-nowrap transition-colors",
-        label === "failed" ? "text-warning" : "text-muted-foreground"
+        warns ? "text-warning" : "text-muted-foreground"
       )}
     >
       <Icon

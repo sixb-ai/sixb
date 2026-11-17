@@ -12,6 +12,7 @@ import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource 
 import { boardPreviewUrl, useBoardPreviews } from "./renderers/canvas/previews"
 import { useCanvas, useCanvasMode } from "./renderers/canvas/renderer"
 import { CanvasThumbnail } from "./renderers/canvas/thumbnail"
+import { DesignedDocumentScreen, isDesignedDocument } from "./renderers/designed-document"
 import { PageScreen } from "./renderers/page"
 import { chartData, chartReadsLocked } from "./renderers/sheet/chart-data"
 import { CHART_ICONS } from "./renderers/sheet/chart-icon"
@@ -148,7 +149,11 @@ function VersionPreview({
       style={theme.style}
     >
       {kind === "document" ? (
-        <DocumentPreview version={version} />
+        isDesignedDocument(version) ? (
+          <DesignedDocumentScreen version={version} />
+        ) : (
+          <DocumentPreview version={version} />
+        )
       ) : kind === "sheet" ? (
         <WorkbookPreview version={version} />
       ) : kind === "slides" ? (

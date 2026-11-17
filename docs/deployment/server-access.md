@@ -40,12 +40,12 @@ systemctl --user status sixb-<name>
 
 ## Several projects on one server
 
-Projects can share a server. Give each project its own `ports`; `sixb deploy check` reports a port that another program or deployment already uses:
+Projects can share a server. Each project uses four ports: its `ports` and its `standbyPorts`, which default to `ports` + 10. Give the next project ports 20 higher; `sixb deploy check` reports a port that another program or deployment already uses:
 
 ```ts
 target: new SshTarget({
   host: "203.0.113.10",
-  ports: { app: 3011, api: 3012 },
+  ports: { app: 3021, api: 3022 },
 }),
 ```
 

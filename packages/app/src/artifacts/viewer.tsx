@@ -48,6 +48,7 @@ import { useSharedGuest } from "../shared-session"
 import { useCopyFeedback } from "./copy-feedback"
 import { DownloadMenu } from "./downloads"
 import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-session"
+import { MarkdownDocument } from "./editor/markdown-document"
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
@@ -58,6 +59,7 @@ import { LiveArtifactProvider } from "./live/hooks"
 import { type LiveView, useLiveView } from "./live/view"
 import { useArtifactMessages } from "./messages"
 import { resetPageState, usePageStateCount } from "./page-state"
+import { downloadDocumentPdf } from "./pdf"
 import { useArtifactPeople } from "./people"
 import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
 import {
@@ -70,7 +72,7 @@ import {
 } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
 import { CanvasRenderer } from "./renderers/canvas/renderer"
-import { DocumentRenderer } from "./renderers/document"
+import { DesignedDocumentRenderer, isDesignedDocument } from "./renderers/designed-document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
 import { PageRenderer } from "./renderers/page"
@@ -167,12 +169,18 @@ function ArtifactView({
     (shown ? null : versionQuery.error)
   const edit = useArtifactEdit(target, detail, shown, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
-  // A canvas's latest version is held live: everyone's changes show as they make them, and
-  // editing it changes it for everyone at once.
+  // A canvas's latest version, and a document's, is held live: everyone's changes show as they
+  // make them, and editing it changes it for everyone at once. A Markdown document is typed into
+  // as it is shown, with no editing to start.
+  const designed = !!shown && isDesignedDocument(shown)
+  const markdown = detail?.artifact.kind === "document" && !!shown && !designed
   const liveView = useLiveView(
-    detail?.artifact.kind === "canvas" && versionNumber === detail.artifact.latestVersion
+    detail &&
+      versionNumber === detail.artifact.latestVersion &&
+      (detail.artifact.kind === "canvas" || detail.artifact.kind === "document")
       ? target.artifactId
-      : null
+      : null,
+    detail?.artifact.kind === "document" ? "document" : "canvas"
   )
 
   if (error || (artifactQuery.isSuccess && !detail)) {
@@ -219,7 +227,9 @@ function ArtifactView({
       <EditSessionProvider
         editing={edit.editing || !!liveView?.editing}
         report={edit.report}
-        start={startEditing(edit, liveView)}
+        start={
+          markdown && liveView && !liveView.state.left ? undefined : startEditing(edit, liveView)
+        }
       >
         <LiveArtifactProvider artifact={liveView?.live ?? null}>
           <ArtifactViewProvider
@@ -588,7 +598,11 @@ function ArtifactBody({
   const messages = useArtifactMessages()
   switch (kind) {
     case "document":
-      return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+      return isDesignedDocument(version) ? (
+        <DesignedDocumentRenderer version={version} {...(part ? { part } : {})} />
+      ) : (
+        <MarkdownDocument version={version} latestVersion={latestVersion} part={part} />
+      )
     case "sheet":
       return <SheetRenderer version={version} part={part} />
     case "slides":
@@ -635,6 +649,8 @@ function ArtifactHeader({
   // A canvas held live is edited live, not as a draft the header saves: until its document holds
   // it, Edit waits. Only one the server never holds live is edited as a draft.
   const heldLive = !!liveView && !liveView.state.left
+  // A Markdown document held live is typed into as it is shown: there is no editing to start.
+  const typedInto = artifact.kind === "document" && !isDesignedDocument(version)
   if (liveView?.editing) {
     return <LiveEditBar chrome={chrome} detail={detail} version={version} liveView={liveView} />
   }
@@ -718,10 +734,16 @@ function ArtifactHeader({
       </ViewerBar>
     )
   }
+  // As the header narrows to a phone's, the kind, Edit's label and the Live dot, which Refresh
+  // stands for beside it, give way, then the object that holds it, so nothing covers an action.
   return (
     <ViewerBar
       chrome={chrome}
-      leading={<ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />}
+      leading={
+        <span className="hidden @md:contents">
+          <ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />
+        </span>
+      }
       title={version.title}
       accessory={
         <>
@@ -731,7 +753,9 @@ function ArtifactHeader({
             onVersionChange={onVersionChange}
             onRestored={() => onVersionChange(artifact.latestVersion)}
           />
-          <ArtifactHolders artifactId={artifact.id} />
+          <span className="hidden @sm:contents">
+            <ArtifactHolders artifactId={artifact.id} />
+          </span>
           {live ? <LiveStatus version={version} /> : null}
           {heldLive && liveView.state.connection === "offline" ? (
             <LiveSaveStatus state={liveView.state} />
@@ -742,16 +766,8 @@ function ArtifactHeader({
     >
       {live ? <RefreshButton version={version} /> : null}
       {heldLive ? (
-        liveView.editable ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="mr-0.5 text-muted-foreground hover:text-foreground"
-            onClick={liveView.start}
-          >
-            <PencilLine aria-hidden="true" />
-            {messages.edit.edit}
-          </Button>
+        liveView.editable && !typedInto ? (
+          <EditButton onClick={liveView.start} />
         ) : !liveView.state.synced && edit.available ? (
           <Button size="sm" variant="ghost" className="mr-0.5 text-muted-foreground" disabled>
             <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -759,15 +775,7 @@ function ArtifactHeader({
           </Button>
         ) : null
       ) : edit.available ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="mr-0.5 text-muted-foreground hover:text-foreground"
-          onClick={edit.start}
-        >
-          <PencilLine aria-hidden="true" />
-          {messages.edit.edit}
-        </Button>
+        <EditButton onClick={edit.start} />
       ) : null}
       {artifact.kind === "sheet" ? (
         <SheetDownloadMenu version={version} />
@@ -846,7 +854,8 @@ function LiveEditBar({
 
 /**
  * Says a version's data is live, and when the reader last read it, in their time zone: the time
- * alone on the day, the date with it after. A narrow header keeps its dot, the words in its title.
+ * alone on the day, the date with it after. A narrow header keeps its dot, the words in its title;
+ * a phone's leaves it to Refresh.
  */
 function LiveStatus({ version }: { readonly version: ArtifactVersion }) {
   const messages = useArtifactMessages().viewer
@@ -869,11 +878,32 @@ function LiveStatus({ version }: { readonly version: ArtifactVersion }) {
     <span
       title={detail}
       data-live=""
-      className="hidden h-5 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-[7px] py-0.5 text-xs font-medium whitespace-nowrap text-success tabular-nums @xs:flex @lg:px-2"
+      className="hidden h-5 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-[7px] py-0.5 text-xs font-medium whitespace-nowrap text-success tabular-nums @md:flex @lg:px-2"
     >
       <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
       <span className="sr-only @lg:not-sr-only">{label}</span>
     </span>
+  )
+}
+
+/** Edit, which a phone's header folds to its icon, so the header's actions keep their room. */
+function EditButton({ onClick }: { readonly onClick: () => void }) {
+  const messages = useArtifactMessages()
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      aria-label={messages.edit.edit}
+      title={messages.edit.edit}
+      className="mr-0.5 size-8 px-0 text-muted-foreground hover:text-foreground @md:w-auto @md:px-2.5"
+      onClick={onClick}
+    >
+      {/* Wrapped, so the button stays square while the label is folded. */}
+      <span className="contents">
+        <PencilLine aria-hidden="true" />
+      </span>
+      <span className="hidden @md:inline">{messages.edit.edit}</span>
+    </Button>
   )
 }
 
@@ -1117,7 +1147,8 @@ function DeleteDialog({
 
 /**
  * A document or a file downloads as its entry. A deck's or a page's entry is only its markup, no
- * file the reader wants on its own without the files beside it.
+ * file the reader wants on its own without the files beside it, and neither is a designed
+ * document's: it downloads as its PDF alone.
  */
 function EntryDownloadMenu({
   version,
@@ -1135,16 +1166,31 @@ function EntryDownloadMenu({
   if (!source) return null
   return (
     <DownloadMenu
-      options={[
-        {
-          key: "entry",
-          type: fileTypeOf(source.name),
-          title: source.name,
-          detail: formatFileSize(source.fileRef.sizeBytes, locale, messages.files),
-          href: source.downloadUrl,
-          fileName: source.name,
-        },
-      ]}
+      options={
+        // A designed document prints to PDF, in a project that can print it.
+        version.printable
+          ? [
+              {
+                key: "pdf",
+                type: "pdf",
+                title: messages.document.pdf,
+                detail: messages.document.pdfDetail,
+                run: () => downloadDocumentPdf(version),
+              },
+            ]
+          : isDesignedDocument(version)
+            ? []
+            : [
+                {
+                  key: "entry",
+                  type: fileTypeOf(source.name),
+                  title: source.name,
+                  detail: formatFileSize(source.fileRef.sizeBytes, locale, messages.files),
+                  href: source.downloadUrl,
+                  fileName: source.name,
+                },
+              ]
+      }
     />
   )
 }

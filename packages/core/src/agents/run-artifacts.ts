@@ -1,4 +1,3 @@
-import { BOARD_PREVIEW_JOB } from "../artifacts/canvas-display"
 import { ArtifactRequestError } from "../artifacts/errors"
 import { announceArtifactUpdates } from "../artifacts/events"
 import {
@@ -13,18 +12,11 @@ import { appendArtifactLive, changedBoards } from "../artifacts/live/presence"
 import { firstArtifactDocument } from "../artifacts/live/state"
 import { withMergedWrite } from "../artifacts/publish/merge"
 import {
-  type BoardPreviewInput,
-  missingBoardPreviews,
-  type RefusedBoardPreview,
-  storeBoardPreviews,
-} from "../artifacts/publish/previews"
-import {
   artifactVersionWarnings,
   type PublishedArtifact,
   prepareArtifactVersion,
   storeArtifactVersion,
 } from "../artifacts/publish/publish"
-import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
 import type { FileRef } from "../blob-storage"
 import type { Broker } from "../broker"
@@ -78,51 +70,12 @@ export interface AgentRunArtifacts {
    * the turn's last write left it at.
    */
   turnWrites(): Promise<readonly ArtifactTurnWriteRecord[]>
-  /**
-   * Keeps the pictures the run took of the boards of a version it wrote, as their previews: its
-   * requester authored the content, and the pictures show what they can see. Refuses any other
-   * version, and one written again since. Each picture stands alone: those not kept are
-   * returned, with why. Creating the version since leaves its content, and its pictures.
-   */
-  storePreviews(input: AgentRunBoardPreviews): Promise<readonly RefusedBoardPreview[]>
-  /**
-   * The boards of a version the run wrote still without a picture, and the modes each misses: a
-   * board it kept as it was keeps the pictures it had. Refuses any other version, and one written
-   * again since.
-   */
-  missingPreviews(input: AgentRunVersion): Promise<readonly AgentRunMissingPreview[]>
-}
-
-/** A version of an artifact, as one of the run's writes left its content. */
-export interface AgentRunVersion {
-  readonly artifactId: string
-  readonly version: number
-  /** The version's `updatedAt` after the write: a content written again since has another. */
-  readonly updatedAt: Date
-}
-
-/** The pictures a run took of a version's boards. */
-export interface AgentRunBoardPreviews extends AgentRunVersion {
-  readonly previews: readonly BoardPreviewInput[]
-}
-
-/** A board of a version without a picture in these modes. */
-export interface AgentRunMissingPreview {
-  readonly board: string
-  readonly themes: readonly ArtifactThemeMode[]
 }
 
 /** A version a run publishes: of a new artifact of `kind`, or of the artifact `artifactId`. */
 export type AgentRunArtifactPublish = {
   readonly title: string
   readonly files: readonly ArtifactFile[]
-  /**
-   * The publisher renders the version's boards itself, as the publish tool's layout check does,
-   * and hands their pictures over with `storePreviews`. The worker then renders only what is still
-   * missing, after a grace period, and without the version's query answers, which the check read.
-   * Any other publish, such as a command in the sandbox, has its queries answered at once.
-   */
-  readonly rendersPreviews?: boolean
 } & (
   | { readonly kind: ArtifactKind }
   | {
@@ -299,14 +252,9 @@ export function agentRunArtifacts(
       if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
       if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
 
-      // A publisher that renders its own previews reads the query answers in its layout check, and
-      // normally pictures every board: answering them here too would run each query twice. So its
-      // job waits, carries none, and a board that reads one and that the check missed keeps its
-      // outline. Every other publish has its answers read now, as its requester.
-      await artifactPreviewRequester(reader)(
-        stored.version,
-        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_JOB.graceMs, withoutAnswers: true } : {}
-      )
+      // The render worker pictures what the boards miss, with their queries answered now, as the
+      // requester.
+      await artifactPreviewRequester(reader)(stored.version)
 
       return {
         ...stored,
@@ -318,44 +266,6 @@ export function agentRunArtifacts(
     async turnWrites() {
       return requireArtifacts(storage).listTurnWrites({ projectId, turnRunId })
     },
-
-    async storePreviews({ previews, ...at }) {
-      const [{ blobs }, version] = await Promise.all([sdk(), publishedVersion(at)])
-      return storeBoardPreviews(
-        { storage: requireArtifacts(storage), blobStorage: blobs },
-        version,
-        previews
-      )
-    },
-
-    async missingPreviews(at) {
-      const missing = await missingBoardPreviews(
-        requireArtifacts(storage),
-        await publishedVersion(at)
-      )
-      return missing.map(({ board, themes }) => ({ board: board.id, themes }))
-    },
-  }
-
-  /**
-   * Only the run that wrote a version's content pictures its boards with its author's rights, and
-   * only while the version holds that content: the pictures are kept under its boards' render keys.
-   * A change that leaves the content, such as creating the version, changes nothing here.
-   */
-  async function publishedVersion(at: AgentRunVersion): Promise<ArtifactVersionRecord> {
-    const version = await requireArtifacts(storage).getVersion({
-      projectId,
-      artifactId: at.artifactId,
-      version: at.version,
-    })
-    const written = at.updatedAt.getTime()
-    if (!version || version.origin?.runId !== run.id || version.updatedAt.getTime() !== written) {
-      throw new ArtifactRequestError(
-        "not_allowed",
-        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' does not hold what this run wrote at ${at.updatedAt.toISOString()}.`
-      )
-    }
-    return version
   }
 }
 

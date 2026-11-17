@@ -68,6 +68,11 @@ export function computerName(): string {
   return osType() === "Darwin" ? "This Mac" : "This computer"
 }
 
+/** The same name inside a sentence, as in "Moved to sixb on this Mac." */
+export function computerNameInText(): string {
+  return osType() === "Darwin" ? "this Mac" : "this computer"
+}
+
 export function placeLabel(place: Place): string {
   return place === "computer" ? computerName() : "Cloud"
 }

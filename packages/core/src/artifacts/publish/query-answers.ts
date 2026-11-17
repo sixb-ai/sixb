@@ -2,7 +2,12 @@ import { AuthorizationError } from "../../authorization/errors"
 import { ObjectQueryExecutionError } from "../../objects/query/errors"
 import type { ArtifactVersionRecord } from "../../storage/artifacts/types"
 import { ArtifactRequestError } from "../errors"
-import { type ArtifactQueryResult, artifactQueryName, isArtifactQueryName } from "../queries"
+import {
+  type ArtifactQueryResult,
+  artifactQueryName,
+  DOCUMENT_HOLDER_QUERY,
+  isArtifactQueryName,
+} from "../queries"
 import { serializeArtifactQueryResult } from "../serialize-query"
 
 // A page opened outside the app, by the Agent's layout check or to picture a canvas's boards, reads
@@ -41,15 +46,21 @@ export async function answerArtifactQuery(
   }
 }
 
-/** Every query a version holds, each answered by `read`: as whoever it reads as. */
+/**
+ * Every query a version holds, each answered by `read`: as whoever it reads as. A designed
+ * document's holder, which its fields read, is answered too.
+ */
 export async function answerArtifactQueries(
-  version: Pick<ArtifactVersionRecord, "files">,
+  version: Pick<ArtifactVersionRecord, "files" | "outline">,
   read: (name: string) => Promise<ArtifactQueryResult | null>
 ): Promise<ArtifactQueryAnswers> {
   const names = version.files.flatMap((file) => {
     const name = artifactQueryName(file.path)
     return name === undefined ? [] : [name]
   })
+  if (version.outline.kind === "document" && version.outline.holder) {
+    names.push(DOCUMENT_HOLDER_QUERY)
+  }
 
   const answers = await Promise.all(
     names.map(async (name) => [name, await answerArtifactQuery(() => read(name))] as const)

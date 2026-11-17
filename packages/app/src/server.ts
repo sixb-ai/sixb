@@ -13,6 +13,7 @@ export {
   type CustomAppInstance,
   type CustomAppServer,
   type CustomAppStartOptions,
+  type CustomAppStopOptions,
   type CustomAuthExperienceBuildOptions,
   type CustomAuthExperienceBuildResult,
   createCustomApp,

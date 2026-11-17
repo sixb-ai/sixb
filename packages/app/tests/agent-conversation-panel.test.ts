@@ -77,10 +77,10 @@ test("an empty conversation shows host welcome content in place of the agent nam
 test("sandbox recovery remains visible in an empty conversation", () => {
   // Regression proof: remove sandboxRecovery from the empty composer layout; this fails.
   const html = renderPanel({
-    sandboxRecovery: createElement("div", null, "Sandbox recovery required"),
+    sandboxRecovery: createElement("div", null, "The agent was interrupted"),
     composer: { ...composer, disabled: true },
   })
-  expect(html).toContain("Sandbox recovery required")
+  expect(html).toContain("The agent was interrupted")
 })
 
 test("replaces an interrupted turn's unsaved stream with a way to run it again", () => {

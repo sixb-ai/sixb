@@ -215,6 +215,7 @@ async function setup() {
   }
 
   return {
+    app,
     storage,
     host,
     send,
@@ -290,6 +291,38 @@ describe("a runner outside the worker", () => {
     await callModel(session, 2 * 1024 * 1024).catch(() => undefined)
 
     expect(reached.model).toBe(1)
+    await session.close()
+  })
+
+  // A model call streams nothing while the model thinks, which on a long conversation outlasts Bun's
+  // 10-second idle timeout: Bun closes the socket and the runner reads ECONNRESET. Bun 1.4.2 cuts a
+  // POST mid-stream this way, so no in-process fetch reproduces it; this pins the request that
+  // keeps the socket open. Removal proof: drop `server?.timeout(request, 0)` in
+  // agentRunSessionHandler.
+  test("keeps its session's sockets open past Bun's idle timeout, and no one else's", async () => {
+    const { app, person, ask, claim } = await setup()
+    const timeouts: Array<{ readonly path: string; readonly seconds: number }> = []
+    Object.assign(app, {
+      server: {
+        timeout(request: Request, seconds: number) {
+          timeouts.push({ path: new URL(request.url).pathname, seconds })
+        },
+      },
+    })
+    const ava = await person("ava")
+    const runId = await ask(ava, "Read every report in this folder.")
+    const session = await claim(ava, runId)
+    if (!session) throw new Error("Expected the claimed turn's session.")
+
+    // The model refuses every call here: the request that carried it is what counts.
+    await callModel(session, 16).catch(() => undefined)
+
+    expect(timeouts).toContainEqual({
+      path: `/api/agent-runs/${runId}/session/models.stream`,
+      seconds: 0,
+    })
+    // Neither the person's requests nor the claim reach past the session's admission.
+    expect(timeouts.every(({ path }) => path.includes("/session/"))).toBe(true)
     await session.close()
   })
 
@@ -378,6 +411,41 @@ describe("a runner outside the worker", () => {
       code: "not_thread_owner",
       error: expect.stringContaining("Shared with you, it is yours to read and follow."),
     })
+  })
+
+  // Guard proofs: drop `computer` from serializeAgentRun (Ava's list no longer names the folder the
+  // app marks a move to); serialize it without the owner check (Bob reads her folder).
+  test("names the folder each turn runs in, to the conversation's owner alone", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    const runs = async (as: typeof ava) =>
+      (
+        (await (await call(as, "GET", `/api/agent-threads/${threadId}/runs`)).json()) as {
+          readonly runs: readonly Record<string, unknown>[]
+        }
+      ).runs
+
+    expect(await runs(ava)).toEqual([
+      expect.objectContaining({
+        id: runId,
+        runsOn: "computer",
+        computer: { id: LAPTOP.id, folder: LAPTOP.folder },
+      }),
+    ])
+
+    const [followed] = await runs(bob)
+    expect(followed).toMatchObject({ id: runId, runsOn: "computer" })
+    expect(followed).not.toHaveProperty("computer")
   })
 
   // Guard proof: drop the computerClaiming call from the claim route; Ava's desktop runs a turn
@@ -915,11 +983,12 @@ describe("a runner outside the worker", () => {
     const session = await claim(ava, runId)
     await holdCall(storage, runId)
 
-    // The turn pauses at the last moment a move could have missed it.
+    // The turn pauses at the last moment a move could have missed it. The original comes back
+    // before the turn finishes: a conversation turn finishes in a transaction of its own.
     const transaction = host.storage.transaction.bind(host.storage)
     host.storage.transaction = (async (...input: Parameters<typeof transaction>) => {
-      await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
       host.storage.transaction = transaction
+      await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
       return transaction(...input)
     }) as typeof host.storage.transaction
 
@@ -1345,6 +1414,64 @@ describe("a runner outside the worker", () => {
       stop()
       await session.close()
     }
+  })
+
+  // Guard proof: require runsOn === "computer" in moveToComputer; a cloud conversation refuses
+  // POST /api/agent-threads/:threadId/computer, stranding it in the cloud.
+  test("moves a cloud thread to a computer, claims turns there, and moves back to the cloud as needed", async () => {
+    const { person, ask, call, claim, post, storage } = await setup()
+    const ava = await person("ava")
+    const cloudRunId = await ask(ava, "Start in the cloud.", {})
+    const threadId =
+      (await storage.agents.runs.getById({ projectId, id: cloudRunId }))?.threadId ?? ""
+
+    // While the cloud turn is queued, moving to the computer is refused.
+    const whileQueued = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: LAPTOP,
+    })
+    expect(whileQueued.status).toBe(409)
+    await storage.agents.runs.finishQueued({
+      projectId,
+      id: cloudRunId,
+      status: "cancelled",
+    })
+
+    // Cloud -> Computer
+    const toLaptop = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: LAPTOP,
+    })
+    expect(toLaptop.status).toBe(200)
+    expect(await toLaptop.json()).toMatchObject({
+      id: threadId,
+      runsOn: "computer",
+      computer: { ...LAPTOP, online: false },
+      movedAt: expect.any(String),
+    })
+
+    const posted = (await post(ava, `/api/agent-threads/${threadId}/messages`, {
+      text: "Now inspect the local folder.",
+    })) as { readonly run: { readonly id: string; readonly runsOn?: string } }
+    expect(posted.run).toMatchObject({ runsOn: "computer" })
+    const session = await claim(ava, posted.run.id)
+    expect(session).not.toBeNull()
+    await session?.finish({ status: "succeeded" })
+    await session?.close()
+
+    // Computer -> Cloud -> Computer again
+    const backToCloud = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    expect(backToCloud.status).toBe(200)
+    expect(await backToCloud.json()).not.toHaveProperty("runsOn")
+
+    const elsewhere = { ...LAPTOP, folder: "/Users/ava/other" }
+    const backToComputer = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: elsewhere,
+    })
+    expect(backToComputer.status).toBe(200)
+    expect(await backToComputer.json()).toMatchObject({
+      id: threadId,
+      runsOn: "computer",
+      computer: { ...elsewhere, online: false },
+    })
   })
 })
 

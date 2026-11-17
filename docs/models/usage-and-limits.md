@@ -73,8 +73,8 @@ generation waits while projections continue updating objects.
 Calls to `sixb.models.audio.transcribe()` appear in **AI usage** with their cost and audio duration,
 when available.
 
-Vercel Gateway transcription is currently blocked when a cost limit applies, because Sixb
-cannot estimate its cost before the call.
+Vercel Gateway and Azure AI Foundry transcription are currently blocked when a cost limit applies,
+because Sixb cannot estimate their cost before the call.
 
 ## Image and speech generation
 
@@ -87,7 +87,7 @@ A cost limit lets a call start only when Sixb can estimate its cost first:
 | --- | --- |
 | Per image (most image models, Gemini image models) | Runs. Sixb reserves the price of every image requested. |
 | Per character (most speech models) | Runs. Sixb reserves the price of the text. |
-| By tokens (GPT Image, Gemini speech) | Blocked: the output's size is unknown before the call. |
+| By tokens (GPT Image, Gemini speech, Azure AI Foundry's gpt-4o-mini-tts) | Blocked: the output's size is unknown before the call. |
 
 A call with reference images is also blocked under a cost limit when its model is priced by
 tokens. A model whose provider has no published price can only run without a cost limit.
@@ -97,8 +97,9 @@ tokens. A model whose provider has no published price can only run without a cos
 Queries using `.rerank()` add one accounted model call for their candidates. Direct provider
 `rerank()` calls bypass Sixb's usage and limit controls.
 
-Gateway rerankers report a cost without token usage. Reranking counts toward cost limits only;
-a model without catalog pricing cannot run while a cost limit applies.
+Gateway rerankers report a cost without token usage. Azure AI Foundry's Rerank v5 is priced by
+input tokens, and Rerank v4.0, billed per search, has no price Sixb can apply. Reranking counts
+toward cost limits only; a model without pricing cannot run while a cost limit applies.
 
 ## Web search
 

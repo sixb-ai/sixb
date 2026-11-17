@@ -71,6 +71,22 @@ describe("a board's elements", () => {
     )
   })
 
+  test("take no typing where a designed document shows live data: a field, the text around it, a repeated element", () => {
+    // Reproduce by dropping isLive and holdsField from kindOf: the field and its paragraph are
+    // text, and typing into either writes over a value the document shows live.
+    const kinds = boardElements(
+      `<p>Fee <span data-sixb-field="amount">$4,000</span> a month.</p><b>Plain</b>
+       <ul><li data-sixb-each="timeline"><b data-sixb-field="label">Kickoff</b></li></ul>`
+    ).map(({ address, kind }) => [address, kind])
+    expect(kinds).toEqual([
+      ["body>p:0", "box"],
+      ["body>p:0>span:0", "whole"],
+      ["body>b:0", "text"],
+      ["body>ul:0", "box"],
+      ["body>ul:0>li:0", "whole"],
+    ])
+  })
+
   test("are addressed the same in a board with no body tag, and nowhere in its head", () => {
     // An implied body is no element of the source: its children are.
     expect(boardElements("<h1>Hi</h1><p>There</p>").map(({ address }) => address)).toEqual([
@@ -146,6 +162,68 @@ describe("an edit to a board", () => {
     expect(edited(BOARD, setBoardText(BOARD, "body>main:0>p:1", "New"))).toContain("<p>New</p>")
     expect(() => setBoardText(BOARD, "body>main:0>div:0", "x")).toThrow("a box of elements")
     expect(() => setBoardText(BOARD, "body>main:0>h2:0", "x")).toThrow("or a script builds it")
+  })
+
+  // Reproduce by merging with mergeText alone in mergeBoardText: the word typed at the line
+  // break lands among the source's indent, as "technician\n Avery    found".
+  test("makes a change typed from collapsed whitespace where it falls, keeping the source's own", () => {
+    const source = "<body><p>\n    Our technician\n    found a failed fan motor.\n  </p></body>"
+    const at = "body>p:0"
+    const shown = "Our technician found a failed fan motor."
+    expect(
+      edited(
+        source,
+        mergeBoardText(source, at, shown, "Our technician Avery found a failed fan motor.")
+      )
+    ).toBe("<body><p>\n    Our technician\n    Avery found a failed fan motor.\n  </p></body>")
+    expect(
+      edited(
+        source,
+        mergeBoardText(source, at, shown, "Our technician found a failed fan motor today.")
+      )
+    ).toBe("<body><p>\n    Our technician\n    found a failed fan motor today.\n  </p></body>")
+    expect(edited(source, mergeBoardText(source, at, shown, "A technician found it."))).toBe(
+      "<body><p>\n    A technician found it.\n  </p></body>"
+    )
+
+    // A space typed shows twice until the next word, and is written with that word.
+    const spaced = edited(
+      source,
+      mergeBoardText(source, at, shown, "Our technician  found a failed fan motor.")
+    )
+    expect(spaced).toBe(source)
+    expect(
+      edited(
+        spaced,
+        mergeBoardText(
+          spaced,
+          at,
+          "Our technician  found a failed fan motor.",
+          "Our technician A found a failed fan motor."
+        )
+      )
+    ).toBe("<body><p>\n    Our technician\n    A found a failed fan motor.\n  </p></body>")
+  })
+
+  // Reproduce by merging the reader's collapsed words with the source's own in mergeBoardText:
+  // the word typed at the line break lands in the indent, as "technician\n Avery    found".
+  test("merges a change typed from collapsed whitespace with others' since, in the words as shown", () => {
+    const source = "<body><p>\n    Our technician\n    found a failed fan motor.\n  </p></body>"
+    const at = "body>p:0"
+    const theirs = applyBoardEdit(
+      source,
+      setBoardText(source, at, "\n    Our technician\n    found a failed fan motor today.\n  ")
+    )
+    const shown = "Our technician found a failed fan motor."
+
+    expect(
+      edited(
+        theirs,
+        mergeBoardText(theirs, at, shown, "Our technician Avery found a failed fan motor.")
+      )
+    ).toBe(
+      "<body><p>\n    Our technician\n    Avery found a failed fan motor today.\n  </p></body>"
+    )
   })
 
   // Guard proof: in mergeBoardText, set the typed words as they are; the word someone else added

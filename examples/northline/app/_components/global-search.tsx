@@ -30,6 +30,8 @@ export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // An editor that took the key, for a link, keeps it.
+      if (event.defaultPrevented) return
       if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         setOpen((current) => !current)

@@ -12,13 +12,16 @@ import {
 } from "../src"
 import {
   AgentExecutionLostError,
+  AgentRunRefusedError,
   type AgentRunSession,
   type claimAgentRun,
   createSubagentRunId,
   createSubagentThreadId,
   NOOP_STREAM_SINK,
+  type StreamSink,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
+import type { UserPrincipal } from "../src/auth"
 import { emptyGrantIndex } from "../src/authorization/types"
 import type {
   LanguageModel,
@@ -217,17 +220,39 @@ const SECURITY = {
   ],
 } as unknown as SecurityDefinitionCatalog
 
+/** A sink that keeps what reaches it, in order: the method, and what it was given. */
+function recordingSink() {
+  const records: { readonly method: keyof StreamSink; readonly input: unknown }[] = []
+  const record =
+    (method: keyof StreamSink) =>
+    async (input: unknown): Promise<void> => {
+      records.push({ method, input })
+    }
+  const sink: StreamSink = {
+    publishStarted: record("publishStarted"),
+    publishCompactionStarted: record("publishCompactionStarted"),
+    publishCompactionCompleted: record("publishCompactionCompleted"),
+    publishCompactionFailed: record("publishCompactionFailed"),
+    publishUiChunk: record("publishUiChunk"),
+    publishInboxRead: record("publishInboxRead"),
+    publishMessageFinalized: record("publishMessageFinalized"),
+    publishRunFinished: record("publishRunFinished"),
+  }
+  return { sink, records }
+}
+
 /** A conversation owned by Alice, with turns to claim. */
 async function seedConversation(claim: ClaimAgentRunSession) {
   const storage = new InMemoryStorage()
   const broker = new InMemoryBroker()
   const { session, blobs } = projectOver(storage, broker)
+  const published = recordingSink()
   const host = {
     projectId: PROJECT_ID,
     storage,
     broker,
     recoverAiModelCall: async () => {},
-    events: NOOP_STREAM_SINK,
+    events: published.sink,
     security: SECURITY,
     ...session,
   }
@@ -253,10 +278,19 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       parts: [{ type: "text", text: id }],
     })
   /** A turn of the thread, answering `trigger`; claimed, it opens its session. */
-  const turn = async (id: string, trigger: string, timeZone?: string, locale?: string) => {
+  const turn = async (
+    id: string,
+    trigger: string,
+    {
+      timeZone,
+      locale,
+      requestedBy,
+    }: { timeZone?: string; locale?: string; requestedBy?: UserPrincipal } = {}
+  ) => {
     const executionId = await createTestAgentExecution(storage, {
       projectId: PROJECT_ID,
       runId: id,
+      ...(requestedBy ? { requestedBy } : {}),
     })
     return storage.agents.runs.create({
       id,
@@ -288,7 +322,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       }),
     },
   ]
-  return { storage, thread, say, turn, open, documentFile }
+  return { storage, thread, say, turn, open, documentFile, published: published.records }
 }
 
 export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): void {
@@ -1244,7 +1278,9 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     test("anchors its history on the latest answer after the checkpoint, with its settings", async () => {
       const { storage, thread, say, turn, open } = await seedConversation(claim)
       await say("msg_1", "user")
-      const first = await open(await turn("run_1", "msg_1", "Europe/Paris", "fr-FR"))
+      const first = await open(
+        await turn("run_1", "msg_1", { timeZone: "Europe/Paris", locale: "fr-FR" })
+      )
       await say("msg_2", "assistant", "run_1")
       await storage.aiUsage.recordModelCall({
         id: "usage_1",
@@ -1347,6 +1383,145 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(history.usageAnchor?.modelCall.id).toBe(status === "succeeded" ? "usage_1" : undefined)
       next.close()
+    })
+
+    test("drains steers through the session, consumes persisted ones, and refuses forged user messages", async () => {
+      const { thread, say, turn, open, storage } = await seedConversation(claim)
+      await say("msg_1", "user")
+      const session = await open(await turn("run_1", "msg_1", { requestedBy: alice }))
+
+      await storage.agents.inbox.enqueue({
+        id: "inb_1",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_1",
+        authorPrincipal: alice,
+        mode: "steer",
+        parts: [{ type: "text", text: "Steer 1" }],
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
+      await storage.agents.inbox.enqueue({
+        id: "inb_2",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_2",
+        authorPrincipal: alice,
+        mode: "steer",
+        parts: [{ type: "text", text: "Steer 2 (unanswered)" }],
+      })
+
+      const steers = await session.inbox.takeSteers({ stepIndex: 1 })
+      expect(steers.map((item) => item.id)).toEqual(["inb_1", "inb_2"])
+
+      // Forging an unclaimed user message on finish is refused.
+      const forgedError = await session
+        .finish({ status: "succeeded" }, [
+          {
+            id: "msg_forged",
+            projectId: PROJECT_ID,
+            threadId: thread.id,
+            runId: null,
+            role: "user",
+            parts: [{ type: "text", text: "Forged" }],
+          },
+        ])
+        .catch((error: unknown) => error)
+      expect(forgedError).toBeInstanceOf(AgentRunRefusedError)
+
+      // Finishing with msg_steer_1 consumes inb_1 and releases unanswered inb_2 back to unclaimed.
+      await session.finish({ status: "succeeded" }, [
+        {
+          id: "msg_asst_1",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Step 0" }],
+        },
+        {
+          id: "msg_steer_1",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Tampered client copy ignored" }],
+        },
+        {
+          id: "msg_asst_2",
+          projectId: PROJECT_ID,
+          threadId: thread.id,
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Adjusted answer" }],
+        },
+      ])
+      session.close()
+
+      const storedSteer = await storage.agents.messages.getById({
+        projectId: PROJECT_ID,
+        id: "msg_steer_1",
+      })
+      expect(storedSteer?.runId).toBeNull()
+      expect(storedSteer?.parts).toEqual([{ type: "text", text: "Steer 1" }])
+      expect(storedSteer?.authorPrincipal).toEqual(alice)
+      expect(storedSteer?.metadata).toEqual({
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
+
+      const remaining = await storage.agents.inbox.list({
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+      })
+      expect(
+        remaining.map((item) => ({ id: item.id, claimed: item.claimedBy !== undefined }))
+      ).toEqual([{ id: "inb_2", claimed: false }])
+    })
+
+    // Removal proof: drop publishInboxRead from the in-process takeSteers, and the read never
+    // reaches the stream; drop the flush from the HTTP session's takeSteers, and over HTTP it lands
+    // before the chunk the runner streamed first.
+    test("tells the stream what a step read, after what streamed before it, from what was stored", async () => {
+      const { thread, say, turn, open, storage, published } = await seedConversation(claim)
+      await say("msg_1", "user")
+      const session = await open(await turn("run_1", "msg_1", { requestedBy: alice }))
+      await storage.agents.inbox.enqueue({
+        id: "inb_1",
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+        messageId: "msg_steer_1",
+        authorPrincipal: alice,
+        mode: "steer",
+        parts: [{ type: "text", text: "Use the Q3 numbers" }],
+        createdAt: new Date("2026-11-15T09:00:00.000Z"),
+      })
+
+      await session.events.publishUiChunk({
+        run: session.run,
+        chunkIndex: 0,
+        chunk: { type: "text-delta", id: "t1", delta: "Q2 says" },
+      })
+      await session.inbox.takeSteers({ stepIndex: 1 })
+      // Nothing more to read at the next boundary: nothing more to tell.
+      await session.inbox.takeSteers({ stepIndex: 2 })
+      session.close()
+
+      expect(published.map((record) => record.method)).toEqual([
+        "publishUiChunk",
+        "publishInboxRead",
+      ])
+      expect(published[1]?.input).toMatchObject({
+        run: { id: "run_1" },
+        messages: [
+          {
+            id: "msg_steer_1",
+            authorPrincipal: alice,
+            parts: [{ type: "text", text: "Use the Q3 numbers" }],
+            createdAt: "2026-11-15T09:00:00.000Z",
+          },
+        ],
+      })
     })
   })
 }

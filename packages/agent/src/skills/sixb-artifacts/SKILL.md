@@ -15,7 +15,7 @@ the question, answer in the chat.
 
 | Kind | Publish it for | Read first |
 | --- | --- | --- |
-| `document` | A report, brief, memo, plan, or write-up: anything read top to bottom | `document.md` |
+| `document` | A report, brief, memo, plan, or write-up: anything read top to bottom; designed, a proposal, contract, or letter in a business's own look | `document.md` |
 | `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
 | `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
@@ -45,8 +45,8 @@ go beside each picture.
    cannot, tell the user the deliverable could not be published; never describe it as ready.
 4. Fix what each warning names and update the artifact when it matters to the reader. A
    deck also comes back with a screenshot of each slide, a page with one at a laptop's width and
-   one at a phone's, and a canvas with one of each board: look at them (`slides.md`, `page.md`,
-   `canvas.md`, Check).
+   one at a phone's, a designed document with one of each page, and a canvas with one of each
+   board: look at them (`slides.md`, `page.md`, `document.md`, `canvas.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
    of it in place, use its address (`references.md`). A figure you cite from live data is the one
@@ -76,12 +76,12 @@ publish_artifact({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 oper
 ```
 
 An entry with `"edited": true` was last written outside this conversation: most often a person's
-edit in the app, such as a sheet's cells or columns or a canvas's notes and layout, but also
-another conversation or the project's code. Start from it as it is, and keep its changes in yours
+edit in the app, such as a sheet's cells or columns, a canvas's notes and layout, or a document's
+blocks, designed or not, but also another conversation or the project's code. Start from it as it is, and keep its changes in yours
 unless the user asks you to undo them; say what you built on when you reply.
 
-When others changed a canvas while you worked, the update merges your changes with theirs
-and writes the merged result into the folder you updated from: keep editing it.
+When others changed a canvas or a document while you worked, the update merges your changes with
+theirs and writes the merged result into the folder you updated from: keep editing it.
 
 If another kind of artifact changes while you work, the update refuses rather than write
 over what it never saw, says who changed it, and installs it in place of your copy and in the

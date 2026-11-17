@@ -4,19 +4,22 @@
 // slide is measured in each of its themes with the layout probe and screenshot in the first. A page
 // loads at 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and
 // screenshot at each width. A canvas's boards load each at its own size, four at a time, measured
-// as a page is and screenshot as boards/<id>.png; a board boards.json marks `pictured` also in
-// each other theme, as boards/<id>.<theme>.png, and each of its pictures for readers also at most
-// `smallWidth` wide, as boards/<id>.<theme>.small.webp; a board whose page did not load whole is
-// not pictured, but listed in `unpictured`, as a broken picture would stay. With overview.html, the
-// whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
-// { layout, slides, problems, errors, screenshots, previews, unpictured, oversized, stalls,
-// overview?, stopped? } or
+// in each theme as a page is and screenshot in the first as boards/<id>.png; the pictures readers
+// see are the render worker's to take. With overview.html, the whole canvas as it opens is
+// screenshot as overview.png. A designed document loads as one sheet
+// at its paper's width, and is measured whole, as a page is, but not for what only a screen has,
+// small text and small controls; without paper, that sheet is screenshot as document.png. It is
+// measured the same way at a phone's 390px, as the app shows it there, and screenshot as
+// phone.png. With paper, it is then cut into its pages, each checked for what runs past its edge,
+// and screenshot as page-NN.png. It writes one line of JSON:
+// { layout, slides, pages?, problems, errors, screenshots, oversized, stalls, overview?, stopped? }
+// or
 // { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
 //
-// The library holds what the worker installs beside this script: deck.css, page.css, runtime.js,
-// probe.js. The output directory holds entries.json, each page the check opens by its path, with
+// The library holds what the worker installs beside this script: deck.css, page.css,
+// document.css, runtime.js, probe.js. The output directory holds entries.json, each page the check opens by its path, with
 // the kit and runtime in it; boards.json, a canvas's boards and their sizes; overview.html and
 // overview.json, a canvas's page of itself and the window it opens in; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
@@ -42,16 +45,25 @@ const DEADLINE_MS = Number(deadline) || 100_000
 const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
 /** The frame's own files, served from the library as the API serves them beside a version's. */
-const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/page.css", "/__sixb/runtime.js"])
+const FRAME_FILES = new Set([
+  "/__sixb/deck.css",
+  "/__sixb/page.css",
+  "/__sixb/document.css",
+  "/__sixb/runtime.js",
+])
 /** Where the runtime reads a query when it is opened on its own. */
 const QUERY_PATH = /^\/__sixb\/queries\/([a-z0-9][a-z0-9-]{0,63})\.json$/
+/** A phone's screen, where pages and designed documents are checked too. */
+const PHONE = { name: "phone", width: 390, height: 844 }
 /** The widths a page is checked at: a laptop's, and a phone's. */
-const VIEWS = [
-  { name: "desktop", width: 1280, height: 800 },
-  { name: "phone", width: 390, height: 844 },
-]
+const VIEWS = [{ name: "desktop", width: 1280, height: 800 }, PHONE]
 /** How much of a page the check measures and shows, from its top. */
 const PAGE_HEIGHT = 4000
+/** How much of a designed document the check measures as one sheet, and how many pages it shoots. */
+const DOCUMENT_HEIGHT = 16_000
+const MAX_PAGES = 40
+/** What the probe judges of a screen, which paper does not have. */
+const SCREEN_ONLY = new Set(["small_text", "small_target"])
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -99,7 +111,7 @@ const PAGE_OPTIONS = {
   deviceScaleFactor: 1,
   reducedMotion: "reduce",
 }
-const NOUN = { canvas: "the canvas", page: "the page" }[layout] ?? "the deck"
+const NOUN = { canvas: "the canvas", page: "the page", document: "the document" }[layout] ?? "the deck"
 
 /** What the check has found so far, which a check that stops early reports. */
 const found = {
@@ -108,10 +120,7 @@ const found = {
   problems: [],
   errors: [],
   screenshots: [],
-  // A canvas's: each board's picture in each theme the reader sees it in, the boards that stopped
-  // answering, and the whole canvas as it opens.
-  previews: [],
-  unpictured: [],
+  // A canvas's: the boards that stopped answering, and the whole canvas as it opens.
   // A canvas's boards whose page draws larger than the board shows.
   oversized: [],
   stalls: [],
@@ -128,7 +137,6 @@ const findings = () => ({
   screenshots: [...found.screenshots].sort(
     (left, right) => byBoard({ board: shotBoard(left) }, { board: shotBoard(right) })
   ),
-  previews: [...found.previews].sort(byBoard),
 })
 const shotBoard = (file) => path.basename(file, ".png")
 
@@ -235,10 +243,8 @@ function openTab(page, stepOf) {
 /**
  * A canvas's boards, each at its own size in each theme, a few at once. Each lane is a browser
  * context of its own, so a board that stops answering costs only its lane, which goes on in a new
- * one. A board's first theme is screenshot as boards/<id>.png; a board marked `pictured`, which
- * the reader sees as a picture until they open it, in every theme, the others as
- * boards/<id>.<theme>.png. Then the whole canvas as it opens, when overview.html says how. Returns
- * whether a board stalled.
+ * one. A board's first theme is screenshot as boards/<id>.png. Then the whole canvas as it opens,
+ * when overview.html says how. Returns whether a board stalled.
  */
 async function checkCanvas(browser, port, probe, themes) {
   const boards = JSON.parse(fs.readFileSync(path.join(out, "boards.json"), "utf8"))
@@ -261,7 +267,6 @@ async function checkCanvas(browser, port, probe, themes) {
     await tab.page.setViewportSize({ width: board.w, height: Math.min(board.h, PAGE_HEIGHT) })
     await tab.load(`http://127.0.0.1:${port}/${board.file.split("/").map(encodeURIComponent).join("/")}`)
 
-    const pictures = []
     for (const [index, name] of names.entries()) {
       const step = tab.at(`board '${board.id}' in ${name} mode`)
       await tab.send("theme", themes[name])
@@ -269,35 +274,15 @@ async function checkCanvas(browser, port, probe, themes) {
       for (const problem of await within(step, tab.page.evaluate(`(${probe})("page")`))) {
         found.problems.push({ ...problem, board: board.id, theme: name })
       }
-      if (index === 0) {
-        const page = await within(step, tab.page.evaluate(contentSize))
-        if (page.w > board.w + slack(board.w) || page.h > board.h + slack(board.h)) {
-          found.oversized.push({ board: board.id, w: board.w, h: board.h, page })
-        }
+      if (index > 0) continue
+      const page = await within(step, tab.page.evaluate(contentSize))
+      if (page.w > board.w + slack(board.w) || page.h > board.h + slack(board.h)) {
+        found.oversized.push({ board: board.id, w: board.w, h: board.h, page })
       }
-
-      if (index > 0 && !board.pictured) continue
-      const file = path.join(out, "boards", index === 0 ? `${board.id}.png` : `${board.id}.${name}.png`)
-      const png = await tab.page.screenshot({ path: file, timeout: STEP_MS })
-      if (index === 0) found.screenshots.push(file)
-      if (!board.pictured || tab.failures.length > 0) continue
-
-      const small = path.join(out, "boards", `${board.id}.${name}.small.webp`)
-      await shrink(browser, png, board.smallWidth, small)
-      pictures.push(
-        { board: board.id, theme: name, size: "full", path: file, bytes: png.length },
-        { board: board.id, theme: name, size: "small", path: small, bytes: fs.statSync(small).size }
-      )
+      const file = path.join(out, "boards", `${board.id}.png`)
+      await tab.page.screenshot({ path: file, timeout: STEP_MS })
+      found.screenshots.push(file)
     }
-
-    // A page that did not load whole is pictured broken, and its picture would stay: none is
-    // taken, and the board keeps its outline until it loads.
-    if (!board.pictured) return
-    if (tab.failures.length > 0) {
-      found.unpictured.push({ board: board.id, reason: tab.failures[0] })
-      return
-    }
-    found.previews.push(...pictures)
   }
 
   const lane = async () => {
@@ -323,49 +308,6 @@ async function checkCanvas(browser, port, probe, themes) {
   await Promise.all(Array.from({ length: Math.min(LANES, boards.length) }, lane))
   await overview(browser)
   return stalled
-}
-
-/** How a small picture's WebP is encoded: as sharp as text needs at its size, by eye. */
-const SMALL_QUALITY = 0.85
-/** A blank page where small pictures are encoded, apart from every board's scripts. */
-let encoder
-
-/**
- * A board's screenshot at most `width` wide, its aspect kept, as WebP in `file`: what a canvas
- * shows when it draws the board small. Encoded by the browser's own canvas.
- */
-async function shrink(browser, png, width, file) {
-  encoder ??= within("the browser", browser.newContext()).then((context) =>
-    within("the browser", context.newPage())
-  )
-  const page = await encoder
-  const webp = await within(
-    "a small picture",
-    page.evaluate(
-      async ({ data, width, quality }) => {
-        const image = new Image()
-        image.src = `data:image/png;base64,${data}`
-        await image.decode()
-        const scale = Math.min(1, width / image.naturalWidth)
-        const canvas = document.createElement("canvas")
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-        const context = canvas.getContext("2d")
-        context.imageSmoothingQuality = "high"
-        context.drawImage(image, 0, 0, canvas.width, canvas.height)
-        const blob = await new Promise((done) => canvas.toBlob(done, "image/webp", quality))
-        if (blob?.type !== "image/webp") throw new Error("this browser does not encode WebP")
-        const bytes = new Uint8Array(await blob.arrayBuffer())
-        let binary = ""
-        for (let at = 0; at < bytes.length; at += 0x8000) {
-          binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
-        }
-        return btoa(binary)
-      },
-      { data: png.toString("base64"), width, quality: SMALL_QUALITY }
-    )
-  )
-  fs.writeFileSync(file, Buffer.from(webp, "base64"))
 }
 
 /**
@@ -461,6 +403,10 @@ async function main() {
       () => step
     )
     const { problems, screenshots } = found
+    if (layout === "document") {
+      await checkDocument({ page, load, settle, send }, port, probe, themes, (next) => (step = next))
+      return findings()
+    }
     if (layout === "page") {
       for (const view of VIEWS) {
         step = `the page at ${view.width}px`
@@ -538,6 +484,141 @@ async function main() {
     if (!stalled) await within("the browser", browser.close(), 5_000).catch(() => {})
     server.close()
   }
+}
+
+/**
+ * A designed document: as one sheet at its paper's width and at a phone's, measured whole up to its
+ * cut, then, with paper, as its pages, each checked for what runs past its edge and screenshot. In
+ * the first theme: the paper is white in any.
+ */
+async function checkDocument({ page, load, settle, send }, port, probe, themes, at) {
+  const { problems, screenshots } = found
+  const theme = Object.keys(themes)[0]
+  at(NOUN)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await load(`http://127.0.0.1:${port}/document.html`)
+  const paper = await within(
+    NOUN,
+    page.evaluate(() =>
+      (document.querySelector("script[data-sixb-paper]")?.getAttribute("data-sixb-paper") ?? "")
+        .split(" ")
+        .map(Number)
+    )
+  )
+  const sheet = paper[0] > 0 ? paper[0] : 0
+  // The sheet and the stage around it, wider than a phone's layout.
+  const width = Math.max(Math.ceil(sheet || 816) + 64, 760)
+  await page.setViewportSize({ width, height: 900 })
+  await send("theme", themes[theme])
+  await settle()
+  const height = await within(NOUN, page.evaluate(() => document.documentElement.scrollHeight))
+  await page.setViewportSize({ width, height: Math.max(900, Math.min(DOCUMENT_HEIGHT, height)) })
+  await settle()
+  for (const problem of await within(NOUN, page.evaluate(`(${probe})("page")`))) {
+    if (!SCREEN_ONLY.has(problem.code)) problems.push({ ...problem, theme })
+  }
+  if (!sheet) {
+    const file = path.join(out, "document.png")
+    await page.screenshot({ path: file, timeout: STEP_MS })
+    screenshots.push(file)
+  }
+
+  // On a phone the app shows it as one sheet at the screen's width, where a fixed grid column
+  // or a wide table runs off the side.
+  at(`${NOUN} on a phone`)
+  await page.setViewportSize({ width: PHONE.width, height: PHONE.height })
+  await settle()
+  const tall = await within(NOUN, page.evaluate(() => document.documentElement.scrollHeight))
+  await page.setViewportSize({
+    width: PHONE.width,
+    height: Math.max(PHONE.height, Math.min(PAGE_HEIGHT, tall)),
+  })
+  await settle()
+  for (const problem of await within(NOUN, page.evaluate(`(${probe})("page")`))) {
+    if (!SCREEN_ONLY.has(problem.code)) problems.push({ ...problem, view: "phone", theme })
+  }
+  const phone = path.join(out, "phone.png")
+  await page.screenshot({ path: phone, timeout: STEP_MS })
+  screenshots.push(phone)
+  if (!sheet) return
+
+  at(`${NOUN}'s pages`)
+  await page.setViewportSize({ width, height: 1200 })
+  await load(`http://127.0.0.1:${port}/document.html?pages#sixb-pages`)
+  await send("theme", themes[theme])
+  await page.waitForSelector("html[data-sixb-pages]", { timeout: STEP_MS })
+  await settle()
+  found.pages = await within(
+    `${NOUN}'s pages`,
+    page.evaluate(() => Number(document.documentElement.dataset.sixbPages) || 0)
+  )
+  for (const problem of await within(`${NOUN}'s pages`, page.evaluate(pastPageEdges))) {
+    problems.push({ ...problem, theme })
+  }
+  const sheets = await page.$$(".sixb-paper")
+  for (const [index, each] of sheets.slice(0, MAX_PAGES).entries()) {
+    const file = path.join(out, `page-${String(index + 1).padStart(2, "0")}.png`)
+    // A sheet shows its page once it is in view.
+    await each.scrollIntoViewIfNeeded({ timeout: STEP_MS })
+    await each.waitForSelector(".sixb-flow", { state: "attached", timeout: STEP_MS })
+    await each.screenshot({ path: file, timeout: STEP_MS })
+    screenshots.push(file)
+  }
+}
+
+/**
+ * What runs past a page's content box, which cuts it off: on each page, each fragment of an element
+ * that sits on the page and reaches past its right or bottom edge, such as a table too wide or an
+ * image too tall for the page. Only the outermost of what nests: what it holds runs past with it,
+ * and the box that runs past is the one to fit. Run in the page, on the first sheet's flow, which
+ * lays out every page side by side, each its column.
+ */
+function pastPageEdges() {
+  const problems = []
+  const flow = document.querySelector(".sixb-paper .sixb-flow")
+  const box = flow?.parentElement?.getBoundingClientRect()
+  if (!flow || !box) return problems
+  // In CSS pixels, and as the sheets are zoomed to fit.
+  const style = getComputedStyle(flow)
+  const scale = box.width / Number.parseFloat(style.width) || 1
+  const stride = box.width + (Number.parseFloat(style.columnGap) || 0) * scale
+  const pages = new Map()
+  for (const element of flow.querySelectorAll("*")) {
+    for (const rect of element.getClientRects()) {
+      if (rect.width < 1 || rect.height < 1) continue
+      const index = Math.max(0, Math.floor((rect.left - box.left + 1) / stride))
+      const left = box.left + index * stride
+      if (rect.right > left + box.width + 1 || rect.bottom > box.bottom + 1) {
+        const past = pages.get(index) ?? []
+        pages.set(index, past)
+        past.push({ element, rect, left })
+        break
+      }
+    }
+  }
+  for (const [index, past] of [...pages].sort(([a], [b]) => a - b)) {
+    const outermost = past.filter(
+      ({ element }) => !past.some((other) => other.element !== element && other.element.contains(element))
+    )
+    for (const { element, rect, left } of outermost.slice(0, 5)) {
+      const classes = Array.from(element.classList)
+      problems.push({
+        code: "outside",
+        page: index + 1,
+        rect: {
+          x: Math.round(rect.left - left),
+          y: Math.round(rect.top - box.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+        text:
+          (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60) ||
+          element.tagName.toLowerCase(),
+        selector: `${element.tagName.toLowerCase()}${classes.length > 0 ? `.${classes.join(".")}` : ""}`,
+      })
+    }
+  }
+  return problems.slice(0, 30)
 }
 
 /**

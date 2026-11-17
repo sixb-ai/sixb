@@ -264,6 +264,59 @@ describe("Sixb picks the model of each turn", () => {
     expect(cold.run.spec).toMatchObject({ model: ref("flash"), tier: "light" })
   })
 
+  test("steps down on an easy turn right after the thread moves workspaces", async () => {
+    // Proven by removal: ignore the turns' places in previousTurn; the turn stays on heavy for a
+    // cold workspace prefix it has never cached.
+    const { host, decision, sixb } = await routedSetup()
+    setSystemTime(new Date("2026-10-24T10:00:00.000Z"))
+    decision.answer(HEAVY)
+    const first = await sixb.agent.runs.request({ text: "Design the architecture" })
+    expect(first.run.spec).toMatchObject({ model: ref("opus"), tier: "heavy" })
+    await finish(host, first.run)
+
+    setSystemTime(new Date("2026-10-24T10:01:00.000Z"))
+    await sixb.agent.threads.moveToComputer(first.run.threadId, {
+      id: "cmp_1",
+      name: "Laptop",
+      folder: "/work/sixb",
+    })
+    decision.answer(LIGHT)
+    const moved = await sixb.agent.runs.request({
+      threadId: first.run.threadId,
+      text: "What branch is checked out?",
+    })
+    expect(moved.run.spec).toMatchObject({
+      model: ref("flash"),
+      tier: "light",
+      runsOn: "computer",
+      computer: { id: "cmp_1", folder: "/work/sixb" },
+    })
+  })
+
+  test("stays on its model when the thread comes back to its workspace with no turn elsewhere", async () => {
+    // Proven by removal: judge the cache by the thread's movedAt again; the round trip counts as
+    // a move, and the easy turn steps down, dropping the cloud prompt cached a minute ago.
+    const { host, decision, sixb } = await routedSetup()
+    setSystemTime(new Date("2026-10-24T10:00:00.000Z"))
+    decision.answer(HEAVY)
+    const first = await sixb.agent.runs.request({ text: "Design the architecture" })
+    await finish(host, first.run)
+    const threadId = first.run.threadId
+
+    setSystemTime(new Date("2026-10-24T10:01:00.000Z"))
+    await sixb.agent.threads.moveToComputer(threadId, {
+      id: "cmp_1",
+      name: "Laptop",
+      folder: "/work/sixb",
+    })
+    await sixb.agent.threads.moveToCloud(threadId)
+
+    decision.answer(LIGHT)
+    const back = await sixb.agent.runs.request({ threadId, text: "Thanks, and the tests?" })
+    expect(back.run.spec).toMatchObject({ model: ref("opus"), tier: "heavy" })
+    expect(back.run.spec?.runsOn).toBeUndefined()
+  })
+
   test("takes an older turn's tier from its model", async () => {
     // Proven by removal: drop `?? model?.tier`; the older turn counts as none, so it moves down.
     const deps = createTestRuntimeDeps()
