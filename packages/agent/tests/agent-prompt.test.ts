@@ -53,14 +53,10 @@ describe("agent system prompt", () => {
     }
   })
 
-  // Guard proof: render a move in the system prompt again, as a `workspaceMovedAt` section did;
-  // a thread moved back to a workspace no longer matches the prompt its earlier turns cached.
-  test("keeps a workspace's move out of the system prompt, and closes the message that crossed it", () => {
-    const prompt = renderPrompt({ mode: "conversation", skills: [] })
-    expect(prompt).not.toContain("<sandbox_state>")
-    expect(prompt).not.toContain("moved to this workspace")
-
-    // The move note closes the user message instead, where the history around it stays cacheable.
+  // A move closes the user message that crossed it, where the history around it stays cacheable.
+  // That the system prompt stays the same across moves is checked where a turn builds it: see the
+  // worker's "a conversation back in a workspace sends the prompt that workspace sent before".
+  test("tells the model where a move left the files it worked on", () => {
     const tag = renderWorkspaceMovedTag()
     expect(tag.startsWith("<sixb_workspace_moved>\n")).toBe(true)
     expect(tag.endsWith("\n</sixb_workspace_moved>")).toBe(true)

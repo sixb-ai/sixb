@@ -15369,6 +15369,78 @@ describe("agent tools act as the requester", () => {
     }
   })
 
+  test("a conversation back in a workspace sends the prompt that workspace sent before, byte for byte", async () => {
+    // Proven by removal: render the thread's movedAt in the system prompt again, as the
+    // `workspaceMovedAt` section did (pass it from createConversationAgentEnvironment). Every move
+    // rewrites it, so the third request, back in the cloud, no longer starts with the first's.
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return answerStream(`Answer ${requests.length}.`)
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-moving-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-moving-runs-")))
+    const laptop = { id: "laptop", name: "Laptop", folder }
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computer: async () => ({ id: laptop.id, name: laptop.name }),
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async () => new FolderReadingSandbox("computer"),
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+
+    const inTheCloud = async (threadId: string, text: string) => {
+      const { run } = await requestAgent(sixb, { threadId, text })
+      expect((await waitForTerminalRun(storage, run.id)).status).toBe("succeeded")
+    }
+    const onTheLaptop = async (threadId: string, text: string) => {
+      const { run } = await requestAgent(sixb, { threadId, text })
+      expect(await runner.runTurn(run.id, new AbortController().signal)).toBe(true)
+      await runner.drain()
+    }
+    const toTheLaptop = (threadId: string) =>
+      storage.threads.assignComputer({ projectId: PROJECT_ID, id: threadId, computer: laptop })
+    const toTheCloud = (threadId: string) =>
+      storage.threads.moveToCloud({ projectId: PROJECT_ID, id: threadId })
+
+    try {
+      const first = await requestAgent(sixb, { text: "Look at the orders." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      const { threadId } = first.run
+
+      await toTheLaptop(threadId)
+      await onTheLaptop(threadId, "Now the local report.")
+      await toTheCloud(threadId)
+      await inTheCloud(threadId, "Back to the orders.")
+      await toTheLaptop(threadId)
+      await onTheLaptop(threadId, "And the report again.")
+
+      const [cloud, laptopTurn, cloudAgain, laptopAgain] = requests
+      expect(requests).toHaveLength(4)
+      expect(systemPromptOf(laptopTurn?.messages)).not.toBe(systemPromptOf(cloud?.messages))
+
+      // Each workspace's prompt, and the history it cached, come back as they were sent.
+      expectReplayedPrefix(cloud, cloudAgain, model.providerId)
+      expectReplayedPrefix(laptopTurn, laptopAgain, model.providerId)
+    } finally {
+      await worker.stop()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
   test("accounts a tool's model call to the chat run like the Agent's own", async () => {
     const sixb = buildSixb(
       toolCallThenAnswerModel(summarizeInvoice.name, {}),

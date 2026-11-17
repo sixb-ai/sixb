@@ -555,4 +555,59 @@ describe("moving a conversation between cloud and local computer", () => {
     const backOnLaptop = await owner.agent.threads.moveToComputer(thread.id, laptop)
     expect(backOnLaptop).toMatchObject({ runsOn: "computer", computer: laptop })
   })
+
+  // Guard proof: restrict moveThread's held-call check to `thread.runsOn === "computer"`; the call
+  // reviewed for the cloud's sandbox moves to the laptop, and runs in its folder once approved.
+  test("keeps a cloud conversation in the cloud while its turn waits on approvals", async () => {
+    const { host, storage } = setup()
+    const owner = await userScope(host, "owner")
+    const thread = await owner.agent.threads.create({ title: "Clean the build" })
+    const { run } = await owner.agent.runs.request({
+      threadId: thread.id,
+      text: "Clear the build folder",
+    })
+
+    // The cloud turn holds a call, then pauses on it.
+    const execution = { token: "tok_cloud", queueLeaseExpiresAt: new Date(Date.now() + 60_000) }
+    await storage.agents.runs.start({ projectId: host.id, id: run.id, execution })
+    await storage.agents.approvals.request({
+      id: "apr_clear_build",
+      projectId: host.id,
+      runId: run.id,
+      callerRunId: run.id,
+      executionToken: execution.token,
+      requestedBy: { type: "user", id: "owner" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "clear-build",
+        subject: { kind: "none" },
+        params: {},
+        actionRunId: "act_clear_build",
+        effect: "external",
+      },
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    await storage.agents.runs.finish({
+      projectId: host.id,
+      id: run.id,
+      executionToken: execution.token,
+      status: "succeeded",
+      finishReason: "awaiting_approval",
+    })
+
+    const refused = await owner.agent.threads
+      .moveToComputer(thread.id, laptop)
+      .catch((error: unknown) => error)
+    expect(refused).toMatchObject({
+      code: "active_run_exists",
+      message: expect.stringContaining("waiting for your approval"),
+    })
+    expect(await owner.agent.threads.getById(thread.id)).not.toHaveProperty("runsOn")
+
+    // Stopped, the turn never resumes, and the thread moves.
+    await owner.agent.runs.cancel(run.id)
+    const moved = await owner.agent.threads.moveToComputer(thread.id, laptop)
+    expect(moved).toMatchObject({ runsOn: "computer", computer: laptop })
+  })
 })

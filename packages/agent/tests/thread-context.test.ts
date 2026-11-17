@@ -244,85 +244,240 @@ test("a seeded checkpoint changes only the model input", async () => {
   expect(originalMessages).toEqual(transcript)
 })
 
-test("preserves exact prompt-cache prefixes across Cloud -> Computer -> Cloud -> Computer moves", async () => {
-  // Guard proof: put workspaceMovedAt back in the system prompt, or omit movedMessageIds from
-  // readAgentTurnHistory / conversationModelMessages; returning to a workspace rewrites its system
-  // prompt and loses the cached conversation prefix, or drops the transition marker.
-  const storage = new InMemoryStorage()
-  const agents = storage.agents
-  const laptopA = { id: "cmp_1", name: "MacBook", folder: "/Users/ava/app" }
-  const laptopB = { id: "cmp_1", name: "MacBook", folder: "/Users/ava/docs" }
+// ── Moves and the prompt cache ────────────────────────────────────────────────────────────────
+//
+// Each workspace caches the prompt its turns sent. A conversation that comes back to one reads that
+// cache again only if every later request there starts with the exact bytes of the earlier ones.
+// These scenarios drive turns through the session as a runner does and compare the history the
+// model received, `<sixb_workspace_moved>` notes included. The system prompt here is the test's
+// own: the worker's "a conversation back in a workspace sends the prompt that workspace sent
+// before" checks the one a turn builds.
 
-  await agents.threads.create({
-    id: threadId,
-    projectId,
-    ownerPrincipal: { type: "user", id: "user" },
-  })
+/** Where a turn runs: the cloud, or a folder of its owner's computer. */
+type Workspace = "cloud" | { readonly id: string; readonly folder: string }
 
-  const captured: { readonly system: string; readonly messages: ModelMessage[] }[] = []
-  const runTurn = async (input: {
-    readonly index: number
-    readonly text: string
-    readonly systemPrompt: string
-    readonly runsOn?: "computer"
-    readonly computer?: { readonly id: string; readonly folder: string }
-    readonly at: string
-  }) => {
-    const messageId = `msg_u_${input.index}`
-    const runId = `run_${input.index}`
-    const token = `tok_${input.index}`
-    const createdAt = new Date(input.at)
-    await agents.messages.append({
+const OWNER = { type: "user", id: "user" } as const
+
+const APP_FOLDER: Workspace = { id: "cmp_1", folder: "/Users/ava/app" }
+const DOCS_FOLDER: Workspace = { id: "cmp_1", folder: "/Users/ava/docs" }
+const SITE_FOLDER: Workspace = { id: "cmp_1", folder: "/Users/ava/site" }
+
+function workspaceKey(workspace: Workspace): string {
+  return workspace === "cloud" ? "cloud" : `${workspace.id}:${workspace.folder}`
+}
+
+interface TurnOptions {
+  readonly fails?: boolean
+  /**
+   * Compact within the turn, before its model call: the summary ends before its message, or before
+   * the last message sent into an earlier turn, which it keeps.
+   */
+  readonly compacts?: "before its message" | "before the last steer"
+}
+
+/** One request a turn sent its model. */
+interface SentRequest {
+  /** The text of the user message the turn answers. */
+  readonly turn: string
+  readonly workspace: Workspace
+  /** A compaction replaces what came before it: requests on either side share no prefix. */
+  readonly checkpointId: string | undefined
+  /** An attempt that failed, which a retry runs again. */
+  readonly failed: boolean
+  /** Everything but the system prompt. */
+  readonly messages: readonly ModelMessage[]
+}
+
+/** A conversation's turns, its moves, and every request its model received. */
+class MovingConversation {
+  readonly requests: SentRequest[] = []
+  private workspace: Workspace = "cloud"
+  private userMessages = 0
+  private lastSteerId: string | undefined
+
+  private constructor(
+    private readonly storage: InMemoryStorage,
+    readonly threadId: string,
+    /** Each user message's text is this prefix and its number. */
+    private readonly label: string,
+    private readonly now: () => Date
+  ) {}
+
+  /** A conversation started in `workspace`: in the cloud, or by `sixb` in a folder. */
+  static async start(workspace: Workspace = "cloud"): Promise<MovingConversation> {
+    const storage = new InMemoryStorage()
+    let minute = 0
+    const now = () => new Date(Date.UTC(2026, 10, 14, 10, minute++))
+
+    await storage.agents.threads.create({
+      id: threadId,
+      projectId,
+      ownerPrincipal: { type: "user", id: "user" },
+      ...(workspace === "cloud"
+        ? {}
+        : { runsOn: "computer" as const, computer: { ...workspace, name: "MacBook" } }),
+      createdAt: now(),
+    })
+    const conversation = new MovingConversation(storage, threadId, "U", now)
+    conversation.workspace = workspace
+    return conversation
+  }
+
+  async moveTo(workspace: Workspace): Promise<void> {
+    const threads = this.storage.agents.threads
+    if (workspace === "cloud") {
+      await threads.moveToCloud({ projectId, id: this.threadId, movedAt: this.now() })
+    } else {
+      await threads.assignComputer({
+        projectId,
+        id: this.threadId,
+        computer: { ...workspace, name: "MacBook" },
+        movedAt: this.now(),
+      })
+    }
+    this.workspace = workspace
+  }
+
+  /** Send a message and run its turn where the conversation is. */
+  async turn(options: TurnOptions = {}) {
+    const runId = await this.queue()
+    return this.run(runId, options)
+  }
+
+  /** Send a message whose turn waits for its runner: a move may take it elsewhere. */
+  async queue(): Promise<string> {
+    this.userMessages += 1
+    const messageId = `${this.threadId}_message_${this.userMessages}`
+    await this.storage.agents.messages.append({
       id: messageId,
       projectId,
-      threadId,
+      threadId: this.threadId,
       runId: null,
       role: "user",
-      parts: [{ type: "text", text: input.text }],
-      createdAt,
+      parts: [{ type: "text", text: `${this.label}${this.userMessages}` }],
+      createdAt: this.now(),
     })
-    const executionId = await createTestAgentExecution(storage, { projectId, runId })
-    await agents.runs.create({
+    return this.createRun(messageId, `${messageId}_run`)
+  }
+
+  /**
+   * Send a message while a turn waits or runs, as the composer's steer does: it waits in the
+   * thread's inbox, and the turn reads it and saves it, with no run of its own.
+   */
+  async steer(text: string): Promise<void> {
+    const messageId = `${this.threadId}_steer_${this.userMessages}`
+    await this.storage.agents.inbox.enqueue({
+      id: `${messageId}_inbox`,
+      projectId,
+      threadId: this.threadId,
+      messageId,
+      authorPrincipal: OWNER,
+      mode: "steer",
+      parts: [{ type: "text", text }],
+      createdAt: this.now(),
+    })
+    this.lastSteerId = messageId
+  }
+
+  /** Run a failed turn again, where the conversation is now, as a retry does. */
+  async retry(failedRunId: string) {
+    const failed = await this.storage.agents.runs.getById({ projectId, id: failedRunId })
+    if (failed?.kind !== "conversation") throw new Error("Expected the failed turn's run.")
+
+    await this.storage.agents.messages.deleteByRunId({
+      projectId,
+      threadId: this.threadId,
+      runId: failed.id,
+    })
+    const runId = await this.createRun(failed.triggerMessageId, `${failed.id}_retry`)
+    return this.run(runId)
+  }
+
+  async fork(): Promise<MovingConversation> {
+    const id = `${this.threadId}_fork`
+    await this.storage.agents.threads.fork({
+      projectId,
+      sourceThreadId: this.threadId,
+      id,
+      ownerPrincipal: { type: "user", id: "user" },
+      createdAt: this.now(),
+    })
+    return new MovingConversation(this.storage, id, "F", this.now)
+  }
+
+  private async createRun(triggerMessageId: string, runId: string): Promise<string> {
+    // Asked for by the conversation's owner: a turn reads only the steers its requester sent.
+    const executionId = await createTestAgentExecution(this.storage, {
+      projectId,
+      runId,
+      requestedBy: OWNER,
+    })
+    const computer = this.workspace === "cloud" ? undefined : this.workspace
+    await this.storage.agents.runs.create({
       id: runId,
       projectId,
       executionId,
-      threadId,
-      triggerMessageId: messageId,
-      createdAt,
+      threadId: this.threadId,
+      triggerMessageId,
+      createdAt: this.now(),
       spec: {
         model: { provider: "test", modelId: "test-model" },
-        ...(input.runsOn
-          ? { runsOn: input.runsOn, ...(input.computer ? { computer: input.computer } : {}) }
-          : {}),
+        ...(computer ? { runsOn: "computer" as const, computer } : {}),
       },
     })
+    return runId
+  }
+
+  /** Start a turn where its run says it runs, as that workspace's runner does, and send it. */
+  async run(runId: string, options: TurnOptions = {}): Promise<SentRequest> {
+    const agents = this.storage.agents
+    const queued = await agents.runs.getById({ projectId, id: runId })
+    if (queued?.kind !== "conversation") throw new Error("Expected a conversation run.")
+
+    const workspace: Workspace = queued.spec?.computer ?? "cloud"
+    const token = `${runId}_token`
+    const startedAt = this.now()
     const started = await agents.runs.start({
       id: runId,
       projectId,
-      startedAt: createdAt,
-      execution: {
-        token,
-        queueLeaseExpiresAt: new Date(createdAt.getTime() + 300_000),
-      },
-      ...(input.computer ? { onComputer: input.computer } : {}),
+      startedAt,
+      execution: { token, queueLeaseExpiresAt: new Date(startedAt.getTime() + 300_000) },
+      ...(workspace === "cloud" ? {} : { onComputer: workspace }),
     })
-    if (started.kind !== "conversation") throw new Error("Expected conversation run.")
+    if (started.kind !== "conversation") throw new Error("Expected a conversation run.")
 
-    const model = captureModel((prompt) => {
-      const sys = prompt.find((m) => m.role === "system")
-      captured.push({
-        system: sys?.role === "system" ? sys.content : "",
-        messages: prompt.filter((m) => m.role !== "system"),
-      })
+    if (options.compacts) await this.compact(started, token, options.compacts)
+    const checkpoint = await agents.checkpoints.getLatest({ projectId, threadId: this.threadId })
+
+    const trigger = await agents.messages.getById({ projectId, id: started.triggerMessageId })
+    const firstPart = trigger?.parts[0]
+    const turnText = firstPart?.type === "text" ? firstPart.text : runId
+
+    let sent: readonly ModelMessage[] | undefined
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        sent = request.messages.filter((message) => message.role !== "system")
+        if (options.fails) throw new Error("[Test] The provider failed.")
+
+        return testStream([
+          { type: "stream-start" },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: `Answer to ${turnText}` },
+          { type: "text-end", id: "answer" },
+          { type: "finish", finishReason: "stop", rawFinishReason: "stop", usage },
+        ])
+      },
     })
-    await runTurnInSession({
-      storage: requireWorkerStorage(storage),
+
+    const turnRun = runTurnInSession({
+      storage: requireWorkerStorage(this.storage),
       context: {
         id: projectId,
         authorPrincipal: { type: "serviceAccount", id: "service_agent" },
         blobStorage: new InMemoryBlobStorage(),
         tools: [],
-        systemPrompt: input.systemPrompt,
+        systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
         projectLocale: "en",
       },
@@ -337,113 +492,279 @@ test("preserves exact prompt-cache prefixes across Cloud -> Computer -> Cloud ->
       run: started,
       signal: new AbortController().signal,
     })
+    if (options.fails) {
+      await turnRun.catch((error) => error)
+      await this.failIfRunning(runId, token)
+    } else {
+      await turnRun
+    }
+
+    if (!sent) throw new Error(`Expected ${turnText} to reach its model.`)
+    const request: SentRequest = {
+      turn: turnText,
+      workspace,
+      checkpointId: checkpoint?.id,
+      failed: options.fails === true,
+      messages: sent,
+    }
+    this.requests.push(request)
+    return request
   }
 
-  // Turn 1 in Cloud
-  await runTurn({
-    index: 1,
-    text: "Inspect cloud objects",
-    systemPrompt: "CLOUD_PROMPT",
-    at: "2026-11-14T10:00:00.000Z",
-  })
+  private async failIfRunning(runId: string, token: string): Promise<void> {
+    const run = await this.storage.agents.runs.getById({ projectId, id: runId })
+    if (run?.status !== "running") return
 
-  // Move Cloud -> Laptop folder A, run Turn 2 & Turn 3
-  await agents.threads.assignComputer({
-    projectId,
-    id: threadId,
-    computer: laptopA,
-    movedAt: new Date("2026-11-14T10:02:00.000Z"),
-  })
-  await runTurn({
-    index: 2,
-    text: "Edit local files",
-    systemPrompt: "LAPTOP_A_PROMPT",
-    runsOn: "computer",
-    computer: { id: laptopA.id, folder: laptopA.folder },
-    at: "2026-11-14T10:03:00.000Z",
-  })
-  await runTurn({
-    index: 3,
-    text: "Run local tests",
-    systemPrompt: "LAPTOP_A_PROMPT",
-    runsOn: "computer",
-    computer: { id: laptopA.id, folder: laptopA.folder },
-    at: "2026-11-14T10:04:00.000Z",
-  })
+    await this.storage.agents.runs.finish({
+      id: runId,
+      projectId,
+      executionToken: token,
+      status: "failed",
+    })
+  }
 
-  // Move Laptop folder A -> Cloud, run Turn 4
-  await agents.threads.moveToCloud({
-    projectId,
-    id: threadId,
-    movedAt: new Date("2026-11-14T10:05:00.000Z"),
+  /**
+   * Summarize the history as a compaction within the turn's run does: what came before its message,
+   * or before the last steer, which a compaction may keep as it keeps any user message.
+   */
+  private async compact(
+    run: ConversationAgentRunRecord,
+    token: string,
+    through: NonNullable<TurnOptions["compacts"]>
+  ): Promise<void> {
+    const agents = this.storage.agents
+    const { messages } = await agents.messages.list({
+      projectId,
+      threadId: this.threadId,
+      order: "asc",
+    })
+    const firstKept = messages.find(
+      (message) =>
+        message.id ===
+        (through === "before the last steer" ? this.lastSteerId : run.triggerMessageId)
+    )
+    const head = messages.at(-1)
+    if (!firstKept || !head) throw new Error("Expected the message the summary ends before.")
+
+    const previous = await agents.checkpoints.getLatest({ projectId, threadId: this.threadId })
+    await agents.checkpoints.create({
+      id: `${run.id}_checkpoint`,
+      projectId,
+      threadId: this.threadId,
+      createdByRunId: run.id,
+      expectedPreviousCheckpointId: previous?.id ?? null,
+      expectedHeadSeq: head.seq,
+      executionToken: token,
+      reason: "threshold",
+      summary: `Everything before ${firstKept.id}.`,
+      summaryFormatVersion: 1,
+      summarizedThroughSeq: firstKept.seq - 1,
+      observedHeadSeq: head.seq,
+      estimatedInputTokensBefore: 1_000,
+      estimatedInputTokensAfter: 300,
+      summaryModelId: "test-model",
+    })
+  }
+}
+
+/**
+ * Every request's history starts with the exact bytes of each earlier one sent from its workspace,
+ * since the same compaction. A failed attempt is compared where its scenario says what holds.
+ */
+function expectEachWorkspaceReplaysItsRequests(requests: readonly SentRequest[]): void {
+  const sent = requests.filter((request) => !request.failed)
+  for (const [index, later] of sent.entries()) {
+    for (const earlier of sent.slice(0, index)) {
+      if (workspaceKey(earlier.workspace) !== workspaceKey(later.workspace)) continue
+      if (earlier.checkpointId !== later.checkpointId) continue
+
+      expectStartsWith(later, earlier)
+    }
+  }
+}
+
+function expectStartsWith(later: SentRequest, earlier: SentRequest): void {
+  const pair = `${earlier.turn} then ${later.turn}`
+  const replayed: readonly ModelMessage[] = later.messages.slice(0, earlier.messages.length)
+
+  expect({ pair, messages: replayed }).toEqual({ pair, messages: earlier.messages })
+}
+
+/** The user messages a request closes with the move note, by their text. */
+function movedMessages(request: SentRequest): readonly string[] {
+  return request.messages.flatMap((message) => {
+    if (message.role !== "user") return []
+
+    const texts = message.content.map((part) => (part.type === "text" ? part.text : ""))
+    return texts.some((text) => text.includes(renderWorkspaceMovedTag())) ? [texts[0] ?? ""] : []
   })
-  await runTurn({
-    index: 4,
-    text: "Check live metrics in cloud",
-    systemPrompt: "CLOUD_PROMPT",
-    at: "2026-11-14T10:06:00.000Z",
-  })
+}
 
-  // Move Cloud -> Laptop folder A again, run Turn 5
-  await agents.threads.assignComputer({
-    projectId,
-    id: threadId,
-    computer: laptopA,
-    movedAt: new Date("2026-11-14T10:07:00.000Z"),
-  })
-  await runTurn({
-    index: 5,
-    text: "Back in app folder",
-    systemPrompt: "LAPTOP_A_PROMPT",
-    runsOn: "computer",
-    computer: { id: laptopA.id, folder: laptopA.folder },
-    at: "2026-11-14T10:08:00.000Z",
-  })
+// Guard proof for the scenarios below: mark the first user message after `thread.movedAt` again in
+// detectMovedMessages (run-turn.ts), as the fallback this replaced did. The tag it adds moves to
+// another message at the next move, and the round trips, the queued turn and the fork fail.
 
-  // Move Laptop folder A -> Laptop folder B, run Turn 6
-  await agents.threads.assignComputer({
-    projectId,
-    id: threadId,
-    computer: laptopB,
-    movedAt: new Date("2026-11-14T10:09:00.000Z"),
-  })
-  await runTurn({
-    index: 6,
-    text: "Update docs folder",
-    systemPrompt: "LAPTOP_B_PROMPT",
-    runsOn: "computer",
-    computer: { id: laptopB.id, folder: laptopB.folder },
-    at: "2026-11-14T10:10:00.000Z",
-  })
+test("a round trip with no turn in between leaves the history it comes back to as it was sent", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.moveTo("cloud")
+  await conversation.turn()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+  await conversation.moveTo("cloud")
+  const last = await conversation.turn()
 
-  const [c1, l2, l3, c4, l5, l6] = captured
-  if (!c1 || !l2 || !l3 || !c4 || !l5 || !l6) throw new Error("Expected 6 captured prompts.")
+  // The cloud kept its workspace: U2 ran where U1 did, so only the turns that changed it say so.
+  expect(movedMessages(last)).toEqual(["U4", "U5"])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
 
-  // 1. Consecutive turns in the same local folder share the exact prefix.
-  expect(l3.system).toBe(l2.system)
-  expect(l3.messages.slice(0, l2.messages.length)).toEqual(l2.messages)
+test("round trips with a turn in each workspace keep each workspace's prefix", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.turn()
+  for (const workspace of [APP_FOLDER, "cloud", APP_FOLDER, "cloud"] as const) {
+    await conversation.moveTo(workspace)
+    await conversation.turn()
+  }
 
-  // 2. Returning to Cloud (Turn 4) matches Turn 1's system prompt and initial messages byte-for-byte!
-  expect(c4.system).toBe(c1.system)
-  expect(c4.messages.slice(0, c1.messages.length)).toEqual(c1.messages)
+  expect(movedMessages(conversation.requests.at(-1) as SentRequest)).toEqual([
+    "U2",
+    "U3",
+    "U4",
+    "U5",
+  ])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
 
-  // 3. Returning to Laptop folder A (Turn 5) matches Turn 3's system prompt and Turn 1..3 messages byte-for-byte!
-  expect(l5.system).toBe(l3.system)
-  expect(l5.messages.slice(0, l3.messages.length)).toEqual(l3.messages)
+test("moves between folders keep each folder's prefix, a return with no turn included", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+  for (const workspace of [DOCS_FOLDER, SITE_FOLDER, APP_FOLDER]) {
+    await conversation.moveTo(workspace)
+    await conversation.turn()
+  }
+  await conversation.moveTo(DOCS_FOLDER)
+  await conversation.moveTo(APP_FOLDER)
+  const last = await conversation.turn()
 
-  // 4. Exactly the user messages after a move (Turn 2, Turn 4, Turn 5, Turn 6) carry <sixb_workspace_moved>,
-  // while Turn 1 and Turn 3 (which stayed in place) do not.
-  const userMessagesOf = (messages: readonly ModelMessage[]) =>
-    messages
-      .filter((m): m is Extract<ModelMessage, { role: "user" }> => m.role === "user")
-      .map((m) => m.content.map((part) => (part.type === "text" ? part.text : "")).join(""))
+  expect(movedMessages(last)).toEqual(["U2", "U3", "U4"])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
 
-  const finalUsers = userMessagesOf(l6.messages)
-  expect(finalUsers).toHaveLength(6)
-  expect(finalUsers[0]).not.toContain("<sixb_workspace_moved>")
-  expect(finalUsers[1]).toContain(renderWorkspaceMovedTag())
-  expect(finalUsers[2]).not.toContain("<sixb_workspace_moved>")
-  expect(finalUsers[3]).toContain(renderWorkspaceMovedTag())
-  expect(finalUsers[4]).toContain(renderWorkspaceMovedTag())
-  expect(finalUsers[5]).toContain(renderWorkspaceMovedTag())
+test("a retried turn replays the bytes its failed attempt sent, where it runs again", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.turn()
+  const failed = await conversation.turn({ fails: true })
+  const retried = await conversation.retry("thread_message_2_run")
+  await conversation.turn()
+
+  expect(retried.messages).toEqual(failed.messages)
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+
+  // Retried on the computer, U4 crossed the move there: the cloud reads its cache again up to U4,
+  // the message its failed attempt ended on, which the retry answered elsewhere.
+  const failedInCloud = await conversation.turn({ fails: true })
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.retry("thread_message_4_run")
+  await conversation.turn()
+  await conversation.moveTo("cloud")
+  const back = await conversation.turn()
+
+  expect(movedMessages(back)).toEqual(["U4", "U6"])
+  expect(back.messages.slice(0, failedInCloud.messages.length - 1)).toEqual(
+    failedInCloud.messages.slice(0, -1)
+  )
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
+
+test("a queued turn a move takes elsewhere says so once, wherever the conversation goes next", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+  const queued = await conversation.queue()
+  await conversation.moveTo(DOCS_FOLDER)
+  await conversation.moveTo("cloud")
+  await conversation.run(queued)
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+  await conversation.moveTo("cloud")
+  const last = await conversation.turn()
+
+  expect(movedMessages(last)).toEqual(["U2", "U4", "U5"])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
+
+test("a fork's first turn says it starts elsewhere, and keeps saying it after the fork moves", async () => {
+  const source = await MovingConversation.start(APP_FOLDER)
+  await source.turn()
+  await source.turn()
+
+  const fork = await source.fork()
+  await fork.turn()
+  await fork.turn()
+  await fork.moveTo(APP_FOLDER)
+  await fork.turn()
+  await fork.moveTo("cloud")
+  const last = await fork.turn()
+
+  // The copies were answered in the source's workspace, which the fork does not have.
+  expect(movedMessages(last)).toEqual(["F1", "F3", "F4"])
+  expectEachWorkspaceReplaysItsRequests(fork.requests)
+})
+
+test("a compaction across a move keeps the note on the message that crossed it", async () => {
+  const conversation = await MovingConversation.start()
+  await conversation.turn()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  const compacted = await conversation.turn({ compacts: "before its message" })
+  await conversation.turn()
+  await conversation.moveTo("cloud")
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  const last = await conversation.turn()
+
+  expect(compacted.checkpointId).toBeDefined()
+  expect(movedMessages(compacted)).toEqual(["U3"])
+  expect(movedMessages(last)).toEqual(["U3", "U5", "U6"])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
+
+test("a fork whose first turn compacts what it copied still says that turn started elsewhere", async () => {
+  // Proven by removal: start `inherited` false in detectMovedMessages; once the copies are
+  // summarized, nothing before F1 shows that the fork's history comes from another workspace.
+  const source = await MovingConversation.start(APP_FOLDER)
+  await source.turn()
+  await source.turn()
+
+  const fork = await source.fork()
+  const compacted = await fork.turn({ compacts: "before its message" })
+  const last = await fork.turn()
+
+  expect(compacted.checkpointId).toBeDefined()
+  expect(movedMessages(last)).toEqual(["F1"])
+  expectEachWorkspaceReplaysItsRequests(fork.requests)
+})
+
+test("a message sent while a turn waited does not hide where that turn ran", async () => {
+  // Proven by removal: look for the run before the history only among the runs that started
+  // before its oldest message; the waiting turn started after the message sent meanwhile, so the
+  // cloud turn before it is taken for the previous place, and U3 reads as moved.
+  const conversation = await MovingConversation.start()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  const waiting = await conversation.queue()
+  await conversation.steer("Also check the tests.")
+  await conversation.run(waiting)
+  const last = await conversation.turn({ compacts: "before the last steer" })
+
+  // The waiting turn read the steer and saved it, with no run of its own: it is the oldest message
+  // the last turn keeps after its summary.
+  expect(last.messages[1]?.content[0]).toEqual({ type: "text", text: "Also check the tests." })
+  expect(movedMessages(last)).toEqual([])
+  expectEachWorkspaceReplaysItsRequests(conversation.requests)
 })

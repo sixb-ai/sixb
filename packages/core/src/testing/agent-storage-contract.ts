@@ -909,7 +909,8 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
     // Guard proof: drop `movesComputerPlace` from a store's assignComputer; a rename on the same
     // folder records a move. Drop `runs_on = 'computer'` from assignComputer; a cloud thread gets a
-    // computer without running on one.
+    // computer without running on one. Drop `running` from assertAssignableComputer's cloud check;
+    // a running cloud turn loses its thread to the laptop.
     test("moves a thread between the cloud, computers and folders back and forth", async () => {
       await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
@@ -939,24 +940,31 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           movedAt: at("2026-06-23T12:00:00.000Z"),
         })
 
-        // A queued cloud turn keeps the thread in the cloud until it finishes.
+        // A cloud turn keeps the thread in the cloud until it finishes, queued or running.
         await createRun(
           storage,
           fixture,
           runInput({
-            id: "run_cloud_queued",
+            id: "run_cloud",
             threadId: "thr_cloud",
             spec: { model: { provider: "test", modelId: "large" } },
-            execution: execution("cloud_queued"),
+            execution: execution("cloud"),
           })
         )
         await expectAgentError(
           storage.threads.assignComputer({ projectId, id: "thr_cloud", computer: laptop }),
           "active_run_exists"
         )
-        await storage.runs.finishQueued({
+
+        await storage.runs.start({ projectId, id: "run_cloud", execution: execution("cloud") })
+        await expectAgentError(
+          storage.threads.assignComputer({ projectId, id: "thr_cloud", computer: laptop }),
+          "active_run_exists"
+        )
+        await storage.runs.finish({
           projectId,
-          id: "run_cloud_queued",
+          id: "run_cloud",
+          executionToken: "cloud",
           status: "cancelled",
         })
 
@@ -1043,9 +1051,44 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
     // Guard proof: drop the child-state update from a store's assignComputer; a continuation on
     // the computer hands its child its out/ back, and a later return to the cloud resumes a
-    // workspace that never saw the computer's work.
+    // workspace that never saw the computer's work. Drop `parent_thread_id` from that update (sqlite,
+    // pg) or the parent check (in-memory); another conversation's ready workspace is retired too.
     test("retires a paused child's cloud workspace when its conversation moves to a computer", async () => {
       await withStorage(async (storage, fixture) => {
+        // Another conversation of the project, idle with a ready workspace of its own.
+        await storage.threads.create(threadInput({ id: "thr_neighbour", sandboxParams: {} }))
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_neighbour",
+            threadId: "thr_neighbour",
+            execution: execution("neighbour_token", new Date("2099-01-01")),
+          })
+        )
+        const acquireNeighbour = {
+          projectId,
+          id: "thr_neighbour",
+          action: "acquire" as const,
+          runId: "run_neighbour",
+          executionToken: "neighbour_token",
+          name: "neighbour-workspace",
+          sourceFingerprint: "c".repeat(64),
+        }
+        await storage.threads.transitionSandbox(acquireNeighbour)
+        await storage.threads.transitionSandbox({
+          ...acquireNeighbour,
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        await storage.runs.finish({
+          projectId,
+          id: "run_neighbour",
+          executionToken: "neighbour_token",
+          status: "succeeded",
+        })
+
         await createRunningParent(storage, fixture)
         await createSubagent(storage, fixture)
         await storage.runs.start({
@@ -1092,6 +1135,11 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           storage.threads.getById({ projectId, id: "thread_child_1" })
         ).resolves.toMatchObject({
           sandboxState: { name: "child-workspace", status: "unavailable" },
+        })
+        await expect(
+          storage.threads.getById({ projectId, id: "thr_neighbour" })
+        ).resolves.toMatchObject({
+          sandboxState: { name: "neighbour-workspace", status: "ready" },
         })
       })
     })

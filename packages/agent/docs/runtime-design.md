@@ -141,9 +141,11 @@ turn N's last request sent, on every storage:
   points at the file.
 - **Workspace moves close the user message that crossed them.** Moving a thread between the cloud,
   computers or folders appends `<sixb_workspace_moved>` to the first user message in the new
-  workspace (derived from each run's stored place, with `thread.movedAt` as fallback for forks),
-  ahead of `<sixb_current_time>` and `<sixb_author>`. The system prompt carries no move timestamp,
-  so returning to a workspace within its one-hour cache TTL reuses its cached prefix byte for byte.
+  workspace, ahead of `<sixb_current_time>` and `<sixb_author>`. Only each run's stored place
+  decides it, never the thread's latest move, so no later move adds or removes a note: a round trip
+  with no turn in between marks nothing, and a fork's first turn is marked, its copies having no
+  run in the fork. The system prompt carries no move timestamp, so returning to a workspace within
+  its one-hour cache TTL reuses its cached prefix byte for byte.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the

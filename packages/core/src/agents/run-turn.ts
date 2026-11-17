@@ -6,9 +6,9 @@ import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
-  ConversationAgentRunSpec,
   SubagentRunRecord,
 } from "../storage/agents"
+import { runPlaceKey } from "../storage/agents/provider"
 import type { AiModelCallUsageRecord } from "../storage/ai-usage"
 import type { ExecutionRecord } from "../storage/executions/types"
 import { isPausedSubagentRun } from "./approvals"
@@ -326,16 +326,16 @@ async function readSentSettings(
     places[run.triggerMessageId] = runPlaceKey(run.spec)
   }
 
-  const priorRun = earlier.runs.find(
-    (run) => run.kind === "conversation" && !retained.has(run.triggerMessageId)
-  )
+  // The latest turn the summary holds. It may have started after the oldest message kept, one sent
+  // while it waited: look for it in both lists.
+  const priorRun = [...runs, ...earlier.runs]
+    .filter((run) => run.kind === "conversation" && !retained.has(run.triggerMessageId))
+    .sort((left, right) => startOf(right) - startOf(left))[0]
   const movedMessageIds = detectMovedMessages({
     userMessages,
-    allMessages: messages,
     checkpoint,
     places,
     priorPlace: priorRun?.kind === "conversation" ? runPlaceKey(priorRun.spec) : undefined,
-    movedAt: thread?.movedAt,
   })
   return {
     sentTimeZones: zones,
@@ -344,47 +344,44 @@ async function readSentSettings(
   }
 }
 
-function runPlaceKey(spec: ConversationAgentRunSpec | undefined): string {
-  if (spec?.runsOn !== "computer") return "cloud"
-  return spec.computer ? `computer:${spec.computer.id}:${spec.computer.folder}` : "computer"
+/** When a run started, or was admitted when it never did: the order the run lists sort by. */
+function startOf(run: AgentRunRecord): number {
+  return (run.startedAt ?? run.createdAt).getTime()
 }
 
+/**
+ * The user messages that ran in another workspace than the one before them. Only runs decide it,
+ * never the thread's latest move, so a message keeps its note, or its lack of one, at every later
+ * turn: a round trip with no turn in between changes nothing, and the workspace it comes back to
+ * reads its cached prefix again.
+ */
 function detectMovedMessages(input: {
   readonly userMessages: readonly AgentMessageRecord[]
-  readonly allMessages: readonly AgentMessageRecord[]
   readonly checkpoint: AgentContextCheckpointRecord | null
   readonly places: Readonly<Record<string, string>>
   readonly priorPlace: string | undefined
-  readonly movedAt: Date | undefined
 }): readonly string[] {
-  const moved = new Set<string>()
+  const moved: string[] = []
   let previous = input.priorPlace
+
+  // A message with no run of its own, such as one sent into a turn that runs, decides nothing.
+  // Before any run of the thread, though, such messages are a fork's copies, answered in its
+  // source's workspace, as is a summary with no run before it: the fork's first turn starts
+  // elsewhere.
+  let inherited = previous === undefined && input.checkpoint !== null
+
   for (const message of input.userMessages) {
     const place = input.places[message.id]
-    if (place === undefined) continue
-    if (previous !== undefined && previous !== place) moved.add(message.id)
+    if (place === undefined) {
+      inherited = true
+      continue
+    }
+
+    const crossed = previous === undefined ? inherited : previous !== place
+    if (crossed) moved.push(message.id)
     previous = place
   }
-
-  // Fallback for forked threads (whose copied messages carry no runs here) or pre-place runs:
-  // mark the first user message after movedAt when earlier history existed and no run transition
-  // already marked it.
-  if (input.movedAt) {
-    const movedAtMs = input.movedAt.getTime()
-    const hadEarlier =
-      input.checkpoint !== null ||
-      input.allMessages.some((message) => message.createdAt.getTime() <= movedAtMs)
-    const alreadyMarked = input.userMessages.some(
-      (message) => message.createdAt.getTime() >= movedAtMs && moved.has(message.id)
-    )
-    if (hadEarlier && !alreadyMarked) {
-      const firstAfter = input.userMessages.find(
-        (message) => message.createdAt.getTime() > movedAtMs
-      )
-      if (firstAfter) moved.add(firstAfter.id)
-    }
-  }
-  return input.userMessages.filter((message) => moved.has(message.id)).map((message) => message.id)
+  return moved
 }
 
 /**

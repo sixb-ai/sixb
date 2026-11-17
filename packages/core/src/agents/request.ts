@@ -35,6 +35,7 @@ import {
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
 } from "../storage/agents"
+import { type AgentTurnPlace, turnPlace } from "../storage/agents/provider"
 import {
   aiLimitSubjectsFromAttribution,
   aiUsageLimitExceededError,
@@ -206,6 +207,8 @@ export async function requestAgentRun(
     (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: existingThread?.id }))
       .approvalMode
 
+  const place = turnPlace(runsOn, existingThread ? existingThread.computer : input.computer)
+
   // Last before anything is written, so a message the checks above refuse never reaches the
   // decision model. Concurrent messages to an idle thread can still each ask before one of them is
   // refused with `active_run_exists` below.
@@ -215,24 +218,12 @@ export async function requestAgentRun(
           ...requested,
           projectId,
           threadId: existingThread?.id,
-          movedAt: existingThread?.movedAt,
+          place,
           settings,
           language: models.language,
         })
       : requested
-  const computerPlace = existingThread ? existingThread.computer : input.computer
-  const spec: ConversationAgentRunSpec = Object.freeze({
-    ...selected,
-    approvalMode,
-    ...(runsOn === undefined
-      ? {}
-      : {
-          runsOn,
-          ...(computerPlace
-            ? { computer: Object.freeze({ id: computerPlace.id, folder: computerPlace.folder }) }
-            : {}),
-        }),
-  })
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
   const createdThread = existingThread === null
   const thread =
@@ -1099,22 +1090,7 @@ function inPlace(
   spec: ConversationAgentRunSpec
 ): ConversationAgentRunSpec {
   const { runsOn: _runsOn, computer: _computer, ...rest } = spec
-  return Object.freeze(
-    thread.runsOn === undefined
-      ? rest
-      : {
-          ...rest,
-          runsOn: thread.runsOn,
-          ...(thread.computer
-            ? {
-                computer: Object.freeze({
-                  id: thread.computer.id,
-                  folder: thread.computer.folder,
-                }),
-              }
-            : {}),
-        }
-  )
+  return Object.freeze({ ...rest, ...turnPlace(thread.runsOn, thread.computer) })
 }
 
 /** The paused turn's spec, with defaults for a model that has since left the catalog. */
@@ -1191,7 +1167,8 @@ async function routedConversationRunSpec(
   input: RoutedTurn & {
     readonly projectId: string
     readonly threadId: string | undefined
-    readonly movedAt: Date | undefined
+    /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
+    readonly place: AgentTurnPlace
     readonly settings: RequesterSettings
     readonly language: LanguageModelCatalog | undefined
   }
@@ -1199,11 +1176,7 @@ async function routedConversationRunSpec(
   const previous = input.threadId
     ? await latestConversationRun(agents, input.projectId, input.threadId)
     : undefined
-  const choice = await input.router.choose(
-    input.text,
-    previous,
-    input.movedAt === undefined ? undefined : { movedAt: input.movedAt }
-  )
+  const choice = await input.router.choose(input.text, previous, input.place)
 
   return resolveConversationRunSpec({
     models: input.language,

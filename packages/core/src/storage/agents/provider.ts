@@ -779,6 +779,30 @@ export function sameComputerPlace(a: AgentThreadPlace, b: AgentThreadPlace): boo
   return a.id === b.id && a.folder === b.folder
 }
 
+/** Where a turn runs, as its spec records it: the cloud, or a folder of its owner's computer. */
+export type AgentTurnPlace = Pick<ConversationAgentRunSpec, "runsOn" | "computer">
+
+/** The place a turn's spec records, from its thread's: the cloud, or a computer and its folder. */
+export function turnPlace(
+  runsOn: "computer" | undefined,
+  computer: AgentThreadPlace | undefined
+): AgentTurnPlace {
+  if (runsOn === undefined) return {}
+
+  return computer
+    ? { runsOn, computer: Object.freeze({ id: computer.id, folder: computer.folder }) }
+    : { runsOn }
+}
+
+/**
+ * The same key for two turns that ran in the same workspace: the cloud, or one folder of one
+ * computer. A computer's turn from before folders were kept ran in a folder nobody knows.
+ */
+export function runPlaceKey(spec: AgentTurnPlace | undefined): string {
+  if (spec?.runsOn !== "computer") return "cloud"
+  return spec.computer ? `computer:${spec.computer.id}:${spec.computer.folder}` : "computer"
+}
+
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {
   return (AGENT_APPROVAL_MODES as readonly unknown[]).includes(value)
 }
