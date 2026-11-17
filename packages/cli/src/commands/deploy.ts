@@ -231,14 +231,21 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
     if (!submodule.repo || (await isPrivate(submodule.repo))) privateSubmodules.push(submodule)
   }
 
+  const desktop = await desktopSigning(cwd)
   const credential = await ci.create(`github:${repo.name}`, { name: config.name })
-  const secrets = Object.fromEntries(
-    Object.keys(credential.secrets).map((variable) => [variable, secretName(config.name, variable)])
-  )
+  const secretsOf = (values: Readonly<Record<string, string>>) =>
+    Object.fromEntries(
+      Object.keys(values).map((variable) => [variable, secretName(config.name, variable)])
+    )
+  const secrets = secretsOf(credential.secrets)
+  const desktopSecrets = desktop?.values ? secretsOf(desktop.values) : null
   try {
     await ensureEnvironment(repo)
-    for (const [variable, value] of Object.entries(credential.secrets)) {
-      await setSecret(repo, secrets[variable] ?? variable, value)
+    for (const [variable, value] of Object.entries({
+      ...credential.secrets,
+      ...desktop?.values,
+    })) {
+      await setSecret(repo, secretName(config.name, variable), value)
     }
   } catch (error) {
     // CI never got the new key, so it must not stay authorized.
@@ -257,6 +264,7 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
     install: credential.install,
     submodules:
       privateSubmodules.length > 0 ? "private" : submodules.length > 0 ? "public" : "none",
+    desktop: desktopSecrets ? { secrets: desktopSecrets } : null,
   })
   const path = workflowPath(config.name)
   const file = Bun.file(join(repoRoot, path))
@@ -274,8 +282,9 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
       environment: CI_ENVIRONMENT,
       branch,
       credential: credential.description,
-      secrets: Object.values(secrets),
+      secrets: [...Object.values(secrets), ...Object.values(desktopSecrets ?? {})],
       retired,
+      desktop: desktop && { missing: desktop.missing },
       workflow: {
         path,
         state: existing === null ? "written" : existing === workflow ? "unchanged" : "kept",
@@ -286,6 +295,50 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
           : null,
     })
   )
+}
+
+/** What the Mac job signs with: notarization needs all but the certificate's password. */
+const DESKTOP_SIGNING = {
+  required: ["APPLE_CERTIFICATE", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER"],
+  optional: ["APPLE_CERTIFICATE_PASSWORD"],
+} as const
+
+/**
+ * The Apple variables where `sixb deploy ci` runs, to store for the Mac job: null for a project
+ * without `@sixb/desktop`. A runner has no keychain, so the certificate must be among them, and
+ * `APPLE_API_KEY` is stored as the key itself, not a path that means nothing there.
+ */
+async function desktopSigning(cwd: string): Promise<{
+  readonly values: Readonly<Record<string, string>> | null
+  readonly missing: readonly string[]
+} | null> {
+  const manifest = (await Bun.file(join(cwd, "package.json"))
+    .json()
+    .catch(() => null)) as Record<string, Record<string, unknown> | undefined> | null
+  const uses = ["dependencies", "devDependencies", "optionalDependencies"].some(
+    (field) => manifest?.[field]?.["@sixb/desktop"] !== undefined
+  )
+  if (!uses) return null
+
+  const missing = DESKTOP_SIGNING.required.filter((name) => !process.env[name]?.trim())
+  if (missing.length > 0) return { values: null, missing }
+  const values: Record<string, string> = {}
+  for (const name of [...DESKTOP_SIGNING.required, ...DESKTOP_SIGNING.optional]) {
+    const value = process.env[name]?.trim()
+    if (value) values[name] = value
+  }
+  const key = values.APPLE_API_KEY ?? ""
+  if (!key.includes("-----BEGIN")) {
+    const file = Bun.file(key)
+    if (!(await file.exists())) {
+      throw new SixbCliError(`[SixbDeploy] APPLE_API_KEY names ${key}, which doesn't exist.`, {
+        remediation:
+          "Set it to the path of the .p8 key App Store Connect gave you, or its contents.",
+      })
+    }
+    values.APPLE_API_KEY = (await file.text()).trim()
+  }
+  return { values, missing: [] }
 }
 
 /**

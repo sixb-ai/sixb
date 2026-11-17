@@ -251,6 +251,7 @@ export function deployCiView({
   retired,
   workflow,
   token,
+  desktop = null,
 }: {
   name: string
   repo: string
@@ -259,6 +260,8 @@ export function deployCiView({
   credential: string
   secrets: readonly string[]
   retired: readonly DeployAccessKey[]
+  /** For a project with a desktop app: the Apple variables it lacks to release from CI. */
+  desktop?: { readonly missing: readonly string[] } | null
   workflow: { readonly path: string; readonly state: "written" | "unchanged" | "kept" }
   token: {
     readonly name: string
@@ -289,6 +292,18 @@ export function deployCiView({
         kept: `${workflow.path} (yours, kept: it differs from what this command writes; delete it and run again to start over)`,
       }[workflow.state],
     },
+    ...(desktop
+      ? [
+          desktop.missing.length === 0
+            ? { label: "Desktop", status: "ok" as const, value: "macOS, when the version goes up" }
+            : {
+                label: "Desktop",
+                status: "idle" as const,
+                value: "not released from CI",
+                remedy: `Set ${desktop.missing.join(", ")} where you run \`sixb deploy ci\`, then run it again.`,
+              },
+        ]
+      : []),
     ...(token
       ? [
           {

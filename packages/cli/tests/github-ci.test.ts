@@ -85,6 +85,67 @@ describe("the deploy workflow", () => {
   })
 })
 
+describe("the desktop app's release", () => {
+  const desktop = {
+    secrets: {
+      APPLE_CERTIFICATE: "APPLE_CERTIFICATE_NORTHLINE",
+      APPLE_API_KEY: "APPLE_API_KEY_NORTHLINE",
+    },
+  }
+
+  test("runs on a Mac after a deploy, only when the deploy finds its version behind", () => {
+    const parsed = Bun.YAML.parse(renderWorkflow({ ...input, desktop })) as {
+      jobs: Record<
+        string,
+        {
+          needs?: string
+          if?: string
+          "runs-on": string
+          environment: string
+          outputs?: Record<string, string>
+          steps: Step[]
+        }
+      >
+    }
+    const { deploy, "desktop-mac": mac } = parsed.jobs
+
+    expect(deploy?.outputs).toEqual({ desktop: `\${{ steps.desktop.outputs.platforms }}` })
+    const check = deploy?.steps.find((step) => step.name === "Check the desktop app's version")
+    expect(check?.run).toContain("bunx sixb desktop status --json")
+    expect(check?.["working-directory"]).toBe("examples/northline")
+
+    expect(mac).toMatchObject({
+      needs: "deploy",
+      if: "contains(needs.deploy.outputs.desktop, 'darwin')",
+      "runs-on": "macos-latest",
+      environment: "production",
+    })
+    // It publishes over the deploy's connection, so it installs the same key.
+    expect(mac?.steps.map((step) => step.name ?? step.uses?.split("@")[0])).toEqual([
+      "actions/checkout",
+      "oven-sh/setup-bun",
+      "Install dependencies",
+      "Install the deploy key",
+      "Release the desktop app",
+    ])
+    expect(mac?.steps.at(-1)).toEqual({
+      name: "Release the desktop app",
+      env: {
+        APPLE_CERTIFICATE: `\${{ secrets.APPLE_CERTIFICATE_NORTHLINE }}`,
+        APPLE_API_KEY: `\${{ secrets.APPLE_API_KEY_NORTHLINE }}`,
+      },
+      run: "bunx sixb desktop release",
+      "working-directory": "examples/northline",
+    })
+  })
+
+  test("is left out without the signing variables", () => {
+    const parsed = Bun.YAML.parse(renderWorkflow(input)) as { jobs: Record<string, unknown> }
+
+    expect(Object.keys(parsed.jobs)).toEqual(["deploy"])
+  })
+})
+
 describe("submodule URLs", () => {
   test("name their GitHub repository", () => {
     expect(githubRepoOf("https://github.com/acme/lib.git", "acme/shop")).toBe("acme/lib")

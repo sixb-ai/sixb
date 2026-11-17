@@ -36,6 +36,11 @@ export interface WorkflowInput {
   readonly secrets: Readonly<Record<string, string>>
   readonly install: readonly string[]
   readonly submodules: "none" | "public" | "private"
+  /**
+   * Releases the desktop app after each deploy that raises the project's version, with the signing
+   * variables from these GitHub secrets, by variable.
+   */
+  readonly desktop?: { readonly secrets: Readonly<Record<string, string>> } | null
 }
 
 /** A GitHub Actions workflow that deploys on every push to `branch`. */
@@ -63,6 +68,31 @@ export function renderWorkflow(input: WorkflowInput): string {
         ]
       : []
 
+  // What every job starts with: the commit, Bun, the project's packages and the deploy key.
+  const prepare = [
+    ...tokenCheck,
+    `      - uses: ${CHECKOUT}`,
+    "        with:",
+    ...checkoutWith,
+    `      - uses: ${SETUP_BUN}`,
+    ...(input.bunVersionFile
+      ? ["        with:", `          bun-version-file: ${input.bunVersionFile}`]
+      : []),
+    "      - name: Install dependencies",
+    // `sixb deploy` only loads `sixb.deploy.ts` and uploads the source; the server installs again
+    // with lifecycle scripts. Skipping them here skips downloads such as a Playwright browser.
+    "        run: bun install --frozen-lockfile --ignore-scripts",
+    ...workingDirectory,
+    "      - name: Install the deploy key",
+    "        env:",
+    ...Object.entries(input.secrets).map(
+      ([variable, secret]) => `          ${variable}: \${{ secrets.${secret} }}`
+    ),
+    "        run: |",
+    ...input.install.map((line) => `          ${line}`),
+  ]
+  const desktop = input.desktop
+
   return [
     `# Written by \`sixb deploy ci\`. Run it again to rotate the deploy key.`,
     `name: Deploy ${input.name}`,
@@ -85,30 +115,42 @@ export function renderWorkflow(input: WorkflowInput): string {
     "    runs-on: ubuntu-latest",
     `    environment: ${CI_ENVIRONMENT}`,
     "    timeout-minutes: 30",
+    ...(desktop ? ["    outputs:", `      desktop: \${{ steps.desktop.outputs.platforms }}`] : []),
     "    steps:",
-    ...tokenCheck,
-    `      - uses: ${CHECKOUT}`,
-    "        with:",
-    ...checkoutWith,
-    `      - uses: ${SETUP_BUN}`,
-    ...(input.bunVersionFile
-      ? ["        with:", `          bun-version-file: ${input.bunVersionFile}`]
-      : []),
-    "      - name: Install dependencies",
-    // `sixb deploy` only loads `sixb.deploy.ts` and uploads the source; the server installs again
-    // with lifecycle scripts. Skipping them here skips downloads such as a Playwright browser.
-    "        run: bun install --frozen-lockfile --ignore-scripts",
-    ...workingDirectory,
-    "      - name: Install the deploy key",
-    "        env:",
-    ...Object.entries(input.secrets).map(
-      ([variable, secret]) => `          ${variable}: \${{ secrets.${secret} }}`
-    ),
-    "        run: |",
-    ...input.install.map((line) => `          ${line}`),
+    ...prepare,
     "      - name: Deploy",
     "        run: bunx sixb deploy",
     ...workingDirectory,
+    ...(desktop
+      ? [
+          // The systems whose release is behind package.json: a push that raises no version starts
+          // no Mac runner.
+          "      - name: Check the desktop app's version",
+          "        id: desktop",
+          "        run: |",
+          `          platforms="$(bunx sixb desktop status --json | bun -e 'const { platforms } = await Bun.stdin.json(); console.log(platforms.filter((p) => p.outdated).map((p) => p.platform).join(" "))')"`,
+          '          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"',
+          ...workingDirectory,
+          "",
+          // After the deploy, so the release takes the name and icon the app now serves.
+          "  desktop-mac:",
+          "    needs: deploy",
+          "    if: contains(needs.deploy.outputs.desktop, 'darwin')",
+          "    runs-on: macos-latest",
+          `    environment: ${CI_ENVIRONMENT}`,
+          // Notarizing waits on Apple, usually for minutes.
+          "    timeout-minutes: 60",
+          "    steps:",
+          ...prepare,
+          "      - name: Release the desktop app",
+          "        env:",
+          ...Object.entries(desktop.secrets).map(
+            ([variable, secret]) => `          ${variable}: \${{ secrets.${secret} }}`
+          ),
+          "        run: bunx sixb desktop release",
+          ...workingDirectory,
+        ]
+      : []),
     "",
   ].join("\n")
 }
