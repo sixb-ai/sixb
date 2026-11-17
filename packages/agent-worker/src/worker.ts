@@ -128,20 +128,26 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
-    if (this.context) {
-      const context = this.context
-      const stopDispatch = new AbortController()
-      const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
-      const dispatchLoop = this.runDispatchLoop(context, workerSignal)
-      try {
-        await super.run(workerSignal)
-      } finally {
-        stopDispatch.abort()
-        await dispatchLoop
+    try {
+      if (this.context) {
+        const context = this.context
+        const stopDispatch = new AbortController()
+        const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
+        const dispatchSignal = AbortSignal.any([workerSignal, this.drainSignal])
+        const dispatchLoop = this.runDispatchLoop(context, dispatchSignal)
+        try {
+          await super.run(workerSignal)
+        } finally {
+          stopDispatch.abort()
+          await dispatchLoop
+        }
+        return
       }
-      return
+      await super.run(signal)
+    } finally {
+      await this.children?.drain()
+      await Promise.allSettled([...this.pendingTeardowns])
     }
-    await super.run(signal)
   }
 
   override async stop(): Promise<void> {

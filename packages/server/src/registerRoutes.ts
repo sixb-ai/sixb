@@ -51,6 +51,7 @@ export interface HttpRouteOptions {
   readonly sharedAccess: SharedAccessBoundary
   /** Where frames are served from and which app origins may show them. */
   readonly browserPolicy: ResolvedSixbApiBrowserPolicy
+  readonly isStopping?: () => boolean
 }
 
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
@@ -58,7 +59,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerModelCallRoutes(app, host)
   registerModelGenerationRoutes(app, host)
   registerProjectRoutes(app, host)
-  registerStatusRoutes(app, host)
+  registerStatusRoutes(app, host, { isStopping: options.isStopping })
   registerConnectorRoutes(app, host)
   registerConnectorConnectionRoutes(app, host)
   registerConnectorConnectionRunRoutes(app, host, options.connectorConnections)

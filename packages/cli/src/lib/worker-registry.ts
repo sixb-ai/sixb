@@ -24,7 +24,10 @@ export const WORKER_TYPES = [
 export type WorkerType = (typeof WORKER_TYPES)[number]
 
 export type WorkerConcurrency = Readonly<Partial<Record<WorkerType, number>>>
-export type QueueWorkerProcess = Worker & { readonly concurrency: number }
+export type QueueWorkerProcess = Worker & {
+  readonly concurrency: number
+  drain(timeoutMs?: number): Promise<boolean>
+}
 
 export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string

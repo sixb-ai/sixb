@@ -64,12 +64,20 @@ export interface CustomAppStartOptions {
   authEnabled?: boolean
 }
 
+export interface CustomAppStopOptions {
+  /**
+   * How long in-flight requests may take to finish before remaining connections are closed.
+   * Defaults to 5 seconds; `0` closes them at once.
+   */
+  readonly timeoutMs?: number
+}
+
 export interface CustomAppServer {
   host: string
   /** The port it listens on: the one it bound when asked for port 0. */
   port: number
   url: string
-  stop(): Promise<void>
+  stop(options?: CustomAppStopOptions): Promise<void>
 }
 
 export interface CustomAppDevServer extends CustomAppServer {
@@ -692,12 +700,58 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         host,
         port: boundPort,
         url: `http://${displayHost}:${boundPort}`,
-        async stop() {
-          server.stop(true)
+        async stop(stopOptions: CustomAppStopOptions = {}) {
+          await stopBunAppServer(server, stopOptions.timeoutMs)
         },
       }
     },
   }
+}
+
+const DEFAULT_APP_STOP_TIMEOUT_MS = 5_000
+
+async function stopBunAppServer(
+  server: ReturnType<typeof Bun.serve>,
+  timeoutMs: number = DEFAULT_APP_STOP_TIMEOUT_MS
+): Promise<void> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("[SixbCustomApp] Stop timeout must be a non-negative finite number.")
+  }
+  if (timeoutMs <= 0) {
+    await server.stop(true)
+    return
+  }
+
+  const draining = server.stop(false)
+  const deadline = Date.now() + timeoutMs
+  let settled = false
+  void draining.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    }
+  )
+
+  while (!settled && (server.pendingRequests > 0 || server.pendingWebSockets > 0)) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        draining,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, Math.min(remaining, 25))
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+
+  await server.stop(true)
+  await draining
 }
 
 async function pathExists(path: string): Promise<boolean> {

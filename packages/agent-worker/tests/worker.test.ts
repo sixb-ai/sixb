@@ -13582,6 +13582,34 @@ describe("AgentWorker", () => {
     ).toMatchObject({ activeRunId: null })
   })
 
+  test("drain lets a running turn finish as succeeded without claiming new turns", async () => {
+    // Regression proof: have `drain()` call `stop()` directly; the first turn ends cancelled with
+    // `finishReason: "interrupted"` instead of answering.
+    const controlled = controlledBlockingAnswerModel()
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+    const first = await requestAgent(sixb, { text: "first" })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    await controlled.waitForStarted(1)
+
+    const draining = worker.drain(10_000)
+    const second = await requestAgent(sixb, { text: "second" })
+
+    controlled.releaseAll()
+    expect(await draining).toBe(true)
+
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })).toMatchObject({
+      status: "succeeded",
+      finishReason: "stop",
+    })
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })).toMatchObject({
+      status: "queued",
+    })
+    expect(controlled.startedCount()).toBe(1)
+  })
+
   test("publishes UI chunks before appending the finalized assistant message", async () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)

@@ -134,7 +134,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
           step("Starting server")
           return server.start()
         },
-        stop: () => server.stop(),
+        stop: () => server.stop({ timeoutMs: 0 }),
       },
       agentApiBaseUrl: topology.apiPublicOrigin,
       workerConcurrency,
