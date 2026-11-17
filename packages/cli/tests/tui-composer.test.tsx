@@ -214,13 +214,14 @@ test("says why a queued turn isn't starting here", () => {
     continueFromWeb: true,
     runningHere: false,
   }
-  const label = (change: Partial<typeof where>) =>
+  const label = (change: Partial<typeof where & { folder: string }>) =>
     activityLabel(runs, "run_1", { ...where, ...change })
 
   expect(label({})).toBe("Starting")
   expect(label({ onComputer: false })).toBe("Starting")
   expect(label({ mine: false })).toBe("Waiting for its owner's computer")
-  expect(label({ here: false })).toBe("Waiting for sixb in its folder")
+  expect(label({ here: false, folder: "docs" })).toBe("Waiting for docs to be available")
+  expect(label({ here: false })).toBe("Waiting for its folder")
   expect(label({ continueFromWeb: false })).toBe("Waiting: messages from the web are off")
   expect(label({ continueFromWeb: false, runningHere: true })).toBe("Starting")
 })

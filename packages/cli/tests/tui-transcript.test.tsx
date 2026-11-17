@@ -6,6 +6,7 @@ import { useRenderer } from "@opentui/react"
 import { testRender } from "@opentui/react/test-utils"
 import { useMemo, useState } from "react"
 import { toolLine } from "../src/tui/format"
+import { type PlaceNames, placeNames } from "../src/tui/moves"
 import {
   approvalOutcomes,
   type LiveRun,
@@ -13,8 +14,9 @@ import {
   type StoredMessage,
   shownMessage,
 } from "../src/tui/parts"
+import { computerName, computerNameInText } from "../src/tui/settings"
 import { tuiColors } from "../src/tui/theme"
-import { Transcript } from "../src/tui/transcript"
+import { type Run, Transcript } from "../src/tui/transcript"
 
 // A call `sixb` held for approval, then decided: the turn resumes from a message that says how the
 // call ended, and the call's own line says it from then on.
@@ -70,6 +72,9 @@ function shown(...messages: StoredMessage[]) {
   return messages.flatMap((message) => shownMessage(message) ?? [])
 }
 
+/** The names a person's own conversation is written with, on this computer. */
+const NAMES = placeNames({ thread: null, computerId: "cmp_1", mine: true })
+
 let setup: TestRendererSetup | null = null
 afterEach(() => {
   setup?.renderer.destroy()
@@ -116,7 +121,8 @@ describe("a held call", () => {
         live={null}
         approvals={[]}
         modelNames={new Map()}
-        computerRuns={false}
+        thread={null}
+        names={NAMES}
         width={100}
         approvalChoice={0}
       />,
@@ -172,7 +178,8 @@ describe("a search's results", () => {
         live={null}
         approvals={[]}
         modelNames={new Map()}
-        computerRuns={false}
+        thread={null}
+        names={NAMES}
         width={100}
         approvalChoice={0}
       />,
@@ -185,6 +192,229 @@ describe("a search's results", () => {
     expect(frame).toContain('grep  "invoice" in run/memory/user  1 match in 1 file')
     expect(frame).toContain("run/memory/user/billing.md:3 Invoices go out on the 1st")
     expect(frame).not.toContain("sixb-agent")
+  })
+})
+
+// After a move, each turn still says where it ran, and a line marks every move between two turns,
+// as the app's transcript does.
+describe("a conversation that moved", () => {
+  const message = (id: string, role: "user" | "assistant", minute: number, runId?: string) =>
+    ({
+      id,
+      threadId: "t",
+      projectId: "p",
+      seq: minute,
+      runId: runId ?? null,
+      role,
+      createdAt: `2026-11-16T10:0${minute}:00.000Z`,
+      contentVersion: 1,
+      parts: role === "user" ? [{ type: "text", text: `Message ${minute}` }] : [],
+    }) as unknown as StoredMessage
+
+  const run = (id: string, trigger: string, place?: { id: string; folder: string }): Run =>
+    ({
+      id,
+      projectId: "p",
+      kind: "conversation",
+      threadId: "t",
+      triggerMessageId: trigger,
+      status: "succeeded",
+      createdAt: "2026-11-16T10:00:00.000Z",
+      ...(place ? { runsOn: "computer" as const, computer: place } : {}),
+    }) as unknown as Run
+
+  /** The turns' meta lines and move lines, as the transcript draws them. */
+  const placeRows = async (input: {
+    readonly messages: readonly StoredMessage[]
+    readonly runs: readonly Run[]
+    readonly thread: Parameters<typeof Transcript>[0]["thread"]
+    readonly names: PlaceNames
+    /** The person's messages too, to show where a line falls between them. */
+    readonly withMessages?: boolean
+  }) => {
+    setup = await testRender(
+      <Transcript
+        colors={tuiColors("dark")}
+        // Only an answer's text uses it, and these answers have none.
+        syntax={{} as SyntaxStyle}
+        messages={shown(...input.messages)}
+        runs={input.runs}
+        live={null}
+        approvals={[]}
+        modelNames={new Map()}
+        thread={input.thread}
+        names={input.names}
+        width={100}
+        approvalChoice={0}
+      />,
+      { width: 100, height: 40 }
+    )
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false })
+    await setup.renderOnce()
+
+    return setup
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trim())
+      .filter(
+        (row) =>
+          row.startsWith("▰") ||
+          row.startsWith("◇") ||
+          (input.withMessages === true && row.startsWith("┃  Message"))
+      )
+  }
+
+  // Guard proof: in RunMeta (src/tui/transcript.tsx), name the place from the thread's current
+  // runsOn again, or leave `transcriptMoves` out: every turn reads Cloud, and no move is marked.
+  test("names each turn's own place, and marks each move", async () => {
+    const rows = await placeRows({
+      messages: [
+        message("u1", "user", 1),
+        message("a1", "assistant", 2, "r1"),
+        message("u2", "user", 3),
+        message("a2", "assistant", 4, "r2"),
+        message("u3", "user", 5),
+        message("a3", "assistant", 6, "r3"),
+      ],
+      runs: [
+        run("r1", "u1"),
+        run("r2", "u2", { id: "cmp_1", folder: "/Users/ada/code/sixb" }),
+        run("r3", "u3", { id: "cmp_1", folder: "/Users/ada/code/docs" }),
+      ],
+      // Back in the cloud since, with no turn there yet.
+      thread: { createdAt: "2026-11-16T10:00:00.000Z", movedAt: "2026-11-16T10:07:00.000Z" },
+      names: NAMES,
+    })
+
+    expect(rows).toEqual([
+      "▰ Cloud",
+      `◇ Moved to sixb on ${computerNameInText()}. The cloud's files stay behind.`,
+      `▰ ${computerName()} · sixb`,
+      "◇ Moved from sixb to docs. The files in sixb stay behind.",
+      `▰ ${computerName()} · docs`,
+      "◇ Moved to the cloud. The files in docs stay behind.",
+    ])
+  })
+
+  // Guard proof: in transcriptMoves (src/tui/moves.ts), drop `!samePlace(previous, current)` from
+  // the latest move, or keep a retried turn's first run: the conversation reads as moved.
+  test("marks no move for a round trip with no turn in between", async () => {
+    const rows = await placeRows({
+      messages: [message("u1", "user", 1), message("a1", "assistant", 2, "r1")],
+      // Retried in the cloud after a first try on the computer: the latest run is where it went.
+      runs: [run("r0", "u1", { id: "cmp_1", folder: "/Users/ada/code/sixb" }), run("r1", "u1")],
+      // Moved to a folder and back to the cloud since.
+      thread: { createdAt: "2026-11-16T10:00:00.000Z", movedAt: "2026-11-16T10:05:00.000Z" },
+      names: NAMES,
+    })
+
+    expect(rows).toEqual(["▰ Cloud"])
+  })
+
+  // Guard proof: in transcriptMoves (src/tui/moves.ts), leave `forked` false: the fork's first
+  // turn, and a fork no turn ran in yet, show no line where they continue.
+  test("marks where a fork continues, after the copies it began with", async () => {
+    // Copied from the conversation it was forked from: written before the fork was.
+    const copies = [message("u1", "user", 1), message("a1", "assistant", 2, "r_source")]
+
+    const firstTurn = await placeRows({
+      messages: [...copies, message("u2", "user", 4), message("a2", "assistant", 5, "r2")],
+      runs: [run("r2", "u2", { id: "cmp_1", folder: "/Users/ada/code/sixb" })],
+      thread: {
+        createdAt: "2026-11-16T10:03:00.000Z",
+        runsOn: "computer",
+        computer: { id: "cmp_1", name: "Studio", folder: "/Users/ada/code/sixb", online: true },
+      },
+      names: NAMES,
+    })
+    expect(firstTurn).toEqual([
+      `◇ Continued in sixb on ${computerNameInText()}. The original conversation's files stay with it.`,
+      `▰ ${computerName()} · sixb`,
+    ])
+
+    setup?.renderer.destroy()
+    const noTurnYet = await placeRows({
+      messages: copies,
+      runs: [],
+      thread: { createdAt: "2026-11-16T10:03:00.000Z" },
+      names: NAMES,
+    })
+    expect(noTurnYet).toEqual([
+      "◇ Continued in the cloud. The original conversation's files stay with it.",
+    ])
+  })
+
+  // Guard proof: in transcriptMoves (src/tui/moves.ts), place a fork's line before its first turn
+  // after the last message dated by `movedAt` again: it falls between the copies, or nowhere.
+  test("places a fork's line after its last copy, whenever its source moved", async () => {
+    // Four copies of a source conversation, which keeps its `movedAt`.
+    const copies = [
+      message("u1", "user", 1),
+      message("a1", "assistant", 2, "r_source_1"),
+      message("u2", "user", 3),
+      message("a2", "assistant", 4, "r_source_2"),
+    ]
+    const forkOf = (movedAt: string) =>
+      placeRows({
+        messages: copies,
+        runs: [],
+        thread: { createdAt: "2026-11-16T10:05:00.000Z", movedAt },
+        names: NAMES,
+        withMessages: true,
+      })
+    const afterTheCopies = [
+      "┃  Message 1",
+      "┃  Message 3",
+      "◇ Continued in the cloud. The original conversation's files stay with it.",
+    ]
+
+    // The source moved between two of the copies.
+    expect(await forkOf("2026-11-16T10:02:30.000Z")).toEqual(afterTheCopies)
+    setup?.renderer.destroy()
+
+    // The source moved before its first message.
+    expect(await forkOf("2026-11-16T10:00:30.000Z")).toEqual(afterTheCopies)
+  })
+
+  // Guard proof: in placeNames (src/tui/moves.ts), leave `ownerName` null: the participant reads
+  // "the computer" and "Computer", not whose it is.
+  test("names the owner's computer to someone they shared it with", async () => {
+    const thread = {
+      createdAt: "2026-11-16T10:00:00.000Z",
+      runsOn: "computer" as const,
+      ownerPrincipal: { type: "user" as const, id: "usr_ada" },
+      owner: { type: "user" as const, id: "usr_ada", displayName: "Ada" },
+    }
+    const rows = await placeRows({
+      messages: [
+        message("u1", "user", 1),
+        message("a1", "assistant", 2, "r1"),
+        message("u2", "user", 3),
+        message("a2", "assistant", 4, "r2"),
+      ],
+      // The runs keep the computer from them: its folders are the owner's to see.
+      runs: [run("r1", "u1"), { ...run("r2", "u2"), runsOn: "computer" }],
+      thread,
+      names: placeNames({ thread, computerId: "cmp_1", mine: false }),
+    })
+
+    expect(rows).toEqual([
+      "▰ Cloud",
+      "◇ Moved to Ada's computer. The cloud's files stay behind.",
+      "▰ Ada's computer",
+    ])
+
+    // A fork of it, no turn run yet: on the owner's computer too.
+    setup?.renderer.destroy()
+    const fork = await placeRows({
+      messages: [message("u1", "user", 1)],
+      runs: [],
+      thread: { ...thread, createdAt: "2026-11-16T10:05:00.000Z" },
+      names: placeNames({ thread, computerId: "cmp_1", mine: false }),
+    })
+    expect(fork).toEqual([
+      "◇ Continued on Ada's computer. The original conversation's files stay with it.",
+    ])
   })
 })
 
@@ -262,7 +492,8 @@ function StreamedTurn() {
       live={live}
       approvals={[]}
       modelNames={new Map()}
-      computerRuns={false}
+      thread={null}
+      names={NAMES}
       width={90}
       approvalChoice={0}
     />

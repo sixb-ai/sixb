@@ -346,9 +346,17 @@ describe("a connected computer", () => {
   })
 
   // Guard proof: drop onThreadMoved from ComputerConnection.start; a conversation moved into a
-  // connected folder with a queued turn waits up to twenty seconds for the next session renewal.
+  // connected folder with a queued turn waits up to twenty seconds for the next session renewal,
+  // and this test times out waiting for the offer.
   test("offers a moved conversation to its new folder at once", async () => {
-    const offered = spyOn(LocalRunner.prototype, "offer").mockResolvedValue()
+    // Resolved by the offer itself: the test waits for it, not for time to pass.
+    let offer: (thread: unknown) => void = () => {}
+    const firstOffer = new Promise<unknown>((resolve) => {
+      offer = resolve
+    })
+    const offered = spyOn(LocalRunner.prototype, "offer").mockImplementation(async (thread) => {
+      offer(thread)
+    })
     const a = await folder("a")
     await setFoldersAllowed(THIS_PROJECT, [a], true)
     const server = Bun.serve({
@@ -399,14 +407,9 @@ describe("a connected computer", () => {
       }
       const computer = new ComputerConnection(connection, () => {}, false)
       await computer.start()
-      for (let turn = 0; turn < 200 && offered.mock.calls.length === 0; turn += 1) {
-        await Bun.sleep(5)
-      }
+
+      expect(await firstOffer).toMatchObject({ id: "thr_moved", activeRunId: "run_waiting" })
       expect(offered.mock.calls).toHaveLength(1)
-      expect(offered.mock.calls[0]?.[0]).toMatchObject({
-        id: "thr_moved",
-        activeRunId: "run_waiting",
-      })
       await computer.stop()
     } finally {
       offered.mockRestore()

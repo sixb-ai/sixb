@@ -92,7 +92,7 @@ export async function runAgent(options: {
   const place = thread.computer
   if (onComputer && !place) {
     throw new Error(
-      "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+f."
+      "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+g twice."
     )
   }
   const here = onComputer && place?.id === (await thisComputerId()) && place.folder === folder
