@@ -27,6 +27,7 @@ import {
   modelPalette,
   otherModelColor,
   priorRange,
+  rangeLabel,
   rangePeriods,
   readFilters,
   spendRange,
@@ -162,6 +163,7 @@ describe("Usage › Spend", () => {
       id: "7d",
       from: "2026-11-08T05:00:00.000Z",
       to: "2026-11-15T05:00:00.000Z",
+      unit: "day",
       bucket: "day",
       period: "week",
       timeZone: "America/New_York",
@@ -176,22 +178,22 @@ describe("Usage › Spend", () => {
     expect(days).toHaveLength(7)
     expect(days[0]).toBe(week.from)
     expect(rangePeriods(spendRange("24h", "UTC", Date.parse(now)))).toHaveLength(24)
-    // Weeks start on Monday, so the range opens with the Monday before its first day.
+    // Weeks start on Monday, so the first holds the range's start, Saturday, August 1.
     const weeks = rangePeriods(spendRange("90d", "UTC", Date.parse(now)))
-    expect(weeks[0]).toBe("2026-08-03T00:00:00.000Z")
+    expect(weeks[0]).toBe("2026-07-27T00:00:00.000Z")
     expect(weeks.at(-1)).toBe("2026-10-26T00:00:00.000Z")
-    expect(weeks).toHaveLength(13)
+    expect(weeks).toHaveLength(14)
   })
 
   test("a picked day narrows the range to it, and compares it with the day before", () => {
     const range = spendRange("7d", "UTC", Date.parse(now))
     const day = activeRange(range, { day: "2026-10-28T00:00:00.000Z" })
     expect(day).toEqual({ from: "2026-10-28T00:00:00.000Z", to: "2026-10-29T00:00:00.000Z" })
-    expect(priorRange(day, range.bucket, range.timeZone)).toEqual({
+    expect(priorRange(day, range)).toEqual({
       from: "2026-10-27T00:00:00.000Z",
       to: "2026-10-28T00:00:00.000Z",
     })
-    expect(priorRange(activeRange(range, {}), range.bucket, range.timeZone)).toEqual(weekBefore)
+    expect(priorRange(activeRange(range, {}), range)).toEqual(weekBefore)
   })
 
   // Removal proof: subtract the range's milliseconds; the week before a change of clocks starts
@@ -202,9 +204,34 @@ describe("Usage › Spend", () => {
       from: "2026-10-30T04:00:00.000Z",
       to: "2026-11-06T05:00:00.000Z",
     })
-    expect(priorRange(range, range.bucket, range.timeZone)).toEqual({
+    expect(priorRange(range, range)).toEqual({
       from: "2026-10-23T04:00:00.000Z",
       to: "2026-10-30T04:00:00.000Z",
+    })
+  })
+
+  // Removal proof: end the 90 days with the current week again; read on a Monday, the range names
+  // the six days to come and compares 85 days of spend with 91.
+  test("90 days end today, and compare with as many days before them", () => {
+    const monday = Date.parse("2026-11-16T10:00:00.000Z")
+    const range = spendRange("90d", "Europe/Paris", monday)
+    expect(range).toMatchObject({
+      from: "2026-08-17T22:00:00.000Z",
+      to: "2026-11-16T23:00:00.000Z",
+      bucket: "week",
+    })
+    expect(rangeLabel(range, "en", range.timeZone)).toBe("Aug 18 – Nov 16")
+    expect(priorRange(range, range)).toEqual({
+      from: "2026-05-18T22:00:00.000Z",
+      to: "2026-08-17T22:00:00.000Z",
+    })
+
+    // The first week began the Monday before the range; picking it reads only the days inside.
+    const first = rangePeriods(range)[0]!
+    expect(first).toBe("2026-08-16T22:00:00.000Z")
+    expect(activeRange(range, { day: first })).toEqual({
+      from: "2026-08-17T22:00:00.000Z",
+      to: "2026-08-23T22:00:00.000Z",
     })
   })
 

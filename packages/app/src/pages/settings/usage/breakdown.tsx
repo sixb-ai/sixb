@@ -83,7 +83,7 @@ export function Breakdown({
     ...(lens === "model" ? { provider: undefined, model: undefined } : { [lens]: undefined }),
   }
   const active = activeRange(range, filters)
-  const earlier = priorRange(active, range.bucket, range.timeZone)
+  const earlier = priorRange(active, range)
   const base = useQuery({
     ...getAiAccountingOverviewOptions({
       query: { ...active, bucket: range.bucket, timeZone: range.timeZone, ...apiFilters(others) },

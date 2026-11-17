@@ -166,7 +166,7 @@ function Spend({ range, filters, onFilter, onModel, onClear, limitsHref }: Spend
   const query = apiFilters(filters)
   const bucket = range.bucket
   const timeZone = range.timeZone
-  const earlier = priorRange(active, bucket, timeZone)
+  const earlier = priorRange(active, range)
 
   const overview = useQuery({
     ...getAiAccountingOverviewOptions({ query: { ...active, bucket, timeZone, ...query } }),

@@ -6,7 +6,6 @@ import type {
 import {
   addCalendarPeriods,
   type CalendarPeriod,
-  calendarPeriodStart,
   calendarPeriods,
   canonicalTimeZone,
 } from "@sixb/core/calendar"
@@ -24,12 +23,16 @@ export type Call = ListAiModelCallsResponse["items"][number]
 export type ModelKind = NonNullable<Overview["kinds"][number]["modelKind"]>
 type OverviewQuery = GetAiAccountingOverviewData["query"]
 
-/** The ranges the page offers, as whole periods of the reader's calendar. */
+/**
+ * The ranges the page offers: `periods` whole hours or days of the reader's calendar, ending with
+ * the current one, drawn in `bucket` bars. The 90 days end today, so their first and last weeks
+ * are partial.
+ */
 export const spendRanges = [
-  { id: "24h", bucket: "hour", periods: 24, period: "day" },
-  { id: "7d", bucket: "day", periods: 7, period: "week" },
-  { id: "30d", bucket: "day", periods: 30, period: "month" },
-  { id: "90d", bucket: "week", periods: 13, period: "quarter" },
+  { id: "24h", unit: "hour", periods: 24, bucket: "hour", period: "day" },
+  { id: "7d", unit: "day", periods: 7, bucket: "day", period: "week" },
+  { id: "30d", unit: "day", periods: 30, bucket: "day", period: "month" },
+  { id: "90d", unit: "day", periods: 91, bucket: "week", period: "quarter" },
 ] as const
 
 type SpendRangeId = (typeof spendRanges)[number]["id"]
@@ -39,6 +42,8 @@ export interface SpendRange {
   readonly id: SpendRangeId
   readonly from: string
   readonly to: string
+  /** What the range is counted in, and what the period it compares with steps back by. */
+  readonly unit: (typeof spendRanges)[number]["unit"]
   readonly bucket: Bucket
   readonly period: (typeof spendRanges)[number]["period"]
   /** The zone whose days, weeks or hours the bars are, and which the API buckets by. */
@@ -50,15 +55,15 @@ export function viewerTimeZone(): string {
   return canonicalTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? "UTC"
 }
 
-/** A range that ends with the current period, so its bars are whole periods of the zone. */
+/** A range that ends with the current hour or day, never later, on the zone's calendar. */
 export function spendRange(id: string | null, timeZone: string, now = Date.now()): SpendRange {
   const preset = spendRanges.find((range) => range.id === id) ?? spendRanges[1]
-  const current = calendarPeriodStart(new Date(now), preset.bucket, timeZone)
-  const to = addCalendarPeriods(current, preset.bucket, 1, timeZone)
+  const to = addCalendarPeriods(new Date(now), preset.unit, 1, timeZone)
   return {
     id: preset.id,
-    from: addCalendarPeriods(to, preset.bucket, -preset.periods, timeZone).toISOString(),
+    from: addCalendarPeriods(to, preset.unit, -preset.periods, timeZone).toISOString(),
     to: to.toISOString(),
+    unit: preset.unit,
     bucket: preset.bucket,
     period: preset.period,
     timeZone,
@@ -143,23 +148,27 @@ export function activeRange(range: SpendRange, filters: SpendFilters) {
   if (!filters.day) return { from: range.from, to: range.to }
   const start = new Date(filters.day)
   const end = addCalendarPeriods(start, range.bucket, 1, range.timeZone)
+
+  // A week bar can begin before the range and end after it; the numbers stay inside it.
   return {
-    from: start.toISOString(),
+    from: new Date(Math.max(start.getTime(), Date.parse(range.from))).toISOString(),
     to: new Date(Math.min(end.getTime(), Date.parse(range.to))).toISOString(),
   }
 }
 
-/** The periods before, as many: the previous bar for a picked day, else the previous range. */
+/**
+ * The as many hours or days just before: the previous bar for a picked day, else the previous
+ * range, so a range that has not finished its last day compares with one as long.
+ */
 export function priorRange(
-  range: { readonly from: string; readonly to: string },
-  bucket: Bucket,
-  timeZone: string
+  active: { readonly from: string; readonly to: string },
+  range: Pick<SpendRange, "unit" | "timeZone">
 ) {
-  const from = new Date(range.from)
-  const count = calendarPeriods(from, new Date(range.to), bucket, timeZone).length
+  const from = new Date(active.from)
+  const count = calendarPeriods(from, new Date(active.to), range.unit, range.timeZone).length
   return {
-    from: addCalendarPeriods(from, bucket, -count, timeZone).toISOString(),
-    to: range.from,
+    from: addCalendarPeriods(from, range.unit, -count, range.timeZone).toISOString(),
+    to: active.from,
   }
 }
 
