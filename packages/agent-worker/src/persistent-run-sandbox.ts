@@ -122,6 +122,12 @@ class PersistentSandboxSession {
     this.access = new WorkspaceAccess({
       recipe,
       auth: definition?.auth,
+      ...(context.sixb.execution.requestedBy === undefined
+        ? {}
+        : { requestedBy: context.sixb.execution.requestedBy }),
+      ...(context.sandboxConnectionTokens === undefined
+        ? {}
+        : { sandboxConnectionTokens: context.sandboxConnectionTokens }),
       factory: context.sandboxes,
       apiOrigin: new URL(context.apiBaseUrl).origin,
       apiCredential: input.apiCredential,

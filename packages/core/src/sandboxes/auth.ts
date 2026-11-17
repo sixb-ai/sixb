@@ -1,5 +1,36 @@
+import type { ConnectorAccessToken, ConnectorConnectionSelector } from "../connectors/types"
+import type { AuthorizablePrincipal } from "../execution/types"
 import type { SandboxSource } from "./configuration"
 import type { SandboxRequestCredential } from "./sandbox"
+
+/** Registered OAuth connector accepted by host-side sandbox source authentication. */
+export interface SandboxOAuthConnector {
+  readonly kind: "connector"
+  readonly id: string
+  readonly adapter: {
+    readonly authentication: {
+      readonly type: "oauth2"
+    }
+  }
+}
+
+/** Resolve a live token from an OAuth connector connection on the host. */
+export type SandboxConnectionTokenResolver = (
+  connector: SandboxOAuthConnector,
+  selector: ConnectorConnectionSelector
+) => Promise<ConnectorAccessToken>
+
+export interface SandboxSourceAuthInput {
+  readonly source: SandboxSource
+  readonly signal: AbortSignal
+  /** Who requested the run, when a person or service account started it. */
+  readonly requestedBy?: AuthorizablePrincipal
+  /**
+   * Resolve a live access token from an OAuth connector connection on the host.
+   * Enforces the same requester and member-status rules as `sixb.connector()`.
+   */
+  readonly connectionToken?: SandboxConnectionTokenResolver
+}
 
 /** Per-run source access. Never persist these grants or expose them to the guest. */
 export interface SandboxSourceCredentials {
@@ -26,8 +57,5 @@ export interface SandboxSourceCredentials {
 /** Integration-owned authentication; grant source.access (read by default), or reject. */
 export interface SandboxSourceAuth {
   /** A thrown error is reported to onError: it and its causes must never contain a credential. */
-  authorize(input: {
-    readonly source: SandboxSource
-    readonly signal: AbortSignal
-  }): Promise<SandboxSourceCredentials>
+  authorize(input: SandboxSourceAuthInput): Promise<SandboxSourceCredentials>
 }

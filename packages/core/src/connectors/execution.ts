@@ -1,5 +1,5 @@
 import { AuthorizationError, assertProviderAccess } from "../authorization"
-import type { ExecutionContext } from "../execution"
+import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createConnectorConnections } from "./connection-handles"
@@ -65,7 +65,7 @@ export function createConnectorRuntime(
           `[Sixb] Connector '${definition.id}' uses persistent connections and requires an explicit owner and slot.`
         )
       }
-      assertPersonalConnectionRequester(definition, execution, selector)
+      assertPersonalConnectionRequester(definition, execution.requestedBy, selector)
       return service.connectConnection(definition, selector)
     }
     if (selector) {
@@ -178,13 +178,12 @@ export function getConnectorExecutionSourceResolver(
  * person's account by calling an action, even with can.manage. A run no one requested, such as one
  * an event or a schedule started, picks the owner from its data, as syncs and webhooks do.
  */
-function assertPersonalConnectionRequester(
-  definition: ConnectorDefinition,
-  execution: ExecutionContext,
+export function assertPersonalConnectionRequester(
+  definition: Pick<ConnectorDefinition, "id">,
+  requester: AuthorizablePrincipal | undefined,
   selector: ConnectorConnectionSelector
 ): void {
   const owner = selector.owner
-  const requester = execution.requestedBy
   if (owner?.type !== "user" || requester === undefined) return
   if (requester.type === "user" && requester.id === owner.id) return
   throw new AuthorizationError(

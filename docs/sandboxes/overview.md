@@ -153,6 +153,40 @@ starts.
 Sixb refreshes access for each run and revokes it during normal cleanup. A worker crash cannot
 guarantee immediate revocation.
 
+### Commit and push as the connected user
+
+To attribute commits, pushes, and pull requests to the member running the conversation instead of
+the App's bot account, register a personal GitHub OAuth connector with your GitHub App's client ID
+and secret (see [Let people connect their own accounts](../connectors/authentication.md#let-people-connect-their-own-accounts))
+and pass `githubOAuth` as `auth`:
+
+```ts
+import { githubApp, githubOAuth } from "@sixb/connector-github/sandbox"
+import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
+import { githubConnector } from "./connectors/github"
+
+const factory = new VercelSandboxFactory({
+  auth: githubOAuth({
+    connector: githubConnector,
+    // Optional: used only for automated runs not started by a user
+    fallback: githubApp({
+      appId: process.env.GITHUB_APP_ID!,
+      privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+    }),
+  }),
+  // ...static source or params + resolve
+})
+```
+
+Each run narrows the user's OAuth token to that single repository and requested `read` or `write`
+permissions, sets their Git author and committer identity, and revokes only the scoped token when
+the run ends.
+
+Write access also lets the agent attach files to issues and pull requests: uploads to
+`uploads.github.com` carry the same scoped token, so a screenshot taken in the sandbox lands in a
+pull request description as the person who asked. GitHub refuses an App installation token on that
+endpoint, so attaching files needs the OAuth connection.
+
 ## Keep files across conversation runs
 
 Opt in when creating a thread:

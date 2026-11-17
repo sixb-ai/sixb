@@ -1,5 +1,5 @@
 import { type OpenRunSandbox, runApiCredential, runTokenFor } from "@sixb/agent"
-import type { SandboxDefinition, SandboxFactory } from "@sixb/core"
+import type { AuthorizablePrincipal, SandboxDefinition, SandboxFactory } from "@sixb/core"
 import type { AgentRunSession, WorkflowAgentNodeSession } from "@sixb/core/internal/agents"
 import { staticSandboxRecipe } from "@sixb/core/internal/agents"
 import type {
@@ -72,12 +72,16 @@ export function childSandbox(input: {
  * sandbox from the project's.
  */
 export function workflowStepSandbox(input: {
-  readonly context: Pick<AgentWorkerContext, "id" | "sandboxes" | "apiBaseUrl">
+  readonly context: Pick<
+    AgentWorkerContext,
+    "id" | "sandboxes" | "sandboxConnectionTokens" | "apiBaseUrl"
+  >
   readonly session: Pick<WorkflowAgentNodeSession, "assertOwned">
   readonly run: WorkflowAgentNodeRunRecord
+  readonly requestedBy?: AuthorizablePrincipal
   readonly stepSandbox?: SandboxFactory
 }): OpenRunSandbox {
-  const { context, session, run, stepSandbox } = input
+  const { context, session, run, requestedBy, stepSandbox } = input
   const apiCredential = runCredential(context, run.nodeRunId, run.execution?.token)
   return async ({ signal, onFailure }) => ({
     sandbox: stepSandbox
@@ -90,6 +94,7 @@ export function workflowStepSandbox(input: {
             factory: stepSandbox,
             recipe: staticSandboxRecipe(stepSandbox.configuration ?? {}),
             auth: stepSandbox.configuration?.auth,
+            ...(requestedBy === undefined ? {} : { requestedBy }),
             assertOwner: () => session.assertOwned(),
             onAuthFailure: onFailure,
           },

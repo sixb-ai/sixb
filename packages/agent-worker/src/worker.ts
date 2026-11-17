@@ -23,6 +23,7 @@ import {
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
+import { getSandboxConnectionTokenAccess } from "@sixb/core/internal/connector-connections"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {
@@ -556,10 +557,12 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
       `[SixbAgentWorker] ${sandboxCredentialIssue({ supportsRequestCredentials: false })}`
     )
   }
+  const sandboxConnectionTokens = getSandboxConnectionTokenAccess(host)
   return {
     id: host.id,
     storage,
     sandboxes: host.sandboxes,
+    ...(sandboxConnectionTokens === undefined ? {} : { sandboxConnectionTokens }),
     keepsChildWorkspaces: keepsSubagentWorkspace(host.sandboxes),
     // Normalize the server base URL once here, at the boundary. Everything downstream (the sandbox's
     // API address and run context) consumes it verbatim.

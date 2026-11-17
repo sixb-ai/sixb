@@ -49,7 +49,9 @@ Vercel requests can outlive their worker: storage fencing cannot cancel provider
 Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
 Saved files remain subject to provider retention.
 
-Source `auth` stays host-side. Providers advertising `supportsRequestCredentials`, as every
+Source `auth` stays host-side and receives the run's `requestedBy` principal and a host-only
+`connectionToken` resolver for OAuth connector connections, enforcing the same personal-connection
+ownership and member-suspension rules as `sixb.connector()`. Providers advertising `supportsRequestCredentials`, as every
 agent's provider must, apply execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
 initial credentials before setup and expose session-scoped renewal, for ephemeral and named
 sandboxes alike. Unsupported providers reject credentials before provisioning. During initial

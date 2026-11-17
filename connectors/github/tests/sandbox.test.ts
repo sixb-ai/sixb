@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { githubApp } from "../src/sandbox"
+import { defineConnector } from "@sixb/core"
+import type { ConnectorAccessToken, SandboxOAuthConnector } from "@sixb/core/sandboxes"
+import { github } from "../src/github"
+import { githubApp, githubOAuth } from "../src/sandbox"
 
 // The key size is not under test; 1024 bits keeps key generation off the clock (2048 takes ~100ms).
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 1024 })
@@ -16,6 +19,13 @@ const IDENTITY = {
   GIT_COMMITTER_NAME: "sixb-agent[bot]",
   GIT_COMMITTER_EMAIL: "987+sixb-agent[bot]@users.noreply.github.com",
 }
+
+/**
+ * What `GH_TOKEN` and `GITHUB_TOKEN` hold inside a sandbox. The host replaces the value in the
+ * Authorization header, so the real token never enters; the `ghp_` prefix only satisfies a `gh`
+ * that reads one before it uploads an attachment.
+ */
+const PLACEHOLDER = "ghp_placeholder-replaced-outside-the-sandbox"
 
 function fixture(
   options: {
@@ -161,12 +171,18 @@ describe("GitHub App workspace auth", () => {
         method: ["GET", "POST", "PUT", "PATCH", "DELETE"],
         headers: { Authorization: "Bearer test-installation-token" },
       },
+      // Regression proof: drop the upload rule; a sandbox cannot post an attachment.
+      {
+        origin: "https://uploads.github.com",
+        path: "/user-attachments/assets",
+        method: "POST",
+        headers: { Authorization: "Bearer test-installation-token" },
+      },
     ])
 
     // GitHub clients read either variable. The host replaces the header, so the real token
     // never enters. Regression proof: drop GITHUB_TOKEN from the write env; this fails.
-    const placeholder = "placeholder-replaced-outside-the-sandbox"
-    expect(grant.env).toEqual({ ...IDENTITY, GH_TOKEN: placeholder, GITHUB_TOKEN: placeholder })
+    expect(grant.env).toEqual({ ...IDENTITY, GH_TOKEN: PLACEHOLDER, GITHUB_TOKEN: PLACEHOLDER })
     expect(JSON.stringify(grant.env)).not.toContain("test-installation-token")
     await grant.revoke()
   })
@@ -370,5 +386,339 @@ describe("GitHub App workspace auth", () => {
     await expect(grant.revoke()).rejects.toThrow("HTTP 503")
     await expect(grant.revoke()).rejects.toThrow("HTTP 503")
     expect(f.calls.filter((call) => call.init?.method === "DELETE")).toHaveLength(2)
+  })
+})
+
+const OAUTH = { clientId: "Iv1.client123", clientSecret: "super-secret-value" }
+
+const OAUTH_CONNECTOR = defineConnector("github", github({ auth: { oauth: OAUTH } }), {
+  owners: ["project", "user"],
+})
+
+const USER_IDENTITY = {
+  GIT_AUTHOR_NAME: "Ada Lovelace",
+  GIT_AUTHOR_EMAIL: "4242+adalovelace@users.noreply.github.com",
+  GIT_COMMITTER_NAME: "Ada Lovelace",
+  GIT_COMMITTER_EMAIL: "4242+adalovelace@users.noreply.github.com",
+}
+
+function oauthFixture(
+  options: {
+    access?: "read" | "write"
+    owner?: "user" | "project"
+    slot?: string
+    requestedBy?: { readonly type: "user" | "serviceAccount"; readonly id: string }
+    parentTokens?: readonly string[]
+    grant?: Record<string, unknown>
+    scopedStatuses?: number[]
+    revokeStatus?: number
+    fallback?: ReturnType<typeof githubApp>
+  } = {}
+) {
+  const calls: { url: string; init?: RequestInit }[] = []
+  const tokenLookups: unknown[] = []
+  let invalidations = 0
+  let tokenIndex = 0
+  const parentTokens = options.parentTokens ?? ["ghu_parent_1", "ghu_parent_2"]
+  const statuses = [...(options.scopedStatuses ?? [])]
+  const permissions =
+    options.access === "write"
+      ? { contents: "write", pull_requests: "write", metadata: "read" }
+      : { contents: "read", metadata: "read" }
+
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.endsWith("/applications/Iv1.client123/token") && init?.method === "DELETE") {
+        return new Response(null, { status: options.revokeStatus ?? 204 })
+      }
+      if (url.endsWith("/applications/Iv1.client123/token/scoped")) {
+        const nextStatus = statuses.shift()
+        if (nextStatus !== undefined) {
+          return Response.json(
+            { message: "provider detail must never leak" },
+            { status: nextStatus }
+          )
+        }
+        return Response.json({
+          token: "ghu_scoped_token",
+          expires_at: new Date(Date.now() + 28_800_000).toISOString(),
+          app: { client_id: "Iv1.client123", name: "Sixb", url: "https://github.com/apps/sixb" },
+          installation: {
+            repository_selection: "selected",
+            permissions,
+            account: { login: "acme", id: 1, type: "Organization" },
+          },
+          user: {
+            id: 4242,
+            login: "adalovelace",
+            name: "Ada Lovelace",
+            type: "User",
+          },
+          ...options.grant,
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    },
+    { preconnect() {} }
+  ) as typeof fetch
+
+  const auth = githubOAuth({
+    connector: OAUTH_CONNECTOR,
+    ...(options.owner === undefined ? {} : { owner: options.owner }),
+    ...(options.slot === undefined ? {} : { slot: options.slot }),
+    ...(options.fallback === undefined ? {} : { fallback: options.fallback }),
+  })
+
+  const connectionToken = async (
+    connector: SandboxOAuthConnector,
+    selector: unknown
+  ): Promise<ConnectorAccessToken> => {
+    tokenLookups.push({ connector, selector })
+    const accessToken = parentTokens[Math.min(tokenIndex++, parentTokens.length - 1)]!
+    return {
+      accessToken,
+      invalidate() {
+        invalidations++
+      },
+    }
+  }
+
+  const hasRequestedBy = Object.hasOwn(options, "requestedBy")
+  const authorize = (
+    url = "https://github.com/acme/website.git",
+    signal = new AbortController().signal
+  ) =>
+    auth.authorize({
+      source: { type: "git", url, ...(options.access ? { access: options.access } : {}) },
+      signal,
+      ...(hasRequestedBy
+        ? options.requestedBy === undefined
+          ? {}
+          : { requestedBy: options.requestedBy }
+        : { requestedBy: { type: "user", id: "usr_ada" } }),
+      connectionToken,
+    })
+
+  return {
+    calls,
+    auth,
+    authorize,
+    tokenLookups,
+    invalidations: () => invalidations,
+  }
+}
+
+describe("GitHub OAuth workspace auth", () => {
+  test("scopes the requester's OAuth token to one repository, attributes commits to them, and revokes only the scoped token", async () => {
+    // Regression proof: omit repositories or permissions from /token/scoped, or use /grant on revoke.
+    const f = oauthFixture({ access: "write" })
+    const grant = await f.authorize()
+
+    expect(f.tokenLookups).toEqual([
+      {
+        connector: OAUTH_CONNECTOR,
+        selector: { owner: { type: "user", id: "usr_ada" }, slot: "default" },
+      },
+    ])
+    expect(f.calls.map((call) => call.url)).toEqual([
+      "https://api.github.com/applications/Iv1.client123/token/scoped",
+    ])
+    const authHeader = new Headers(f.calls[0]?.init?.headers).get("Authorization")
+    expect(authHeader).toBe(
+      `Basic ${Buffer.from("Iv1.client123:super-secret-value").toString("base64")}`
+    )
+    expect(JSON.parse(String(f.calls[0]?.init?.body))).toEqual({
+      access_token: "ghu_parent_1",
+      target: "acme",
+      repositories: ["website"],
+      permissions: { contents: "write", pull_requests: "write" },
+    })
+    expect(grant.env).toEqual({
+      ...USER_IDENTITY,
+      GH_TOKEN: PLACEHOLDER,
+      GITHUB_TOKEN: PLACEHOLDER,
+    })
+    expect(grant.requests.map(({ origin, path, method }) => ({ origin, path, method }))).toEqual([
+      { origin: "https://github.com", path: "/acme/website.git/info/refs", method: "GET" },
+      { origin: "https://github.com", path: "/acme/website.git/git-upload-pack", method: "POST" },
+      { origin: "https://github.com", path: "/acme/website.git/git-receive-pack", method: "POST" },
+      {
+        origin: "https://api.github.com",
+        path: { prefix: "/" },
+        method: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      },
+      { origin: "https://uploads.github.com", path: "/user-attachments/assets", method: "POST" },
+    ])
+    expect(JSON.stringify(f.auth)).not.toContain("super-secret-value")
+
+    await grant.revoke()
+    await grant.revoke()
+    expect(f.calls).toHaveLength(2)
+    expect(f.calls[1]?.url).toBe("https://api.github.com/applications/Iv1.client123/token")
+    expect(f.calls[1]?.init?.method).toBe("DELETE")
+    expect(JSON.parse(String(f.calls[1]?.init?.body))).toEqual({
+      access_token: "ghu_scoped_token",
+    })
+  })
+
+  // Removal proof: drop the upload rule from gitRequests; a sandbox cannot post an asset. Put the
+  // parent token in that rule; the scoped-token assertion fails on the first run that uploads.
+  test("write access can attach a file, with the scoped token and never the parent", async () => {
+    const write = await oauthFixture({ access: "write" }).authorize()
+
+    expect(write.requests.find(({ origin }) => origin === "https://uploads.github.com")).toEqual({
+      origin: "https://uploads.github.com",
+      path: "/user-attachments/assets",
+      method: "POST",
+      headers: { Authorization: "Bearer ghu_scoped_token" },
+    })
+    expect(JSON.stringify(write.requests)).not.toContain("ghu_parent_1")
+    expect(JSON.stringify(write.env)).not.toContain("ghu_scoped_token")
+
+    const read = await oauthFixture({ access: "read" }).authorize()
+    expect(read.requests.some(({ origin }) => origin === "https://uploads.github.com")).toBe(false)
+  })
+
+  test("read access sets the user's Git identity without API access or token placeholders, and treats 404 revoke as idempotent", async () => {
+    const f = oauthFixture({
+      access: "read",
+      revokeStatus: 404,
+      grant: {
+        user: { id: 4242, login: "adalovelace", name: "Ada\n<Lovelace>", type: "User" },
+      },
+    })
+    const grant = await f.authorize()
+
+    expect(grant.env).toEqual({
+      ...USER_IDENTITY,
+      GIT_AUTHOR_NAME: "AdaLovelace",
+      GIT_COMMITTER_NAME: "AdaLovelace",
+    })
+    expect(grant.requests).toHaveLength(2)
+    await expect(grant.revoke()).resolves.toBeUndefined()
+  })
+
+  test("invalidates a stale parent token on 404 from /token/scoped and retries once with the refreshed token", async () => {
+    // Regression proof: drop the 404 catch in githubOAuth; the stale token fails without refreshing.
+    const f = oauthFixture({
+      scopedStatuses: [404],
+      parentTokens: ["ghu_stale", "ghu_fresh"],
+    })
+    const grant = await f.authorize()
+
+    expect(f.invalidations()).toBe(1)
+    expect(f.tokenLookups).toHaveLength(2)
+    expect(f.calls).toHaveLength(2)
+    expect(JSON.parse(String(f.calls[1]?.init?.body)).access_token).toBe("ghu_fresh")
+    await grant.revoke()
+  })
+
+  test("supports project-owned connections and custom slots, and delegates to fallback only when no user requested the run", async () => {
+    // Regression proof: use fallback when a user's connection lookup fails; their commits silently become bot commits.
+    const project = oauthFixture({ owner: "project", slot: "engineering", requestedBy: undefined })
+    await (await project.authorize()).revoke()
+    expect(project.tokenLookups[0]).toMatchObject({
+      selector: { owner: { type: "project" }, slot: "engineering" },
+    })
+
+    let fallbackCalls = 0
+    const fallback = {
+      authorize: async () => {
+        fallbackCalls++
+        return {
+          requests: [
+            {
+              origin: "https://github.com",
+              path: "/acme/website.git/info/refs",
+              method: "GET" as const,
+              headers: { Authorization: "Basic ZmFsbGJhY2s=" },
+            },
+          ],
+          expiresAt: new Date(Date.now() + 3_600_000),
+          revoke: async () => {},
+        }
+      },
+    }
+    const background = oauthFixture({
+      requestedBy: undefined,
+      fallback: fallback as ReturnType<typeof githubApp>,
+    })
+    await background.authorize()
+    expect(fallbackCalls).toBe(1)
+    expect(background.tokenLookups).toHaveLength(0)
+
+    const noFallback = oauthFixture({ requestedBy: { type: "serviceAccount", id: "svc_1" } })
+    await expect(noFallback.authorize()).rejects.toThrow("requires a run requested by a user")
+  })
+
+  test.each([
+    [401, "[SixbGitHub] GitHub rejected the OAuth client credentials."],
+    [
+      403,
+      "[SixbGitHub] Either the GitHub App is not installed on this repository or the connected GitHub account cannot access it.",
+    ],
+    [
+      422,
+      "[SixbGitHub] The GitHub App or connected account does not grant the permissions this workspace needs (Contents and Pull requests: write).",
+    ],
+  ])("maps status %i to an actionable error without leaking provider details", async (status, message) => {
+    const f = oauthFixture({ access: "write", scopedStatuses: [status] })
+    const error = await f.authorize().catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe(message)
+    expect((error as Error).message).not.toContain("provider detail")
+  })
+
+  test.each([
+    { expires_at: null },
+    { expires_at: "1970-01-01T00:00:00.000Z" },
+    { app: { client_id: "Iv1.other" } },
+    {
+      installation: {
+        repository_selection: "all",
+        permissions: { contents: "read", metadata: "read" },
+        account: { login: "acme" },
+      },
+    },
+    {
+      installation: {
+        repository_selection: "selected",
+        permissions: { contents: "write", metadata: "read" },
+        account: { login: "acme" },
+      },
+    },
+    {
+      installation: {
+        repository_selection: "selected",
+        permissions: { contents: "read", metadata: "read" },
+        account: { login: "other-org" },
+      },
+    },
+    { user: { id: 4242, login: "sixb[bot]", type: "Bot" } },
+    { user: { id: 0, login: "adalovelace", type: "User" } },
+  ])("revokes unexpected scoped grants before rejecting: %j", async (grant) => {
+    const f = oauthFixture({ grant })
+    await expect(f.authorize()).rejects.toThrow("[SixbGitHub]")
+    expect(f.calls.map((call) => call.init?.method)).toEqual(["POST", "DELETE"])
+  })
+
+  test("validates configuration before serving any request", () => {
+    // An OAuth connector that github() did not build has no GitHub client to scope tokens with.
+    const foreign: SandboxOAuthConnector = {
+      kind: "connector",
+      id: "github",
+      adapter: { authentication: { type: "oauth2" } },
+    }
+    expect(() => githubOAuth({ connector: foreign })).toThrow("requires a GitHub OAuth connector")
+
+    const enterprise = defineConnector(
+      "github-enterprise",
+      github({ auth: { oauth: OAUTH }, baseUrl: "https://api.acme.ghe.com" })
+    )
+    expect(() => githubOAuth({ connector: enterprise })).toThrow("supports github.com only")
+
+    expect(() => githubOAuth({ connector: OAUTH_CONNECTOR, slot: " " })).toThrow("Connection slot")
   })
 })

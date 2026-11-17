@@ -16,7 +16,41 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 ## Register
 
-Drop this in your project's `connectors/` directory — `createSixb()` auto-discovers it:
+Drop one of these in your project's `connectors/` directory so `createSixb()` auto-discovers it.
+
+### Static token or GitHub App installation
+
+```ts
+import { defineConnector } from "@sixb/core"
+import { github } from "@sixb/connector-github"
+
+// Fine-grained PAT:
+export const githubConnector = defineConnector(
+  "github",
+  github({
+    token: process.env.GITHUB_TOKEN!,
+  })
+)
+
+// Or a GitHub App installation:
+export const githubAppConnector = defineConnector(
+  "github-app",
+  github({
+    auth: {
+      app: {
+        appId: process.env.GITHUB_APP_ID!,
+        privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+        installationId: process.env.GITHUB_INSTALLATION_ID!,
+      },
+    },
+  })
+)
+```
+
+### Managed OAuth connections
+
+Register `https://<sixb-api-origin>/auth/connectors/callback` as a Callback URL on your GitHub App
+and enable expiring user authorization tokens:
 
 ```ts
 import { defineConnector } from "@sixb/core"
@@ -25,15 +59,23 @@ import { github } from "@sixb/connector-github"
 export const githubConnector = defineConnector(
   "github",
   github({
-    token: process.env.GITHUB_TOKEN!,
-  })
+    auth: {
+      oauth: {
+        clientId: process.env.GITHUB_CLIENT_ID!,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      },
+    },
+  }),
+  { owners: ["user"] } // or ["project", "user"]
 )
 ```
 
 | Option          | Description                                                              |
 | --------------- | ------------------------------------------------------------------------ |
-| `token`         | **Required.** GitHub token — a fine-grained PAT is recommended.          |
-| `baseUrl`       | API base URL — override for GitHub Enterprise Server.                    |
+| `token`         | Static GitHub token (or pass `auth: { token }`).                         |
+| `auth.app`      | GitHub App installation credentials (`appId`, `privateKey`, `installationId`). |
+| `auth.oauth`    | OAuth client credentials (`clientId`, `clientSecret`, optional `webBaseUrl`, `scopes`, `pkce`). |
+| `baseUrl`       | API base URL for GitHub Enterprise Cloud or Server.                      |
 | `webhookSecret` | Secret used to verify inbound webhooks. See [Webhooks](#webhooks).       |
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
@@ -48,9 +90,24 @@ membership visibility depends on the authenticated user's organization access.
 
 ## Sandbox access
 
-`@sixb/connector-github/sandbox` provides `githubApp({ appId, privateKey })` for
-the sandbox factory's `auth` option. It is separate from the token-based REST connector; no connector
-registration is required. See [repository authentication](../../docs/sandboxes/overview.md#repository-authentication).
+`@sixb/connector-github/sandbox` provides two `auth` helpers for sandbox factories (see [repository authentication](../../docs/sandboxes/overview.md#repository-authentication)):
+
+- `githubApp({ appId, privateKey })`: mints repository-scoped App installation tokens and attributes commits to the App's bot account.
+- `githubOAuth({ connector, slot?, owner?, fallback? })`: mints repository-scoped user tokens from the requester's GitHub App OAuth connection, with the connector's own client ID and secret, and attributes commits and pull requests to that user. With write access it can also attach files to issues and pull requests, which GitHub refuses an App installation token for.
+
+```ts
+import { githubApp, githubOAuth } from "@sixb/connector-github/sandbox"
+import { githubConnector } from "./connectors/github"
+
+const auth = githubOAuth({
+  connector: githubConnector,
+  // Optional: used only when no user requested the run (such as a scheduled workflow step)
+  fallback: githubApp({
+    appId: process.env.GITHUB_APP_ID!,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+  }),
+})
+```
 
 Set up the GitHub App once:
 
@@ -65,10 +122,10 @@ Set up the GitHub App once:
 With `source.access: "write"`, the agent can use `git` and GitHub API clients such as `gh` for
 that repository, for example to push and open pull requests. Each run receives a repository-scoped installation token,
 injected outside the VM only into Git fetch/push requests and, with write access, GitHub API
-requests. The sandbox gets a placeholder in `GH_TOKEN` and `GITHUB_TOKEN` and the Git identity of
-the App's bot, so commits are attributed to it. SSH, Git LFS and cross-repository submodule
-credentials are not provided. Private keys remain host-side; the App does not replace your
-application's access checks.
+requests and attachment uploads. The sandbox gets a placeholder in `GH_TOKEN` and `GITHUB_TOKEN`
+and the Git identity of the App's bot, so commits are attributed to it. SSH, Git LFS and
+cross-repository submodule credentials are not provided. Private keys remain host-side; the App
+does not replace your application's access checks.
 
 If the installation lacks a permission the workspace needs, the run fails: the cause of the error
 reported to `onError` names the permissions to grant.

@@ -85,7 +85,15 @@ export type {
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
 export type { ListMilestonesOptions, RepositoryMilestonesApi } from "./milestones"
-export type { GitHubConnectorOptions } from "./options"
+export type {
+  GitHubAppAuthOptions,
+  GitHubCommonOptions,
+  GitHubConnectorOptions,
+  GitHubOAuthAuthOptions,
+  GitHubOAuthConnectorOptions,
+  GitHubOAuthOptions,
+  GitHubStaticAuthOptions,
+} from "./options"
 export type {
   GetPullRequestOptions,
   GitHubPullRequest,

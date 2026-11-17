@@ -154,3 +154,20 @@ function assertPageSize(pageSize: number): number {
   }
   return pageSize
 }
+
+/**
+ * The web host paired with the configured API: github.com for api.github.com,
+ * `<name>.ghe.com` for GitHub Enterprise Cloud's `api.<name>.ghe.com`, and an Enterprise Server's
+ * own host, port included.
+ */
+export function githubWebHost(apiBaseUrl: URL): string {
+  if (apiBaseUrl.host === "api.github.com") return "github.com"
+  if (apiBaseUrl.hostname.startsWith("api.") && apiBaseUrl.hostname.endsWith(".ghe.com")) {
+    return apiBaseUrl.host.slice("api.".length)
+  }
+  return apiBaseUrl.host
+}
+
+export function githubWebOrigin(apiBaseUrl: URL): string {
+  return `${apiBaseUrl.protocol}//${githubWebHost(apiBaseUrl)}`
+}

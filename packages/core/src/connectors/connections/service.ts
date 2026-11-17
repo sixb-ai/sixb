@@ -23,6 +23,7 @@ import type {
   ConnectorClient,
   ConnectorConnectionSelector,
   ConnectorDefinition,
+  ConnectorTokenSource,
   OAuthConnectorAdapter,
 } from "../types"
 import {
@@ -172,6 +173,68 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     definition: ConnectorDefinition<string, TAdapter>,
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>> {
+    const readable = await this.requireReadableConnection(definition, selector)
+    return this.connectExecutionConnection(definition, readable)
+  }
+
+  /**
+   * Live token source for one connected account, re-checking connection status and member
+   * suspension on each read while keeping revision invalidation across calls.
+   */
+  createConnectionTokenSource<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    selector: ConnectorConnectionSelector
+  ): ConnectorTokenSource {
+    this.assertOAuthRegistered(definition)
+    assertConnectorConnectionSelector(selector)
+    let current:
+      | {
+          readonly authorizationId: string
+          readonly accountId: string
+          readonly source: ConnectorTokenSource
+        }
+      | undefined
+
+    return Object.freeze({
+      get: async () => {
+        const readable = await this.requireReadableConnection(definition, selector)
+        if (
+          readable.projectId !== this.projectId ||
+          readable.connectorId !== definition.id ||
+          readable.status !== "connected"
+        ) {
+          throw createConnectorCodedError(
+            "connector.not_found",
+            `Connector '${definition.id}' connection '${readable.id}' is not active in this project.`
+          )
+        }
+        const authorization = await this.authorizations.requireStableActiveAuthorization(
+          definition,
+          readable.authorizationId
+        )
+        if (
+          current?.authorizationId !== authorization.id ||
+          current.accountId !== readable.account.id
+        ) {
+          current = {
+            authorizationId: authorization.id,
+            accountId: readable.account.id,
+            source: this.authorizations.createTokenSource(
+              definition,
+              authorization.id,
+              readable.account
+            ),
+          }
+        }
+        return current.source.get()
+      },
+    })
+  }
+
+  private async requireReadableConnection<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    selector: ConnectorConnectionSelector
+  ): Promise<ConnectorConnectionRecord> {
     this.assertOAuthRegistered(definition)
     assertConnectorConnectionSelector(selector)
     const connection = await withConnectorStorageBoundary(
@@ -199,8 +262,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
         `Connector '${definition.id}' does not open the connections of a suspended member.`
       )
     }
-
-    return this.connectExecutionConnection(definition, readable)
+    return readable
   }
 
   /** Snapshot the connected records that one trusted primitive execution may consume. */

@@ -1,5 +1,7 @@
 import type {
+  AuthorizablePrincipal,
   Sandbox,
+  SandboxConnectionTokenResolver,
   SandboxRequestCredential,
   SandboxSource,
   SandboxSourceAuth,
@@ -44,6 +46,8 @@ export class WorkspaceAuthSession {
     private readonly input: {
       auth: SandboxSourceAuth
       source: SandboxSource
+      requestedBy?: AuthorizablePrincipal
+      connectionToken?: SandboxConnectionTokenResolver
       /** Injected with every grant, which replaces the session's whole list. */
       alongside: readonly SandboxRequestCredential[]
       signal: AbortSignal
@@ -105,6 +109,10 @@ export class WorkspaceAuthSession {
         this.input.auth.authorize({
           source: this.input.source,
           signal: this.input.signal,
+          ...(this.input.requestedBy === undefined ? {} : { requestedBy: this.input.requestedBy }),
+          ...(this.input.connectionToken === undefined
+            ? {}
+            : { connectionToken: this.input.connectionToken }),
         })
       )
       .then(async (grant) => {
