@@ -149,6 +149,38 @@ starts.
 Sixb refreshes access for each run and revokes it during normal cleanup. A worker crash cannot
 guarantee immediate revocation.
 
+## Work on the project's own code
+
+Name the repository your project lives in, and a conversation can work on any of its branches:
+
+```ts
+export const sixb = await createSixb({
+  sandboxes: new VercelSandboxFactory({
+    auth: githubApp({ appId: process.env.GITHUB_APP_ID!, privateKey: process.env.GITHUB_APP_PRIVATE_KEY! }),
+  }),
+  source: { repository: "acme/operations" },
+})
+
+const thread = await sixb.agent.threads.create({ sandbox: { branch: "vendor-invoices" } })
+```
+
+The thread's sandbox checks that branch out, or creates it from the default branch when it is
+new, and installs the repository's dependencies. With the factory's [`auth`](#repository-authentication)
+the agent can push the branch; without it, the repository must be public and the agent only reads
+it. The network is open unless the factory sets one, so the agent can install packages and run the
+project's tools. `SIXB_SOURCE_REPOSITORY`, `SIXB_SOURCE_BRANCH` and `SIXB_SOURCE_PATH` tell commands
+in the sandbox where they are.
+
+| Option | Purpose |
+| --- | --- |
+| `repository` | The GitHub repository, `owner/name`. |
+| `path` | The project's folder inside it, for a project that isn't at the repository root. |
+
+A thread whose `sandbox` names only `branch` works on the project's repository. Any other params
+go to the factory's own `params` and `resolve`, so a project can keep its own recipes beside it.
+The factory can't also set a static `source`. Branch names are letters, digits, `.`, `_`, `-` and
+`/`, as git takes them.
+
 ## Keep files across conversation runs
 
 Opt in when creating a thread:

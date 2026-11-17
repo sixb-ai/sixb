@@ -28,6 +28,7 @@ import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
+import type { ProjectSource } from "../sandboxes/source"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
@@ -61,6 +62,11 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory<TParams>
+  /**
+   * Where the project's own code lives, `{ repository: "owner/name" }`. A thread whose sandbox names
+   * only `branch` then works on that branch of the project, created when it is new.
+   */
+  source?: ProjectSource
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -145,6 +151,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     blobStorage: options.blobStorage,
     queues: options.queues,
     sandboxes: options.sandboxes,
+    ...(options.source === undefined ? {} : { source: options.source }),
     logger: options.logger,
     observability: options.observability,
     activity: options.activity,

@@ -101,6 +101,7 @@ import {
   sandboxCredentialIssue,
 } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
+import { captureProjectSource, type ProjectSource } from "../sandboxes/source"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
@@ -157,6 +158,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory<TParams>
+  /** Where the project's own code lives: a thread can then work on one of its branches. */
+  source?: ProjectSource
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -226,6 +229,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
+  /** The project's repository, when `source` is configured. */
+  readonly source?: ProjectSource
   readonly projectRoot: string
   private readonly cron: MaintenancePass
   private readonly errorReporter: ErrorReporter
@@ -270,10 +275,20 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       getSubTypes: (objectTypeId) => definitions.ontology.listSubTypes(objectTypeId),
     })
     this.definitions = definitions
+    this.source = options.source === undefined ? undefined : captureProjectSource(options.source)
+    if (this.source && !options.sandboxes) {
+      throw new RuntimeError(
+        "[Sixb] `source` lets threads work on a branch of the project in a sandbox: configure `sandboxes` too."
+      )
+    }
     this.sandboxDefinition =
       options.sandboxes?.configuration === undefined
         ? undefined
-        : createSandboxDefinition(options.sandboxes.configuration, definitions.ontology)
+        : createSandboxDefinition(
+            options.sandboxes.configuration,
+            definitions.ontology,
+            this.source
+          )
     assertSandboxCredentials(options.sandboxes)
     registerProjectionRegistry(this, definitions.projections)
 

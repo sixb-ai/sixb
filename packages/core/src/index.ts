@@ -1297,6 +1297,7 @@ export type {
   SandboxResolveContext,
   SandboxSource,
 } from "./sandboxes/configuration"
+export type { ProjectSource } from "./sandboxes/source"
 export type { ParamOptions } from "./shared/params/builders"
 export type { InferParams, ParamConfig, ParamsConfig } from "./shared/params/types"
 export type {

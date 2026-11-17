@@ -7,6 +7,12 @@ import { coerceParamsToTyped, normalizeParams } from "../shared/params/validatio
 import type { SandboxSourceAuth } from "./auth"
 import { SandboxError } from "./errors"
 import type { SandboxNetworkPolicy } from "./sandbox"
+import {
+  isProjectBranchBinding,
+  PROJECT_SOURCE_PARAMS,
+  type ProjectSource,
+  projectSourceEnvironment,
+} from "./source"
 
 /** Static recipes accept an empty parameter record, not arbitrary undeclared keys. */
 export type InferSandboxParams<TParams extends ParamsConfig> = keyof TParams extends never
@@ -51,12 +57,25 @@ export interface SandboxConfig<in out TParams extends ParamsConfig = ParamsConfi
 export interface SandboxDefinition {
   readonly auth?: SandboxSourceAuth
   readonly params: ParamsConfig
+  /** Set with the project's `source`: a thread whose params name only `branch` works on it. */
+  readonly source?: ProjectSource
   readonly resolve: (context: SandboxResolveContext) => Promise<SandboxEnvironment>
+}
+
+/** The parameters a thread's binding is checked against: its project branch, or the recipe's. */
+export function sandboxBindingParams(
+  definition: Pick<SandboxDefinition, "params" | "source">,
+  input: unknown
+): ParamsConfig {
+  return definition.source && isProjectBranchBinding(input)
+    ? PROJECT_SOURCE_PARAMS
+    : definition.params
 }
 
 export function createSandboxDefinition<TParams extends ParamsConfig>(
   config: SandboxConfig<TParams>,
-  ontology: OntologyRegistry
+  ontology: OntologyRegistry,
+  source?: ProjectSource
 ): SandboxDefinition {
   const raw: unknown = config
   if (
@@ -81,6 +100,11 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
   }
   if (config.resolve !== undefined && (config.source !== undefined || config.setup !== undefined)) {
     throw new SandboxError("[Sixb] Use either static source/setup or resolve, not both.")
+  }
+  if (source !== undefined && config.source !== undefined) {
+    throw new SandboxError(
+      "[Sixb] The project's source is its sandboxes' repository: remove the sandbox factory's static source."
+    )
   }
   const invalid = (path: string) =>
     new SandboxError(`[Sixb] ${path} must be a valid parameter declaration; use param(schema).`)
@@ -120,8 +144,16 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
   deepFreeze(params)
   return Object.freeze({
     params,
+    ...(source === undefined ? {} : { source }),
     ...(authorize ? { auth: Object.freeze({ authorize }) } : {}),
     resolve: async ({ params: input, sixb }: SandboxResolveContext) => {
+      if (source && isProjectBranchBinding(input)) {
+        // Pushing a branch needs credentials issued outside the sandbox; without them it reads.
+        const access = authorize ? "write" : "read"
+        return captureEnvironment(
+          projectSourceEnvironment({ source, branch: input.branch, access, base: environment })
+        )
+      }
       const binding = normalizeParams(ontology.getValueTypesById(), params, input, {
         kind: "sandbox",
         id: "sandboxes",
