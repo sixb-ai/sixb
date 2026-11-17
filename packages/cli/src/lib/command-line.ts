@@ -241,6 +241,8 @@ export type LocalCommandId =
   | "typegen"
   | "build"
   | "desktop:build"
+  | "desktop:release"
+  | "desktop:status"
   | "db:migrate"
   | "db:prepare"
   | "lake:check"
@@ -558,12 +560,22 @@ const commandTree: readonly CommandNode[] = [
   {
     name: "desktop",
     summary: "Ship the app as a desktop app",
-    usage: "sixb desktop build",
+    usage: "sixb desktop <build|release|status>",
     children: [
       command("desktop:build", "Package the deployed app as a desktop app for this machine", {
         path: ["desktop", "build"],
         options: ["app-public-origin", "api-public-origin"],
         rootHelpLabel: "desktop build",
+      }),
+      command("desktop:release", "Build, sign and publish the desktop app for this system", {
+        path: ["desktop", "release"],
+        options: ["json"],
+        rootHelpLabel: "desktop release",
+      }),
+      command("desktop:status", "Show which desktop app version the deployment serves", {
+        path: ["desktop", "status"],
+        options: ["json"],
+        rootHelpLabel: "desktop status",
       }),
     ],
   },

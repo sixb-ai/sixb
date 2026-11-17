@@ -122,6 +122,8 @@ Run these from your project root:
 | `sixb dev` | Start the local API, app, and workers. |
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
+| `sixb desktop release` | Build, sign and publish the desktop app to the deployment, for this machine's system. |
+| `sixb desktop status` | Show which desktop app version the deployment serves. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |

@@ -358,6 +358,18 @@ async function main(): Promise<void> {
       break
     }
 
+    case "desktop:release": {
+      const { runDesktopRelease } = await import("./commands/desktop")
+      await runDesktopRelease({ json: hasFlag("json") })
+      break
+    }
+
+    case "desktop:status": {
+      const { runDesktopStatus } = await import("./commands/desktop")
+      await runDesktopStatus({ json: hasFlag("json") })
+      break
+    }
+
     case "run": {
       const { runScriptCommand } = await import("./commands/run")
       const [script = "", ...scriptArgs] = positionals

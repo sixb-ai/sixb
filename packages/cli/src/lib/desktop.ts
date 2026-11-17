@@ -1,5 +1,5 @@
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { SixbCliError } from "./errors"
+import { errorMessage, SixbCliError } from "./errors"
 
 export interface DesktopAppOptions {
   readonly projectRoot: string
@@ -24,10 +24,67 @@ export interface SixbDesktop {
     readonly exited: Promise<number>
     close(): void
   }>
-  buildDesktopApp(options: DesktopAppOptions): Promise<{
+  buildDesktopApp(options: DesktopAppOptions & { readonly requireSignature?: boolean }): Promise<{
     readonly path: string
     readonly signed: boolean
+    /** Absent from a package older than releases. */
+    readonly release?: DesktopReleaseFiles | null
   }>
+}
+
+/** What `sixb desktop release` publishes: one system's files, served as they are. */
+export interface DesktopReleaseFiles {
+  readonly platform: DesktopReleasePlatform
+  readonly version: string
+  readonly dir: string
+}
+
+/** The systems desktop releases are made for, in the order `sixb desktop status` lists them. */
+export const DESKTOP_RELEASE_PLATFORMS = ["darwin"] as const
+
+export type DesktopReleasePlatform = (typeof DESKTOP_RELEASE_PLATFORMS)[number]
+
+/** How each system is named to people. */
+export const DESKTOP_PLATFORM_NAMES: Readonly<Record<DesktopReleasePlatform, string>> = {
+  darwin: "macOS",
+}
+
+/** Where the deployment serves each system's release, on the app's origin. */
+export function desktopReleaseUrl(
+  appUrl: string,
+  platform: DesktopReleasePlatform,
+  file: string
+): string {
+  return new URL(`/__sixb/desktop/${platform}/${file}`, appUrl).href
+}
+
+/** What people download, by system. */
+export const DESKTOP_INSTALLERS: Readonly<Record<DesktopReleasePlatform, string>> = {
+  darwin: "install.dmg",
+}
+
+/**
+ * The version a deployment serves for one system, from the feed its installed apps update from.
+ * Null when it serves none.
+ */
+export async function releasedDesktopVersion(
+  appUrl: string,
+  platform: DesktopReleasePlatform
+): Promise<string | null> {
+  const url = desktopReleaseUrl(appUrl, platform, "releases.json")
+  let response: Response
+  try {
+    response = await fetch(url, { headers: { "cache-control": "no-cache" } })
+  } catch (error) {
+    throw new SixbCliError(`[SixbCLI] Could not reach ${url}: ${errorMessage(error)}`)
+  }
+  if (response.status === 404) return null
+  if (!response.ok) throw new SixbCliError(`[SixbCLI] ${url} answered ${response.status}.`)
+  const feed = (await response.json().catch(() => null)) as { readonly currentRelease?: unknown }
+  if (typeof feed?.currentRelease !== "string") {
+    throw new SixbCliError(`[SixbCLI] ${url} names no release.`)
+  }
+  return feed.currentRelease
 }
 
 /**
