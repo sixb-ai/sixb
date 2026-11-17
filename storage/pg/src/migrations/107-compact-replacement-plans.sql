@@ -14,3 +14,6 @@ ALTER TABLE ontology_replacement_plan_identities
 DROP INDEX idx_ontology_replacement_plan_work_incident;
 CREATE INDEX idx_ontology_replacement_plan_identities_flips
   ON ontology_replacement_plan_identities (version_id) WHERE flips;
+
+-- A plan's work is keyed by its record keys alone, which are unique by themselves.
+ALTER TABLE ontology_replacement_plan_work DROP COLUMN unique_key;

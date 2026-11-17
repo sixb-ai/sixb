@@ -1,3 +1,5 @@
+import { Readable } from "node:stream"
+import { pipeline } from "node:stream/promises"
 import {
   type EffectiveChangeCounts,
   MaterializationConflictError,
@@ -38,7 +40,6 @@ import { PgMaterializationStateReader } from "./materialization-state"
 import {
   assertProjectionExecution,
   columnKeyExpression,
-  jsonParameter,
   jsonTupleExpression,
   type PgOntologySourceRow,
   toIsoString,
@@ -364,25 +365,16 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
       const { plan, candidate } = await requirePlan(sql, input)
       const identities = prepareReplacementIdentities(input, planCommit(plan))
       const versionId = candidate.version_id
-      const summary = identities.map((identity) => ({
-        entityKind: identity.kind,
-        identityKey: identity.key,
-        classified: identity.classified,
-        change: identity.change,
-        ...identityExistence(identity),
-      }))
+      const existence = identities.map(identityExistence)
       // Only an identity streamed and still to plan has the revision its work is planned from,
       // and holds no work: unplanning one deletes its work and forgets what it read.
       const planned = await sql`
-        WITH planned AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(sql, summary)}::jsonb)
-        )
         UPDATE ${sql(IDENTITIES)} AS identities
         SET planned_revision = identities.read_revision,
-          classified = (planned.value->>'classified')::boolean,
-          change = planned.value->>'change',
-          planned_exists = (planned.value->>'plannedExists')::boolean,
-          flips = (planned.value->>'flips')::boolean,
+          classified = planned.classified,
+          change = planned.change,
+          planned_exists = planned.planned_exists,
+          flips = planned.flips,
           -- A planned object may flip its existence: the next link expansion starts from it.
           expand_at = CASE identities.entity_kind
             WHEN 'object' THEN (
@@ -390,64 +382,25 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
             )
             ELSE identities.expand_at
           END
-        FROM planned
+        FROM unnest(
+          ${sql.array(identities.map((identity) => identity.kind))}::text[],
+          ${sql.array(identities.map((identity) => identity.key))}::text[],
+          ${sql.array(identities.map((identity) => identity.classified))}::boolean[],
+          ${sql.array(identities.map((identity) => identity.change))}::text[],
+          ${sql.array(existence.map((value) => value.plannedExists))}::boolean[],
+          ${sql.array(existence.map((value) => value.flips))}::boolean[]
+        ) AS planned(entity_kind, identity_key, classified, change, planned_exists, flips)
         WHERE identities.version_id = ${versionId}
-          AND identities.entity_kind = planned.value->>'entityKind'
-          AND identities.identity_key = planned.value->>'identityKey'
+          AND identities.entity_kind = planned.entity_kind
+          AND identities.identity_key = planned.identity_key
           AND identities.read_revision IS NOT NULL AND identities.planned_revision IS NULL
-        RETURNING identities.entity_kind, identities.identity_key
       `
-      if (planned.length !== identities.length) {
-        const streamed = new Set(planned.map((row) => `${row.entity_kind}:${row.identity_key}`))
-        const missing = identities.find(
-          (identity) => !streamed.has(`${identity.kind}:${identity.key}`)
-        )
+      if (planned.count !== identities.length) {
         throw new MaterializationValidationError(
-          `Replacement identity ${missing?.entityKey} is not streamed and still to plan.`
+          `Replacement identity ${await firstUnstreamed(sql, versionId, identities)} is not streamed and still to plan.`
         )
       }
-      // What the identity row now holds is not work: only what a commit applies is.
-      const work = identities.flatMap((identity) =>
-        identity.records.filter(isAppliedWork).map((record) => {
-          const columns = materializationWorkColumns(record)
-          return {
-            entityKind: identity.kind,
-            identityKey: identity.key,
-            recordKey: record.recordKey,
-            uniqueKey: workUniquenessKey(record),
-            kind: record.kind,
-            lane: columns.lane,
-            majorOrder: columns.majorOrder,
-            minorOrder: columns.minorOrder,
-            sortOne: columns.sortOne,
-            sortTwo: columns.sortTwo,
-            occupied: record.kind === "cardinality" ? record.occupied : null,
-            record,
-          }
-        })
-      )
-      if (work.length > 0) {
-        try {
-          await sql`
-            WITH staged AS (
-              SELECT value FROM jsonb_array_elements(${jsonParameter(sql, work)}::jsonb)
-            )
-            INSERT INTO ${sql(PG_PLAN_WORK_TABLE)} (
-              work_id, entity_kind, identity_key, record_key, unique_key, kind, lane,
-              major_order, minor_order, sort_one, sort_two, cardinality_occupied, payload
-            )
-            SELECT ${versionId}, value->>'entityKind', value->>'identityKey', value->>'recordKey',
-              value->>'uniqueKey', value->>'kind', value->>'lane',
-              (value->>'majorOrder')::integer, (value->>'minorOrder')::integer,
-              value->>'sortOne', value->>'sortTwo', (value->>'occupied')::boolean,
-              value->'record'
-            FROM staged
-          `
-        } catch (error) {
-          if (isUniqueViolation(error)) throw duplicateMaterializationWork()
-          throw error
-        }
-      }
+      await copyAppliedWork(sql, versionId, identities)
     })
   }
 
@@ -1206,4 +1159,118 @@ function isAppliedWork(record: MaterializationWorkRecord): boolean {
     record.kind !== "object-existence" &&
     record.kind !== "incident-object"
   )
+}
+
+/** The first of `identities` that `stage` could not plan: one not streamed, or already planned. */
+async function firstUnstreamed(
+  sql: SQLClient,
+  versionId: string,
+  identities: readonly { readonly kind: string; readonly key: string; readonly entityKey: string }[]
+): Promise<string | undefined> {
+  const planned = await sql<{ readonly entity_kind: string; readonly identity_key: string }[]>`
+    SELECT entity_kind, identity_key FROM ${sql(IDENTITIES)}
+    WHERE version_id = ${versionId} AND planned_revision IS NOT NULL
+      AND identity_key = ANY(${sql.array(identities.map((identity) => identity.key))}::text[])
+  `
+  const streamed = new Set(planned.map((row) => `${row.entity_kind}:${row.identity_key}`))
+  return identities.find((identity) => !streamed.has(`${identity.kind}:${identity.key}`))?.entityKey
+}
+
+/**
+ * Streams the identities' applied work into the plan with COPY: PostgreSQL parses each payload
+ * once, as the column it lands in, instead of one JSON document that holds every row. A payload
+ * keeps only what the commit reads (a plan's item, an event's draft, a cardinality occupant's ref);
+ * its keys and sort keys are columns.
+ */
+async function copyAppliedWork(
+  sql: SQLClient,
+  versionId: string,
+  identities: readonly {
+    readonly kind: "object" | "link"
+    readonly key: string
+    readonly records: readonly MaterializationWorkRecord[]
+  }[]
+): Promise<void> {
+  const lines: string[] = []
+  for (const identity of identities) {
+    for (const record of identity.records) {
+      if (!isAppliedWork(record)) continue
+      // A plan's record keys are unique by themselves: the work table keys on them alone.
+      if (workUniquenessKey(record) !== record.recordKey) {
+        throw new MaterializationValidationError(
+          `Replacement work '${record.recordKey}' has a different uniqueness key.`
+        )
+      }
+      const columns = materializationWorkColumns(record)
+      lines.push(
+        [
+          versionId,
+          identity.kind,
+          copyText(identity.key),
+          copyText(record.recordKey),
+          record.kind,
+          columns.lane,
+          columns.majorOrder,
+          columns.minorOrder,
+          copyText(columns.sortOne),
+          copyText(columns.sortTwo),
+          record.kind === "cardinality" ? String(record.occupied) : "\\N",
+          copyText(JSON.stringify(appliedPayload(record))),
+        ].join("\t")
+      )
+    }
+  }
+  if (lines.length === 0) return
+  const writable = await sql`
+    COPY ${sql(PG_PLAN_WORK_TABLE)} (
+      work_id, entity_kind, identity_key, record_key, kind, lane, major_order, minor_order,
+      sort_one, sort_two, cardinality_occupied, payload
+    ) FROM STDIN
+  `.writable()
+  try {
+    await pipeline(Readable.from(copyChunks(lines)), writable)
+  } catch (error) {
+    if (isUniqueViolation(error)) throw duplicateMaterializationWork()
+    throw error
+  }
+}
+
+function appliedPayload(record: MaterializationWorkRecord): unknown {
+  switch (record.kind) {
+    case "plan":
+      return { item: record.item }
+    case "event":
+      return { draft: record.draft }
+    case "cardinality":
+      return { ref: record.ref }
+    default:
+      throw new MaterializationValidationError(`'${record.kind}' work is not applied.`)
+  }
+}
+
+/** About a megabyte of COPY rows per write. */
+function* copyChunks(lines: readonly string[]): Generator<string> {
+  let chunk = ""
+  for (const line of lines) {
+    chunk += `${line}\n`
+    if (chunk.length >= 1 << 20) {
+      yield chunk
+      chunk = ""
+    }
+  }
+  if (chunk) yield chunk
+}
+
+const COPY_ESCAPES: Readonly<Record<string, string>> = {
+  "\\": "\\\\",
+  "\t": "\\t",
+  "\n": "\\n",
+  "\r": "\\r",
+}
+
+/** A text field of COPY's text format. */
+function copyText(value: string): string {
+  return /[\\\t\n\r]/.test(value)
+    ? value.replace(/[\\\t\n\r]/g, (char) => COPY_ESCAPES[char]!)
+    : value
 }
