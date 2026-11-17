@@ -202,13 +202,13 @@ test("a streamed plan seeks its staged work by key before its links are planned"
     )
     const publish = await devicePublisher(storage)
 
-    // 600 objects: fewer identities than ANALYZE_ROWS, but four times as many rows of work.
+    // 600 objects: fewer identities than ANALYZE_ROWS, but twice as many rows of work.
     await publish(1, 600)
     // Autovacuum analyzes the plan tables while they hold the first plan.
     await sql`ANALYZE ontology_replacement_plan_identities, ontology_replacement_plan_work`
     await publish(2, 600)
 
-    // The lookups of a link page: the planned existence of each endpoint, by its unique key.
+    // The lookups of a refresh that unplans identities: their work, by identity key.
     const [plan] = await sql<{ readonly version_id: string }[]>`
       SELECT MAX(version_id) AS version_id FROM ontology_replacement_plans
     `
@@ -217,8 +217,9 @@ test("a streamed plan seeks its staged work by key before its links are planned"
     )
     const lookups = sql`
       SELECT (
-        SELECT payload FROM ontology_replacement_plan_work
-        WHERE work_id = ${plan!.version_id} AND unique_key = 'object-existence:' || requested.key
+        SELECT COUNT(*) FROM ontology_replacement_plan_work
+        WHERE work_id = ${plan!.version_id} AND entity_kind = 'object'
+          AND identity_key = requested.key
       )
       FROM unnest(${sql.array(keys)}::text[]) AS requested(key)
     `
