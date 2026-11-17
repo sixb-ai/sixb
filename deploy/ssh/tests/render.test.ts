@@ -535,6 +535,58 @@ describe("a release with storage migrations", () => {
   )
 })
 
+describe("starting the new release", () => {
+  const startBeside = async (running: Record<string, unknown>) => {
+    const server = await standInServer()
+    try {
+      await writeFile(server.layout.manifest, JSON.stringify(running, null, 2))
+
+      const result = await runDeploySteps(server, {
+        before: `RELEASE_PROJECT=${server.root}`,
+        steps: ["Start new release"],
+        after: 'echo "deploy_mode=$deploy_mode" >> "$CALLS"',
+      })
+      const calls = (await readFile(server.calls, "utf8")).trim().split("\n")
+      return { exitCode: result.exitCode, calls }
+    } finally {
+      await server.remove()
+    }
+  }
+
+  // Reproduce: send `stage` whatever the running manifest says; the supervisor from before
+  // blue-green deploys never answers it, and every deploy after the upgrade fails after 90 s.
+  test(
+    "restarts a supervisor from before blue-green deploys cold, once",
+    async () => {
+      const { exitCode, calls } = await startBeside({ version: 1, name: "northline", services: [] })
+
+      expect(exitCode).toBe(0)
+      expect(calls).toContain("systemctl --user restart sixb-northline.service")
+      expect(calls).not.toContain("bun sixb-deploy-ssh stage")
+      expect(calls).toContain("deploy_mode=cold")
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+
+  test(
+    "stages the new release beside one that already runs in a slot",
+    async () => {
+      const { exitCode, calls } = await startBeside({
+        version: 1,
+        name: "northline",
+        slot: "blue",
+        services: [],
+      })
+
+      expect(exitCode).toBe(0)
+      expect(calls).toContain("bun sixb-deploy-ssh stage")
+      expect(calls).not.toContain("systemctl --user restart sixb-northline.service")
+      expect(calls).toContain("deploy_mode=staged")
+    },
+    STEP_RUN_TIMEOUT_MS
+  )
+})
+
 describe("a deploy that fails", () => {
   // Reproduce: write `release.json` at the end of "Activate release" again; a check that fails
   // after the switch then leaves the record on the previous commit while the new one serves.
