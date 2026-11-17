@@ -4,7 +4,10 @@
  * HTTP executor in `@sixb/client` is the remote counterpart.
  */
 
-import type { AuthorizedObjectReader } from "../../execution/authorized-object-reader"
+import {
+  type AuthorizedObjectReader,
+  getQueryDiscovery,
+} from "../../execution/authorized-object-reader"
 import type { OntologyRegistry } from "../../ontology"
 import { ObjectQueryPlanningError } from "../query"
 import { explainObjectQuery } from "../query/explain"
@@ -17,6 +20,7 @@ export function createRuntimeQueryExecutor(params: {
   objectReader: AuthorizedObjectReader
 }): ObjectQueryExecutor {
   const { ontology, objectReader } = params
+  const discovery = getQueryDiscovery(objectReader)
 
   return {
     async list(query: ObjectQuery, options?: { includeTotal?: boolean; signal?: AbortSignal }) {
@@ -56,11 +60,11 @@ export function createRuntimeQueryExecutor(params: {
     },
 
     validate(query: ObjectQuery) {
-      return validateObjectQuery(query, { ontology, normalize: false })
+      return validateObjectQuery(query, { ontology, discovery, normalize: false })
     },
 
     explain(query: ObjectQuery) {
-      return explainObjectQuery(query, { ontology, normalize: false })
+      return explainObjectQuery(query, { ontology, discovery, normalize: false })
     },
   }
 }

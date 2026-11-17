@@ -61,7 +61,8 @@ export function resolveViewCondition(
         input: { kind: "start", objectTypeId, includeSubtypes: true },
         predicate: grant.condition,
       },
-      { ontology },
+      // The author writes the role, so the issue may name every property of the type.
+      { ontology, discovery: ontology },
       unmarkedPropertiesOnly(subject, objectTypeIds, ontology)
     )
 

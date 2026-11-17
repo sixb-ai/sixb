@@ -1627,9 +1627,129 @@ describe("Vercel AI Gateway provider", () => {
       providerId: "vercel-ai-gateway",
       data: {
         item: { type: "web_search_call", id: "search-1", status: "completed" },
+        modelId: "tool-model",
       },
     })
     expect(events.at(-1)).toMatchObject({ type: "finish", finishReason: "tool-calls" })
+  })
+
+  // A thread moved from an OpenAI model to Gemini through the gateway failed every turn with
+  // "Corrupted thought signature". Removal proof: stop passing this.modelId to responsesInput.
+  test("replays reasoning only to the model that produced it", async () => {
+    const bodies: Record<string, unknown>[] = []
+    const provider = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([
+          { type: "response.created", response: { id: "resp", status: "in_progress" } },
+          { type: "response.completed", response: { id: "resp", status: "completed", usage: {} } },
+        ])
+      },
+    })
+    const history = request({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "provider-state",
+              providerId: "vercel-ai-gateway",
+              data: {
+                item: { type: "reasoning", id: "rs-1", encrypted_content: "openai-signed" },
+                modelId: "openai/gpt-6.1-sol",
+              },
+            },
+            { type: "text", text: "Done." },
+          ],
+        },
+      ],
+    })
+
+    await collect((await provider("openai/gpt-6.1-sol").stream(history)).events)
+    await collect((await provider("google/gemini-4-carbon").stream(history)).events)
+
+    expect(bodies[0]?.input).toContainEqual({
+      type: "reasoning",
+      id: "rs-1",
+      encrypted_content: "openai-signed",
+    })
+    expect(bodies[1]?.input).toEqual([
+      { role: "assistant", content: [{ type: "output_text", text: "Done." }] },
+    ])
+  })
+
+  // With fallbacks, another model may answer: its reasoning is its own, under the Gateway model id
+  // `response.created` names. Removal proof: drop replayModelId from the stream options, or read it
+  // again on response.in_progress; Gemini's reasoning, tagged with the GPT model asked for, reaches
+  // the next GPT request.
+  test("tags a fallback's reasoning with the model that answered", async () => {
+    const reasoning = { type: "reasoning", id: "rs-1", encrypted_content: "gemini-signed" }
+    const bodies: Record<string, unknown>[] = []
+    let answered = "google/gemini-4-carbon"
+    const provider = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([
+          { type: "response.created", response: { id: "resp", model: answered } },
+          { type: "response.in_progress", response: { id: "resp" } },
+          { type: "response.output_item.done", output_index: 0, item: reasoning },
+          { type: "response.completed", response: { id: "resp", status: "completed", usage: {} } },
+        ])
+      },
+    })
+    const withFallback = provider("openai/gpt-6.1-sol", {
+      providerOptions: { gateway: { models: ["google/gemini-4-carbon"] } },
+    })
+
+    const events = await collect((await withFallback.stream(request())).events)
+    const state = events.find((event) => event.type === "provider-state")
+    if (state?.type !== "provider-state") throw new Error("Expected the reasoning kept for replay.")
+    expect(state.data).toEqual({ item: reasoning, modelId: "google/gemini-4-carbon" })
+
+    const history = request({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "provider-state", providerId: state.providerId, data: state.data },
+            { type: "text", text: "Done." },
+          ],
+        },
+      ],
+    })
+    answered = "openai/gpt-6.1-sol"
+    await collect((await withFallback.stream(history)).events)
+    await collect((await provider("google/gemini-4-carbon").stream(history)).events)
+
+    const done = { role: "assistant", content: [{ type: "output_text", text: "Done." }] }
+    expect(bodies[1]?.input).toEqual([done])
+    expect(bodies[2]?.input).toEqual([reasoning, done])
+  })
+
+  // Without fallbacks, only the model asked for can answer, whatever name the Gateway gives it.
+  // Removal proof: tag with response.model alone; the model loses its own reasoning.
+  test("tags reasoning with the model asked for when it has no fallbacks", async () => {
+    const provider = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      fetch: async () =>
+        sseResponse([
+          { type: "response.created", response: { id: "resp", model: "openai/gpt-6.1-sol-0901" } },
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: { type: "reasoning", id: "rs-1", encrypted_content: "openai-signed" },
+          },
+          { type: "response.completed", response: { id: "resp", status: "completed", usage: {} } },
+        ]),
+    })
+
+    const events = await collect((await provider("openai/gpt-6.1-sol").stream(request())).events)
+
+    expect(events.find((event) => event.type === "provider-state")).toMatchObject({
+      data: { modelId: "openai/gpt-6.1-sol" },
+    })
   })
 
   test("sanitizes provider HTTP failures and validates convenience defaults", async () => {

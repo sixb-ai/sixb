@@ -1,4 +1,4 @@
-import { getAuthorizedOntologyView } from "../execution/authorized-object-reader"
+import { getAuthorizedOntologyView, getQueryDiscovery } from "../execution/authorized-object-reader"
 import type { AuthorizedOntologyView } from "../objects/authorized-ontology-view"
 import { ObjectQueryPlanningError, ObjectQueryValidationError } from "../objects/query/errors"
 import type { ObjectExpansion } from "../objects/query/ir"
@@ -57,7 +57,10 @@ export function describeArtifactQuery(
   runtime: Pick<SixbRuntimeContext, "ontology" | "objectReader">,
   query: ArtifactQuery
 ): ArtifactQueryShape {
-  const validated = validateObjectQuery(query.query, { ontology: runtime.ontology })
+  const validated = validateObjectQuery(query.query, {
+    ontology: runtime.ontology,
+    discovery: getQueryDiscovery(runtime.objectReader),
+  })
 
   return {
     resultObjectTypeIds: [...validated.result.objectTypeIds],

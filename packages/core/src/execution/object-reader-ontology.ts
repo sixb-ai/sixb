@@ -3,6 +3,7 @@ import {
   type AuthorizedOntologyView,
   createAuthorizedOntologyView,
 } from "../objects/authorized-ontology-view"
+import type { ObjectQueryDiscovery } from "../objects/query/validate"
 import type { OntologyRegistry } from "../ontology"
 import { assertObjectReadOutputWithinLimit } from "../storage"
 import type { ObjectReaderSecurity } from "./object-reader-security"
@@ -10,11 +11,16 @@ import type { ObjectReaderSecurity } from "./object-reader-security"
 /** The ontology a reader resolves against, and the part of it its authority may describe. */
 export class ObjectReaderOntology {
   readonly registry: OntologyRegistry
+  /** The view as query validation reads it, building the view only when an issue reads it. */
+  readonly discovery: ObjectQueryDiscovery
   readonly #security: ObjectReaderSecurity
   #view?: AuthorizedOntologyView
 
   constructor(registry: OntologyRegistry, security: ObjectReaderSecurity) {
     this.registry = registry
+    this.discovery = {
+      getObjectTypeById: (objectTypeId) => this.view().getObjectTypeById(objectTypeId),
+    }
     this.#security = security
     Object.freeze(this)
   }

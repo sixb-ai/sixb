@@ -78,6 +78,7 @@ export type {
 export { planObjectQuery } from "./planner"
 export { sortTieDirection } from "./sort-ties"
 export type {
+  ObjectQueryDiscovery,
   ObjectQueryValidationIssue,
   ObjectQueryValidationOptions,
   ValidatedObjectQuery,

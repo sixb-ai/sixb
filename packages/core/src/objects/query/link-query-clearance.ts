@@ -2,6 +2,7 @@ import type { OntologyRegistry } from "../../ontology"
 import { type PropertyClearance, unreadableError } from "../property-clearance"
 import type { ObjectQuery } from "./ir"
 import { type ExecuteObjectQueryLinksInput, preflightObjectQueryLinks } from "./links"
+import type { ObjectQueryDiscovery } from "./validate"
 
 /**
  * Refuse a link query that could return a link, or an endpoint, the reader cannot read.
@@ -13,6 +14,8 @@ import { type ExecuteObjectQueryLinksInput, preflightObjectQueryLinks } from "./
  */
 export function assertLinkQueryReadable(input: {
   readonly ontology: OntologyRegistry
+  /** What the reader discovers, which an unknown-property issue lists from. */
+  readonly discovery?: ObjectQueryDiscovery
   readonly clearance: PropertyClearance
   readonly query: ObjectQuery
   readonly request: Omit<ExecuteObjectQueryLinksInput, "query">
@@ -25,7 +28,7 @@ export function assertLinkQueryReadable(input: {
 
   const preflight = preflightObjectQueryLinks(
     { ...input.request, query: input.query },
-    { ontology }
+    { ontology, discovery: input.discovery }
   )
 
   const selected = preflight.validated.result.objectTypeIds

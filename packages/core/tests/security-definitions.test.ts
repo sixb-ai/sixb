@@ -974,7 +974,7 @@ describe("view grant conditions", () => {
     [
       "a condition reading an unknown property",
       conditionOn("note", { propertyId: "missing", op: "eq", value: "x" }),
-      "[Sixb] Role 'staff': can.view(note).where(...): Property 'missing' does not exist on object type 'note'",
+      "[Sixb] Role 'staff': can.view(note).where(...): Property 'missing' does not exist on object type 'note'; its properties are id, owner, topic, body",
     ],
     [
       "a condition reading a property without query metadata",

@@ -303,7 +303,8 @@ describe("requestAction", () => {
     {
       name: "an object action without an object subject",
       request: { actionId: "setTemperature", params: { target: 72 } },
-      message: "Action 'setTemperature' requires an object subject.",
+      message:
+        "Action 'setTemperature' requires an object subject: name the Room it acts on, by its object type and primary id.",
     },
     {
       name: "a global action with an object subject",

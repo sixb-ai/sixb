@@ -298,3 +298,78 @@ test("names a failed response about the context window as one", async () => {
     reason: "context-window-exceeded",
   })
 })
+
+// One provider, such as AI Gateway, fronts several models, and a model rejects another's encrypted
+// reasoning: a thread that moved from an OpenAI model to Gemini failed every turn with "Corrupted
+// thought signature". Removal proof: drop the fromModel check in responsesInput; the OpenAI
+// reasoning and function_call items reach the Gemini request.
+test("replays a native item only to the model that produced it", async () => {
+  const reasoning = { type: "reasoning", id: "rs-1", encrypted_content: "openai-signed" }
+  const call = {
+    type: "function_call",
+    id: "fc-item",
+    call_id: "call-1",
+    name: "echo",
+    arguments: '{"value":"x"}',
+  }
+  const events = []
+  for await (const event of responsesEvents(
+    stream([
+      { type: "response.created", response: { id: "resp", model: "openai/gpt" } },
+      { type: "response.output_item.done", item: reasoning },
+      { type: "response.output_item.done", item: call },
+      {
+        type: "response.completed",
+        response: { id: "resp", status: "completed", output: [reasoning, call] },
+      },
+    ]),
+    new AbortController().signal,
+    { providerId: "gateway", modelId: "openai/gpt", errorPrefix: "[TestProvider]" }
+  )) {
+    events.push(event)
+  }
+  const state = events.find((event) => event.type === "provider-state")
+  const ended = events.find((event) => event.type === "tool-input-end")
+  if (state?.type !== "provider-state" || ended?.type !== "tool-input-end") {
+    throw new Error("Expected the reasoning and the call to be kept for replay.")
+  }
+  const history: ModelMessage[] = JSON.parse(
+    JSON.stringify([
+      {
+        role: "assistant",
+        content: [
+          state,
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "echo",
+            input: { value: "x" },
+            providerData: ended.providerData,
+          },
+        ],
+      },
+    ])
+  )
+
+  // The same model gets its own reasoning and native call back.
+  expect(responsesInput(history, "gateway", "openai/gpt")).toEqual([reasoning, call])
+  // Another model behind the same provider gets the call, portably, and no reasoning.
+  expect(responsesInput(history, "gateway", "google/gemini")).toEqual([
+    { type: "function_call", call_id: "call-1", name: "echo", arguments: '{"value":"x"}' },
+  ])
+  // Items recorded before their model was, and callers that name none, replay as before.
+  const untagged: ModelMessage[] = [
+    {
+      role: "assistant",
+      content: [
+        { type: "provider-state", providerId: "gateway", data: { item: reasoning } },
+        { type: "text", text: "Done" },
+      ],
+    },
+  ]
+  expect(responsesInput(untagged, "gateway", "google/gemini")).toEqual([
+    reasoning,
+    { role: "assistant", content: [{ type: "output_text", text: "Done" }] },
+  ])
+  expect(responsesInput(history, "gateway")).toEqual([reasoning, call])
+})

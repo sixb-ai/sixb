@@ -9,6 +9,7 @@ import type {
 import { normalizeObjectQuery } from "./normalize"
 import {
   collectObjectQueryValidationIssues,
+  type ObjectQueryDiscovery,
   type ObjectQueryValidationIssue,
   validateObjectQuery,
 } from "./validate"
@@ -19,6 +20,8 @@ export interface ObjectQueryExplainOptions {
   maxLimit?: number
   maxPageSize?: number
   maxRefs?: number
+  /** What the caller discovers of the ontology. See `ObjectQueryValidationOptions.discovery`. */
+  discovery?: ObjectQueryDiscovery
 }
 
 export interface ObjectQueryExplanation {
@@ -50,6 +53,7 @@ export function explainObjectQuery(
         maxPageSize: options.maxPageSize,
         maxRefs: options.maxRefs,
         normalize: false,
+        discovery: options.discovery,
       })
     : []
 
@@ -61,6 +65,7 @@ export function explainObjectQuery(
           maxPageSize: options.maxPageSize,
           maxRefs: options.maxRefs,
           normalize: false,
+          discovery: options.discovery,
         }).result
       : undefined
 

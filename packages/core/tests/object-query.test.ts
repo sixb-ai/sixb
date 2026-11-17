@@ -848,6 +848,38 @@ describe("object query explain", () => {
     expect(formatted).toContain('text "acme"')
   })
 
+  // An agent guessed property names (contractNumber, updatedAt) and failed one query in six.
+  // Removal proof: drop knownProperties from the unknown_property issue; the names go missing.
+  test("names what the caller discovers of a type when a query reads a property it lacks", () => {
+    const Ledger = defineObjectType({
+      id: "Ledger",
+      name: "Ledger",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("title", "string"),
+        ...Array.from({ length: 30 }, (_, index) => prop(`field${index}`, "string")),
+      ],
+    })
+    const ontology = new OntologyRegistry({ sources: [Ledger] })
+    const issue = (discovery?: OntologyRegistry) =>
+      explainObjectQuery(
+        {
+          kind: "project",
+          properties: ["updatedAt"],
+          input: { kind: "start", objectTypeId: "Ledger" },
+        },
+        { ontology, ...(discovery === undefined ? {} : { discovery }) }
+      ).issues.find((found) => found.code === "unknown_property")?.message
+
+    expect(issue(ontology)).toStartWith(
+      "Property 'updatedAt' does not exist on object type 'Ledger'; its properties are id, title, field0,"
+    )
+    expect(issue(ontology)).toEndWith("field22, and 7 more")
+
+    // The registry holds types a caller may not view: without its discovery, nothing is named.
+    expect(issue()).toBe("Property 'updatedAt' does not exist on object type 'Ledger'")
+  })
+
   test("formats validation issues, honoring the configured refs bound", () => {
     const explanation = explainObjectQuery(
       {

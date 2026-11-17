@@ -8,8 +8,17 @@ import {
 } from "@sixb/core/models"
 import { canonicalJsonStringify, object, string } from "../json"
 
-/** Serialize portable content and only the calling provider's ordered replay state. */
-export function responsesInput(messages: readonly ModelMessage[], providerId: string): JsonValue[] {
+/**
+ * Serialize portable content and only the calling provider's ordered replay state. With `modelId`,
+ * a native item another model produced, such as its encrypted reasoning, is left out: one provider
+ * may front several models, and a model rejects another's reasoning. Its visible text and tool
+ * calls still replay, portably. Items recorded without their model replay as before.
+ */
+export function responsesInput(
+  messages: readonly ModelMessage[],
+  providerId: string,
+  modelId?: string
+): JsonValue[] {
   const input: JsonValue[] = []
   for (const message of messages) {
     if (message.role === "system") {
@@ -55,14 +64,14 @@ export function responsesInput(messages: readonly ModelMessage[], providerId: st
         if (part.providerId === providerId) {
           const data = object(part.data)
           const item = data?.item
-          if (isJsonObject(item)) {
+          if (isJsonObject(item) && fromModel(data, modelId)) {
             flushAssistantText()
             input.push(item)
           }
         }
         continue
       }
-      const raw = providerItem(part.providerData, providerId)
+      const raw = providerItem(part.providerData, providerId, modelId)
       if (raw) {
         flushAssistantText()
         input.push(raw)
@@ -114,10 +123,20 @@ function userPartToInput(
   }
 }
 
-function providerItem(data: ProviderData | undefined, providerId: string): JsonObject | undefined {
+function providerItem(
+  data: ProviderData | undefined,
+  providerId: string,
+  modelId: string | undefined
+): JsonObject | undefined {
   const provider = data?.[providerId]
   const wrapped = object(provider)
-  return object(wrapped?.item)
+  return fromModel(wrapped, modelId) ? object(wrapped?.item) : undefined
+}
+
+/** Whether a replay item may go to `modelId`: one recorded without its model always may. */
+function fromModel(data: JsonObject | undefined, modelId: string | undefined): boolean {
+  const recorded = string(data?.modelId)
+  return modelId === undefined || recorded === "" || recorded === modelId
 }
 
 function toolOutputText(output: ModelToolOutput): string {
