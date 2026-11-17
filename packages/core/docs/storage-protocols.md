@@ -64,6 +64,13 @@ rewrites its row whole, at start, as each pass ends and every 30 seconds, so a p
 runs leaves it. Nothing purges a row: a project that stops using an orchestrator deletes its row, or
 `/api/status` keeps reading it as stale.
 
+## Branches
+
+`branches` holds one row per git branch of the project that has a runtime of its own. Identity and
+the revision are columns; the rest is one JSON record, read and written whole. Every write names
+the revision it read and fails when the row moved on, so the worker holding a branch's sandbox never
+writes over a stop, a push or another worker's lease. A row stays until its branch is removed.
+
 ## Lake retention runs
 
 `lake_retention_runs` holds one row per project: when the last automatic run started and ended, and

@@ -31,6 +31,7 @@ export type GrantKind =
   | "manage:connector"
   | "manage:aiUsage"
   | "manage:agentMemory"
+  | "manage:source"
 
 /** Capabilities over one project-wide surface: held or not, with no ids to select. */
 export type SingletonGrantKind =
@@ -44,6 +45,7 @@ export type SingletonGrantKind =
   | "observe:console"
   | "manage:aiUsage"
   | "manage:agentMemory"
+  | "manage:source"
 export type TargetedGrantKind = Exclude<GrantKind, SingletonGrantKind>
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
@@ -193,6 +195,11 @@ export const GRANT_KINDS: {
     subject: "Agent memory",
     fix: "Use can.manage(agent.memory).",
   },
+  "manage:source": {
+    singleton: true,
+    subject: "the project's source",
+    fix: "Use can.manage(project.source).",
+  },
 }
 
 export const GRANT_KIND_KEYS = Object.keys(GRANT_KINDS) as readonly GrantKind[]
@@ -256,5 +263,6 @@ export function emptyGrantSets(): MutableGrantIndex {
     "manage:connector": new Set(),
     "manage:aiUsage": false,
     "manage:agentMemory": false,
+    "manage:source": false,
   }
 }

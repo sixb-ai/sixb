@@ -39,6 +39,7 @@ import { SqliteAiLimitStorage } from "./ai-limit-storage"
 import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteArtifactStorage } from "./artifact-storage"
 import { SqliteAuthStorage } from "./auth-storage"
+import { SqliteBranchStorage } from "./branch-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
 import { SqliteDatasetIngestStorage } from "./dataset-ingest-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
@@ -116,6 +117,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: SqliteLakeRetentionRunStorage
   readonly activity: SqliteActivityStorage
+  readonly branches: SqliteBranchStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -191,6 +193,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.lakeRetentionRuns = createOperationScopedFacade(stores.lakeRetentionRuns, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
+    this.branches = createOperationScopedFacade(stores.branches, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, {
       advanceConnectorConnectionTime: (durationMs) =>
@@ -360,6 +363,7 @@ function createSqliteStores(
     maintenanceHeartbeats: new SqliteMaintenanceHeartbeatStorage(connection),
     lakeRetentionRuns: new SqliteLakeRetentionRunStorage(connection),
     activity: new SqliteActivityStorage(connection),
+    branches: new SqliteBranchStorage(connection),
   }
 }
 
@@ -391,6 +395,7 @@ interface SqliteStoreSet {
   readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: SqliteLakeRetentionRunStorage
   readonly activity: SqliteActivityStorage
+  readonly branches: SqliteBranchStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"

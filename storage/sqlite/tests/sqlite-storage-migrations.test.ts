@@ -223,6 +223,7 @@ const shippedMigrationIds = [
   "101-artifact-pdfs",
   "102-guest-comment-links",
   "103-agent-thread-inbox",
+  "104-branches",
 ]
 
 afterEach(async () => {

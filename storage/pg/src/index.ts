@@ -54,6 +54,7 @@ import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { PgArtifactStorage } from "./pg-artifact-storage"
+import { PgBranchStorage } from "./pg-branch-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgDatasetIngestStorage } from "./pg-dataset-ingest-storage"
 import { PgExecutionStorage } from "./pg-execution-storage"
@@ -191,6 +192,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly activity: PgActivityStorage
+  readonly branches: PgBranchStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage
   readonly migrators: readonly StorageMigrator[]
@@ -284,6 +286,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     this.datasetIngest = createOperationScopedFacade(stores.datasetIngest, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
+    this.branches = createOperationScopedFacade(stores.branches, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.lakeRetentionRuns = createOperationScopedFacade(stores.lakeRetentionRuns, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
@@ -462,6 +465,7 @@ function createPostgresStores(
     datasetIngest: new PgDatasetIngestStorage(sql),
     fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
     activity: new PgActivityStorage(sql),
+    branches: new PgBranchStorage(sql),
     maintenanceHeartbeats: new PgMaintenanceHeartbeatStorage(sql),
     lakeRetentionRuns: new PgLakeRetentionRunStorage(sql),
   }
@@ -493,6 +497,7 @@ interface PostgresStoreSet {
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly activity: PgActivityStorage
+  readonly branches: PgBranchStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage
 }

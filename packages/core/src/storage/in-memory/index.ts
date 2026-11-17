@@ -8,6 +8,7 @@ import { type AiLimitStorage, InMemoryAiLimitStorage } from "../ai-limits"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type ArtifactStorage, InMemoryArtifactStorage } from "../artifacts"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
+import { type BranchStorage, InMemoryBranchStorage } from "../branches"
 import {
   type ConnectorConnectionStorage,
   InMemoryConnectorConnectionStorage,
@@ -148,6 +149,7 @@ export class InMemoryStorage implements Storage {
   private readonly lakeRetentionRunStorage = new InMemoryLakeRetentionRunStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   private readonly activityStorage = new InMemoryActivityStorage()
+  private readonly branchStorage = new InMemoryBranchStorage()
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
@@ -172,6 +174,7 @@ export class InMemoryStorage implements Storage {
   readonly lakeRetentionRuns: LakeRetentionRunStorage
   readonly connectorConnections: ConnectorConnectionStorage
   readonly activity: ActivityStorage
+  readonly branches: BranchStorage
 
   constructor(options: InMemoryStorageOptions = {}) {
     this.connectorConnectionStorage = new InMemoryConnectorConnectionStorage(
@@ -213,6 +216,7 @@ export class InMemoryStorage implements Storage {
     this.lakeRetentionRuns = createOperationScopedFacade(this.lakeRetentionRunStorage, scope)
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.activity = createOperationScopedFacade(this.activityStorage, scope)
+    this.branches = createOperationScopedFacade(this.branchStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
       getTransactionToken: () => this.getActiveTransactionToken(),
@@ -428,6 +432,7 @@ export class InMemoryStorage implements Storage {
       lakeRetentionRuns: this.lakeRetentionRunStorage,
       connectorConnections: this.connectorConnectionStorage,
       activity: this.activityStorage,
+      branches: this.branchStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
@@ -464,6 +469,7 @@ export class InMemoryStorage implements Storage {
       lakeRetentionRuns: this.lakeRetentionRunStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
       activity: this.activityStorage.snapshot(),
+      branches: this.branchStorage.snapshot(),
     }
   }
 
@@ -495,6 +501,7 @@ export class InMemoryStorage implements Storage {
     this.lakeRetentionRunStorage.restore(snapshot.lakeRetentionRuns)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
     this.activityStorage.restore(snapshot.activity)
+    this.branchStorage.restore(snapshot.branches)
   }
 }
 
@@ -526,4 +533,5 @@ export interface InMemoryStorageSnapshot {
   readonly lakeRetentionRuns: ReturnType<InMemoryLakeRetentionRunStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
   readonly activity: ReturnType<InMemoryActivityStorage["snapshot"]>
+  readonly branches: ReturnType<InMemoryBranchStorage["snapshot"]>
 }

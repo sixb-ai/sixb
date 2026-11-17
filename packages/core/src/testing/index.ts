@@ -76,6 +76,10 @@ export {
   runBlobStorageContractSuite,
 } from "./blob-storage-contract"
 export {
+  type BranchStorageContractSuiteOptions,
+  runBranchStorageContractSuite,
+} from "./branch-storage-contract"
+export {
   type BrokerContractSuiteOptions,
   runBrokerContractSuite,
 } from "./broker-contract"

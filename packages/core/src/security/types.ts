@@ -179,6 +179,11 @@ export interface ProjectReference {
   readonly users: { readonly kind: "users" }
   /** Every model in the project's catalog, for `can.run(project.models)`. */
   readonly models: { readonly kind: "models" }
+  /**
+   * The project's own code, for `can.manage(project.source)`: start and run its branches, and
+   * see what they change.
+   */
+  readonly source: { readonly kind: "source" }
 }
 
 /**
@@ -191,7 +196,7 @@ export interface ObserveGrant {
   readonly target: ObserveGrantTarget
 }
 
-export type ManageGrantTarget = "connector" | "aiUsage" | "agentMemory"
+export type ManageGrantTarget = "connector" | "aiUsage" | "agentMemory" | "source"
 
 /**
  * Manage the selected connectors, the project's AI usage-limit policies, or the project's shared

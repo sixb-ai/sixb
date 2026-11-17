@@ -535,6 +535,11 @@ describe("role definitions", () => {
       { capability: "manage", target: "agentMemory" },
     ],
     [
+      "can.manage takes the project's source",
+      can.manage(project.source),
+      { capability: "manage", target: "source" },
+    ],
+    [
       "can.edit takes an object type",
       can.edit(Account),
       { capability: "edit", selection: { all: false, ids: ["account"] } },
