@@ -164,7 +164,7 @@ describe("branch runtimes on the local provider", () => {
     // The runtime answers only the project, which holds its key.
     expect((await fetch(`${url}/__sixb/branch`)).status).toBe(401)
 
-    // Drop the `pushedAt` check in HeldBranch.tick and the runtime keeps serving "one".
+    // A push the webhook reported is taken at the owner's next look.
     await run(origin, "git", "checkout", "-q", "vendor-invoices")
     await writeFile(join(origin, "version.txt"), "two\n")
     await commit("second")
@@ -176,6 +176,16 @@ describe("branch runtimes on the local provider", () => {
     const pulled = await waitFor(read, (branch) => branch.manifest === "two")
     expect(pulled).toMatchObject({ state: "ready", generation: 2 })
     expect(pulled.pulledAt?.getTime()).toBe(pulled.pushedAt?.getTime())
+
+    // No webhook told it this time: the runtime fetches its remote on its own.
+    await run(origin, "git", "checkout", "-q", "vendor-invoices")
+    await writeFile(join(origin, "version.txt"), "three\n")
+    await commit("third")
+    await run(origin, "git", "checkout", "-q", "main")
+    expect(await waitFor(read, (branch) => branch.manifest === "three")).toMatchObject({
+      state: "ready",
+      generation: 3,
+    })
 
     await branches.update(
       { projectId: PROJECT, name: "vendor-invoices", at: new Date() },

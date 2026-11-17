@@ -9,6 +9,11 @@ export interface ProjectSource {
   readonly repository: string
   /** The project's folder inside the repository. Defaults to its root, `.`. */
   readonly path?: string
+  /**
+   * The secret of the repository's push webhook, pointed at `/api/source/github`: a branch's
+   * runtime then pulls as soon as it's pushed to, rather than at its next look.
+   */
+  readonly webhookSecret?: string
 }
 
 /** What a thread on a branch of the project names, and all it names. */
@@ -26,11 +31,13 @@ const PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 export function captureProjectSource(source: unknown): ProjectSource {
   if (
     !isPlainRecord(source) ||
-    Object.keys(source).some((key) => !["repository", "path"].includes(key))
+    Object.keys(source).some((key) => !["repository", "path", "webhookSecret"].includes(key))
   ) {
-    throw new SandboxError("[Sixb] source takes a repository, `owner/name`, and an optional path.")
+    throw new SandboxError(
+      "[Sixb] source takes a repository, `owner/name`, an optional path and an optional webhookSecret."
+    )
   }
-  const { repository, path } = source
+  const { repository, path, webhookSecret } = source
   if (typeof repository !== "string" || !REPOSITORY.test(repository)) {
     throw new SandboxError(
       "[Sixb] source.repository must be a GitHub repository written `owner/name`, such as `acme/operations`."
@@ -41,9 +48,13 @@ export function captureProjectSource(source: unknown): ProjectSource {
       "[Sixb] source.path must be the project's folder relative to the repository root, such as `apps/operations`."
     )
   }
+  if (webhookSecret !== undefined && (typeof webhookSecret !== "string" || webhookSecret === "")) {
+    throw new SandboxError("[Sixb] source.webhookSecret must be the push webhook's secret.")
+  }
   return Object.freeze({
     repository,
     ...(path === undefined || path === "." ? {} : { path: path.replace(/\/+$/, "") }),
+    ...(webhookSecret === undefined ? {} : { webhookSecret }),
   })
 }
 

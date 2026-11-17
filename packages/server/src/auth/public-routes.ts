@@ -83,6 +83,11 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // The same for the repository's push webhook: GitHub signs each delivery with its secret.
+  if (pathname === "/api/source/github" && normalizedMethod === "POST") {
+    return true
+  }
+
   if (pathname === "/api/auth/session" && normalizedMethod === "GET") {
     return true
   }

@@ -27,6 +27,8 @@ const LEASE_MS = 60_000
 export const BRANCH_IDLE_MS = 20 * 60_000
 /** How far each push of the provider's deadline reaches, and so how often it is pushed. */
 const KEEP_ALIVE_MS = 10 * 60_000
+/** How often a running branch fetches its remote, push webhook or not. */
+const FETCH_EVERY_MS = 10_000
 /** How long a started runtime may take to answer before the branch counts as failed. */
 const ANSWER_DEADLINE_MS = 3 * 60_000
 
@@ -114,6 +116,7 @@ class HeldBranch {
   private url: string | undefined
   private startedAt = 0
   private keptAliveAt = 0
+  private fetchedAt = 0
   private readonly abort = new AbortController()
 
   constructor(
@@ -170,9 +173,9 @@ class HeldBranch {
         console.error(`[SixbAgentWorker] Could not keep branch '${branch.name}' alive.`, error)
       })
     }
-    if (branch.pushedAt && branch.pushedAt.getTime() > (branch.pulledAt?.getTime() ?? 0)) {
-      await this.pull(branch.pushedAt)
-    }
+    const pushed =
+      branch.pushedAt !== null && branch.pushedAt.getTime() > (branch.pulledAt?.getTime() ?? 0)
+    if (pushed || now - this.fetchedAt > FETCH_EVERY_MS) await this.pull(branch.pushedAt)
     if (this.runtime?.exited) await this.startRuntime()
     await this.report(now)
     return false
@@ -243,6 +246,7 @@ class HeldBranch {
       })
     }
     this.sandbox = sandbox
+    this.fetchedAt = Date.now()
     access.attach(sandbox)
 
     if (!sandbox.start || !sandbox.url) {
@@ -288,15 +292,21 @@ class HeldBranch {
     }
   }
 
-  private async pull(pushedAt: Date): Promise<void> {
+  /**
+   * Takes what was pushed. A checkout already at the remote's commit rewrites nothing, so its
+   * runtime's watcher restarts only on a change: its status then reports the new generation.
+   */
+  private async pull(pushedAt: Date | null): Promise<void> {
     if (!this.sandbox) return
+    this.fetchedAt = Date.now()
     try {
       await this.sync(this.sandbox)
     } catch (error) {
       console.error(errorMessage(error))
     }
-    // The runtime's watcher restarts it on what changed: its status reports the new generation.
-    await this.write({ pulledAt: pushedAt })
+    if (pushedAt && pushedAt.getTime() !== this.branch.pulledAt?.getTime()) {
+      await this.write({ pulledAt: pushedAt })
+    }
   }
 
   /** Writes what the runtime's front reports. */

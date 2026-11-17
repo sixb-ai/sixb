@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createHmac } from "node:crypto"
 import {
   type AuthorizationContext,
   InMemoryBlobStorage,
@@ -10,9 +11,13 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
+import { getProjectBranches } from "@sixb/core/internal/branches"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { createTestSixb } from "@sixb/core/testing"
 import { Elysia } from "elysia"
+import { isPublicRoute } from "../src/auth/public-routes"
 import { registerBranchRoutes } from "../src/routes/branches"
+import { registerSourceWebhookRoutes } from "../src/routes/source-webhook"
 
 const forbidden = async (): Promise<never> => {
   throw new Error("Must not create a sandbox")
@@ -182,5 +187,71 @@ describe("a project's branches over HTTP", () => {
     })
     socket.close()
     expect(reply).toBe(`echo:hello:${branch?.key}`)
+  })
+})
+
+describe("the repository's push webhook", () => {
+  const secret = "webhook-secret"
+  const sign = (body: string, key = secret) =>
+    `sha256=${createHmac("sha256", key).update(body).digest("hex")}`
+
+  async function setup() {
+    const storage = new InMemoryStorage()
+    const sixb = new SixbHost({
+      id: "source-webhook-test",
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage,
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes,
+      source: { repository: "acme/operations", webhookSecret: secret },
+    })
+    const app = registerSourceWebhookRoutes(new Elysia(), sixb)
+    const deliver = (payload: unknown, options: { key?: string; event?: string } = {}) => {
+      const body = JSON.stringify(payload)
+      return app.handle(
+        new Request("http://localhost/api/source/github", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-github-event": options.event ?? "push",
+            "x-hub-signature-256": sign(body, options.key),
+          },
+          body,
+        })
+      )
+    }
+    const pushedAt = async () =>
+      (await storage.branches.get({ projectId: sixb.id, name: "fix" }))?.pushedAt ?? null
+    return { storage, sixb, deliver, pushedAt }
+  }
+
+  test("a signed push to a branch with a runtime tells it to pull", async () => {
+    expect(isPublicRoute("/api/source/github", "POST")).toBe(true)
+    const { sixb, deliver, pushedAt } = await setup()
+    await getProjectBranches(
+      createTestSixb(sixb, {
+        authorization: {
+          principal: { type: "user", id: "u1" },
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "manage:source": true },
+        },
+      })
+    ).open("fix")
+    const push = { ref: "refs/heads/fix", repository: { full_name: "Acme/Operations" } }
+
+    expect((await deliver(push, { key: "wrong" })).status).toBe(401)
+    expect(await pushedAt()).toBeNull()
+
+    expect((await deliver({ ...push, repository: { full_name: "acme/other" } })).status).toBe(200)
+    expect((await deliver({ ...push, ref: "refs/tags/v1" })).status).toBe(200)
+    expect((await deliver(push, { event: "ping" })).status).toBe(200)
+    expect(await pushedAt()).toBeNull()
+
+    expect((await deliver(push)).status).toBe(200)
+    expect(await pushedAt()).toBeInstanceOf(Date)
   })
 })
