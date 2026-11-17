@@ -78,14 +78,15 @@ export function createAppInstallationTokenSource(
   let nextRevision = 0
   let rejectedRevision = -1
 
-  const fetchFresh = async (signal?: AbortSignal): Promise<CachedInstallationToken> => {
-    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  // Every caller waiting for a token shares this request, so only its own timeout bounds it: one
+  // caller's abort must not fail the others.
+  const fetchFresh = async (): Promise<CachedInstallationToken> => {
     const response = await fetch(
       new URL(`app/installations/${installationId}/access_tokens`, apiBaseUrl),
       {
         method: "POST",
         redirect: "error",
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: {
           Authorization: `Bearer ${signer.signJwt()}`,
           Accept: "application/vnd.github+json",
@@ -136,10 +137,10 @@ export function createAppInstallationTokenSource(
       if (reusable && current) {
         resolved = current
       } else {
-        inflight ??= fetchFresh(signal).finally(() => {
+        inflight ??= fetchFresh().finally(() => {
           inflight = undefined
         })
-        resolved = await inflight
+        resolved = await waitUnlessAborted(inflight, signal)
       }
       return {
         accessToken: resolved.accessToken,
@@ -164,6 +165,19 @@ export function createAppInstallationTokenSource(
       }).catch(() => undefined)
     },
   }
+}
+
+/** Waits for a shared request, but stops waiting when this caller's signal aborts. */
+function waitUnlessAborted<T>(shared: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return shared
+  if (signal.aborted) return Promise.reject(signal.reason)
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener("abort", abort, { once: true })
+
+    shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
+  })
 }
 
 function parseInstallationId(value: string | number): string {

@@ -17,6 +17,7 @@ import {
   requireConnectionProcess,
   seedConnectorActors,
 } from "../../../packages/core/tests/connector-connections.fixture"
+import { createAppInstallationTokenSource } from "../src/app-auth"
 import { type GitHubConnector, type GitHubOAuthConnector, github } from "../src/github"
 import { githubOAuth } from "../src/sandbox"
 import type { GitHubOAuthOptions } from "../src/types/options"
@@ -154,6 +155,44 @@ describe("github connector auth modes", () => {
     await adapter.disconnect?.(client)
     expect(calls.at(-1)?.url).toBe("https://api.github.com/installation/token")
     expect(calls.at(-1)?.init?.method).toBe("DELETE")
+  })
+
+  test("one caller's abort does not fail the others waiting for the same installation token", async () => {
+    // Regression proof: pass the first caller's signal to the shared token request in app-auth.ts;
+    // aborting that caller aborts the request and the second caller rejects too.
+    let requests = 0
+    let release!: () => void
+    const released = new Promise<void>((resolve) => (release = resolve))
+
+    globalThis.fetch = Object.assign(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requests += 1
+        const aborted = new Promise<never>((_, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))
+        )
+        await Promise.race([released, aborted])
+        return Response.json({
+          token: "ghs_shared",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+        })
+      },
+      { preconnect() {} }
+    ) as typeof fetch
+
+    const source = createAppInstallationTokenSource(
+      { appId: "123", privateKey: pem, installationId: 42 },
+      new URL("https://api.github.com/")
+    )
+    const cancelled = new AbortController()
+    const first = source.get(cancelled.signal).catch((error: unknown) => error)
+    const second = source.get(new AbortController().signal)
+
+    cancelled.abort(new Error("run cancelled"))
+    release()
+
+    expect(await first).toEqual(new Error("run cancelled"))
+    expect((await second).accessToken).toBe("ghs_shared")
+    expect(requests).toBe(1)
   })
 })
 
