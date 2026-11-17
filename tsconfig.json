@@ -6,6 +6,7 @@
       "@sixb/agent": ["./packages/agent/src/index.ts"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/anthropic": ["./models/anthropic/src/index.ts"],
+      "@sixb/claude-code": ["./models/claude-code/src/index.ts"],
       "@sixb/typesafe": ["./models/typesafe/src/index.ts"],
       "@sixb/azure-ai-foundry": ["./models/azure-ai-foundry/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],

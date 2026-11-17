@@ -10,6 +10,11 @@ Sixb packages are versioned independently. Each release entry names the packages
   last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
   link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
   series on the `timeZone` its query names, UTC when it names none.
+- Use Claude through the Claude Code signed in on your computer with `@sixb/claude-code`:
+  `claudeCode("opus")` is a language model like any other, billed to your Claude plan rather than
+  an API key. Sixb keeps running the Agent's prompt, tools and loop; each answer resumes the Claude
+  Code session the last one came from, and a conversation it cannot resume starts a new session
+  from a transcript.
 
 ### Upgrade notes
 

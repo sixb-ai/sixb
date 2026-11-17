@@ -1,0 +1,524 @@
+import { mkdir } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  type ModelInfo,
+  type Options,
+  query,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk"
+import {
+  defineLanguageModel,
+  defineLanguageModelLabel,
+  isJsonObject,
+  type JsonObject,
+  type LanguageModel,
+  type LanguageModelDefinition,
+  type LanguageModelDefinitionCatalog,
+  type LanguageModelLabel,
+  type LanguageModelProvider,
+  type LanguageModelRequest,
+  type LanguageModelStream,
+  type LanguageModelStreamEvent,
+  MODEL_REASONING_EFFORTS,
+  MODEL_REASONING_LEVELS,
+  type ModelCapabilities,
+  ModelCatalogUnavailableError,
+  ModelProviderError,
+  type ModelReasoning,
+  type ModelReasoningCapabilities,
+  type ModelReasoningEffort,
+  type ModelReasoningLevel,
+  modelReasoningSupportIssue,
+  UnsupportedModelFeatureError,
+} from "@sixb/core/models"
+import { ClaudeCodeStream } from "./stream"
+import { sixbToolServer, TOOL_PREFIX } from "./tools"
+import { type ClaudeCodeSessionState, ERROR_PREFIX, PROVIDER_ID, planTurn } from "./turn"
+
+type ValueSource<T> = T | (() => T)
+
+const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
+const CATALOG_TIMEOUT_MS = 30_000
+const ANTHROPIC = { id: "anthropic", name: "Anthropic" } as const
+
+/** What every model reached through Claude Code takes, whatever its catalog entry says. */
+const CAPABILITIES: ModelCapabilities = {
+  inputMediaTypes: ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"],
+  localTools: true,
+  parallelToolCalls: true,
+  nativeStructuredOutput: true,
+  providerExecutedTools: false,
+}
+
+export interface ClaudeCodeOptions {
+  /**
+   * A key Claude Code bills to instead of its own sign-in. Absent, `ANTHROPIC_API_KEY` is kept from
+   * Claude Code, so a Claude subscription it is signed in with pays for the calls.
+   */
+  readonly apiKey?: ValueSource<string | undefined>
+  /** The Claude Code executable to run, such as the `claude` on your PATH. Defaults to the SDK's. */
+  readonly executable?: string
+  /** Variables for Claude Code, over the ones it inherits from this process. */
+  readonly env?: Readonly<Record<string, string | undefined>>
+  /**
+   * The folder Claude Code runs in. Its sessions are stored for this folder, under
+   * `~/.claude/projects`. Defaults to `sixb-claude-code` in the system's temporary folder.
+   */
+  readonly cwd?: string
+  /** How long the model list stays in memory. Defaults to one hour. */
+  readonly catalogTtlMs?: number
+  /** Definitions supplied here override matching entries from Claude Code's model list. */
+  readonly models?: readonly LanguageModelDefinition[]
+}
+
+export interface ClaudeCodeModelOptions extends LanguageModelLabel {
+  /** Reasoning Sixb applies when this model runs without an explicit choice. */
+  readonly reasoning?: ModelReasoningLevel
+  readonly capabilities?: ModelCapabilities
+}
+
+export interface ClaudeCodeCatalog extends LanguageModelDefinitionCatalog {
+  refresh(): Promise<readonly LanguageModelDefinition[]>
+}
+
+export interface ClaudeCodeProvider extends LanguageModelProvider {
+  (modelId: string, options?: ClaudeCodeModelOptions): LanguageModel
+  readonly providerId: typeof PROVIDER_ID
+  readonly catalog: ClaudeCodeCatalog
+}
+
+/**
+ * Claude through the Claude Code on this computer, signed in as you, so a Claude subscription pays
+ * for the calls. Sixb keeps running the Agent: its prompt, its tools and its loop. Claude Code only
+ * answers, without its own tools, settings or MCP servers.
+ */
+export function createClaudeCode(options: ClaudeCodeOptions = {}): ClaudeCodeProvider {
+  if (
+    options.catalogTtlMs !== undefined &&
+    (!Number.isSafeInteger(options.catalogTtlMs) || options.catalogTtlMs <= 0)
+  ) {
+    throw new TypeError(`${ERROR_PREFIX} catalogTtlMs must be a positive integer.`)
+  }
+  if (options.executable !== undefined && !options.executable.trim()) {
+    throw new TypeError(`${ERROR_PREFIX} executable must not be empty.`)
+  }
+
+  const runtime = new ClaudeCodeRuntime(options)
+  const configured = configuredModelDefinitions(options.models ?? [])
+  const catalog = new ClaudeCodeModelCatalog(runtime, configured, options.catalogTtlMs)
+  const model = (modelId: string, modelOptions: ClaudeCodeModelOptions = {}) => {
+    if (!modelId.trim()) throw new TypeError(`${ERROR_PREFIX} Model id must not be empty.`)
+    return new ClaudeCodeLanguageModel(
+      runtime,
+      catalog,
+      modelId,
+      structuredClone(modelOptions),
+      configured.get(modelId)
+    )
+  }
+
+  return Object.assign(model, { providerId: PROVIDER_ID as typeof PROVIDER_ID, catalog })
+}
+
+export const claudeCode: ClaudeCodeProvider = createClaudeCode()
+
+/** How every query starts Claude Code. */
+class ClaudeCodeRuntime {
+  constructor(private readonly options: ClaudeCodeOptions) {}
+
+  async queryOptions(): Promise<Options> {
+    const cwd = this.options.cwd ?? join(tmpdir(), "sixb-claude-code")
+    await mkdir(cwd, { recursive: true })
+
+    return {
+      cwd,
+      env: this.env(),
+      ...(this.options.executable === undefined
+        ? {}
+        : { pathToClaudeCodeExecutable: this.options.executable }),
+      // Sixb's prompt and tools only: none of Claude Code's tools, nor the user's settings, CLAUDE.md
+      // files, skills or MCP servers.
+      tools: [],
+      settingSources: [],
+      skills: [],
+      strictMcpConfig: true,
+    }
+  }
+
+  private env(): Record<string, string | undefined> {
+    const inherited: Record<string, string | undefined> = { ...process.env }
+    // A key in the environment would take precedence over Claude Code's sign-in.
+    delete inherited.ANTHROPIC_API_KEY
+    delete inherited.ANTHROPIC_AUTH_TOKEN
+
+    const apiKey =
+      typeof this.options.apiKey === "function" ? this.options.apiKey() : this.options.apiKey
+    return {
+      ...inherited,
+      ...this.options.env,
+      ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+      CLAUDE_AGENT_SDK_CLIENT_APP: "sixb",
+    }
+  }
+}
+
+function configuredModelDefinitions(
+  definitions: readonly LanguageModelDefinition[]
+): ReadonlyMap<string, LanguageModelDefinition> {
+  const configured = new Map<string, LanguageModelDefinition>()
+  for (const input of definitions) {
+    const definition = defineLanguageModel(input)
+    if (definition.providerId !== PROVIDER_ID) {
+      throw new TypeError(
+        `${ERROR_PREFIX} Supplied model '${definition.modelId}' must use providerId '${PROVIDER_ID}'.`
+      )
+    }
+    if (configured.has(definition.modelId)) {
+      throw new TypeError(`${ERROR_PREFIX} Duplicate model '${definition.modelId}'.`)
+    }
+    configured.set(definition.modelId, definition)
+  }
+  return configured
+}
+
+/** The models Claude Code offers the account it is signed in with, as it lists them itself. */
+class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
+  private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
+  private loadedAt = 0
+
+  constructor(
+    private readonly runtime: ClaudeCodeRuntime,
+    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>,
+    private readonly ttlMs = DEFAULT_CATALOG_TTL_MS
+  ) {}
+
+  async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
+    return (
+      this.supplied.get(modelId) ?? (await this.load()).find((model) => model.modelId === modelId)
+    )
+  }
+
+  list(): Promise<readonly LanguageModelDefinition[]> {
+    return this.load()
+  }
+
+  refresh(): Promise<readonly LanguageModelDefinition[]> {
+    this.loadPromise = undefined
+    this.loadedAt = 0
+    return this.load()
+  }
+
+  private load(): Promise<readonly LanguageModelDefinition[]> {
+    if (this.loadPromise && this.loadedAt !== 0 && Date.now() - this.loadedAt >= this.ttlMs) {
+      this.loadPromise = undefined
+      this.loadedAt = 0
+    }
+    this.loadPromise ??= this.fetchDefinitions()
+      .then((definitions) => {
+        this.loadedAt = Date.now()
+        return definitions
+      })
+      .catch((error) => {
+        this.loadPromise = undefined
+        throw error
+      })
+    return this.loadPromise
+  }
+
+  private async fetchDefinitions(): Promise<readonly LanguageModelDefinition[]> {
+    const abort = new AbortController()
+    let release = () => {}
+    const idle = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    // A query that sends nothing: Claude Code answers control requests without a turn.
+    const session = query({
+      prompt: waitFor(idle),
+      options: { ...(await this.runtime.queryOptions()), abortController: abort },
+    })
+    const timeout = AbortSignal.timeout(CATALOG_TIMEOUT_MS)
+
+    try {
+      const models = await Promise.race([session.supportedModels(), rejectOnAbort(timeout)])
+      const listed = models
+        // "default" names whichever model the account defaults to, which another entry also lists.
+        .filter((info) => info.value !== "default")
+        .map((info) => this.supplied.get(info.value) ?? modelInfoDefinition(info))
+      const listedIds = new Set(listed.map((definition) => definition.modelId))
+
+      return [...listed, ...[...this.supplied.values()].filter((d) => !listedIds.has(d.modelId))]
+    } catch (error) {
+      throw new ModelCatalogUnavailableError(
+        `${ERROR_PREFIX} Claude Code could not list its models: ${errorMessage(error)}`,
+        { cause: error }
+      )
+    } finally {
+      release()
+      abort.abort()
+      session.close()
+    }
+  }
+}
+
+export function modelInfoDefinition(info: ModelInfo): LanguageModelDefinition {
+  const reasoning = modelInfoReasoning(info)
+
+  return defineLanguageModel({
+    kind: "language",
+    providerId: PROVIDER_ID,
+    modelId: info.value,
+    ...(info.displayName.trim() ? { name: info.displayName.trim() } : {}),
+    ...(info.description.trim() ? { description: info.description.trim() } : {}),
+    publisher: ANTHROPIC,
+    via: "Claude Code",
+    capabilities: { ...CAPABILITIES, ...(reasoning === undefined ? {} : { reasoning }) },
+  })
+}
+
+function modelInfoReasoning(info: ModelInfo): ModelReasoningCapabilities | undefined {
+  const efforts = (info.supportsEffort === true ? (info.supportedEffortLevels ?? []) : []).filter(
+    isReasoningEffort
+  )
+  // Newer than the SDK's types: Claude Code says whether a model's thinking can be turned off.
+  const thinkingOff: unknown = Reflect.get(info, "supportsThinkingOff")
+  if (efforts.length === 0 && typeof thinkingOff !== "boolean") return undefined
+
+  return {
+    canDisable: thinkingOff === true,
+    ...(efforts.length === 0 ? {} : { efforts }),
+  }
+}
+
+function fallbackDefinition(modelId: string): LanguageModelDefinition {
+  return defineLanguageModel({
+    kind: "language",
+    providerId: PROVIDER_ID,
+    modelId,
+    publisher: ANTHROPIC,
+    via: "Claude Code",
+    capabilities: CAPABILITIES,
+  })
+}
+
+class ClaudeCodeLanguageModel implements LanguageModel {
+  readonly providerId = PROVIDER_ID
+  readonly modelId: string
+  readonly definition: LanguageModelDefinition
+  readonly defaultReasoning?: ModelReasoningLevel
+
+  constructor(
+    private readonly runtime: ClaudeCodeRuntime,
+    private readonly catalog: ClaudeCodeCatalog,
+    modelId: string,
+    private readonly options: ClaudeCodeModelOptions,
+    private readonly configured: LanguageModelDefinition | undefined,
+    private readonly resolved = false
+  ) {
+    this.modelId = modelId
+    if (options.reasoning !== undefined) {
+      if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(options.reasoning)) {
+        throw new TypeError(
+          `${ERROR_PREFIX} reasoning must be one of: ${MODEL_REASONING_LEVELS.join(", ")}.`
+        )
+      }
+      this.defaultReasoning = options.reasoning
+    }
+    this.definition = defineLanguageModel({
+      ...(configured ?? fallbackDefinition(modelId)),
+      ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+      ...defineLanguageModelLabel(options, ERROR_PREFIX),
+    })
+  }
+
+  async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {
+    if (this.resolved) return this
+    const definition =
+      options?.offline === true ? this.configured : await this.catalog.get(this.modelId)
+
+    return new ClaudeCodeLanguageModel(
+      this.runtime,
+      this.catalog,
+      this.modelId,
+      this.options,
+      definition ?? this.configured,
+      true
+    )
+  }
+
+  async stream(request: LanguageModelRequest): Promise<LanguageModelStream> {
+    request.signal.throwIfAborted()
+    const issue = modelReasoningSupportIssue(
+      this.definition.capabilities.reasoning,
+      request.reasoning
+    )
+    if (issue) throw new UnsupportedModelFeatureError(`${ERROR_PREFIX} ${issue}.`)
+
+    return { events: this.events(request) }
+  }
+
+  private async *events(request: LanguageModelRequest): AsyncIterable<LanguageModelStreamEvent> {
+    const turn = planTurn(request.messages)
+    yield { type: "stream-start" }
+
+    if (turn.resume !== undefined) {
+      let answered = false
+      try {
+        for await (const event of this.query(request, turn.systemPrompt, turn.resume.content, {
+          session: turn.resume.session,
+        })) {
+          answered = true
+          yield event
+        }
+        return
+      } catch (error) {
+        // A session Claude Code no longer has, such as one its cleanup removed, starts over.
+        if (answered || request.signal.aborted || !isMissingSession(error)) throw error
+      }
+    }
+
+    yield* this.query(request, turn.systemPrompt, turn.start)
+  }
+
+  /** One Claude Code query, ended as soon as the answer is complete. */
+  private async *query(
+    request: LanguageModelRequest,
+    systemPrompt: string,
+    content: readonly JsonObject[],
+    resume?: { readonly session: ClaudeCodeSessionState }
+  ): AsyncIterable<LanguageModelStreamEvent> {
+    const released = new AbortController()
+    const release = () => released.abort()
+    request.signal.addEventListener("abort", release, { once: true })
+
+    let stderr = ""
+    const stream = new ClaudeCodeStream({
+      modelId: this.modelId,
+      structuredOutput: request.responseFormat !== undefined,
+    })
+    const conversation = query({
+      prompt: waitFor(Promise.resolve(), userMessage(content)),
+      options: {
+        ...(await this.runtime.queryOptions()),
+        abortController: released,
+        model: this.modelId,
+        systemPrompt,
+        includePartialMessages: true,
+        // Only Sixb's tools exist, and each is allowed: nothing is left to ask about.
+        permissionMode: "dontAsk",
+        stderr: (data) => {
+          stderr = (stderr + data).slice(-2_000)
+        },
+        ...(request.tools.length === 0
+          ? {}
+          : {
+              mcpServers: { sixb: sixbToolServer(request.tools, released.signal) },
+              allowedTools: request.tools.map((tool) => `${TOOL_PREFIX}${tool.name}`),
+            }),
+        ...(resume === undefined
+          ? {}
+          : { resume: resume.session.sessionId, resumeSessionAt: resume.session.at }),
+        ...reasoningOptions(request.reasoning),
+        ...(request.responseFormat === undefined
+          ? {}
+          : { outputFormat: { type: "json_schema", schema: request.responseFormat.schema } }),
+      },
+    })
+
+    try {
+      for await (const message of conversation) {
+        yield* stream.accept(message)
+
+        if (stream.toolCallsReady) {
+          // Sixb runs the tools. Claude Code has started them too, and would wait for them: stop it,
+          // and the next call resumes the session at this answer with Sixb's results.
+          await conversation.interrupt().catch(() => undefined)
+          yield* stream.finish()
+          return
+        }
+        if (stream.done) {
+          yield* stream.finish()
+          return
+        }
+      }
+
+      request.signal.throwIfAborted()
+      throw new ModelProviderError(
+        `${ERROR_PREFIX} Claude Code ended without an answer.${stderr ? ` ${stderr.trim()}` : ""}`,
+        PROVIDER_ID,
+        this.modelId
+      )
+    } catch (error) {
+      if (error instanceof ModelProviderError || request.signal.aborted) throw error
+      throw new ModelProviderError(
+        `${ERROR_PREFIX} Claude Code failed: ${errorMessage(error)}`,
+        PROVIDER_ID,
+        this.modelId,
+        { cause: error }
+      )
+    } finally {
+      request.signal.removeEventListener("abort", release)
+      released.abort()
+      conversation.close()
+    }
+  }
+}
+
+export function reasoningOptions(
+  reasoning: ModelReasoning | undefined
+): Pick<Options, "effort" | "thinking"> {
+  if (reasoning === undefined || reasoning === "provider-default") return {}
+  if (reasoning === "none") return { thinking: { type: "disabled" } }
+  if (typeof reasoning === "object") {
+    return { thinking: { type: "enabled", budgetTokens: reasoning.budgetTokens } }
+  }
+  // Claude has no effort below low.
+  return { effort: reasoning === "minimal" ? "low" : reasoning }
+}
+
+function isReasoningEffort(value: string): value is ModelReasoningEffort {
+  return (MODEL_REASONING_EFFORTS as readonly string[]).includes(value)
+}
+
+type UserContentBlock = Exclude<SDKUserMessage["message"]["content"], string>[number]
+
+/** The block types `messagesInput` writes for user and tool messages. */
+const USER_BLOCK_TYPES = new Set(["text", "image", "document", "tool_result"])
+
+function userMessage(content: readonly JsonObject[]): SDKUserMessage {
+  return {
+    type: "user",
+    parent_tool_use_id: null,
+    message: {
+      role: "user",
+      content: content.flatMap((block) => (isUserContentBlock(block) ? [block] : [])),
+    },
+  }
+}
+
+function isUserContentBlock(block: unknown): block is UserContentBlock {
+  return isJsonObject(block) && typeof block.type === "string" && USER_BLOCK_TYPES.has(block.type)
+}
+
+/** Claude Code's input: these messages, then nothing more once `idle` settles. */
+async function* waitFor(
+  idle: Promise<void>,
+  ...messages: SDKUserMessage[]
+): AsyncIterable<SDKUserMessage> {
+  yield* messages
+  await idle
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+  })
+}
+
+function isMissingSession(error: unknown): boolean {
+  return error instanceof ModelProviderError && /no conversation found/i.test(error.message)
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
