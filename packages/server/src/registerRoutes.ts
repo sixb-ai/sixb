@@ -21,6 +21,7 @@ import {
 import { registerConnectorConnectionRoutes } from "./routes/connector-connections"
 import { registerConnectorRoutes } from "./routes/connectors"
 import { registerDatasetRoutes } from "./routes/datasets"
+import { registerDefinitionRoutes } from "./routes/definitions"
 import { registerEventRoutes } from "./routes/events"
 import { registerFileDownloadRoutes } from "./routes/file-downloads"
 import { registerFileRoutes } from "./routes/files"
@@ -58,6 +59,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerModelCallRoutes(app, host)
   registerModelGenerationRoutes(app, host)
   registerProjectRoutes(app, host)
+  registerDefinitionRoutes(app, host)
   registerStatusRoutes(app, host)
   registerConnectorRoutes(app, host)
   registerConnectorConnectionRoutes(app, host)

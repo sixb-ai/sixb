@@ -89,6 +89,7 @@ import {
   getDataset,
   getDatasetVersion,
   getDatasetVersionLineage,
+  getDefinitionsManifest,
   getLakeHealth,
   getLatestTelemetry,
   getObject,
@@ -462,6 +463,9 @@ import type {
   GetDatasetVersionLineageError,
   GetDatasetVersionLineageResponse,
   GetDatasetVersionResponse,
+  GetDefinitionsManifestData,
+  GetDefinitionsManifestError,
+  GetDefinitionsManifestResponse,
   GetLakeHealthData,
   GetLakeHealthError,
   GetLakeHealthResponse,
@@ -2264,6 +2268,33 @@ export const getProjectInfoOptions = (options?: Options<GetProjectInfoData>) =>
       return data
     },
     queryKey: getProjectInfoQueryKey(options),
+  })
+
+export const getDefinitionsManifestQueryKey = (options?: Options<GetDefinitionsManifestData>) =>
+  createQueryKey("getDefinitionsManifest", options)
+
+/**
+ * Describe the project's definitions
+ *
+ * Every definition this runtime runs, with the file that declares it and a hash, so two runtimes such as production and a branch can be compared.
+ */
+export const getDefinitionsManifestOptions = (options?: Options<GetDefinitionsManifestData>) =>
+  queryOptions<
+    GetDefinitionsManifestResponse,
+    GetDefinitionsManifestError,
+    GetDefinitionsManifestResponse,
+    ReturnType<typeof getDefinitionsManifestQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getDefinitionsManifest({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getDefinitionsManifestQueryKey(options),
   })
 
 export const getStatusQueryKey = (options?: Options<GetStatusData>) =>

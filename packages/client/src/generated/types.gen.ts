@@ -4805,6 +4805,92 @@ export type GetProjectInfoResponses = {
 
 export type GetProjectInfoResponse = GetProjectInfoResponses[keyof GetProjectInfoResponses]
 
+export type GetDefinitionsManifestData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/definitions"
+}
+
+export type GetDefinitionsManifestErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetDefinitionsManifestError =
+  GetDefinitionsManifestErrors[keyof GetDefinitionsManifestErrors]
+
+export type GetDefinitionsManifestResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    commit: string | null
+    hash: string
+    definitions: Array<{
+      kind:
+        | "objectType"
+        | "valueType"
+        | "action"
+        | "connector"
+        | "dataset"
+        | "group"
+        | "instructions"
+        | "marking"
+        | "membershipPolicy"
+        | "pipeline"
+        | "projection"
+        | "role"
+        | "rule"
+        | "schedule"
+        | "share"
+        | "skill"
+        | "sync"
+        | "tool"
+        | "workflow"
+      id: string
+      file: string | null
+      hash: string
+    }>
+    projections: Array<{
+      id: string
+      revision: string
+    }>
+    datasets: Array<{
+      id: string
+      description?: string
+      primaryKey?: string | Array<string>
+      sequenceBy?: string
+      partitionBy?: Array<string>
+      schema: {
+        columns: Array<{
+          name: string
+          type:
+            | "string"
+            | "boolean"
+            | "int64"
+            | "float64"
+            | "decimal"
+            | "date"
+            | "timestamp"
+            | "json"
+            | "fileRef"
+          nullable?: boolean
+          markings?: Array<string>
+        }>
+      }
+      kind: "dataset"
+    }>
+  }
+}
+
+export type GetDefinitionsManifestResponse =
+  GetDefinitionsManifestResponses[keyof GetDefinitionsManifestResponses]
+
 export type GetStatusData = {
   body?: never
   path?: never

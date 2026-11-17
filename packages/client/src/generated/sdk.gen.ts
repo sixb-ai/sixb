@@ -243,6 +243,9 @@ import type {
   GetDatasetVersionLineageErrors,
   GetDatasetVersionLineageResponses,
   GetDatasetVersionResponses,
+  GetDefinitionsManifestData,
+  GetDefinitionsManifestErrors,
+  GetDefinitionsManifestResponses,
   GetLakeHealthData,
   GetLakeHealthErrors,
   GetLakeHealthResponses,
@@ -1537,6 +1540,27 @@ export const getProjectInfo = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/project",
+    ...options,
+  })
+
+/**
+ * Describe the project's definitions
+ *
+ * Every definition this runtime runs, with the file that declares it and a hash, so two runtimes such as production and a branch can be compared.
+ */
+export const getDefinitionsManifest = <ThrowOnError extends boolean = false>(
+  options?: Options<GetDefinitionsManifestData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetDefinitionsManifestResponses,
+    GetDefinitionsManifestErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/definitions",
     ...options,
   })
 

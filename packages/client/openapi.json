@@ -14593,6 +14593,208 @@
         }
       }
     },
+    "/api/definitions": {
+      "get": {
+        "summary": "Describe the project's definitions",
+        "description": "Every definition this runtime runs, with the file that declares it and a hash, so two runtimes such as production and a branch can be compared.",
+        "tags": ["Project"],
+        "operationId": "getDefinitionsManifest",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commit": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "hash": {
+                      "type": "string"
+                    },
+                    "definitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "objectType",
+                              "valueType",
+                              "action",
+                              "connector",
+                              "dataset",
+                              "group",
+                              "instructions",
+                              "marking",
+                              "membershipPolicy",
+                              "pipeline",
+                              "projection",
+                              "role",
+                              "rule",
+                              "schedule",
+                              "share",
+                              "skill",
+                              "sync",
+                              "tool",
+                              "workflow"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "file": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "hash": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["kind", "id", "file", "hash"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "projections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "revision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "revision"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "primaryKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 2
+                              }
+                            ]
+                          },
+                          "sequenceBy": {
+                            "type": "string"
+                          },
+                          "partitionBy": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "schema": {
+                            "type": "object",
+                            "properties": {
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "string",
+                                        "boolean",
+                                        "int64",
+                                        "float64",
+                                        "decimal",
+                                        "date",
+                                        "timestamp",
+                                        "json",
+                                        "fileRef"
+                                      ]
+                                    },
+                                    "nullable": {
+                                      "type": "boolean"
+                                    },
+                                    "markings": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["name", "type"],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": ["columns"],
+                            "additionalProperties": false
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["dataset"]
+                          }
+                        },
+                        "required": ["id", "schema", "kind"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["commit", "hash", "definitions", "projections", "datasets"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/status": {
       "get": {
         "summary": "Get runtime status",

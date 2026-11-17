@@ -50,6 +50,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  {
+    operationId: "getDefinitionsManifest",
+    method: "GET",
+    path: "/api/definitions",
+    accessToken: true,
+    agentApi: false,
+  },
   // Token and service-account management is bearer-capable so the CLI can authenticate with a
   // personal access token. It is NOT exposed to agents. The runtime still confines every operation
   // to the caller's own groups, and service-account tokens are rejected (only user principals may

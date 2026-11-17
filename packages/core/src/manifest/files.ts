@@ -1,26 +1,29 @@
 import { posix } from "node:path"
 
 /** What a definitions manifest lists, and the key prefix discovery records each file under. */
-export type DefinitionKind =
-  | "objectType"
-  | "valueType"
-  | "action"
-  | "connector"
-  | "dataset"
-  | "group"
-  | "instructions"
-  | "marking"
-  | "membershipPolicy"
-  | "pipeline"
-  | "projection"
-  | "role"
-  | "rule"
-  | "schedule"
-  | "share"
-  | "skill"
-  | "sync"
-  | "tool"
-  | "workflow"
+export const DEFINITION_KINDS = [
+  "objectType",
+  "valueType",
+  "action",
+  "connector",
+  "dataset",
+  "group",
+  "instructions",
+  "marking",
+  "membershipPolicy",
+  "pipeline",
+  "projection",
+  "role",
+  "rule",
+  "schedule",
+  "share",
+  "skill",
+  "sync",
+  "tool",
+  "workflow",
+] as const
+
+export type DefinitionKind = (typeof DEFINITION_KINDS)[number]
 
 /** Which file each discovered definition came from: `definitionKey(kind, id)` → POSIX path. */
 export type DefinitionFiles = ReadonlyMap<string, string>
