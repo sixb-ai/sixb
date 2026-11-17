@@ -1102,6 +1102,16 @@ function gatewayCandidates(
 }
 
 /**
+ * The model a response's native items replay to, such as its encrypted reasoning. With fallbacks,
+ * the one the Gateway names as having answered, which `response.created` gives as a Gateway model
+ * id. Without, only the model asked for can have answered, whatever name the Gateway gives it.
+ */
+function replayModel(modelId: string, fallbacks: boolean, response: JsonObject): string {
+  const named = string(response.model)
+  return fallbacks && named ? named : modelId
+}
+
+/**
  * Whether the model asked for answered, so its card prices the call: the Gateway names the model
  * that did, and when it names none, only a binding without fallbacks can be sure.
  */
@@ -1256,10 +1266,13 @@ class VercelGatewayLanguageModel implements LanguageModel {
       )
     }
     const requestId = response.headers.get("x-request-id") ?? response.headers.get("request-id")
+    const fallbacks = gatewayCandidates(this.modelId, this.options.providerOptions).length > 1
+
     return {
       events: responsesEvents(response.body, request.signal, {
         providerId: this.providerId,
         modelId: this.modelId,
+        replayModelId: (created) => replayModel(this.modelId, fallbacks, created),
         requestId: requestId ?? undefined,
         errorPrefix: "[SixbVercelGateway]",
         providerIds: gatewayProviderIds,

@@ -20,6 +20,11 @@ export interface ResponsesStreamOptions {
   readonly requestId?: string
   readonly errorPrefix: string
   readonly providerIds?: (response: JsonObject | undefined, requestId?: string) => ModelProviderIds
+  /**
+   * The model a native item kept for replay is tagged with, read from the response that produced
+   * it, for a provider that may answer with another model than `modelId`. Defaults to `modelId`.
+   */
+  readonly replayModelId?: (response: JsonObject) => string
   readonly usage?: (raw: JsonObject | undefined) => ModelUsage
   readonly finishMetadata?: (
     response: JsonObject
@@ -77,8 +82,13 @@ class ResponseState {
   started = false
   finished = false
   sawToolCall = false
+  /** The model native items are tagged with: `modelId`, or the one the response names. */
+  private replayModelId: string
+  private replayModelRead = false
 
-  constructor(private readonly options: ResponsesStreamOptions) {}
+  constructor(private readonly options: ResponsesStreamOptions) {
+    this.replayModelId = options.modelId
+  }
 
   private get providerId(): string {
     return this.options.providerId
@@ -86,7 +96,7 @@ class ResponseState {
 
   /** A native item kept for replay, with the model that produced it. */
   private replayData(item: JsonObject): JsonObject {
-    return { item, modelId: this.options.modelId }
+    return { item, modelId: this.replayModelId }
   }
 
   private providerIds(response: JsonObject | undefined): ModelProviderIds {
@@ -111,6 +121,14 @@ class ResponseState {
       const response = object(value.response)
       const id = string(response?.id)
       const modelId = string(response?.model)
+
+      // Read once, from the response that opens the stream: a later progress event may name the
+      // model differently, or not at all.
+      if (response && this.options.replayModelId && !this.replayModelRead) {
+        this.replayModelRead = true
+        this.replayModelId = this.options.replayModelId(response)
+      }
+
       if (id || modelId) {
         events.push({
           type: "response-metadata",
@@ -238,7 +256,7 @@ class ResponseState {
       events.push({
         type: "tool-input-end",
         id: callId,
-        providerData: providerItemData(this.providerId, this.options.modelId, {
+        providerData: providerItemData(this.providerId, this.replayModelId, {
           ...(item ?? {}),
           type: "function_call",
           call_id: callId,
@@ -301,7 +319,7 @@ class ResponseState {
           events.push({
             type: "tool-input-end",
             id: callId,
-            providerData: providerItemData(this.providerId, this.options.modelId, {
+            providerData: providerItemData(this.providerId, this.replayModelId, {
               ...item,
               arguments: argumentsText,
             }),

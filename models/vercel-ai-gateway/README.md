@@ -50,7 +50,8 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 - **Output limits:** the strictest per-call, configured, or model limit wins, for agents too.
 - **Reasoning replay:** a model's encrypted reasoning replays only to that model. A conversation
   that moves to another model behind the Gateway keeps its text and tool calls, without the
-  reasoning the new model would reject.
+  reasoning the new model would reject. When a fallback (`gateway.models`) answers, its reasoning
+  is the fallback's.
 - **Retries:** `429` and `5xx` responses are retried before streaming starts. Configure
   `maxRetries` and `maxRetryDelayMs` on `createVercelGateway`.
 - **Custom transport:** supply `baseUrl`, `headers`, or `fetch` on `createVercelGateway`.
