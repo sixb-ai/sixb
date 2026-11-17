@@ -32,9 +32,14 @@ import {
   type OpenRunSandbox,
 } from "./run-environment"
 import { recordFate } from "./run-fate"
+import { sandboxStopOf, sandboxStoppedError } from "./run-sandbox"
 import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunSettings } from "./types"
+
+/** Why a turn ended whose workspace, kept across turns, its provider stopped: as the chat offers. */
+const SANDBOX_STOPPED_UNSAVED_MESSAGE =
+  "The sandbox stopped, so this turn ended here. To go on, pick up where it left off or start over."
 
 // A conversation turn, from its claimed session to its end, whichever runner runs it: the worker,
 // under a queue delivery, or a runner on a computer, over HTTP. The runner keeps what is its own:
@@ -181,7 +186,10 @@ export async function runConversationTurn(input: {
         await environment.beforeFinalize()
       } catch (saveError) {
         if (saveError instanceof AgentExecutionLostError) return
-        error = saveError
+        // A workspace its provider stopped cannot be cleaned and saved: it waits for its owner, and
+        // the run still says why it ended.
+        const stop = sandboxStopOf(error)
+        error = stop ? sandboxStoppedError(stop, SANDBOX_STOPPED_UNSAVED_MESSAGE) : saveError
         environmentSaveFailed = true
       }
     }

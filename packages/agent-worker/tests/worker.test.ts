@@ -3959,6 +3959,99 @@ describe("AgentWorker", () => {
     )
   })
 
+  // A thread that keeps its files, whose VM the provider stopped mid-turn, as Vercel does at a
+  // session's time limit: its save cannot run, so it waits for its owner, and the run says why and
+  // what to do instead of only that it failed. Removal proof: drop the `sandboxStopOf` branch in
+  // runConversationTurn's save failure; the run reads "Agent execution failed." alone.
+  test("ends a turn whose kept workspace stopped, and says how its owner goes on", async () => {
+    const sandbox = Object.assign(new RecordingSandbox("kept-stopped"), {
+      setRequestCredentials: async () => {},
+    })
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], options) => {
+      if (sandbox.status === "stopped" || args.some((arg) => arg.includes("npm test"))) {
+        sandbox.status = "stopped"
+        throw new SandboxNotRunningError("[Sandbox] sandbox kept-stopped stopped.")
+      }
+      return runCommand(command, args, options)
+    }
+    // Asked again, the model would answer: a turn that goes on succeeds, and the test says so.
+    let modelCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        modelCalls++
+        return modelCalls > 1
+          ? stream([
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "I could not do it." },
+              { type: "text-end", id: "t" },
+              finish("stop"),
+            ])
+          : stream([
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "bash-1",
+                toolName: "bash",
+                input: JSON.stringify({ command: "npm test" }),
+              },
+              finish("tool-calls"),
+            ])
+      },
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          return sandbox
+        },
+        resume: async () => sandbox,
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => ({ source: { type: "git", url: "https://example.com/repository.git" } }),
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Run the tests" })
+    const worker = new AgentWorker(host, workerOptions())
+    const completion = observeQueueSettlement(host.queues.agents)
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+      errors.mockRestore()
+    }
+
+    expect(modelCalls).toBe(1)
+    expect(
+      await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+    ).toMatchObject({
+      status: "failed",
+      error: {
+        code: "agent.execution_failed",
+        message:
+          "Agent execution failed. The sandbox stopped, so this turn ended here. To go on, pick up where it left off or start over.",
+      },
+    })
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toMatchObject({
+      status: "blocked",
+    })
+  })
+
   // SixbHost rejects such sandboxes at construction. A worker host is structural, so the worker
   // keeps its own guard. Regression proof: remove the check from buildAgentContext; it starts.
   test("refuses to start on sandboxes that cannot add the run token", () => {

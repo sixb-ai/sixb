@@ -141,9 +141,11 @@ export function endsWhenStopped(
   }
 }
 
+const stops = new WeakMap<Error, SandboxNotRunningError>()
+
 /** Why a run whose sandbox stopped ended, in the words its run and its reader see. */
 export function sandboxStoppedError(cause: SandboxNotRunningError, message: string): Error {
-  return withFailureMessage(
+  const error = withFailureMessage(
     createSixbError(
       "agent.execution_failed",
       "[SixbAgent] The run's sandbox stopped; nothing more can run in it.",
@@ -151,4 +153,11 @@ export function sandboxStoppedError(cause: SandboxNotRunningError, message: stri
     ),
     message
   )
+  stops.set(error, cause)
+  return error
+}
+
+/** The provider's stop a run ended on, when `sandboxStoppedError` says that is why it ended. */
+export function sandboxStopOf(error: unknown): SandboxNotRunningError | undefined {
+  return error instanceof Error ? stops.get(error) : undefined
 }
