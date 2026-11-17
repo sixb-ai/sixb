@@ -175,11 +175,37 @@ in the sandbox where they are.
 | --- | --- |
 | `repository` | The GitHub repository, `owner/name`. |
 | `path` | The project's folder inside it, for a project that isn't at the repository root. |
+| `webhookSecret` | The secret of the repository's push webhook, so branches [pull at once](#run-a-branch). |
 
 A thread whose `sandbox` names only `branch` works on the project's repository. Any other params
 go to the factory's own `params` and `resolve`, so a project can keep its own recipes beside it.
 The factory can't also set a static `source`. Branch names are letters, digits, `.`, `_`, `-` and
-`/`, as git takes them.
+`/`, as git takes them. Starting such a thread takes `can.manage(project.source)`, since its agent
+can push to the project's repository. The agent commits and pushes each change once it checks out.
+
+### Run a branch
+
+A branch can also run: `sixb dev --branch` in a sandbox of its own, with the API and workers of
+the project as that branch has it, and its own development data. Open one, and the project's server
+reaches it under `/branches/<name>/`:
+
+```bash
+curl -X POST https://ops.example.com/api/branches -d '{"name":"vendor-invoices"}'
+curl https://ops.example.com/branches/vendor-invoices/api/definitions
+```
+
+| | |
+| --- | --- |
+| Who | Signed-in people with `can.manage(project.source)`. The runtime gets a key of its own, never their session |
+| Changes | Pushes reach it within ten seconds, or at once with the push webhook pointed at `/api/source/github` |
+| Restarts | Each change starts a new generation; `GET /api/branches/<name>` shows its commit, its manifest hash, or the file a failure points at |
+| Stops | After twenty minutes without a request, or `POST /api/branches/<name>/stop`. Its sandbox keeps its data for the next open |
+| Doesn't run | Cron schedules or agent turns |
+
+The agent worker runs branches, so the factory's sandboxes have to serve: Vercel's and the local
+provider's do. On a laptop a branch takes a free port of its own. A branch pulls its development
+values from the project's [env source](../deployment/environment-variables.md) when the factory's `auth`
+lets its requests through, as it does the agent's.
 
 ## Keep files across conversation runs
 
