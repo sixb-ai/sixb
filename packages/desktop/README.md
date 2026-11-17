@@ -65,6 +65,19 @@ exposes, which says how to add to it. The window stays on the app and API origin
 - **Packager.** `@electron/packager` fails under Bun whenever it verifies a download, so
   `src/packager.mjs` runs it under Electron's own binary as Node.
 
+### Updates
+
+A packaged macOS app keeps itself current from the deployment that serves it (`src/shell/updates.ts`):
+Electron's `autoUpdater` reads `/__sixb/desktop/darwin/releases.json` at launch and every 4 hours,
+downloads a newer version in the background, and the new version takes over the next time the app
+starts. Nothing shows on screen, and checking stops once a version is downloaded, since another check
+would download it again.
+
+- macOS installs an update only when it's signed by the same Developer ID as the running app, so an
+  app signed ad hoc doesn't try.
+- Run from the disk image or Downloads, the app can't replace itself, so it first offers to move to
+  Applications, which relaunches it there.
+
 ### Signing in
 
 A window like this cannot finish a sign-in on its own: a magic link opens in the user's browser,

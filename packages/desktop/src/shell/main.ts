@@ -6,6 +6,7 @@ import { hostname } from "node:os"
 import { isAbsolute, join } from "node:path"
 import {
   app,
+  autoUpdater,
   BrowserWindow,
   dialog,
   type Event,
@@ -19,6 +20,7 @@ import {
 import { COMPUTER_CHANNELS } from "./bridge"
 import { createNavigationState, isWebUrl, nextNavigationStep, type ShellConfig } from "./navigation"
 import { DesktopRunner, RUNNER_BINARY, runnerEnvironment, startRunnerProcess } from "./runner"
+import { keepUpToDate } from "./updates"
 import {
   HIDDEN_TITLE_BAR_CSS,
   hasHiddenTitleBar,
@@ -204,9 +206,35 @@ function installComputerAccess(running: DesktopRunner): void {
   })
 }
 
-void app.whenReady().then(() => {
+/**
+ * Run from the disk image or Downloads, the app can't replace itself with a new version, and leaves
+ * the disk image mounted. Moving relaunches it from Applications.
+ */
+async function offerToMoveToApplications(): Promise<void> {
+  if (app.isInApplicationsFolder()) return
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    message: `Move ${config.name} to Applications?`,
+    buttons: ["Move to Applications", "Not Now"],
+    defaultId: 0,
+    cancelId: 1,
+  })
+  if (response !== 0) return
+  try {
+    app.moveToApplicationsFolder()
+  } catch (error) {
+    console.error("[SixbDesktop] Could not move the app to Applications.", error)
+  }
+}
+
+void app.whenReady().then(async () => {
   // A packaged app carries its icon in its bundle. Run from source, it would show Electron's.
   if (icon && !app.isPackaged) app.dock?.setIcon(icon)
+
+  if (app.isPackaged && process.platform === "darwin") {
+    await offerToMoveToApplications()
+    keepUpToDate(config, autoUpdater)
+  }
 
   // Judged by the frame that asks, which may be another site's embedded in the app.
   session.defaultSession.setPermissionRequestHandler(
