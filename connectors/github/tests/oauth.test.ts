@@ -378,6 +378,25 @@ describe("github managed OAuth", () => {
       `Basic ${Buffer.from("Iv1.github123:github-client-secret").toString("base64")}`
     )
     expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ access_token: "ghu_1" })
+
+    // A token GitHub cannot revoke again resolves, so a disconnect never stays pending.
+    revokeStatus = 422
+    await adapter.authentication.revoke!(CONTEXT, { accessToken: "ghu_1" })
+    expect(calls).toHaveLength(4)
+
+    // An expired token is already invalid: nothing is sent.
+    await adapter.authentication.revoke!(CONTEXT, {
+      accessToken: "ghu_expired",
+      expiresAt: new Date(Date.now() - 1_000),
+    })
+    expect(calls).toHaveLength(4)
+
+    revokeStatus = 401
+    expect(
+      await oauthErrorKind(
+        Promise.resolve(adapter.authentication.revoke!(CONTEXT, { accessToken: "ghu_1" }))
+      )
+    ).toBe("terminal")
   })
 
   test("resolves a fresh OAuth token per request and invalidates the rejected token on 401", async () => {

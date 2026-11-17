@@ -125,6 +125,11 @@ export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL):
        * person can still remove the App from their GitHub settings.
        */
       async revoke(context, credentials) {
+        // An expired token is already invalid: there is nothing left to revoke.
+        if (credentials.expiresAt !== undefined && credentials.expiresAt.getTime() <= Date.now()) {
+          return
+        }
+
         let response: Response
         try {
           response = await fetch(
@@ -150,8 +155,10 @@ export function createGitHubOAuth(options: GitHubOAuthOptions, apiBaseUrl: URL):
           )
         }
 
-        // 404: the token is no longer valid, because it expired or was already revoked.
-        if (response.status === 204 || response.status === 404) return
+        // GitHub answers 404 for a token it no longer knows, and documents 422 for this endpoint
+        // without saying when. Either way the token cannot be revoked again, and Sixb's contract
+        // is that an already invalid grant resolves: retrying would leave the disconnect pending.
+        if (response.status === 204 || response.status === 404 || response.status === 422) return
 
         throw new ConnectorOAuthError(
           response.status === 429 || response.status >= 500 ? "retryable" : "terminal",
