@@ -4,7 +4,8 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { DeployStatus } from "@sixb/core/deploy"
 import { renderProcessLogLine } from "../src/server/logs"
-import type { ProcessManifest } from "../src/server/manifest"
+import { loadProcessManifest, type ProcessManifest } from "../src/server/manifest"
+import { type SupervisorCommand, sendSupervisorCommand } from "../src/server/supervisor"
 
 const helper = resolve(import.meta.dir, "../src/server/cli.ts")
 const cleanups: (() => Promise<void>)[] = []
@@ -530,6 +531,23 @@ describe("supervisor", () => {
     expect((await ctl(manifestPath, "discard")).exitCode).toBe(0)
     expect(isAlive(greenPid)).toBe(false)
     expect(isAlive(bluePid)).toBe(true)
+  }, 15_000)
+
+  // Reproduce: answer only the requests that parse; a command newer than the supervisor then gets
+  // no response, and its client waits out the timeout instead of failing at once.
+  test("answers a command it does not know, so its client fails at once", async () => {
+    const { manifestPath } = await startSupervisor()
+    await until(
+      () => status(manifestPath),
+      (current) => current.running
+    )
+
+    const manifest = await loadProcessManifest(manifestPath)
+    const error = await sendSupervisorCommand(manifest, "upgrade" as SupervisorCommand, {
+      timeoutMs: 5_000,
+    }).catch((failure: unknown) => failure)
+
+    expect(String(error)).toContain('does not know the "upgrade" command')
   }, 15_000)
 
   // Reproduce: let the restart timer use the cohort the instance had when it exited; it then

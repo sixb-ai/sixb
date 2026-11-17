@@ -398,14 +398,20 @@ class Supervisor {
 
     for (const entry of entries.filter((name) => name.endsWith(".json"))) {
       const path = resolve(controlDir(this.manifest), entry)
-      let request: SupervisorRequest | null = null
+
+      // The id is read first: a request this supervisor cannot run, such as a command newer than
+      // it, still gets an answer, so its client fails at once instead of waiting out its timeout.
+      let id: string | null = null
       try {
-        request = parseRequest(JSON.parse(await readFile(path, "utf8")))
+        const body: unknown = JSON.parse(await readFile(path, "utf8"))
+        id = requestId(body)
+
+        const request = parseRequest(body)
         await rm(path, { force: true })
         await this.writeResponse(request.id, true, await this.handleRequest(request))
       } catch (error) {
         await rm(path, { force: true })
-        if (request) await this.writeResponse(request.id, false, errorMessage(error))
+        if (id) await this.writeResponse(id, false, errorMessage(error))
       }
     }
   }
@@ -725,14 +731,22 @@ const VALID_COMMANDS: readonly SupervisorCommand[] = [
   "discard",
 ]
 
+function requestId(value: unknown): string | null {
+  const id = (value as { readonly id?: unknown } | null)?.id
+  return typeof id === "string" ? id : null
+}
+
 function parseRequest(value: unknown): SupervisorRequest {
   const request = value as Partial<SupervisorRequest> | null
-  if (
-    !request ||
-    typeof request.id !== "string" ||
-    !VALID_COMMANDS.includes(request.type as SupervisorCommand)
-  ) {
+  if (!request || typeof request.id !== "string") {
     throw new Error("[SshTarget] Invalid supervisor request.")
+  }
+
+  if (!VALID_COMMANDS.includes(request.type as SupervisorCommand)) {
+    throw new Error(
+      `[SshTarget] This supervisor does not know the "${String(request.type)}" command: it is ` +
+        "older than the deploy that sent it. Restarting the deployment starts the new one."
+    )
   }
   return {
     id: request.id,
