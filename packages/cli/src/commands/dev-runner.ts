@@ -1,10 +1,11 @@
-import { dirname, resolve } from "node:path"
+import { dirname, relative, resolve, sep } from "node:path"
 import {
   AppPackagesMissingError,
   type CustomAppDevOptions,
   type CustomAppDevServer,
   createCustomApp,
 } from "@sixb/app/server"
+import { readDefinitionsManifest } from "@sixb/core/internal/manifest"
 import { createSixbServer, requestTimingOptionsFromEnv } from "@sixb/server"
 import {
   apiDocsUrl,
@@ -45,6 +46,11 @@ export interface DevOptions {
   subagentConcurrencyPerRun?: string
   /** Also open the app in a desktop window. The supervisor does, so the window outlives restarts. */
   desktop?: boolean
+  /**
+   * Serve this checkout as a branch of the project, inside the branch's sandbox: the API and its
+   * workers, behind the supervisor's port, with no app, schedules or agent turns.
+   */
+  branch?: string
 }
 
 export async function runDevRuntime(options: DevOptions = {}) {
@@ -89,21 +95,25 @@ export async function runDevRuntime(options: DevOptions = {}) {
     abort.signal.throwIfAborted()
     const projectRoot = dirname(resolve(entry))
 
+    const branch = options.branch !== undefined
+    // A branch's API listens only where its supervisor, on the port, forwards to.
     const topology = resolveBrowserTopology({
       role: "dev",
-      host: options.host,
-      apiHost: options.apiHost,
+      host: branch ? "127.0.0.1" : options.host,
+      apiHost: branch ? "127.0.0.1" : options.apiHost,
       port: options.port,
       apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
     })
-    const customApp = await createCustomApp({
-      rootDir: projectRoot,
-      apiBaseUrl: topology.apiPublicOrigin,
-      authEnabled: host.auth.isEnabled(),
-    })
-    const authExperience = (await customApp.prepareAuthExperience()) ?? {
+    const customApp = branch
+      ? null
+      : await createCustomApp({
+          rootDir: projectRoot,
+          apiBaseUrl: topology.apiPublicOrigin,
+          authEnabled: host.auth.isEnabled(),
+        })
+    const authExperience = (await customApp?.prepareAuthExperience()) ?? {
       outdir: resolve(projectRoot, ".sixb", "generated", "auth"),
     }
 
@@ -137,14 +147,18 @@ export async function runDevRuntime(options: DevOptions = {}) {
         stop: () => server.stop(),
       },
       agentApiBaseUrl: topology.apiPublicOrigin,
+      branch,
       workerConcurrency,
       vectorConcurrency,
       ...subagents,
     })
     abort.signal.throwIfAborted()
 
-    step("Starting app")
-    const devApp = await startDevApp(customApp, { host: topology.host, port: topology.appPort })
+    let devApp: Awaited<ReturnType<typeof startDevApp>> = { server: null }
+    if (customApp) {
+      step("Starting app")
+      devApp = await startDevApp(customApp, { host: topology.host, port: topology.appPort })
+    }
     customAppServer = devApp.server
     abort.signal.throwIfAborted()
 
@@ -176,15 +190,21 @@ export async function runDevRuntime(options: DevOptions = {}) {
         ? { url: servedUrl(topology), apiOrigin: topology.apiPublicOrigin }
         : null,
       view,
+      ...(branch ? { manifest: (await readDefinitionsManifest(host)).hash } : {}),
     })
 
     await Promise.race([stopped, runtime.waitForWorkerFailure()])
   } catch (error) {
     if (!abort.signal.aborted) {
       const remediation = errorRemediation(error)
+      const file = projectFileOf(error, dirname(entry))
       send({
         type: "startup-error",
-        error: { message: errorMessage(error), ...(remediation ? { remediation } : {}) },
+        error: {
+          message: errorMessage(error),
+          ...(remediation ? { remediation } : {}),
+          ...(file ? { file } : {}),
+        },
       })
       task?.stop()
       if (!reportOnly) await renderCliError(error)
@@ -215,4 +235,29 @@ export async function startDevApp(
     if (!(error instanceof AppPackagesMissingError)) throw error
     return { server: null, warning: error.message.replace("[SixbCustomApp] ", "") }
   }
+}
+
+/**
+ * The project file a startup error points at, relative to the project: the first frame of its
+ * stack inside the project and outside its dependencies, so a broken branch names what to fix.
+ */
+export function projectFileOf(error: unknown, root: string): string | undefined {
+  // A loader's error wraps the module's own: its cause holds the frame inside the project.
+  for (let current = error, depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    const file = projectFileInStack(current.stack, root)
+    if (file) return file
+    current = current.cause
+  }
+  return undefined
+}
+
+function projectFileInStack(stack: string | undefined, root: string): string | undefined {
+  if (!stack) return undefined
+  for (const match of stack.matchAll(/(?:\(|at |file:\/\/)(\/[^():\s]+):\d+/g)) {
+    const path = match[1]!
+    if (!path.startsWith(root + sep) || path.includes(`${sep}node_modules${sep}`)) continue
+    if (path.includes(`${sep}.sixb${sep}`)) continue
+    return relative(root, path).split(sep).join("/")
+  }
+  return undefined
 }

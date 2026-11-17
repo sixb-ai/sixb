@@ -6,6 +6,9 @@ import { assertDevEnv } from "./env"
 export type { DevOptions } from "./dev-runner"
 
 export async function runDev(options: DevOptions = {}) {
+  // The project's configuration can tell a branch runtime from a laptop by it, as the template does
+  // to keep a branch's storage inside its sandbox.
+  if (options.branch !== undefined) process.env.SIXB_BRANCH = options.branch
   if (process.env.SIXB_DEV_CHILD === "1" && process.send) {
     // The parent cannot enforce its deadline after it dies. Arm our own before
     // importing the runner so a stuck import/startup also has a shutdown bound.

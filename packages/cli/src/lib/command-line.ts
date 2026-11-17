@@ -178,7 +178,8 @@ export const CLI_OPTION_DEFINITIONS = {
   },
   branch: {
     syntax: "--branch <name>",
-    summary: "Branch whose pushes deploy (default: the repository's default branch)",
+    summary:
+      "Git branch: for deploy setup, whose pushes deploy (default: the default branch); for dev, the branch this checkout serves",
     kind: "string",
   },
   tail: {
@@ -349,6 +350,7 @@ const commandTree: readonly CommandNode[] = [
       "subagent-concurrency-per-run",
       "app-public-origin",
       "desktop",
+      "branch",
     ],
     repeatable: ["concurrency"],
   }),

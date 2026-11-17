@@ -267,7 +267,9 @@ async function loadOntologyModule(input: {
   } catch (error) {
     const relPath = relative(input.projectRoot, input.modulePath)
     const reason = error instanceof Error ? error.message : String(error)
-    throw new RuntimeError(`Failed to load ontology module '${relPath}': ${reason}`)
+    throw new RuntimeError(`Failed to load ontology module '${relPath}': ${reason}`, {
+      cause: error,
+    })
   }
 }
 

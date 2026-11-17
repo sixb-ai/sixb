@@ -1041,6 +1041,36 @@ describe("split production runtime roles", () => {
     expect(calls).toEqual([])
   })
 
+  // Reproduce: pass every schedule to compileRoutes in `startOrchestratorRuntime`; the cron
+  // workflow gets a route, and with it a worker.
+  test("a branch runtime routes schedules that follow events, and none on the clock", async () => {
+    const daily = defineSchedule("branch-daily").cron("0 2 * * *")
+    const zoneCreated = defineSchedule("branch-zone-created").on(events.object(Zone).created())
+    const host = (schedules: readonly (typeof daily | typeof zoneCreated)[]) =>
+      new SixbHost({
+        id: "cli-branch-cron",
+        ontology: [Zone],
+        broker: new InMemoryBroker(),
+        storage: new InMemoryStorage(),
+        lakeStorage: createLakeStorage(),
+        blobStorage: new InMemoryBlobStorage(),
+        queues: new InMemoryQueues(),
+        schedules: [...schedules],
+        workflows: schedules.map((schedule) =>
+          defineWorkflow(`${schedule.id}-workflow`).input({}).when(schedule).then(workflowStep)
+        ),
+      })
+
+    const clockOnly = await startOrchestratorRuntime(host([daily]), { cron: false })
+    expect(clockOnly.orchestratorWorker).toBeNull()
+    expect(clockOnly.warnings).toEqual([])
+    await clockOnly.stop()
+
+    const following = await startOrchestratorRuntime(host([daily, zoneCreated]), { cron: false })
+    expect(following.orchestratorWorker).not.toBeNull()
+    await following.stop()
+  })
+
   // Reproduce: drop `this.cron` from `SixbHost.startMaintenance`; the timer has nothing
   // to fire for and no occurrence is emitted.
   test("fires cron occurrences on the second, with no scheduler process", async () => {

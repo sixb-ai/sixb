@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
 import { canRunLive } from "../ui/live/can-run-live"
 import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "./desktop"
+import { BRANCH_KEY_ENV, startBranchFront } from "./dev-branch"
 import { DEV_UI_ENV, type DevChildMessage } from "./dev-messages"
 import { watchDevSource } from "./dev-watch"
 import { errorMessage } from "./errors"
@@ -19,6 +20,8 @@ export interface DevReporter {
   line(text: string): void
   message(message: DevChildMessage, pid: number | undefined): void
   restarting(filename: string | undefined): void
+  /** A new dev process is about to start. */
+  starting?(): void
   exited(code: number | null): void
   timedOut(): void
   error(text: string): void
@@ -92,9 +95,11 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
       requestShutdown()
     },
   }
-  const reporter: DevReporter = canRunLive()
-    ? await (await import("../ui/live/dev")).startDevFooter({ root, controls })
-    : plainDevReporter(root)
+  const reporter: DevReporter = options.branch
+    ? startBranchFront({ branch: options.branch, root, ...branchFrontOptions(options) }).reporter
+    : canRunLive()
+      ? await (await import("../ui/live/dev")).startDevFooter({ root, controls })
+      : plainDevReporter(root)
   function terminate(current: NonNullable<typeof child>, signal: NodeJS.Signals) {
     try {
       if (process.platform !== "win32" && current.process.pid) {
@@ -143,6 +148,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
         // All saves before this spawn are already in its fresh module graph.
         pending = false
         clearTimeout(timer)
+        reporter.starting?.()
         const proc = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
           env: {
             ...process.env,
@@ -269,6 +275,33 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
     await shutdown()
     await reporter.stop()
   }
+}
+
+/** Where a branch's front listens, and the key it asks for: the API is one port past it. */
+function branchFrontOptions(options: DevOptions) {
+  const key = process.env[BRANCH_KEY_ENV]
+  if (!key || key.length < 32) {
+    throw new Error(
+      `[SixbDev] sixb dev --branch needs ${BRANCH_KEY_ENV}, at least 32 characters: the key the project's server sends with every request it forwards.`
+    )
+  }
+  if (options.desktop) throw new Error("[SixbDev] A branch runtime has no desktop window.")
+  const port = parsePort(options.port, 3000)
+  return {
+    key,
+    host: options.host ?? "127.0.0.1",
+    port,
+    apiPort: parsePort(options.apiPort, port + 1),
+  }
+}
+
+function parsePort(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  const port = Number(value)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`[SixbDev] '${value}' is not a port.`)
+  }
+  return port
 }
 
 /** Hands the reporter each whole line a stream writes. */

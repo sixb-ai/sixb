@@ -74,6 +74,11 @@ export interface StartSixbRuntimeOptions {
   readonly vectorConcurrency?: number
   readonly subagentConcurrency?: number
   readonly subagentConcurrencyPerRun?: number
+  /**
+   * A branch runtime serves a project under edit: no cron schedule fires, so nothing it runs
+   * starts on its own, and agent turns stay with the project, so it starts no agent worker.
+   */
+  readonly branch?: boolean
 }
 
 export interface RuntimeApiServer {
@@ -168,17 +173,32 @@ export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRu
 }
 
 export async function startOrchestratorRuntime(
-  sixb: LoadedSixbHost
+  sixb: LoadedSixbHost,
+  options: { readonly cron?: boolean } = {}
 ): Promise<RunningOrchestratorRuntime> {
   const projections = getProjectionDispatchDescriptors(sixb)
+  const declared = sixb.definitions.schedules.list()
+  // Without cron, schedules that follow events still route: only the clock is off.
+  const schedules =
+    options.cron === false
+      ? declared.filter((schedule) => schedule.trigger.type !== "cron")
+      : declared
+  const timed = new Set(
+    declared.filter((schedule) => !schedules.includes(schedule)).map((schedule) => schedule.id)
+  )
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
-    schedules: sixb.definitions.schedules.list(),
+    schedules,
     syncs: sixb.definitions.syncs.list(),
     pipelines: sixb.definitions.pipelines.list(),
     projections,
     workflows: sixb.definitions.workflows.list(),
   })
-  const warnings = diagnostics.map(formatRouteDiagnosticWarning)
+  const warnings = diagnostics
+    .filter(
+      (diagnostic) =>
+        diagnostic.type !== "schedule.reference.unknown" || !timed.has(diagnostic.scheduleId)
+    )
+    .map(formatRouteDiagnosticWarning)
   const dispatchers = {
     syncs: new SyncRunDispatcher(sixb),
     pipelines: new PipelineRunDispatcher(sixb),
@@ -309,7 +329,7 @@ export async function startSixbRuntime(
 
     if (options.cohostWorkers) {
       // Constructed here so a configuration error stops startup early; started last, below.
-      if (agentWorkerRequired(sixb)) {
+      if (!options.branch && agentWorkerRequired(sixb)) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: agentRuntimeRequired(sixb.definitions)
             ? requireAgentApiBaseUrl(options.agentApiBaseUrl)
@@ -358,7 +378,7 @@ export async function startSixbRuntime(
         await renderWorker.start()
       }
 
-      orchestratorRuntime = await startOrchestratorRuntime(sixb)
+      orchestratorRuntime = await startOrchestratorRuntime(sixb, { cron: !options.branch })
       orchestratorWorker = orchestratorRuntime.orchestratorWorker
       warnings.push(...orchestratorRuntime.warnings)
     }

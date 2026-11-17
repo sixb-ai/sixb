@@ -31,6 +31,8 @@ export interface DevReadyView {
 export interface DevStartupFailure {
   readonly message: string
   readonly remediation?: string
+  /** The project file the error points at, relative to the project. */
+  readonly file?: string
 }
 
 export type DevChildMessage =
@@ -40,5 +42,7 @@ export type DevChildMessage =
       readonly watchesApp: boolean
       readonly app: { readonly url: string; readonly apiOrigin: string } | null
       readonly view?: DevReadyView
+      /** A branch runtime's definitions manifest hash, for whoever compares it with production. */
+      readonly manifest?: string
     }
   | { readonly type: "startup-error"; readonly error?: DevStartupFailure }

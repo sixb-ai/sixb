@@ -139,6 +139,7 @@ async function main(): Promise<void> {
         subagentConcurrency: getFlag("subagent-concurrency"),
         subagentConcurrencyPerRun: getFlag("subagent-concurrency-per-run"),
         desktop: hasFlag("desktop"),
+        branch: getFlag("branch"),
       })
       break
     }

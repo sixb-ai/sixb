@@ -340,7 +340,9 @@ async function loadModules(
       moduleNamespace = await module.load()
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      throw new RuntimeError(`Failed to load ${module.kind} module '${module.path}': ${reason}`)
+      throw new RuntimeError(`Failed to load ${module.kind} module '${module.path}': ${reason}`, {
+        cause: error,
+      })
     }
 
     const exportedCandidates: unknown[] = []
