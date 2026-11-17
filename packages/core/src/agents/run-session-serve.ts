@@ -1,4 +1,5 @@
 import { captureSixbFailure, createSixbError, withFailureMessage } from "../errors/internal"
+import type { LanguageModelStreamEvent } from "../models/events"
 import type { LanguageModelRequest } from "../models/language-model"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -123,7 +124,26 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
       ref as Parameters<AgentRunSession["models"]["language"]>[0]
     )
     const { providerId, modelId, definition, rateCard, defaultReasoning, maxOutputTokens } = model
-    return { providerId, modelId, definition, rateCard, defaultReasoning, maxOutputTokens }
+    return {
+      providerId,
+      modelId,
+      definition,
+      rateCard,
+      defaultReasoning,
+      maxOutputTokens,
+      ...(model.runsOnComputers === true ? { runsOnComputers: true } : {}),
+    }
+  },
+  "models.recordCall": async (session, [ref, call, events]) => {
+    if (!session.models.recordCall) {
+      throw new Error("[Sixb] This run's session does not record calls made on a computer.")
+    }
+    await session.models.recordCall(
+      ref as Parameters<AgentRunSession["models"]["language"]>[0],
+      call as Omit<LanguageModelRequest, "signal">,
+      events as readonly LanguageModelStreamEvent[]
+    )
+    return null
   },
   "models.webSearch": (session, [request], signal) =>
     session.models.webSearch(

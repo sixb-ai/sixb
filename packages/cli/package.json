@@ -34,6 +34,7 @@
     "@sixb/agent": "workspace:*",
     "@sixb/agent-worker": "workspace:*",
     "@sixb/app": "workspace:^",
+    "@sixb/claude-code": "workspace:^",
     "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:*",
     "@sixb/cli-core": "workspace:^",

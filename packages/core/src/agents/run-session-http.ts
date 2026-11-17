@@ -1,5 +1,5 @@
 import type { FileRef } from "../blob-storage/types"
-import type { LanguageModel, LanguageModelStreamEvent } from "../models"
+import type { LanguageModel, LanguageModelRequest, LanguageModelStreamEvent } from "../models"
 import type {
   AgentRunRecord,
   AgentThreadComputer,
@@ -35,7 +35,16 @@ export interface HttpAgentRunSessionInput<TRun extends AgentRunRecord> {
   readonly run: TRun
   /** Sends a request; defaults to `fetch`. */
   readonly fetch?: (request: Request) => Promise<Response>
+  /**
+   * This computer's own copy of a model that runs on computers (`runsOnComputers`), given what the
+   * project describes of it: its calls are made here and reported to the run. Undefined leaves the
+   * model's calls to the project.
+   */
+  readonly localModel?: (described: DescribedLanguageModel) => LanguageModel | undefined
 }
+
+/** A project's language model as a runner sees it: everything but its calls. */
+export type DescribedLanguageModel = Omit<LanguageModel, "stream">
 
 export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
   input: HttpAgentRunSessionInput<TRun>
@@ -114,8 +123,17 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
           models.set(key, described)
         }
 
-        return httpModel(await described, ref, request, options?.measures !== false)
+        const model = await described
+        const local = model.runsOnComputers === true ? input.localModel?.(model) : undefined
+        if (local) {
+          return computerModel(model, local, (modelCall, events) =>
+            call("models.recordCall", [ref, modelCall, events])
+          )
+        }
+
+        return httpModel(model, ref, request, options?.measures !== false)
       },
+      recordCall: (ref, modelCall, events) => call("models.recordCall", [ref, modelCall, events]),
       // The server searches, with the project's key, and records the call against the run.
       webSearch: (request, signal) => call("models.webSearch", [request], signal),
     },
@@ -250,6 +268,8 @@ export async function claimAgentRunOverHttp(input: {
    */
   readonly computer?: AgentThreadComputer
   readonly fetch?: (request: Request) => Promise<Response>
+  /** See {@link HttpAgentRunSessionInput.localModel}. */
+  readonly localModel?: HttpAgentRunSessionInput<ConversationAgentRunRecord>["localModel"]
 }): Promise<AgentRunSession<ConversationAgentRunRecord> | null> {
   const send = input.fetch ?? ((request: Request) => fetch(request))
   const response = await send(
@@ -292,6 +312,7 @@ export async function claimAgentRunChildOverHttp(
       apiUrl: turn.apiUrl,
       ...claimed,
       ...(turn.fetch === undefined ? {} : { fetch: turn.fetch }),
+      ...(turn.localModel === undefined ? {} : { localModel: turn.localModel }),
     })
   )
 }
@@ -307,6 +328,64 @@ async function result<T>(response: Response): Promise<T> {
   }
   if (body.error) throw decodeWireError(body.error)
   return body.result as T
+}
+
+/**
+ * A model this computer runs itself: each call is made here, and the server records it from the
+ * events reported before its `finish` reaches the reader, as it records a call it makes itself.
+ */
+function computerModel(
+  described: DescribedLanguageModel,
+  local: LanguageModel,
+  record: (
+    call: Omit<LanguageModelRequest, "signal">,
+    events: readonly LanguageModelStreamEvent[]
+  ) => Promise<void>
+): LanguageModel {
+  return {
+    ...described,
+    async stream(request) {
+      const opened = await local.stream(request)
+      return { events: reportedEvents(opened.events, request, record) }
+    },
+  }
+}
+
+async function* reportedEvents(
+  events: AsyncIterable<LanguageModelStreamEvent>,
+  request: LanguageModelRequest,
+  record: (
+    call: Omit<LanguageModelRequest, "signal">,
+    events: readonly LanguageModelStreamEvent[]
+  ) => Promise<void>
+): AsyncIterable<LanguageModelStreamEvent> {
+  // What the record needs: the response's identity and what it used, not what it said.
+  const call = {
+    callId: request.callId,
+    messages: [],
+    tools: [],
+    ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
+  }
+  const reported: LanguageModelStreamEvent[] = [{ type: "stream-start" }]
+  let recorded = false
+
+  try {
+    for await (const event of events) {
+      if (event.type === "response-metadata") reported.push(event)
+      if (event.type === "finish") {
+        recorded = true
+        await record(call, [...reported, event])
+      }
+      yield event
+    }
+  } finally {
+    // A call that ended without finishing is still a call: recorded with its usage unknown.
+    if (!recorded) {
+      await record(call, reported).catch((error: unknown) => {
+        console.error(`[Sixb] A call made on this computer could not be recorded.`, error)
+      })
+    }
+  }
 }
 
 /** A model the server serves: its description here, each call admitted and recorded there. */

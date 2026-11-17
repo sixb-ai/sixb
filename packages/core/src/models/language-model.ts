@@ -147,6 +147,13 @@ export interface LanguageModel {
    */
   readonly webSearch?: WebSearchModel
   /**
+   * A computer that runs an agent turn makes this model's calls itself, with its own copy of the
+   * provider, and the run records what each call used from the computer's report. Only such a
+   * model's calls are recorded from a runner's report: every other call is made, and measured,
+   * where the project runs.
+   */
+  readonly runsOnComputers?: boolean
+  /**
    * The names of the tools its provider runs itself, which every request declares, such as
    * `web_search` from `providerTools`. Sixb checks at startup that none takes a name it gives the
    * Agent's own tools.

@@ -14,7 +14,9 @@ Sixb packages are versioned independently. Each release entry names the packages
   `claudeCode("opus")` is a language model like any other, billed to your Claude plan rather than
   an API key. Sixb keeps running the Agent's prompt, tools and loop; each answer resumes the Claude
   Code session the last one came from, and a conversation it cannot resume starts a new session
-  from a transcript.
+  from a transcript. A turn that runs on a person's computer, in the desktop app or `sixb agent`,
+  calls Claude Code there, billed to their own plan, and the project records what each call used;
+  `createClaudeCode({ computersOnly: true })` keeps every call on people's computers.
 
 ### Upgrade notes
 

@@ -19,6 +19,7 @@ import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import type { Connection } from "../lib/connection"
 import { resolveConfigPath } from "../lib/profiles"
 import { thisComputer, thisComputerId } from "./computer"
+import { computerModel } from "./computer-models"
 import { keepAwake, type ReleaseAwake } from "./keep-awake"
 
 /** How long stopping waits for a running turn to record its end, or the project to answer. */
@@ -93,6 +94,7 @@ export class LocalRunner {
         this.session?.renew()
         for (const listener of this.backgroundListeners) listener()
       },
+      localModel: computerModel,
       openSandbox: ({ workingDirectory, runFiles, credential, signal }) =>
         new LocalSandboxFactory({
           readWritePaths: [runFiles],

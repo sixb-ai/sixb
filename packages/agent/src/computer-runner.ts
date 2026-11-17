@@ -7,8 +7,10 @@ import {
   type AgentRunSession,
   claimAgentRunChildOverHttp,
   claimAgentRunOverHttp,
+  type DescribedLanguageModel,
   type HttpAgentRunSessionInput,
 } from "@sixb/core/internal/agents"
+import type { LanguageModel } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { delay } from "./abort"
 import {
@@ -69,6 +71,12 @@ export interface ComputerRunnerOptions {
    */
   readonly onBackgroundChange?: () => void
   readonly fetch?: (request: Request) => Promise<Response>
+  /**
+   * This computer's own copy of a project model that runs on computers, such as one through the
+   * Claude Code signed in here: the turn's calls to it are made on this computer, and reported to
+   * the project. Undefined, or undefined for a model, leaves its calls to the project.
+   */
+  readonly localModel?: (described: DescribedLanguageModel) => LanguageModel | undefined
 }
 
 /** A thread's background command, as the computer reports it to the web. */
@@ -133,6 +141,7 @@ export class ComputerRunner {
       computer: { ...(await this.options.computer()), folder: this.options.folder },
       leaseExpiresAt: lease(),
       ...(fetch === undefined ? {} : { fetch }),
+      ...(this.options.localModel === undefined ? {} : { localModel: this.options.localModel }),
     })
     if (!session) return false
 
@@ -147,6 +156,7 @@ export class ComputerRunner {
       }),
       run,
       ...(fetch === undefined ? {} : { fetch }),
+      ...(this.options.localModel === undefined ? {} : { localModel: this.options.localModel }),
     }
     const lost = new AbortController()
     const held = new Set<AgentRunSession>([session])

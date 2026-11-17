@@ -115,7 +115,7 @@ export function reportModelCalls(
   onEnd: (event: ModelCallEndEvent) => void | Promise<void>
 ): LanguageModel {
   const { providerId, modelId, definition, costEstimator, rateCard } = model
-  const { defaultReasoning, maxOutputTokens } = model
+  const { defaultReasoning, maxOutputTokens, runsOnComputers } = model
   // Read and bound once: a provider's model keeps its state in private fields.
   return {
     providerId,
@@ -125,6 +125,7 @@ export function reportModelCalls(
     ...(rateCard === undefined ? {} : { rateCard }),
     ...(defaultReasoning === undefined ? {} : { defaultReasoning }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    ...(runsOnComputers === undefined ? {} : { runsOnComputers }),
     ...(model.validateResponseFormat === undefined
       ? {}
       : { validateResponseFormat: model.validateResponseFormat.bind(model) }),

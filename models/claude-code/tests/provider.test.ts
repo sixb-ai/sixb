@@ -16,6 +16,30 @@ describe("claudeCode", () => {
     })
   })
 
+  test("runs on the computer of whoever runs a turn, named after the alias it binds", () => {
+    const model = claudeCode("sonnet")
+
+    expect(model.runsOnComputers).toBe(true)
+    expect(model.definition.name).toBe("Sonnet")
+  })
+
+  test("refuses a call made where the project runs when it runs only on computers", async () => {
+    const provider = createClaudeCode({ computersOnly: true })
+
+    const refused = await provider("opus")
+      .stream({
+        callId: "call-1",
+        messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+      .catch((error: unknown) => error)
+
+    expect(refused).toMatchObject({ code: "computers_only" })
+    // Its model list never starts Claude Code: it is the definitions the project supplies.
+    expect(await provider.catalog.list()).toEqual([])
+  })
+
   test("rejects options it cannot use", () => {
     expect(() => claudeCode(" ")).toThrow("Model id must not be empty")
     expect(() => createClaudeCode({ catalogTtlMs: 0 })).toThrow("catalogTtlMs")

@@ -41,6 +41,8 @@ type ValueSource<T> = T | (() => T)
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
 const CATALOG_TIMEOUT_MS = 30_000
 const ANTHROPIC = { id: "anthropic", name: "Anthropic" } as const
+/** How starting a Claude Code that is not there fails. */
+const MISSING_EXECUTABLE = /ENOENT|not found/i
 
 /** What every model reached through Claude Code takes, whatever its catalog entry says. */
 const CAPABILITIES: ModelCapabilities = {
@@ -70,6 +72,12 @@ export interface ClaudeCodeOptions {
   readonly catalogTtlMs?: number
   /** Definitions supplied here override matching entries from Claude Code's model list. */
   readonly models?: readonly LanguageModelDefinition[]
+  /**
+   * Refuse every call but one a computer makes for a turn it runs, so the project's own processes
+   * never start Claude Code: each person's turns use the Claude Code signed in on their computer.
+   * The model list is then the definitions supplied in `models`.
+   */
+  readonly computersOnly?: boolean
 }
 
 export interface ClaudeCodeModelOptions extends LanguageModelLabel {
@@ -126,6 +134,10 @@ export const claudeCode: ClaudeCodeProvider = createClaudeCode()
 /** How every query starts Claude Code. */
 class ClaudeCodeRuntime {
   constructor(private readonly options: ClaudeCodeOptions) {}
+
+  get computersOnly(): boolean {
+    return this.options.computersOnly === true
+  }
 
   async queryOptions(): Promise<Options> {
     const cwd = this.options.cwd ?? join(tmpdir(), "sixb-claude-code")
@@ -227,6 +239,9 @@ class ClaudeCodeModelCatalog implements ClaudeCodeCatalog {
   }
 
   private async fetchDefinitions(): Promise<readonly LanguageModelDefinition[]> {
+    // Claude Code may not even be installed where the project runs.
+    if (this.runtime.computersOnly) return [...this.supplied.values()]
+
     const abort = new AbortController()
     let release = () => {}
     const idle = new Promise<void>((resolve) => {
@@ -290,11 +305,21 @@ function modelInfoReasoning(info: ModelInfo): ModelReasoningCapabilities | undef
   }
 }
 
+/** Names for the aliases Claude Code resolves to its latest models, before its list is read. */
+const ALIAS_NAMES: Readonly<Record<string, string>> = {
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  fable: "Fable",
+}
+
 function fallbackDefinition(modelId: string): LanguageModelDefinition {
+  const name = ALIAS_NAMES[modelId]
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
     modelId,
+    ...(name === undefined ? {} : { name }),
     publisher: ANTHROPIC,
     via: "Claude Code",
     capabilities: CAPABILITIES,
@@ -306,6 +331,8 @@ class ClaudeCodeLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly defaultReasoning?: ModelReasoningLevel
+  /** A computer that runs a turn calls Claude Code itself, signed in as whoever runs it there. */
+  readonly runsOnComputers = true
 
   constructor(
     private readonly runtime: ClaudeCodeRuntime,
@@ -348,6 +375,14 @@ class ClaudeCodeLanguageModel implements LanguageModel {
 
   async stream(request: LanguageModelRequest): Promise<LanguageModelStream> {
     request.signal.throwIfAborted()
+    if (this.runtime.computersOnly) {
+      throw new ModelProviderError(
+        `${ERROR_PREFIX} '${this.modelId}' runs on the computer of whoever runs the turn, through their Claude Code: run the thread on your computer, in the desktop app or with \`sixb agent\`.`,
+        PROVIDER_ID,
+        this.modelId,
+        { code: "computers_only" }
+      )
+    }
     const issue = modelReasoningSupportIssue(
       this.definition.capabilities.reasoning,
       request.reasoning
@@ -450,8 +485,11 @@ class ClaudeCodeLanguageModel implements LanguageModel {
       )
     } catch (error) {
       if (error instanceof ModelProviderError || request.signal.aborted) throw error
+      const detail = errorMessage(error)
       throw new ModelProviderError(
-        `${ERROR_PREFIX} Claude Code failed: ${errorMessage(error)}`,
+        MISSING_EXECUTABLE.test(detail)
+          ? `${ERROR_PREFIX} Claude Code is not installed here: install it and sign in with \`claude\`, then try again. (${detail})`
+          : `${ERROR_PREFIX} Claude Code failed: ${detail}`,
         PROVIDER_ID,
         this.modelId,
         { cause: error }

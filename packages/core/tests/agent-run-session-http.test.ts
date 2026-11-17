@@ -15,6 +15,7 @@ import {
   describeAgentRunSessionContract,
   seedAgentRun,
 } from "./agent-run-session-contract"
+import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 // The session suite, run on a session a runner reaches over HTTP: claimed as a runner claims, each
 // operation one request to the server's handler, with no network between them.
@@ -111,6 +112,65 @@ describe("a runner's messages", () => {
         part.type === "tool-call" && "outputFile" in part ? part.toolCallId : null
       )
     ).toEqual(["kept", "page", null, null, null])
+    session.close()
+  })
+})
+
+describe("a runner's models", () => {
+  // Guard proof: return httpModel for every model in createHttpAgentRunSession's models.language;
+  // the call then reaches the project's binding, which throws.
+  test("call a model that runs on computers on the runner, and record it at the project", async () => {
+    const { host, storage, run } = await seedAgentRun()
+    const claimed = await claimAgentRunForRunner(host, {
+      run,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    })
+    if (!claimed) throw new Error("Expected the run to be claimed.")
+    const asked: string[] = []
+    const session = createHttpAgentRunSession({
+      apiUrl: "http://sixb.test",
+      runnerToken: claimed.runnerToken,
+      run: claimed.run,
+      fetch: async (request) =>
+        (await serveAgentRunSession(host, request)) ?? new Response(null, { status: 404 }),
+      localModel: (described) => {
+        asked.push(described.modelId)
+        return new MockLanguageModel({
+          providerId: described.providerId,
+          modelId: described.modelId,
+          stream: async () =>
+            streamFromArray([
+              { type: "stream-start" },
+              { type: "text-start", id: "text" },
+              { type: "text-delta", id: "text", delta: "From this computer." },
+              { type: "text-end", id: "text" },
+              { type: "finish", finishReason: "stop", usage: { inputTokens: 9, outputTokens: 4 } },
+            ]),
+        })
+      },
+    })
+
+    const model = await session.models.language({ provider: "test", modelId: "computer-model" })
+    const stream = await model.stream({
+      callId: "call-1",
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      tools: [],
+      signal: new AbortController().signal,
+    })
+    const text: string[] = []
+    for await (const event of stream.events) {
+      if (event.type === "text-delta") text.push(event.delta)
+    }
+    // A model the project calls itself stays the project's, whatever the runner offers.
+    await session.models.language({ provider: "test", modelId: "test-model" })
+
+    expect(text.join("")).toBe("From this computer.")
+    expect(asked).toEqual(["computer-model"])
+    const summary = await storage.aiUsage.summarizeExecution({
+      projectId: run.projectId,
+      executionId: run.executionId,
+    })
+    expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 9 } })
     session.close()
   })
 })
