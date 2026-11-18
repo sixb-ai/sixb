@@ -4243,6 +4243,7 @@ describe("AgentWorker", () => {
     sandbox.runCommand = async (command, args = [], options = {}) => {
       // As Vercel answers: HTTP 400, before any process starts.
       if (options.cwd === missing) {
+        sandbox.commands.push({ command, args, options })
         throw new Error(`failed to start process: chdir ${missing}: no such file or directory`)
       }
       // As bash answers a cd into it.
@@ -4295,7 +4296,7 @@ describe("AgentWorker", () => {
         await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
       ).toMatchObject({ status: "succeeded" })
       expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("ready")
-      expect(sandbox.commands.some((call) => call.options.cwd === missing)).toBe(false)
+      expect(sandbox.commands.filter((call) => call.options.cwd === missing)).toEqual([])
       if (mode === "foreground") expect(toolOutputs.join("")).toContain(notFound)
     } finally {
       await worker.stop()
