@@ -219,7 +219,7 @@ For a blank sandbox:
    `runCommand("bash", ["-lc", script], ...)`. Its `cwd` never reaches the provider: the shell
    changes to it ([login-shell.ts](../src/login-shell.ts)), so a directory that does not exist
    fails the command with bash's message. A provider refuses to start in one, and a refused call
-   leaves a persistent workspace unconfirmed, blocked until it is recreated.
+   leaves a persistent workspace unconfirmed, blocked until its owner resumes or recreates it.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 `bash` with `run_in_background` starts a command that outlives its call
