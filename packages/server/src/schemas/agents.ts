@@ -656,7 +656,10 @@ export const PostAgentMessageResponseSchema = z.object({
   item: AgentInboxItemSchema.optional(),
 })
 
-export const EditAgentMessageResponseSchema = PostAgentMessageResponseSchema
+/** An edit always starts the turn that answers the edited message. */
+export const EditAgentMessageResponseSchema = z.object({
+  run: AgentRunSchema,
+})
 
 export const CancelAgentRunResponseSchema = z.object({
   run: AgentRunSchema,
