@@ -13,7 +13,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useStat
 import { PersonAvatar } from "../../artifacts/person-avatar"
 import { useCurrentUser } from "../../session"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
-import { usePrefetchAgentThread } from "../hooks/thread-queries"
+import { markThreadReadsStale, usePrefetchAgentThread } from "../hooks/thread-queries"
 import { useAgentThreadLists } from "../hooks/use-thread-lists"
 import { useAgentMessages } from "../i18n"
 import { personName, threadOwner } from "../sharing"
@@ -51,10 +51,16 @@ export function AgentThreads({
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
   const refreshWaiting = () =>
     queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
+  // A thread a row prefetched keeps its reads until it opens: a change, or a gap in the feed, marks
+  // them stale so that opening it reads it again.
   const activity = useAgentActivityStream({
-    onActivity: () => void refreshThreads(),
+    onActivity: (event) => {
+      markThreadReadsStale(queryClient, event.threadId)
+      void refreshThreads()
+    },
     onApprovalActivity: () => void refreshWaiting(),
     onSubscribed: () => {
+      markThreadReadsStale(queryClient)
       void refreshThreads()
       void refreshWaiting()
     },

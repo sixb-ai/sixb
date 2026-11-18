@@ -105,7 +105,7 @@ import type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "../types"
-import { threadQueryOptions } from "./thread-queries"
+import { markThreadReadsStale, threadQueryOptions } from "./thread-queries"
 import {
   ComputerUnavailableError,
   type NewThreadPlaceBody,
@@ -267,6 +267,8 @@ export function useAgentConversation({
         return
       }
 
+      // Another thread may hold reads a prefetch or an earlier visit left: opening it reads again.
+      if (event.threadId !== threadId) markThreadReadsStale(queryClient, event.threadId)
       void refreshThreads()
     },
     // A held call changed: its card, and the thread list's count of what waits for the reader. Its
@@ -287,6 +289,7 @@ export function useAgentConversation({
     },
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
+      markThreadReadsStale(queryClient)
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
       void queryClient.invalidateQueries({ queryKey: listAgentComputersQueryKey() })
       void (threadId === null ? refreshThreads() : refreshThread(threadId))

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, jest, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, expect, jest, test } from "bun:test"
 import { client } from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -37,15 +37,59 @@ const originalConfig = client.getConfig()
 // Generated query keys carry the client's base URL, so it is set before any key is built.
 client.setConfig({ baseUrl: "https://api.sixb.test" })
 
+/** Sockets the app opens; a test plays the server by calling their handlers. */
+const sockets: FakeSocket[] = []
+const previousWebSocket = Object.getOwnPropertyDescriptor(globalThis, "WebSocket")
+
+class FakeSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSING = 2
+  static readonly CLOSED = 3
+  readyState = FakeSocket.CONNECTING
+  readonly sent: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { readonly data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor() {
+    sockets.push(this)
+  }
+
+  send(message: string): void {
+    this.sent.push(message)
+  }
+
+  close(): void {
+    this.readyState = FakeSocket.CLOSED
+  }
+
+  addEventListener(): void {}
+
+  removeEventListener(): void {}
+}
+
+beforeAll(() => {
+  Object.defineProperty(globalThis, "WebSocket", {
+    configurable: true,
+    writable: true,
+    value: FakeSocket,
+  })
+})
+
 afterEach(() => {
   jest.useRealTimers()
   focusManager.setFocused(undefined)
   cleanup()
+  sockets.length = 0
   client.setConfig({ fetch: originalConfig.fetch })
 })
 
 afterAll(() => {
   client.setConfig({ baseUrl: originalConfig.baseUrl })
+  if (previousWebSocket) Object.defineProperty(globalThis, "WebSocket", previousWebSocket)
+  else Reflect.deleteProperty(globalThis, "WebSocket")
 })
 
 const listed: AgentThread = {
@@ -73,7 +117,8 @@ function serve(thread: AgentThread = listed): string[] {
     const url = new URL(input instanceof Request ? input.url : String(input))
     requests.push(`${url.pathname}${url.search}`)
     const body = (() => {
-      if (url.pathname === "/api/agent-threads/thr_1") return thread
+      const read = /^\/api\/agent-threads\/([^/]+)$/.exec(url.pathname)
+      if (read) return { ...thread, id: read[1] }
       if (url.pathname.endsWith("/messages"))
         return { messages: [], authors: [], hasMore: false, total: 0 }
       if (url.pathname.endsWith("/runs")) return { runs: [], hasMore: false, total: 0 }
@@ -127,6 +172,53 @@ async function prefetched(queryClient: QueryClient, threadId: string) {
     }
   })
   return reads
+}
+
+/** Plays the server on the activity feed: its socket opens and subscribes. */
+async function subscribeActivity() {
+  await act(async () => {
+    for (const socket of sockets) socket.onopen?.()
+  })
+  const feed = sockets.find((socket) =>
+    socket.sent.some((sent) => sent.includes('"subscribe.activity"'))
+  )
+  if (!feed) throw new Error("Nothing opened the activity feed.")
+
+  const deliver = (message: object) =>
+    act(() => feed.onmessage?.({ data: JSON.stringify(message) }))
+  deliver({ type: "subscribed.activity" })
+
+  return {
+    /** A run in this thread ended, as the feed reports it. */
+    runEnded: (threadId: string) =>
+      deliver({
+        type: "activity",
+        event: {
+          schemaVersion: 1,
+          type: "agent.run.activity",
+          projectId: "demo",
+          runId: `run_${threadId}`,
+          threadId,
+          status: "succeeded",
+          attempt: 0,
+          occurredAt: "2026-11-14T10:05:00.000Z",
+        },
+      }),
+    /** The feed came back after a gap, and subscribed again. */
+    resubscribed: () => deliver({ type: "subscribed.activity" }),
+  }
+}
+
+/** Whether each of a thread's reads is marked stale, and whether any is being read. */
+function readsState(queryClient: QueryClient, threadId: string) {
+  const reads = threadQueryOptions(threadId)
+  const states = [reads.thread, reads.messages, reads.runs].map((read) =>
+    queryClient.getQueryState(read.queryKey)
+  )
+  return {
+    stale: states.map((state) => state?.isInvalidated),
+    reading: states.some((state) => state?.fetchStatus === "fetching"),
+  }
 }
 
 /** Opens a thread with the conversation the app's chat runs on. */
@@ -251,4 +343,49 @@ test("reads a shared thread again when the window comes back, however recent its
   })
 
   await waitFor(() => expect(threadReads()).toHaveLength(2))
+})
+
+// A thread a row prefetched keeps its fresh reads until it opens, and nothing reads them again by
+// itself. A change the feed reports, or a gap in the feed, marks them stale, reading nothing, so
+// that the open reads them. Removal proof: drop markThreadReadsStale from the thread list's
+// onActivity, or from its onSubscribed; the reads stay fresh and the open shows them as they were.
+test("the thread list marks a prefetched thread stale when the feed reports a change or a gap", async () => {
+  serve()
+  const queryClient = signedIn()
+  render(<AgentThreads onSelectThread={() => {}} onNewThread={() => {}} />, {
+    wrapper: wrapper(queryClient),
+  })
+  const feed = await subscribeActivity()
+  await prefetched(queryClient, "thr_1")
+
+  feed.runEnded("thr_2")
+  expect(readsState(queryClient, "thr_1")).toEqual({ stale: [false, false, false], reading: false })
+
+  feed.runEnded("thr_1")
+  expect(readsState(queryClient, "thr_1")).toEqual({ stale: [true, true, true], reading: false })
+
+  await prefetched(queryClient, "thr_1")
+  await waitFor(() => expect(readsState(queryClient, "thr_1").stale).toEqual([false, false, false]))
+  feed.resubscribed()
+  expect(readsState(queryClient, "thr_1")).toEqual({ stale: [true, true, true], reading: false })
+})
+
+// The open conversation hears of every thread's runs too, and marks another thread's reads the
+// same way. Removal proof: drop markThreadReadsStale from the conversation's onActivity, or from
+// its onSubscribed; the other thread's reads stay fresh.
+test("an open conversation marks another thread it has read stale when the feed reports a change or a gap", async () => {
+  serve()
+  const queryClient = signedIn()
+  open(queryClient, "thr_1")
+  const feed = await subscribeActivity()
+  await prefetched(queryClient, "thr_2")
+  expect(readsState(queryClient, "thr_2")).toEqual({ stale: [false, false, false], reading: false })
+
+  feed.runEnded("thr_2")
+  expect(readsState(queryClient, "thr_2")).toEqual({ stale: [true, true, true], reading: false })
+
+  await prefetched(queryClient, "thr_2")
+  await waitFor(() => expect(readsState(queryClient, "thr_2").stale).toEqual([false, false, false]))
+  feed.resubscribed()
+  expect(readsState(queryClient, "thr_2")).toEqual({ stale: [true, true, true], reading: false })
 })
