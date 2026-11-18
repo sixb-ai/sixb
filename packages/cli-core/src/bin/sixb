@@ -3,6 +3,31 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# In a checked-out Sixb project, a command this CLI doesn't have (`dev`, `env`, `check`, `build`...)
+# belongs to the project's own `sixb`, at the version the project pins: hand it the call unchanged.
+# Its own commands stay here, talking to the instance the run belongs to. Keep this list in step
+# with src/main.ts; tests/sandbox-cli.test.ts checks it.
+case "${1:-}" in
+  "" | -h | --help | help | --version | version | status | context | memory | history) ;;
+  project | ontology | objects | telemetry | actions | action-runs | files) ;;
+  workflows | workflow-runs | users | artifacts | models | datasets) ;;
+  syncs | sync-runs | pipelines | pipeline-runs) ;;
+  *)
+    dir=$(pwd)
+    while :; do
+      project_cli="$dir/node_modules/.bin/sixb"
+      if [ -x "$project_cli" ] && [ "$dir/node_modules/.bin" != "$script_dir" ]; then
+        exec "$project_cli" "$@"
+      fi
+      if [ "$dir" = / ]; then
+        break
+      fi
+      dir=$(dirname -- "$dir")
+    done
+    ;;
+esac
+
 artifact="$script_dir/../lib/sixb.mjs"
 if [ ! -f "$artifact" ]; then
   artifact="$script_dir/../generated/sixb.mjs"

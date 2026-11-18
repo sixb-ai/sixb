@@ -249,6 +249,9 @@ Artifact comments:
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
 
+In a Sixb project checked out here, other commands (\`sixb dev\`, \`sixb env pull\`, \`sixb check\`,
+\`sixb typegen\`) run the project's own sixb, at the version it pins.
+
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
 function renderInstanceHelp() {

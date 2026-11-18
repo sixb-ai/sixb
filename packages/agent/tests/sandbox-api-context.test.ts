@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -182,5 +183,60 @@ describe("the run's API access", () => {
     }).catch((error: unknown) => error)
 
     expect(String(error)).toContain("has no credentialedUrl")
+  })
+})
+
+describe("the sixb on a sandboxed command's PATH", () => {
+  const SHELL_TIMEOUT_MS = 5_000
+
+  // Guard proof: make the bash-env bootstrap export PATH="$SIXB_BIN_DIR:$PATH" unconditionally, as
+  // before; a nested shell under `bun run` finds the agent's sixb instead of the project's.
+  test("is the agent's in a command, and the project's in a script that put its own first", async () => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-bash-env-")))
+    const { env } = await prepareAgentSandboxApiContext({
+      sandbox: new LocalBashSandbox(root),
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      apiBaseUrl: "http://gateway.invalid",
+      projectId: "bash-env",
+      runId: "run_1",
+      skills: [],
+      ontologyFiles: [],
+    })
+    const binDir = env.SIXB_BIN_DIR
+    const bashEnv = env.BASH_ENV
+    if (!binDir || !bashEnv) throw new Error("Expected SIXB_BIN_DIR and BASH_ENV.")
+    // Sandboxes install the launcher as 0755; this test sandbox writes files without their mode.
+    chmodSync(join(binDir, "sixb"), 0o755)
+
+    const projectBin = join(root, "node_modules/.bin")
+    mkdirSync(projectBin, { recursive: true })
+    writeFileSync(join(projectBin, "sixb"), "#!/bin/sh\n", { mode: 0o755 })
+
+    // A command the worker runs: its PATH doesn't have the CLI yet.
+    expect(await whichSixb("/usr/bin:/bin")).toBe(join(binDir, "sixb"))
+
+    // A script `bun run` starts: it put the project's bin first, ahead of the inherited CLI.
+    expect(await whichSixb(`${projectBin}:${binDir}:/usr/bin:/bin`)).toBe(join(projectBin, "sixb"))
+
+    async function whichSixb(path: string): Promise<string> {
+      const shell = Bun.spawn({
+        cmd: ["bash", "-c", "command -v sixb"],
+        env: { PATH: path, SIXB_BIN_DIR: binDir ?? "", BASH_ENV: bashEnv ?? "" },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const killTimer = setTimeout(() => shell.kill("SIGKILL"), SHELL_TIMEOUT_MS)
+      try {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          shell.exited,
+          new Response(shell.stdout).text(),
+          new Response(shell.stderr).text(),
+        ])
+        expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+        return stdout.trim()
+      } finally {
+        clearTimeout(killTimer)
+      }
+    }
   })
 })

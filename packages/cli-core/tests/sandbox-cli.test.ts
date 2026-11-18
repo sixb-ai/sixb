@@ -1,7 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { INSTANCE_COMMANDS } from "../src"
 import {
   type CliResult,
   runSandboxCliContractSuite,
@@ -182,4 +183,86 @@ describe("Sixb sandbox CLI generated artifact", () => {
       await rm(tempDir, { recursive: true, force: true })
     }
   })
+})
+
+describe("Sixb sandbox CLI launcher in a Sixb project", () => {
+  const LAUNCH_TIMEOUT_MS = 5_000
+
+  // What src/main.ts answers itself. Every other command belongs to a project's own `sixb`.
+  const SANDBOX_COMMANDS = [
+    ...["--help", "-h", "help", "--version", "version"],
+    ...["status", "context", "memory", "history"],
+    ...INSTANCE_COMMANDS,
+  ]
+
+  // Guard proof: drop the `*)` hand-off from src/bin/sixb; `dev` and `env pull` reach the sandbox
+  // CLI. Drop a command from the launcher's list; that command reaches the project's CLI.
+  test("hands the project's commands to its own sixb and keeps its own", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-project-"))
+    try {
+      // The sandbox's layout: bin/sixb runs ../lib/sixb.mjs. A stub bundle names who answered.
+      await mkdir(join(tempDir, "agent", "bin"), { recursive: true })
+      await mkdir(join(tempDir, "agent", "lib"), { recursive: true })
+      await symlink(launcherPath, join(tempDir, "agent", "bin", "sixb"))
+      await writeFile(
+        join(tempDir, "agent", "lib", "sixb.mjs"),
+        'console.log(["sandbox", ...process.argv.slice(2)].join("\\n"))\n'
+      )
+
+      const projectBin = join(tempDir, "project", "node_modules", ".bin")
+      await mkdir(projectBin, { recursive: true })
+      await mkdir(join(tempDir, "project", "app"), { recursive: true })
+      await mkdir(join(tempDir, "elsewhere"), { recursive: true })
+      await writeFile(join(projectBin, "sixb"), "#!/bin/sh\nprintf '%s\\n' project \"$@\"\n")
+      await chmod(join(projectBin, "sixb"), 0o755)
+
+      const run = (cwd: string, args: readonly string[]) =>
+        launch(join(tempDir, "agent", "bin", "sixb"), join(tempDir, cwd), args)
+
+      const own = await Promise.all(
+        [[], ...SANDBOX_COMMANDS.map((command) => [command])].map((args) =>
+          run("project/app", args)
+        )
+      )
+      expect(own.map((output) => output[0])).toEqual(own.map(() => "sandbox"))
+
+      // From a subdirectory too, with every argument passed as it was.
+      expect(await run("project/app", ["dev"])).toEqual(["project", "dev"])
+      expect(await run("project/app", ["env", "set", "NAME", "a b"])).toEqual([
+        "project",
+        "env",
+        "set",
+        "NAME",
+        "a b",
+      ])
+      expect(await run("project", ["check"])).toEqual(["project", "check"])
+
+      // Without a project, the sandbox CLI answers, and reports the unknown command.
+      expect(await run("elsewhere", ["dev"])).toEqual(["sandbox", "dev"])
+    } finally {
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  async function launch(launcher: string, cwd: string, args: readonly string[]): Promise<string[]> {
+    const child = Bun.spawn({
+      cmd: [launcher, ...args],
+      cwd,
+      env: { PATH: process.env.PATH ?? "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const killTimer = setTimeout(() => child.kill("SIGKILL"), LAUNCH_TIMEOUT_MS)
+    try {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect({ args, exitCode, stderr }).toEqual({ args, exitCode: 0, stderr: "" })
+      return stdout.trimEnd().split("\n")
+    } finally {
+      clearTimeout(killTimer)
+    }
+  }
 })

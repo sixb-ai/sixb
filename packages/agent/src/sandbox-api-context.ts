@@ -130,12 +130,18 @@ export async function prepareAgentSandboxApiContext(
     { path: join(libDir, "search.mjs"), contents: SEARCH_SCRIPT_SOURCE, mode: 0o644 },
     { path: runContextPath, contents: runContext },
     { path: runtimeProbePath, contents: "first\nsixb-runtime-probe\nthird\n", mode: 0o644 },
+    // Bash reads this file in every non-interactive shell, nested ones included. Adding the CLI only
+    // when PATH lacks it leaves a nested shell's PATH as its parent ordered it: `bun run <script>`
+    // puts `node_modules/.bin` first, so a project's own `sixb` keeps running its scripts.
     {
       path: bashEnvPath,
       contents: [
         "# Installed by Sixb for every sandboxed bash command.",
         `if [ -n "\${SIXB_BIN_DIR:-}" ]; then`,
-        '  export PATH="$SIXB_BIN_DIR:$PATH"',
+        '  case ":$PATH:" in',
+        '    *":$SIXB_BIN_DIR:"*) ;;',
+        '    *) export PATH="$SIXB_BIN_DIR:$PATH" ;;',
+        "  esac",
         "fi",
         "export SIXB_BASH_ENV_READY=1",
         "",
