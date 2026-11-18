@@ -117,6 +117,11 @@ export interface ListSyncRunsInput {
   readonly syncIds?: readonly string[]
   /** Runs of this connection. `null` lists the runs that read no single connection. */
   readonly connectionId?: string | null
+  /**
+   * The connections whose runs are listed. Runs of any other connection are left out; runs that
+   * read no single connection always stay. Omitted, nothing is left out.
+   */
+  readonly visibleConnectionIds?: readonly string[]
   readonly datasetId?: string
   readonly statuses?: readonly SyncRunStatus[]
   readonly startedAfter?: Date
@@ -135,10 +140,22 @@ export interface ListSyncRunsResult {
 export interface ListLatestSyncRunsInput {
   readonly projectId: string
   readonly syncIds: readonly string[]
+  /**
+   * The connections whose runs are listed. Runs of any other connection are left out; runs that
+   * read no single connection always stay. Omitted, nothing is left out.
+   */
+  readonly visibleConnectionIds?: readonly string[]
 }
 
 export interface ListLatestSyncRunsResult {
   readonly runs: readonly SyncRunRecord[]
+}
+
+export interface ListLatestSyncConnectionRunsInput {
+  readonly projectId: string
+  readonly syncIds: readonly string[]
+  /** Only these connections. Omitted, every connection of the syncs. */
+  readonly connectionIds?: readonly string[]
 }
 
 export interface SyncRunStorage {
@@ -160,4 +177,8 @@ export interface SyncRunStorage {
   getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null>
   list(input: ListSyncRunsInput): Promise<ListSyncRunsResult>
   listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult>
+  /** The latest run of each sync and connection, among runs that read one connection. */
+  listLatestByConnection(
+    input: ListLatestSyncConnectionRunsInput
+  ): Promise<ListLatestSyncRunsResult>
 }

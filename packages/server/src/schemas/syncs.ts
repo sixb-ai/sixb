@@ -67,6 +67,45 @@ export const SyncRunSchema = z.object({
   error: SyncRunFailureSchema.optional(),
 })
 
+const SyncAccountConnectionSchema = z.object({
+  id: z.string(),
+  owner: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("project") }),
+    z.object({ type: z.literal("user"), id: z.string() }),
+  ]),
+  slot: z.string(),
+  account: z.object({ id: z.string(), label: z.string() }),
+})
+
+/** One connected account of an OAuth connector, and the latest run of each of its syncs. */
+export const ConnectorAccountSchema = z.object({
+  connection: SyncAccountConnectionSchema,
+  latestRuns: z.array(SyncRunSchema),
+})
+
+export const ConnectorAccountListResponseSchema = z.object({
+  accounts: z.array(ConnectorAccountSchema),
+})
+
+export const ConnectorAccountsParamsSchema = z.object({
+  connectorId: z.string().min(1),
+})
+
+/** Where a sync of an OAuth connector's accounts stand, by the latest run of each. */
+const SyncAccountSummarySchema = z.object({
+  total: z.number(),
+  /** Their latest run is queued or running. */
+  running: z.number(),
+  /** Their latest run failed because the account needs reconnecting. */
+  needsReconnecting: z.number(),
+  /** Their latest run failed for any other reason. */
+  failing: z.number(),
+  /** Their latest run succeeded. */
+  synced: z.number(),
+  /** When the most recent of those successful runs finished. */
+  lastSyncedAt: z.string().optional(),
+})
+
 export const SyncSchema = z.object({
   id: z.string(),
   mode: SyncModeSchema,
@@ -80,6 +119,17 @@ export const SyncSchema = z.object({
   }),
   triggers: z.array(SyncTriggerSchema),
   latestRun: SyncRunSchema.nullable(),
+  /** On a sync of an OAuth connector: the accounts the caller may see. */
+  accounts: SyncAccountSummarySchema.optional(),
+})
+
+export const ConnectionSyncRunsParamsSchema = z.object({
+  connectorId: z.string().min(1),
+  connectionId: z.string().min(1),
+})
+
+export const ConnectionSyncRunsResponseSchema = z.object({
+  runs: z.array(SyncRunSchema),
 })
 
 export const SyncRunListResponseSchema = z.object({

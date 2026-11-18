@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isSixbApiError } from "../api"
 import { useSixbProviderClient } from "../client-provider"
 import {
+  listConnectorConnectionSyncRunsOptions,
   listPendingConnectorConnectionRunsOptions,
   listPendingConnectorConnectionRunsQueryKey,
 } from "../generated/@tanstack/react-query.gen"
+import type { ListConnectorConnectionSyncRunsResponse } from "../generated/types.gen"
 import {
   useConnectConnector,
   useDisconnectConnector,
@@ -24,6 +26,7 @@ import {
 const CONNECTOR_CALLBACK_CONNECTOR_PARAM = "connectionConnectorId"
 const CONNECTOR_CALLBACK_RUN_PARAM = "connectionRunId"
 const RUN_POLL_INTERVAL_MS = 1_000
+const SYNC_POLL_INTERVAL_MS = 5_000
 
 interface ConnectorConnectionCallback {
   readonly connectorId: string
@@ -65,6 +68,17 @@ export interface ConnectorConnectionFailure {
   readonly cause: unknown
 }
 
+/** How a connection's syncs last went, across every sync of its connector. */
+export interface ConnectorConnectionSync {
+  /**
+   * `"syncing"` while a sync of the connection is queued or running, `"failed"` when a sync's latest
+   * run failed, and `"synced"` otherwise.
+   */
+  readonly status: "syncing" | "synced" | "failed"
+  /** When that run started, for `"syncing"`, or finished. ISO 8601. */
+  readonly at: string
+}
+
 export interface ConnectorAccountSelectionOptions {
   readonly replace?: boolean
 }
@@ -78,6 +92,8 @@ export interface UseConnectorConnectionResult {
   readonly canConnect: boolean
   readonly isPending: boolean
   readonly selectedAccountId: string | undefined
+  /** How the connection's syncs last went. Undefined before its first sync. */
+  readonly sync: ConnectorConnectionSync | undefined
   connect(): Promise<void>
   selectAccount(accountId: string, options?: ConnectorAccountSelectionOptions): Promise<void>
   disconnect(): Promise<void>
@@ -145,6 +161,16 @@ export function useConnectorConnection({
     refetchInterval: (query) => (isRunInProgress(query.state.data) ? RUN_POLL_INTERVAL_MS : false),
   })
   const resumedRun = runQuery.data && fillsSlot(runQuery.data) ? runQuery.data : undefined
+  const syncRunsQuery = useQuery({
+    ...listConnectorConnectionSyncRunsOptions({
+      client: providerClient,
+      path: { connectorId, connectionId: connection?.id ?? "" },
+    }),
+    enabled: connection !== undefined,
+    // Polling only while a sync runs: its end is what the person is waiting to see.
+    refetchInterval: (query) =>
+      summarizeSync(query.state.data?.runs)?.status === "syncing" ? SYNC_POLL_INTERVAL_MS : false,
+  })
   const resolvedReturnTo = returnTo ?? connectorConnectionReturnTo()
 
   const connectMutation = useConnectConnector({
@@ -272,6 +298,7 @@ export function useConnectorConnection({
       }
     }
     await refreshConnectionsAndConsumeCallback(completedCallback)
+    if (connection) await syncRunsQuery.refetch()
   }
 
   function dismiss(): void {
@@ -329,6 +356,7 @@ export function useConnectorConnection({
     canConnect,
     isPending: status === "loading" || status === "authorizing" || mutationPending,
     selectedAccountId: selectMutation.variables?.accountId,
+    sync: connection ? summarizeSync(syncRunsQuery.data?.runs) : undefined,
     connect,
     selectAccount,
     disconnect,
@@ -337,6 +365,37 @@ export function useConnectorConnection({
     dismiss,
     resetError,
   }
+}
+
+type ConnectionSyncRun = ListConnectorConnectionSyncRunsResponse["runs"][number]
+
+/** One status for every sync of a connection: running first, then any failure, then the last success. */
+function summarizeSync(
+  runs: readonly ConnectionSyncRun[] | undefined
+): ConnectorConnectionSync | undefined {
+  const latest = (status: "syncing" | "synced" | "failed", matching: ConnectionSyncRun[]) => {
+    const at = matching
+      .map((run) => (status === "syncing" ? (run.startedAt ?? run.queuedAt) : run.finishedAt))
+      .filter((value): value is string => value !== undefined)
+      .sort()
+      .at(-1)
+    return at === undefined ? undefined : { status, at }
+  }
+  const all = runs ?? []
+  return (
+    latest(
+      "syncing",
+      all.filter((run) => run.status === "queued" || run.status === "running")
+    ) ??
+    latest(
+      "failed",
+      all.filter((run) => run.status === "failed")
+    ) ??
+    latest(
+      "synced",
+      all.filter((run) => run.status === "succeeded")
+    )
+  )
 }
 
 export function isConnectorReplacementRequired(error: unknown): boolean {

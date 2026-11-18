@@ -17,6 +17,8 @@ export async function queryLatestRunsByOwnerId<TRow>(
     readonly selectList?: PgLatestRunSelectList
     /** A status that never counts as the latest run, such as a run made stale by a newer one. */
     readonly excludedStatus?: string
+    /** One more condition a row must meet to count. `bind` adds a parameter, named as it returns. */
+    readonly filter?: (bind: (value: SqlParameter) => string) => string
   } & PgLatestRunTarget
 ): Promise<readonly TRow[]> {
   const ownerIds = [...new Set(input.ownerIds)]
@@ -31,6 +33,11 @@ export async function queryLatestRunsByOwnerId<TRow>(
     parameters.push(input.excludedStatus)
     statusFilter = ` AND status <> $${parameters.length}`
   }
+  const bind = (value: SqlParameter) => {
+    parameters.push(value)
+    return `$${parameters.length}`
+  }
+  const filter = input.filter === undefined ? "" : ` AND ${input.filter(bind)}`
   const orderColumn =
     input.tableName === "sync_runs" ||
     input.tableName === "pipeline_runs" ||
@@ -41,7 +48,7 @@ export async function queryLatestRunsByOwnerId<TRow>(
     `
       SELECT DISTINCT ON (${input.ownerColumn}) ${input.selectList ?? "*"}
       FROM ${input.tableName}
-      WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})${statusFilter}
+      WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})${statusFilter}${filter}
       ORDER BY ${input.ownerColumn}, ${orderColumn} DESC, id DESC
     `,
     parameters

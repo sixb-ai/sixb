@@ -12,6 +12,7 @@ import type {
   ConfirmRunExecutionInput,
   ExecutionStorage,
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListLostRunsInput,
@@ -323,6 +324,12 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       args.push(input.connectionId)
     }
 
+    if (input.visibleConnectionIds) {
+      const visible = visibleConnectionsFilter(input.visibleConnectionIds)
+      whereClauses.push(visible.clause)
+      args.push(...visible.args)
+    }
+
     if (input.datasetId) {
       whereClauses.push("dataset_id = ?")
       args.push(input.datasetId)
@@ -355,6 +362,9 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       ownerIds: input.syncIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.sync_id,
+      ...(input.visibleConnectionIds === undefined
+        ? {}
+        : { filter: visibleConnectionsFilter(input.visibleConnectionIds) }),
     })
 
     return {
@@ -362,9 +372,50 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     }
   }
 
+  async listLatestByConnection(
+    input: ListLatestSyncConnectionRunsInput
+  ): Promise<ListLatestSyncRunsResult> {
+    if (input.syncIds.length === 0 || input.connectionIds?.length === 0) return { runs: [] }
+
+    const marks = (values: readonly string[]) => values.map(() => "?").join(", ")
+    const connectionFilter =
+      input.connectionIds === undefined
+        ? "connection_id IS NOT NULL"
+        : `connection_id IN (${marks(input.connectionIds)})`
+    const rows = this.db
+      .query(
+        `
+          SELECT * FROM (
+            SELECT
+              *,
+              ROW_NUMBER() OVER (
+                PARTITION BY sync_id, connection_id
+                ORDER BY COALESCE(started_at, queued_at) DESC, id DESC
+              ) AS sixb_latest_rank
+            FROM sync_runs
+            WHERE project_id = ? AND sync_id IN (${marks(input.syncIds)}) AND ${connectionFilter}
+          )
+          WHERE sixb_latest_rank = 1
+        `
+      )
+      .all(input.projectId, ...input.syncIds, ...(input.connectionIds ?? [])) as DatabaseRow[]
+
+    return { runs: rows.map(rowToSyncRunRecord) }
+  }
+
   close(): void {
     closeSqliteStoreConnection(this.connection)
   }
+}
+
+/** `visibleConnectionIds` as a condition: runs of those connections, and runs that read none. */
+function visibleConnectionsFilter(connectionIds: readonly string[]) {
+  const clause =
+    connectionIds.length === 0
+      ? "connection_id IS NULL"
+      : `(connection_id IS NULL OR connection_id IN (${connectionIds.map(() => "?").join(", ")}))`
+
+  return { clause, args: connectionIds }
 }
 
 function staleExecution(id: string): SyncRunError {

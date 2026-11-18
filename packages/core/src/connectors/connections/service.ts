@@ -269,6 +269,15 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   async listExecutionConnections<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<readonly ConnectorConnectionRecord[]> {
+    const connections = await this.listAllConnections(definition)
+    const connected = connections.filter((connection) => connection.status === "connected")
+    return this.withoutSuspendedOwners(connected)
+  }
+
+  /** Every connection of the connector, whatever its status: none is ever deleted. */
+  async listAllConnections<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<readonly ConnectorConnectionRecord[]> {
     this.assertOAuthRegistered(definition)
     const connections = await withConnectorStorageBoundary(
       "Connector connections could not be listed.",
@@ -278,9 +287,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
           connectorId: definition.id,
         })
     )
-    const connected = connections.filter((connection) => connection.status === "connected")
-    const readable = await this.withoutSuspendedOwners(connected)
-    return [...readable].sort((left, right) => left.id.localeCompare(right.id))
+    return [...connections].sort((left, right) => left.id.localeCompare(right.id))
   }
 
   /**

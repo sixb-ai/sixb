@@ -20,6 +20,7 @@ import {
   createTestActionExecution,
   createTestAutomaticWorkflowExecution,
   createTestSixb,
+  queueTestSyncRun,
 } from "../src/testing"
 import {
   callbackUrl,
@@ -352,6 +353,38 @@ async function connectAdaAndBen(
   }
 }
 
+/** A manager fills the project's slot, beside Ada's and Ben's. */
+async function connectProjectAccount(
+  harness: ReturnType<typeof createHarness>,
+  dependencies: ReturnType<typeof createTestRuntimeDeps>,
+  projectId: string
+): Promise<void> {
+  const process = requireConnectionProcess(
+    new ConnectorService(projectId, [harness.connector], {
+      storage: dependencies.storage,
+      credentialProtector: harness.protector,
+    })
+  )
+  const command = managementCommand("another-session", { principalId: "user-a", projectId })
+
+  const started = await process.startAuthorization(command, connectorId, {
+    owner: projectOwner,
+    slot: "default",
+    redirectUri: callbackUrl,
+  })
+  const { authorizationId } = await process.completeAuthorization(command, connectorId, {
+    state: new URL(started.authorizationUrl).searchParams.get("state")!,
+    code: "authorization-code",
+    redirectUri: callbackUrl,
+  })
+  await process.selectAccount(command, connectorId, {
+    authorizationId,
+    accountId: "account-b",
+    owner: projectOwner,
+    slot: "default",
+  })
+}
+
 describe("personal connections in actions and workflows", () => {
   const projectId = "default"
 
@@ -634,10 +667,13 @@ describe("sync runs people request", () => {
   const members = defineGroup("members")
   const managers = defineGroup("managers")
 
-  async function syncHost() {
-    const harness = createHarness({ owners: ["user"] })
+  async function syncHost(options: { readonly projectConnection?: boolean } = {}) {
+    const harness = createHarness({
+      owners: options.projectConnection ? ["project", "user"] : ["user"],
+    })
     const dependencies = createTestRuntimeDeps()
     await connectAdaAndBen(harness, dependencies, projectId)
+    if (options.projectConnection) await connectProjectAccount(harness, dependencies, projectId)
     const inbox = defineSync("inbox", { mode: "append" })
       .from(harness.connector)
       .read(() => [])
@@ -662,21 +698,56 @@ describe("sync runs people request", () => {
       projectId,
       connectorId,
     })
-    const connectionOf = (userId: User) => {
-      const found = connections.find(({ owner }) => owner.type === "user" && owner.id === userId)
+    const connectionOf = (userId: User | "project") => {
+      const found = connections.find(({ owner }) =>
+        userId === "project"
+          ? owner.type === "project"
+          : owner.type === "user" && owner.id === userId
+      )
       if (!found) throw new Error(`Expected ${userId}'s connection.`)
       return found.id
     }
-    const as = (userId: User, group: typeof members | typeof managers) =>
+    const sixbAs = (userId: User, group: typeof members | typeof managers) =>
       createTestSixb(host, {
         authorization: resolveAuthorizationContext({
           principal: { type: "user", id: userId },
           groupIds: [group.id],
           roles: host.definitions.security.listResolvedRoles(),
         }),
-      }).syncs
-    return { inbox, as, connectionOf }
+      })
+    const as = (userId: User, group: typeof members | typeof managers) =>
+      sixbAs(userId, group).syncs
+    return { host, inbox, as, sixbAs, connectionOf, storage: dependencies.storage }
   }
+
+  /** One run of each kind, Ben's the latest: the project's, one that reads none, Ada's, Ben's. */
+  async function runHistory() {
+    const host = await syncHost({ projectConnection: true })
+    const queue = (id: string, minute: number, owner?: User | "project") =>
+      queueTestSyncRun(host.storage, {
+        id,
+        projectId,
+        syncId: host.inbox.id,
+        ...(owner === undefined ? {} : { connectionId: host.connectionOf(owner) }),
+        datasetId: rows.id,
+        mode: "append",
+        queuedAt: new Date(`2026-08-19T13:0${minute}:00.000Z`),
+      })
+
+    await queue("project-run", 1, "project")
+    await queue("whole-run", 2)
+    await queue("ada-run", 3, "user-a")
+    await queue("ben-run", 4, "user-b")
+
+    return {
+      ...host,
+      ada: host.as("user-a", members).runs,
+      manager: host.as("user-a", managers).runs,
+    }
+  }
+
+  const runIds = (result: { readonly runs: readonly { id: string }[] }) =>
+    result.runs.map(({ id }) => id)
 
   const runConnections = (result: { readonly runs: readonly { connectionId?: string }[] }) =>
     result.runs.map(({ connectionId }) => connectionId).sort()
@@ -715,5 +786,119 @@ describe("sync runs people request", () => {
     const [first, second] = [await request(), await request()]
     expect(second.runs[0]?.runId).toBe(first.runs[0]?.runId)
     expect(second.runs[0]?.created).toBe(false)
+  })
+
+  // Removal proof: drop the `mayRunConnection` filter from accounts.list; Ada sees Ben's account.
+  test("a connector's accounts list what each person may see, with their latest runs", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ada = as("user-a", members)
+    const {
+      runs: [queued],
+    } = await ada.request({ syncId: inbox.id })
+
+    expect(await ada.accounts.list(connectorId)).toMatchObject([
+      { connection: { id: connectionOf("user-a") }, latestRuns: [{ id: queued?.runId }] },
+    ])
+    const everyone = await as("user-a", managers).accounts.list(connectorId)
+    expect(everyone.map(({ connection }) => connection.id).sort()).toEqual(
+      [connectionOf("user-a"), connectionOf("user-b")].sort()
+    )
+    expect(everyone.find(({ connection }) => connection.id === connectionOf("user-b"))).toEqual({
+      connection: expect.objectContaining({ id: connectionOf("user-b") }),
+      latestRuns: [],
+    })
+  })
+
+  // Removal proof: return true from `seesConnection`; Ada reads Ben's sync status.
+  test("a person reads their own connection's sync status, not someone else's", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ben = as("user-b", members)
+    const {
+      runs: [queued],
+    } = await ben.request({ syncId: inbox.id })
+
+    expect(await ben.accounts.latestRuns(connectorId, connectionOf("user-b"))).toMatchObject([
+      { id: queued?.runId, syncId: inbox.id, status: "queued" },
+    ])
+    expect(
+      await as("user-a", members).accounts.latestRuns(connectorId, connectionOf("user-b"))
+    ).toEqual([])
+    expect(
+      await as("user-a", managers).accounts.latestRuns(connectorId, connectionOf("user-b"))
+    ).toHaveLength(1)
+  })
+
+  // Removal proof: drop `visibleConnectionIds` from `runs.list`; Ada lists Ben's run.
+  test("a member lists the project's runs and their own, not a colleague's", async () => {
+    const { inbox, ada, manager } = await runHistory()
+
+    const listed = await ada.list({ syncId: inbox.id })
+    expect(runIds(listed)).toEqual(["ada-run", "whole-run", "project-run"])
+    expect(listed.total).toBe(3)
+    expect(runIds(await ada.list())).toEqual(["ada-run", "whole-run", "project-run"])
+
+    expect(runIds(await manager.list({ syncId: inbox.id }))).toEqual([
+      "ben-run",
+      "ada-run",
+      "whole-run",
+      "project-run",
+    ])
+  })
+
+  // Removal proof: drop the `hidden` check from `runs.getById`; Ada reads Ben's run.
+  test("a member can't read a colleague's run by its id", async () => {
+    const { ada, manager } = await runHistory()
+
+    expect(await ada.getById("ben-run")).toBeNull()
+    expect(await ada.getById("ada-run")).toMatchObject({ id: "ada-run" })
+    expect(await ada.getById("project-run")).toMatchObject({ id: "project-run" })
+    expect(await ada.getById("whole-run")).toMatchObject({ id: "whole-run" })
+
+    expect(await manager.getById("ben-run")).toMatchObject({ id: "ben-run" })
+  })
+
+  // Removal proof: drop `visibleConnectionIds` from `runs.listLatest`; Ada's latest run is Ben's.
+  test("a sync's latest run is the latest one the member sees", async () => {
+    const { inbox, ada, manager } = await runHistory()
+
+    expect(runIds(await ada.listLatest([inbox.id]))).toEqual(["ada-run"])
+    expect(runIds(await manager.listLatest([inbox.id]))).toEqual(["ben-run"])
+  })
+
+  // Removal proof: return `events` from `withoutHiddenSyncRuns` unfiltered; Ada reads Ben's failure.
+  test("a member reads the run events of the project's connection and their own", async () => {
+    const { host, inbox, sixbAs, connectionOf } = await syncHost({ projectConnection: true })
+    const finished = (runId: string, owner?: User | "project") => ({
+      type: "sync.run.finished" as const,
+      payload: {
+        syncId: inbox.id,
+        runId,
+        ...(owner === undefined ? {} : { connectionId: connectionOf(owner) }),
+        status: "failed" as const,
+        error: {
+          code: "sync.execution_failed" as const,
+          message: `The provider refused ${runId}.`,
+          retryable: false,
+          at: "2026-08-19T13:00:00.000Z",
+        },
+      },
+    })
+
+    await host.events.append({
+      events: [
+        finished("project-run", "project"),
+        finished("whole-run"),
+        finished("ada-run", "user-a"),
+        finished("ben-run", "user-b"),
+      ],
+    })
+
+    const readBy = async (group: typeof members | typeof managers) => {
+      const events = await sixbAs("user-a", group).events.read({ types: ["sync.run.finished"] })
+      return events.map((event) => (event.topic === "syncs" ? event.payload.runId : event.type))
+    }
+
+    expect(await readBy(members)).toEqual(["project-run", "whole-run", "ada-run"])
+    expect(await readBy(managers)).toEqual(["project-run", "whole-run", "ada-run", "ben-run"])
   })
 })

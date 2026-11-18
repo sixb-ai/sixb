@@ -880,6 +880,14 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // Account labels are people's sign-in names: for the dashboard and scripts, not the Agent.
+  {
+    operationId: "listConnectorAccounts",
+    method: "GET",
+    path: "/api/connectors/:connectorId/accounts",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "listSyncRuns",
     method: "GET",

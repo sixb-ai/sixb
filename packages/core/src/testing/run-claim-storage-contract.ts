@@ -288,6 +288,90 @@ export function runRunClaimStorageContractSuite<TStorage extends RunClaimStorage
       })
     })
 
+    test("Sync: lists the latest run of each sync and connection", async () => {
+      await withStorage(async (storage) => {
+        const runs = requireRuns(storage.syncRuns)
+        const queue = (id: string, syncId: string, minute: number, connectionId?: string) =>
+          queueTestSyncRun(storage, {
+            id,
+            projectId,
+            syncId,
+            ...(connectionId === undefined ? {} : { connectionId }),
+            datasetId: syncId,
+            mode: "merge",
+            queuedAt: new Date(`2100-06-01T12:0${minute}:00.000Z`),
+          })
+        await queue("inbox-ada-old", "inbox", 1, "conn_ada")
+        await queue("inbox-ada-new", "inbox", 2, "conn_ada")
+        await queue("inbox-grace", "inbox", 1, "conn_grace")
+        await queue("calendar-ada", "calendar", 3, "conn_ada")
+        await queue("inbox-whole", "inbox", 4)
+        await queue("other-ada", "other", 5, "conn_ada")
+
+        const ids = async (input: Parameters<typeof runs.listLatestByConnection>[0]) =>
+          (await runs.listLatestByConnection(input)).runs.map((run) => run.id).sort()
+
+        expect(await ids({ projectId, syncIds: ["inbox", "calendar"] })).toEqual([
+          "calendar-ada",
+          "inbox-ada-new",
+          "inbox-grace",
+        ])
+        expect(
+          await ids({ projectId, syncIds: ["inbox", "calendar"], connectionIds: ["conn_ada"] })
+        ).toEqual(["calendar-ada", "inbox-ada-new"])
+        expect(await ids({ projectId, syncIds: [] })).toEqual([])
+      })
+    })
+
+    // Reproduce: ignore `visibleConnectionIds` in the store; Grace's runs come back to Ada.
+    test("Sync: lists only the runs of visible connections, and every run that reads none", async () => {
+      await withStorage(async (storage) => {
+        const runs = requireRuns(storage.syncRuns)
+        const queue = (id: string, minute: number, connectionId?: string) =>
+          queueTestSyncRun(storage, {
+            id,
+            projectId,
+            syncId: "inbox",
+            ...(connectionId === undefined ? {} : { connectionId }),
+            datasetId: "inbox",
+            mode: "merge",
+            queuedAt: new Date(`2100-06-01T12:0${minute}:00.000Z`),
+          })
+        await queue("whole", 1)
+        await queue("project", 2, "conn_project")
+        await queue("ada", 3, "conn_ada")
+        await queue("grace", 4, "conn_grace")
+
+        const listed = async (visibleConnectionIds: readonly string[]) => {
+          const page = await runs.list({
+            projectId,
+            syncId: "inbox",
+            visibleConnectionIds,
+            limit: 2,
+          })
+          return { ids: page.runs.map((run) => run.id), total: page.total, hasMore: page.hasMore }
+        }
+        const latest = async (visibleConnectionIds?: readonly string[]) => {
+          const { runs: found } = await runs.listLatestBySyncIds({
+            projectId,
+            syncIds: ["inbox"],
+            ...(visibleConnectionIds === undefined ? {} : { visibleConnectionIds }),
+          })
+          return found.map((run) => run.id)
+        }
+
+        expect(await listed(["conn_project", "conn_ada"])).toEqual({
+          ids: ["ada", "project"],
+          total: 3,
+          hasMore: true,
+        })
+        expect(await listed([])).toEqual({ ids: ["whole"], total: 1, hasMore: false })
+        expect(await latest(["conn_project", "conn_ada"])).toEqual(["ada"])
+        expect(await latest([])).toEqual(["whole"])
+        expect(await latest()).toEqual(["grace"])
+      })
+    })
+
     // Reproduce: count any running sibling in `planRunClaim`; the second run then waits for a day.
     test("Sync: a run of an older version holds no later run back", async () => {
       await withStorage(async (storage) => {

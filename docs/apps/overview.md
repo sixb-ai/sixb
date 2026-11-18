@@ -266,7 +266,8 @@ need `can.run` on the sync or pipeline, and logs need `can.observe(project.logs)
 [Authorization](../auth/authorization.md).
 
 To start a sync from your own pages, use `SyncButton`. It turns into **Syncing…** until the run
-ends.
+ends. On a sync of an [OAuth connector](../syncs/overview.md#sync-connected-accounts), it runs every
+account the person may run, and its status describes those accounts.
 
 ```tsx
 import { SyncButton } from "@sixb/app"

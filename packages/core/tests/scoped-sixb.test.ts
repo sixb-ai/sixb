@@ -1444,7 +1444,13 @@ describe("bound Sixb surface", () => {
     expect(Object.keys(scoped.workflows).sort()).toEqual(
       ["getById", "interventions", "list", "request", "requestById", "runs"].sort()
     )
-    expect(Object.keys(scoped.syncs).sort()).toEqual(["getById", "list", "request", "runs"])
+    expect(Object.keys(scoped.syncs).sort()).toEqual([
+      "accounts",
+      "getById",
+      "list",
+      "request",
+      "runs",
+    ])
     expect(Object.keys(scoped.pipelines).sort()).toEqual(
       ["getById", "list", "request", "runs"].sort()
     )

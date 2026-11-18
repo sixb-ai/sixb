@@ -3,6 +3,7 @@ export {
   type ConnectorConnectionFailure,
   type ConnectorConnectionOperation,
   type ConnectorConnectionStatus,
+  type ConnectorConnectionSync,
   isConnectorReplacementRequired,
   type UseConnectorConnectionOptions,
   type UseConnectorConnectionResult,

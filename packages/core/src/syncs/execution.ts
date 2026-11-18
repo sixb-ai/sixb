@@ -8,14 +8,22 @@ import type {
   ListSyncRunsResult,
   SyncRunRecord,
 } from "../storage/sync-runs"
-import type { SyncConnections } from "./connections"
+import { createSyncAccountsRuntime, type SyncAccountsRuntime } from "./accounts"
+import { type SyncConnections, visibleSyncConnectionIds } from "./connections"
 import { SyncValidationError } from "./errors"
 import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResults } from "./request"
 import type { SyncDefinition } from "./types"
 
+/**
+ * The runs of the syncs you may run. On a sync of an OAuth connector, only the runs of the
+ * connections you may run as well: the project's and your own, or everyone's with `can.manage` on
+ * the connector.
+ */
 export interface SyncRunsRuntime {
   getById(runId: string): Promise<SyncRunRecord | null>
-  list(input?: Omit<ListSyncRunsInput, "projectId" | "syncIds">): Promise<ListSyncRunsResult>
+  list(
+    input?: Omit<ListSyncRunsInput, "projectId" | "syncIds" | "visibleConnectionIds">
+  ): Promise<ListSyncRunsResult>
   listLatest(syncIds: readonly string[]): Promise<ListLatestSyncRunsResult>
 }
 
@@ -25,6 +33,8 @@ export interface SyncsRuntime {
   /** Queue a run, or on a sync of an OAuth connector one run per connection the caller may run. */
   request(input: RequestSyncRunInput): Promise<SyncRunRequestResults>
   readonly runs: SyncRunsRuntime
+  /** Where each connected account stands, on a sync of an OAuth connector. */
+  readonly accounts: SyncAccountsRuntime
 }
 
 export function createSyncsRuntime(
@@ -47,16 +57,28 @@ export function createSyncsRuntime(
         ? visibleIds()
         : []
 
+  const getById = (syncId: string) => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
+    const sync = source.getById(syncId)
+    return sync && allowed(syncId) ? sync : null
+  }
+
+  const visibleConnectionIds = (syncs: readonly (SyncDefinition | null)[]) =>
+    visibleSyncConnectionIds(runtime, execution, syncs, connections)
+
   return {
     list: () =>
       authority.type === "denied" || authority.type === "delegated"
         ? []
         : source.list().filter((sync) => allowed(sync.id)),
-    getById: (syncId) => {
-      if (authority.type === "denied" || authority.type === "delegated") return null
-      const sync = source.getById(syncId)
-      return sync && allowed(syncId) ? sync : null
-    },
+    getById,
+    accounts: createSyncAccountsRuntime({
+      runtime,
+      execution,
+      syncs: () => source.list(),
+      runnable: getById,
+      ...(connections === undefined ? {} : { connections }),
+    }),
     request: async (input) => {
       assertAuthorized(runtime, { kind: "sync.run", syncId: input.syncId })
       const sync = source.getById(input.syncId)
@@ -72,30 +94,46 @@ export function createSyncsRuntime(
             projectId: runtime.projectId,
             id: runId,
           })) ?? null
-        return run && allowed(run.syncId) ? run : null
+        if (!run || !allowed(run.syncId)) return null
+
+        const visible = await visibleConnectionIds([source.getById(run.syncId)])
+        const hidden =
+          run.connectionId !== undefined && visible?.includes(run.connectionId) === false
+        return hidden ? null : run
       },
-      list: (input = {}) => {
+      list: async (input = {}) => {
         if (authority.type === "denied" || authority.type === "delegated") {
-          return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+          return { runs: [], hasMore: false, total: 0 }
         }
         const storage = runtime.storage.syncRuns
-        if (!storage) return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        if (!storage) return { runs: [], hasMore: false, total: 0 }
+
+        const syncs =
+          input.syncId === undefined
+            ? source.list().filter((sync) => allowed(sync.id))
+            : [getById(input.syncId)]
+        const visible = await visibleConnectionIds(syncs)
         return storage.list({
           ...input,
           syncIds: historyFilterIds(),
+          ...(visible === undefined ? {} : { visibleConnectionIds: visible }),
           projectId: runtime.projectId,
         })
       },
-      listLatest: (syncIds) => {
-        if (authority.type === "denied" || authority.type === "delegated") {
-          return Promise.resolve({ runs: [] })
-        }
+      listLatest: async (syncIds) => {
+        if (authority.type === "denied" || authority.type === "delegated") return { runs: [] }
         const storage = runtime.storage.syncRuns
-        if (!storage || syncIds.length === 0) return Promise.resolve({ runs: [] })
         const allowedIds = syncIds.filter(allowed)
-        return allowedIds.length === 0
-          ? Promise.resolve({ runs: [] })
-          : storage.listLatestBySyncIds({ projectId: runtime.projectId, syncIds: allowedIds })
+        if (!storage || allowedIds.length === 0) return { runs: [] }
+
+        const visible = await visibleConnectionIds(
+          allowedIds.map((syncId) => source.getById(syncId))
+        )
+        return storage.listLatestBySyncIds({
+          projectId: runtime.projectId,
+          syncIds: allowedIds,
+          ...(visible === undefined ? {} : { visibleConnectionIds: visible }),
+        })
       },
     },
   }

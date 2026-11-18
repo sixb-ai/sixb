@@ -147,6 +147,8 @@ import {
   listAuthServiceAccountAccessTokens,
   listAuthServiceAccounts,
   listAuthSessions,
+  listConnectorAccounts,
+  listConnectorConnectionSyncRuns,
   listConnectorConnections,
   listConnectors,
   listDatasetRows,
@@ -635,6 +637,10 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsError,
   ListAuthSessionsResponse,
+  ListConnectorAccountsData,
+  ListConnectorAccountsResponse,
+  ListConnectorConnectionSyncRunsData,
+  ListConnectorConnectionSyncRunsResponse,
   ListConnectorConnectionsData,
   ListConnectorConnectionsError,
   ListConnectorConnectionsResponse,
@@ -2852,6 +2858,63 @@ export const getSyncOptions = (options: Options<GetSyncData>) =>
       return data
     },
     queryKey: getSyncQueryKey(options),
+  })
+
+export const listConnectorAccountsQueryKey = (options: Options<ListConnectorAccountsData>) =>
+  createQueryKey("listConnectorAccounts", options)
+
+/**
+ * List a connector's accounts and how they synced
+ *
+ * On an OAuth connector, each connected account you may see, with the latest run of each of its syncs you may run. Empty for a static connector.
+ */
+export const listConnectorAccountsOptions = (options: Options<ListConnectorAccountsData>) =>
+  queryOptions<
+    ListConnectorAccountsResponse,
+    DefaultError,
+    ListConnectorAccountsResponse,
+    ReturnType<typeof listConnectorAccountsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listConnectorAccounts({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listConnectorAccountsQueryKey(options),
+  })
+
+export const listConnectorConnectionSyncRunsQueryKey = (
+  options: Options<ListConnectorConnectionSyncRunsData>
+) => createQueryKey("listConnectorConnectionSyncRuns", options)
+
+/**
+ * Latest sync runs of a connection
+ *
+ * The latest run of each sync of one connection: your own, or anyone's with can.manage on its connector. Empty for a connection you don't see.
+ */
+export const listConnectorConnectionSyncRunsOptions = (
+  options: Options<ListConnectorConnectionSyncRunsData>
+) =>
+  queryOptions<
+    ListConnectorConnectionSyncRunsResponse,
+    DefaultError,
+    ListConnectorConnectionSyncRunsResponse,
+    ReturnType<typeof listConnectorConnectionSyncRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listConnectorConnectionSyncRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listConnectorConnectionSyncRunsQueryKey(options),
   })
 
 export const listSyncRunsQueryKey = (options?: Options<ListSyncRunsData>) =>

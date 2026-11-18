@@ -211,6 +211,8 @@ describe("useConnectorConnection", () => {
         "/api/connectors/github/connection-runs",
         "/api/connectors/github/connection-runs/ccr_1",
         "/api/connectors/github/connections",
+        // Once connected, how its syncs last went.
+        "/api/connectors/github/connections/ccn_1/sync-runs",
       ])
     )
     expect(paths("POST")).toEqual(["/api/connectors/github/connection-runs/ccr_1/selection"])
@@ -303,6 +305,54 @@ describe("useConnectorConnection", () => {
     await act(async () => rendered.result.current.refresh())
     await waitFor(() => expect(rendered.result.current.connection?.id).toBe("ccn_2"))
     expect(rendered.result.current.status).toBe("connected")
+  })
+
+  // Removal proof: rank "synced" above "failed" in summarizeSync; the first assertion fails.
+  test("tells the person how their connection's syncs last went", async () => {
+    const personal = { ...connection, id: "ccn_2", owner: { type: "user", id: "usr_ada" } } as const
+    const run = (syncId: string, status: string, finishedAt?: string) => ({
+      id: `run_${syncId}`,
+      projectId: "project",
+      syncId,
+      connectionId: "ccn_2",
+      datasetId: syncId,
+      mode: "merge",
+      status,
+      attempt: 1,
+      queuedAt: "2026-08-24T09:00:00.000Z",
+      startedAt: "2026-08-24T09:00:01.000Z",
+      ...(finishedAt === undefined ? {} : { finishedAt }),
+    })
+    let runs = [
+      run("inbox", "succeeded", "2026-08-24T12:00:00.000Z"),
+      run("calendar", "failed", "2026-08-24T11:00:00.000Z"),
+    ]
+    const { client } = createHookClient(async (request) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith("/connections/ccn_2/sync-runs")) return Response.json({ runs })
+      if (url.pathname.endsWith("/connections")) return Response.json([personal])
+      return Response.json([])
+    })
+    const rendered = renderHook(
+      () => useConnectorConnection({ connectorId: "github", owner: "me" }),
+      { wrapper: connectorWrapper(client, connectorQueryClient()) }
+    )
+
+    await waitFor(() =>
+      expect(rendered.result.current.sync).toEqual({
+        status: "failed",
+        at: "2026-08-24T11:00:00.000Z",
+      })
+    )
+
+    runs = [run("inbox", "running"), run("calendar", "succeeded", "2026-08-24T12:30:00.000Z")]
+    await act(async () => rendered.result.current.refresh())
+    await waitFor(() =>
+      expect(rendered.result.current.sync).toEqual({
+        status: "syncing",
+        at: "2026-08-24T09:00:01.000Z",
+      })
+    )
   })
 
   test("coalesces concurrent connect calls into one authorization request", async () => {

@@ -21157,6 +21157,31 @@
                         ],
                         "additionalProperties": false,
                         "nullable": true
+                      },
+                      "accounts": {
+                        "type": "object",
+                        "properties": {
+                          "total": {
+                            "type": "number"
+                          },
+                          "running": {
+                            "type": "number"
+                          },
+                          "needsReconnecting": {
+                            "type": "number"
+                          },
+                          "failing": {
+                            "type": "number"
+                          },
+                          "synced": {
+                            "type": "number"
+                          },
+                          "lastSyncedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["total", "running", "needsReconnecting", "failing", "synced"],
+                        "additionalProperties": false
                       }
                     },
                     "required": ["id", "mode", "connector", "target", "triggers", "latestRun"],
@@ -21459,6 +21484,31 @@
                       ],
                       "additionalProperties": false,
                       "nullable": true
+                    },
+                    "accounts": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "running": {
+                          "type": "number"
+                        },
+                        "needsReconnecting": {
+                          "type": "number"
+                        },
+                        "failing": {
+                          "type": "number"
+                        },
+                        "synced": {
+                          "type": "number"
+                        },
+                        "lastSyncedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["total", "running", "needsReconnecting", "failing", "synced"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["id", "mode", "connector", "target", "triggers", "latestRun"],
@@ -21479,6 +21529,438 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/accounts": {
+      "get": {
+        "summary": "List a connector's accounts and how they synced",
+        "description": "On an OAuth connector, each connected account you may see, with the latest run of each of its syncs you may run. Empty for a static connector.",
+        "tags": ["Connector Connections"],
+        "operationId": "listConnectorAccounts",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "connection": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "owner": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["project"]
+                                      }
+                                    },
+                                    "required": ["type"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "slot": {
+                                "type": "string"
+                              },
+                              "account": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "label"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["id", "owner", "slot", "account"],
+                            "additionalProperties": false
+                          },
+                          "latestRuns": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "syncId": {
+                                  "type": "string"
+                                },
+                                "connectionId": {
+                                  "type": "string"
+                                },
+                                "datasetId": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": ["snapshot", "append", "merge"]
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "rowsRead": {
+                                  "type": "number"
+                                },
+                                "output": {
+                                  "type": "object",
+                                  "properties": {
+                                    "datasetId": {
+                                      "type": "string"
+                                    },
+                                    "versionId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["datasetId", "versionId"],
+                                  "additionalProperties": false
+                                },
+                                "expectedLatestVersionId": {
+                                  "type": "string"
+                                },
+                                "commitMessage": {
+                                  "type": "string"
+                                },
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "queue.enqueue_failed",
+                                        "sync.execution_failed",
+                                        "connector.authorization_required"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "syncId",
+                                "datasetId",
+                                "mode",
+                                "status",
+                                "attempt",
+                                "queuedAt"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": ["connection", "latestRuns"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["accounts"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections/{connectionId}/sync-runs": {
+      "get": {
+        "summary": "Latest sync runs of a connection",
+        "description": "The latest run of each sync of one connection: your own, or anyone's with can.manage on its connector. Empty for a connection you don't see.",
+        "tags": ["Connector Connections"],
+        "operationId": "listConnectorConnectionSyncRuns",
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "syncId": {
+                            "type": "string"
+                          },
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "datasetId": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": ["snapshot", "append", "merge"]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "attempt": {
+                            "type": "number"
+                          },
+                          "queuedAt": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "rowsRead": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "versionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["datasetId", "versionId"],
+                            "additionalProperties": false
+                          },
+                          "expectedLatestVersionId": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "queue.enqueue_failed",
+                                  "sync.execution_failed",
+                                  "connector.authorization_required"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "syncId",
+                          "datasetId",
+                          "mode",
+                          "status",
+                          "attempt",
+                          "queuedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["runs"],
                   "additionalProperties": false
                 }
               }

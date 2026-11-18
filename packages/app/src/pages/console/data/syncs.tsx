@@ -25,6 +25,14 @@ import {
   useRunStatusLabels,
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
+import {
+  AccountsMeta,
+  needsReconnecting,
+  SyncStatusPill,
+  SyncTimeMeta,
+  useAccountsStats,
+  useConnectorAccounts,
+} from "./accounts"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
@@ -34,7 +42,6 @@ import { SyncButton } from "./sync-button"
 /** Console › Syncs: what copies each connector's data into the project, and how it last went. */
 export function ConsoleSyncsPage() {
   const messages = useDataMessages()
-  const format = useFormat()
   useSyncLiveUpdates()
   const syncsQuery = useQuery({ ...listSyncsOptions(), retry: false })
   const syncs = syncsQuery.data ?? []
@@ -77,23 +84,13 @@ export function ConsoleSyncsPage() {
                   {sync.triggers.map((trigger) => (
                     <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
                   ))}
-                  {sync.latestRun ? (
-                    <>
-                      <MetaDot />
-                      <span>
-                        {format.relative(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
-                      </span>
-                    </>
-                  ) : null}
+                  <SyncTimeMeta sync={sync} />
+                  {sync.accounts ? <AccountsMeta summary={sync.accounts} /> : null}
                 </>
               }
               trailing={
                 <>
-                  {sync.latestRun ? (
-                    <RunStatusPill status={sync.latestRun.status} />
-                  ) : (
-                    <Pill tone="muted">{messages.common.neverRun}</Pill>
-                  )}
+                  <SyncStatusPill sync={sync} />
                   <ChevronRight className="size-4 text-muted-foreground/60" />
                 </>
               }
@@ -124,6 +121,15 @@ export function ConsoleSyncPage() {
         : false,
   })
   const sync = syncQuery.data
+  const accountsStats = useAccountsStats(sync?.accounts)
+  // Runs name their account: the connector's accounts give their labels.
+  const accountsQuery = useConnectorAccounts(sync?.connector.id ?? "", sync?.accounts !== undefined)
+  const accountLabels = new Map(
+    accountsQuery.data?.accounts.map(({ connection }) => [
+      connection.id,
+      connection.account.label,
+    ]) ?? []
+  )
   const back = { href: "/console/syncs", label: messages.syncs.title }
 
   if (!sync) {
@@ -165,7 +171,8 @@ export function ConsoleSyncPage() {
     )
   }
 
-  const latestRun = sync.latestRun
+  // On a sync of an OAuth connector, the latest run is one account's: the accounts describe it.
+  const latestRun = sync.accounts ? null : sync.latestRun
   // A failed latest run gets its own panel; its row leaves the failure out rather than repeat it.
   const failedLatest = latestRun?.status === "failed" && latestRun.error ? latestRun : null
   const dataset = sync.target.dataset
@@ -180,40 +187,44 @@ export function ConsoleSyncPage() {
       title={humanize(sync.id)}
       meta={
         <>
-          {latestRun ? (
-            <RunStatusPill status={latestRun.status} />
-          ) : (
-            <Pill tone="muted">{messages.common.neverRun}</Pill>
-          )}
+          <SyncStatusPill sync={sync} />
           <span>{messages.common.modes[sync.mode]}</span>
           <MetaDot />
           <Link to={datasetHref} className="hover:text-foreground hover:underline">
             {messages.common.writes(dataset.id)}
           </Link>
+          {sync.accounts ? (
+            <AccountsMeta
+              summary={sync.accounts}
+              href={`/console/connectors/${encodeURIComponent(sync.connector.id)}`}
+            />
+          ) : null}
         </>
       }
       actions={<SyncButton sync={sync.id} variant="default" />}
     >
       <Stats
-        items={[
-          {
-            label: messages.common.lastRun,
-            value: latestRun ? (
-              statusLabels[latestRun.status]
-            ) : (
-              <span className="text-muted-foreground">{messages.common.neverRun}</span>
-            ),
-          },
-          {
-            label: messages.common.started,
-            value: latestRun ? format.relative(latestRun.startedAt ?? latestRun.queuedAt) : "—",
-          },
-          {
-            label: messages.common.took,
-            value: formatDuration(latestRun?.startedAt, latestRun?.finishedAt),
-          },
-          { label: messages.syncs.rowsRead, value: numbers.count(latestRun?.rowsRead) },
-        ]}
+        items={
+          accountsStats ?? [
+            {
+              label: messages.common.lastRun,
+              value: latestRun ? (
+                statusLabels[latestRun.status]
+              ) : (
+                <span className="text-muted-foreground">{messages.common.neverRun}</span>
+              ),
+            },
+            {
+              label: messages.common.started,
+              value: latestRun ? format.relative(latestRun.startedAt ?? latestRun.queuedAt) : "—",
+            },
+            {
+              label: messages.common.took,
+              value: formatDuration(latestRun?.startedAt, latestRun?.finishedAt),
+            },
+            { label: messages.syncs.rowsRead, value: numbers.count(latestRun?.rowsRead) },
+          ]
+        }
       />
 
       {failedLatest?.error ? (
@@ -250,6 +261,14 @@ export function ConsoleSyncPage() {
                 title={format.dateTime(run.startedAt ?? run.queuedAt)}
                 meta={
                   <>
+                    {run.connectionId ? (
+                      <>
+                        <span className="truncate">
+                          {accountLabels.get(run.connectionId) ?? run.connectionId}
+                        </span>
+                        <MetaDot />
+                      </>
+                    ) : null}
                     <span>{messages.common.modes[run.mode]}</span>
                     {run.finishedAt ? (
                       <>
@@ -292,9 +311,15 @@ export function ConsoleSyncPage() {
                     ) : null}
                   </>
                 }
-                trailing={<RunStatusPill status={run.status} />}
+                trailing={
+                  needsReconnecting(run) ? (
+                    <Pill tone="warn">{messages.syncs.needsReconnecting}</Pill>
+                  ) : (
+                    <RunStatusPill status={run.status} />
+                  )
+                }
               >
-                {run.error && run.id !== failedLatest?.id ? (
+                {run.error && run.id !== failedLatest?.id && !needsReconnecting(run) ? (
                   <FailureSummary failure={run.error} compact />
                 ) : null}
               </PanelRow>

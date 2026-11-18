@@ -1,3 +1,4 @@
+export type { SyncAccount, SyncAccountsRuntime } from "./accounts"
 export { defineSync } from "./builders"
 export { SyncValidationError } from "./errors"
 export type {

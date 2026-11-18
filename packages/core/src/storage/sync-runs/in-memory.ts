@@ -27,6 +27,7 @@ import { assertSyncRunExecution } from "./provider"
 import { canFinishSyncRun } from "./transitions"
 import type {
   FinishSyncRunInput,
+  ListLatestSyncConnectionRunsInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
@@ -287,6 +288,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
           ? true
           : (record.connectionId ?? null) === input.connectionId
       )
+      .filter((record) => isVisibleRun(record, input.visibleConnectionIds))
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
       .filter((record) =>
         matchesRunListDateFilters(record, {
@@ -308,7 +310,10 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
 
   async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
     const runs = latestStartedAtByOwnerId(
-      [...this.rows.values()].filter((record) => record.projectId === input.projectId),
+      [...this.rows.values()].filter(
+        (record) =>
+          record.projectId === input.projectId && isVisibleRun(record, input.visibleConnectionIds)
+      ),
       input.syncIds,
       (record) => record.syncId
     )
@@ -316,6 +321,25 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     return {
       runs: runs.map(cloneSyncRunRecord),
     }
+  }
+
+  async listLatestByConnection(
+    input: ListLatestSyncConnectionRunsInput
+  ): Promise<ListLatestSyncRunsResult> {
+    const syncIds = new Set(input.syncIds)
+    const connectionIds = input.connectionIds ? new Set(input.connectionIds) : null
+    const latest = new Map<string, SyncRunRecord>()
+    for (const record of this.rows.values()) {
+      const { connectionId } = record
+      if (record.projectId !== input.projectId || connectionId === undefined) continue
+      if (!syncIds.has(record.syncId) || (connectionIds && !connectionIds.has(connectionId))) {
+        continue
+      }
+      const key = JSON.stringify([record.syncId, connectionId])
+      const current = latest.get(key)
+      if (!current || compareStartedAt(record, current, "desc") < 0) latest.set(key, record)
+    }
+    return { runs: [...latest.values()].map(cloneSyncRunRecord) }
   }
 
   private requireRun(projectId: string, id: string): SyncRunRecord {
@@ -338,6 +362,18 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     this.rows.set(syncRunKey(run.projectId, run.id), structuredClone(run))
     return cloneSyncRunRecord(run)
   }
+}
+
+/** Whether `visibleConnectionIds` keeps this run, as `ListSyncRunsInput` describes. */
+function isVisibleRun(
+  record: SyncRunRecord,
+  visibleConnectionIds: readonly string[] | undefined
+): boolean {
+  return (
+    visibleConnectionIds === undefined ||
+    record.connectionId === undefined ||
+    visibleConnectionIds.includes(record.connectionId)
+  )
 }
 
 function staleExecution(id: string): SyncRunError {

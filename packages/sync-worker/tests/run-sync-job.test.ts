@@ -1047,6 +1047,9 @@ describe("runSyncJob", () => {
       listLatestBySyncIds(input) {
         return delegate.listLatestBySyncIds(input)
       },
+      listLatestByConnection(input) {
+        return delegate.listLatestByConnection(input)
+      },
     }
     registerSyncRunStorage(syncRunsStorage, executionsByRunStorage.get(delegate)!)
 

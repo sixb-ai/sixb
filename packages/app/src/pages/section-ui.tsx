@@ -350,7 +350,7 @@ export function PanelRow({
   }
 
   return (
-    <div className="flex items-center gap-3.5 px-4 py-3.5">
+    <div className="group flex items-center gap-3.5 px-4 py-3.5">
       {body}
       {trailing ? <div className="flex shrink-0 items-center gap-2">{trailing}</div> : null}
     </div>
