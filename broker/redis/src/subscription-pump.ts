@@ -6,7 +6,12 @@ import type { EnsuredStream } from "./stream-manager"
 import { bodyFromEntry, parseXReadEntries, type RedisStreamEntry } from "./stream-replies"
 import type { ActiveSubscription } from "./subscription-registry"
 
-const WATCHDOG_GRACE_MS = 1_000
+/**
+ * How long past its block a read may take before its connection counts as dead. A busy API
+ * process answers late: at one second, a single slow request had every open subscription
+ * reconnect at once, each on a new connection, and the live views it fed fell behind.
+ */
+const WATCHDOG_GRACE_MS = 10_000
 const RETRY_INITIAL_DELAY_MS = 100
 const RETRY_MAX_DELAY_MS = 2_000
 

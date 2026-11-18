@@ -9,7 +9,6 @@ import {
   getAgentPreferencesQueryKey,
   getAgentThreadContextOptions,
   getAgentThreadContextQueryKey,
-  getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
   listAgentComputersOptions,
@@ -18,9 +17,7 @@ import {
   listAgentThreadApprovalsQueryKey,
   listAgentThreadInboxOptions,
   listAgentThreadInboxQueryKey,
-  listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
-  listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
   listModelsOptions,
@@ -108,6 +105,7 @@ import type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "../types"
+import { markThreadReadsStale, threadQueryOptions } from "./thread-queries"
 import {
   ComputerUnavailableError,
   type NewThreadPlaceBody,
@@ -221,6 +219,9 @@ export interface AgentConversationMessagesError {
 
 const MESSAGES_LOAD_ERROR: AgentConversationMessagesError = { code: "load" }
 
+/** How often an open thread's messages are read again while the activity feed is away. */
+const MESSAGES_RECOVERY_POLL_MS = 30_000
+
 /**
  * Everything one conversation with the project's agent needs: its threads, messages, turn and
  * model choice, and the actions on them. Route-independent; the built-in chat and custom chats
@@ -265,6 +266,8 @@ export function useAgentConversation({
         return
       }
 
+      // Another thread may hold reads a prefetch or an earlier visit left: opening it reads again.
+      if (event.threadId !== threadId) markThreadReadsStale(queryClient, event.threadId)
       void refreshThreads()
     },
     // A held call changed: its card, and the thread list's count of what waits for the reader. Its
@@ -285,6 +288,7 @@ export function useAgentConversation({
     },
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
+      markThreadReadsStale(queryClient)
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
       void queryClient.invalidateQueries({ queryKey: listAgentComputersQueryKey() })
       void (threadId === null ? refreshThreads() : refreshThread(threadId))
@@ -294,6 +298,9 @@ export function useAgentConversation({
   // The project activity feed is primary. Poll only as a focus-aware recovery path while the
   // socket is unavailable, rather than opening one connection per background thread.
   const recoveryPollMs = !activityStream.connected || activityStream.error ? 10_000 : false
+  // A thread's messages are its heaviest read, so they follow less often while the feed is away;
+  // its runs and the thread still poll at the faster rate.
+  const messagesRecoveryPollMs = recoveryPollMs === false ? false : MESSAGES_RECOVERY_POLL_MS
   const { threads, sharedThreads, waitingThreadIds } = useAgentThreadLists({
     refetchInterval: recoveryPollMs,
   })
@@ -311,14 +318,17 @@ export function useAgentConversation({
   )
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
+  const reads = threadQueryOptions(threadId ?? "")
   const threadQuery = useQuery({
-    ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
+    ...reads.thread,
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
     // A shared thread can lose its reader without an event, and a computer's sixb can stop
-    // without saying so: read it again when they come back.
+    // without saying so: read it again when they come back, however recent the last read.
     refetchOnWindowFocus: (query) =>
-      isShared(query.state.data ?? null) || query.state.data?.computer !== undefined,
+      isShared(query.state.data ?? null) || query.state.data?.computer !== undefined
+        ? "always"
+        : false,
   })
   // A 404 after a read means the reader no longer reads it, such as a participant someone removed:
   // the last copy the query keeps must not stand in for it.
@@ -340,22 +350,16 @@ export function useAgentConversation({
     access === "owner" && thread?.runsOn === "computer" && thread.computer?.online !== true
 
   const messagesQuery = useQuery({
-    ...listAgentThreadMessagesOptions({
-      path: { threadId: threadId ?? "" },
-      query: { order: "asc" },
-    }),
+    ...reads.messages,
     enabled: threadId !== null,
-    refetchInterval: recoveryPollMs,
+    refetchInterval: messagesRecoveryPollMs,
   })
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
   const authors = messagesQuery.data?.authors
   // Every run, as every message is read: the transcript marks each move from the runs either side.
   const runsQuery = useQuery({
-    ...listAgentThreadRunsOptions({
-      path: { threadId: threadId ?? "" },
-      query: { order: "desc" },
-    }),
+    ...reads.runs,
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
   })

@@ -101,7 +101,7 @@ test("replaces a client when the XREAD watchdog expires", async () => {
 
   try {
     pump.start("0-0")
-    await advanceTimersUntil(() => received.length === 1, 2_500)
+    await advanceTimersUntil(() => received.length === 1, 11_500)
 
     expect(received).toEqual(["after-watchdog"])
     expect(replacementCount).toBe(1)
@@ -109,6 +109,64 @@ test("replaces a client when the XREAD watchdog expires", async () => {
     expect(
       errors.mock.calls.some((args) => args.some((arg) => String(arg).includes("did not finish")))
     ).toBe(true)
+  } finally {
+    pump.stop()
+    try {
+      await pump.drain()
+    } finally {
+      errors.mockRestore()
+    }
+  }
+})
+
+// A busy API process answers a read late. With a one-second grace, one slow request had every
+// open subscription reconnect at once, each on a new connection. Removal proof: lower
+// WATCHDOG_GRACE_MS back to 1_000; the late read is abandoned and its client replaced.
+test("keeps a subscription whose read answers seconds late", async () => {
+  jest.useFakeTimers()
+  const errors = spyOn(console, "error").mockImplementation(() => undefined)
+  let reads = 0
+  const client = fakeClient(
+    () =>
+      new Promise<unknown>((resolve) => {
+        reads += 1
+        if (reads > 1) return
+        setTimeout(
+          () =>
+            resolve([
+              [
+                stream.keys.streamKey,
+                [["1-0", ["body", encodeRecord({ payload: "late" }, "2026-08-14T00:00:00.000Z")]]],
+              ],
+            ]),
+          3_000
+        )
+      })
+  )
+  let replacements = 0
+  const received: unknown[] = []
+  const pump = new RedisSubscriptionPump({
+    connectionManager: {
+      createSubscriptionClient: async () => {
+        replacements += 1
+        return client
+      },
+      closeClient: () => undefined,
+    },
+    client,
+    stream,
+    batchSize: 1,
+    blockMs: 1_000,
+    handler: (records) => received.push(...records.map((record) => record.payload)),
+  })
+
+  try {
+    pump.start("0-0")
+    await advanceTimersUntil(() => received.length === 1, 4_000)
+
+    expect(received).toEqual(["late"])
+    expect(replacements).toBe(0)
+    expect(errors).not.toHaveBeenCalled()
   } finally {
     pump.stop()
     try {

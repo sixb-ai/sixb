@@ -9,10 +9,11 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CircleX, Search, SquarePen } from "lucide-react"
-import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { PersonAvatar } from "../../artifacts/person-avatar"
 import { useCurrentUser } from "../../session"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
+import { markThreadReadsStale, usePrefetchAgentThread } from "../hooks/thread-queries"
 import { useAgentThreadLists } from "../hooks/use-thread-lists"
 import { useAgentMessages } from "../i18n"
 import { personName, threadOwner } from "../sharing"
@@ -50,10 +51,16 @@ export function AgentThreads({
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
   const refreshWaiting = () =>
     queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
+  // A thread a row prefetched keeps its reads until it opens: a change, or a gap in the feed, marks
+  // them stale so that opening it reads it again.
   const activity = useAgentActivityStream({
-    onActivity: () => void refreshThreads(),
+    onActivity: (event) => {
+      markThreadReadsStale(queryClient, event.threadId)
+      void refreshThreads()
+    },
     onApprovalActivity: () => void refreshWaiting(),
     onSubscribed: () => {
+      markThreadReadsStale(queryClient)
       void refreshThreads()
       void refreshWaiting()
     },
@@ -317,12 +324,14 @@ function Row({
   const owner = shared ? personName(threadOwner(thread)) : null
   const detail = [messages.messageCount(thread.messageCount), owner].filter(Boolean).join(" · ")
   const working = thread.activeRunId !== null
+  const prefetch = usePrefetchOnIntent(thread.id)
 
   return (
     <button
       type="button"
       data-thread-option=""
       onClick={() => onSelect(thread.id)}
+      {...prefetch}
       data-thread-working={working ? "" : undefined}
       aria-label={[
         title,
@@ -374,4 +383,35 @@ function moveRowFocus(event: KeyboardEvent<HTMLDivElement>) {
   const next = index < 0 ? (delta > 0 ? 0 : options.length - 1) : index + delta
   options[(next + options.length) % options.length]?.focus()
   event.preventDefault()
+}
+
+/**
+ * How long the pointer or the keyboard rests on a thread before it loads: passing over the list,
+ * or holding an arrow key down it, loads nothing.
+ */
+const PREFETCH_INTENT_MS = 100
+
+/** Load a thread when the pointer or the keyboard focus rests on its row, before it opens. */
+function usePrefetchOnIntent(threadId: string) {
+  const prefetchThread = usePrefetchAgentThread()
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const cancel = () => {
+    clearTimeout(timer.current)
+    timer.current = undefined
+  }
+  const wait = () => {
+    cancel()
+    timer.current = setTimeout(() => prefetchThread(threadId), PREFETCH_INTENT_MS)
+  }
+
+  // A row that unmounts while the pointer or the focus rests on it loads nothing after.
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  return {
+    onPointerEnter: wait,
+    onPointerLeave: cancel,
+    onFocus: wait,
+    onBlur: cancel,
+  }
 }

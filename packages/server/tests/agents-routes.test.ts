@@ -864,6 +864,78 @@ describe("agent routes", () => {
     expect(body.messages[0]?.parts).toEqual([call])
   })
 
+  // Encrypted reasoning and provider metadata only replay a conversation to its model, and made up
+  // some 40% of a long thread's messages. Removal proof: return message.parts as stored from
+  // serializeMessage; the provider's state and metadata reach the response.
+  test("leaves out what only replays to the model, keeping each part's index for its files", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thr-replay-state",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const log = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("full test output"),
+      fileName: "test.log",
+      mediaType: "text/plain",
+    })
+    await storage.agents.messages.append({
+      id: "msg-replay-state",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: null,
+      role: "assistant",
+      parts: [
+        {
+          type: "provider-state",
+          providerId: "vercel-ai-gateway",
+          data: { item: { type: "reasoning", encrypted_content: "signed" } },
+        },
+        {
+          type: "reasoning",
+          text: "Checking the tests.",
+          providerMetadata: { "vercel-ai-gateway": { item: { id: "rs_1" } } },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "call-tests",
+          toolName: "bash",
+          input: { command: "bun test" },
+          providerMetadata: { "vercel-ai-gateway": { item: { type: "function_call" } } },
+          state: "output-available",
+          output: { exitCode: 0 },
+          outputFile: { fileRef: log, path: "tool-outputs/test.log" },
+        },
+      ],
+    })
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
+    )
+    const body = (await response.json()) as { messages: { parts: unknown[] }[] }
+    const file = await app.fetch(
+      new Request(
+        `http://localhost/api/agent-threads/${thread.id}/messages/msg-replay-state/files/content?path=${encodeURIComponent("/parts/2/outputFile/fileRef")}`
+      )
+    )
+
+    expect(body.messages[0]?.parts).toEqual([
+      { type: "provider-state", providerId: "vercel-ai-gateway", data: null },
+      { type: "reasoning", text: "Checking the tests." },
+      {
+        type: "tool-call",
+        toolCallId: "call-tests",
+        toolName: "bash",
+        input: { command: "bun test" },
+        state: "output-available",
+        output: { exitCode: 0 },
+        outputFile: { fileRef: log, path: "tool-outputs/test.log" },
+      },
+    ])
+    expect(file.status).toBe(200)
+    expect(await file.text()).toBe("full test output")
+  })
+
   test("returns 409 when posting to a thread with an active run", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({

@@ -252,6 +252,51 @@ describe("observed agent thread routes", () => {
     expect(missing.status).toBe(404)
   })
 
+  // The route returns its page unchecked, and its response schema is what drops what the model
+  // read of a tool's output. Guard proof: remove the 200 response schema from the observed
+  // messages route; the observer reads `modelOutput`, sandbox paths included.
+  test("an observer reads a conversation without what only its model reads", async () => {
+    const fixture = createFixture()
+    await fixture.browser("marie", [runners.id], "Marie Curie")
+    const observer = await fixture.browser("olivia", [threadObservers.id])
+    await fixture.seedConversation()
+
+    const call = {
+      type: "tool-call" as const,
+      toolCallId: "call_tests",
+      toolName: "bash",
+      input: { command: "bun test" },
+      state: "output-available" as const,
+      output: { exitCode: 0 },
+    }
+    await fixture.storage.agents.messages.append({
+      projectId,
+      id: "msg_answer",
+      threadId: "thr_marie",
+      runId: "run_marie",
+      role: "assistant",
+      parts: [
+        { type: "provider-state", providerId: "test", data: { encrypted: "signed" } },
+        {
+          ...call,
+          providerMetadata: { test: { itemId: "fc_1" } },
+          modelOutput: { type: "text", value: "<tool_output_file path=/sandbox/test.log>" },
+        },
+      ],
+    })
+
+    const messages = await fixture.request(
+      "/api/observed-agent-threads/thr_marie/messages?role=assistant",
+      observer
+    )
+    const body = (await messages.json()) as { messages: { parts: unknown[] }[] }
+
+    expect(body.messages[0]?.parts).toEqual([
+      { type: "provider-state", providerId: "test", data: null },
+      call,
+    ])
+  })
+
   // Guard proof: drop the assertAuthorized call in createObservedAgentThreadsRuntime; the owner
   // and the activity observer then read these routes.
   test("takes can.observe(agent.threads): neither the owner nor activity alone is enough", async () => {

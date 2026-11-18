@@ -77,6 +77,7 @@ export type {
   AgentConversationTurn,
   AgentFileSource,
 } from "./agent/conversation"
+export { usePrefetchAgentThread } from "./agent/hooks/thread-queries"
 export {
   type AgentConversation,
   type AgentConversationMessagesError,
