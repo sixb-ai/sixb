@@ -222,11 +222,14 @@ export function FolderContents<TItem>({
 function FolderTiles({ folders }: { readonly folders: readonly FolderTile[] }) {
   const messages = useFolderMessages()
   return (
-    <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+    // As many columns as fit tiles wide enough for a usual name, so names are read, not cut: one
+    // on a phone.
+    <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,12.5rem),1fr))] gap-2.5">
       {folders.map((folder) => (
         <li key={folder.path} className="min-w-0">
           <Link
             to={folder.href}
+            title={folder.name}
             className={cn(
               "group flex h-full min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5",
               "shadow-[0_1px_2px_0_rgb(0_0_0/0.04)] outline-none transition-[background-color,border-color,transform] duration-150",
@@ -236,7 +239,10 @@ function FolderTiles({ folders }: { readonly folders: readonly FolderTile[] }) {
           >
             <FolderGlyph className="h-7 w-8 shrink-0" />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm leading-5 font-medium">{folder.name}</span>
+              {/* A name too long for its tile wraps, at its hyphens first, rather than lose its end. */}
+              <span className="line-clamp-2 text-sm leading-5 font-medium break-words">
+                {folder.name}
+              </span>
               <span className="block text-xs leading-4 tabular-nums text-muted-foreground">
                 {messages.items(folder.count)}
               </span>
