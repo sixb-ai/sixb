@@ -1,4 +1,4 @@
-import type { ActionDescriptor, SixbHostView } from "@sixb/core"
+import type { ActionDescriptor, DefinitionFolders, SixbHostView } from "@sixb/core"
 import { schemaFieldsToJsonSchema } from "@sixb/core/internal/ontology"
 import type { Elysia } from "elysia"
 import { serializeActionRunDetail } from "../actions/serialize"
@@ -19,10 +19,12 @@ import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
 
 function serializeAction(
-  action: ActionDescriptor
+  action: ActionDescriptor,
+  folders: DefinitionFolders
 ): ReturnType<typeof ActionCatalogItemSchema.parse> {
   return ActionCatalogItemSchema.parse({
     id: action.id,
+    folder: folders.of("actions", action.id),
     name: action.id,
     description: action.description,
     ...(action.binding.kind === "object" ? { objectTypeId: action.binding.objectTypeId } : {}),
@@ -44,7 +46,7 @@ function serializeActionDetail(
   host: SixbHostView
 ): ReturnType<typeof ActionDetailSchema.parse> {
   return ActionDetailSchema.parse({
-    ...serializeAction(action),
+    ...serializeAction(action, host.definitions.folders),
     inputSchema: schemaFieldsToJsonSchema({
       fields: action.params,
       valueTypesById: host.definitions.ontology.getValueTypesById(),
@@ -58,7 +60,7 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
       "/api/actions",
       async (context) => {
         const actions = requireRequestSixb(context).actions.list()
-        return actions.map(serializeAction)
+        return actions.map((action) => serializeAction(action, host.definitions.folders))
       },
       {
         response: { 200: ActionCatalogItemSchema.array() },

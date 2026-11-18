@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { DefinitionFolderSchema } from "./common"
 
 export const ObjectTypeParamsSchema = z.object({ objectTypeId: z.string().min(1) })
 
@@ -69,6 +70,7 @@ export const ActionSchema = z.object({
 
 export const ObjectTypeSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   name: z.string(),
   description: z.string().optional(),
   extends: z.string().optional(),

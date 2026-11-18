@@ -60,6 +60,11 @@ function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostView {
       syncRuns,
     },
     definitions: {
+      // `syncs/erp/invoices.ts` puts the sync in `erp`.
+      folders: {
+        of: (family: string, id: string) =>
+          family === "syncs" && id === "sync-invoices" ? "erp" : undefined,
+      },
       syncs: {
         list: () => syncs,
         getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
@@ -138,6 +143,7 @@ describe("sync routes", () => {
 
     const body = (await response.json()) as Array<{
       id: string
+      folder?: string
       target: { dataset: { primaryKey?: string | string[] } }
       latestRun: {
         id: string
@@ -158,6 +164,7 @@ describe("sync routes", () => {
     expect(body.find((sync) => sync.id === "sync-invoices")?.target.dataset.primaryKey).toBe(
       "invoiceId"
     )
+    expect(body.map((sync) => sync.folder)).toEqual([undefined, undefined, "erp"])
     expect(body.find((sync) => sync.id === "sync-customers")?.latestRun).toMatchObject({
       status: "failed",
       error: FAILURE,

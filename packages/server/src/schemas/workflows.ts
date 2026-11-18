@@ -7,7 +7,12 @@ import { z } from "zod"
 import { AgentMessagePartSchema, AgentRunFailureSchema } from "./agents"
 import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
-import { JsonValueSchema, PrincipalSchema, sixbFailureSchema } from "./common"
+import {
+  DefinitionFolderSchema,
+  JsonValueSchema,
+  PrincipalSchema,
+  sixbFailureSchema,
+} from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
 
@@ -204,6 +209,7 @@ export const WorkflowInterventionSchema = z.object({
 
 export const WorkflowSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   input: WorkflowIOSnapshotSchema,
   triggers: z.array(WorkflowTriggerSchema),
   nodes: z.array(WorkflowNodeSchema),
