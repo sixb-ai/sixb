@@ -1,8 +1,16 @@
 import { type Principal, principalsEqual, SYSTEM_PRINCIPAL, type UserPrincipal } from "../auth"
 import { isRuntimeAllowed } from "../authorization"
 import type { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import type { AuthorizablePrincipal } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
+import type {
+  AgentRunFailureCode,
+  AgentRunFinishReason,
+  AgentRunRecord,
+  AgentRunStatus,
+  AgentStorage,
+  AgentThreadRecord,
+} from "../storage/agents"
 import { AgentRequestError } from "./errors"
 
 /** How the caller takes part in a conversation: its owner, or a user its owner added. */
@@ -15,9 +23,56 @@ export interface AgentThreadParticipant {
   readonly addedBy: Principal
 }
 
-/** A thread as the runtime returns it: the stored record with the users taking part in it. */
+/**
+ * How far the caller's reading of a thread has reached, and what arrived past it. Reading on one
+ * device clears it on every other.
+ */
+export interface AgentThreadReadView {
+  readonly threadId: string
+  /** The seq of the last message their reading reached; 0 when it reached none. */
+  readonly throughSeq: number
+  /** The seq of the thread's newest message, 0 when it has none. */
+  readonly headSeq: number
+  /**
+   * Messages past `throughSeq` that someone else wrote: the Agent's answers and other people's
+   * messages. Their own messages are not new to them, nor is a message that only reports how
+   * approved calls ended.
+   */
+  readonly unread: number
+  /** When they last marked the thread read, even where their place did not move. */
+  readonly readAt?: Date
+}
+
+/** The thread's newest run, enough for a client to offer Continue or Retry without reading it. */
+export interface AgentThreadLastRunView {
+  readonly id: string
+  readonly status: AgentRunStatus
+  readonly finishReason?: AgentRunFinishReason
+  /** Why it failed, when it did. */
+  readonly errorCode?: AgentRunFailureCode
+  readonly completedAt?: Date
+  /**
+   * Who asked for it, when it ended short (failed, timed out or interrupted): only they can run it
+   * again, as it runs with their rights.
+   */
+  readonly requestedBy?: AuthorizablePrincipal
+}
+
+/** A run that stopped before its answer: it failed, timed out, or its worker went away. */
+export function agentRunEndedShort(run: Pick<AgentRunRecord, "status" | "finishReason">): boolean {
+  if (run.status === "failed") return true
+  return run.finishReason === "timeout" || run.finishReason === "interrupted"
+}
+
+/**
+ * A thread as the runtime returns it: the stored record with the users taking part in it, the
+ * caller's place in it, and its newest run. `read` is absent for an observer, and for system code,
+ * which is nobody's reading.
+ */
 export interface AgentThreadView extends AgentThreadRecord {
   readonly participants: readonly AgentThreadParticipant[]
+  readonly read?: AgentThreadReadView
+  readonly lastRun?: AgentThreadLastRunView
 }
 
 /** A thread the caller can read, and how it takes part in it. */

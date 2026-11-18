@@ -29,6 +29,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListLatestAgentRunsInput,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type RequestAgentRunCancelInput,
@@ -584,6 +585,26 @@ export class SqliteAgentRunStore implements AgentRunStore {
       const run = rowToRunRecord(row)
       return run.kind === "subagent" ? [run] : []
     })
+  }
+
+  async latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]> {
+    if (input.threadIds.length === 0) return []
+
+    const rows = this.db
+      .query(`
+        SELECT * FROM (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY thread_id
+            ORDER BY created_at DESC, id DESC
+          ) AS thread_rank
+          FROM agent_runs
+          WHERE project_id = ? AND thread_id IN (SELECT value FROM json_each(?))
+        )
+        WHERE thread_rank = 1
+      `)
+      .all(input.projectId, JSON.stringify(input.threadIds)) as AgentRunRow[]
+
+    return rows.map(rowToRunRecord)
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

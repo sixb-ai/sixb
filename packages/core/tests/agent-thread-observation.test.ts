@@ -84,6 +84,8 @@ describe("observing other users' conversations", () => {
       ownerPrincipal: { type: "user", id: "marie" },
       title: "Overdue invoices",
     })
+    // Reading is the owner's and participants' alone: an observer has no place in it.
+    expect((await observer.agent.observed.getById(thread.id))?.read).toBeUndefined()
     const runs = await observer.agent.observed.listRuns(thread.id)
     expect(runs?.runs.map((run) => [run.id, run.status])).toEqual([["run_marie", "failed"]])
     expect(await observer.agent.observed.getById("thr_missing")).toBeNull()

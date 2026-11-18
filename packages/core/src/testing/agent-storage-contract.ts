@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
+import { AGENT_MESSAGE_CONTENT_VERSION, type AgentMessagePart } from "../agents/message"
 import { projectAgentThreadModelContext } from "../agents/thread-context-projection"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage/types"
@@ -106,6 +106,10 @@ function participant(userId: string, addedAt: Date): AgentThreadParticipantRecor
     addedAt,
     addedBy: owner,
   }
+}
+
+function user(id: string): { readonly type: "user"; readonly id: string } {
+  return { type: "user", id }
 }
 
 function execution(
@@ -1772,6 +1776,400 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(await storage.threads.listParticipants({ projectId, threadIds: ["thr_1"] })).toEqual(
           []
         )
+      })
+    })
+
+    // ── read state ─────────────────────────────────────────────────────────────────────────────
+
+    test("marks how far one person has read, never backwards, by message", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        for (const id of ["m1", "m2", "m3"]) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role: "user",
+            authorPrincipal: user("usr_bob"),
+            parts: [{ type: "text", text: id }],
+            createdAt: at("2026-06-23T10:00:00.000Z"),
+          })
+        }
+        const mark = (input: {
+          readonly principal?: { readonly type: "user"; readonly id: string }
+          readonly throughMessageId?: string
+          readonly readAt?: Date
+        }) =>
+          storage.reads.mark({
+            projectId,
+            threadId: "thr_1",
+            principal: input.principal ?? user("usr_1"),
+            ...(input.throughMessageId === undefined
+              ? {}
+              : { throughMessageId: input.throughMessageId }),
+            ...(input.readAt === undefined ? {} : { readAt: input.readAt }),
+          })
+
+        expect(
+          await mark({ throughMessageId: "m2", readAt: at("2026-06-23T11:00:00.000Z") })
+        ).toEqual({
+          threadId: "thr_1",
+          throughSeq: 2,
+          headSeq: 3,
+          unread: 1,
+          readAt: at("2026-06-23T11:00:00.000Z"),
+        })
+
+        // Regression proof: replace the GREATEST/MAX on `through_seq` with a plain assignment;
+        // the stale mark rewinds the phone that read further. Looking still counts: replace the
+        // one on `read_at` with the old value and it keeps 11:00.
+        const back = await mark({ throughMessageId: "m1", readAt: at("2026-06-23T12:00:00.000Z") })
+        expect(back.throughSeq).toBe(2)
+        expect(back.readAt?.toISOString()).toBe("2026-06-23T12:00:00.000Z")
+
+        const earlier = await mark({
+          throughMessageId: "m2",
+          readAt: at("2026-06-23T09:00:00.000Z"),
+        })
+        expect(earlier.readAt?.toISOString()).toBe("2026-06-23T12:00:00.000Z")
+
+        // Done: the newest.
+        expect(await mark({})).toMatchObject({ throughSeq: 3, headSeq: 3, unread: 0 })
+
+        // A message the thread does not hold marks nothing.
+        const other = await mark({ principal: user("usr_2"), throughMessageId: "m_gone" })
+        expect(other).toEqual({ threadId: "thr_1", throughSeq: 0, headSeq: 3, unread: 3 })
+
+        expect(
+          await storage.reads.list({
+            projectId,
+            threadIds: ["thr_1", "thr_1", "thr_missing"],
+            principal: user("usr_2"),
+          })
+        ).toEqual([{ threadId: "thr_1", throughSeq: 0, headSeq: 3, unread: 3 }])
+        await expectAgentError(
+          storage.reads.mark({ projectId, threadId: "thr_missing", principal: user("usr_1") }),
+          "thread_not_found"
+        )
+      })
+    })
+
+    test("counts as unread what someone else wrote", async () => {
+      await withStorage(async (storage) => {
+        const alice = user("usr_1")
+        const bob = user("usr_bob")
+        await storage.threads.create(threadInput())
+
+        const message = (
+          id: string,
+          role: "user" | "assistant",
+          author: Principal,
+          parts: readonly AgentMessagePart[]
+        ) =>
+          storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role,
+            authorPrincipal: author,
+            parts,
+          })
+
+        // Alice asks (1). The answer carries its requester as author (2). Alice resumes a paused
+        // call with approval outcomes only (3). Bob writes (4).
+        await message("m1", "user", alice, [{ type: "text", text: "question" }])
+        await message("m2", "assistant", alice, [{ type: "text", text: "answer" }])
+        await message("m3", "user", alice, [
+          {
+            type: "approval-outcome",
+            approvalId: "apr_1",
+            status: "approved",
+            call: {
+              kind: "action",
+              actionId: "mark-paid",
+              subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-2041" },
+            },
+          },
+        ])
+        await message("m4", "user", bob, [{ type: "text", text: "hello" }])
+
+        // Removal proof: count `headSeq - throughSeq` instead; Alice reads 4 new where 2 are.
+        const place = (principal: { readonly type: "user"; readonly id: string }) =>
+          storage.reads.list({ projectId, threadIds: ["thr_1"], principal })
+        expect(await place(alice)).toEqual([
+          { threadId: "thr_1", throughSeq: 0, headSeq: 4, unread: 2 },
+        ])
+        expect(await place(bob)).toMatchObject([{ unread: 2 }])
+
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: alice,
+          throughMessageId: "m2",
+        })
+        expect(await place(alice)).toMatchObject([{ throughSeq: 2, unread: 1 }])
+      })
+    })
+
+    test("a retried turn's new answer is unread to whoever read the failed one", async () => {
+      await withStorage(async (storage, fixture) => {
+        // Bob read the failed answer (2). The retry deletes it and its answer takes seq 2 again.
+        // Removal proof: skip the clamp in `deleteByRunId`; Bob stays at 2 and never sees it.
+        const bob = user("usr_bob")
+        await storage.threads.create(threadInput())
+        await storage.messages.append({
+          id: "m1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "first" }],
+        })
+        await createAndStartRun(storage, fixture, runInput({ triggerMessageId: "m1" }))
+        await storage.messages.append({
+          id: "m2",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          role: "assistant",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "failed answer" }],
+        })
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+        await storage.runs.finish({
+          id: "run_1",
+          projectId,
+          executionToken: "exec_1",
+          status: "failed",
+        })
+
+        await storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+        const retried = await storage.messages.append({
+          id: "m3",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "assistant",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "retried answer" }],
+        })
+
+        expect(retried.seq).toBe(2)
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: bob })
+        ).toMatchObject([{ throughSeq: 1, headSeq: 2, unread: 1 }])
+
+        // A stale screen that still shows the failed answer cannot mark the new one read.
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: bob,
+          throughMessageId: "m2",
+        })
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: bob })
+        ).toMatchObject([{ throughSeq: 1, unread: 1 }])
+      })
+    })
+
+    test("retrying an older turn leaves what came after it read", async () => {
+      await withStorage(async (storage, fixture) => {
+        // Run 1 failed after answering (2); Alice asked again (3) and was answered (4); Bob read
+        // through 4. Retrying run 1 deletes 2, which no later message takes: 3 and 4 stay read.
+        // Removal proof: pull places back to before the first deleted message; Bob reads 3 and 4
+        // as new again.
+        const bob = user("usr_bob")
+        await storage.threads.create(threadInput())
+        const message = (id: string, role: "user" | "assistant", runId: string | null) =>
+          storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId,
+            role,
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+          })
+
+        await message("m1", "user", null)
+        await createAndStartRun(storage, fixture, runInput({ triggerMessageId: "m1" }))
+        await message("m2", "assistant", "run_1")
+        await storage.runs.finish({
+          id: "run_1",
+          projectId,
+          executionToken: "exec_1",
+          status: "failed",
+        })
+        await message("m3", "user", null)
+        await message("m4", "assistant", null)
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+
+        await storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: bob })
+        ).toMatchObject([{ throughSeq: 4, headSeq: 4, unread: 0 }])
+      })
+    })
+
+    test("an edited message is unread to whoever read past it", async () => {
+      await withStorage(async (storage) => {
+        // Removal proof: skip the clamp in `deleteFromSeq`; Bob stays at 3 and the edit, which
+        // takes seq 2 again, reads as read.
+        const bob = user("usr_bob")
+        await storage.threads.create(threadInput())
+        for (const id of ["m1", "m2", "m3"]) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role: "user",
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+          })
+        }
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+        await storage.reads.mark({ projectId, threadId: "thr_1", principal: user("usr_1") })
+
+        await storage.messages.deleteFromSeq({ projectId, threadId: "thr_1", fromSeq: 2 })
+        await storage.messages.append({
+          id: "m2_edited",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          authorPrincipal: owner,
+          parts: [{ type: "text", text: "edited" }],
+        })
+
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: bob })
+        ).toMatchObject([{ throughSeq: 1, headSeq: 2, unread: 1 }])
+        // The editor's own message is not new to them.
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: user("usr_1") })
+        ).toMatchObject([{ throughSeq: 1, unread: 0 }])
+      })
+    })
+
+    test("starts a participant caught up and drops their row when they leave", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        for (const id of ["m1", "m2"]) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId: null,
+            role: "user",
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+            createdAt: at("2026-06-23T10:00:00.000Z"),
+          })
+        }
+
+        await storage.threads.addParticipants(
+          participantsInput(["usr_bob"], at("2026-06-23T11:00:00.000Z"))
+        )
+        const bobsPlace = () =>
+          storage.reads.list({ projectId, threadIds: ["thr_1"], principal: user("usr_bob") })
+        expect(await bobsPlace()).toEqual([
+          {
+            threadId: "thr_1",
+            throughSeq: 2,
+            headSeq: 2,
+            unread: 0,
+            readAt: at("2026-06-23T11:00:00.000Z"),
+          },
+        ])
+
+        await storage.threads.removeParticipant({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_bob"),
+        })
+        expect(await bobsPlace()).toEqual([
+          { threadId: "thr_1", throughSeq: 0, headSeq: 2, unread: 2 },
+        ])
+
+        // A mark that raced his removal leaves a row behind; joining again starts him caught up.
+        // Removal proof: keep `DO NOTHING` on the join's insert; Bob stays at 1.
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_bob"),
+          throughMessageId: "m1",
+        })
+        await storage.threads.addParticipants(
+          participantsInput(["usr_bob"], at("2026-06-23T12:00:00.000Z"))
+        )
+        expect(await bobsPlace()).toMatchObject([{ throughSeq: 2, unread: 0 }])
+      })
+    })
+
+    test("a fork keeps its owner's place, clamped to what it copied", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_2"),
+          throughMessageId: "m4",
+        })
+
+        await storage.threads.fork(forkInput())
+
+        expect(
+          await storage.reads.list({
+            projectId,
+            threadIds: ["thr_fork"],
+            principal: user("usr_2"),
+          })
+        ).toMatchObject([{ throughSeq: 4 }])
+      })
+    })
+
+    test("reads each thread's newest run, by creation then id", async () => {
+      await withStorage(async (storage, fixture) => {
+        for (const id of ["thr_1", "thr_2", "thr_3"]) {
+          await storage.threads.create(threadInput({ id }))
+        }
+
+        const run = async (
+          id: string,
+          threadId: string,
+          createdAt: string,
+          status: "succeeded" | "failed"
+        ) => {
+          await createAndStartRun(
+            storage,
+            fixture,
+            runInput({ id, threadId, createdAt: at(createdAt), execution: execution(`exec_${id}`) })
+          )
+          await storage.runs.finish({ id, projectId, executionToken: `exec_${id}`, status })
+        }
+
+        // A failed turn, then its retry: the retry is newest, so nothing reads as failed.
+        await run("run_1", "thr_1", "2026-06-23T10:00:10.000Z", "failed")
+        await run("run_2", "thr_1", "2026-06-23T10:00:20.000Z", "succeeded")
+        // Created in the same millisecond: the id decides.
+        await run("run_b", "thr_2", "2026-06-23T10:00:30.000Z", "failed")
+        await run("run_c", "thr_2", "2026-06-23T10:00:30.000Z", "succeeded")
+
+        // Removal proof: order by `created_at` ascending; thr_1 reads run_1 and stays failed.
+        const latest = await storage.runs.latestByThread({
+          projectId,
+          threadIds: ["thr_1", "thr_2", "thr_3", "thr_missing"],
+        })
+        expect(latest.map((entry) => [entry.threadId, entry.id, entry.status]).sort()).toEqual([
+          ["thr_1", "run_2", "succeeded"],
+          ["thr_2", "run_c", "succeeded"],
+        ])
+        expect(await storage.runs.latestByThread({ projectId, threadIds: [] })).toEqual([])
       })
     })
 

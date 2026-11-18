@@ -10,9 +10,19 @@ Sixb packages are versioned independently. Each release entry names the packages
   last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
   link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
   series on the `timeZone` its query names, UTC when it names none.
+- A conversation remembers how far each person has read it, on every device.
+  `sixb.agent.threads.list()` and `getById()` return the caller's `read` (their place, the newest
+  message and how many messages someone else wrote since) and `lastRun`, enough to offer Continue
+  or Retry. `sixb.agent.threads.markRead(threadId, { throughMessageId })` moves the place, or to
+  the newest message without one; over HTTP, `PUT /api/agent-threads/:threadId/read`.
 
 ### Upgrade notes
 
+- Run the migrations: PostgreSQL `108-agent-thread-reads`, SQLite `105-agent-thread-reads`. Every
+  existing conversation's owner and participants start caught up.
+- A storage provider of your own implements `AgentStorage.reads` and
+  `AgentRunStore.latestByThread`, and its `messages.deleteByRunId` and `deleteFromSeq` bring any
+  place past the newest message left back to it.
 - `getAiAccountingOverview` takes an optional `timeZone`, an IANA name, and returns its periods on
   that calendar instead of always UTC's. Settings › Usage sends the browser's.
 - A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's

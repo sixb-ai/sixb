@@ -105,6 +105,8 @@ export type {
   AgentRun,
   AgentThread,
   AgentThreadContext,
+  AgentThreadLastRun,
+  AgentThreadRead,
   AgentThreadSandboxParams,
   LanguageModel,
 } from "./agent/types"

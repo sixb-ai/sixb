@@ -156,6 +156,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
       if (deleted.length === 0) {
         return 0
       }
+      this.clampReadsToHead(input.projectId, input.threadId)
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -205,6 +206,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         )
         .all(input.projectId, input.threadId, input.fromSeq) as { parts: string }[]
       if (deleted.length === 0) return 0
+      this.clampReadsToHead(input.projectId, input.threadId)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -231,6 +233,28 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       return deleted.length
     })()
+  }
+
+  /**
+   * Bring every place past the thread's newest message back to it, after a deletion. The next
+   * message takes the number after the newest, so a place left past it would cover what a retry
+   * or an edit writes next. Messages up to the newest kept their numbers and stay read.
+   */
+  private clampReadsToHead(projectId: string, threadId: string): void {
+    this.db
+      .query(`
+        UPDATE agent_thread_reads
+        SET through_seq = (
+          SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+          WHERE project_id = ?1 AND thread_id = ?2
+        )
+        WHERE project_id = ?1 AND thread_id = ?2
+          AND through_seq > (
+            SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+            WHERE project_id = ?1 AND thread_id = ?2
+          )
+      `)
+      .run(projectId, threadId)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {

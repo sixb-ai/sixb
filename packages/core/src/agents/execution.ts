@@ -90,7 +90,10 @@ import { normalizeSandboxBinding } from "./sandbox"
 import { publishAgentThreadMoved } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import {
+  type AgentThreadLastRunView,
+  type AgentThreadReadView,
   type AgentThreadView,
+  agentRunEndedShort,
   agentThreadViews,
   assertConversationThread,
   createAgentThreadAccessRule,
@@ -164,6 +167,16 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
+    /**
+     * Record that the caller's reading of a thread reached a message, or its newest when omitted,
+     * which is what a Done button sends. It never moves backwards, so another device that read
+     * further keeps its place; a message a retry or an edit took away marks nothing. Answers the
+     * caller's place afterwards.
+     */
+    markRead(
+      threadId: string,
+      input?: { readonly throughMessageId?: string }
+    ): Promise<AgentThreadReadView>
     /**
      * The sub-agents a conversation's turns spawned, oldest first, each the thread it works in with
      * every run it took; `null` when the caller cannot read the conversation. `runId` keeps those
@@ -805,6 +818,66 @@ export function createAgentRuntime<
     },
   }
 
+  /** The caller, when there is a person: system code and shared links have no reading. */
+  const readViewer = (): UserPrincipal | undefined =>
+    principal.type === "user" ? principal : undefined
+
+  /**
+   * A thread's newest run as a client needs it to offer Continue or Retry. A run that ended short
+   * also names who asked for it, from its execution: only those runs pay for that read.
+   */
+  const lastRunView = async (run: AgentRunRecord): Promise<AgentThreadLastRunView> => {
+    const view: AgentThreadLastRunView = {
+      id: run.id,
+      status: run.status,
+      ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
+      ...(run.error === undefined ? {} : { errorCode: run.error.code }),
+      ...(run.completedAt === undefined ? {} : { completedAt: run.completedAt }),
+    }
+    if (!agentRunEndedShort(run)) return view
+
+    const execution = await runtime.storage.executions.getById({
+      projectId: runtime.projectId,
+      id: run.executionId,
+    })
+    if (!execution?.requestedBy) return view
+
+    return { ...view, requestedBy: structuredClone(execution.requestedBy) }
+  }
+
+  /**
+   * The caller's place in each thread and its newest run, in one batched read each, plus one
+   * execution read per thread whose newest turn ended short. Only the paths that hand a thread to
+   * a person call this: an access check does not pay for it.
+   */
+  const withThreadState = async (
+    threads: readonly AgentThreadView[],
+    viewer: UserPrincipal | undefined
+  ): Promise<readonly AgentThreadView[]> => {
+    const agents = runtime.storage.agents
+    if (!viewer || !agents || threads.length === 0) return threads
+
+    const threadIds = threads.map((thread) => thread.id)
+    const [reads, runs] = await Promise.all([
+      agents.reads.list({ projectId: runtime.projectId, threadIds, principal: viewer }),
+      agents.runs.latestByThread({ projectId: runtime.projectId, threadIds }),
+    ])
+    const lastRuns = await Promise.all(runs.map(lastRunView))
+
+    const readOf = new Map(reads.map((read) => [read.threadId, read]))
+    const runOf = new Map(runs.map((run, index) => [run.threadId, lastRuns[index]]))
+
+    return threads.map((thread) => {
+      const read = readOf.get(thread.id)
+      const lastRun = runOf.get(thread.id)
+      return {
+        ...thread,
+        ...(read === undefined ? {} : { read }),
+        ...(lastRun === undefined ? {} : { lastRun }),
+      }
+    })
+  }
+
   /** Move a conversation's sandbox out of recovery, as its owner chose: fresh, or as it was. */
   const recoverSandbox = async (
     threadId: string,
@@ -827,7 +900,10 @@ export function createAgentRuntime<
     }
     const thread = readable.thread
     const sandboxState = await transition(storage)
-    const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
+    const [view] = await withThreadState(
+      await agentThreadViews(runtime, [{ ...thread, sandboxState }]),
+      readViewer()
+    )
     return view ?? thread
   }
 
@@ -924,7 +1000,7 @@ export function createAgentRuntime<
           agents.threads.assignComputer({ projectId: runtime.projectId, id: threadId, computer })
         )
         if (moves) await announceThreadMoved(thread)
-        const [view] = await agentThreadViews(runtime, [moved])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [moved]), readViewer())
         return view ?? moved
       },
       moveToCloud: async (threadId) => {
@@ -940,7 +1016,7 @@ export function createAgentRuntime<
         )
         if (queued) await dispatchAgentRun(runtime, requireAgents(), queued.id)
         await announceThreadMoved(thread)
-        const [view] = await agentThreadViews(runtime, [moved])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [moved]), readViewer())
         return view ?? moved
       },
       create: async (input) => {
@@ -988,7 +1064,8 @@ export function createAgentRuntime<
           ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
           ...(input.computer === undefined ? {} : { computer: input.computer }),
         })
-        return { ...created, participants: [] }
+        const [view] = await withThreadState([{ ...created, participants: [] }], readViewer())
+        return view ?? { ...created, participants: [] }
       },
       listChildren: async (threadId, { runId } = {}) => {
         const thread = await getVisibleThreadRecord(threadId)
@@ -1027,10 +1104,41 @@ export function createAgentRuntime<
           ownerPrincipal: principal,
           sandbox,
         })
-        const [view] = await agentThreadViews(runtime, [fork])
+        const [view] = await withThreadState(await agentThreadViews(runtime, [fork]), readViewer())
         return view ?? { ...fork, participants: [] }
       },
-      getById: getVisibleThreadRecord,
+      getById: async (threadId) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread) return null
+        const [view] = await withThreadState([thread], readViewer())
+        return view ?? null
+      },
+      markRead: async (threadId, input = {}) => {
+        const readable = await rule.read(threadId)
+        if (!readable) {
+          throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+        }
+        assertConversationThread(readable.thread)
+        const reader = settingsPrincipal()
+        if (reader.type !== "user") {
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+        }
+        if (input.throughMessageId !== undefined && input.throughMessageId.trim().length === 0) {
+          throw new AgentRequestError(
+            "invalid_message",
+            "[Sixb] 'throughMessageId' must name a message of the thread."
+          )
+        }
+
+        return requireAgents().reads.mark({
+          projectId: runtime.projectId,
+          threadId,
+          principal: reader,
+          ...(input.throughMessageId === undefined
+            ? {}
+            : { throughMessageId: input.throughMessageId }),
+        })
+      },
       list: async ({ sharedWithMe, ...input } = {}) => {
         assertNoAgentSelector(input)
         const none = { threads: [], hasMore: false, total: 0 }
@@ -1050,7 +1158,8 @@ export function createAgentRuntime<
             ? { participantPrincipal: caller }
             : { ownerPrincipal: caller }),
         })
-        return { ...result, threads: await agentThreadViews(runtime, result.threads) }
+        const views = await agentThreadViews(runtime, result.threads)
+        return { ...result, threads: await withThreadState(views, readViewer()) }
       },
       participants: {
         add: (threadId, users) =>

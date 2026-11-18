@@ -20,6 +20,12 @@ export type Agent = GetAgentResponse
 
 export type AgentThread = ListAgentThreadsResponse["threads"][number]
 
+/** How far the reader's place in a thread has reached, and what is new to them. */
+export type AgentThreadRead = NonNullable<AgentThread["read"]>
+
+/** A thread's newest run: enough to offer Continue or Retry without reading it. */
+export type AgentThreadLastRun = NonNullable<AgentThread["lastRun"]>
+
 /** What a new conversation's sandbox is made from, as the project's sandbox declares its params. */
 export type AgentThreadSandboxParams = NonNullable<CreateAgentThreadData["body"]["sandbox"]>
 

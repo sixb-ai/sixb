@@ -239,6 +239,34 @@ export class PgAgentThreadStore implements AgentThreadStore {
           RETURNING *
         `
 
+        // The owner of the copy keeps their place: copied messages keep their seq, so what they
+        // had not read in the source is what they have not read here. Only a user reads.
+        if (input.ownerPrincipal.type === "user") {
+          await tx`
+            INSERT INTO agent_thread_reads (
+              project_id,
+              thread_id,
+              principal_type,
+              principal_id,
+              through_seq,
+              read_at
+            )
+            SELECT
+              ${input.projectId},
+              ${input.id},
+              'user',
+              ${input.ownerPrincipal.id},
+              LEAST(source.through_seq, ${plan.headSeq}),
+              source.read_at
+            FROM agent_thread_reads AS source
+            WHERE source.project_id = ${input.projectId}
+              AND source.thread_id = ${input.sourceThreadId}
+              AND source.principal_type = 'user'
+              AND source.principal_id = ${input.ownerPrincipal.id}
+            ON CONFLICT DO NOTHING
+          `
+        }
+
         if (plan.messages.length > 0) {
           await tx`
             INSERT INTO agent_messages (
@@ -448,6 +476,34 @@ export class PgAgentThreadStore implements AgentThreadStore {
         `
       }
 
+      // Someone who joins starts caught up: what came before is not new to them. A place left
+      // from an earlier stay, or written by a mark that raced the removal, does not carry over.
+      for (const principal of added) {
+        await tx`
+          INSERT INTO agent_thread_reads (
+            project_id,
+            thread_id,
+            principal_type,
+            principal_id,
+            through_seq,
+            read_at
+          ) VALUES (
+            ${input.projectId},
+            ${input.threadId},
+            ${principal.type},
+            ${principal.id},
+            (
+              SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+              WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+            ),
+            ${addedAt}
+          )
+          ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO UPDATE SET
+            through_seq = EXCLUDED.through_seq,
+            read_at = EXCLUDED.read_at
+        `
+      }
+
       return added.length === 0
         ? existing
         : selectParticipants(tx, input.projectId, [input.threadId])
@@ -455,16 +511,26 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
-    const rows = await this.sql<{ principal_id: string }[]>`
-      DELETE FROM agent_thread_participants
-      WHERE project_id = ${input.projectId}
-        AND thread_id = ${input.threadId}
-        AND principal_type = ${input.principal.type}
-        AND principal_id = ${input.principal.id}
-      RETURNING principal_id
-    `
+    return runPgTransaction(this.sql, async (tx) => {
+      const rows = await tx<{ principal_id: string }[]>`
+        DELETE FROM agent_thread_participants
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND principal_type = ${input.principal.type}
+          AND principal_id = ${input.principal.id}
+        RETURNING principal_id
+      `
 
-    return rows.length > 0
+      await tx`
+        DELETE FROM agent_thread_reads
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND principal_type = ${input.principal.type}
+          AND principal_id = ${input.principal.id}
+      `
+
+      return rows.length > 0
+    })
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {

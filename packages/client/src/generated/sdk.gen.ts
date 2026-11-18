@@ -514,6 +514,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  MarkAgentThreadReadData,
+  MarkAgentThreadReadErrors,
+  MarkAgentThreadReadResponses,
   MoveAgentThreadToCloudData,
   MoveAgentThreadToCloudErrors,
   MoveAgentThreadToCloudResponses,
@@ -3412,6 +3415,31 @@ export const cancelAgentRunById = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/agent-runs/{runId}/cancel",
     ...options,
+  })
+
+/**
+ * Mark how far you have read an Agent thread
+ *
+ * Record that your reading of a conversation reached a message, or its newest when `throughMessageId` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place; a message a retry or an edit took away marks nothing. Session routes only: a runner has no reading.
+ */
+export const markAgentThreadRead = <ThrowOnError extends boolean = false>(
+  options: Options<MarkAgentThreadReadData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    MarkAgentThreadReadResponses,
+    MarkAgentThreadReadErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/read",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

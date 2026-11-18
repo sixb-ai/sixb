@@ -167,6 +167,55 @@ describe("reading a shared conversation", () => {
     expect((await owner.agent.threads.list({ sharedWithMe: true })).total).toBe(0)
   })
 
+  test("each reader keeps their own place, and joining starts caught up", async () => {
+    const { host } = setup()
+    const { owner, participant, thread } = await sharedThread(host)
+
+    // Alice asked and its turn failed before answering. Her own message is not new to her, and
+    // the turn names her: she alone can run it again.
+    expect((await owner.agent.threads.getById(thread.id))?.read).toMatchObject({
+      throughSeq: 0,
+      headSeq: 1,
+      unread: 0,
+    })
+    expect((await owner.agent.threads.getById(thread.id))?.lastRun).toMatchObject({
+      status: "failed",
+      requestedBy: alice,
+    })
+
+    // Bob joined after that message, so it is not new to him.
+    expect((await participant.agent.threads.getById(thread.id))?.read).toMatchObject({
+      throughSeq: 1,
+      headSeq: 1,
+      unread: 0,
+    })
+
+    expect(await owner.agent.threads.markRead(thread.id)).toMatchObject({
+      throughSeq: 1,
+      headSeq: 1,
+      unread: 0,
+    })
+    // A message the thread no longer holds marks nothing.
+    expect(
+      await owner.agent.threads.markRead(thread.id, { throughMessageId: "msg_gone" })
+    ).toMatchObject({ throughSeq: 1, unread: 0 })
+    const blank = await owner.agent.threads
+      .markRead(thread.id, { throughMessageId: " " })
+      .catch((error) => error)
+    expect(blank).toMatchObject({ code: "invalid_message" })
+
+    // Bob writes: new to Alice, not to him.
+    await participant.agent.runs.request({ threadId: thread.id, text: "Why?" })
+    expect((await owner.agent.threads.list()).threads[0]?.read).toMatchObject({
+      throughSeq: 1,
+      headSeq: 2,
+      unread: 1,
+    })
+    expect((await participant.agent.threads.getById(thread.id))?.read).toMatchObject({
+      unread: 0,
+    })
+  })
+
   test("anyone else reads nothing, and a participant without can.run(agent) neither", async () => {
     const { host } = setup()
     const { other, thread, run } = await sharedThread(host)

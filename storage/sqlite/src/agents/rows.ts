@@ -271,6 +271,19 @@ export function rowToParticipantRecord(
   }
 }
 
+/**
+ * Whether the message row `alias` counts as a thread message (`countsAsThreadMessage`): not one
+ * that only reports approval outcomes. The fork's `counted` column spells the same rule.
+ */
+export function countedMessageSql(alias: string): string {
+  return `NOT (
+    json_array_length(${alias}.parts) > 0 AND NOT EXISTS (
+      SELECT 1 FROM json_each(${alias}.parts)
+      WHERE json_extract(value, '$.type') <> 'approval-outcome'
+    )
+  )`
+}
+
 function principalFromColumns(
   type: Principal["type"] | null | undefined,
   id: string | null | undefined

@@ -167,6 +167,46 @@ export const AgentThreadParticipantSchema = z.object({
   addedBy: AgentPrincipalSchema,
 })
 
+export const AgentRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+
+export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
+
+/** Your place in a conversation: how far your reading reached, and what is new. */
+export const AgentThreadReadSchema = z.object({
+  threadId: z.string(),
+  /** The seq of the last message your reading reached; 0 when it reached none. */
+  throughSeq: z.number(),
+  /** The thread's newest message seq. */
+  headSeq: z.number(),
+  /** Messages past your place that someone else wrote: not yours, nor approval outcomes alone. */
+  unread: z.number(),
+  /** When you last marked it read. */
+  readAt: z.string().optional(),
+})
+
+/** The newest run of a thread, enough to offer Continue or Retry without reading it. */
+export const AgentThreadLastRunSchema = z.object({
+  id: z.string(),
+  status: AgentRunStatusSchema,
+  finishReason: AgentRunFinishReasonSchema.optional(),
+  errorCode: z.enum(AGENT_RUN_FAILURE_CODES).optional(),
+  completedAt: z.string().optional(),
+  /** Who asked for it, when it ended short: only they can run it again. */
+  requestedBy: AgentAuthorizablePrincipalSchema.optional(),
+})
+
+export const MarkAgentThreadReadBodySchema = z
+  .object({ throughMessageId: z.string().trim().min(1).optional() })
+  .strict()
+
+export const MarkAgentThreadReadResponseSchema = z.object({ read: AgentThreadReadSchema })
+
 export const AgentThreadSchema = z.object({
   sandboxState: z
     .object({
@@ -224,6 +264,10 @@ export const AgentThreadSchema = z.object({
   messageCount: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Your place in it: absent for an observer, and for code that is not a person. */
+  read: AgentThreadReadSchema.optional(),
+  /** Its newest run, so a client can offer Continue or Retry without reading it. */
+  lastRun: AgentThreadLastRunSchema.optional(),
   /** Your mode in this thread, when the thread is read alone. */
   approvalMode: AgentApprovalModeSchema.optional(),
   /**
@@ -540,16 +584,6 @@ export const AgentRequestErrorResponseSchema = ErrorResponseSchema.extend({
 export const CancelAgentRunBodySchema = z.object({
   runId: z.string().trim().min(1),
 })
-
-export const AgentRunStatusSchema = z.enum([
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-])
-
-export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 
 export const AgentRunSchema = z.object({
   id: z.string(),

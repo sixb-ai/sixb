@@ -306,6 +306,76 @@ export interface ListAgentThreadParticipantsInput {
   readonly threadIds: readonly string[]
 }
 
+// ── agent_thread_reads — how far each person has read a conversation ──────────────────────────
+
+/**
+ * How far one person's reading of a conversation has reached, as the `seq` of its last message.
+ *
+ * A watermark, not a flag: nothing writes here when a message arrives, so new ones sit past it
+ * until the reader moves it. A mark never moves it backwards, so two devices converge on the later
+ * position and a stale one cannot rewind the other. Only a deletion does: when a retry or an edit
+ * takes the newest messages away, every place past what remains comes back to it, because the next
+ * messages take those numbers again.
+ */
+export interface AgentThreadReadRecord {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+  /** The highest message `seq` this person's reading has reached. 0 when none has. */
+  readonly throughSeq: number
+  /** When this person last looked: every mark sets it, even one that leaves `throughSeq` alone. */
+  readonly readAt: Date
+}
+
+/**
+ * One person's place in a conversation, and what arrived past it.
+ *
+ * `unread` counts the messages past `throughSeq` that are new to them: every Agent answer and
+ * every other person's message. What they wrote is not, nor a message that only reports how
+ * approved calls ended (`countsAsThreadMessage`).
+ */
+export interface AgentThreadReadState {
+  readonly threadId: string
+  /** Where their reading reached, never past `headSeq`. 0 when they have no row. */
+  readonly throughSeq: number
+  /** The `seq` of the thread's newest message, 0 when it has none. */
+  readonly headSeq: number
+  /** Messages past `throughSeq` that someone else wrote. */
+  readonly unread: number
+  /** When they last looked; absent until they have a row. */
+  readonly readAt?: Date
+}
+
+export interface MarkAgentThreadReadInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+  /**
+   * The last message they read, or the thread's newest when absent. A message the thread no longer
+   * holds marks nothing: a retry or an edit took it away, and its number may already name another.
+   */
+  readonly throughMessageId?: string
+  readonly readAt?: Date
+}
+
+export interface ListAgentThreadReadsInput {
+  readonly projectId: string
+  readonly threadIds: readonly string[]
+  readonly principal: UserPrincipal
+}
+
+export interface AgentThreadReadStore {
+  /**
+   * Record that this person's reading reached a message, never moving it back, and that they
+   * looked now. A participant has a row from the moment they join, and the migration gave one to
+   * everyone in the threads that existed before; an owner without one reads as 0 until their
+   * first mark. Answers their place afterwards.
+   */
+  mark(input: MarkAgentThreadReadInput): Promise<AgentThreadReadState>
+  /** One person's place in each of these threads; a thread that does not exist is absent. */
+  list(input: ListAgentThreadReadsInput): Promise<readonly AgentThreadReadState[]>
+}
+
 // ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
 
 /** Lifecycle shared by every durable agent execution, conversational or workflow-owned. */
@@ -655,6 +725,11 @@ export interface ListAgentRunsResult {
   readonly total: number
 }
 
+export interface ListLatestAgentRunsInput {
+  readonly projectId: string
+  readonly threadIds: readonly string[]
+}
+
 // ── agent_messages — one message (assistant messages inserted only once finalized) ─────────────
 
 export type { AgentMessageRole }
@@ -872,15 +947,23 @@ export interface AgentRunStore {
    * within a turn the latest admitted first. Read by key (one per turn) or by finish reason.
    */
   listThreadSubagents(input: ListThreadSubagentsInput): Promise<readonly SubagentRunRecord[]>
+  /** The newest run of each thread, by creation and id; a thread without one is absent. */
+  latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]>
   list(input: ListAgentRunsInput): Promise<ListAgentRunsResult>
 }
 
 export interface AgentMessageStore {
   /** Insert a message (its `parts` are the canonical content) and bump thread stats. */
   append(input: AppendAgentMessageInput): Promise<AgentMessageRecord>
-  /** Delete every message produced by one run and repair the thread's message stats. */
+  /**
+   * Delete every message produced by one run and repair the thread's message stats. A reader's
+   * place past the newest message left comes back to it: the next message reuses those numbers.
+   */
   deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number>
-  /** Delete every message at or after `fromSeq` and repair the thread's message stats. */
+  /**
+   * Delete every message at or after `fromSeq` and repair the thread's message stats. A reader's
+   * place past the newest message left comes back to it: the edit that follows reuses the numbers.
+   */
   deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
@@ -1591,6 +1674,7 @@ export interface AgentInboxStore {
 
 export interface AgentStorage {
   readonly threads: AgentThreadStore
+  readonly reads: AgentThreadReadStore
   readonly runs: AgentRunStore
   readonly messages: AgentMessageStore
   readonly checkpoints: AgentContextCheckpointStore

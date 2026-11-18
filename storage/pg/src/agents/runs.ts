@@ -28,6 +28,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListLatestAgentRunsInput,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type RequestAgentRunCancelInput,
@@ -490,6 +491,20 @@ export class PgAgentRunStore implements AgentRunStore {
       const run = rowToRunRecord(row)
       return run.kind === "subagent" ? [run] : []
     })
+  }
+
+  async latestByThread(input: ListLatestAgentRunsInput): Promise<readonly AgentRunRecord[]> {
+    if (input.threadIds.length === 0) return []
+
+    const rows = await this.sql<AgentRunRow[]>`
+      SELECT DISTINCT ON (thread_id) *
+      FROM agent_runs
+      WHERE project_id = ${input.projectId}
+        AND thread_id = ANY(${this.sql.array([...input.threadIds])}::text[])
+      ORDER BY thread_id, created_at DESC, id DESC
+    `
+
+    return rows.map(rowToRunRecord)
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

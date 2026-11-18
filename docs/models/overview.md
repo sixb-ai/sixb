@@ -675,6 +675,33 @@ Over HTTP: `POST /api/agent-threads/:threadId/participants` with `{ "users": [..
 `DELETE /api/agent-threads/:threadId/participants/:userId`, and
 `GET /api/agent-threads?sharedWithMe=true`.
 
+### Know what is new
+
+Each person has a place in each conversation: the last message they read, on every device. A
+conversation you list or read carries yours, and its newest turn:
+
+```ts
+const thread = await sixb.agent.threads.getById(threadId)
+thread.read // { throughSeq: 12, headSeq: 15, unread: 2, readAt }
+thread.lastRun // { id, status: "failed", errorCode, completedAt, requestedBy }
+
+await sixb.agent.threads.markRead(threadId, { throughMessageId: lastShown.id })
+await sixb.agent.threads.markRead(threadId) // Done: up to its newest message
+```
+
+- **`unread` counts messages someone else wrote**: the agent's answers and other people's
+  messages, never your own.
+- **A place never moves back** when a device that read less marks it. When a retry or an edit
+  removes the newest messages, a place past what remains comes back to it, so what replaces them
+  reads as new.
+- **Joining starts you caught up.** A fork keeps its owner's place.
+- **`lastRun.requestedBy` is set when the turn ended short** (failed, timed out or interrupted):
+  only that person can run it again. `readAt` tells whether you looked after it ended.
+- Only the owner and participants have a place: an observer, system code or a service account
+  gets no `read`.
+
+Over HTTP: `PUT /api/agent-threads/:threadId/read` with `{ "throughMessageId"?: string }`.
+
 ## Continue a conversation
 
 Copy a conversation of yours, or one [shared with you](#share-a-conversation), into a new one

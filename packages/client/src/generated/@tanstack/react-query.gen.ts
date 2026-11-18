@@ -175,6 +175,7 @@ import {
   listWorkflowInterventions,
   listWorkflowRuns,
   listWorkflows,
+  markAgentThreadRead,
   moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   type Options,
@@ -710,6 +711,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  MarkAgentThreadReadData,
+  MarkAgentThreadReadError,
+  MarkAgentThreadReadResponse,
   MoveAgentThreadToCloudData,
   MoveAgentThreadToCloudError,
   MoveAgentThreadToCloudResponse,
@@ -5324,6 +5328,35 @@ export const cancelAgentRunByIdMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await cancelAgentRunById({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Mark how far you have read an Agent thread
+ *
+ * Record that your reading of a conversation reached a message, or its newest when `throughMessageId` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place; a message a retry or an edit took away marks nothing. Session routes only: a runner has no reading.
+ */
+export const markAgentThreadReadMutation = (
+  options?: Partial<Options<MarkAgentThreadReadData>>
+): UseMutationOptions<
+  MarkAgentThreadReadResponse,
+  MarkAgentThreadReadError,
+  Options<MarkAgentThreadReadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    MarkAgentThreadReadResponse,
+    MarkAgentThreadReadError,
+    Options<MarkAgentThreadReadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await markAgentThreadRead({
         ...options,
         ...fnOptions,
         throwOnError: true,
