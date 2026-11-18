@@ -2,6 +2,7 @@ import { getSyncOptions, listSyncRunsOptions, listSyncsOptions } from "@sixb/cli
 import { useQuery } from "@tanstack/react-query"
 import { CalendarClock, ChevronRight, RefreshCw } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
+import { FolderContents, folderBack, noItems, useFolderBrowser } from "../../folders"
 import { DetailFallback, SectionPage } from "../../section-page"
 import {
   apiErrorMessage,
@@ -37,70 +38,81 @@ export function ConsoleSyncsPage() {
   const format = useFormat()
   useSyncLiveUpdates()
   const syncsQuery = useQuery({ ...listSyncsOptions(), retry: false })
-  const syncs = syncsQuery.data ?? []
+  const browser = useFolderBrowser({
+    items: syncsQuery.data ?? noItems,
+    title: messages.syncs.title,
+    description: messages.syncs.description,
+  })
 
   return (
-    <SectionPage
-      section="console"
-      page="syncs"
-      title={messages.syncs.title}
-      description={messages.syncs.description}
-    >
-      <Panel>
-        {syncsQuery.isPending ? (
+    <SectionPage section="console" page="syncs" {...browser.frame}>
+      {syncsQuery.isPending ? (
+        <Panel>
           <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
-        ) : syncsQuery.isError ? (
+        </Panel>
+      ) : syncsQuery.isError ? (
+        <Panel>
           <PanelEmpty
             tone="error"
             icon={RefreshCw}
             title={messages.syncs.title}
             description={apiErrorMessage(syncsQuery.error, messages.common.loadFailed)}
           />
-        ) : syncs.length === 0 ? (
+        </Panel>
+      ) : syncsQuery.data.length === 0 ? (
+        <Panel>
           <PanelEmpty
             icon={RefreshCw}
             title={messages.syncs.emptyTitle}
             description={messages.syncs.emptyDescription}
           />
-        ) : (
-          syncs.map((sync) => (
-            <PanelRow
-              key={sync.id}
-              href={`/console/syncs/${encodeURIComponent(sync.id)}`}
-              leading={<ConnectorIcon type={sync.connector.type} />}
-              title={<span className="truncate">{humanize(sync.id)}</span>}
-              meta={
-                <>
-                  <span>{messages.common.modes[sync.mode]}</span>
-                  <MetaDot />
-                  <span className="truncate">{messages.common.writes(sync.target.dataset.id)}</span>
-                  {sync.triggers.map((trigger) => (
-                    <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
-                  ))}
-                  {sync.latestRun ? (
+        </Panel>
+      ) : (
+        <FolderContents browser={browser} rootLabel={messages.syncs.title}>
+          {(syncs) => (
+            <Panel>
+              {syncs.map((sync) => (
+                <PanelRow
+                  key={sync.id}
+                  href={`/console/syncs/${encodeURIComponent(sync.id)}`}
+                  leading={<ConnectorIcon type={sync.connector.type} />}
+                  title={<span className="truncate">{humanize(sync.id)}</span>}
+                  meta={
                     <>
+                      <span>{messages.common.modes[sync.mode]}</span>
                       <MetaDot />
-                      <span>
-                        {format.relative(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
+                      <span className="truncate">
+                        {messages.common.writes(sync.target.dataset.id)}
                       </span>
+                      {sync.triggers.map((trigger) => (
+                        <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
+                      ))}
+                      {sync.latestRun ? (
+                        <>
+                          <MetaDot />
+                          <span>
+                            {format.relative(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
+                          </span>
+                        </>
+                      ) : null}
                     </>
-                  ) : null}
-                </>
-              }
-              trailing={
-                <>
-                  {sync.latestRun ? (
-                    <RunStatusPill status={sync.latestRun.status} />
-                  ) : (
-                    <Pill tone="muted">{messages.common.neverRun}</Pill>
-                  )}
-                  <ChevronRight className="size-4 text-muted-foreground/60" />
-                </>
-              }
-            />
-          ))
-        )}
-      </Panel>
+                  }
+                  trailing={
+                    <>
+                      {sync.latestRun ? (
+                        <RunStatusPill status={sync.latestRun.status} />
+                      ) : (
+                        <Pill tone="muted">{messages.common.neverRun}</Pill>
+                      )}
+                      <ChevronRight className="size-4 text-muted-foreground/60" />
+                    </>
+                  }
+                />
+              ))}
+            </Panel>
+          )}
+        </FolderContents>
+      )}
     </SectionPage>
   )
 }
@@ -124,7 +136,7 @@ export function ConsoleSyncPage() {
         : false,
   })
   const sync = syncQuery.data
-  const back = { href: "/console/syncs", label: messages.syncs.title }
+  const back = folderBack({ href: "/console/syncs", label: messages.syncs.title }, sync?.folder)
 
   if (!sync) {
     return (

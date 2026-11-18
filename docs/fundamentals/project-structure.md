@@ -36,6 +36,9 @@ fit together.
 
 - Export backend definitions from their matching folders.
 - File names are up to you. Sixb also loads definitions from subfolders.
+- The Console shows those subfolders as folders you can open, so a long list of datasets, syncs or
+  actions stays organized. Folders only arrange what you see: ids stay unique across the project,
+  and moving a file to another folder changes nothing else.
 - The starter creates only the folders it needs. Add optional folders as your project grows.
 - Keep tests and [scripts](scripts.md) outside definition folders, since Sixb imports their modules.
   The exception is `ontology/`: Markdown files and `scripts/` folders there are given to the
