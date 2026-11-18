@@ -45,6 +45,7 @@ function createSixbStub(pipelineRuns: Partial<PipelineRunStorage>): SixbHostView
     id: "my-app",
     storage: { pipelineRuns },
     definitions: {
+      folders: { of: () => undefined },
       pipelines: {
         list: () => [pipeline],
         getById: (id: string) => (id === pipeline.id ? pipeline : null),

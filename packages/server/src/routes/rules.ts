@@ -1,4 +1,4 @@
-import type { RuleDefinition, SixbHostView } from "@sixb/core"
+import type { DefinitionFolders, RuleDefinition, SixbHostView } from "@sixb/core"
 import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -14,9 +14,13 @@ import {
 } from "../schemas/rules"
 import { handleRouteError, parseOptionalInt, unconfiguredStorageResponse } from "../utils/http"
 
-function serializeRule(rule: RuleDefinition): ReturnType<typeof RuleSchema.parse> {
+function serializeRule(
+  rule: RuleDefinition,
+  folders: DefinitionFolders
+): ReturnType<typeof RuleSchema.parse> {
   return RuleSchema.parse({
     ...rule,
+    folder: folders.of("rules", rule.id),
     dependencies: deriveRuleEventDependencies(rule),
   })
 }
@@ -30,7 +34,9 @@ export function registerRuleRoutes(app: Elysia, host: SixbHostView) {
     .get(
       "/api/rules",
       (context) => {
-        return requireRequestSixb(context).rules.list().map(serializeRule)
+        return requireRequestSixb(context)
+          .rules.list()
+          .map((rule) => serializeRule(rule, host.definitions.folders))
       },
       {
         response: { 200: RuleSchema.array() },
@@ -51,7 +57,7 @@ export function registerRuleRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Rule not found" }
         }
 
-        return serializeRule(rule)
+        return serializeRule(rule, host.definitions.folders)
       },
       {
         params: RuleParamsSchema,

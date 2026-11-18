@@ -14720,6 +14720,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "type": {
                         "type": "string"
                       },
@@ -14815,6 +14819,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "type": {
                       "type": "string"
@@ -19483,6 +19491,10 @@
                         "type": "string",
                         "enum": ["dataset"]
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "materialized": {
                         "type": "boolean"
                       },
@@ -19673,6 +19685,10 @@
                     "kind": {
                       "type": "string",
                       "enum": ["dataset"]
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "materialized": {
                       "type": "boolean"
@@ -20878,6 +20894,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "mode": {
                         "type": "string",
                         "enum": ["snapshot", "append", "merge"]
@@ -21175,6 +21195,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "mode": {
                       "type": "string",
@@ -21908,6 +21932,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "triggers": {
                         "type": "array",
                         "items": {
@@ -22314,6 +22342,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "triggers": {
                       "type": "array",
@@ -23439,6 +23471,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "input": {
                         "type": "object",
                         "additionalProperties": {
@@ -23913,6 +23949,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "input": {
                       "type": "object",
@@ -29014,6 +29054,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "subject": {
                         "type": "object",
                         "properties": {
@@ -29524,6 +29568,10 @@
                     },
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "subject": {
                       "type": "object",
@@ -31609,6 +31657,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "name": {
                         "type": "string"
                       },
@@ -31994,6 +32046,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "name": {
                       "type": "string"
@@ -34260,6 +34316,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "folder": {
+                        "type": "string",
+                        "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                      },
                       "name": {
                         "type": "string"
                       },
@@ -34365,6 +34425,10 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                     },
                     "name": {
                       "type": "string"
@@ -78145,6 +78209,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "folder": {
+                            "type": "string",
+                            "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                          },
                           "objectTypeId": {
                             "type": "string"
                           },
@@ -78823,6 +78891,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "folder": {
+                            "type": "string",
+                            "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                          },
                           "linkId": {
                             "type": "string"
                           },
@@ -79445,6 +79517,10 @@
                           },
                           "id": {
                             "type": "string"
+                          },
+                          "folder": {
+                            "type": "string",
+                            "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                           },
                           "objectTypeId": {
                             "type": "string"
@@ -80108,6 +80184,10 @@
                         },
                         "id": {
                           "type": "string"
+                        },
+                        "folder": {
+                          "type": "string",
+                          "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                         },
                         "objectTypeId": {
                           "type": "string"
@@ -80784,6 +80864,10 @@
                         "id": {
                           "type": "string"
                         },
+                        "folder": {
+                          "type": "string",
+                          "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
+                        },
                         "linkId": {
                           "type": "string"
                         },
@@ -81403,6 +81487,10 @@
                         },
                         "id": {
                           "type": "string"
+                        },
+                        "folder": {
+                          "type": "string",
+                          "description": "Folder below the definition's directory, such as `raw/erp`; absent at its top."
                         },
                         "objectTypeId": {
                           "type": "string"

@@ -1,4 +1,4 @@
-import type { SixbHostView, SyncDefinition } from "@sixb/core"
+import type { DefinitionFolders, SixbHostView, SyncDefinition } from "@sixb/core"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -69,10 +69,12 @@ async function getLatestSyncRuns(
 
 function serializeSync(
   sync: SyncDefinition,
-  latestRun: SerializedSyncRun | null
+  latestRun: SerializedSyncRun | null,
+  folders: DefinitionFolders
 ): ReturnType<typeof SyncSchema.parse> {
   return SyncSchema.parse({
     id: sync.id,
+    folder: folders.of("syncs", sync.id),
     mode: sync.config.mode,
     connector: {
       id: sync.connector.id,
@@ -99,7 +101,9 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           syncs.map((sync) => sync.id)
         )
 
-        return syncs.map((sync) => serializeSync(sync, latestRuns.get(sync.id) ?? null))
+        return syncs.map((sync) =>
+          serializeSync(sync, latestRuns.get(sync.id) ?? null, host.definitions.folders)
+        )
       },
       {
         response: { 200: SyncSchema.array() },
@@ -122,7 +126,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Sync not found" }
         }
 
-        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
+        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id), host.definitions.folders)
       },
       {
         params: SyncParamsSchema,

@@ -1,4 +1,4 @@
-import type { Property, SixbHostView, ValueType } from "@sixb/core"
+import type { DefinitionFolders, Property, SixbHostView, ValueType } from "@sixb/core"
 import { resolvePropertyQueryCapabilities } from "@sixb/core/internal/ontology"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
@@ -70,10 +70,12 @@ function serializeSearch(
 function serializeObjectType(
   execution: Sixb,
   valueTypesById: ReadonlyMap<string, ValueType>,
-  objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number]
+  objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number],
+  folders: DefinitionFolders
 ) {
   return {
     id: objectType.id,
+    folder: folders.of("objectTypes", objectType.id),
     name: objectType.name,
     description: objectType.description,
     extends: objectType.extends,
@@ -118,7 +120,9 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
         const valueTypesById = host.definitions.ontology.getValueTypesById()
         return sixb.objects
           .listTypes()
-          .map((objectType) => serializeObjectType(sixb, valueTypesById, objectType))
+          .map((objectType) =>
+            serializeObjectType(sixb, valueTypesById, objectType, host.definitions.folders)
+          )
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -141,7 +145,12 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(sixb, host.definitions.ontology.getValueTypesById(), objectType)
+        return serializeObjectType(
+          sixb,
+          host.definitions.ontology.getValueTypesById(),
+          objectType,
+          host.definitions.folders
+        )
       },
       {
         params: ObjectTypeParamsSchema,

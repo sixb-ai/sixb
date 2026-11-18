@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { RedactionsSchema } from "./common"
+import { DefinitionFolderSchema, RedactionsSchema } from "./common"
 
 export const DatasetParamsSchema = z.object({
   datasetId: z.string().min(1),
@@ -111,6 +111,7 @@ export const DatasetLatestVersionSummarySchema = z.object({
 
 export const DatasetCatalogItemSchema = DatasetDefinitionSchema.extend({
   kind: z.literal("dataset"),
+  folder: DefinitionFolderSchema,
   materialized: z.boolean(),
   latestVersion: DatasetLatestVersionSummarySchema.nullable(),
   syncIds: z.array(z.string()),

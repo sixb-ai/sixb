@@ -16,6 +16,15 @@ export function codedErrorResponseSchema<
 /** Values omitted because the caller lacks a clearance for their markings. */
 export const RedactionsSchema = z.record(z.object({ reason: z.literal("missing_clearance") }))
 
+/**
+ * The folder a definition sits in below its directory, such as `raw/erp` for
+ * `datasets/raw/erp/orders.ts`. Absent at the top of the directory.
+ */
+export const DefinitionFolderSchema = z
+  .string()
+  .optional()
+  .describe("Folder below the definition's directory, such as `raw/erp`; absent at its top.")
+
 export const SuccessResponseSchema = z.object({ success: z.boolean() })
 
 /** The canonical `Principal` shape from `@sixb/core`. */

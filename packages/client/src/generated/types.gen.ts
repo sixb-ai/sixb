@@ -4857,6 +4857,10 @@ export type ListConnectorsResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     type: string
     connection: {
       authentication: "oauth2"
@@ -4901,6 +4905,10 @@ export type GetConnectorResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     type: string
     connection: {
       authentication: "oauth2"
@@ -6432,6 +6440,10 @@ export type ListDatasetsResponses = {
       }>
     }
     kind: "dataset"
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     materialized: boolean
     latestVersion: {
       datasetId: string
@@ -6506,6 +6518,10 @@ export type GetDatasetResponses = {
       }>
     }
     kind: "dataset"
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     materialized: boolean
     latestVersion: {
       datasetId: string
@@ -6966,6 +6982,10 @@ export type ListSyncsResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     mode: "snapshot" | "append" | "merge"
     connector: {
       id: string
@@ -7076,6 +7096,10 @@ export type GetSyncResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     mode: "snapshot" | "append" | "merge"
     connector: {
       id: string
@@ -7311,6 +7335,10 @@ export type ListPipelinesResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     triggers: Array<{
       type: "schedule"
       scheduleId: string
@@ -7452,6 +7480,10 @@ export type GetPipelineResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     triggers: Array<{
       type: "schedule"
       scheduleId: string
@@ -7837,6 +7869,10 @@ export type ListWorkflowsResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     input: {
       [key: string]:
         | string
@@ -8023,6 +8059,10 @@ export type GetWorkflowResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     input: {
       [key: string]:
         | string
@@ -9880,6 +9920,10 @@ export type ListRulesResponses = {
   200: Array<{
     kind: "rule"
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     subject: {
       kind: "object"
       objectTypeId: string
@@ -10022,6 +10066,10 @@ export type GetRuleResponses = {
   200: {
     kind: "rule"
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     subject: {
       kind: "object"
       objectTypeId: string
@@ -10678,6 +10726,10 @@ export type ListObjectTypesResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     name: string
     description?: string
     extends?: string
@@ -10805,6 +10857,10 @@ export type GetObjectTypeResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     name: string
     description?: string
     extends?: string
@@ -11640,6 +11696,10 @@ export type ListActionsResponses = {
    */
   200: Array<{
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     name: string
     description?: string
     objectTypeId?: string
@@ -11689,6 +11749,10 @@ export type GetActionResponses = {
    */
   200: {
     id: string
+    /**
+     * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+     */
+    folder?: string
     name: string
     description?: string
     objectTypeId?: string
@@ -27096,6 +27160,10 @@ export type ListProjectionsResponses = {
     objectProjections: Array<{
       _tag: "ObjectProjectionDefinition"
       id: string
+      /**
+       * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+       */
+      folder?: string
       objectTypeId: string
       datasetId: string
       properties: {
@@ -27299,6 +27367,10 @@ export type ListProjectionsResponses = {
     linkProjections: Array<{
       _tag: "LinkProjectionDefinition"
       id: string
+      /**
+       * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+       */
+      folder?: string
       linkId: string
       sourceObjectTypeId: string
       targetObjectTypeId: string
@@ -27483,6 +27555,10 @@ export type ListProjectionsResponses = {
     telemetryProjections: Array<{
       _tag: "TelemetryProjectionDefinition"
       id: string
+      /**
+       * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+       */
+      folder?: string
       objectTypeId: string
       datasetId: string
       objectIdField: string
@@ -27701,6 +27777,10 @@ export type GetProjectionResponses = {
     | {
         _tag: "ObjectProjectionDefinition"
         id: string
+        /**
+         * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+         */
+        folder?: string
         objectTypeId: string
         datasetId: string
         properties: {
@@ -27904,6 +27984,10 @@ export type GetProjectionResponses = {
     | {
         _tag: "LinkProjectionDefinition"
         id: string
+        /**
+         * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+         */
+        folder?: string
         linkId: string
         sourceObjectTypeId: string
         targetObjectTypeId: string
@@ -28088,6 +28172,10 @@ export type GetProjectionResponses = {
     | {
         _tag: "TelemetryProjectionDefinition"
         id: string
+        /**
+         * Folder below the definition's directory, such as `raw/erp`; absent at its top.
+         */
+        folder?: string
         objectTypeId: string
         datasetId: string
         objectIdField: string

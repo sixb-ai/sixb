@@ -1,5 +1,6 @@
 import type { RulePredicate } from "@sixb/core"
 import { z } from "zod"
+import { DefinitionFolderSchema } from "./common"
 
 export const RuleParamsSchema = z.object({
   ruleId: z.string().min(1),
@@ -79,6 +80,7 @@ const RuleEventDependencySchema = z.union([
 export const RuleSchema = z.object({
   kind: z.literal("rule"),
   id: z.string(),
+  folder: DefinitionFolderSchema,
   subject: RuleSubjectSchema,
   predicate: RulePredicateSchema,
   dependencies: z.array(RuleEventDependencySchema),

@@ -4,7 +4,7 @@ import {
   type SixbFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { sixbFailureSchema } from "./common"
+import { DefinitionFolderSchema, sixbFailureSchema } from "./common"
 import { DatasetDefinitionSchema } from "./datasets"
 
 const PipelineRunFailureSchema: z.ZodType<SixbFailure<PipelineRunFailureCode>> = sixbFailureSchema(
@@ -104,6 +104,7 @@ export const PipelineStepSchema = z.object({
 
 export const PipelineSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   triggers: z.array(PipelineTriggerSchema),
   graph: z.object({
     kind: z.literal("sequence"),

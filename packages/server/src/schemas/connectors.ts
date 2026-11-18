@@ -3,7 +3,7 @@ import {
   type ConnectorConnectionRunFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { ErrorResponseSchema, sixbFailureSchema } from "./common"
+import { DefinitionFolderSchema, ErrorResponseSchema, sixbFailureSchema } from "./common"
 
 export const CONNECTOR_HTTP_ERROR_CODES = [
   "internal.unexpected",
@@ -71,6 +71,7 @@ export const ConnectorWebhookSchema = z.object({
 
 export const ConnectorSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   type: z.string(),
   connection: z.object({ authentication: z.literal("oauth2") }).nullable(),
   syncIds: z.array(z.string()),

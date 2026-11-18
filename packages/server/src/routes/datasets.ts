@@ -1,4 +1,4 @@
-import type { DatasetDefinition, DatasetLineage, SixbHostView } from "@sixb/core"
+import type { DatasetDefinition, DatasetLineage, DefinitionFolders, SixbHostView } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
@@ -149,10 +149,12 @@ function serializeLatestVersionSummary(summary: DatasetLatestVersionSummary) {
 function serializeDatasetCatalogItem(
   dataset: DatasetDefinition,
   state: DatasetCatalogState | undefined,
-  references: DatasetReferences
+  references: DatasetReferences,
+  folders: DefinitionFolders
 ) {
   return DatasetCatalogItemSchema.parse({
     ...dataset,
+    folder: folders.of("datasets", dataset.id),
     materialized: state?.materialized ?? false,
     latestVersion: state?.latestVersion ? serializeLatestVersionSummary(state.latestVersion) : null,
     syncIds: references.syncIds,
@@ -175,7 +177,8 @@ async function serializeDatasetCatalogItems(
     serializeDatasetCatalogItem(
       definition,
       stateByDatasetId.get(definition.id),
-      references.get(definition.id) ?? EMPTY_DATASET_REFERENCES
+      references.get(definition.id) ?? EMPTY_DATASET_REFERENCES,
+      host.definitions.folders
     )
   )
 }
@@ -238,7 +241,12 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           const dataset = requireDataset(sixb, params.datasetId)
           const [state] = await host.lakeStorage.listDatasetCatalogState([dataset.id])
           const references = buildDatasetReferenceIndex(sixb).get(dataset.id)
-          return serializeDatasetCatalogItem(dataset, state, references ?? EMPTY_DATASET_REFERENCES)
+          return serializeDatasetCatalogItem(
+            dataset,
+            state,
+            references ?? EMPTY_DATASET_REFERENCES,
+            host.definitions.folders
+          )
         } catch (error) {
           return handleRouteError(error, set)
         }
