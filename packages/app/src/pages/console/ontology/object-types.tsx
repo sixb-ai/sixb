@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { CornerDownRight, LayoutGrid, Link2, Rows3, Zap } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { FolderContents, folderMatches, useFolderBrowser } from "../../folders"
 import { objectTypeHref } from "../../routes"
 import { SectionPage } from "../../section-page"
 import { apiErrorMessage, PanelEmpty, SkeletonText } from "../../section-ui"
@@ -28,31 +29,31 @@ export function ConsoleObjectTypesPage() {
   const typesQuery = useQuery({ ...listObjectTypesOptions(), retry: false })
   const objectTypes = typesQuery.data ?? noObjectTypes
   const byId = useMemo(() => new Map(objectTypes.map((type) => [type.id, type])), [objectTypes])
+  const query = search.trim().toLowerCase()
   const filtered = useMemo(() => {
     const sorted = [...objectTypes].sort((a, b) => displayName(a).localeCompare(displayName(b)))
-    const query = search.trim().toLowerCase()
-    return query ? sorted.filter((type) => matchesType(type, query)) : sorted
-  }, [objectTypes, search])
+    return query
+      ? sorted.filter((type) => matchesType(type, query) || folderMatches(type.folder, query))
+      : sorted
+  }, [objectTypes, query])
+  const browser = useFolderBrowser({
+    items: filtered,
+    title: "Object types",
+    meta: typesQuery.isPending ? (
+      <CountSkeleton />
+    ) : (
+      <span>{countLabel(objectTypes.length, "type")}</span>
+    ),
+    narrowed: query.length > 0,
+  })
 
   return (
-    <SectionPage
-      section="console"
-      page="object-types"
-      width="wide"
-      title="Object types"
-      meta={
-        typesQuery.isPending ? (
-          <CountSkeleton />
-        ) : (
-          <span>{countLabel(objectTypes.length, "type")}</span>
-        )
-      }
-    >
+    <SectionPage section="console" page="object-types" width="wide" {...browser.frame}>
       <div className="-mt-4 flex flex-col">
         <CollectionToolbar
           search={{
             value: search,
-            placeholder: "Search types, fields, or links...",
+            placeholder: "Search types, fields, folders, or links...",
             onChange: setSearch,
           }}
         />
@@ -72,19 +73,25 @@ export function ConsoleObjectTypesPage() {
             No types matching "{search}".
           </div>
         ) : (
-          <div className={typeListClass}>
-            <ul className="divide-y divide-border">
-              {filtered.map((type) => (
-                <li key={type.id}>
-                  <TypeRow
-                    type={type}
-                    parent={type.extends ? (byId.get(type.extends) ?? null) : null}
-                    onSelect={() => navigate(objectTypeHref(type.id))}
-                    onSelectType={(typeId) => navigate(objectTypeHref(typeId))}
-                  />
-                </li>
-              ))}
-            </ul>
+          <div className="mt-2">
+            <FolderContents browser={browser} rootLabel="Object types">
+              {(types) => (
+                <div className={typeListClass}>
+                  <ul className="divide-y divide-border">
+                    {types.map((type) => (
+                      <li key={type.id}>
+                        <TypeRow
+                          type={type}
+                          parent={type.extends ? (byId.get(type.extends) ?? null) : null}
+                          onSelect={() => navigate(objectTypeHref(type.id))}
+                          onSelectType={(typeId) => navigate(objectTypeHref(typeId))}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </FolderContents>
           </div>
         )}
       </div>
@@ -93,13 +100,13 @@ export function ConsoleObjectTypesPage() {
 }
 
 const typeListClass =
-  "mt-2 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
+  "overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
 const typeRowClass = "flex items-start gap-4 px-4 py-3.5"
 
 /** The list while the types load, row for row the shape of `TypeRow`. */
 function TypeListSkeleton() {
   return (
-    <div aria-hidden className={typeListClass}>
+    <div aria-hidden className={cn("mt-2", typeListClass)}>
       <ul className="divide-y divide-border">
         {["w-64", "w-52", "w-72", "w-48", "w-60"].map((width) => (
           <li key={width} className={typeRowClass}>

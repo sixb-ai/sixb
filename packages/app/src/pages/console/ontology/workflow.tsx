@@ -44,6 +44,7 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo } from "react"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { folderBack } from "../../folders"
 import { DetailFallback, SectionWorkspace } from "../../section-page"
 import {
   CopyButton,
@@ -156,12 +157,17 @@ export function ConsoleWorkflowPage() {
     return <Navigate to="/console/workflows" replace />
   }
 
+  const back = folderBack(
+    { href: "/console/workflows", label: "Workflows" },
+    workflowQuery.data?.folder
+  )
+
   if (!workflowQuery.data) {
     return (
       <DetailFallback
         section="console"
         page="workflows"
-        back={{ href: "/console/workflows", label: "Workflows" }}
+        back={back}
         name={workflowId}
         id={workflowId}
         icon={GitBranch}
@@ -170,7 +176,7 @@ export function ConsoleWorkflowPage() {
           <div className="relative min-h-0 w-full flex-1">
             <WorkflowHeader
               workflowId={workflowId}
-              onBack={() => navigate("/console/workflows")}
+              onBack={() => navigate(back.href)}
               facts={
                 <span>
                   <SkeletonText className="h-2 w-40" />
@@ -273,7 +279,7 @@ export function ConsoleWorkflowPage() {
 
             <WorkflowHeader
               workflowId={workflow.id}
-              onBack={() => navigate("/console/workflows")}
+              onBack={() => navigate(back.href)}
               facts={
                 activeRunId && runDetail ? (
                   <>

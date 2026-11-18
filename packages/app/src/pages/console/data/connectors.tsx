@@ -8,6 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { Cable, ChevronRight, RefreshCw, Webhook } from "lucide-react"
 import { useParams } from "react-router-dom"
+import { FolderContents, folderBack, noItems, useFolderBrowser } from "../../folders"
 import { DetailFallback, SectionPage } from "../../section-page"
 import {
   apiErrorMessage,
@@ -38,60 +39,67 @@ import { ConnectorIcon } from "./shared"
 export function ConsoleConnectorsPage() {
   const messages = useDataMessages()
   const connectorsQuery = useQuery({ ...listConnectorsOptions(), retry: false })
-  const connectors = connectorsQuery.data ?? []
+  const browser = useFolderBrowser({
+    items: connectorsQuery.data ?? noItems,
+    title: messages.connectors.title,
+    description: messages.connectors.description,
+  })
 
   return (
-    <SectionPage
-      section="console"
-      page="connectors"
-      title={messages.connectors.title}
-      description={messages.connectors.description}
-    >
-      <Panel>
-        {connectorsQuery.isPending ? (
-          <PanelSkeleton
-            rows={3}
-            interactive
-            trailing={<TrailingSkeleton pill={false} chevron />}
-          />
-        ) : connectorsQuery.isError ? (
-          <PanelEmpty
-            tone="error"
-            icon={Cable}
-            title={messages.connectors.title}
-            description={apiErrorMessage(connectorsQuery.error, messages.common.loadFailed)}
-          />
-        ) : connectors.length === 0 ? (
-          <PanelEmpty
-            icon={Cable}
-            title={messages.connectors.emptyTitle}
-            description={messages.connectors.emptyDescription}
-          />
-        ) : (
-          connectors.map((connector) => (
-            <PanelRow
-              key={connector.id}
-              href={`/console/connectors/${encodeURIComponent(connector.id)}`}
-              leading={<ConnectorIcon type={connector.type} />}
-              title={<span className="truncate">{humanize(connector.id)}</span>}
-              meta={
-                <>
-                  <span className="font-mono text-xs">{connector.type}</span>
-                  <MetaDot />
-                  <span>{messages.connectors.syncCount(connector.syncIds.length)}</span>
-                  {connector.webhooks.length > 0 ? (
+    <SectionPage section="console" page="connectors" {...browser.frame}>
+      {connectorsQuery.isSuccess && connectorsQuery.data.length > 0 ? (
+        <FolderContents browser={browser} rootLabel={messages.connectors.title}>
+          {(connectors) => (
+            <Panel>
+              {connectors.map((connector) => (
+                <PanelRow
+                  key={connector.id}
+                  href={`/console/connectors/${encodeURIComponent(connector.id)}`}
+                  leading={<ConnectorIcon type={connector.type} />}
+                  title={<span className="truncate">{humanize(connector.id)}</span>}
+                  meta={
                     <>
+                      <span className="font-mono text-xs">{connector.type}</span>
                       <MetaDot />
-                      <span>{messages.connectors.webhookCount(connector.webhooks.length)}</span>
+                      <span>{messages.connectors.syncCount(connector.syncIds.length)}</span>
+                      {connector.webhooks.length > 0 ? (
+                        <>
+                          <MetaDot />
+                          <span>{messages.connectors.webhookCount(connector.webhooks.length)}</span>
+                        </>
+                      ) : null}
                     </>
-                  ) : null}
-                </>
-              }
-              trailing={<ChevronRight className="size-4 text-muted-foreground/60" />}
+                  }
+                  trailing={<ChevronRight className="size-4 text-muted-foreground/60" />}
+                />
+              ))}
+            </Panel>
+          )}
+        </FolderContents>
+      ) : (
+        <Panel>
+          {connectorsQuery.isPending ? (
+            <PanelSkeleton
+              rows={3}
+              interactive
+              trailing={<TrailingSkeleton pill={false} chevron />}
             />
-          ))
-        )}
-      </Panel>
+          ) : connectorsQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={Cable}
+              title={messages.connectors.title}
+              description={apiErrorMessage(connectorsQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={Cable}
+              title={messages.connectors.emptyTitle}
+              description={messages.connectors.emptyDescription}
+            />
+          )}
+        </Panel>
+      )}
     </SectionPage>
   )
 }
@@ -118,7 +126,10 @@ export function ConsoleConnectorPage() {
   })
   const syncs = (syncsQuery.data ?? []).filter((sync) => sync.connector.id === connectorId)
   const apiUrl = (client.getConfig().baseUrl ?? window.location.origin).replace(/\/$/, "")
-  const back = { href: "/console/connectors", label: messages.connectors.title }
+  const back = folderBack(
+    { href: "/console/connectors", label: messages.connectors.title },
+    connector?.folder
+  )
 
   if (!connector) {
     return (
