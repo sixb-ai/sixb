@@ -31,6 +31,11 @@ const SHARED_THREAD_LIST_QUERY = {
 /** The calls waiting for the reader across threads, for the thread list. */
 const PENDING_APPROVALS_QUERY = { status: "pending" as const, limit: "200" }
 
+type ThreadListPage = { readonly threads: AgentThread[] }
+
+/** A thread list as the cache holds it: the paged list this hook reads, or a single page. */
+type ThreadListData = InfiniteData<ThreadListPage> | ThreadListPage
+
 /**
  * The reader's threads, the ones shared with them, and those where a call waits for them: what a
  * thread's header counts and the threads page lists. One read for both, so opening the page from a
@@ -83,31 +88,33 @@ export function useAgentThreadLists(
   )
 
   /**
-   * Record the reader's place in a thread, or its newest when no seq is given, which is what Done
+   * Record the reader's place in a thread, or its newest when no message is given, which is what Done
    * sends. The answer is the state it produced, so the caches take it without a refetch.
    */
   const markThreadRead = async (
     threadId: string,
-    throughSeq?: number
+    input: { readonly throughMessageId?: string } = {}
   ): Promise<AgentThreadRead> => {
     const { read } = await markRead.mutateAsync({
       path: { threadId },
-      body: throughSeq === undefined ? {} : { throughSeq },
+      body:
+        input.throughMessageId === undefined ? {} : { throughMessageId: input.throughMessageId },
     })
 
-    queryClient.setQueriesData<InfiniteData<{ threads: AgentThread[] }>>(
-      { queryKey: listAgentThreadsQueryKey() },
-      (data) =>
-        data && {
+    const withRead = (thread: AgentThread) =>
+      thread.id === read.threadId ? { ...thread, read } : thread
+
+    // The key matches every thread list, paged or not: a custom app may hold either.
+    queryClient.setQueriesData<ThreadListData>({ queryKey: listAgentThreadsQueryKey() }, (data) => {
+      if (!data) return data
+      if ("pages" in data) {
+        return {
           ...data,
-          pages: data.pages.map((page) => ({
-            ...page,
-            threads: page.threads.map((thread) =>
-              thread.id === read.threadId ? { ...thread, read } : thread
-            ),
-          })),
+          pages: data.pages.map((page) => ({ ...page, threads: page.threads.map(withRead) })),
         }
-    )
+      }
+      return { ...data, threads: data.threads.map(withRead) }
+    })
     queryClient.setQueryData<AgentThread>(
       getAgentThreadQueryKey({ path: { threadId } }),
       (thread) => (thread ? { ...thread, read } : thread)

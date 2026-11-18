@@ -37512,9 +37512,6 @@
                           "messageCount": {
                             "type": "number"
                           },
-                          "lastMessageSeq": {
-                            "type": "number"
-                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -37568,6 +37565,36 @@
                                   "other",
                                   "unknown"
                                 ]
+                              },
+                              "errorCode": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "agent.context_limit_exceeded",
+                                  "agent.execution_failed",
+                                  "agent.step_limit_reached",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
+                                ]
+                              },
+                              "completedAt": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["id", "status"],
@@ -37592,7 +37619,6 @@
                           "status",
                           "activeRunId",
                           "messageCount",
-                          "lastMessageSeq",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -38114,9 +38140,6 @@
                         "messageCount": {
                           "type": "number"
                         },
-                        "lastMessageSeq": {
-                          "type": "number"
-                        },
                         "createdAt": {
                           "type": "string"
                         },
@@ -38170,6 +38193,36 @@
                                 "other",
                                 "unknown"
                               ]
+                            },
+                            "errorCode": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.context_limit_exceeded",
+                                "agent.execution_failed",
+                                "agent.step_limit_reached",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
+                              ]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "requestedBy": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user", "serviceAccount"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
                           },
                           "required": ["id", "status"],
@@ -38194,7 +38247,6 @@
                         "status",
                         "activeRunId",
                         "messageCount",
-                        "lastMessageSeq",
                         "createdAt",
                         "updatedAt"
                       ],
@@ -38536,9 +38588,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -38592,6 +38641,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -38616,7 +38695,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -39083,9 +39161,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -39139,6 +39214,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -39163,7 +39268,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -39678,9 +39782,6 @@
                         "messageCount": {
                           "type": "number"
                         },
-                        "lastMessageSeq": {
-                          "type": "number"
-                        },
                         "createdAt": {
                           "type": "string"
                         },
@@ -39734,6 +39835,36 @@
                                 "other",
                                 "unknown"
                               ]
+                            },
+                            "errorCode": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.context_limit_exceeded",
+                                "agent.execution_failed",
+                                "agent.step_limit_reached",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
+                              ]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "requestedBy": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user", "serviceAccount"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
                           },
                           "required": ["id", "status"],
@@ -39758,7 +39889,6 @@
                         "status",
                         "activeRunId",
                         "messageCount",
-                        "lastMessageSeq",
                         "createdAt",
                         "updatedAt"
                       ],
@@ -40158,9 +40288,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -40214,6 +40341,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -40238,7 +40395,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -40639,6 +40795,88 @@
                     },
                     "updatedAt": {
                       "type": "string"
+                    },
+                    "read": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "throughSeq": {
+                          "type": "number"
+                        },
+                        "headSeq": {
+                          "type": "number"
+                        },
+                        "unread": {
+                          "type": "number"
+                        },
+                        "readAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "throughSeq", "headSeq", "unread"],
+                      "additionalProperties": false
+                    },
+                    "lastRun": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "timeout",
+                            "interrupted",
+                            "awaiting_approval",
+                            "awaiting_answer",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["id", "status"],
+                      "additionalProperties": false
                     },
                     "approvalMode": {
                       "type": "string",
@@ -51857,10 +52095,10 @@
         }
       }
     },
-    "/api/agent/thread-reads/{threadId}": {
+    "/api/agent-threads/{threadId}/read": {
       "put": {
         "summary": "Mark how far you have read an Agent thread",
-        "description": "Record that your reading of a conversation reached a message, or its newest when `throughSeq` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place. Session routes only: a runner has no reading.",
+        "description": "Record that your reading of a conversation reached a message, or its newest when `throughMessageId` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place; a message a retry or an edit took away marks nothing. Session routes only: a runner has no reading.",
         "tags": ["Agent Threads"],
         "operationId": "markAgentThreadRead",
         "security": [
@@ -51889,9 +52127,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "throughSeq": {
-                    "type": "integer",
-                    "minimum": 0
+                  "throughMessageId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -51901,9 +52139,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "throughSeq": {
-                    "type": "integer",
-                    "minimum": 0
+                  "throughMessageId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -51913,9 +52151,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "throughSeq": {
-                    "type": "integer",
-                    "minimum": 0
+                  "throughMessageId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -52783,9 +53021,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -52839,6 +53074,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -52863,7 +53128,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -53237,9 +53501,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -53293,6 +53554,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -53317,7 +53608,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -54564,9 +54854,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -54620,6 +54907,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -54644,7 +54961,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -57175,9 +57491,6 @@
                     "messageCount": {
                       "type": "number"
                     },
-                    "lastMessageSeq": {
-                      "type": "number"
-                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -57231,6 +57544,36 @@
                             "other",
                             "unknown"
                           ]
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.context_limit_exceeded",
+                            "agent.execution_failed",
+                            "agent.step_limit_reached",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
+                          ]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["id", "status"],
@@ -57255,7 +57598,6 @@
                     "status",
                     "activeRunId",
                     "messageCount",
-                    "lastMessageSeq",
                     "createdAt",
                     "updatedAt"
                   ],

@@ -148,7 +148,6 @@ export async function serializeThreads(
       activeRunId: thread.activeRunId,
       lastMessageAt: thread.lastMessageAt ? toIsoString(thread.lastMessageAt) : undefined,
       messageCount: thread.messageCount,
-      lastMessageSeq: thread.lastMessageSeq,
       createdAt: toIsoString(thread.createdAt),
       updatedAt: toIsoString(thread.updatedAt),
       read: thread.read && {
@@ -162,6 +161,11 @@ export async function serializeThreads(
         id: thread.lastRun.id,
         status: thread.lastRun.status,
         finishReason: thread.lastRun.finishReason,
+        errorCode: thread.lastRun.errorCode,
+        completedAt: thread.lastRun.completedAt
+          ? toIsoString(thread.lastRun.completedAt)
+          : undefined,
+        requestedBy: thread.lastRun.requestedBy,
       },
     })
   )

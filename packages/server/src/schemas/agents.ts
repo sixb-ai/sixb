@@ -180,9 +180,13 @@ export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 /** Your place in a conversation: how far your reading reached, and what is new. */
 export const AgentThreadReadSchema = z.object({
   threadId: z.string(),
+  /** The seq of the last message your reading reached; 0 when it reached none. */
   throughSeq: z.number(),
+  /** The thread's newest message seq. */
   headSeq: z.number(),
+  /** Messages past your place that someone else wrote: not yours, nor approval outcomes alone. */
   unread: z.number(),
+  /** When you last marked it read. */
   readAt: z.string().optional(),
 })
 
@@ -191,10 +195,14 @@ export const AgentThreadLastRunSchema = z.object({
   id: z.string(),
   status: AgentRunStatusSchema,
   finishReason: AgentRunFinishReasonSchema.optional(),
+  errorCode: z.enum(AGENT_RUN_FAILURE_CODES).optional(),
+  completedAt: z.string().optional(),
+  /** Who asked for it, when it ended short: only they can run it again. */
+  requestedBy: AgentAuthorizablePrincipalSchema.optional(),
 })
 
 export const MarkAgentThreadReadBodySchema = z
-  .object({ throughSeq: z.number().int().min(0).optional() })
+  .object({ throughMessageId: z.string().trim().min(1).optional() })
   .strict()
 
 export const MarkAgentThreadReadResponseSchema = z.object({ read: AgentThreadReadSchema })
@@ -254,8 +262,6 @@ export const AgentThreadSchema = z.object({
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),
   messageCount: z.number(),
-  /** The highest message seq the thread ever assigned: what your place is measured against. */
-  lastMessageSeq: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /** Your place in it: absent for an observer, and for code that is not a person. */

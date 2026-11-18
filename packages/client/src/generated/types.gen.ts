@@ -12798,7 +12798,6 @@ export type ListAgentThreadsResponses = {
       activeRunId: string | null
       lastMessageAt?: string
       messageCount: number
-      lastMessageSeq: number
       createdAt: string
       updatedAt: string
       read?: {
@@ -12823,6 +12822,19 @@ export type ListAgentThreadsResponses = {
           | "error"
           | "other"
           | "unknown"
+        errorCode?:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
+          | "agent.execution_failed"
+          | "agent.step_limit_reached"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        completedAt?: string
+        requestedBy?: {
+          type: "user" | "serviceAccount"
+          id: string
+        }
       }
       approvalMode?: "manual" | "accept-edits" | "auto"
       approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -12964,7 +12976,6 @@ export type CreateAgentThreadResponses = {
       activeRunId: string | null
       lastMessageAt?: string
       messageCount: number
-      lastMessageSeq: number
       createdAt: string
       updatedAt: string
       read?: {
@@ -12989,6 +13000,19 @@ export type CreateAgentThreadResponses = {
           | "error"
           | "other"
           | "unknown"
+        errorCode?:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
+          | "agent.execution_failed"
+          | "agent.step_limit_reached"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        completedAt?: string
+        requestedBy?: {
+          type: "user" | "serviceAccount"
+          id: string
+        }
       }
       approvalMode?: "manual" | "accept-edits" | "auto"
       approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -13103,7 +13127,6 @@ export type GetAgentThreadResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -13128,6 +13151,19 @@ export type GetAgentThreadResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -13267,7 +13303,6 @@ export type AddAgentThreadParticipantsResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -13292,6 +13327,19 @@ export type AddAgentThreadParticipantsResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -13471,7 +13519,6 @@ export type ForkAgentThreadResponses = {
       activeRunId: string | null
       lastMessageAt?: string
       messageCount: number
-      lastMessageSeq: number
       createdAt: string
       updatedAt: string
       read?: {
@@ -13496,6 +13543,19 @@ export type ForkAgentThreadResponses = {
           | "error"
           | "other"
           | "unknown"
+        errorCode?:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
+          | "agent.execution_failed"
+          | "agent.step_limit_reached"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        completedAt?: string
+        requestedBy?: {
+          type: "user" | "serviceAccount"
+          id: string
+        }
       }
       approvalMode?: "manual" | "accept-edits" | "auto"
       approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -13621,7 +13681,6 @@ export type RecreateAgentThreadSandboxResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -13646,6 +13705,19 @@ export type RecreateAgentThreadSandboxResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -13773,6 +13845,42 @@ export type RestoreAgentThreadSandboxResponses = {
     messageCount: number
     createdAt: string
     updatedAt: string
+    read?: {
+      threadId: string
+      throughSeq: number
+      headSeq: number
+      unread: number
+      readAt?: string
+    }
+    lastRun?: {
+      id: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "timeout"
+        | "interrupted"
+        | "awaiting_approval"
+        | "awaiting_answer"
+        | "error"
+        | "other"
+        | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+    }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
@@ -17595,13 +17703,13 @@ export type CancelAgentRunByIdResponse =
 
 export type MarkAgentThreadReadData = {
   body: {
-    throughSeq?: number
+    throughMessageId?: string
   }
   path: {
     threadId: string
   }
   query?: never
-  url: "/api/agent/thread-reads/{threadId}"
+  url: "/api/agent-threads/{threadId}/read"
 }
 
 export type MarkAgentThreadReadErrors = {
@@ -17953,7 +18061,6 @@ export type MoveAgentThreadToCloudResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -17978,6 +18085,19 @@ export type MoveAgentThreadToCloudResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -18115,7 +18235,6 @@ export type MoveAgentThreadToComputerResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -18140,6 +18259,19 @@ export type MoveAgentThreadToComputerResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -18513,7 +18645,6 @@ export type SetAgentThreadApprovalModeResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -18538,6 +18669,19 @@ export type SetAgentThreadApprovalModeResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"
@@ -19463,7 +19607,6 @@ export type GetObservedAgentThreadResponses = {
     activeRunId: string | null
     lastMessageAt?: string
     messageCount: number
-    lastMessageSeq: number
     createdAt: string
     updatedAt: string
     read?: {
@@ -19488,6 +19631,19 @@ export type GetObservedAgentThreadResponses = {
         | "error"
         | "other"
         | "unknown"
+      errorCode?:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
+        | "agent.execution_failed"
+        | "agent.step_limit_reached"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
+      completedAt?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
     }
     approvalMode?: "manual" | "accept-edits" | "auto"
     approvalModeSource?: "thread" | "default" | "fallback" | "run"

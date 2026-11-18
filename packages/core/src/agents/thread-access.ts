@@ -1,9 +1,12 @@
 import { type Principal, principalsEqual, SYSTEM_PRINCIPAL, type UserPrincipal } from "../auth"
 import { isRuntimeAllowed } from "../authorization"
 import type { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import type { AuthorizablePrincipal } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
+  AgentRunFailureCode,
   AgentRunFinishReason,
+  AgentRunRecord,
   AgentRunStatus,
   AgentStorage,
   AgentThreadRecord,
@@ -21,18 +24,22 @@ export interface AgentThreadParticipant {
 }
 
 /**
- * How far the caller's reading of a thread has reached, and what is left. `headSeq` is the
- * thread's high-water mark, so `unread` is what arrived since `throughSeq`; reading on one device
- * clears it on every other.
+ * How far the caller's reading of a thread has reached, and what arrived past it. Reading on one
+ * device clears it on every other.
  */
 export interface AgentThreadReadView {
   readonly threadId: string
-  /** 0 when they have not read any of it. */
+  /** The seq of the last message their reading reached; 0 when it reached none. */
   readonly throughSeq: number
   /** The thread's newest message seq, which never goes back. */
   readonly headSeq: number
-  /** `headSeq - throughSeq`, never below 0. */
+  /**
+   * Messages past `throughSeq` that someone else wrote: the Agent's answers and other people's
+   * messages. Their own messages are not new to them, nor is a message that only reports how
+   * approved calls ended.
+   */
   readonly unread: number
+  /** When they last marked the thread read, even where their place did not move. */
   readonly readAt?: Date
 }
 
@@ -41,6 +48,20 @@ export interface AgentThreadLastRunView {
   readonly id: string
   readonly status: AgentRunStatus
   readonly finishReason?: AgentRunFinishReason
+  /** Why it failed, when it did. */
+  readonly errorCode?: AgentRunFailureCode
+  readonly completedAt?: Date
+  /**
+   * Who asked for it, when it ended short (failed, timed out or interrupted): only they can run it
+   * again, as it runs with their rights.
+   */
+  readonly requestedBy?: AuthorizablePrincipal
+}
+
+/** A run that stopped before its answer: it failed, timed out, or its worker went away. */
+export function agentRunEndedShort(run: Pick<AgentRunRecord, "status" | "finishReason">): boolean {
+  if (run.status === "failed") return true
+  return run.finishReason === "timeout" || run.finishReason === "interrupted"
 }
 
 /**

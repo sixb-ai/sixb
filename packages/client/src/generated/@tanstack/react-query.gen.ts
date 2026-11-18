@@ -5341,7 +5341,7 @@ export const cancelAgentRunByIdMutation = (
 /**
  * Mark how far you have read an Agent thread
  *
- * Record that your reading of a conversation reached a message, or its newest when `throughSeq` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place. Session routes only: a runner has no reading.
+ * Record that your reading of a conversation reached a message, or its newest when `throughMessageId` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place; a message a retry or an edit took away marks nothing. Session routes only: a runner has no reading.
  */
 export const markAgentThreadReadMutation = (
   options?: Partial<Options<MarkAgentThreadReadData>>

@@ -2428,7 +2428,7 @@ describe("thread read routes", () => {
       threadId: thread.id,
       runId: null,
       role: "user",
-      authorPrincipal: { type: "user", id: "reader-owner" },
+      authorPrincipal: { type: "user", id: "reader-other" },
       parts: [{ type: "text", text: "Where are we?" }],
       createdAt: new Date("2026-06-27T10:00:01.000Z"),
     })
@@ -2442,25 +2442,26 @@ describe("thread read routes", () => {
 
     const mark = (headers: Record<string, string>, body: unknown) =>
       app.fetch(
-        new Request(`http://localhost/api/agent/thread-reads/${thread.id}`, {
+        new Request(`http://localhost/api/agent-threads/${thread.id}/read`, {
           method: "PUT",
           headers,
           body: JSON.stringify(body),
         })
       )
 
-    const marked = await mark(owner.csrfHeaders, { throughSeq: 1 })
+    const marked = await mark(owner.csrfHeaders, { throughMessageId: "read-message" })
     expect(marked.status).toBe(200)
     expect(await marked.json()).toMatchObject({
       read: { threadId: thread.id, throughSeq: 1, headSeq: 1, unread: 0 },
     })
 
-    // Done sends no seq: the thread's newest.
+    // Done names no message: the thread's newest.
     expect(await (await mark(owner.csrfHeaders, {})).json()).toMatchObject({
       read: { throughSeq: 1, unread: 0 },
     })
 
-    expect((await mark(owner.csrfHeaders, { throughSeq: -1 })).status).toBe(422)
+    expect((await mark(owner.csrfHeaders, { throughMessageId: "" })).status).toBe(422)
+    expect((await mark(owner.csrfHeaders, { throughSeq: 1 })).status).toBe(422)
     expect((await mark(stranger.csrfHeaders, {})).status).toBe(404)
   })
 })

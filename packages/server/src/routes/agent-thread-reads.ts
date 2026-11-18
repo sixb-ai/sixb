@@ -14,12 +14,12 @@ import { toIsoString, unconfiguredStorageResponse } from "../utils/http"
 import { handleAgentRouteError } from "./agents"
 
 const MARKING =
-  "Record that your reading of a conversation reached a message, or its newest when `throughSeq` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place. Session routes only: a runner has no reading."
+  "Record that your reading of a conversation reached a message, or its newest when `throughMessageId` is omitted, which is what a Done button sends. It never moves backwards, so another device that read further keeps its place; a message a retry or an edit took away marks nothing. Session routes only: a runner has no reading."
 
 /** Where the caller's reading of a conversation has reached. One route: the write. */
 export function registerAgentThreadReadRoutes(app: Elysia, host: SixbHostView) {
   return app.put(
-    "/api/agent/thread-reads/:threadId",
+    "/api/agent-threads/:threadId/read",
     async (context) => {
       const { set } = context
       try {
