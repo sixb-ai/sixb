@@ -1,4 +1,3 @@
-import type { ListSyncsResponse } from "@sixb/client"
 import { getSyncOptions, listSyncRunsOptions, listSyncsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { CalendarClock, ChevronRight, RefreshCw } from "lucide-react"
@@ -28,8 +27,9 @@ import {
 import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
 import {
   AccountsMeta,
-  AccountsStatusPill,
   needsReconnecting,
+  SyncStatusPill,
+  SyncTimeMeta,
   useAccountsStats,
   useConnectorAccounts,
 } from "./accounts"
@@ -42,7 +42,6 @@ import { SyncButton } from "./sync-button"
 /** Console › Syncs: what copies each connector's data into the project, and how it last went. */
 export function ConsoleSyncsPage() {
   const messages = useDataMessages()
-  const format = useFormat()
   useSyncLiveUpdates()
   const syncsQuery = useQuery({ ...listSyncsOptions(), retry: false })
   const syncs = syncsQuery.data ?? []
@@ -85,24 +84,8 @@ export function ConsoleSyncsPage() {
                   {sync.triggers.map((trigger) => (
                     <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
                   ))}
-                  {sync.accounts ? (
-                    <>
-                      {sync.accounts.lastSyncedAt ? (
-                        <>
-                          <MetaDot />
-                          <span>{format.relative(sync.accounts.lastSyncedAt)}</span>
-                        </>
-                      ) : null}
-                      <AccountsMeta summary={sync.accounts} />
-                    </>
-                  ) : sync.latestRun ? (
-                    <>
-                      <MetaDot />
-                      <span>
-                        {format.relative(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
-                      </span>
-                    </>
-                  ) : null}
+                  <SyncTimeMeta sync={sync} />
+                  {sync.accounts ? <AccountsMeta summary={sync.accounts} /> : null}
                 </>
               }
               trailing={
@@ -396,18 +379,6 @@ export function ConsoleSyncPage() {
 
       <SchemaPanel dataset={dataset} />
     </SectionPage>
-  )
-}
-
-/** How a sync stands: its latest run, or on a sync of an OAuth connector, its accounts. */
-function SyncStatusPill({ sync }: { readonly sync: ListSyncsResponse[number] }) {
-  const messages = useDataMessages()
-  if (sync.accounts) return <AccountsStatusPill summary={sync.accounts} />
-
-  return sync.latestRun ? (
-    <RunStatusPill status={sync.latestRun.status} />
-  ) : (
-    <Pill tone="muted">{messages.common.neverRun}</Pill>
   )
 }
 

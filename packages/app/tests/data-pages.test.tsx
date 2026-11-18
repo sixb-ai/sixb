@@ -583,6 +583,35 @@ describe("a sync of an OAuth connector", () => {
     expect(view.queryByText("Failed")).toBeNull()
   })
 
+  // Removal proof: read `sync.latestRun` again in the connector page's sync rows; they say
+  // "Failed".
+  test("is described by its accounts on its connector's page", () => {
+    const connectorPath = { connectorId: "outlook" }
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/outlook",
+      data: [
+        [
+          getConnectorQueryKey({ path: connectorPath }),
+          {
+            id: "outlook",
+            type: "microsoft",
+            connection: { authentication: "oauth2" },
+            syncIds: ["inbox"],
+            webhooks: [],
+          },
+        ],
+        [listSyncsQueryKey(), [sync()]],
+        [listConnectorAccountsQueryKey({ path: connectorPath }), { accounts: [] }],
+      ],
+    })
+
+    const syncs = within(
+      view.getByText("What this connector copies into the project.").closest("section")!
+    )
+    expect(syncs.getByText("Needs attention")).toBeDefined()
+    expect(syncs.queryByText("Failed")).toBeNull()
+  })
+
   // Removal proof: drop the `sync.accounts` branches of isSyncing and syncStatus; the button
   // says "Last sync failed", then "Sync now" while an account still runs.
   test("gives SyncButton its status, and keeps it busy while an account runs", () => {

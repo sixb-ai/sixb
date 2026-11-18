@@ -100,7 +100,7 @@ function syncAccountsState(summary: AccountsSummary): SyncAccountsState {
 }
 
 /** The pill of a sync of an OAuth connector, on its row and its page. */
-export function AccountsStatusPill({ summary }: { readonly summary: AccountsSummary }) {
+function AccountsStatusPill({ summary }: { readonly summary: AccountsSummary }) {
   const messages = useDataMessages()
 
   switch (syncAccountsState(summary)) {
@@ -117,6 +117,37 @@ export function AccountsStatusPill({ summary }: { readonly summary: AccountsSumm
     case "never":
       return <Pill tone="muted">{messages.common.neverRun}</Pill>
   }
+}
+
+/**
+ * How a sync stands: its latest run, or on a sync of an OAuth connector, its accounts. There, the
+ * latest run is only the account that ran last.
+ */
+export function SyncStatusPill({ sync }: { readonly sync: Sync }) {
+  const messages = useDataMessages()
+  if (sync.accounts) return <AccountsStatusPill summary={sync.accounts} />
+
+  return sync.latestRun ? (
+    <RunStatusPill status={sync.latestRun.status} />
+  ) : (
+    <Pill tone="muted">{messages.common.neverRun}</Pill>
+  )
+}
+
+/** On a sync's row: when it last ran, or on a sync of an OAuth connector, when an account synced. */
+export function SyncTimeMeta({ sync }: { readonly sync: Sync }) {
+  const format = useFormat()
+  const at = sync.accounts
+    ? sync.accounts.lastSyncedAt
+    : (sync.latestRun?.startedAt ?? sync.latestRun?.queuedAt)
+  if (!at) return null
+
+  return (
+    <>
+      <MetaDot />
+      <span>{format.relative(at)}</span>
+    </>
+  )
 }
 
 /**

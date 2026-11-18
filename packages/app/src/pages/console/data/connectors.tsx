@@ -30,7 +30,7 @@ import {
   useNumbers,
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
-import { ConnectorAccountsSection } from "./accounts"
+import { ConnectorAccountsSection, SyncStatusPill, SyncTimeMeta } from "./accounts"
 import { useDataMessages } from "./messages"
 import { ConnectorIcon } from "./shared"
 
@@ -197,23 +197,10 @@ export function ConsoleConnectorPage() {
                 meta={
                   <>
                     <span>{messages.common.writes(sync.target.dataset.id)}</span>
-                    {sync.latestRun ? (
-                      <>
-                        <MetaDot />
-                        <span>
-                          {format.relative(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
-                        </span>
-                      </>
-                    ) : null}
+                    <SyncTimeMeta sync={sync} />
                   </>
                 }
-                trailing={
-                  sync.latestRun ? (
-                    <RunStatusPill status={sync.latestRun.status} />
-                  ) : (
-                    <Pill tone="muted">{messages.common.neverRun}</Pill>
-                  )
-                }
+                trailing={<SyncStatusPill sync={sync} />}
               />
             ))
           )}
