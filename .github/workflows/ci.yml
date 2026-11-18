@@ -6,9 +6,12 @@ on:
     branches:
       - main
 
+# A new push to a pull request cancels its previous run. Each commit on main keeps its own run:
+# pull requests skip E2E suites they cannot reach (scripts/ci-scope.ts), and main, which runs every
+# suite, is where a dependency that script misses gets caught.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   typecheck:
@@ -214,13 +217,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The pull request's merge commit and its first parent, the base it merges into.
+          fetch-depth: 2
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
 
+      # Pull requests only. A skipped suite still reports this job as passed, which keeps the
+      # required check satisfied; a notice on the run says why it was skipped. Anything but an
+      # explicit `false` runs the suite: a push to main never asks, and `continue-on-error` lets
+      # the remaining steps run with no answer when this step itself fails.
+      - name: Decide scope
+        id: scope
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: bun scripts/ci-scope.ts '${{ matrix.package }}' HEAD^1 HEAD
+
       - name: Cache Bun install
+        if: steps.scope.outputs.run != 'false'
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -229,7 +246,9 @@ jobs:
             bun-${{ runner.os }}-
 
       - name: Install dependencies
+        if: steps.scope.outputs.run != 'false'
         run: bun install --frozen-lockfile
 
       - name: E2E tests
+        if: steps.scope.outputs.run != 'false'
         run: bun --filter '${{ matrix.package }}' test:e2e
