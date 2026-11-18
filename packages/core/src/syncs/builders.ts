@@ -37,7 +37,7 @@ function assertDataset(dataset: DatasetDefinition, mode: SyncMode): void {
 function assertConnectorMode(syncId: string, connector: ConnectorDefinition, mode: SyncMode): void {
   if (mode !== "snapshot" || !isOAuthConnectorDefinition(connector)) return
   throw new SyncValidationError(
-    `[Sixb] Sync '${syncId}' reads OAuth connector '${connector.id}', which runs once per connection. Use mode "merge" or "append": a snapshot of one connection would replace every other connection's rows.`
+    `[Sixb] Sync '${syncId}' reads OAuth connector '${connector.id}', which runs once per connection, so a snapshot of one connection would replace every other connection's rows. Use mode "merge" and return change.delete() for records the provider deleted, or mode "append".`
   )
 }
 

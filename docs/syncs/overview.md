@@ -76,9 +76,13 @@ export const importVideos = defineSync("import-videos", { mode: "merge" })
   .intoDataset(videos)
 ```
 
-Use `"merge"` or `"append"`. A snapshot of one account would replace every other account's rows,
-so `defineSync` rejects `"snapshot"` for an OAuth connector. If record IDs can repeat across
-accounts, include the account ID in the dataset's primary key.
+| Mode | On an OAuth connector |
+| --- | --- |
+| `"snapshot"` | Rejected: one account's snapshot would replace every other account's rows. |
+| `"merge"` | Keeps every row until you [delete it](incremental.md#update-and-delete-records): return `change.delete()` for records the provider deleted. |
+| `"append"` | Adds the returned rows. |
+
+If record IDs can repeat across accounts, include the account ID in the dataset's primary key.
 
 A schedule starts a run for every connected account. A schedule on
 `events.connector(social).connected()` starts one for the account that just connected, so its first

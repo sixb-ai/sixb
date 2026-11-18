@@ -155,7 +155,7 @@ describe("defineSync", () => {
     [
       "a snapshot of an OAuth connector, which runs once per connection",
       () => defineSync("sync-videos").from(social),
-      `Sync 'sync-videos' reads OAuth connector 'social', which runs once per connection. Use mode "merge" or "append"`,
+      `Use mode "merge" and return change.delete() for records the provider deleted, or mode "append".`,
     ],
     [
       "an empty dataset target name",
