@@ -8,7 +8,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { readdir } from "node:fs/promises"
-import { join, relative, resolve, sep } from "node:path"
+import { join, posix, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
 import { isConnectorDefinition } from "../connectors"
@@ -19,6 +19,7 @@ import type { ValueType } from "../ontology/types"
 import { isPipelineDefinition } from "../pipelines"
 import { isProjectionDefinition } from "../projections/builders"
 import { isRuleDefinition } from "../rules"
+import type { DefinitionFolderFamily, DefinitionFolderIndex } from "../runtime/definitions"
 import { RuntimeError } from "../runtime/errors"
 import { isScheduleDefinition } from "../schedules"
 import {
@@ -44,6 +45,8 @@ export interface DiscoveredOntologyModule {
 export interface DiscoveredOntology {
   readonly sources: readonly OntologySource[]
   readonly modules: readonly DiscoveredOntologyModule[]
+  /** Each object type's folder below `ontology/`; see {@link DefinitionFolderIndex}. */
+  readonly folders: ReadonlyMap<string, string>
 }
 
 export async function discoverOntologySources(projectRoot: string): Promise<DiscoveredOntology> {
@@ -53,6 +56,7 @@ export async function discoverOntologySources(projectRoot: string): Promise<Disc
   const objectTypes: ObjectTypeWithPropertyTokens[] = []
   const valueTypes: ValueType[] = []
   const modules: DiscoveredOntologyModule[] = []
+  const folders = new DefinitionFolderCollector()
   const seen = new Set<unknown>()
 
   for (const loaded of loadedModules) {
@@ -77,10 +81,9 @@ export async function discoverOntologySources(projectRoot: string): Promise<Disc
         valueTypes.push(candidate)
       }
     }
-    modules.push({
-      path: toPosix(relative("ontology", loaded.path)),
-      objectTypeIds: [...new Set(objectTypeIds)],
-    })
+    const path = toPosix(relative("ontology", loaded.path))
+    for (const id of objectTypeIds) folders.add(id, path)
+    modules.push({ path, objectTypeIds: [...new Set(objectTypeIds)] })
   }
 
   const discoveredSources: OntologySource[] = [...ontologyDocuments, ...objectTypes]
@@ -93,7 +96,7 @@ export async function discoverOntologySources(projectRoot: string): Promise<Disc
     })
   }
 
-  return { sources: discoveredSources, modules }
+  return { sources: discoveredSources, modules, folders: folders.index }
 }
 
 export type DiscoveryModuleKind =
@@ -217,31 +220,88 @@ export type DiscoveredProjectDefinitions = {
   readonly [TKey in keyof typeof definitionDiscoveryRegistry]: readonly DefinitionFromFamily<
     (typeof definitionDiscoveryRegistry)[TKey]
   >[]
+} & {
+  /** The folder each definition was found in; object types come from `discoverOntologySources`. */
+  readonly folders: Omit<DefinitionFolderIndex, "objectTypes">
 }
+
+/** The families whose folders the app shows; the rest are kept by id alone. */
+const folderFamilies: ReadonlySet<string> = new Set<Exclude<DefinitionFolderFamily, "objectTypes">>(
+  [
+    "actions",
+    "connectors",
+    "datasets",
+    "pipelines",
+    "projections",
+    "rules",
+    "schedules",
+    "syncs",
+    "workflows",
+  ]
+)
 
 export async function discoverProjectDefinitions(
   projectRoot: string
 ): Promise<DiscoveredProjectDefinitions> {
   const entries = await Promise.all(
     Object.entries(definitionDiscoveryRegistry).map(async ([key, family]) => {
-      const definitions = await discoverDefinitionFamily(projectRoot, family)
-      return [key, definitions] as const
+      const discovered = await discoverDefinitionFamily(projectRoot, family)
+      return [key, discovered] as const
     })
   )
 
+  const folders = Object.fromEntries(
+    entries.filter(([key]) => folderFamilies.has(key)).map(([key, { folders }]) => [key, folders])
+  )
   // Object.fromEntries erases literal keys. Every entry above comes from the exact registry and its
   // definitions have passed that entry's type guard, so restoring the mapped result type is safe.
-  return Object.fromEntries(entries) as DiscoveredProjectDefinitions
+  return {
+    ...Object.fromEntries(entries.map(([key, { definitions }]) => [key, definitions])),
+    folders,
+  } as DiscoveredProjectDefinitions
 }
 
 async function discoverDefinitionFamily(
   projectRoot: string,
   family: DefinitionDiscoveryFamily<unknown>
-): Promise<readonly unknown[]> {
+): Promise<{ definitions: readonly unknown[]; folders: ReadonlyMap<string, string> }> {
   const loadedModules = await loadFamilyModules(projectRoot, family.kind, family.directory)
   const exportedCandidates = new Set(loadedModules.flatMap((loaded) => loaded.exports))
+  const definitions = [...exportedCandidates].filter(family.isDefinition)
+  const isDefinition = new Set(definitions)
 
-  return [...exportedCandidates].filter(family.isDefinition)
+  const directory = family.directory.join("/")
+  const folders = new DefinitionFolderCollector()
+  for (const loaded of loadedModules) {
+    const path = posix.relative(directory, toPosix(loaded.path))
+    for (const candidate of loaded.exports) {
+      if (isDefinition.has(candidate) && hasStringId(candidate)) folders.add(candidate.id, path)
+    }
+  }
+
+  return { definitions, folders: folders.index }
+}
+
+/**
+ * Collects each definition's folder from the modules that export it. When several do, the deepest
+ * wins: a barrel such as `datasets/index.ts` re-exports what the files below it define.
+ */
+class DefinitionFolderCollector {
+  readonly index = new Map<string, string>()
+  private readonly depths = new Map<string, number>()
+
+  /** `path` is the module's POSIX path below the family's directory. */
+  add(id: string, path: string): void {
+    const folder = posix.dirname(path)
+    const depth = folder === "." ? 0 : folder.split("/").length
+    if ((this.depths.get(id) ?? -1) >= depth) return
+    this.depths.set(id, depth)
+    if (depth > 0) this.index.set(id, folder)
+  }
+}
+
+function hasStringId(value: unknown): value is { readonly id: string } {
+  return isRecord(value) && typeof value.id === "string"
 }
 
 /**

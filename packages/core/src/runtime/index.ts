@@ -22,7 +22,13 @@ export type { RegisteredWebhook } from "../webhooks"
 export { WebhookValidationError } from "../webhooks"
 export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
-export type { DefinitionCatalog, SixbDefinitions } from "./definitions"
+export type {
+  DefinitionCatalog,
+  DefinitionFolderFamily,
+  DefinitionFolderIndex,
+  DefinitionFolders,
+  SixbDefinitions,
+} from "./definitions"
 export { RuntimeError } from "./errors"
 export type { SixbHostOptions, SixbHostView } from "./host"
 export { SixbHost } from "./host"
