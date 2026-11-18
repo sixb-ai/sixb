@@ -53,28 +53,7 @@ export function ConsoleSyncsPage() {
 
   return (
     <SectionPage section="console" page="syncs" {...browser.frame}>
-      {syncsQuery.isPending ? (
-        <Panel>
-          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
-        </Panel>
-      ) : syncsQuery.isError ? (
-        <Panel>
-          <PanelEmpty
-            tone="error"
-            icon={RefreshCw}
-            title={messages.syncs.title}
-            description={apiErrorMessage(syncsQuery.error, messages.common.loadFailed)}
-          />
-        </Panel>
-      ) : syncsQuery.data.length === 0 ? (
-        <Panel>
-          <PanelEmpty
-            icon={RefreshCw}
-            title={messages.syncs.emptyTitle}
-            description={messages.syncs.emptyDescription}
-          />
-        </Panel>
-      ) : (
+      {syncsQuery.isSuccess && syncsQuery.data.length > 0 ? (
         <FolderContents browser={browser} rootLabel={messages.syncs.title}>
           {(syncs) => (
             <Panel>
@@ -109,6 +88,25 @@ export function ConsoleSyncsPage() {
             </Panel>
           )}
         </FolderContents>
+      ) : (
+        <Panel>
+          {syncsQuery.isPending ? (
+            <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
+          ) : syncsQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={RefreshCw}
+              title={messages.syncs.title}
+              description={apiErrorMessage(syncsQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={RefreshCw}
+              title={messages.syncs.emptyTitle}
+              description={messages.syncs.emptyDescription}
+            />
+          )}
+        </Panel>
       )}
     </SectionPage>
   )

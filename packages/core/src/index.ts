@@ -1116,7 +1116,6 @@ export type {
   DefinitionCatalog,
   DefinitionFolderFamily,
   DefinitionFolderIndex,
-  DefinitionFolders,
   FileListPropertyToken,
   FilePropertyToken,
   ListResult,

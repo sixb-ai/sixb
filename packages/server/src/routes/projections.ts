@@ -1,5 +1,4 @@
 import type {
-  DefinitionFolders,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
@@ -95,10 +94,10 @@ type SerializedProjection<TProjection extends ProjectionDefinition> =
 function serializeProjection<TProjection extends ProjectionDefinition>(
   projection: TProjection,
   latestRuns: ReadonlyMap<string, SerializedProjectionRun>,
-  folders: DefinitionFolders
+  folders: ReadonlyMap<string, string> | undefined
 ): SerializedProjection<TProjection> {
   const latestRun = latestRuns.get(projection.id) ?? null
-  const folder = folders.of("projections", projection.id)
+  const folder = folders?.get(projection.id)
   if (projection._tag === "ObjectProjectionDefinition") {
     return {
       ...projection,
@@ -113,7 +112,7 @@ function serializeProjection<TProjection extends ProjectionDefinition>(
 function serializeProjectionCatalog(
   catalog: ViewableProjectionCatalog,
   latestRuns: ReadonlyMap<string, SerializedProjectionRun>,
-  folders: DefinitionFolders
+  folders: ReadonlyMap<string, string> | undefined
 ) {
   return {
     objectProjections: catalog.objectProjections.map((projection) =>
@@ -136,7 +135,7 @@ export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
         const sixb = requireRequestSixb(context)
         const catalog = listViewableProjections(sixb)
         const latestRuns = await getLatestProjectionRuns(sixb, projectionCatalogIds(catalog))
-        return serializeProjectionCatalog(catalog, latestRuns, host.definitions.folders)
+        return serializeProjectionCatalog(catalog, latestRuns, host.definitions.folders.projections)
       },
       {
         response: { 200: ProjectionListResponseSchema },
@@ -159,7 +158,7 @@ export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
         }
 
         const latestRuns = await getLatestProjectionRuns(sixb, [found.id])
-        return serializeProjection(found, latestRuns, host.definitions.folders)
+        return serializeProjection(found, latestRuns, host.definitions.folders.projections)
       },
       {
         params: ProjectionParamsSchema,

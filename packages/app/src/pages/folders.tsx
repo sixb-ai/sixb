@@ -50,10 +50,6 @@ export interface FolderGroup<TItem> {
 }
 
 export interface FolderBrowser<TItem> {
-  /** Whether any item is in a folder. Without one, the page is a plain list. */
-  readonly active: boolean
-  /** The open folder, or `undefined` at the top. */
-  readonly folder: string | undefined
   /** The open folder's subfolders, by name. */
   readonly folders: readonly FolderTile[]
   /** The items directly in the open folder. */
@@ -108,7 +104,8 @@ export function useFolderBrowser<TItem extends Foldered>({
   const { folder } = arranged
   const parent = folder ? parentOf(folder) : undefined
   return {
-    ...arranged,
+    items: arranged.items,
+    groups: arranged.groups,
     folders: arranged.folders.map((tile) => ({ ...tile, href: hrefFor(tile.path) })),
     frame: folder
       ? {
@@ -122,7 +119,7 @@ export function useFolderBrowser<TItem extends Foldered>({
 
 /** What a list holds at one folder, before it becomes links and a page header. */
 export interface FolderArrangement<TItem> {
-  readonly active: boolean
+  /** The open folder, or `undefined` at the top. */
   readonly folder: string | undefined
   readonly folders: readonly Omit<FolderTile, "href">[]
   readonly items: readonly TItem[]
@@ -141,8 +138,6 @@ export function arrangeByFolder<TItem extends Foldered>(
   requested: string | undefined,
   narrowed: boolean
 ): FolderArrangement<TItem> {
-  const active = items.some((item) => item.folder !== undefined)
-
   if (narrowed) {
     const byFolder = new Map<string | undefined, TItem[]>()
     for (const item of items) {
@@ -153,7 +148,7 @@ export function arrangeByFolder<TItem extends Foldered>(
     const groups = [...byFolder.entries()]
       .sort(([left], [right]) => compareFolders(left, right))
       .map(([folder, grouped]) => ({ folder, items: grouped }))
-    return { active, folder: undefined, folders: [], items, groups, total: items.length }
+    return { folder: undefined, folders: [], items, groups, total: items.length }
   }
 
   const within = requested ? items.filter((item) => isWithin(item.folder, requested)) : items
@@ -178,7 +173,7 @@ export function arrangeByFolder<TItem extends Foldered>(
     .map(([path, count]) => ({ name: nameOf(path), path, count }))
     .sort((left, right) => compareNames(left.name, right.name))
 
-  return { active, folder, folders, items: direct, groups: undefined, total: inFolder.length }
+  return { folder, folders, items: direct, groups: undefined, total: inFolder.length }
 }
 
 /**
@@ -197,8 +192,9 @@ export function FolderContents<TItem>({
   readonly children: (items: readonly TItem[]) => ReactNode
 }) {
   if (browser.groups) {
-    // Without folders, or with every match at one level, a heading would only repeat the page.
-    if (!browser.active || browser.groups.length < 2) return <>{children(browser.items)}</>
+    // With every match in one place, as in a project without folders, a heading would only repeat
+    // the page.
+    if (browser.groups.length < 2) return <>{children(browser.items)}</>
     return (
       <div className="flex flex-col gap-6">
         {browser.groups.map((group) => (
@@ -262,25 +258,11 @@ function FolderHeading({
   readonly folder: string | undefined
   readonly rootLabel: string
 }) {
-  const segments = folder ? folder.split("/") : [rootLabel]
   return (
     <h3 className="flex min-w-0 items-center gap-2 px-0.5 text-[0.8125rem] leading-5 font-medium text-muted-foreground">
       {/* The top is the list itself, not a folder. */}
       {folder ? <FolderGlyph className="h-3.5 w-4 shrink-0" /> : null}
-      <span className="flex min-w-0 items-center gap-1.5">
-        {segments.map((segment, index) => (
-          <span key={`${index}-${segment}`} className="flex min-w-0 items-center gap-1.5">
-            {index > 0 ? (
-              <span aria-hidden className="text-muted-foreground/50">
-                /
-              </span>
-            ) : null}
-            <span className={cn("truncate", index === segments.length - 1 && "text-foreground/80")}>
-              {segment}
-            </span>
-          </span>
-        ))}
-      </span>
+      <span className="truncate">{folder ? folder.replaceAll("/", " / ") : rootLabel}</span>
     </h3>
   )
 }
@@ -316,11 +298,6 @@ export function folderBack(
 ): { readonly href: string; readonly label: string } {
   if (!folder) return list
   return { href: `${list.href}?${FOLDER_PARAM}=${encodeFolder(folder)}`, label: nameOf(folder) }
-}
-
-/** Whether a folder path matches a search, so typing a folder's name finds what is in it. */
-export function folderMatches(folder: string | undefined, query: string): boolean {
-  return folder?.toLowerCase().includes(query) ?? false
 }
 
 function encodeFolder(folder: string): string {

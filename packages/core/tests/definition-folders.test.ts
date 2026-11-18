@@ -53,12 +53,12 @@ test("each definition keeps the folder below its directory that defines it", asy
   )
 
   const { folders } = host.definitions
-  expect(folders.of("objectTypes", "Deal")).toBe("sales/crm")
-  expect(folders.of("objectTypes", "Site")).toBeUndefined()
-  expect(folders.of("connectors", "hubspot")).toBe("crm")
-  expect(folders.of("connectors", "weather")).toBeUndefined()
+  expect(folders.objectTypes?.get("Deal")).toBe("sales/crm")
+  expect(folders.objectTypes?.get("Site")).toBeUndefined()
+  expect(folders.connectors?.get("hubspot")).toBe("crm")
+  expect(folders.connectors?.get("weather")).toBeUndefined()
   // Passed to createSixb() directly, so it was never in a folder.
-  expect(folders.of("connectors", "inline")).toBeUndefined()
+  expect(folders.connectors?.get("inline")).toBeUndefined()
   // Folders are per family: the same id in another family is a different definition.
-  expect(folders.of("datasets", "hubspot")).toBeUndefined()
+  expect(folders.datasets?.get("hubspot")).toBeUndefined()
 })

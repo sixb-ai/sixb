@@ -26,7 +26,6 @@ export type {
   DefinitionCatalog,
   DefinitionFolderFamily,
   DefinitionFolderIndex,
-  DefinitionFolders,
   SixbDefinitions,
 } from "./definitions"
 export { RuntimeError } from "./errors"

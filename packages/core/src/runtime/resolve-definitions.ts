@@ -39,7 +39,6 @@ import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowAgentStepGroupReferences, validateWorkflowsAtStartup } from "../workflows"
 import {
   createDefinitionCatalog,
-  createDefinitionFolders,
   type DefinitionFolderIndex,
   type SixbDefinitions,
 } from "./definitions"
@@ -251,7 +250,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     shares: createDefinitionCatalog(sharesById),
     syncs: createDefinitionCatalog(syncsById),
     workflows: createDefinitionCatalog(workflowsById),
-    folders: createDefinitionFolders(options.definitionFolders),
+    folders: Object.freeze({ ...options.definitionFolders }),
   })
 }
 
