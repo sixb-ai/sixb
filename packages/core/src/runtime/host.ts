@@ -129,7 +129,7 @@ import { createSyncConnections, registerSyncConnections } from "../syncs/connect
 import type { RegisteredWebhook } from "../webhooks"
 import { WebhookRegistry, WebhookValidationError } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
-import type { SixbDefinitions } from "./definitions"
+import type { DefinitionFolderIndex, SixbDefinitions } from "./definitions"
 import { RuntimeError } from "./errors"
 import { canonicalLocale, DEFAULT_PROJECT_LOCALE, DEFAULT_PROJECT_TIME_ZONE } from "./locale"
 import {
@@ -190,6 +190,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
   shares?: readonly ShareDefinition[]
+  /** The folder each definition sits in below its directory. createSixb() discovers them. */
+  definitionFolders?: DefinitionFolderIndex
   auth?: SixbAuthConfig
 }
 
