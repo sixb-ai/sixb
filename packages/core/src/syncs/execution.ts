@@ -1,9 +1,4 @@
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
-import {
-  type ConnectorDefinition,
-  isOAuthConnectorDefinition,
-  type OAuthConnectorAdapter,
-} from "../connectors"
 import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -14,7 +9,7 @@ import type {
   SyncRunRecord,
 } from "../storage/sync-runs"
 import { createSyncAccountsRuntime, type SyncAccountsRuntime } from "./accounts"
-import { mayRunConnection, type SyncConnections } from "./connections"
+import { type SyncConnections, visibleSyncConnectionIds } from "./connections"
 import { SyncValidationError } from "./errors"
 import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResults } from "./request"
 import type { SyncDefinition } from "./types"
@@ -68,29 +63,8 @@ export function createSyncsRuntime(
     return sync && allowed(syncId) ? sync : null
   }
 
-  /**
-   * The connections whose runs of these syncs the caller sees, as `mayRunConnection` decides.
-   * Undefined when nothing is left out: no sync reads an OAuth connector, or the caller sees all.
-   */
-  const visibleConnectionIds = async (syncs: readonly (SyncDefinition | null)[]) => {
-    if (authority.type === "unrestricted" || execution.requestedBy === undefined) return undefined
-
-    const connectors = new Map<string, ConnectorDefinition<string, OAuthConnectorAdapter>>()
-    for (const sync of syncs) {
-      if (sync && isOAuthConnectorDefinition(sync.connector)) {
-        connectors.set(sync.connector.id, sync.connector)
-      }
-    }
-    if (!connections || connectors.size === 0) return undefined
-
-    const all = await Promise.all(
-      [...connectors.values()].map((connector) => connections.listAll(connector))
-    )
-    return all
-      .flat()
-      .filter((connection) => mayRunConnection(runtime, execution, connection))
-      .map(({ id }) => id)
-  }
+  const visibleConnectionIds = (syncs: readonly (SyncDefinition | null)[]) =>
+    visibleSyncConnectionIds(runtime, execution, syncs, connections)
 
   return {
     list: () =>

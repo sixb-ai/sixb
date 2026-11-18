@@ -1,12 +1,15 @@
 import { isRuntimeAllowed } from "../authorization"
-import type {
-  ConnectorConnectionMetadata,
-  ConnectorDefinition,
-  OAuthConnectorAdapter,
+import {
+  type ConnectorConnectionMetadata,
+  type ConnectorDefinition,
+  isOAuthConnectorDefinition,
+  type OAuthConnectorAdapter,
 } from "../connectors"
 import type { ConnectorService } from "../connectors/service"
 import type { ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { SyncDefinition } from "./types"
 
 /**
  * The connections a sync of an OAuth connector runs for: every connected one whose owner isn't
@@ -67,6 +70,37 @@ export function mayRunConnection(
   connection: ConnectorConnectionMetadata
 ): boolean {
   return connection.owner.type === "project" || seesConnection(runtime, execution, connection)
+}
+
+/**
+ * The connections whose runs of these syncs the caller sees, as `mayRunConnection` decides: one
+ * listing per OAuth connector they read. Undefined when nothing is left out: no sync reads an
+ * OAuth connector, or the caller sees every run.
+ */
+export async function visibleSyncConnectionIds(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  syncs: readonly (SyncDefinition | null)[],
+  connections: SyncConnections | undefined
+): Promise<readonly string[] | undefined> {
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  if (authority.type === "unrestricted" || execution.requestedBy === undefined) return undefined
+
+  const connectors = new Map<string, ConnectorDefinition<string, OAuthConnectorAdapter>>()
+  for (const sync of syncs) {
+    if (sync && isOAuthConnectorDefinition(sync.connector)) {
+      connectors.set(sync.connector.id, sync.connector)
+    }
+  }
+  if (!connections || connectors.size === 0) return undefined
+
+  const all = await Promise.all(
+    [...connectors.values()].map((connector) => connections.listAll(connector))
+  )
+  return all
+    .flat()
+    .filter((connection) => mayRunConnection(runtime, execution, connection))
+    .map(({ id }) => id)
 }
 
 /**

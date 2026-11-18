@@ -707,15 +707,17 @@ describe("sync runs people request", () => {
       if (!found) throw new Error(`Expected ${userId}'s connection.`)
       return found.id
     }
-    const as = (userId: User, group: typeof members | typeof managers) =>
+    const sixbAs = (userId: User, group: typeof members | typeof managers) =>
       createTestSixb(host, {
         authorization: resolveAuthorizationContext({
           principal: { type: "user", id: userId },
           groupIds: [group.id],
           roles: host.definitions.security.listResolvedRoles(),
         }),
-      }).syncs
-    return { inbox, as, connectionOf, storage: dependencies.storage }
+      })
+    const as = (userId: User, group: typeof members | typeof managers) =>
+      sixbAs(userId, group).syncs
+    return { host, inbox, as, sixbAs, connectionOf, storage: dependencies.storage }
   }
 
   /** One run of each kind, Ben's the latest: the project's, one that reads none, Ada's, Ben's. */
@@ -861,5 +863,42 @@ describe("sync runs people request", () => {
 
     expect(runIds(await ada.listLatest([inbox.id]))).toEqual(["ada-run"])
     expect(runIds(await manager.listLatest([inbox.id]))).toEqual(["ben-run"])
+  })
+
+  // Removal proof: return `events` from `withoutHiddenSyncRuns` unfiltered; Ada reads Ben's failure.
+  test("a member reads the run events of the project's connection and their own", async () => {
+    const { host, inbox, sixbAs, connectionOf } = await syncHost({ projectConnection: true })
+    const finished = (runId: string, owner?: User | "project") => ({
+      type: "sync.run.finished" as const,
+      payload: {
+        syncId: inbox.id,
+        runId,
+        ...(owner === undefined ? {} : { connectionId: connectionOf(owner) }),
+        status: "failed" as const,
+        error: {
+          code: "sync.execution_failed" as const,
+          message: `The provider refused ${runId}.`,
+          retryable: false,
+          at: "2026-08-19T13:00:00.000Z",
+        },
+      },
+    })
+
+    await host.events.append({
+      events: [
+        finished("project-run", "project"),
+        finished("whole-run"),
+        finished("ada-run", "user-a"),
+        finished("ben-run", "user-b"),
+      ],
+    })
+
+    const readBy = async (group: typeof members | typeof managers) => {
+      const events = await sixbAs("user-a", group).events.read({ types: ["sync.run.finished"] })
+      return events.map((event) => (event.topic === "syncs" ? event.payload.runId : event.type))
+    }
+
+    expect(await readBy(members)).toEqual(["project-run", "whole-run", "ada-run"])
+    expect(await readBy(managers)).toEqual(["project-run", "whole-run", "ada-run", "ben-run"])
   })
 })

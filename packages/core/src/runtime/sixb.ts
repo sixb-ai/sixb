@@ -38,7 +38,7 @@ import type { SandboxDefinition } from "../sandboxes/configuration"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
 import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
-import { createSyncConnections } from "../syncs/connections"
+import { createSyncConnections, visibleSyncConnectionIds } from "../syncs/connections"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createUsersRuntime, type MemberStatusRuntime, type UsersRuntime } from "../users"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
@@ -136,6 +136,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
   dependencies: SixbDependencies
 ): Omit<Sixb<TParams>, "execution"> {
   const actions = createActionsRuntime(runtime, execution)
+  const syncConnections = createSyncConnections(dependencies.connectorService)
   const workflows = createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows)
   // One session per execution: the facade's model calls and the Agent's decisions share its
   // accounting, AI limits and cancellation.
@@ -171,12 +172,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.datasetIngest
     ),
     workflows,
-    syncs: createSyncsRuntime(
-      runtime,
-      execution,
-      dependencies.definitions.syncs,
-      createSyncConnections(dependencies.connectorService)
-    ),
+    syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs, syncConnections),
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
@@ -197,7 +193,15 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.blobStorage
     ),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
-    events: createEventsRuntime(runtime),
+    events: createEventsRuntime(runtime, {
+      visibleSyncConnectionIds: (syncIds) =>
+        visibleSyncConnectionIds(
+          runtime,
+          execution,
+          syncIds.map((syncId) => dependencies.definitions.syncs.getById(syncId)),
+          syncConnections
+        ),
+    }),
     logs: createLogsRuntime(runtime, dependencies.logging),
     activity: createActivityRuntime(runtime, dependencies.activity),
     schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),

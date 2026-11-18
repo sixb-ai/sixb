@@ -48,7 +48,18 @@ export interface EventsRuntime {
   ): Promise<() => void>
 }
 
-export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime {
+export interface EventsRuntimeAccess {
+  /**
+   * The connections whose sync runs the caller sees, among those these syncs read, as
+   * `syncs.runs` decides. Undefined when nothing is left out.
+   */
+  visibleSyncConnectionIds(syncIds: readonly string[]): Promise<readonly string[] | undefined>
+}
+
+export function createEventsRuntime(
+  runtime: SixbRuntimeContext,
+  access: EventsRuntimeAccess
+): EventsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
 
   // Objects an event names that the reader cannot read: storage tells which still exist, and the
@@ -86,7 +97,8 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       case "unrestricted":
         return events
       case "principal": {
-        const shown = await visibleByGrants(authority.context, events)
+        const granted = await visibleByGrants(authority.context, events)
+        const shown = await withoutHiddenSyncRuns(granted, access)
         if (!events.some((event) => event.topic === "artifacts")) return shown
 
         // Artifact events go to whoever reads the artifact, in the log's order with the others.
@@ -217,6 +229,34 @@ async function readableArtifactEvents(
     if (event.topic === "artifacts" && (await reads(event.payload.artifactId))) shown.add(event)
   }
   return shown
+}
+
+/**
+ * The events left once the runs of connections the caller may not run are dropped, as
+ * `syncs.runs` drops them: a colleague's run, with its failure. A sync event that names no
+ * connection stays, and a batch without one costs no lookup.
+ */
+async function withoutHiddenSyncRuns(
+  events: readonly StoredDomainEvent[],
+  access: EventsRuntimeAccess
+): Promise<readonly StoredDomainEvent[]> {
+  const connectionOf = (event: StoredDomainEvent) =>
+    event.topic === "syncs" ? event.payload.connectionId : undefined
+  const syncIds = new Set(
+    events.flatMap((event) =>
+      event.topic === "syncs" && connectionOf(event) !== undefined ? [event.payload.syncId] : []
+    )
+  )
+  if (syncIds.size === 0) return events
+
+  const visible = await access.visibleSyncConnectionIds([...syncIds])
+  if (visible === undefined) return events
+
+  const shown = new Set(visible)
+  return events.filter((event) => {
+    const connectionId = connectionOf(event)
+    return connectionId === undefined || shown.has(connectionId)
+  })
 }
 
 /**
