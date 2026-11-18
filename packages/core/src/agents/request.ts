@@ -126,7 +126,7 @@ export interface RequestAgentRunInput {
   readonly principal?: Principal
 }
 
-/** What a turn's model is chosen from. */
+/** An earlier message to replace, and the turn its new text starts. */
 export interface EditAgentMessageInput {
   /** The conversation thread containing the message to edit. */
   readonly threadId: string
@@ -151,6 +151,7 @@ export interface EditAgentMessageInput {
   readonly principal?: Principal
 }
 
+/** What a turn's model is chosen from. */
 export interface AgentRequestModels {
   readonly language?: LanguageModelCatalog
   /** Picks the model of a turn that names none; absent without tiers and `models.decision`. */

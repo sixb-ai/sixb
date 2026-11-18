@@ -299,19 +299,7 @@ export interface AgentThreadForkPlan {
   readonly checkpoint?: AgentContextCheckpointRecord
 }
 
-/**
- * Decide what a fork copies. While a turn is running, the fork copies what came before its trigger
- * message, so the copy never has a gap; otherwise it copies everything. Copies keep their `seq`,
- * so the latest checkpoint whose observed head was copied projects unchanged.
- *
- * The plan mints the ids of the copies: which messages are copied is only known here, under the
- * provider's lock, so the caller cannot supply them.
- */
-/**
- * Whether a message counts in its thread's `messageCount`, which reads as what the conversation
- * shows. The message Sixb writes to resume a paused turn carries only how its calls ended, which the
- * chat shows on their cards: it is not counted.
- */
+/** `fromSeq` names a message of the thread: sequences start at 1. */
 export function assertDeleteAgentMessagesFromSeqInput(
   input: DeleteAgentMessagesFromSeqInput,
   prefix = "Sixb"
@@ -324,6 +312,7 @@ export function assertDeleteAgentMessagesFromSeqInput(
   }
 }
 
+/** `afterSeq` is the last sequence whose summaries stay: 0 keeps none. */
 export function assertDeleteAgentContextCheckpointsAfterSeqInput(
   input: DeleteAgentContextCheckpointsAfterSeqInput,
   prefix = "Sixb"
@@ -336,12 +325,25 @@ export function assertDeleteAgentContextCheckpointsAfterSeqInput(
   }
 }
 
+/**
+ * Whether a message counts in its thread's `messageCount`, which reads as what the conversation
+ * shows. The message Sixb writes to resume a paused turn carries only how its calls ended, which the
+ * chat shows on their cards: it is not counted.
+ */
 export function countsAsThreadMessage(message: Pick<AgentMessageRecord, "parts">): boolean {
   return !(
     message.parts.length > 0 && message.parts.every((part) => part.type === "approval-outcome")
   )
 }
 
+/**
+ * Decide what a fork copies. While a turn is running, the fork copies what came before its trigger
+ * message, so the copy never has a gap; otherwise it copies everything. Copies keep their `seq`,
+ * so the latest checkpoint whose observed head was copied projects unchanged.
+ *
+ * The plan mints the ids of the copies: which messages are copied is only known here, under the
+ * provider's lock, so the caller cannot supply them.
+ */
 export function planAgentThreadFork(
   input: ForkAgentThreadInput,
   source: AgentThreadForkSource,
