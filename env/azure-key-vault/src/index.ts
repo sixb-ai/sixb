@@ -639,7 +639,7 @@ function withGrant(error: unknown, vault: string, token: string): unknown {
     return error
   }
   return new Error(
-    `${error.message}\nThe server reads with its managed identity, ${objectId}. Let it read the vault; a new grant takes a few minutes to apply:\n  ${grant}`,
+    `${error.message}\nThe server reads with its managed identity, ${objectId}. Let it read the vault by running this in the vault's subscription. A new grant takes a few minutes to apply:\n  ${grant}`,
     { cause: error }
   )
 }

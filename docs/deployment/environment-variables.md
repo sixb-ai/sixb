@@ -155,7 +155,7 @@ source: azureKeyVault({
 }),
 ```
 
-`sixb deploy setup` then needs no Azure rights at all. The VM needs an identity, and someone who can grant access to the prod vault lets it read secrets there, once. The first deploy prints the exact command, with the identity's object ID:
+`sixb deploy setup` then needs no Azure rights at all. The VM needs an identity, and someone who can grant access to the prod vault lets it read secrets there, once. The first deploy prints the exact command, with the identity's object ID. Run it signed in to the vault's subscription (`az account set --subscription <id>`):
 
 ```bash
 az role assignment create --role "Key Vault Secrets User" --assignee-object-id <object ID> --assignee-principal-type ServicePrincipal --scope "$(az keyvault show --name client-a-prod --query id --output tsv)"

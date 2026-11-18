@@ -740,7 +740,7 @@ describe("azureKeyVault", () => {
       expect(error).not.toBeInstanceOf(EnvSourceUnreachableError)
       expect(error.message).toBe(
         "[AzureKeyVault] shop-prod: Denied. (HTTP 403)\n" +
-          "The server reads with its managed identity, mi-oid-1. Let it read the vault; a new grant takes a few minutes to apply:\n" +
+          "The server reads with its managed identity, mi-oid-1. Let it read the vault by running this in the vault's subscription. A new grant takes a few minutes to apply:\n" +
           '  az role assignment create --role "Key Vault Secrets User" --assignee-object-id mi-oid-1' +
           ' --assignee-principal-type ServicePrincipal --scope "$(az keyvault show --name shop-prod --query id --output tsv)"'
       )
