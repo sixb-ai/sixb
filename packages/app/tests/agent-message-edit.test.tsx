@@ -557,6 +557,23 @@ describe("user message hover actions and in-place rewind UX", () => {
     expect(view.getAllByText("Updated first question while streaming")).toHaveLength(1)
   })
 
+  test("leaves Enter to the input method while it composes, and saves nothing", async () => {
+    // Guard proof: drop the composition check in UserMessageEditor's handleKeyDown; confirming a
+    // Japanese candidate with Enter posts the edit and erases the turns after it.
+    const { view, requests } = renderChat("dana")
+    await view.findByText("Yes, add the domain to Safe Senders.")
+    fireEvent.click(view.getAllByRole("button", { name: "Edit message" })[0]!)
+
+    const editor = await view.findByRole("textbox", { name: "Edit message" })
+    typeIn(editor, "画像を表示")
+    fireEvent.keyDown(editor, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(editor, { key: "Enter", keyCode: 229 })
+    await act(async () => {})
+
+    expect(requests.filter((request) => request.method === "POST")).toEqual([])
+    expect(view.getByText("Yes, add the domain to Safe Senders.")).toBeTruthy()
+  })
+
   test("restores the inline editor draft and transcript when an edit request fails", async () => {
     const { view } = renderChat("dana", { failEditStatus: 500 })
     await view.findByText("Yes, add the domain to Safe Senders.")

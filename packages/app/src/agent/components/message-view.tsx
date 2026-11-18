@@ -348,6 +348,9 @@ function UserMessageEditor({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter and Escape confirm or dismiss the input method's candidate while one is open; Safari
+    // reports that keydown with keyCode 229 rather than `isComposing`.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === "Escape") {
       event.preventDefault()
       onCancel()
