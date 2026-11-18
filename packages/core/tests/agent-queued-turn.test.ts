@@ -552,6 +552,38 @@ describe("an edit sent while a turn runs", () => {
     expect(await inbox(host, thread.id)).toEqual([])
   })
 
+  test("moves the editor's waiting steer to the next turn: it was written for the turn taken back", async () => {
+    // Guard proof: drop both queueWaitingSteers calls (deferAgentMessageEdit, rewindAgentThread);
+    // the steer stays one, and the edited turn reads it at its first step.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const first = await turn(host, deps, sixb, thread.id, { status: "succeeded" })
+
+    const stopped = await turn(host, deps, sixb, thread.id, { status: "cancelled" }, async () => {
+      await sixb.agent.runs.send({
+        threadId: thread.id,
+        text: "Use the March file.",
+        delivery: "steer",
+        messageId: "msg_steer",
+      })
+      await sixb.agent.runs.editMessage({
+        threadId: thread.id,
+        messageId: first.triggerMessageId,
+        text: "Summarize the April file.",
+        nextMessageId: "msg_edited",
+      })
+    })
+    await afterAgentRunFinished(sessionHost(host, deps), stopped)
+
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_edited"])
+    const waiting = await host.storage.agents!.inbox.list({
+      projectId: host.id,
+      threadId: thread.id,
+    })
+    expect(waiting.map((item) => [item.messageId, item.mode])).toEqual([["msg_steer", "queue"]])
+  })
+
   test("keeps only the newest edit waiting, and drops one whose message is gone by then", async () => {
     // Guard proof: let rewindAgentThread's refusal throw out of startQueuedAgentTurnFromInbox; the
     // turn's end fails, and the edit waits for a repair pass that can never start it.

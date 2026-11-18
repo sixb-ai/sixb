@@ -600,6 +600,8 @@ async function deferAgentMessageEdit(
     executionId: request.id,
   })
 
+  // Taken from the turn before it stops: it would read them at its next step.
+  await queueWaitingSteers(agents, projectId, thread.id, edit.authorPrincipal)
   await stopTurnBefore(runtime, execution, active, options.blobStorage)
   return item
 }
@@ -672,8 +674,28 @@ async function rewindAgentThread(
     afterSeq: target.seq - 1,
   })
   await agents.messages.deleteFromSeq({ projectId, threadId: thread.id, fromSeq: target.seq })
+  await queueWaitingSteers(agents, projectId, thread.id, editor)
 
   return { restoredVersions: [...restored.values()], cancelledApprovals: approvals.cancelled }
+}
+
+/**
+ * The editor's steers still waiting were written for a turn the edit takes back: they wait for the
+ * next turn instead, where the tray shows them to keep or withdraw. Someone else's stay as they are.
+ */
+async function queueWaitingSteers(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  editor: Principal
+): Promise<void> {
+  const waiting = await agents.inbox.list({ projectId, threadId, includeClaimed: false })
+  for (const item of waiting) {
+    if (item.mode !== "steer" || item.immediate) continue
+    if (!principalsEqual(item.authorPrincipal, editor)) continue
+
+    await agents.inbox.update({ projectId, threadId, id: item.id, mode: "queue" })
+  }
 }
 
 /** The documents that restore the canvases the rewound turns wrote, read before the rewind. */
