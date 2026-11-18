@@ -1,4 +1,4 @@
-import type { DefinitionFolders, Property, SixbHostView, ValueType } from "@sixb/core"
+import type { Property, SixbHostView, ValueType } from "@sixb/core"
 import { resolvePropertyQueryCapabilities } from "@sixb/core/internal/ontology"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
@@ -71,11 +71,11 @@ function serializeObjectType(
   execution: Sixb,
   valueTypesById: ReadonlyMap<string, ValueType>,
   objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number],
-  folders: DefinitionFolders
+  folder: string | undefined
 ) {
   return {
     id: objectType.id,
-    folder: folders.of("objectTypes", objectType.id),
+    folder,
     name: objectType.name,
     description: objectType.description,
     extends: objectType.extends,
@@ -121,7 +121,12 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
         return sixb.objects
           .listTypes()
           .map((objectType) =>
-            serializeObjectType(sixb, valueTypesById, objectType, host.definitions.folders)
+            serializeObjectType(
+              sixb,
+              valueTypesById,
+              objectType,
+              host.definitions.folders.objectTypes?.get(objectType.id)
+            )
           )
       },
       {
@@ -149,7 +154,7 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
           sixb,
           host.definitions.ontology.getValueTypesById(),
           objectType,
-          host.definitions.folders
+          host.definitions.folders.objectTypes?.get(objectType.id)
         )
       },
       {

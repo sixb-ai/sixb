@@ -24,7 +24,6 @@ import {
   type FolderBrowser,
   FolderContents,
   folderBack,
-  folderMatches,
   noItems,
   useFolderBrowser,
 } from "../../folders"
@@ -749,7 +748,7 @@ export function ConsoleRulesPage() {
     return rules.filter((rule) => {
       return (
         rule.id.toLowerCase().includes(query) ||
-        folderMatches(rule.folder, query) ||
+        rule.folder?.toLowerCase().includes(query) ||
         rule.subject.objectTypeId.toLowerCase().includes(query) ||
         predicateSearchText(rule.predicate).toLowerCase().includes(query) ||
         rule.dependencies.some((dependency) =>

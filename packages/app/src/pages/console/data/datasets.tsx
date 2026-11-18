@@ -82,32 +82,7 @@ export function ConsoleDatasetsPage() {
 
   return (
     <SectionPage section="console" page="datasets" {...browser.frame}>
-      {datasetsQuery.isPending ? (
-        <Panel>
-          <PanelSkeleton
-            rows={4}
-            interactive
-            trailing={<TrailingSkeleton pill={false} chevron />}
-          />
-        </Panel>
-      ) : datasetsQuery.isError ? (
-        <Panel>
-          <PanelEmpty
-            tone="error"
-            icon={Database}
-            title={messages.datasets.title}
-            description={apiErrorMessage(datasetsQuery.error, messages.common.loadFailed)}
-          />
-        </Panel>
-      ) : datasetsQuery.data.length === 0 ? (
-        <Panel>
-          <PanelEmpty
-            icon={Database}
-            title={messages.datasets.emptyTitle}
-            description={messages.datasets.emptyDescription}
-          />
-        </Panel>
-      ) : (
+      {datasetsQuery.isSuccess && datasetsQuery.data.length > 0 ? (
         <FolderContents browser={browser} rootLabel={messages.datasets.title}>
           {(datasets) => (
             <Panel>
@@ -156,6 +131,29 @@ export function ConsoleDatasetsPage() {
             </Panel>
           )}
         </FolderContents>
+      ) : (
+        <Panel>
+          {datasetsQuery.isPending ? (
+            <PanelSkeleton
+              rows={4}
+              interactive
+              trailing={<TrailingSkeleton pill={false} chevron />}
+            />
+          ) : datasetsQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={Database}
+              title={messages.datasets.title}
+              description={apiErrorMessage(datasetsQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={Database}
+              title={messages.datasets.emptyTitle}
+              description={messages.datasets.emptyDescription}
+            />
+          )}
+        </Panel>
       )}
     </SectionPage>
   )

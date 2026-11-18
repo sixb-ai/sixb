@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { CornerDownRight, LayoutGrid, Link2, Rows3, Zap } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { FolderContents, folderMatches, useFolderBrowser } from "../../folders"
+import { FolderContents, useFolderBrowser } from "../../folders"
 import { objectTypeHref } from "../../routes"
 import { SectionPage } from "../../section-page"
 import { apiErrorMessage, PanelEmpty, SkeletonText } from "../../section-ui"
@@ -33,7 +33,9 @@ export function ConsoleObjectTypesPage() {
   const filtered = useMemo(() => {
     const sorted = [...objectTypes].sort((a, b) => displayName(a).localeCompare(displayName(b)))
     return query
-      ? sorted.filter((type) => matchesType(type, query) || folderMatches(type.folder, query))
+      ? sorted.filter(
+          (type) => matchesType(type, query) || type.folder?.toLowerCase().includes(query)
+        )
       : sorted
   }, [objectTypes, query])
   const browser = useFolderBrowser({

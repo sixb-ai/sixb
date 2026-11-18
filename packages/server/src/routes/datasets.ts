@@ -1,4 +1,4 @@
-import type { DatasetDefinition, DatasetLineage, DefinitionFolders, SixbHostView } from "@sixb/core"
+import type { DatasetDefinition, DatasetLineage, SixbHostView } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
@@ -150,11 +150,11 @@ function serializeDatasetCatalogItem(
   dataset: DatasetDefinition,
   state: DatasetCatalogState | undefined,
   references: DatasetReferences,
-  folders: DefinitionFolders
+  folder: string | undefined
 ) {
   return DatasetCatalogItemSchema.parse({
     ...dataset,
-    folder: folders.of("datasets", dataset.id),
+    folder,
     materialized: state?.materialized ?? false,
     latestVersion: state?.latestVersion ? serializeLatestVersionSummary(state.latestVersion) : null,
     syncIds: references.syncIds,
@@ -178,7 +178,7 @@ async function serializeDatasetCatalogItems(
       definition,
       stateByDatasetId.get(definition.id),
       references.get(definition.id) ?? EMPTY_DATASET_REFERENCES,
-      host.definitions.folders
+      host.definitions.folders.datasets?.get(definition.id)
     )
   )
 }
@@ -245,7 +245,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
             dataset,
             state,
             references ?? EMPTY_DATASET_REFERENCES,
-            host.definitions.folders
+            host.definitions.folders.datasets?.get(dataset.id)
           )
         } catch (error) {
           return handleRouteError(error, set)
