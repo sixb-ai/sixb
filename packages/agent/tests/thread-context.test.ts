@@ -393,6 +393,38 @@ class MovingConversation {
     return this.run(runId)
   }
 
+  /**
+   * Edit an earlier message as `runs.editMessage` does: the thread loses it and every later message
+   * and summary, and the edited text runs where the conversation is now.
+   */
+  async edit(messageNumber: number, text: string): Promise<string> {
+    const agents = this.storage.agents
+    const target = await agents.messages.getById({
+      projectId,
+      id: `${this.threadId}_message_${messageNumber}`,
+    })
+    if (!target) throw new Error(`Expected message ${messageNumber}.`)
+
+    await agents.checkpoints.deleteAfterSeq({
+      projectId,
+      threadId: this.threadId,
+      afterSeq: target.seq - 1,
+    })
+    await agents.messages.deleteFromSeq({ projectId, threadId: this.threadId, fromSeq: target.seq })
+
+    const messageId = `${target.id}_edited`
+    await agents.messages.append({
+      id: messageId,
+      projectId,
+      threadId: this.threadId,
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text }],
+      createdAt: this.now(),
+    })
+    return this.createRun(messageId, `${messageId}_run`)
+  }
+
   async fork(): Promise<MovingConversation> {
     const id = `${this.threadId}_fork`
     await this.storage.agents.threads.fork({
@@ -767,6 +799,26 @@ test("a message sent while a turn waited does not hide where that turn ran", asy
   expect(last.messages[1]?.content[0]).toEqual({ type: "text", text: "Also check the tests." })
   expect(movedMessages(last)).toEqual([])
   expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
+
+test("an edit after a move sends the messages it keeps as they were, and moves only its own", async () => {
+  // Guard proof: drop the trigger check in `latestSummarizedRun` (run-turn.ts) and the turn U3
+  // rewound reads as the one before U1: U1 gains the move note and its cached prefix is lost.
+  const conversation = await MovingConversation.start()
+  const first = await conversation.turn()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+
+  const edited = await conversation.run(await conversation.edit(2, "U2, edited"))
+  const next = await conversation.turn()
+
+  // U1 ran in the cloud and stays as it was sent; the edited U2 runs on the computer, so it alone
+  // says the conversation moved, at this turn and the next.
+  expect(edited.messages[0]).toEqual(first.messages[0])
+  expect(movedMessages(edited)).toEqual(["U2, edited"])
+  expect(movedMessages(next)).toEqual(["U2, edited"])
+  expectStartsWith(next, edited)
 })
 
 test("editing an earlier turn preserves exact prefix bytes, pinned memory, and cache affinity while dropping later turns", async () => {
