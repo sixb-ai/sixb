@@ -651,6 +651,8 @@ export function useAgentConversation({
       {
         onSuccess: () => {
           setPendingUser(null)
+          // The turn the edit stopped is still winding down: it shows as stopping.
+          if (activeRunId !== null) setStoppingRunId(activeRunId)
           if (edit?.replacesMessageId) {
             setEditingMessage((current) => ({
               messageId: edit.replacesMessageId as string,

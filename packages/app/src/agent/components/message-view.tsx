@@ -256,7 +256,7 @@ function UserMessage({
             data-user-message-actions=""
             data-visible={copied || touched || undefined}
             className={cn(
-              "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none [@media(hover:none)]:gap-3",
+              "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none [@media(hover:none)]:gap-4",
               "pointer-events-none opacity-0 transition-opacity duration-150 ease-out",
               "group-hover/user-message:pointer-events-auto group-hover/user-message:opacity-100",
               "group-focus-within/user-message:pointer-events-auto group-focus-within/user-message:opacity-100",
@@ -344,8 +344,16 @@ function UserMessageEditor({
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    el.focus()
+    el.focus({ preventScroll: true })
     el.setSelectionRange(el.value.length, el.value.length)
+
+    // Reopened after a refused save or a Stop, the editor may sit off screen: once the transcript
+    // has settled, it comes into view, clear of the header and the composer, and keeps the focus.
+    const frame = requestAnimationFrame(() => {
+      el.closest("[data-user-message-editor]")?.scrollIntoView({ block: "nearest" })
+      if (document.activeElement !== el) el.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure height whenever the text changes
@@ -389,7 +397,10 @@ function UserMessageEditor({
   }
 
   return (
-    <div data-user-message-editor="" className="flex w-full flex-col items-end gap-2">
+    <div
+      data-user-message-editor=""
+      className="flex w-full scroll-mt-20 scroll-mb-48 flex-col items-end gap-2"
+    >
       <div
         className={cn(
           "flex w-full max-w-[min(85%,42rem)] flex-col gap-2 rounded-2xl bg-background px-3.5 py-2.5",
