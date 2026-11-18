@@ -172,6 +172,19 @@ function UserMessage({
     return () => window.clearTimeout(timer)
   }, [copied])
 
+  // A touch screen has no hover: touching the message shows its time and actions, and touching
+  // anywhere else puts them away.
+  const [touched, setTouched] = useState(false)
+
+  useEffect(() => {
+    if (!touched) return
+    const away = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setTouched(false)
+    }
+    document.addEventListener("pointerdown", away)
+    return () => document.removeEventListener("pointerdown", away)
+  }, [touched])
+
   if (!text && files.length === 0 && message.context.length === 0 && !editing) return null
 
   if (editing && message.id && onSubmitEdit && onCancelEdit) {
@@ -212,6 +225,9 @@ function UserMessage({
       ref={ref}
       data-user-message=""
       className="group/user-message flex flex-col items-end gap-1.5"
+      onPointerUp={(event) => {
+        if (event.pointerType !== "mouse") setTouched(true)
+      }}
     >
       {continued ? null : <AuthorLine author={authors?.labelOf(message.author)} />}
       <ContextChips
@@ -236,14 +252,13 @@ function UserMessage({
         <TooltipProvider delayDuration={300}>
           <div
             data-user-message-actions=""
-            data-visible={copied || undefined}
+            data-visible={copied || touched || undefined}
             className={cn(
               "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none",
               "pointer-events-none opacity-0 transition-opacity duration-150 ease-out",
               "group-hover/user-message:pointer-events-auto group-hover/user-message:opacity-100",
               "group-focus-within/user-message:pointer-events-auto group-focus-within/user-message:opacity-100",
-              "data-[visible]:pointer-events-auto data-[visible]:opacity-100",
-              "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:group-active/user-message:opacity-100"
+              "data-[visible]:pointer-events-auto data-[visible]:opacity-100"
             )}
           >
             {age ? (

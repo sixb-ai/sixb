@@ -574,6 +574,22 @@ describe("user message hover actions and in-place rewind UX", () => {
     expect(view.getByText("Yes, add the domain to Safe Senders.")).toBeTruthy()
   })
 
+  test("shows a message's actions when it is touched, and puts them away on a touch elsewhere", async () => {
+    // Guard proof: drop `touched` from the bar's data-visible; on a touch screen, which has no
+    // hover, the time, Edit and Copy never show.
+    const { view } = renderChat("dana")
+    const question = await view.findByText("Can we whitelist one domain?")
+    const message = question.closest("[data-user-message]") as HTMLElement
+    const actions = () => message.querySelector("[data-user-message-actions]")
+
+    expect(actions()?.hasAttribute("data-visible")).toBe(false)
+    fireEvent.pointerUp(question, { pointerType: "touch" })
+    expect(actions()?.hasAttribute("data-visible")).toBe(true)
+
+    fireEvent.pointerDown(document.body, { pointerType: "touch" })
+    expect(actions()?.hasAttribute("data-visible")).toBe(false)
+  })
+
   test("restores the inline editor draft and transcript when an edit request fails", async () => {
     const { view } = renderChat("dana", { failEditStatus: 500 })
     await view.findByText("Yes, add the domain to Safe Senders.")
