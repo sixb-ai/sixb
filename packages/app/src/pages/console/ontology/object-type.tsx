@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Box, ChevronRight, LayoutGrid, Network } from "lucide-react"
 import { Fragment, type ReactNode, useMemo } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { folderBack } from "../../folders"
 import { graphTypeHref, objectsOfTypeHref, objectTypeHref } from "../../routes"
 import { DetailFallback, SectionPage } from "../../section-page"
 import { SkeletonText } from "../../section-ui"
@@ -103,7 +104,10 @@ export function ConsoleObjectTypePage() {
   const resolvedTab: TabValue =
     activeTab === "projections" && projectionCount === 0 ? DEFAULT_TAB : activeTab
 
-  const back = { href: "/console/object-types", label: "Object types" }
+  const back = folderBack(
+    { href: "/console/object-types", label: "Object types" },
+    objectType?.folder
+  )
   if (!objectType) {
     return (
       <DetailFallback

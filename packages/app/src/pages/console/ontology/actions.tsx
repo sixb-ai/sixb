@@ -46,6 +46,7 @@ import {
 import { type ReactElement, type SyntheticEvent, useCallback, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useSectionOpen } from "../../../sections/sections"
+import { FolderContents, noItems, useFolderBrowser } from "../../folders"
 import { actionRunHref } from "../../routes"
 import { notify, SectionPage } from "../../section-page"
 import {
@@ -94,6 +95,17 @@ export function ConsoleActionsPage() {
   const count = countQuery.data?.length
   const [searchParams, setSearchParams] = useSearchParams()
   const view = searchParams.get("view") === "runs" ? "runs" : "actions"
+  // The list below arranges the same actions by the same URL; this is its header.
+  const browser = useFolderBrowser({
+    items: countQuery.data ?? noItems,
+    title: "Actions",
+    meta: countQuery.isPending ? (
+      <CountSkeleton />
+    ) : count === undefined ? undefined : (
+      <span>{`${count} action${count === 1 ? "" : "s"}`}</span>
+    ),
+    narrowed: view === "runs" || actionFiltersActive(searchParams),
+  })
   // Each view has its own filters, so switching starts them clear.
   const showView = (next: "actions" | "runs") =>
     setSearchParams(next === "runs" ? { view: "runs" } : {})
@@ -113,19 +125,7 @@ export function ConsoleActionsPage() {
     )
 
   return (
-    <SectionPage
-      section="console"
-      page="actions"
-      width="wide"
-      title="Actions"
-      meta={
-        countQuery.isPending ? (
-          <CountSkeleton />
-        ) : count === undefined ? undefined : (
-          <span>{`${count} action${count === 1 ? "" : "s"}`}</span>
-        )
-      }
-    >
+    <SectionPage section="console" page="actions" width="wide" {...browser.frame}>
       <ToolbarTabs
         className="-mt-4"
         value={view}
@@ -188,12 +188,23 @@ function ActionDefinitionsTab() {
       if (scope === "object" && !action.objectTypeId) return false
       if (objectType !== "all" && action.objectTypeId !== objectType) return false
       if (!normalizedQuery) return true
-      return [action.id, humanizeIdentifier(action.id), action.description, action.objectTypeId]
+      return [
+        action.id,
+        humanizeIdentifier(action.id),
+        action.description,
+        action.objectTypeId,
+        action.folder,
+      ]
         .filter((value): value is string => typeof value === "string")
         .some((value) => value.toLowerCase().includes(normalizedQuery))
     })
   }, [actions, objectType, query, scope])
-  const filtersActive = query.trim().length > 0 || scope !== "all" || objectType !== "all"
+  const filtersActive = actionFiltersActive(searchParams)
+  const browser = useFolderBrowser({
+    items: filteredActions,
+    title: "Actions",
+    narrowed: filtersActive,
+  })
 
   const updateFilterParam = (key: "q" | "type", value: string) => {
     setSearchParams(
@@ -318,15 +329,19 @@ function ActionDefinitionsTab() {
               ))}
             </div>
           ) : filteredActions.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {filteredActions.map((action) => (
-                <ActionCard
-                  key={action.id}
-                  action={action}
-                  latestRun={latestRunByAction.get(action.id)}
-                />
-              ))}
-            </div>
+            <FolderContents browser={browser} rootLabel="Actions">
+              {(shown) => (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {shown.map((action) => (
+                    <ActionCard
+                      key={action.id}
+                      action={action}
+                      latestRun={latestRunByAction.get(action.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </FolderContents>
           ) : (
             <PanelEmpty
               icon={Search}
@@ -337,6 +352,18 @@ function ActionDefinitionsTab() {
         </>
       )}
     </section>
+  )
+}
+
+/** Whether the URL narrows the actions, so they show by folder no longer but all matches at once. */
+function actionFiltersActive(params: URLSearchParams): boolean {
+  const scope = params.get("scope")
+  const type = params.get("type")
+  return (
+    (params.get("q") ?? "").trim().length > 0 ||
+    scope === "global" ||
+    scope === "object" ||
+    (type !== null && type !== "all" && scope !== "global")
   )
 }
 

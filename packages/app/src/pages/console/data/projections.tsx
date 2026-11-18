@@ -8,8 +8,9 @@ import {
 } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { Activity, ArrowRight, Box, ChevronRight, Layers, Link2 } from "lucide-react"
-import { type ComponentType, type ReactNode, useState } from "react"
+import { type ComponentType, type ReactNode, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
+import { FolderContents, folderBack, noItems, useFolderBrowser } from "../../folders"
 import { DetailFallback, SectionPage } from "../../section-page"
 import {
   apiErrorMessage,
@@ -82,102 +83,127 @@ export function projectionRunsPollInterval(
 /** Console › Projections: how datasets become objects, links and telemetry. */
 export function ConsoleProjectionsPage() {
   const messages = useDataMessages()
-  const format = useFormat()
   const [tab, setTab] = useState<Tab>("all")
   const projectionsQuery = useQuery({ ...listProjectionsOptions(), retry: false })
   const data = projectionsQuery.data
-  const all: readonly Projection[] = data
-    ? [...data.objectProjections, ...data.linkProjections, ...data.telemetryProjections]
-    : []
-  const shown = tab === "all" ? all : all.filter((projection) => kindOf(projection) === tab)
-  const count = (kind: ProjectionKind) => all.filter((p) => kindOf(p) === kind).length
-  // A kind the project has none of gets no tab, so no tab is ever empty.
+  const all = useMemo<readonly Projection[]>(
+    () =>
+      data
+        ? [...data.objectProjections, ...data.linkProjections, ...data.telemetryProjections]
+        : noItems,
+    [data]
+  )
+  const browser = useFolderBrowser({
+    items: all,
+    title: messages.projections.title,
+    description: messages.projections.description,
+  })
+
+  return (
+    <SectionPage section="console" page="projections" {...browser.frame}>
+      {all.length > 0 ? (
+        <FolderContents browser={browser} rootLabel={messages.projections.title}>
+          {(projections) => (
+            <ProjectionsPanel projections={projections} tab={tab} onTabChange={setTab} />
+          )}
+        </FolderContents>
+      ) : (
+        <Panel
+          toolbar={projectionsQuery.isPending ? <SkeletonBlock className="h-7 w-56" /> : undefined}
+        >
+          {projectionsQuery.isPending ? (
+            <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
+          ) : projectionsQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={Layers}
+              title={messages.projections.title}
+              description={apiErrorMessage(projectionsQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={Layers}
+              title={messages.projections.emptyTitle}
+              description={messages.projections.emptyDescription}
+            />
+          )}
+        </Panel>
+      )}
+    </SectionPage>
+  )
+}
+
+/** Projections with a tab for each kind among them, so no tab is ever empty. */
+function ProjectionsPanel({
+  projections,
+  tab: chosen,
+  onTabChange,
+}: {
+  readonly projections: readonly Projection[]
+  readonly tab: Tab
+  readonly onTabChange: (tab: Tab) => void
+}) {
+  const messages = useDataMessages()
+  const format = useFormat()
+  const count = (kind: ProjectionKind) => projections.filter((p) => kindOf(p) === kind).length
   const tabs = (
     [
-      { id: "all", label: messages.projections.tabs.all, count: all.length },
+      { id: "all", label: messages.projections.tabs.all, count: projections.length },
       { id: "object", label: messages.projections.tabs.object, count: count("object") },
       { id: "link", label: messages.projections.tabs.link, count: count("link") },
       { id: "telemetry", label: messages.projections.tabs.telemetry, count: count("telemetry") },
     ] satisfies { id: Tab; label: string; count: number }[]
   ).filter((entry) => entry.id === "all" || entry.count > 0)
+  // A folder without the chosen kind shows all of its own.
+  const tab = tabs.some((entry) => entry.id === chosen) ? chosen : "all"
+  const shown =
+    tab === "all" ? projections : projections.filter((projection) => kindOf(projection) === tab)
 
   return (
-    <SectionPage
-      section="console"
-      page="projections"
-      title={messages.projections.title}
-      description={messages.projections.description}
-    >
-      <Panel
-        toolbar={
-          projectionsQuery.isPending ? (
-            <SkeletonBlock className="h-7 w-56" />
-          ) : all.length > 0 ? (
-            <ToolbarTabs value={tab} onChange={setTab} tabs={tabs} />
-          ) : undefined
-        }
-      >
-        {projectionsQuery.isPending ? (
-          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
-        ) : projectionsQuery.isError ? (
-          <PanelEmpty
-            tone="error"
-            icon={Layers}
-            title={messages.projections.title}
-            description={apiErrorMessage(projectionsQuery.error, messages.common.loadFailed)}
-          />
-        ) : shown.length === 0 ? (
-          <PanelEmpty
-            icon={Layers}
-            title={messages.projections.emptyTitle}
-            description={messages.projections.emptyDescription}
-          />
-        ) : (
-          shown.map((projection) => {
-            const kind = kindOf(projection)
-            return (
-              <PanelRow
-                key={projection.id}
-                href={`/console/projections/${encodeURIComponent(projection.id)}`}
-                leading={<IconTile icon={kindIcons[kind]} />}
-                title={<span className="truncate">{humanize(projection.id)}</span>}
-                meta={
+    <Panel toolbar={<ToolbarTabs value={tab} onChange={onTabChange} tabs={tabs} />}>
+      {shown.map((projection) => {
+        const kind = kindOf(projection)
+        return (
+          <PanelRow
+            key={projection.id}
+            href={`/console/projections/${encodeURIComponent(projection.id)}`}
+            leading={<IconTile icon={kindIcons[kind]} />}
+            title={<span className="truncate">{humanize(projection.id)}</span>}
+            meta={
+              <>
+                <span>{messages.projections.kinds[kind]}</span>
+                <MetaDot />
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <span className="truncate font-mono text-xs">{projection.datasetId}</span>
+                  <ArrowRight className="size-3 shrink-0" />
+                  <span className="truncate">{targetOf(projection)}</span>
+                </span>
+                {projection.latestRun ? (
                   <>
-                    <span>{messages.projections.kinds[kind]}</span>
                     <MetaDot />
-                    <span className="inline-flex min-w-0 items-center gap-1">
-                      <span className="truncate font-mono text-xs">{projection.datasetId}</span>
-                      <ArrowRight className="size-3 shrink-0" />
-                      <span className="truncate">{targetOf(projection)}</span>
+                    <span>
+                      {format.relative(
+                        projection.latestRun.startedAt ?? projection.latestRun.queuedAt
+                      )}
                     </span>
-                    {projection.latestRun ? (
-                      <>
-                        <MetaDot />
-                        <span>
-                          {format.relative(
-                            projection.latestRun.startedAt ?? projection.latestRun.queuedAt
-                          )}
-                        </span>
-                      </>
-                    ) : null}
                   </>
-                }
-                trailing={
-                  <>
-                    {projection.latestRun ? (
-                      <RunStatusPill status={projection.latestRun.status} />
-                    ) : (
-                      <Pill tone="muted">{messages.common.neverRun}</Pill>
-                    )}
-                    <ChevronRight className="size-4 text-muted-foreground/60" />
-                  </>
-                }
-              />
-            )
-          })
-        )}
-      </Panel>
-    </SectionPage>
+                ) : null}
+              </>
+            }
+            trailing={
+              <>
+                {projection.latestRun ? (
+                  <RunStatusPill status={projection.latestRun.status} />
+                ) : (
+                  <Pill tone="muted">{messages.common.neverRun}</Pill>
+                )}
+                <ChevronRight className="size-4 text-muted-foreground/60" />
+              </>
+            }
+          />
+        )
+      })}
+    </Panel>
   )
 }
 
@@ -209,7 +235,10 @@ export function ConsoleProjectionPage() {
   })
 
   const projection = projectionQuery.data
-  const back = { href: "/console/projections", label: messages.projections.title }
+  const back = folderBack(
+    { href: "/console/projections", label: messages.projections.title },
+    projection?.folder
+  )
 
   if (!projection) {
     return (

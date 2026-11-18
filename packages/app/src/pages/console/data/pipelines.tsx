@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
+import { FolderContents, folderBack, noItems, useFolderBrowser } from "../../folders"
 import {
   DetailFallback,
   notify,
@@ -66,80 +67,87 @@ export function ConsolePipelinesPage() {
   const format = useFormat()
   usePipelineLiveUpdates()
   const pipelinesQuery = useQuery({ ...listPipelinesOptions(), retry: false })
-  const pipelines = pipelinesQuery.data ?? []
+  const browser = useFolderBrowser({
+    items: pipelinesQuery.data ?? noItems,
+    title: messages.pipelines.title,
+    description: messages.pipelines.description,
+  })
 
   return (
-    <SectionPage
-      section="console"
-      page="pipelines"
-      title={messages.pipelines.title}
-      description={messages.pipelines.description}
-    >
-      <Panel>
-        {pipelinesQuery.isPending ? (
-          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
-        ) : pipelinesQuery.isError ? (
-          <PanelEmpty
-            tone="error"
-            icon={Workflow}
-            title={messages.pipelines.title}
-            description={apiErrorMessage(pipelinesQuery.error, messages.common.loadFailed)}
-          />
-        ) : pipelines.length === 0 ? (
-          <PanelEmpty
-            icon={Workflow}
-            title={messages.pipelines.emptyTitle}
-            description={messages.pipelines.emptyDescription}
-          />
-        ) : (
-          pipelines.map((pipeline) => {
-            const steps = pipeline.graph.nodes
-            const output = steps.at(-1)?.step.output.id
-            return (
-              <PanelRow
-                key={pipeline.id}
-                href={`/console/pipelines/${encodeURIComponent(pipeline.id)}`}
-                leading={<IconTile icon={Workflow} />}
-                title={<span className="truncate">{humanize(pipeline.id)}</span>}
-                meta={
-                  <>
-                    <span>{messages.pipelines.stepCount(steps.length)}</span>
-                    {output ? (
+    <SectionPage section="console" page="pipelines" {...browser.frame}>
+      {pipelinesQuery.isSuccess && pipelinesQuery.data.length > 0 ? (
+        <FolderContents browser={browser} rootLabel={messages.pipelines.title}>
+          {(pipelines) => (
+            <Panel>
+              {pipelines.map((pipeline) => {
+                const steps = pipeline.graph.nodes
+                const output = steps.at(-1)?.step.output.id
+                return (
+                  <PanelRow
+                    key={pipeline.id}
+                    href={`/console/pipelines/${encodeURIComponent(pipeline.id)}`}
+                    leading={<IconTile icon={Workflow} />}
+                    title={<span className="truncate">{humanize(pipeline.id)}</span>}
+                    meta={
                       <>
-                        <MetaDot />
-                        <span className="truncate">{messages.common.writes(output)}</span>
+                        <span>{messages.pipelines.stepCount(steps.length)}</span>
+                        {output ? (
+                          <>
+                            <MetaDot />
+                            <span className="truncate">{messages.common.writes(output)}</span>
+                          </>
+                        ) : null}
+                        {pipeline.triggers.map((trigger) => (
+                          <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
+                        ))}
+                        {pipeline.latestRun ? (
+                          <>
+                            <MetaDot />
+                            <span>
+                              {format.relative(
+                                pipeline.latestRun.startedAt ?? pipeline.latestRun.queuedAt
+                              )}
+                            </span>
+                          </>
+                        ) : null}
                       </>
-                    ) : null}
-                    {pipeline.triggers.map((trigger) => (
-                      <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
-                    ))}
-                    {pipeline.latestRun ? (
+                    }
+                    trailing={
                       <>
-                        <MetaDot />
-                        <span>
-                          {format.relative(
-                            pipeline.latestRun.startedAt ?? pipeline.latestRun.queuedAt
-                          )}
-                        </span>
+                        {pipeline.latestRun ? (
+                          <RunStatusPill status={pipeline.latestRun.status} />
+                        ) : (
+                          <Pill tone="muted">{messages.common.neverRun}</Pill>
+                        )}
+                        <ChevronRight className="size-4 text-muted-foreground/60" />
                       </>
-                    ) : null}
-                  </>
-                }
-                trailing={
-                  <>
-                    {pipeline.latestRun ? (
-                      <RunStatusPill status={pipeline.latestRun.status} />
-                    ) : (
-                      <Pill tone="muted">{messages.common.neverRun}</Pill>
-                    )}
-                    <ChevronRight className="size-4 text-muted-foreground/60" />
-                  </>
-                }
-              />
-            )
-          })
-        )}
-      </Panel>
+                    }
+                  />
+                )
+              })}
+            </Panel>
+          )}
+        </FolderContents>
+      ) : (
+        <Panel>
+          {pipelinesQuery.isPending ? (
+            <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
+          ) : pipelinesQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={Workflow}
+              title={messages.pipelines.title}
+              description={apiErrorMessage(pipelinesQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={Workflow}
+              title={messages.pipelines.emptyTitle}
+              description={messages.pipelines.emptyDescription}
+            />
+          )}
+        </Panel>
+      )}
     </SectionPage>
   )
 }
@@ -212,7 +220,10 @@ function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
     onError: (error) => notify.error(apiErrorMessage(error, messages.pipelines.requestFailed)),
   })
 
-  const back = { href: "/console/pipelines", label: messages.pipelines.title }
+  const back = folderBack(
+    { href: "/console/pipelines", label: messages.pipelines.title },
+    pipelineQuery.data?.folder
+  )
 
   if (!pipeline) {
     return (
