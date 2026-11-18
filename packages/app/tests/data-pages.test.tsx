@@ -418,7 +418,8 @@ describe("a connector's accounts", () => {
 
     expect(rowLabels(view)).toEqual(["linus@example.com", "grace@example.com", "ada@example.com"])
     const panel = within(view.getByText("Accounts").closest("section")!)
-    expect(panel.getByText("Needs reconnecting")).toBeDefined()
+    // Once as the row's pill, once on its own line on a narrow screen.
+    expect(panel.getAllByText("Needs reconnecting")).toHaveLength(2)
     expect(panel.getAllByText("Not synced yet")).toHaveLength(2)
     expect(panel.getByText(/^Calendar /)).toBeDefined()
   })

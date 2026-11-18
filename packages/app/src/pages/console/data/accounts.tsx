@@ -27,6 +27,7 @@ import {
   RunStatusPill,
   useFormat,
   useNumbers,
+  useRunStatusLabels,
 } from "../../section-ui"
 import { PersonAvatar } from "../../settings/controls"
 import { TrailingSkeleton } from "../skeletons"
@@ -310,9 +311,11 @@ function AccountRow({
   return (
     <PanelRow
       leading={isProject ? <IconTile icon={Building2} /> : <PersonAvatar email={label} />}
-      title={<span className="truncate">{label}</span>}
+      // A narrow screen wraps the address rather than cut it: it says whose account this is.
+      title={<span className="min-w-0 wrap-anywhere sm:truncate">{label}</span>}
       meta={
         <>
+          <NarrowAccountState state={state} />
           {isProject ? (
             <>
               <span>{messages.syncs.project}</span>
@@ -369,20 +372,51 @@ function AccountRow({
       trailing={
         <>
           <AccountSyncButton connectorId={connectorId} account={account} syncs={syncs} />
-          {state === "never" ? (
-            <Pill tone="muted">{messages.syncs.notSyncedYet}</Pill>
-          ) : state === "reconnect" ? (
-            <Pill tone="warn">{messages.syncs.needsReconnecting}</Pill>
-          ) : (
-            <RunStatusPill
-              status={state === "failed" ? "failed" : state === "running" ? "running" : "succeeded"}
-            />
-          )}
+          <span className="hidden sm:inline-flex">
+            {state === "never" ? (
+              <Pill tone="muted">{messages.syncs.notSyncedYet}</Pill>
+            ) : state === "reconnect" ? (
+              <Pill tone="warn">{messages.syncs.needsReconnecting}</Pill>
+            ) : (
+              <RunStatusPill
+                status={
+                  state === "failed" ? "failed" : state === "running" ? "running" : "succeeded"
+                }
+              />
+            )}
+          </span>
         </>
       }
     >
       {failure?.error ? <FailureSummary failure={failure.error} compact /> : null}
     </PanelRow>
+  )
+}
+
+const narrowStates = {
+  reconnect: { dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
+  failed: { dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
+  running: { dot: "bg-sky-500", text: "text-foreground/75" },
+} as const
+
+/**
+ * On a narrow screen, an account's state gets its own line under the address instead of taking
+ * the row's right side, which leaves the address room. A synced account says nothing, and one
+ * never synced says so already.
+ */
+function NarrowAccountState({ state }: { readonly state: AccountState }) {
+  const messages = useDataMessages().syncs
+  const statusLabels = useRunStatusLabels()
+  if (state !== "reconnect" && state !== "failed" && state !== "running") return null
+
+  const tone = narrowStates[state]
+  const label = state === "reconnect" ? messages.needsReconnecting : statusLabels[state]
+
+  return (
+    <span className={cn("flex w-full items-center gap-1.5 font-medium sm:hidden", tone.text)}>
+      <span aria-hidden className={cn("size-1.5 rounded-full", tone.dot)} />
+      {label}
+    </span>
   )
 }
 
