@@ -1,6 +1,7 @@
 import type {
   AgentInboxReadMessage,
   AgentRunFailure,
+  AgentRunStepsEvent,
   AgentRunStreamEvent,
   ModelUiChunk,
 } from "@sixb/client"
@@ -118,6 +119,8 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
         ...state,
         inboxReads: [...state.inboxReads, { at: state.parts.length, messages: event.messages }],
       }
+    case "agent.ui.steps":
+      return applySteps(state, event)
     case "agent.message.finalized":
       return { ...state, finalizedMessageId: event.messageId }
     case "agent.run.finished":
@@ -133,6 +136,41 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
     default:
       return state
   }
+}
+
+/**
+ * The turn's finished steps, sent first to a reader who opened it late: they replace whatever it
+ * rebuilt so far, what it read included. What streams next belongs to a later step, even when that
+ * step's start was dropped from the stream, so it opens a step of its own.
+ */
+function applySteps(state: LiveRunState, steps: AgentRunStepsEvent): LiveRunState {
+  let next: LiveRunState = {
+    ...state,
+    runId: steps.runId,
+    active: true,
+    parts: [],
+    partKeys: [],
+    inboxReads: [],
+    stepIndex: 0,
+    stepStart: 0,
+  }
+
+  // Each read sits where the turn read it: after the parts its first `at` chunks built.
+  const addReads = (matches: (at: number) => boolean) => {
+    for (const read of steps.reads ?? []) {
+      if (!matches(read.at)) continue
+      const inboxRead = { at: next.parts.length, messages: read.messages }
+      next = { ...next, inboxReads: [...next.inboxReads, inboxRead] }
+    }
+  }
+
+  steps.chunks.forEach((chunk, index) => {
+    addReads((at) => at === index)
+    next = applyChunk(next, chunk)
+  })
+  addReads((at) => at >= steps.chunks.length)
+
+  return { ...next, stepIndex: next.stepIndex + 1, stepStart: next.parts.length }
 }
 
 type TextChunk = Extract<ModelUiChunk, { readonly type: "text-start" | "text-delta" | "text-end" }>

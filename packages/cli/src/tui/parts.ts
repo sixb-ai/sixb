@@ -169,6 +169,13 @@ export function reduceLive(state: LiveRun, event: AgentRunStreamEvent): LiveRun 
       return { ...state, compacting: false, contextFull: false }
     case "agent.ui.chunk":
       return reduceChunk(state, event.chunk)
+    case "agent.ui.steps": {
+      // The turn's finished steps, sent first to a reader who opened it late, replace what it
+      // rebuilt so far. What streams next opens a step of its own, even when its start was dropped.
+      let next: LiveRun = { ...state, working: true, parts: [], keys: [], step: 0, stepStart: 0 }
+      for (const chunk of event.chunks) next = reduceChunk(next, chunk)
+      return { ...next, step: next.step + 1, stepStart: next.parts.length }
+    }
     case "agent.message.finalized":
       return { ...state, finalized: true }
     case "agent.run.finished":

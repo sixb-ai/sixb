@@ -3,6 +3,7 @@ import type {
   AgentApprovalActivityEvent,
   AgentComputerActivityEvent,
   AgentRunActivityEvent,
+  AgentRunStepsEvent,
   AgentRunStreamEvent,
   AgentThreadMovedEvent,
 } from "@sixb/core/agents/streams"
@@ -26,6 +27,8 @@ export type {
   AgentInboxReadMessage,
   AgentRunActivityEvent,
   AgentRunFailure,
+  AgentRunStepsEvent,
+  AgentRunStepsRead,
   AgentRunStreamEvent,
   AgentThreadMovedEvent,
   ModelUiChunk,
@@ -81,6 +84,8 @@ export type AgentRunStreamServerMessage =
   | { readonly type: "activity"; readonly event: AgentActivityEvent }
   | { readonly type: "error"; readonly message: string }
   | { readonly type: "run.snapshot"; readonly run: AgentRunSnapshot }
+  /** The turn's finished steps, sent before its live records to a reader who opens it late. */
+  | { readonly type: "run.steps"; readonly event: AgentRunStepsEvent }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
 
 export function createSixbAgentsWebSocketUrl(baseUrl?: string): string {
@@ -96,6 +101,10 @@ export interface AgentRunSocketOptions {
   readonly baseUrl?: string
   /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
   readonly client?: Client
+  /**
+   * Each event in order, with the cursor it was read at. The finished steps a late reader receives
+   * first come with the cursor before them: they are not a record of the stream.
+   */
   readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
   readonly onError?: (message: string) => void
@@ -154,6 +163,11 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
       if (message.type === "record") {
         latestCursor = message.record.cursor
         options.onEvent(message.record.payload, message.record.cursor)
+        return
+      }
+
+      if (message.type === "run.steps") {
+        options.onEvent(message.event, latestCursor ?? "")
         return
       }
 
@@ -225,6 +239,14 @@ export function parseAgentRunStreamServerMessage(
 
   if (parsed.type === "run.snapshot" && isAgentRunSnapshot(parsed.run)) {
     return { type: "run.snapshot", run: parsed.run }
+  }
+
+  if (
+    parsed.type === "run.steps" &&
+    isAgentRunStreamEvent(parsed.event) &&
+    parsed.event.type === "agent.ui.steps"
+  ) {
+    return { type: "run.steps", event: parsed.event }
   }
 
   if (parsed.type === "error") {

@@ -17,6 +17,7 @@ import {
 } from "@sixb/core/agents/streams"
 import {
   announceAgentApprovals,
+  createBrokerStreamSink,
   createSubagentRunId,
   createSubagentThreadId,
 } from "@sixb/core/internal/agents"
@@ -480,6 +481,96 @@ describe("a sub-agent's live stream", () => {
   })
 })
 
+describe("a turn opened late", () => {
+  test("reads the finished steps first, then the live records they do not cover", async () => {
+    await withAgentWsServer(async ({ baseUrl, sixb }) => {
+      const lateRunId = "agt_run_ws_late"
+      await advanceDurableRun(sixb, { type: "agent.run.started", runId: lateRunId })
+      const run = await agentStorage(sixb).runs.getById({ projectId, id: lateRunId })
+      if (!run) throw new Error("expected the run")
+      const sink = createBrokerStreamSink({ broker: sixb.broker, projectId, deltaWindowMs: 0 })
+
+      // Three steps of 2,500 deltas: more than the live stream keeps.
+      const expected: string[] = []
+      let chunkIndex = 0
+      for (let step = 0; step < 3; step += 1) {
+        await sink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk: { type: "start-step" } })
+        for (let index = 0; index < 2_500; index += 1) {
+          const delta = `${step}.${index} `
+          expected.push(delta)
+          await sink.publishUiChunk({
+            run,
+            chunkIndex: chunkIndex++,
+            chunk: { type: "text-delta", id: "text", delta },
+          })
+        }
+      }
+
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "agents" })
+        // The broker hands a long backlog over in pages: read until the newest chunk arrives.
+        const lastChunkIndex = chunkIndex - 1
+        const messages = collectUntil(
+          ws,
+          (message) =>
+            message.type === "record" &&
+            (message.record as { payload: { chunkIndex?: number } }).payload.chunkIndex ===
+              lastChunkIndex
+        )
+        ws.send(JSON.stringify({ type: "subscribe", runId: lateRunId }))
+        const [subscribed, steps, ...rest] = await messages
+
+        expect(subscribed).toEqual({ type: "subscribed", runId: lateRunId, afterCursor: null })
+        expect(steps).toMatchObject({
+          type: "run.steps",
+          event: { type: "agent.ui.steps", runId: lateRunId, attempt: 1, throughChunkIndex: 5_001 },
+        })
+        const records = rest.filter((message) => message.type === "record")
+        const live = records.map(
+          (message) => (message.record as { payload: AgentRunStreamEvent }).payload
+        )
+        // Only the current step streams: none of the chunks the steps hold is sent again.
+        expect(live).toHaveLength(2_501)
+        expect(
+          live.every((event) => event.type === "agent.ui.chunk" && event.chunkIndex > 5_001)
+        ).toBe(true)
+
+        const chunks = [
+          ...((steps?.event as { chunks: { type: string; delta?: string }[] }).chunks ?? []),
+          ...live.flatMap((event) => (event.type === "agent.ui.chunk" ? [event.chunk] : [])),
+        ]
+        const text = chunks
+          .map((chunk) => (chunk.type === "text-delta" ? chunk.delta : ""))
+          .join("")
+        expect(text).toBe(expected.join(""))
+
+        // A reader back at its place in the stream resumes from it: it has the steps already.
+        const lastCursor = (records.at(-1)?.record as { cursor: string }).cursor
+        const resumed = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+        try {
+          expect(await nextWsMessage(resumed)).toEqual({ type: "connected", channel: "agents" })
+          const resumedMessages = collectUntil(
+            resumed,
+            (message) => message.type === "run.snapshot"
+          )
+          resumed.send(
+            JSON.stringify({ type: "subscribe", runId: lateRunId, afterCursor: lastCursor })
+          )
+          expect((await resumedMessages).map((message) => message.type)).toEqual([
+            "subscribed",
+            "run.snapshot",
+          ])
+        } finally {
+          resumed.close()
+        }
+      } finally {
+        ws.close()
+      }
+    })
+  })
+})
+
 describe("canAccessAgentThreadActivity", () => {
   test("filters project activity by durable run, thread, project, and owner", async () => {
     const sixb = createSixbInstance({
@@ -791,6 +882,30 @@ function agentStreamPayload(
     case "agent.run.finished":
       return { ...base, type: "agent.run.finished", status: "succeeded", finishReason: "stop" }
   }
+}
+
+/** Every message until one matches, that one included. */
+function collectUntil(
+  ws: WebSocket,
+  done: (message: Record<string, unknown>) => boolean,
+  timeoutMs = 10_000
+): Promise<Record<string, unknown>[]> {
+  return new Promise((resolvePromise, reject) => {
+    const messages: Record<string, unknown>[] = []
+    const timeout = setTimeout(() => {
+      ws.removeEventListener("message", onMessage)
+      reject(new Error(`Timed out after ${messages.length} websocket messages`))
+    }, timeoutMs)
+    const onMessage = (event: MessageEvent) => {
+      const message = JSON.parse(String(event.data)) as Record<string, unknown>
+      messages.push(message)
+      if (!done(message)) return
+      clearTimeout(timeout)
+      ws.removeEventListener("message", onMessage)
+      resolvePromise(messages)
+    }
+    ws.addEventListener("message", onMessage)
+  })
 }
 
 /**

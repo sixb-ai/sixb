@@ -77,6 +77,11 @@ Foundry image, speech, transcription, rerank and decision models.
   unknown cost.
 - The chat folds its composer on narrow screens, keeps unsent drafts and open artifacts per
   conversation, follows live work steps, and renders Markdown without re-rendering messages.
+- A running Agent turn opened late, or after the stream dropped its place, shows everything it did,
+  its sub-agents and the messages it read included, instead of its last few seconds. The worker logs each finished step to
+  the run's `agents.runs.<runId>.steps` stream, and `/ws/agents` sends a `run.steps` frame before
+  the live records. Deltas streamed within 50 ms go out as one record: a DeepSeek turn wrote one
+  record per 4 characters, about 90,000 for 19 minutes.
 
 ### Upgrade notes
 
@@ -86,6 +91,9 @@ Foundry image, speech, transcription, rerank and decision models.
   project with a sandbox provider. `sixb worker-group` with no types includes it. Until then,
   canvas boards get no new pictures and PDFs wait.
 - `Queues` gains a required `renders` lane, so a third-party queues provider must implement it.
+- `AgentRunStreamEvent` has a new `agent.ui.steps` member, which `useAgentRunStream` and
+  `createAgentRunSocket` deliver to `onEvent`. A reducer over these events should replace its
+  parts with the event's chunks (see the app's `liveRunReducer`).
 - `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
   omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
   `"ads"` too.

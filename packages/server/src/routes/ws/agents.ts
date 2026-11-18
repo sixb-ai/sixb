@@ -1,4 +1,5 @@
 import { principalsEqual } from "@sixb/core"
+import type { AgentRunStepsEvent } from "@sixb/core/agents/streams"
 import {
   AGENT_ACTIVITY_STREAM_ID,
   type AgentActivityEvent,
@@ -9,6 +10,8 @@ import {
   agentActivityStreamDefinition,
   agentRunStreamDefinition,
   agentRunStreamId,
+  coveredBySteps,
+  readAgentRunSteps,
 } from "@sixb/core/internal/agents/streams"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Principal } from "@sixb/core/storage"
@@ -193,12 +196,21 @@ async function subscribeAgentStream(
 
   const buffered: BrokerRecord[] = []
   let live = false
+  // The finished steps sent first, whose live chunks this reader then skips.
+  let steps: AgentRunStepsEvent | null = null
+  const send = (records: readonly BrokerRecord[]): void => {
+    const current = steps
+    sendRecords(
+      ws,
+      current ? records.filter((record) => !coveredBySteps(current, record.payload)) : records
+    )
+  }
   const receive = (records: readonly BrokerRecord[]): void => {
     if (!live) {
       buffered.push(...records)
       return
     }
-    sendRecords(ws, records)
+    send(records)
   }
 
   // Set when the requested cursor had already been trimmed, so the client learns its resume point
@@ -251,13 +263,41 @@ async function subscribeAgentStream(
     runId: message.runId,
     afterCursor: resumedFromEarliest ? null : (message.afterCursor ?? null),
   })
-  sendRecords(ws, buffered.splice(0))
+  // A reader without its place in the stream, opening the turn or back after its place was
+  // dropped, reads the finished steps first: the live stream keeps only its newest records, and a
+  // long turn outgrows it.
+  if (message.afterCursor === undefined || resumedFromEarliest) {
+    steps = await readRunSteps(server, sixb, message.runId)
+    if (steps) safeSend(ws, { type: "run.steps", event: steps })
+  }
+  send(buffered.splice(0))
   if (!(await sendRunSnapshot(sixb, ws, message.runId))) {
     stopSubscription(state)
     return
   }
   live = true
-  sendRecords(ws, buffered.splice(0))
+  send(buffered.splice(0))
+}
+
+/** The run's finished steps for its current attempt, or null: without them it streams as before. */
+async function readRunSteps(
+  server: SixbServer,
+  sixb: Sixb,
+  runId: string
+): Promise<AgentRunStepsEvent | null> {
+  try {
+    const run = await sixb.agent.runs.getById(runId)
+    if (!run || (run.status !== "queued" && run.status !== "running")) return null
+    const host = server.getHost()
+    return await readAgentRunSteps(host.broker, {
+      projectId: host.id,
+      runId,
+      attempt: run.attempt,
+    })
+  } catch (error) {
+    console.error(`[SixbServer] Agent run '${runId}' finished steps could not be read:`, error)
+    return null
+  }
 }
 
 async function subscribeAgentActivity(

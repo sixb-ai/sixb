@@ -344,6 +344,7 @@ export type {
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
+  AgentRunStepsEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
 } from "./streams/protocol"

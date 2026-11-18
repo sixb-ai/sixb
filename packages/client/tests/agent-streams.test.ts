@@ -191,6 +191,52 @@ describe("createAgentRunSocket", () => {
     socket.close()
   })
 
+  test("delivers a late reader's finished steps as an event, keeping its place in the stream", () => {
+    jest.useFakeTimers()
+    const received: Array<{ type: string; cursor: string }> = []
+    const socket = createAgentRunSocket({
+      runId: "run-1",
+      reconnect: true,
+      reconnectDelayMs: 1,
+      onEvent: (event, cursor) => received.push({ type: event.type, cursor }),
+    })
+
+    const ws1 = FakeWebSocket.instances[0]
+    if (!ws1) throw new Error("expected a websocket")
+    ws1.onopen?.()
+    ws1.onmessage?.({
+      data: JSON.stringify({
+        type: "run.steps",
+        event: {
+          schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+          type: "agent.ui.steps",
+          projectId: "proj",
+          runId: "run-1",
+          threadId: "thr-1",
+          attempt: 1,
+          occurredAt: "2026-01-01T00:00:00.000Z",
+          throughChunkIndex: 41,
+          chunks: [{ type: "start-step" }, { type: "text-delta", id: "text", delta: "Hi" }],
+        },
+      }),
+    })
+    ws1.onmessage?.({ data: uiChunkFrame("c42", { type: "start-step" }) })
+    expect(received).toEqual([
+      { type: "agent.ui.steps", cursor: "" },
+      { type: "agent.ui.chunk", cursor: "c42" },
+    ])
+
+    // The steps are no record: a reconnect resumes after the last live record.
+    ws1.onclose?.()
+    jest.advanceTimersByTime(1)
+    const ws2 = FakeWebSocket.instances[1]
+    if (!ws2) throw new Error("expected a reconnect")
+    ws2.onopen?.()
+    expect(JSON.parse(ws2.sent[0]).afterCursor).toBe("c42")
+
+    socket.close()
+  })
+
   test("surfaces server error frames through onError", () => {
     const errors: string[] = []
     const socket = createAgentRunSocket({
