@@ -5,7 +5,7 @@ import { objects } from "@sixb/client/query"
 import { Check, Link2, Shapes, X } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ServiceContract } from "../../../ontology/service-contract"
+import { ServiceContract } from "../../../ontology/customers/service-contract"
 import { PillButton } from "../../_components/next-step"
 import {
   Breadcrumb,

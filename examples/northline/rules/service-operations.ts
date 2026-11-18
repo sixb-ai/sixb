@@ -1,7 +1,7 @@
 import { defineRule } from "@sixb/core"
-import { BuildingAlarm } from "../ontology/building-alarm"
+import { BuildingAlarm } from "../ontology/equipment/building-alarm"
+import { WorkOrder } from "../ontology/field-service/work-order"
 import { ServiceCase } from "../ontology/service-case"
-import { WorkOrder } from "../ontology/work-order"
 
 export const alarmRequiresTriage = defineRule("alarm.requires-triage")
   .on(BuildingAlarm)

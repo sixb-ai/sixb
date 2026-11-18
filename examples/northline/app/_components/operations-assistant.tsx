@@ -1,10 +1,10 @@
 import { AgentSurface, agentContext } from "@sixb/app"
 import { useEffect, useRef } from "react"
 import { useLocation, useMatch, useNavigate } from "react-router-dom"
-import { CustomerAccount } from "../../ontology/customer-account"
-import { Equipment } from "../../ontology/equipment"
+import { CustomerAccount } from "../../ontology/customers/customer-account"
+import { Equipment } from "../../ontology/equipment/equipment"
+import { Technician } from "../../ontology/field-service/technician"
 import { ServiceCase } from "../../ontology/service-case"
-import { Technician } from "../../ontology/technician"
 import { placeFor } from "../_lib/navigation"
 import { NorthlineMark } from "./northline-mark"
 

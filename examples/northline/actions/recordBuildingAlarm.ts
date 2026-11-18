@@ -3,12 +3,12 @@ import { stringEnum } from "@sixb/core/ontology"
 import { businessSystemConnector } from "../connectors/business-system"
 import { serviceCaseIdentity } from "../lib/case-policy"
 import { findRow } from "../lib/sources/client-utils"
-import { BuildingAlarm } from "../ontology/building-alarm"
-import { CustomerAccount } from "../ontology/customer-account"
-import { Equipment } from "../ontology/equipment"
-import { Facility } from "../ontology/facility"
+import { CustomerAccount } from "../ontology/customers/customer-account"
+import { Facility } from "../ontology/customers/facility"
+import { ServiceContract } from "../ontology/customers/service-contract"
+import { BuildingAlarm } from "../ontology/equipment/building-alarm"
+import { Equipment } from "../ontology/equipment/equipment"
 import { ServiceCase } from "../ontology/service-case"
-import { ServiceContract } from "../ontology/service-contract"
 
 export const recordBuildingAlarm = defineAction("record-building-alarm", {
   description: "Record a controls alarm and ensure it has one Northline service case.",

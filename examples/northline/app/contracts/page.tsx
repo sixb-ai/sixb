@@ -4,7 +4,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { ServiceContract } from "../../ontology/service-contract"
+import { ServiceContract } from "../../ontology/customers/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
   calendarDate,

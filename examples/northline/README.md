@@ -209,8 +209,8 @@ and `sync-business-quotes` stores the log cursor as its checkpoint. Initial quot
 decisions are complete-row upserts; the sync also handles exact-key deletes.
 
 Follow the implementation through
-[`datasets/business-system.ts`](./datasets/business-system.ts),
-[`syncs/business-system.ts`](./syncs/business-system.ts), and
+[`datasets/business-system/quotes.ts`](./datasets/business-system/quotes.ts),
+[`syncs/business-system/quotes.ts`](./syncs/business-system/quotes.ts), and
 [`lib/sources/business-system-client.ts`](./lib/sources/business-system-client.ts).
 
 With Northline running, use the demo commands to see an update flow through the same path:
@@ -226,20 +226,27 @@ and reevaluates the existing Quote projection against the complete dataset. Run 
 without another source change and the successful no-op creates no dataset version. The app's
 **Console › Datasets** page shows the dataset's primary key and its `merge` versions.
 
+## How the project is organized
+
+The definitions follow [Organizing your project](../../docs/fundamentals/organizing-your-project.md):
+datasets and syncs sit in a folder per source system, with derived data grouped by domain;
+pipelines, the ontology and projections are grouped by business area; actions are grouped by the
+object they act on. The Console browses each list by the same folders.
+
 ## Read the code in this order
 
 Follow one connected path rather than browsing by feature:
 
 1. [`sixb.config.ts`](./sixb.config.ts)
-2. [`ontology/equipment.ts`](./ontology/equipment.ts)
+2. [`ontology/equipment/equipment.ts`](./ontology/equipment/equipment.ts)
 3. [`ontology/service-case.ts`](./ontology/service-case.ts)
 4. [`lib/sources/building-controls-client.ts`](./lib/sources/building-controls-client.ts)
 5. [`connectors/building-controls.ts`](./connectors/building-controls.ts)
-6. [`syncs/building-controls.ts`](./syncs/building-controls.ts)
-7. [`pipelines/controls.ts`](./pipelines/controls.ts)
-8. [`projections/building-controls.ts`](./projections/building-controls.ts)
+6. [`syncs/building-controls/raw-readings.ts`](./syncs/building-controls/raw-readings.ts)
+7. [`pipelines/building-controls/controls-readings.ts`](./pipelines/building-controls/controls-readings.ts)
+8. [`projections/equipment/equipment-telemetry.ts`](./projections/equipment/equipment-telemetry.ts)
 9. [`actions/recordBuildingAlarm.ts`](./actions/recordBuildingAlarm.ts)
-10. [`actions/dispatchWorkOrder.ts`](./actions/dispatchWorkOrder.ts)
+10. [`actions/service-case/dispatchWorkOrder.ts`](./actions/service-case/dispatchWorkOrder.ts)
 11. [`rules/service-operations.ts`](./rules/service-operations.ts)
 12. [`workflows/service-response.ts`](./workflows/service-response.ts)
 13. [`ai/models.ts`](./ai/models.ts)
