@@ -4228,80 +4228,117 @@ describe("AgentWorker", () => {
     for (const call of commands) expect(call.options.env).toMatchObject(expected)
   })
 
-  test.each([
-    "foreground",
-    "background",
-  ] as const)("saves the workspace after a %s command names a directory that does not exist", async (mode) => {
-    // Regression proof: pass the bash tool's cwd to runCommand again; the provider refuses the
-    // command, the operation stays unconfirmed, the run fails and the thread is blocked.
-    const missing = "/workspace/repository</volume>"
-    const notFound = `cd: ${missing}: No such file or directory`
-    const sandbox = Object.assign(new RecordingSandbox("missing-directory"), {
-      setRequestCredentials: async () => {},
-    })
-    const runCommand = sandbox.runCommand.bind(sandbox)
-    sandbox.runCommand = async (command, args = [], options = {}) => {
-      // As Vercel answers: HTTP 400, before any process starts.
-      if (options.cwd === missing) {
-        sandbox.commands.push({ command, args, options })
-        throw new Error(`failed to start process: chdir ${missing}: no such file or directory`)
-      }
-      // As bash answers a cd into it.
-      if (args.includes(missing)) {
-        sandbox.commands.push({ command, args, options })
-        return { exitCode: 1, stdout: "", stderr: `bash: line 1: ${notFound}\n`, durationMs: 1 }
-      }
-      return runCommand(command, args, options)
-    }
-    const toolOutputs: string[] = []
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        const last = options.messages.at(-1)
-        if (last?.role !== "tool") {
-          return toolCallStream("missing-directory", "bash", {
-            command: "pwd",
-            cwd: missing,
-            ...(mode === "background" ? { run_in_background: true } : {}),
-          })
-        }
-        toolOutputs.push(JSON.stringify(last.content))
-        return answerStream("Done")
-      },
-    })
-    const host = buildSixb(
-      model,
-      new InMemoryBroker(),
-      {
-        supportsRequestCredentials: true,
-        create: async () => sandbox,
-        resume: async () => {
-          sandbox.status = "running"
-          return sandbox
+  describe("a bash command's cwd", () => {
+    type Mode = "foreground" | "background"
+
+    /**
+     * One turn in a workspace cloned from Git, so the tool sees the checkout as its working
+     * directory: the model runs `pwd` in `cwd`, then answers.
+     */
+    async function runPwd(sandbox: RecordingSandbox, mode: Mode, cwd: string) {
+      const toolOutputs: string[] = []
+      const model = new WorkerTestModel({
+        modelId: "mock-model",
+        stream: async (options) => {
+          const last = options.messages.at(-1)
+          if (last?.role !== "tool") {
+            return toolCallStream("pwd", "bash", {
+              command: "pwd",
+              cwd,
+              ...(mode === "background" ? { run_in_background: true } : {}),
+            })
+          }
+          toolOutputs.push(JSON.stringify(last.content))
+          return answerStream("Done")
         },
-      },
-      {
-        sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } },
+      })
+      const host = buildSixb(
+        model,
+        new InMemoryBroker(),
+        {
+          supportsRequestCredentials: true,
+          create: async () => Object.assign(sandbox, { setRequestCredentials: async () => {} }),
+          resume: async () => {
+            sandbox.status = "running"
+            return sandbox
+          },
+        },
+        {
+          sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } },
+        }
+      )
+      const sdk = createTestSixb(host)
+      const thread = await sdk.agent.threads.create({ sandbox: {} })
+      const requested = await requestAgent(host, { threadId: thread.id, text: "Where am I?" })
+
+      const completion = observeQueueSettlement(host.queues.agents)
+      const worker = new AgentWorker(host, workerOptions())
+      await worker.start()
+      try {
+        await completion.wait()
+        return {
+          run: await agentStorageOf(host).runs.getById({
+            projectId: PROJECT_ID,
+            id: requested.run.id,
+          }),
+          workspace: (await sdk.agent.threads.getById(thread.id))?.sandboxState,
+          toolOutput: toolOutputs.join(""),
+        }
+      } finally {
+        await worker.stop()
+        completion.restore()
       }
-    )
-    const sdk = createTestSixb(host)
-    const thread = await sdk.agent.threads.create({ sandbox: {} })
-    const requested = await requestAgent(host, { threadId: thread.id, text: "Where am I?" })
-    const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions())
-    await worker.start()
-    try {
-      await completion.wait()
-      expect(
-        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
-      ).toMatchObject({ status: "succeeded" })
-      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("ready")
-      expect(sandbox.commands.filter((call) => call.options.cwd === missing)).toEqual([])
-      if (mode === "foreground") expect(toolOutputs.join("")).toContain(notFound)
-    } finally {
-      await worker.stop()
-      completion.restore()
     }
+
+    test.each([
+      "foreground",
+      "background",
+    ] as const)("saves the workspace after a %s command names a directory that does not exist", async (mode) => {
+      // Regression proof: pass the bash tool's cwd to runCommand again; the provider refuses the
+      // command, the operation stays unconfirmed, the run fails and the thread is blocked.
+      const missing = "/workspace/repository</volume>"
+      const notFound = `cd: ${missing}: No such file or directory`
+      const sandbox = new RecordingSandbox("missing-directory")
+      const runCommand = sandbox.runCommand.bind(sandbox)
+      sandbox.runCommand = async (command, args = [], options = {}) => {
+        // As Vercel answers: HTTP 400, before any process starts.
+        if (options.cwd === missing) {
+          sandbox.commands.push({ command, args, options })
+          throw new Error(`failed to start process: chdir ${missing}: no such file or directory`)
+        }
+
+        // As bash answers a cd into it.
+        if (args.includes(missing)) {
+          sandbox.commands.push({ command, args, options })
+          return { exitCode: 1, stdout: "", stderr: `bash: line 1: ${notFound}\n`, durationMs: 1 }
+        }
+
+        return runCommand(command, args, options)
+      }
+
+      const { run, workspace, toolOutput } = await runPwd(sandbox, mode, missing)
+
+      expect(sandbox.commands.filter((call) => call.options.cwd === missing)).toEqual([])
+      expect(run).toMatchObject({ status: "succeeded" })
+      expect(workspace?.status).toBe("ready")
+      if (mode === "foreground") expect(toolOutput).toContain(notFound)
+    })
+
+    test.each([
+      "foreground",
+      "background",
+    ] as const)("runs a %s command's relative cwd inside the checkout", async (mode) => {
+      // Regression proof: pass the bash tool's cwd to runCommand again; the provider resolves it
+      // against its own working directory, beside the checkout.
+      const sandbox = new RecordingSandbox("relative-directory")
+
+      const { run } = await runPwd(sandbox, mode, "packages/api")
+
+      expect(run).toMatchObject({ status: "succeeded" })
+      const call = sandbox.commands.find((record) => record.args.at(-1) === "pwd")
+      // Both shell scripts take the directory just before the command.
+      expect(call?.args.at(-2)).toBe(join(sandbox.workingDirectory, "repository", "packages/api"))
+    })
   })
 
   test("rejects an invalid authentication guest environment before provisioning", async () => {

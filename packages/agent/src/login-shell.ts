@@ -32,9 +32,10 @@ export function loginShellArgs(script: string, directory?: string): string[] {
 }
 
 /**
- * The absolute directory a command's `cwd` names, resolved as a provider resolves it, for the
- * shell to change to. A model's `cwd` never reaches the provider: see
- * {@link LOGIN_SHELL_SCRIPT_IN_DIRECTORY}.
+ * The absolute directory a command's `cwd` names, for the shell to change to. A relative one
+ * resolves against the sandbox's working directory, as the bash tool describes it: in a workspace
+ * cloned from Git, that is the checkout, not the provider's own directory above it. A model's
+ * `cwd` never reaches the provider: see {@link LOGIN_SHELL_SCRIPT_IN_DIRECTORY}.
  */
 export function commandDirectory(
   workingDirectory: string,
