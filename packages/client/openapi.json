@@ -14422,6 +14422,30 @@
                     },
                     "text": {
                       "type": "string"
+                    },
+                    "words": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "startMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "endMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "speaker": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["text", "startMs", "endMs"],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": ["callId", "model", "usage", "cost", "text"],

@@ -1,5 +1,6 @@
 import {
   assertJsonObject,
+  isJsonObject,
   type JsonObject,
   type ModelRateCard,
   type TranscriptionCostEstimator,
@@ -8,6 +9,7 @@ import {
   type TranscriptionModelRequest,
   TranscriptionModelResponseError,
   type TranscriptionModelResponseMetadata,
+  type TranscriptionWord,
 } from "@sixb/core/models"
 import { readGatewayJson } from "./json-response"
 
@@ -136,7 +138,7 @@ export function createGatewayTranscription(
         signal,
       })
       const metadata = transport.metadata(payload, requestId)
-      const audioDurationMs = durationInMilliseconds(payload.durationInSeconds)
+      const audioDurationMs = milliseconds(payload.durationInSeconds)
       const responseMetadata = {
         ...metadata,
         usage: {
@@ -154,7 +156,11 @@ export function createGatewayTranscription(
         )
       }
 
-      return { ...responseMetadata, output: { text: payload.text } }
+      const words = transcriptionWords(payload.providerMetadata)
+      return {
+        ...responseMetadata,
+        output: { text: payload.text, ...(words ? { words } : {}) },
+      }
     },
   })
 }
@@ -181,11 +187,115 @@ function assertTranscriptionInput(
   }
 }
 
-function durationInMilliseconds(seconds: unknown): number | undefined {
-  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
-    return undefined
+/**
+ * The words the provider timed, which the Gateway forwards verbatim under the provider's own
+ * key. ElevenLabs writes `elevenlabs.words`, `{ text, type, start, end, speaker_id }` in seconds;
+ * Azure writes `azure.phrases`, in milliseconds with the speaker on the phrase. They are the
+ * part of a transcript that text cannot be rebuilt into, who spoke and when, so they travel on.
+ *
+ * Spacing and audio-event entries are dropped: `text` already carries them, and a caller seeking
+ * by word has no use for them. Words a provider sends without a type are taken as they are, and
+ * one entry Sixb cannot place costs only itself.
+ */
+function transcriptionWords(providerMetadata: unknown): TranscriptionWord[] | undefined {
+  const providers = object(providerMetadata)
+  if (!providers) return undefined
+
+  for (const [provider, metadata] of Object.entries(providers)) {
+    const envelope = object(metadata)
+    if (!envelope) continue
+    const words = provider === "azure" ? phraseWords(envelope.phrases) : timedWords(envelope.words)
+    if (words.length) return words
   }
 
-  const milliseconds = Math.round(seconds * 1000)
-  return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
+  return undefined
+}
+
+/** ElevenLabs' token stream, and any provider that times its own words the same way. */
+function timedWords(value: unknown): TranscriptionWord[] {
+  if (!Array.isArray(value)) return []
+
+  const words: TranscriptionWord[] = []
+  for (const entry of value) {
+    const word = object(entry)
+    if (!word || word.type === "spacing" || word.type === "audio_event") continue
+
+    const startMs = milliseconds(word.start)
+    const endMs = milliseconds(word.end)
+    if (typeof word.text !== "string" || !word.text || startMs === undefined) continue
+    if (endMs === undefined || endMs < startMs) continue
+
+    const speaker = speakerLabel(word.speaker_id)
+    words.push({ text: word.text, startMs, endMs, ...(speaker === undefined ? {} : { speaker }) })
+  }
+
+  return words
+}
+
+/**
+ * Azure's phrases, which carry the speaker and their own words. A phrase that times no usable
+ * word, because the model was asked for phrases only, still says who spoke when: its text
+ * becomes one entry, so a caller seeking by word lands inside it.
+ */
+function phraseWords(value: unknown): TranscriptionWord[] {
+  if (!Array.isArray(value)) return []
+
+  const words: TranscriptionWord[] = []
+  for (const entry of value) {
+    const phrase = object(entry)
+    if (!phrase) continue
+
+    const speaker = speakerLabel(phrase.speaker)
+    const timed: TranscriptionWord[] = []
+    for (const item of Array.isArray(phrase.words) ? phrase.words : []) {
+      const word = offsetWord(item, speaker)
+      if (word) timed.push(word)
+    }
+
+    if (timed.length) {
+      words.push(...timed)
+      continue
+    }
+
+    const whole = offsetWord(phrase, speaker)
+    if (whole) words.push(whole)
+  }
+
+  return words
+}
+
+/** One entry timed by an offset and a duration, as Azure counts them in milliseconds. */
+function offsetWord(value: unknown, speaker: string | undefined): TranscriptionWord | undefined {
+  const entry = object(value)
+  if (!entry || typeof entry.text !== "string" || !entry.text) return undefined
+
+  const startMs = wholeMilliseconds(entry.offsetMilliseconds)
+  const durationMs = wholeMilliseconds(entry.durationMilliseconds)
+  if (startMs === undefined || durationMs === undefined) return undefined
+
+  const endMs = startMs + durationMs
+  if (!Number.isSafeInteger(endMs)) return undefined
+
+  return { text: entry.text, startMs, endMs, ...(speaker === undefined ? {} : { speaker }) }
+}
+
+/** Azure counts speakers from zero; the label reads as ElevenLabs writes its own. */
+function speakerLabel(value: unknown): string | undefined {
+  if (typeof value === "string") return value || undefined
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return undefined
+  return `speaker_${value}`
+}
+
+/** Provider seconds as whole milliseconds, for durations and word timings alike. */
+function milliseconds(seconds: unknown): number | undefined {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return undefined
+  return wholeMilliseconds(Math.round(seconds * 1000))
+}
+
+function wholeMilliseconds(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+function object(value: unknown): JsonObject | undefined {
+  return isJsonObject(value) ? value : undefined
 }

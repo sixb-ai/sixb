@@ -18,6 +18,8 @@ import type {
   TranscriptionModel,
   TranscriptionModelResponseMetadata,
   TranscriptionModelResult,
+  TranscriptionOutput,
+  TranscriptionWord,
 } from "./types"
 
 export function createAudioRuntime(
@@ -86,23 +88,64 @@ export function createAudioRuntime(
       // A completed, billable reply must survive cancellation and transcript validation failures.
       const event = await recordTranscription(accounting, model, callId, result ?? {})
       signal.throwIfAborted()
-      if (typeof result?.output?.text !== "string") {
-        throw new TranscriptionModelResponseError(
-          "[SixbModels] Invalid transcription response.",
-          model.providerId,
-          model.modelId,
-          result ?? {}
-        )
-      }
+      const output = transcriptOutput(result, model)
 
-      return {
-        output: { text: result.output.text },
-        usage: event.usage,
-        cost: event.cost,
-        callId,
-      }
+      return { output, usage: event.usage, cost: event.cost, callId }
     },
   }
+}
+
+/**
+ * The validated transcript. A word list a caller cannot trust is worse than none: a playhead
+ * would seek to a timestamp that is not there. Refuse the reply instead, as for a missing text;
+ * billing for it was recorded already.
+ */
+function transcriptOutput(
+  result: TranscriptionModelResult | undefined,
+  model: TranscriptionModel
+): TranscriptionOutput {
+  const refuse = () =>
+    new TranscriptionModelResponseError(
+      "[SixbModels] Invalid transcription response.",
+      model.providerId,
+      model.modelId,
+      result ?? {}
+    )
+
+  const output = result?.output
+  if (typeof output?.text !== "string") throw refuse()
+
+  const words: readonly unknown[] | undefined = output.words
+  if (words === undefined) return { text: output.text }
+  if (!Array.isArray(words)) throw refuse()
+
+  const timed: TranscriptionWord[] = []
+  for (const word of words) {
+    const entry = word as Partial<TranscriptionWord> | null | undefined
+    if (
+      typeof entry?.text !== "string" ||
+      !entry.text ||
+      !isMillisecond(entry.startMs) ||
+      !isMillisecond(entry.endMs) ||
+      entry.endMs < entry.startMs ||
+      (entry.speaker !== undefined && (typeof entry.speaker !== "string" || !entry.speaker))
+    ) {
+      throw refuse()
+    }
+    timed.push({
+      text: entry.text,
+      startMs: entry.startMs,
+      endMs: entry.endMs,
+      ...(entry.speaker === undefined ? {} : { speaker: entry.speaker }),
+    })
+  }
+
+  // An empty list says nothing; the absent field is the one way to say "no words".
+  return timed.length ? { text: output.text, words: timed } : { text: output.text }
+}
+
+function isMillisecond(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
 interface PreparedAudio {

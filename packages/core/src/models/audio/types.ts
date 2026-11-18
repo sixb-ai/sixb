@@ -18,8 +18,28 @@ export interface TranscriptionModelRequest {
   readonly signal?: AbortSignal
 }
 
+/** One word the provider timed, and who said it when the provider labels voices. */
+export interface TranscriptionWord {
+  readonly text: string
+  /** Milliseconds from the start of the audio. */
+  readonly startMs: number
+  /** Milliseconds from the start of the audio; equal to `startMs` for a word it did not span. */
+  readonly endMs: number
+  /**
+   * The provider's label for who said it, such as `speaker_0`. It is stable within one
+   * transcript only: the same voice need not carry the same label in another.
+   */
+  readonly speaker?: string
+}
+
 export interface TranscriptionOutput {
   readonly text: string
+  /**
+   * The words the provider timed, in spoken order. Text alone cannot say who was speaking at
+   * 12:04, or where to put the playhead. Absent when the provider returns none, which is what
+   * every provider that neither diarizes nor times words does.
+   */
+  readonly words?: readonly TranscriptionWord[]
 }
 
 export interface TranscriptionModelResponseMetadata {
