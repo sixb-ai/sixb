@@ -1105,6 +1105,8 @@ export type {
   BatchItemResult,
   CreateSixbOptions,
   DefinitionCatalog,
+  DefinitionFolderFamily,
+  DefinitionFolderIndex,
   FileListPropertyToken,
   FilePropertyToken,
   ListResult,

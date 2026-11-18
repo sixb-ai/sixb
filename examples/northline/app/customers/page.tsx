@@ -4,10 +4,10 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { CustomerAccount } from "../../ontology/customer-account"
-import { Facility } from "../../ontology/facility"
+import { CustomerAccount } from "../../ontology/customers/customer-account"
+import { Facility } from "../../ontology/customers/facility"
+import { ServiceContract } from "../../ontology/customers/service-contract"
 import { ServiceCase } from "../../ontology/service-case"
-import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
   formatCoverageHours,

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Search, Workflow } from "lucide-react"
 import { useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
+import { FolderContents, noItems, useFolderBrowser } from "../../folders"
 import { SectionPage } from "../../section-page"
 import { PanelEmpty, useLoadFailure } from "../../section-ui"
 import { CardSkeleton, CountSkeleton } from "../skeletons"
@@ -15,37 +16,26 @@ import { WorkflowCard } from "./workflows/workflow-card"
 /** Console › Workflows: every workflow with its latest run; each opens its canvas. */
 export function ConsoleWorkflowsPage() {
   useWorkflowLiveUpdates()
-  const countQuery = useQuery({ ...listWorkflowsOptions(), retry: false })
-  const count = countQuery.data?.length
-  return (
-    <SectionPage
-      section="console"
-      page="workflows"
-      width="wide"
-      title="Workflows"
-      meta={
-        countQuery.isPending ? (
-          <CountSkeleton />
-        ) : count === undefined ? undefined : (
-          <span>{`${count} workflow${count === 1 ? "" : "s"}`}</span>
-        )
-      }
-    >
-      <WorkflowDefinitionsTab />
-    </SectionPage>
-  )
-}
-
-function WorkflowDefinitionsTab() {
   const workflowsQuery = useQuery({ ...listWorkflowsOptions(), retry: false })
   const [searchParams, setSearchParams] = useSearchParams()
-  const workflows = workflowsQuery.data ?? []
+  const workflows = workflowsQuery.data ?? noItems
+  const count = workflowsQuery.data?.length
   const query = searchParams.get("q") ?? ""
+  const normalizedQuery = query.trim().toLowerCase()
   const filteredWorkflows = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return workflows
     return workflows.filter((workflow) => workflowSearchText(workflow).includes(normalizedQuery))
-  }, [query, workflows])
+  }, [normalizedQuery, workflows])
+  const browser = useFolderBrowser({
+    items: filteredWorkflows,
+    title: "Workflows",
+    meta: workflowsQuery.isPending ? (
+      <CountSkeleton />
+    ) : count === undefined ? undefined : (
+      <span>{`${count} workflow${count === 1 ? "" : "s"}`}</span>
+    ),
+    narrowed: normalizedQuery.length > 0,
+  })
 
   const updateQuery = (value: string) => {
     setSearchParams(
@@ -64,11 +54,11 @@ function WorkflowDefinitionsTab() {
       search={{
         value: query,
         onChange: updateQuery,
-        placeholder: "Search workflows, nodes, triggers, or inputs…",
+        placeholder: "Search workflows, folders, nodes, triggers, or inputs…",
       }}
       // The header counts every workflow; while searching, this counts the matches.
       actions={
-        query.trim() && !workflowsQuery.isPending ? (
+        normalizedQuery && !workflowsQuery.isPending ? (
           <p className="px-1 text-xs tabular-nums text-muted-foreground">
             {`${filteredWorkflows.length} of ${workflows.length} workflows`}
           </p>
@@ -77,51 +67,48 @@ function WorkflowDefinitionsTab() {
     />
   )
 
-  if (workflowsQuery.isPending) {
-    return (
-      <section className="-mt-4 space-y-4">
-        {toolbar}
-        <div className="grid gap-3 lg:grid-cols-2">
-          {Array.from({ length: 4 }, (_, index) => (
-            <CardSkeleton key={index} />
-          ))}
-        </div>
-      </section>
-    )
-  }
-
-  if (workflowsQuery.isError) {
-    return <WorkflowsFailure error={workflowsQuery.error} />
-  }
-
-  if (workflows.length === 0) {
-    return (
-      <PanelEmpty
-        icon={Workflow}
-        title="No workflows registered"
-        description="Create a workflow definition to see it appear here."
-      />
-    )
-  }
-
   return (
-    <section className="-mt-4 space-y-4">
-      {toolbar}
-
-      {filteredWorkflows.length === 0 ? (
+    <SectionPage section="console" page="workflows" width="wide" {...browser.frame}>
+      {workflowsQuery.isPending ? (
+        <section className="-mt-4 space-y-4">
+          {toolbar}
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 4 }, (_, index) => (
+              <CardSkeleton key={index} />
+            ))}
+          </div>
+        </section>
+      ) : workflowsQuery.isError ? (
+        <WorkflowsFailure error={workflowsQuery.error} />
+      ) : workflows.length === 0 ? (
         <PanelEmpty
-          icon={Search}
-          title="No matching workflows"
-          description="Try another workflow name, node, trigger, or input."
+          icon={Workflow}
+          title="No workflows registered"
+          description="Create a workflow definition to see it appear here."
         />
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {filteredWorkflows.map((workflow) => (
-            <WorkflowCard key={workflow.id} workflow={workflow} />
-          ))}
-        </div>
+        <section className="-mt-4 space-y-4">
+          {toolbar}
+          {filteredWorkflows.length === 0 ? (
+            <PanelEmpty
+              icon={Search}
+              title="No matching workflows"
+              description="Try another workflow name, folder, node, trigger, or input."
+            />
+          ) : (
+            <FolderContents browser={browser} rootLabel="Workflows">
+              {(shown) => (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {shown.map((workflow) => (
+                    <WorkflowCard key={workflow.id} workflow={workflow} />
+                  ))}
+                </div>
+              )}
+            </FolderContents>
+          )}
+        </section>
       )}
-    </section>
+    </SectionPage>
   )
 }
 
@@ -147,6 +134,7 @@ function workflowSearchText(workflow: WorkflowSummary): string {
   return [
     workflow.id,
     humanizeIdentifier(workflow.id),
+    workflow.folder ?? "",
     ...Object.keys(workflow.input ?? {}),
     ...workflow.triggers.map((trigger) => trigger.scheduleId),
     ...nodeValues,

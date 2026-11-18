@@ -1,7 +1,7 @@
 # Organizing Your Project
 
 Start with one file per definition. Add subdirectories when a business domain or process becomes
-large enough to need them. The examples below are suggestions, not required layouts.
+large enough to need them; the Console browses each primitive by the same folders. The examples below are suggestions, not required layouts.
 See [Project structure](project-structure.md) for the discovery rules shared by every primitive.
 
 ## Workflows

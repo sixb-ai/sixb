@@ -1,9 +1,9 @@
 import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
-import { BuildingAlarm } from "./building-alarm"
-import { CustomerAccount } from "./customer-account"
-import { Equipment } from "./equipment"
-import { Facility } from "./facility"
-import { ServiceContract } from "./service-contract"
+import { CustomerAccount } from "./customers/customer-account"
+import { Facility } from "./customers/facility"
+import { ServiceContract } from "./customers/service-contract"
+import { BuildingAlarm } from "./equipment/building-alarm"
+import { Equipment } from "./equipment/equipment"
 
 export const serviceCaseStatuses = [
   "new",

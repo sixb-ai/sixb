@@ -37,7 +37,11 @@ import {
 } from "../syncs/validation"
 import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowAgentStepGroupReferences, validateWorkflowsAtStartup } from "../workflows"
-import { createDefinitionCatalog, type SixbDefinitions } from "./definitions"
+import {
+  createDefinitionCatalog,
+  type DefinitionFolderIndex,
+  type SixbDefinitions,
+} from "./definitions"
 import { RuntimeError } from "./errors"
 import type { OntologySource } from "./types"
 
@@ -60,6 +64,7 @@ interface DefinitionOptions {
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
+  readonly definitionFolders?: DefinitionFolderIndex
 }
 
 interface ResolvedDefinitions extends SixbDefinitions {
@@ -245,6 +250,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     shares: createDefinitionCatalog(sharesById),
     syncs: createDefinitionCatalog(syncsById),
     workflows: createDefinitionCatalog(workflowsById),
+    folders: Object.freeze({ ...options.definitionFolders }),
   })
 }
 

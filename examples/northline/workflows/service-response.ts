@@ -6,10 +6,10 @@ import {
   interventionField,
   ref,
 } from "@sixb/core"
-import { dispatchWorkOrder } from "../actions/dispatchWorkOrder"
-import { Equipment } from "../ontology/equipment"
+import { dispatchWorkOrder } from "../actions/service-case/dispatchWorkOrder"
+import { Equipment } from "../ontology/equipment/equipment"
+import { Technician } from "../ontology/field-service/technician"
 import { ServiceCase } from "../ontology/service-case"
-import { Technician } from "../ontology/technician"
 import { dispatchReviewRequested } from "../schedules/operations"
 
 const loadDispatchContext = defineWorkflowStep("load-dispatch-context")

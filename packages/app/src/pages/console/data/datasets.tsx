@@ -39,6 +39,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, Columns3, Database, Info, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
+import { FolderContents, folderBack, noItems, useFolderBrowser } from "../../folders"
 import { DetailFallback, SectionPage, SectionWorkspace, WorkspaceHeader } from "../../section-page"
 import {
   apiErrorMessage,
@@ -73,80 +74,87 @@ export function ConsoleDatasetsPage() {
   const numbers = useNumbers()
   useDatasetLiveUpdates()
   const datasetsQuery = useQuery({ ...listDatasetsOptions(), retry: false })
-  const datasets = datasetsQuery.data ?? []
+  const browser = useFolderBrowser({
+    items: datasetsQuery.data ?? noItems,
+    title: messages.datasets.title,
+    description: messages.datasets.description,
+  })
 
   return (
-    <SectionPage
-      section="console"
-      page="datasets"
-      title={messages.datasets.title}
-      description={messages.datasets.description}
-    >
-      <Panel>
-        {datasetsQuery.isPending ? (
-          <PanelSkeleton
-            rows={4}
-            interactive
-            trailing={<TrailingSkeleton pill={false} chevron />}
-          />
-        ) : datasetsQuery.isError ? (
-          <PanelEmpty
-            tone="error"
-            icon={Database}
-            title={messages.datasets.title}
-            description={apiErrorMessage(datasetsQuery.error, messages.common.loadFailed)}
-          />
-        ) : datasets.length === 0 ? (
-          <PanelEmpty
-            icon={Database}
-            title={messages.datasets.emptyTitle}
-            description={messages.datasets.emptyDescription}
-          />
-        ) : (
-          datasets.map((dataset) => (
-            <PanelRow
-              key={dataset.id}
-              href={`/console/datasets/${encodeURIComponent(dataset.id)}`}
-              leading={<IconTile icon={Database} />}
-              title={<span className="truncate">{dataset.id}</span>}
-              meta={
-                <>
-                  {dataset.latestVersion?.rowCount !== undefined ? (
+    <SectionPage section="console" page="datasets" {...browser.frame}>
+      {datasetsQuery.isSuccess && datasetsQuery.data.length > 0 ? (
+        <FolderContents browser={browser} rootLabel={messages.datasets.title}>
+          {(datasets) => (
+            <Panel>
+              {datasets.map((dataset) => (
+                <PanelRow
+                  key={dataset.id}
+                  href={`/console/datasets/${encodeURIComponent(dataset.id)}`}
+                  leading={<IconTile icon={Database} />}
+                  title={<span className="truncate">{dataset.id}</span>}
+                  meta={
                     <>
-                      <span className="tabular-nums">
-                        {messages.common.rows(
-                          dataset.latestVersion.rowCount,
-                          numbers.count(dataset.latestVersion.rowCount)
-                        )}
-                      </span>
-                      <MetaDot />
+                      {dataset.latestVersion?.rowCount !== undefined ? (
+                        <>
+                          <span className="tabular-nums">
+                            {messages.common.rows(
+                              dataset.latestVersion.rowCount,
+                              numbers.count(dataset.latestVersion.rowCount)
+                            )}
+                          </span>
+                          <MetaDot />
+                        </>
+                      ) : null}
+                      <span>{messages.common.columns(dataset.schema.columns.length)}</span>
+                      {dataset.latestVersion ? (
+                        <>
+                          <MetaDot />
+                          <span>
+                            {messages.datasets.updated(
+                              format.relative(dataset.latestVersion.createdAt)
+                            )}
+                          </span>
+                        </>
+                      ) : null}
                     </>
-                  ) : null}
-                  <span>{messages.common.columns(dataset.schema.columns.length)}</span>
-                  {dataset.latestVersion ? (
+                  }
+                  trailing={
                     <>
-                      <MetaDot />
-                      <span>
-                        {messages.datasets.updated(
-                          format.relative(dataset.latestVersion.createdAt)
-                        )}
-                      </span>
+                      {dataset.latestVersion ? null : (
+                        <Pill tone="muted">{messages.datasets.declared}</Pill>
+                      )}
+                      <ChevronRight className="size-4 text-muted-foreground/60" />
                     </>
-                  ) : null}
-                </>
-              }
-              trailing={
-                <>
-                  {dataset.latestVersion ? null : (
-                    <Pill tone="muted">{messages.datasets.declared}</Pill>
-                  )}
-                  <ChevronRight className="size-4 text-muted-foreground/60" />
-                </>
-              }
+                  }
+                />
+              ))}
+            </Panel>
+          )}
+        </FolderContents>
+      ) : (
+        <Panel>
+          {datasetsQuery.isPending ? (
+            <PanelSkeleton
+              rows={4}
+              interactive
+              trailing={<TrailingSkeleton pill={false} chevron />}
             />
-          ))
-        )}
-      </Panel>
+          ) : datasetsQuery.isError ? (
+            <PanelEmpty
+              tone="error"
+              icon={Database}
+              title={messages.datasets.title}
+              description={apiErrorMessage(datasetsQuery.error, messages.common.loadFailed)}
+            />
+          ) : (
+            <PanelEmpty
+              icon={Database}
+              title={messages.datasets.emptyTitle}
+              description={messages.datasets.emptyDescription}
+            />
+          )}
+        </Panel>
+      )}
     </SectionPage>
   )
 }
@@ -219,7 +227,10 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
       )
     : allRows
 
-  const back = { href: "/console/datasets", label: messages.datasets.title }
+  const back = folderBack(
+    { href: "/console/datasets", label: messages.datasets.title },
+    dataset?.folder
+  )
 
   if (!dataset) {
     return (

@@ -61,6 +61,7 @@ function createSixbStub(
   return {
     lakeStorage,
     definitions: {
+      folders: {},
       datasets: {
         list: () => definitions,
         getById: (id: string) => definitions.find((definition) => definition.id === id) ?? null,

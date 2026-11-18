@@ -69,10 +69,12 @@ async function getLatestSyncRuns(
 
 function serializeSync(
   sync: SyncDefinition,
-  latestRun: SerializedSyncRun | null
+  latestRun: SerializedSyncRun | null,
+  folder: string | undefined
 ): ReturnType<typeof SyncSchema.parse> {
   return SyncSchema.parse({
     id: sync.id,
+    folder,
     mode: sync.config.mode,
     connector: {
       id: sync.connector.id,
@@ -99,7 +101,13 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           syncs.map((sync) => sync.id)
         )
 
-        return syncs.map((sync) => serializeSync(sync, latestRuns.get(sync.id) ?? null))
+        return syncs.map((sync) =>
+          serializeSync(
+            sync,
+            latestRuns.get(sync.id) ?? null,
+            host.definitions.folders.syncs?.get(sync.id)
+          )
+        )
       },
       {
         response: { 200: SyncSchema.array() },
@@ -122,7 +130,11 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Sync not found" }
         }
 
-        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
+        return serializeSync(
+          sync,
+          await getLatestSyncRun(sixb, sync.id),
+          host.definitions.folders.syncs?.get(sync.id)
+        )
       },
       {
         params: SyncParamsSchema,

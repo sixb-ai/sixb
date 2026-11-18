@@ -85,39 +85,44 @@ function projectionCatalogIds(catalog: ViewableProjectionCatalog): string[] {
 type SerializedProjection<TProjection extends ProjectionDefinition> =
   TProjection extends ObjectProjectionDefinition
     ? Omit<TProjection, "conflictResolution"> & {
+        folder: string | undefined
         conflictResolution: SourceEditConflictResolution
         latestRun: SerializedProjectionRun | null
       }
-    : TProjection & { latestRun: SerializedProjectionRun | null }
+    : TProjection & { folder: string | undefined; latestRun: SerializedProjectionRun | null }
 
 function serializeProjection<TProjection extends ProjectionDefinition>(
   projection: TProjection,
-  latestRuns: ReadonlyMap<string, SerializedProjectionRun>
+  latestRuns: ReadonlyMap<string, SerializedProjectionRun>,
+  folders: ReadonlyMap<string, string> | undefined
 ): SerializedProjection<TProjection> {
   const latestRun = latestRuns.get(projection.id) ?? null
+  const folder = folders?.get(projection.id)
   if (projection._tag === "ObjectProjectionDefinition") {
     return {
       ...projection,
+      folder,
       conflictResolution: projection.conflictResolution ?? { strategy: "editsWin" },
       latestRun,
     } as SerializedProjection<TProjection>
   }
-  return { ...projection, latestRun } as SerializedProjection<TProjection>
+  return { ...projection, folder, latestRun } as SerializedProjection<TProjection>
 }
 
 function serializeProjectionCatalog(
   catalog: ViewableProjectionCatalog,
-  latestRuns: ReadonlyMap<string, SerializedProjectionRun>
+  latestRuns: ReadonlyMap<string, SerializedProjectionRun>,
+  folders: ReadonlyMap<string, string> | undefined
 ) {
   return {
     objectProjections: catalog.objectProjections.map((projection) =>
-      serializeProjection(projection, latestRuns)
+      serializeProjection(projection, latestRuns, folders)
     ),
     linkProjections: catalog.linkProjections.map((projection) =>
-      serializeProjection(projection, latestRuns)
+      serializeProjection(projection, latestRuns, folders)
     ),
     telemetryProjections: catalog.telemetryProjections.map((projection) =>
-      serializeProjection(projection, latestRuns)
+      serializeProjection(projection, latestRuns, folders)
     ),
   }
 }
@@ -130,7 +135,7 @@ export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
         const sixb = requireRequestSixb(context)
         const catalog = listViewableProjections(sixb)
         const latestRuns = await getLatestProjectionRuns(sixb, projectionCatalogIds(catalog))
-        return serializeProjectionCatalog(catalog, latestRuns)
+        return serializeProjectionCatalog(catalog, latestRuns, host.definitions.folders.projections)
       },
       {
         response: { 200: ProjectionListResponseSchema },
@@ -153,7 +158,7 @@ export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
         }
 
         const latestRuns = await getLatestProjectionRuns(sixb, [found.id])
-        return serializeProjection(found, latestRuns)
+        return serializeProjection(found, latestRuns, host.definitions.folders.projections)
       },
       {
         params: ProjectionParamsSchema,

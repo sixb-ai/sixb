@@ -20,6 +20,13 @@ import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronRight, ListChecks, type LucideIcon, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  type FolderBrowser,
+  FolderContents,
+  folderBack,
+  noItems,
+  useFolderBrowser,
+} from "../../folders"
 import { objectHref, ruleHref } from "../../routes"
 import { DetailFallback, SectionPage } from "../../section-page"
 import {
@@ -380,7 +387,7 @@ function RuleTableView({
   activeCount,
   onSelect,
 }: {
-  rules: ListRulesResponse
+  rules: readonly ListRulesResponse[number][]
   activeCount: (ruleId: string) => ActiveStateCount
   onSelect: (ruleId: string) => void
 }) {
@@ -654,13 +661,13 @@ function RuleStatesSkeleton() {
 
 function RulesContent({
   rules,
-  filteredRules,
+  browser,
   viewStyle,
   activeCount,
   onSelectRule,
 }: {
-  rules: ListRulesResponse
-  filteredRules: ListRulesResponse
+  rules: readonly ListRulesResponse[number][]
+  browser: FolderBrowser<ListRulesResponse[number]>
   viewStyle: RulesListViewStyle
   activeCount: (ruleId: string) => ActiveStateCount
   onSelectRule: (ruleId: string) => void
@@ -675,7 +682,7 @@ function RulesContent({
     )
   }
 
-  if (filteredRules.length === 0) {
+  if (browser.items.length === 0 && browser.folders.length === 0) {
     return (
       <EmptyState
         icon={<Search className="h-9 w-9" />}
@@ -686,21 +693,25 @@ function RulesContent({
     )
   }
 
-  if (viewStyle === "table") {
-    return <RuleTableView rules={filteredRules} activeCount={activeCount} onSelect={onSelectRule} />
-  }
-
   return (
-    <CollectionCardGrid>
-      {filteredRules.map((rule) => (
-        <RuleListItem
-          key={rule.id}
-          rule={rule}
-          activeCount={activeCount(rule.id)}
-          onSelect={() => onSelectRule(rule.id)}
-        />
-      ))}
-    </CollectionCardGrid>
+    <FolderContents browser={browser} rootLabel="Rules">
+      {(shown) =>
+        viewStyle === "table" ? (
+          <RuleTableView rules={shown} activeCount={activeCount} onSelect={onSelectRule} />
+        ) : (
+          <CollectionCardGrid>
+            {shown.map((rule) => (
+              <RuleListItem
+                key={rule.id}
+                rule={rule}
+                activeCount={activeCount(rule.id)}
+                onSelect={() => onSelectRule(rule.id)}
+              />
+            ))}
+          </CollectionCardGrid>
+        )
+      }
+    </FolderContents>
   )
 }
 
@@ -715,7 +726,7 @@ export function ConsoleRulesPage() {
     getCollectionViewStyle("rules", ["cards", "table"], "cards")
   )
 
-  const rules = rulesQuery.data ?? []
+  const rules = rulesQuery.data ?? noItems
   const states = statesQuery.data?.states ?? []
   const unknownStates = unknownActiveStates(statesQuery)
   const activeCountByRule = useMemo(() => {
@@ -730,13 +741,14 @@ export function ConsoleRulesPage() {
   const activeCount = (ruleId: string): ActiveStateCount =>
     unknownStates ?? { kind: "known", count: activeCountByRule.get(ruleId) ?? 0 }
 
+  const query = searchQuery.trim().toLowerCase()
   const filteredRules = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
     if (!query) return rules
 
     return rules.filter((rule) => {
       return (
         rule.id.toLowerCase().includes(query) ||
+        rule.folder?.toLowerCase().includes(query) ||
         rule.subject.objectTypeId.toLowerCase().includes(query) ||
         predicateSearchText(rule.predicate).toLowerCase().includes(query) ||
         rule.dependencies.some((dependency) =>
@@ -744,26 +756,24 @@ export function ConsoleRulesPage() {
         )
       )
     })
-  }, [rules, searchQuery])
+  }, [rules, query])
+  const browser = useFolderBrowser({
+    items: filteredRules,
+    title: "Rules",
+    meta: rulesQuery.isPending ? (
+      <CountSkeleton />
+    ) : rulesQuery.data ? (
+      <span>{`${rules.length} rule${rules.length === 1 ? "" : "s"}`}</span>
+    ) : undefined,
+    narrowed: query.length > 0,
+  })
 
   const handleSelectRule = (ruleId: string) => {
     navigate(ruleHref(ruleId))
   }
 
   return (
-    <SectionPage
-      section="console"
-      page="rules"
-      width="wide"
-      title="Rules"
-      meta={
-        rulesQuery.isPending ? (
-          <CountSkeleton />
-        ) : rulesQuery.data ? (
-          <span>{`${rules.length} rule${rules.length === 1 ? "" : "s"}`}</span>
-        ) : undefined
-      }
-    >
+    <SectionPage section="console" page="rules" width="wide" {...browser.frame}>
       {rulesQuery.isError ? (
         <LoadFailure icon={ListChecks} error={rulesQuery.error} />
       ) : (
@@ -772,7 +782,7 @@ export function ConsoleRulesPage() {
             <CollectionToolbar
               search={{
                 value: searchQuery,
-                placeholder: "Search rules, subjects, or predicates…",
+                placeholder: "Search rules, folders, subjects, or predicates…",
                 onChange: setSearchQuery,
               }}
               actions={
@@ -801,7 +811,7 @@ export function ConsoleRulesPage() {
             ) : (
               <RulesContent
                 rules={rules}
-                filteredRules={filteredRules}
+                browser={browser}
                 viewStyle={viewStyle}
                 activeCount={activeCount}
                 onSelectRule={handleSelectRule}
@@ -842,7 +852,7 @@ export function ConsoleRulePage() {
     navigate(objectHref(state.subject.objectTypeId, state.subject.primaryId))
   }
 
-  const back = { href: "/console/rules", label: "Rules" }
+  const back = folderBack({ href: "/console/rules", label: "Rules" }, rule?.folder)
   if (!rule) {
     return (
       <DetailFallback

@@ -346,10 +346,12 @@ async function getLatestWorkflowRuns(
 
 function serializeWorkflow(
   workflow: WorkflowDefinition,
-  latestRun: SerializedWorkflowRun | null
+  latestRun: SerializedWorkflowRun | null,
+  folder: string | undefined
 ): ReturnType<typeof WorkflowSchema.parse> {
   return WorkflowSchema.parse({
     id: workflow.id,
+    folder,
     input: workflow.input,
     triggers: workflow.triggers,
     nodes: workflow.nodes.map((node) => {
@@ -568,7 +570,11 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
         )
 
         return workflows.map((workflow) =>
-          serializeWorkflow(workflow, latestRuns.get(workflow.id) ?? null)
+          serializeWorkflow(
+            workflow,
+            latestRuns.get(workflow.id) ?? null,
+            host.definitions.folders.workflows?.get(workflow.id)
+          )
         )
       },
       {
@@ -594,7 +600,11 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           return { error: "Workflow not found" }
         }
 
-        return serializeWorkflow(workflow, await getLatestWorkflowRun(sixb, workflow.id))
+        return serializeWorkflow(
+          workflow,
+          await getLatestWorkflowRun(sixb, workflow.id),
+          host.definitions.folders.workflows?.get(workflow.id)
+        )
       },
       {
         params: WorkflowParamsSchema,
