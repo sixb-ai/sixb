@@ -1,10 +1,9 @@
 import { defineSchedule, events } from "@sixb/core"
-import {
-  controlsAlarms,
-  controlsEquipment,
-  controlsRawReadings,
-} from "../datasets/building-controls"
-import { businessContracts, businessFacilities } from "../datasets/business-system"
+import { controlsAlarms } from "../datasets/building-controls/alarms"
+import { controlsEquipment } from "../datasets/building-controls/equipment"
+import { controlsRawReadings } from "../datasets/building-controls/raw-readings"
+import { businessContracts } from "../datasets/business-system/contracts"
+import { businessFacilities } from "../datasets/business-system/facilities"
 
 export const rawReadingsUpdated = defineSchedule("controls-raw-readings-updated").on(
   events.dataset(controlsRawReadings).updated()

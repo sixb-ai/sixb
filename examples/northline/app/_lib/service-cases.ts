@@ -1,8 +1,8 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { type ClientObjectQueryBuilder, objects } from "@sixb/client/query"
 import { useMemo } from "react"
+import { WorkOrder } from "../../ontology/field-service/work-order"
 import { ServiceCase } from "../../ontology/service-case"
-import { WorkOrder } from "../../ontology/work-order"
 import type { Tone } from "../_components/ui"
 
 /**
