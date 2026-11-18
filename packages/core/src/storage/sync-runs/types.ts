@@ -117,6 +117,11 @@ export interface ListSyncRunsInput {
   readonly syncIds?: readonly string[]
   /** Runs of this connection. `null` lists the runs that read no single connection. */
   readonly connectionId?: string | null
+  /**
+   * The connections whose runs are listed. Runs of any other connection are left out; runs that
+   * read no single connection always stay. Omitted, nothing is left out.
+   */
+  readonly visibleConnectionIds?: readonly string[]
   readonly datasetId?: string
   readonly statuses?: readonly SyncRunStatus[]
   readonly startedAfter?: Date
@@ -135,6 +140,11 @@ export interface ListSyncRunsResult {
 export interface ListLatestSyncRunsInput {
   readonly projectId: string
   readonly syncIds: readonly string[]
+  /**
+   * The connections whose runs are listed. Runs of any other connection are left out; runs that
+   * read no single connection always stay. Omitted, nothing is left out.
+   */
+  readonly visibleConnectionIds?: readonly string[]
 }
 
 export interface ListLatestSyncRunsResult {

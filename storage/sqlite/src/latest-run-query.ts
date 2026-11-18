@@ -15,6 +15,8 @@ export function queryLatestRunsByOwnerId<TRow>(
     readonly ownerIdFor: (row: TRow) => string
     /** A status that never counts as the latest run, such as a run made stale by a newer one. */
     readonly excludedStatus?: string
+    /** One more condition a row must meet to count, with its arguments in placeholder order. */
+    readonly filter?: { readonly clause: string; readonly args: readonly SqliteValue[] }
   } & SqliteLatestRunTarget
 ): readonly TRow[] {
   const ownerIds = [...new Set(input.ownerIds)]
@@ -25,6 +27,7 @@ export function queryLatestRunsByOwnerId<TRow>(
   const placeholders = ownerIds.map(() => "?").join(", ")
   const statusFilter = input.excludedStatus === undefined ? "" : " AND status <> ?"
   const statusArgs = input.excludedStatus === undefined ? [] : [input.excludedStatus]
+  const filter = input.filter === undefined ? "" : ` AND ${input.filter.clause}`
   const orderColumn =
     input.tableName === "sync_runs" ||
     input.tableName === "pipeline_runs" ||
@@ -43,12 +46,12 @@ export function queryLatestRunsByOwnerId<TRow>(
               ORDER BY ${orderColumn} DESC, id DESC
             ) AS sixb_latest_rank
           FROM ${input.tableName}
-          WHERE project_id = ? AND ${input.ownerColumn} IN (${placeholders})${statusFilter}
+          WHERE project_id = ? AND ${input.ownerColumn} IN (${placeholders})${statusFilter}${filter}
         )
         WHERE sixb_latest_rank = 1
       `
     )
-    .all(input.projectId, ...ownerIds, ...statusArgs) as (TRow & {
+    .all(input.projectId, ...ownerIds, ...statusArgs, ...(input.filter?.args ?? [])) as (TRow & {
     sixb_latest_rank: SqliteValue
   })[]
 

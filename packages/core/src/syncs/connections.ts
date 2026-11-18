@@ -16,6 +16,10 @@ export interface SyncConnections {
   list(
     definition: ConnectorDefinition<string, OAuthConnectorAdapter>
   ): Promise<readonly ConnectorConnectionMetadata[]>
+  /** Every connection of the connector, whatever its status: each one a run has read. */
+  listAll(
+    definition: ConnectorDefinition<string, OAuthConnectorAdapter>
+  ): Promise<readonly ConnectorConnectionMetadata[]>
 }
 
 const registered = new WeakMap<object, SyncConnections>()
@@ -29,20 +33,26 @@ export function findSyncConnections(host: object): SyncConnections | undefined {
 }
 
 export function createSyncConnections(
-  service: Pick<ConnectorService, "listExecutionConnections">
+  service: Pick<ConnectorService, "listExecutionConnections" | "listAllConnections">
 ): SyncConnections {
   return {
     async list(definition) {
-      const connections = await service.listExecutionConnections(definition)
-      return connections.map(({ id, connectorId, owner, slot, account }) => ({
-        id,
-        connectorId,
-        owner,
-        slot,
-        account,
-      }))
+      return (await service.listExecutionConnections(definition)).map(toMetadata)
+    },
+    async listAll(definition) {
+      return (await service.listAllConnections(definition)).map(toMetadata)
     },
   }
+}
+
+function toMetadata({
+  id,
+  connectorId,
+  owner,
+  slot,
+  account,
+}: ConnectorConnectionMetadata): ConnectorConnectionMetadata {
+  return { id, connectorId, owner, slot, account }
 }
 
 /**

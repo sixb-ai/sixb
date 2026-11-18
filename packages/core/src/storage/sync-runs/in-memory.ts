@@ -288,6 +288,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
           ? true
           : (record.connectionId ?? null) === input.connectionId
       )
+      .filter((record) => isVisibleRun(record, input.visibleConnectionIds))
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
       .filter((record) =>
         matchesRunListDateFilters(record, {
@@ -309,7 +310,10 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
 
   async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
     const runs = latestStartedAtByOwnerId(
-      [...this.rows.values()].filter((record) => record.projectId === input.projectId),
+      [...this.rows.values()].filter(
+        (record) =>
+          record.projectId === input.projectId && isVisibleRun(record, input.visibleConnectionIds)
+      ),
       input.syncIds,
       (record) => record.syncId
     )
@@ -358,6 +362,18 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     this.rows.set(syncRunKey(run.projectId, run.id), structuredClone(run))
     return cloneSyncRunRecord(run)
   }
+}
+
+/** Whether `visibleConnectionIds` keeps this run, as `ListSyncRunsInput` describes. */
+function isVisibleRun(
+  record: SyncRunRecord,
+  visibleConnectionIds: readonly string[] | undefined
+): boolean {
+  return (
+    visibleConnectionIds === undefined ||
+    record.connectionId === undefined ||
+    visibleConnectionIds.includes(record.connectionId)
+  )
 }
 
 function staleExecution(id: string): SyncRunError {

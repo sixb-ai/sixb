@@ -279,6 +279,15 @@ export class PgSyncRunStorage implements SyncRunStorage {
       params.push(input.connectionId)
     }
 
+    if (input.visibleConnectionIds) {
+      whereClauses.push(
+        visibleConnectionsClause(input.visibleConnectionIds, (value) => {
+          params.push(value)
+          return `$${index++}`
+        })
+      )
+    }
+
     if (input.datasetId) {
       whereClauses.push(`dataset_id = $${index++}`)
       params.push(input.datasetId)
@@ -312,6 +321,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 
   async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
+    const { visibleConnectionIds } = input
     const rows = await queryLatestRunsByOwnerId<DatabaseRow>({
       sql: this.sql,
       tableName: "sync_runs",
@@ -320,6 +330,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
       projectId: input.projectId,
       ownerIdFor: (row) => row.sync_id,
       selectList: "*, checkpoint IS NOT NULL AS checkpoint_present",
+      ...(visibleConnectionIds === undefined
+        ? {}
+        : { filter: (bind) => visibleConnectionsClause(visibleConnectionIds, bind) }),
     })
 
     return {
@@ -359,6 +372,17 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
     return { runs: rows.map(rowToSyncRunRecord) }
   }
+}
+
+/** `visibleConnectionIds` as a condition: runs of those connections, and runs that read none. */
+function visibleConnectionsClause(
+  connectionIds: readonly string[],
+  bind: (value: string) => string
+): string {
+  if (connectionIds.length === 0) return "connection_id IS NULL"
+
+  const placeholders = connectionIds.map((id) => bind(id)).join(", ")
+  return `(connection_id IS NULL OR connection_id IN (${placeholders}))`
 }
 
 function staleExecution(id: string): SyncRunError {

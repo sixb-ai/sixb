@@ -324,6 +324,12 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       args.push(input.connectionId)
     }
 
+    if (input.visibleConnectionIds) {
+      const visible = visibleConnectionsFilter(input.visibleConnectionIds)
+      whereClauses.push(visible.clause)
+      args.push(...visible.args)
+    }
+
     if (input.datasetId) {
       whereClauses.push("dataset_id = ?")
       args.push(input.datasetId)
@@ -356,6 +362,9 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       ownerIds: input.syncIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.sync_id,
+      ...(input.visibleConnectionIds === undefined
+        ? {}
+        : { filter: visibleConnectionsFilter(input.visibleConnectionIds) }),
     })
 
     return {
@@ -397,6 +406,16 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
   close(): void {
     closeSqliteStoreConnection(this.connection)
   }
+}
+
+/** `visibleConnectionIds` as a condition: runs of those connections, and runs that read none. */
+function visibleConnectionsFilter(connectionIds: readonly string[]) {
+  const clause =
+    connectionIds.length === 0
+      ? "connection_id IS NULL"
+      : `(connection_id IS NULL OR connection_id IN (${connectionIds.map(() => "?").join(", ")}))`
+
+  return { clause, args: connectionIds }
 }
 
 function staleExecution(id: string): SyncRunError {

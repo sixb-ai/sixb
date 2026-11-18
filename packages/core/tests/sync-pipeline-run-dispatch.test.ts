@@ -707,7 +707,8 @@ describe("automatic dispatch of a Sync on an OAuth connector", () => {
       queues: new InMemoryQueues(),
       definitions: { syncs: createDefinitionCatalog(new Map([[inbox.id, inbox]])) },
     }
-    registerSyncConnections(dependencies, { list: async () => connectionIds.map(connection) })
+    const list = async () => connectionIds.map(connection)
+    registerSyncConnections(dependencies, { list, listAll: list })
     const dispatcher = new SyncRunDispatcher(dependencies)
     const dispatch = (
       eventId: string,
