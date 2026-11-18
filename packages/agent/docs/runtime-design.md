@@ -216,7 +216,10 @@ For a blank sandbox:
    JSON argument ([sandbox-search.ts](../src/tools/sandbox-search.ts), engine in
    [tools/search/](../src/tools/search/)): one walker and one `.gitignore` matcher in every
    sandbox, where `rg` or GNU tools may be missing. Each `bash` call becomes
-   `runCommand("bash", ["-lc", script], ...)`.
+   `runCommand("bash", ["-lc", script], ...)`. Its `cwd` never reaches the provider: the shell
+   changes to it ([login-shell.ts](../src/login-shell.ts)), so a directory that does not exist
+   fails the command with bash's message. A provider refuses to start in one, and a refused call
+   leaves a persistent workspace unconfirmed, blocked until its owner resumes or recreates it.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 `bash` with `run_in_background` starts a command that outlives its call

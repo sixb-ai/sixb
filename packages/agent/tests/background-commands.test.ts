@@ -32,7 +32,7 @@ import { agentTraceFromModelSteps } from "../src/model-adapters"
 import type { OpenRunSandbox } from "../src/run-environment"
 import type { AgentSandboxHandle } from "../src/sandbox-handle"
 import { createStopTool, createWaitTool, reportedCommands } from "../src/tools/background"
-import { createBashTool } from "../src/tools/bash"
+import { type BashToolOutput, createBashTool } from "../src/tools/bash"
 import { waitFor } from "./helpers"
 import { WorkerTestModel } from "./worker-model-fixture"
 
@@ -243,17 +243,51 @@ describe("background commands", () => {
     expect(first.id).not.toBe(second.id)
   })
 
-  test("refuse to start in a directory that does not exist, and say why", async () => {
-    const refused = await commands
-      .start({ handle, command: "true", cwd: "missing" })
-      .catch((error: unknown) => error)
+  // Removal proof: give the sandbox the directory again; the start throws, which a persistent
+  // workspace records as an unconfirmed operation and blocks the thread for.
+  test("end with code 1 and bash's message in a directory that does not exist", async () => {
+    const started = await commands.start({ handle, command: "echo ran", cwd: "missing" })
+    await commands.wait(started.id, 10_000, signal)
 
-    expect(String(refused)).toContain("does not exist")
-    expect(commands.list()).toEqual([])
+    const read = await commands.read(started.id, handle, signal)
+    expect(read).toMatchObject({ status: "exited", exitCode: 1 })
+    expect(read.output).toContain(`cd: ${join(root, "missing")}: No such file or directory`)
+    expect(read.output).not.toContain("ran")
+  })
+
+  test("run in the directory named, relative to the workspace", async () => {
+    mkdirSync(join(root, "nested"))
+    const started = await commands.start({ handle, command: "pwd -P", cwd: "nested" })
+    await commands.wait(started.id, 10_000, signal)
+
+    const read = await commands.read(started.id, handle, signal)
+    expect(read).toMatchObject({ status: "exited", exitCode: 0 })
+    expect(read.output).toBe(`${join(root, "nested")}\n`)
   })
 })
 
 describe("background tools", () => {
+  // Removal proof: give the sandbox the bash tool's cwd again; the missing directory throws
+  // instead of returning a failed command the model can read.
+  test("bash runs in the directory named, and fails in one that does not exist", async () => {
+    const bash = createBashTool(async () => handle, commands)
+    const context = { signal, callId: "call", toolCallId: "tool" }
+    mkdirSync(join(root, "nested"))
+
+    expect(
+      await bash.execute(bash.parseInput({ command: "pwd -P", cwd: "nested" }), context)
+    ).toMatchObject({ exitCode: 0, stdout: `${join(root, "nested")}\n` })
+
+    const missing = (await bash.execute(
+      bash.parseInput({ command: "echo ran", cwd: " /workspace</cwd>" }),
+      context
+    )) as unknown as BashToolOutput
+    expect(missing).toMatchObject({ exitCode: 1, stdout: "" })
+    expect(missing.stderr).toContain(
+      `cd: ${join(root, " /workspace</cwd>")}: No such file or directory`
+    )
+  })
+
   test("bash starts one, wait waits for it, stop reports one already ended", async () => {
     const bash = createBashTool(async () => handle, commands)
     const wait = createWaitTool(async () => handle, commands)

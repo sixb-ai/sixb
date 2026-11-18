@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import { posix } from "node:path"
 import { AgentToolPublicError, type CommandResult, type Sandbox } from "@sixb/core"
 import { waitForAbort } from "./abort"
-import { LOGIN_SHELL_SCRIPT } from "./login-shell"
+import { commandDirectory, LOGIN_SHELL_SCRIPT_IN_DIRECTORY } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // A background command runs in the call that starts it, held open until it ends: a provider that
@@ -116,8 +116,8 @@ export class BackgroundCommands {
 
   /**
    * Start `command` in the background and return once it runs, its output going to its file. One
-   * the sandbox could not start, as in a directory that does not exist, throws what it said. A
-   * `signal` that aborts before then stops it.
+   * the sandbox could not start throws what it said; a directory that does not exist is not one,
+   * as the command's shell changes to it. A `signal` that aborts before then stops it.
    */
   async start(input: {
     readonly handle: AgentSandboxHandle
@@ -155,10 +155,10 @@ export class BackgroundCommands {
         paths.pid,
         paths.exit,
         nonce,
+        commandDirectory(sandbox.workingDirectory, input.cwd) ?? sandbox.workingDirectory,
         input.command,
       ],
       {
-        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(handle.env === undefined ? {} : { env: handle.env }),
         timeout: HELD_TIMEOUT_MS,
         signal: abort.signal,
@@ -483,12 +483,14 @@ const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
 /**
  * Started detached from the held call's own output, in a process group of its own (`set -m`: no
  * `setsid` binary on macOS), its pid written first with the start's nonce, then its exit code once
- * it ended. Its exit is the wrapper's. Arguments: output, pid and exit files, nonce, command.
+ * it ended. Its exit is the wrapper's. Its shell changes to the directory itself: one that does not
+ * exist ends it with code 1 and bash's message in its output. Arguments: output, pid and exit
+ * files, nonce, directory, command.
  */
 const START_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" || exit 1
 : > "$1" && rm -f -- "$3" || exit 1
 set -m
-bash -lc '${LOGIN_SHELL_SCRIPT}' bash "$5" < /dev/null >> "$1" 2>&1 &
+bash -lc '${LOGIN_SHELL_SCRIPT_IN_DIRECTORY}' bash "$5" "$6" < /dev/null >> "$1" 2>&1 &
 pid=$!
 set +m
 echo "$4 $pid" > "$2.tmp" && mv -f -- "$2.tmp" "$2"
