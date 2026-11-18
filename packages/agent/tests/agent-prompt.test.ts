@@ -32,6 +32,19 @@ function renderPrompt(input: Omit<RenderAgentSystemPromptInput, "contextDirector
   return renderAgentSystemPrompt({ contextDirectory: SANDBOX_CONTEXT_DIRECTORY, ...input })
 }
 
+/** A language model as a run's plan carries it, named when `name` is given. */
+function languageModel(providerId: string, modelId: string, name?: string): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId,
+      modelId,
+      ...(name === undefined ? {} : { name }),
+      capabilities: {},
+    },
+  })
+}
+
 describe("agent system prompt", () => {
   test("marks a durable filesystem reset without discarding conversation context", () => {
     const sandboxResetAt = "2026-01-01T00:00:00.000Z"
@@ -647,6 +660,72 @@ describe("agent system prompt", () => {
         sandboxModels: [listed(GATEWAY, "openai/gpt-5.5")],
       })
     ).not.toContain("sixb models")
+  })
+
+  test("names the model the run is on, and marks it among the models it can ask", () => {
+    // Removal proof: drop the running line in renderModelCommands, or `(you)` in
+    // renderLanguageModelCommand; it fails.
+    const listed = (modelId: string, name: string, description: string) =>
+      ({ kind: "language", provider: "azure-ai-foundry", modelId, name, description }) as const
+
+    const prompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel: languageModel("azure-ai-foundry", "deepseek-v4.1-flash", "DeepSeek V4.1 Flash"),
+      sandboxModels: [
+        listed("kimi-k3.1", "Kimi K3.1 Pro", "Default. Strong at multi-step work."),
+        listed("deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "Fast and inexpensive."),
+      ],
+    })
+
+    expect(prompt).toContain(
+      [
+        "You are running on DeepSeek V4.1 Flash (azure-ai-foundry/deepseek-v4.1-flash).",
+        "The project's models are yours to call through `sixb models`.",
+      ].join("\n")
+    )
+    expect(prompt).toContain(
+      [
+        "- kimi-k3.1 Kimi K3.1 Pro: Default. Strong at multi-step work.",
+        "- deepseek-v4.1-flash DeepSeek V4.1 Flash (you): Fast and inexpensive.",
+      ].join("\n")
+    )
+  })
+
+  test("marks the run's model by its provider too, when two providers share its id", () => {
+    // Removal proof: match the running model by modelId alone; the gateway's line is marked too.
+    const prompt = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel: languageModel("anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
+      sandboxModels: [
+        { kind: "language", provider: "anthropic", modelId: "claude-sonnet-5-5" },
+        { kind: "language", provider: GATEWAY, modelId: "claude-sonnet-5-5" },
+      ],
+    })
+
+    expect(prompt).toContain(
+      ["- anthropic:claude-sonnet-5-5 (you)", `- ${GATEWAY}:claude-sonnet-5-5\n`].join("\n")
+    )
+  })
+
+  test("names a project's only model, by its reference when it has no name", () => {
+    // Removal proof: return [] from renderModelCommands when there is no command; it fails.
+    const onlyModel = renderPrompt({
+      mode: "conversation",
+      skills: [],
+      runningModel: languageModel(GATEWAY, "openai/gpt-5.5", "GPT"),
+      sandboxModels: [{ kind: "language", provider: GATEWAY, modelId: "openai/gpt-5.5" }],
+    })
+    const unnamed = renderPrompt({
+      mode: "workflow-task",
+      skills: [],
+      runningModel: languageModel(GATEWAY, "openai/gpt-5.5"),
+    })
+
+    expect(onlyModel).toContain(`You are running on GPT (${GATEWAY}/openai/gpt-5.5).`)
+    expect(onlyModel).not.toContain("sixb models")
+    expect(unnamed).toContain(`You are running on ${GATEWAY}/openai/gpt-5.5.`)
   })
 
   // Guard proof: write any of these paths as `.sixb/agent/...` again; the last expectation fails.

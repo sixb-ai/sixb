@@ -374,6 +374,7 @@ function conversationEstimateShape(
         ...(authors?.section === undefined ? {} : { conversation: authors.section }),
         ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
         ...(memory ? { memory: memory.prompt } : {}),
+        runningModel: plan.model,
       }),
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),
