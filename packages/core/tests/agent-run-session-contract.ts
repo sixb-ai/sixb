@@ -81,6 +81,19 @@ const countingModel = new MockLanguageModel({
   },
 })
 
+/**
+ * A model that runs on computers: a computer that runs a turn calls it itself. The project never
+ * calls it, so a call that reaches here fails.
+ */
+const computerModel = new MockLanguageModel({
+  providerId: "test",
+  modelId: "computer-model",
+  runsOnComputers: true,
+  stream: async () => {
+    throw new Error("A computer calls this model, not the project.")
+  },
+})
+
 /** One call of `model` with one user message, read to its end as a runner reads it. */
 async function streamAll(
   model: LanguageModel,
@@ -139,7 +152,10 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    models: { language: [answeringModel, countingModel], webSearch: [searchingModel] },
+    models: {
+      language: [answeringModel, countingModel, computerModel],
+      webSearch: [searchingModel],
+    },
     tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
@@ -1040,6 +1056,56 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         executionId: session.run.executionId,
       })
       expect(latest).toMatchObject({ modelKind: "web-search", requestedModelId: "test-search" })
+      session.close()
+    })
+
+    // Guard proof: drop the wrapModel call from AgentRunSession.models.recordCall; the reported
+    // call then goes unrecorded, and the run's summary counts none.
+    test("record a call a computer made to a model that runs on computers", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const ref = { provider: "test", modelId: "computer-model" }
+
+      const described = await session.models.language(ref)
+      expect(described.runsOnComputers).toBe(true)
+      await session.models.recordCall?.(ref, { callId: "call-1", messages: [], tools: [] }, [
+        { type: "stream-start" },
+        { type: "response-metadata", id: "msg_1" },
+        { type: "finish", finishReason: "stop", usage: { inputTokens: 7, outputTokens: 2 } },
+      ])
+
+      const summary = await storage.aiUsage.summarizeExecution({
+        projectId: PROJECT_ID,
+        executionId: session.run.executionId,
+      })
+      expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 7 } })
+      session.close()
+    })
+
+    // Guard proof: drop the runsOnComputers check from AgentRunSession.models.recordCall; a runner
+    // then reports what any call of the project used.
+    test("refuse to record a call to a model that does not run on computers", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const refused = await session.models
+        .recordCall?.(
+          { provider: "test", modelId: "test-model" },
+          {
+            callId: "call-1",
+            messages: [],
+            tools: [],
+          },
+          [{ type: "finish", finishReason: "stop", usage: { inputTokens: 1_000_000 } }]
+        )
+        .catch((error: unknown) => error)
+
+      expect(refused).toMatchObject({ code: "agent.execution_failed" })
+      const summary = await storage.aiUsage.summarizeExecution({
+        projectId: PROJECT_ID,
+        executionId: session.run.executionId,
+      })
+      expect(summary).toMatchObject({ modelCallCount: 0 })
       session.close()
     })
 

@@ -122,6 +122,11 @@ claim            POST /api/agent-runs/:runId/claim, as the person who asked for 
                  a queued run only: one whose runner stopped ends interrupted, never replayed
 operations       JSON in, JSON out; dates, bytes and maps tagged (run-session-wire.ts)
 models.stream    the provider's events, one JSON line each; the server admits and records the call
+models.recordCall
+                 a call the runner made itself to a model that runs on computers (runsOnComputers):
+                 the server admits and records it from the events reported before its finish, and
+                 refuses the report for any other model. The runner's own copy of the model
+                 supplies the context window when the project's definition gives none
 events           live records in batches, best effort
 files.*          put, open and stat; a file's id is its content's digest
 renewLease       answers whether the run, or the turn a child stops with, was cancelled: the only

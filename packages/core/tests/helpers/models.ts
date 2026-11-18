@@ -13,12 +13,14 @@ interface MockLanguageModelOptions {
   readonly capabilities?: ModelCapabilities
   readonly definition?: LanguageModelDefinition
   readonly stream?: (request: LanguageModelRequest) => Promise<LanguageModelStream>
+  readonly runsOnComputers?: boolean
 }
 
 export class MockLanguageModel implements LanguageModel {
   readonly providerId: string
   readonly modelId: string
   readonly definition: LanguageModelDefinition
+  readonly runsOnComputers?: boolean
   private readonly streamHandler: (request: LanguageModelRequest) => Promise<LanguageModelStream>
 
   constructor(options: MockLanguageModelOptions = {}) {
@@ -41,6 +43,7 @@ export class MockLanguageModel implements LanguageModel {
     )
     this.providerId = this.definition.providerId
     this.modelId = this.definition.modelId
+    if (options.runsOnComputers !== undefined) this.runsOnComputers = options.runsOnComputers
     this.streamHandler =
       options.stream ??
       (async () => ({

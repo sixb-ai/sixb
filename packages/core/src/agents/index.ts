@@ -300,6 +300,7 @@ export {
   claimAgentRunChildOverHttp,
   claimAgentRunOverHttp,
   createHttpAgentRunSession,
+  type DescribedLanguageModel,
   type HttpAgentRunSessionInput,
 } from "./run-session-http"
 export { claimAgentRunForRunner, serveAgentRunSession } from "./run-session-serve"

@@ -12,13 +12,14 @@ import type { RunLogSession } from "../logging/run-logger"
 import { type LoggingService, resolveLoggingService } from "../logging/service"
 import type { LogFields } from "../logging/types"
 import type { LanguageModelRef } from "../models/catalog"
+import type { LanguageModelStreamEvent } from "../models/events"
 import {
   AiModelCallRecorder,
   createAiModelCallLimitController,
   type ModelCallAccountingStorage,
   type RecoverAiModelCall,
 } from "../models/execution/index"
-import type { LanguageModel } from "../models/language-model"
+import type { LanguageModel, LanguageModelRequest } from "../models/language-model"
 import { resolveLanguageModel } from "../models/resolve"
 import type { WebSearchModelRequest, WebSearchModelResult } from "../models/web-search-model"
 import type { Sixb } from "../runtime/sixb"
@@ -212,6 +213,16 @@ export interface AgentRunModels {
    */
   language(ref: LanguageModelRef, options?: { readonly measures?: boolean }): Promise<LanguageModel>
   /**
+   * Record a call a computer made itself, to a model that runs on computers (`runsOnComputers`):
+   * admitted against the same limits and recorded as a call made here would be, from the events
+   * the computer reports, its `finish` among them. Refused for any other model.
+   */
+  recordCall?(
+    ref: LanguageModelRef,
+    call: Omit<LanguageModelRequest, "signal">,
+    events: readonly LanguageModelStreamEvent[]
+  ): Promise<void>
+  /**
    * Search the web with the project's web search model, the one its plan's `web.search` names.
    * It always runs where the project is: the provider's key never reaches the runner.
    */
@@ -370,6 +381,24 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
   // Each model is pinned once per session: a later catalog refresh does not change a run's model.
   const languageModels = new Map<string, Promise<LanguageModel>>()
+  /** A language model of the project, resolved once for the session. */
+  const languageModel = (ref: LanguageModelRef): Promise<LanguageModel> => {
+    const key = `${ref.provider}/${ref.modelId}`
+    let resolved = languageModels.get(key)
+    if (!resolved) {
+      const entry = host.definitions.models?.language?.getByRef(ref)
+      if (!entry) {
+        throw createSixbError(
+          "agent.execution_failed",
+          `[Sixb] Language model '${key}' is not available in models.language.`
+        )
+      }
+      resolved = resolveLanguageModel(entry.model)
+      languageModels.set(key, resolved)
+      resolved.catch(() => languageModels.delete(key))
+    }
+    return resolved
+  }
   let bound: Promise<BoundRun> | undefined
   const bind = () => {
     bound ??= bindRun(host, run).catch((error: unknown) => {
@@ -526,22 +555,8 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     },
     models: {
       async language(ref, options) {
-        const key = `${ref.provider}/${ref.modelId}`
-        let resolved = languageModels.get(key)
-        if (!resolved) {
-          const entry = host.definitions.models?.language?.getByRef(ref)
-          if (!entry) {
-            throw createSixbError(
-              "agent.execution_failed",
-              `[Sixb] Language model '${key}' is not available in models.language.`
-            )
-          }
-          resolved = resolveLanguageModel(entry.model)
-          languageModels.set(key, resolved)
-          resolved.catch(() => languageModels.delete(key))
-        }
         // Each call records itself, and what it measured of the model's tokenizer.
-        const recorded = (await openedModelCalls()).wrapModel(await resolved)
+        const recorded = (await openedModelCalls()).wrapModel(await languageModel(ref))
         if (options?.measures === false) return recorded
 
         return measuringAgentContextTokenRates(recorded, {
@@ -549,6 +564,25 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           projectId: host.projectId,
           runId: run.id,
         })
+      },
+      async recordCall(ref, call, events) {
+        const model = await languageModel(ref)
+        if (model.runsOnComputers !== true) {
+          throw createSixbError(
+            "agent.execution_failed",
+            `[Sixb] Language model '${ref.provider}/${ref.modelId}' does not run on computers: its calls are made where the project runs.`
+          )
+        }
+
+        // The computer's events pass through the same recorder as a call made here.
+        const reported = (await openedModelCalls()).wrapModel({
+          ...model,
+          stream: async () => ({ events: replay(events) }),
+        })
+        const opened = await reported.stream({ ...call, signal: new AbortController().signal })
+        for await (const _event of opened.events) {
+          // Read to its end: the recorder records the call as its finish goes by.
+        }
       },
       webSearch,
     },
@@ -991,4 +1025,10 @@ function inboxReadMessage(item: AgentInboxItemRecord): AgentInboxReadMessage {
     parts: item.parts,
     createdAt: item.createdAt.toISOString(),
   }
+}
+
+async function* replay(
+  events: readonly LanguageModelStreamEvent[]
+): AsyncIterable<LanguageModelStreamEvent> {
+  yield* events
 }

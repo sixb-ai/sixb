@@ -25,6 +25,14 @@ export const providerCatalog: Record<"models" | "sandboxes", readonly ProviderEn
       icon: "azure.svg",
     },
     {
+      name: "Claude Code",
+      description:
+        "Use Claude through the Claude Code signed in on your computer, billed to your Claude plan.",
+      package: "@sixb/claude-code",
+      href: "https://github.com/sixb-ai/sixb/tree/main/models/claude-code#readme",
+      icon: "anthropic.svg",
+    },
+    {
       name: "TypeSafe",
       description: "Classify and score inputs with Jev decision models.",
       package: "@sixb/typesafe",

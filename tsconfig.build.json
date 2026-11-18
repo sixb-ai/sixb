@@ -116,6 +116,9 @@
       "path": "models/anthropic/tsconfig.build.json"
     },
     {
+      "path": "models/claude-code/tsconfig.build.json"
+    },
+    {
       "path": "models/azure-ai-foundry/tsconfig.build.json"
     },
     {

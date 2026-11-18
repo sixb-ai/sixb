@@ -10,6 +10,16 @@ Sixb packages are versioned independently. Each release entry names the packages
   last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
   link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
   series on the `timeZone` its query names, UTC when it names none.
+- Use Claude through the Claude Code signed in on your computer with `@sixb/claude-code`:
+  `claudeCode("opus")` is a language model like any other, billed to your Claude plan rather than
+  an API key. Sixb keeps running the Agent's prompt, tools and loop; each answer resumes the Claude
+  Code session the last one came from, and a conversation it cannot resume starts a new session
+  from a transcript. A turn that runs on a person's computer, in the desktop app or `sixb agent`,
+  calls Claude Code there, billed to their own plan, and the project records what each call used;
+  `createClaudeCode({ computersOnly: true })` keeps every call on people's computers, and
+  `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` signs it in where the agent worker runs.
+  The Agent sizes a conversation to the context window Claude Code gives the account, and a call
+  the plan's usage limit refuses says when the limit resets instead of being retried.
 
 ### Upgrade notes
 
