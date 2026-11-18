@@ -256,6 +256,44 @@ export function runRunClaimStorageContractSuite<TStorage extends RunClaimStorage
       })
     })
 
+    // Reproduce: drop the connection from the sibling lookup; Grace's run then waits for Ada's.
+    test("Sync: each connection's runs wait only for that connection's", async () => {
+      await withStorage(async (storage) => {
+        const runs = requireRuns(storage.syncRuns)
+        const queue = (id: string, connectionId?: string) =>
+          queueTestSyncRun(storage, {
+            id,
+            projectId,
+            syncId: "inbox",
+            ...(connectionId === undefined ? {} : { connectionId }),
+            datasetId: "inbox",
+            mode: "merge",
+          })
+        await queue("ada-1", "conn_ada")
+        await queue("ada-2", "conn_ada")
+        await queue("grace-1", "conn_grace")
+        await queue("whole-1")
+
+        await runs.startOrReclaim({ projectId, id: "ada-1", execution: held("ada-1"), claimedAt })
+
+        await expect(
+          runs.startOrReclaim({ projectId, id: "ada-2", execution: held("ada-2"), claimedAt })
+        ).resolves.toMatchObject({ outcome: "waiting", sibling: { id: "ada-1" } })
+        await expect(
+          runs.startOrReclaim({ projectId, id: "grace-1", execution: held("grace-1"), claimedAt })
+        ).resolves.toMatchObject({ outcome: "started", run: { connectionId: "conn_grace" } })
+        await expect(
+          runs.startOrReclaim({ projectId, id: "whole-1", execution: held("whole-1"), claimedAt })
+        ).resolves.toMatchObject({ outcome: "started" })
+
+        const ada = await runs.list({ projectId, syncId: "inbox", connectionId: "conn_ada" })
+        expect(ada.runs.map((run) => run.id).sort()).toEqual(["ada-1", "ada-2"])
+        const whole = await runs.list({ projectId, syncId: "inbox", connectionId: null })
+        expect(whole.runs.map((run) => run.id)).toEqual(["whole-1"])
+        expect(whole.runs[0]?.connectionId).toBeUndefined()
+      })
+    })
+
     // Reproduce: count any running sibling in `planRunClaim`; the second run then waits for a day.
     test("Sync: a run of an older version holds no later run back", async () => {
       await withStorage(async (storage) => {

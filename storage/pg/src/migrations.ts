@@ -479,6 +479,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("106-agent-thread-inbox", agentThreadInboxSql),
     pgSql("107-agent-inbox-edits", agentInboxEditsSql),
     pgSql("108-agent-thread-reads", agentThreadReadsSql),
+    pgSql("109-sync-run-connections", syncRunConnectionsSql),
   ],
 })
 
@@ -587,3 +588,4 @@ import guestCommentLinksSql from "./migrations/105-guest-comment-links.sql" with
 import agentThreadInboxSql from "./migrations/106-agent-thread-inbox.sql" with { type: "text" }
 import agentInboxEditsSql from "./migrations/107-agent-inbox-edits.sql" with { type: "text" }
 import agentThreadReadsSql from "./migrations/108-agent-thread-reads.sql" with { type: "text" }
+import syncRunConnectionsSql from "./migrations/109-sync-run-connections.sql" with { type: "text" }

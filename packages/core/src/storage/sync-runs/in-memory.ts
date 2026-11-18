@@ -126,6 +126,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       projectId: input.projectId,
       executionId: input.executionId,
       syncId: input.syncId,
+      ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
       datasetId: input.datasetId,
       mode: input.mode,
       status: "queued",
@@ -146,6 +147,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       (run) =>
         run.projectId === input.projectId &&
         run.syncId === existing.syncId &&
+        run.connectionId === existing.connectionId &&
         run.id !== existing.id &&
         run.status === "running"
     )
@@ -281,6 +283,11 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.syncId ? record.syncId === input.syncId : true))
       .filter((record) => (syncIds ? syncIds.has(record.syncId) : true))
+      .filter((record) =>
+        input.connectionId === undefined
+          ? true
+          : (record.connectionId ?? null) === input.connectionId
+      )
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
       .filter((record) =>
         matchesRunListDateFilters(record, {

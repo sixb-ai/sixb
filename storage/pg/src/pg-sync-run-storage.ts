@@ -71,6 +71,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
           id,
           execution_id,
           sync_id,
+          connection_id,
           dataset_id,
           mode,
           status,
@@ -83,6 +84,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
           ${input.id},
           ${input.executionId},
           ${input.syncId},
+          ${input.connectionId ?? null},
           ${input.datasetId},
           ${input.mode},
           ${"queued"},
@@ -133,14 +135,15 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
   async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>> {
     return runPgTransaction(this.sql, async (tx) => {
-      const { syncId } = await lockPgRun(tx, SYNC_RUNS, input.projectId, input.id)
+      const { syncId, connectionId } = await lockPgRun(tx, SYNC_RUNS, input.projectId, input.id)
 
-      // Two queued runs of one Sync would each see the other not running yet.
-      await lockAdvisoryKeys(tx, [syncRunsLockKey(input.projectId, syncId)])
+      // Two queued runs of one Sync and connection would each see the other not running yet.
+      await lockAdvisoryKeys(tx, [syncRunsLockKey(input.projectId, syncId, connectionId)])
 
       const [sibling] = await tx<DatabaseRow[]>`
         SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
         WHERE project_id = ${input.projectId} AND sync_id = ${syncId}
+          AND connection_id IS NOT DISTINCT FROM ${connectionId ?? null}::text
           AND status = ${"running"} AND id <> ${input.id}
         LIMIT 1
       `
@@ -269,6 +272,13 @@ export class PgSyncRunStorage implements SyncRunStorage {
       params.push(...input.syncIds)
     }
 
+    if (input.connectionId === null) {
+      whereClauses.push("connection_id IS NULL")
+    } else if (input.connectionId !== undefined) {
+      whereClauses.push(`connection_id = $${index++}`)
+      params.push(input.connectionId)
+    }
+
     if (input.datasetId) {
       whereClauses.push(`dataset_id = $${index++}`)
       params.push(input.datasetId)
@@ -322,8 +332,9 @@ function staleExecution(id: string): SyncRunError {
   return new SyncRunError(`[SixbPg] Execution token is no longer current on sync run '${id}'.`)
 }
 
-function syncRunsLockKey(projectId: string, syncId: string): string {
-  return `sync-runs:${JSON.stringify([projectId, syncId])}`
+function syncRunsLockKey(projectId: string, syncId: string, connectionId?: string): string {
+  const key = connectionId === undefined ? [projectId, syncId] : [projectId, syncId, connectionId]
+  return `sync-runs:${JSON.stringify(key)}`
 }
 
 function serializeCheckpoint(checkpoint: JsonValue | undefined): string | null {
@@ -336,6 +347,7 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
     projectId: row.project_id,
     executionId: row.execution_id,
     syncId: row.sync_id,
+    ...(row.connection_id === null ? {} : { connectionId: row.connection_id }),
     datasetId: row.dataset_id,
     mode: row.mode,
     status: row.status,
@@ -373,6 +385,7 @@ interface DatabaseRow extends PgRunExecutionColumns {
   id: string
   execution_id: string
   sync_id: string
+  connection_id: string | null
   dataset_id: string
   mode: SyncRunRecord["mode"]
   status: SyncRunRecord["status"]

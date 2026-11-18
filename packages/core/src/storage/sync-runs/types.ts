@@ -28,6 +28,8 @@ export interface SyncRunRecord {
   readonly projectId: string
   readonly executionId: string
   readonly syncId: string
+  /** The one connection this run reads, on a sync of an OAuth connector. */
+  readonly connectionId?: string
   readonly datasetId: string
   readonly mode: SyncRunMode
   readonly status: SyncRunStatus
@@ -55,6 +57,7 @@ export interface QueueSyncRunInput {
   readonly projectId: string
   readonly executionId: string
   readonly syncId: string
+  readonly connectionId?: string
   readonly datasetId: string
   readonly mode: SyncRunMode
   readonly queuedAt?: Date
@@ -111,6 +114,8 @@ export interface ListSyncRunsInput {
   readonly projectId: string
   readonly syncId?: string
   readonly syncIds?: readonly string[]
+  /** Runs of this connection. `null` lists the runs that read no single connection. */
+  readonly connectionId?: string | null
   readonly datasetId?: string
   readonly statuses?: readonly SyncRunStatus[]
   readonly startedAfter?: Date
@@ -138,8 +143,9 @@ export interface ListLatestSyncRunsResult {
 export interface SyncRunStorage {
   queue(input: QueueSyncRunInput): Promise<SyncRunRecord>
   /**
-   * Takes the run for one execution, or says why this delivery cannot. One run of a Sync runs at a
-   * time: a checkpoint is one cursor, and two runs reading from it would read the same rows.
+   * Takes the run for one execution, or says why this delivery cannot. One run of a Sync, and of
+   * one of its connections, runs at a time: a checkpoint is one cursor, and two runs reading from
+   * it would read the same rows.
    */
   startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>>
   /** Projects a renewed queue lease onto the run. */
