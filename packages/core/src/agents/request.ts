@@ -240,10 +240,11 @@ export async function requestAgentRun(
   // refused with `active_run_exists` below.
   const selected =
     "router" in requested
-      ? await routedConversationRunSpec(agents, {
+      ? await routedConversationRunSpec({
           ...requested,
-          projectId,
-          threadId: existingThread?.id,
+          previous: existingThread
+            ? await latestConversationRun(agents, projectId, existingThread.id)
+            : undefined,
           place,
           settings,
           language: models.language,
@@ -407,22 +408,20 @@ export async function editAgentMessage(
     (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: thread.id }))
       .approvalMode
 
+  // The edited turn runs where the thread runs now, like any message sent to it, and is routed
+  // against the turn it continues: the newest one the rewind keeps.
+  const place = turnPlace(thread.runsOn, thread.computer)
   const selected =
     "router" in requested
-      ? await routedEditRunSpec(agents, {
+      ? await routedConversationRunSpec({
           ...requested,
-          projectId,
-          threadId: thread.id,
-          beforeSeq: target.seq,
+          previous: await latestRetainedConversationRun(agents, projectId, thread.id, tailBefore),
+          place,
           settings,
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({
-    ...selected,
-    approvalMode,
-    ...(thread.runsOn === undefined ? {} : { runsOn: thread.runsOn }),
-  })
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
   // Prepare restore documents for any canvas artifacts touched by turns being rewound.
   const preRewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tailBefore)
@@ -666,52 +665,18 @@ async function listRewoundConversationRuns(
   }
 }
 
-async function routedEditRunSpec(
-  agents: AgentStorage,
-  input: RoutedTurn & {
-    readonly projectId: string
-    readonly threadId: string
-    readonly beforeSeq: number
-    readonly settings: RequesterSettings
-    readonly language: LanguageModelCatalog | undefined
-  }
-): Promise<ConversationAgentRunSpec> {
-  const previous =
-    input.beforeSeq <= 1
-      ? undefined
-      : await latestRetainedConversationRun(
-          agents,
-          input.projectId,
-          input.threadId,
-          input.beforeSeq
-        )
-  const choice = await input.router.choose(input.text, previous)
-
-  return resolveConversationRunSpec({
-    models: input.language,
-    selection: { model: choice.model },
-    settings: input.settings,
-    tierProbabilities: choice.tierProbabilities,
-  })
-}
-
+/**
+ * The newest turn an edit keeps: its trigger message is still in the thread, before the edited one.
+ * Turns the edit rewinds answered a message of `tail`; turns an earlier edit rewound answered a
+ * message that is gone.
+ */
 async function latestRetainedConversationRun(
   agents: AgentStorage,
   projectId: string,
   threadId: string,
-  beforeSeq: number
+  tail: readonly AgentMessageRecord[]
 ): Promise<ConversationAgentRunRecord | undefined> {
-  const { messages } = await agents.messages.list({
-    projectId,
-    threadId,
-    roles: ["user"],
-    order: "desc",
-    limit: 200,
-  })
-  const retainedTriggerIds = new Set(
-    messages.filter((message) => message.seq < beforeSeq).map((message) => message.id)
-  )
-  if (retainedTriggerIds.size === 0) return undefined
+  const notRetained = new Set(tail.map((message) => message.id))
 
   for (let offset = 0; ; ) {
     const page = await agents.runs.list({
@@ -722,11 +687,13 @@ async function latestRetainedConversationRun(
       limit: 50,
       offset,
     })
-    const match = page.runs.find(
-      (run): run is ConversationAgentRunRecord =>
-        run.kind === "conversation" && retainedTriggerIds.has(run.triggerMessageId)
-    )
-    if (match) return match
+
+    for (const run of page.runs) {
+      if (run.kind !== "conversation" || notRetained.has(run.triggerMessageId)) continue
+      if (await agents.messages.getById({ projectId, id: run.triggerMessageId })) return run
+      notRetained.add(run.triggerMessageId)
+    }
+
     offset += page.runs.length
     if (!page.hasMore || page.runs.length === 0) return undefined
   }
@@ -1594,20 +1561,16 @@ function routedTurn(
 
 /** The spec of a turn Sixb picks the model for, compared to the thread's previous turn. */
 async function routedConversationRunSpec(
-  agents: AgentStorage,
   input: RoutedTurn & {
-    readonly projectId: string
-    readonly threadId: string | undefined
+    /** The turn this one continues, absent for a thread's first. */
+    readonly previous: ConversationAgentRunRecord | undefined
     /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
     readonly place: AgentTurnPlace
     readonly settings: RequesterSettings
     readonly language: LanguageModelCatalog | undefined
   }
 ): Promise<ConversationAgentRunSpec> {
-  const previous = input.threadId
-    ? await latestConversationRun(agents, input.projectId, input.threadId)
-    : undefined
-  const choice = await input.router.choose(input.text, previous, input.place)
+  const choice = await input.router.choose(input.text, input.previous, input.place)
 
   return resolveConversationRunSpec({
     models: input.language,

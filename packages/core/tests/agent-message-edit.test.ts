@@ -97,13 +97,16 @@ async function completeTurn(
   runId: string,
   threadId: string,
   replyText: string,
-  replyId = `reply-${runId}`
+  replyId = `reply-${runId}`,
+  /** The folder a computer thread's runner starts the turn in. */
+  onComputer?: { readonly id: string; readonly folder: string }
 ) {
   const token = createAgentRunExecutionToken()
   await storage.agents.runs.start({
     id: runId,
     projectId,
     execution: { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+    ...(onComputer ? { onComputer } : {}),
   })
   await storage.agents.messages.append({
     id: replyId,
@@ -365,8 +368,9 @@ describe("editing an Agent thread message", () => {
   })
 
   test("routes an edited first turn fresh and an edited later turn against the retained prefix's model", async () => {
-    // Guard proof: pass latestConversationRun instead of latestRetainedConversationRun in
-    // routedEditRunSpec; editing u1 stays stuck on opus even for a light greeting.
+    // Guard proof: route the edit against latestConversationRun instead of
+    // latestRetainedConversationRun in editAgentMessage; editing u1 stays stuck on opus even for a
+    // light greeting.
     let nextTier: Record<LanguageModelTier, number> = { light: 0, standard: 0.1, heavy: 0.9 }
     const { host, storage } = setup({
       language: tiers,
@@ -410,6 +414,48 @@ describe("editing an Agent thread message", () => {
       text: "Hi!",
     })
     expect(editedU1.run.spec?.model.modelId).toBe("flash")
+  })
+
+  test("runs an edited turn in the thread's folder and keeps the model whose cache is warm there", async () => {
+    // Guard proof: write only `runsOn` into the edited run's spec, or route it without its place
+    // (request.ts, editAgentMessage); the turn loses its folder, reads as moved, and steps down to
+    // flash, leaving opus's cached prefix behind.
+    let nextTier: Record<LanguageModelTier, number> = { light: 0, standard: 0.1, heavy: 0.9 }
+    const { host, storage } = setup({
+      language: tiers,
+      decision: [decisionModel(async () => tierAnswer(nextTier))],
+    })
+    const sixb = await userScope(host, "alice")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const folder = { id: "cmp_1", folder: "/work/sixb" }
+    await sixb.agent.threads.moveToComputer(thread.id, { ...folder, name: "Laptop" })
+
+    const t1 = await sixb.agent.runs.request({
+      threadId: thread.id,
+      text: "Plan the release",
+      messageId: "u1",
+    })
+    await completeTurn(storage, host.id, t1.run.id, thread.id, "Plan ready.", "a1", folder)
+
+    const t2 = await sixb.agent.runs.request({
+      threadId: thread.id,
+      text: "List the changes",
+      messageId: "u2",
+    })
+    await completeTurn(storage, host.id, t2.run.id, thread.id, "12 changes.", "a2", folder)
+
+    nextTier = { light: 0.9, standard: 0.1, heavy: 0 }
+    const edited = await sixb.agent.runs.editMessage({
+      threadId: thread.id,
+      messageId: "u2",
+      text: "List the breaking changes",
+    })
+
+    expect(edited.run.spec).toMatchObject({
+      model: { provider: "test", modelId: "opus" },
+      runsOn: "computer",
+      computer: folder,
+    })
   })
 
   test("prevents a shared-thread participant from rewinding past another person's message", async () => {
