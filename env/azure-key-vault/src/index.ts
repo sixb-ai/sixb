@@ -514,17 +514,13 @@ async function managedIdentityToken(identity: AzureKeyVaultServer): Promise<stri
   const { clientId } = identity
   const which =
     clientId === undefined ? "The VM's managed identity" : `The managed identity ${clientId}`
-  const query = new URLSearchParams({
-    "api-version": METADATA_API_VERSION,
-    resource: VAULT_RESOURCE,
-    ...(clientId === undefined ? {} : { client_id: clientId }),
-  })
 
   let response: Response
   try {
-    response = await fetch(`${METADATA_ORIGIN}/metadata/identity/oauth2/token?${query}`, {
-      headers: { metadata: "true" },
-      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+    response = await askMetadataService("/metadata/identity/oauth2/token", {
+      "api-version": METADATA_API_VERSION,
+      resource: VAULT_RESOURCE,
+      ...(clientId === undefined ? {} : { client_id: clientId }),
     })
   } catch (error) {
     // Not an outage: Azure answers this on every VM, so the server isn't one.
@@ -586,10 +582,9 @@ async function thisVm(): Promise<
   | undefined
 > {
   try {
-    const response = await fetch(
-      `${METADATA_ORIGIN}/metadata/instance/compute?api-version=${METADATA_COMPUTE_API_VERSION}`,
-      { headers: { metadata: "true" }, signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) }
-    )
+    const response = await askMetadataService("/metadata/instance/compute", {
+      "api-version": METADATA_COMPUTE_API_VERSION,
+    })
     const { subscriptionId, resourceGroupName, name } = (await response.json()) as Record<
       string,
       unknown
@@ -606,6 +601,19 @@ async function thisVm(): Promise<
     // The command then has placeholders.
   }
   return undefined
+}
+
+/**
+ * Calls the VM's instance metadata service, never through a proxy. The service answers only the VM
+ * itself, and Azure doesn't support a proxy in front of it. Bun sends a plain-HTTP request to
+ * `HTTP_PROXY` when one is set, so a proxy would answer in the service's place and see the token.
+ */
+function askMetadataService(path: string, query: Record<string, string>): Promise<Response> {
+  return fetch(`${METADATA_ORIGIN}${path}?${new URLSearchParams(query)}`, {
+    headers: { metadata: "true" },
+    proxy: false,
+    signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+  })
 }
 
 /**

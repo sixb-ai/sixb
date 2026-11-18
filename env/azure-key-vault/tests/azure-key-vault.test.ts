@@ -20,6 +20,7 @@ interface Sent {
   readonly method: string
   readonly authorization: string | null
   readonly metadata: string | null
+  readonly proxy: unknown
   readonly body: string | undefined
 }
 
@@ -39,12 +40,16 @@ afterEach(async () => {
 /** Answers each request from `respond` and records what was sent. */
 function fakeAzure(respond: (request: Sent) => Response | Promise<Response>): Sent[] {
   const sent: Sent[] = []
-  spyOn(globalThis, "fetch").mockImplementation((async (input: string, init?: RequestInit) => {
+  spyOn(globalThis, "fetch").mockImplementation((async (
+    input: string,
+    init?: BunFetchRequestInit
+  ) => {
     const request: Sent = {
       url: new URL(input),
       method: init?.method ?? "GET",
       authorization: new Headers(init?.headers).get("authorization"),
       metadata: new Headers(init?.headers).get("metadata"),
+      proxy: init?.proxy,
       body: init?.body === undefined ? undefined : String(init.body),
     }
     sent.push(request)
@@ -662,6 +667,24 @@ describe("azureKeyVault", () => {
           "  az vm identity assign --subscription sub-1 --resource-group rg-1 --name vm-1" +
           ` --identities "$(az identity list --subscription sub-1 --query "[?clientId=='client-1'].id" --output tsv)"`
       )
+    })
+
+    // Reproduce: drop `proxy: false` from askMetadataService. Bun 1.4.4 then sends both requests
+    // to HTTP_PROXY when it's set, and the proxy answers in the service's place.
+    test("both questions go straight to the metadata service, never through a proxy", async () => {
+      const sent = fakeAzure(metadataService(vault("shop-prod", {}), identityNotFound))
+
+      const error = await managed()
+        .read("prod", { token: managedServerToken })
+        .catch((e) => e)
+      expect(error.message).toStartWith("[AzureKeyVault] This VM has no system-assigned")
+
+      const asked = sent.filter((request) => request.url.hostname === "169.254.169.254")
+      expect(asked.map((request) => request.url.pathname)).toEqual([
+        "/metadata/identity/oauth2/token",
+        "/metadata/instance/compute",
+      ])
+      expect(asked.map((request) => request.proxy)).toEqual([false, false])
     })
 
     // Reproduce: throw EnvSourceUnreachableError for this. A server that isn't an Azure VM then
