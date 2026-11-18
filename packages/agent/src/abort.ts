@@ -38,3 +38,5 @@ export function delay(ms: number, signal: AbortSignal, wake?: Promise<void>): Pr
     signal.addEventListener("abort", abort, { once: true })
   })
 }
+
+// CI scope probe: throwaway, never merged.
