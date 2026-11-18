@@ -5,7 +5,12 @@ import {
   type ActionRunFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { codedErrorResponseSchema, JsonValueSchema, sixbFailureSchema } from "./common"
+import {
+  codedErrorResponseSchema,
+  DefinitionFolderSchema,
+  JsonValueSchema,
+  sixbFailureSchema,
+} from "./common"
 import { ActionParamSchema } from "./ontology"
 
 export const ActionIdParamsSchema = z.object({
@@ -49,6 +54,7 @@ export const RuntimeStoppingResponseSchema = codedErrorResponseSchema(["runtime.
 
 export const ActionCatalogItemSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   name: z.string(),
   description: z.string().optional(),
   objectTypeId: z.string().optional(),

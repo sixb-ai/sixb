@@ -1,4 +1,4 @@
-import type { SixbHostView, SyncAccount, SyncDefinition } from "@sixb/core"
+import type { DefinitionFolders, SixbHostView, SyncAccount, SyncDefinition } from "@sixb/core"
 import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -137,10 +137,12 @@ export function summarizeSyncAccounts(syncId: string, accounts: readonly SyncAcc
 function serializeSync(
   sync: SyncDefinition,
   latestRun: SerializedSyncRun | null,
+  folders: DefinitionFolders,
   accounts?: Awaited<ReturnType<typeof summarizeAccounts>>
 ): ReturnType<typeof SyncSchema.parse> {
   return SyncSchema.parse({
     id: sync.id,
+    folder: folders.of("syncs", sync.id),
     mode: sync.config.mode,
     connector: {
       id: sync.connector.id,
@@ -174,6 +176,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
             serializeSync(
               sync,
               latestRuns.get(sync.id) ?? null,
+              host.definitions.folders,
               await summarizeAccounts(sync, accountsOf)
             )
           )
@@ -203,6 +206,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
         return serializeSync(
           sync,
           await getLatestSyncRun(sixb, sync.id),
+          host.definitions.folders,
           await summarizeAccounts(sync, connectorAccounts(sixb))
         )
       },

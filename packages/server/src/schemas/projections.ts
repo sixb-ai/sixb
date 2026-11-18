@@ -1,7 +1,7 @@
 import type { SixbFailure } from "@sixb/core"
 import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunFailureCode } from "@sixb/core/storage"
 import { z } from "zod"
-import { sixbFailureSchema } from "./common"
+import { DefinitionFolderSchema, sixbFailureSchema } from "./common"
 
 const ProjectionRunFailureSchema: z.ZodType<SixbFailure<ProjectionRunFailureCode>> =
   sixbFailureSchema(PROJECTION_RUN_FAILURE_CODES)
@@ -93,6 +93,7 @@ export const SourceEditConflictResolutionSchema = z.union([
 export const ObjectProjectionSchema = z.object({
   _tag: z.literal("ObjectProjectionDefinition"),
   id: z.string(),
+  folder: DefinitionFolderSchema,
   objectTypeId: z.string(),
   datasetId: z.string(),
   properties: z.record(z.string()),
@@ -107,6 +108,7 @@ export const ObjectProjectionSchema = z.object({
 export const LinkProjectionSchema = z.object({
   _tag: z.literal("LinkProjectionDefinition"),
   id: z.string(),
+  folder: DefinitionFolderSchema,
   linkId: z.string(),
   sourceObjectTypeId: z.string(),
   targetObjectTypeId: z.string(),
@@ -119,6 +121,7 @@ export const LinkProjectionSchema = z.object({
 export const TelemetryProjectionSchema = z.object({
   _tag: z.literal("TelemetryProjectionDefinition"),
   id: z.string(),
+  folder: DefinitionFolderSchema,
   objectTypeId: z.string(),
   datasetId: z.string(),
   objectIdField: z.string(),

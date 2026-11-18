@@ -4,7 +4,7 @@ import {
   type SyncRunFailureCode,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { sixbFailureSchema } from "./common"
+import { DefinitionFolderSchema, sixbFailureSchema } from "./common"
 import { DatasetDefinitionSchema } from "./datasets"
 
 const SyncRunFailureSchema: z.ZodType<SixbFailure<SyncRunFailureCode>> =
@@ -108,6 +108,7 @@ const SyncAccountSummarySchema = z.object({
 
 export const SyncSchema = z.object({
   id: z.string(),
+  folder: DefinitionFolderSchema,
   mode: SyncModeSchema,
   connector: z.object({
     id: z.string(),

@@ -14,6 +14,7 @@ function serializeConnector(
 ) {
   return {
     id: connector.id,
+    folder: host.definitions.folders.of("connectors", connector.id),
     type: connector.adapter.type,
     connection: isOAuthConnectorDefinition(connector)
       ? { authentication: "oauth2" as const }
