@@ -102,7 +102,11 @@ export function PendingMessages({
   // copy the tray last held: the list read again no longer has it.
   const held = useRef(new Map<string, AgentInboxItem>())
   const [folded, setFolded] = useState<ReadonlySet<string>>(NOTHING_READ)
-  const fetched = threadId === null ? [] : (inbox.data?.items ?? [])
+  // An edit waiting for the turn it stopped shows in place of the message it replaces, not here.
+  const fetched =
+    threadId === null
+      ? []
+      : (inbox.data?.items ?? []).filter((item) => item.replacesMessageId === undefined)
   for (const item of fetched) held.current.set(item.messageId, item)
   const leaving = [...read].flatMap((messageId) => {
     const item = held.current.get(messageId)

@@ -6,6 +6,7 @@ import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
+  ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "../storage/agents"
 import { runPlaceKey } from "../storage/agents/provider"
@@ -328,20 +329,49 @@ async function readSentSettings(
 
   // The latest turn the summary holds. It may have started after the oldest message kept, one sent
   // while it waited: look for it in both lists.
-  const priorRun = [...runs, ...earlier.runs]
-    .filter((run) => run.kind === "conversation" && !retained.has(run.triggerMessageId))
-    .sort((left, right) => startOf(right) - startOf(left))[0]
+  const priorRun = await latestSummarizedRun(host, [...runs, ...earlier.runs], retained)
   const movedMessageIds = detectMovedMessages({
     userMessages,
     checkpoint,
     places,
-    priorPlace: priorRun?.kind === "conversation" ? runPlaceKey(priorRun.spec) : undefined,
+    priorPlace: priorRun ? runPlaceKey(priorRun.spec) : undefined,
   })
   return {
     sentTimeZones: zones,
     sentLocales: locales,
     ...(movedMessageIds.length > 0 ? { movedMessageIds } : {}),
   }
+}
+
+/**
+ * The newest turn whose trigger message the summary holds. A turn whose message isn't kept is
+ * either summarized, its message still stored, or rewound by an edit, its message deleted: only the
+ * first tells where the conversation ran before its oldest kept message.
+ */
+async function latestSummarizedRun(
+  host: AgentTurnHistoryHost,
+  runs: readonly AgentRunRecord[],
+  retained: ReadonlySet<string>
+): Promise<ConversationAgentRunRecord | undefined> {
+  const candidates = runs
+    .filter(
+      (run): run is ConversationAgentRunRecord =>
+        run.kind === "conversation" && !retained.has(run.triggerMessageId)
+    )
+    .sort((left, right) => startOf(right) - startOf(left))
+
+  const rewound = new Set<string>()
+  for (const run of candidates) {
+    if (rewound.has(run.triggerMessageId)) continue
+
+    const trigger = await host.storage.agents.messages.getById({
+      projectId: host.projectId,
+      id: run.triggerMessageId,
+    })
+    if (trigger) return run
+    rewound.add(run.triggerMessageId)
+  }
+  return undefined
 }
 
 /** When a run started, or was admitted when it never did: the order the run lists sort by. */

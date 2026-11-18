@@ -29,6 +29,7 @@ import {
   type AgentApprovalMode,
   type AgentApprovalRecord,
   type AgentInboxItemRecord,
+  type AgentMessageRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadComputer,
@@ -36,7 +37,7 @@ import {
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
 } from "../storage/agents"
-import { type AgentTurnPlace, turnPlace } from "../storage/agents/provider"
+import { type AgentTurnPlace, countsAsThreadMessage, turnPlace } from "../storage/agents/provider"
 import {
   aiLimitSubjectsFromAttribution,
   aiUsageLimitExceededError,
@@ -44,7 +45,9 @@ import {
   applicableAiLimitPolicyStatuses,
 } from "../storage/ai-limits/enforcement"
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
+import type { PublishedArtifactVersion } from "../storage/artifacts/types"
 import type { ExecutionRecord } from "../storage/executions"
+import type { Storage } from "../storage/types"
 import {
   type AgentTurnReadiness,
   announceAgentApprovals,
@@ -119,6 +122,31 @@ export interface RequestAgentRunInput {
   readonly computer?: AgentThreadComputer
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
   readonly messageId?: string
+  /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
+  readonly principal?: Principal
+}
+
+/** An earlier message to replace, and the turn its new text starts. */
+export interface EditAgentMessageInput {
+  /** The conversation thread containing the message to edit. */
+  readonly threadId: string
+  /** The existing user message to replace and rewind from. */
+  readonly messageId: string
+  /** Updated user text. Omitted when attachments are the whole message. */
+  readonly text?: string
+  /** Blob-backed files attached to the edited message. */
+  readonly attachments?: readonly FileRef[]
+  /** Structured page/object context snapshotted onto the edited user message. */
+  readonly context?: readonly AgentContextEntryInput[]
+  /** Configured language model selected for the re-run. Omitted uses routing or the agent default. */
+  readonly model?: LanguageModelRef
+  /** Reasoning effort or token budget for the re-run. Omitted uses the model's default. */
+  readonly reasoning?: AgentReasoning
+  readonly timeZone?: string
+  readonly locale?: string
+  readonly approvalMode?: AgentApprovalMode
+  /** Explicit id for the replacement user message. Defaults to a generated id. */
+  readonly nextMessageId?: string
   /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
   readonly principal?: Principal
 }
@@ -215,10 +243,11 @@ export async function requestAgentRun(
   // refused with `active_run_exists` below.
   const selected =
     "router" in requested
-      ? await routedConversationRunSpec(agents, {
+      ? await routedConversationRunSpec({
           ...requested,
-          projectId,
-          threadId: existingThread?.id,
+          previous: existingThread
+            ? await latestConversationRun(agents, projectId, existingThread.id)
+            : undefined,
           place,
           settings,
           language: models.language,
@@ -299,6 +328,608 @@ export async function requestAgentRun(
     run,
     ...(jobId ? { jobId } : {}),
     createdThread,
+  }
+}
+
+/** Whether a stored message is a user-authored prompt that can be edited in place. */
+export function isEditableAgentMessage(
+  message: Pick<AgentMessageRecord, "role" | "parts">
+): boolean {
+  if (message.role !== "user") return false
+  if (message.parts.some((part) => part.type === "continuation")) return false
+  return countsAsThreadMessage(message)
+}
+
+/**
+ * Edit an earlier user message in place: the thread loses that message and everything after it,
+ * and the edited message starts a new turn.
+ *
+ * On an idle thread the rewind and the new turn are one transaction. While a turn runs, the edit
+ * waits in the thread's inbox, sent now: the turn stops, and its end rewinds the thread and starts
+ * the edited message (see `startQueuedAgentTurnFromInbox`), so nothing the stopped turn still
+ * writes lands after the edit.
+ *
+ * Historical `agent_runs` and `executions` remain intact for AI usage and cost accounting.
+ */
+export async function editAgentMessage(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  models: AgentRequestModels,
+  input: EditAgentMessageInput,
+  blobStorage?: RewindBlobStorage
+): Promise<SendAgentMessageResult> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertNoAgentSelector(input)
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+
+  const trigger = triggerParts(input)
+  const selection = { model: input.model, reasoning: input.reasoning }
+  const settings = requesterSettings(input)
+  if (input.approvalMode !== undefined) assertAgentApprovalMode(input.approvalMode)
+
+  const routed = routedTurn(models.router, selection, input)
+  const requested =
+    routed ?? (await resolveConversationRunSpec({ models: models.language, selection, settings }))
+  assertAttachments(input.attachments)
+
+  const contextParts = await resolveAgentContextParts(runtime, input.context)
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const principal =
+    authority.type === "principal"
+      ? authority.context.principal
+      : (input.principal ?? SYSTEM_PRINCIPAL)
+
+  const thread = await agents.threads.getById({ projectId, id: input.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${input.threadId}' not found.`
+    )
+  }
+  assertThreadAcceptsMessages(thread, principal)
+
+  const target = await agents.messages.getById({ projectId, id: input.messageId })
+  if (!target || target.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "message_not_found",
+      `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
+    )
+  }
+  assertEditableMessageAuthority(thread, target, principal)
+
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  assertParticipantCanRewindTail(thread, tail, principal)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  assertRewindsWholeTurns(target, tail, rewoundRuns)
+
+  const approvalMode =
+    input.approvalMode ??
+    (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: thread.id }))
+      .approvalMode
+
+  // The edited turn runs where the thread runs now, like any message sent to it, and is routed
+  // against the turn it continues: the newest one the rewind keeps.
+  const place = turnPlace(thread.runsOn, thread.computer)
+  const selected =
+    "router" in requested
+      ? await routedConversationRunSpec({
+          ...requested,
+          previous: await latestRetainedConversationRun(agents, projectId, thread.id, tail),
+          place,
+          settings,
+          language: models.language,
+        })
+      : requested
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
+
+  const edit: AgentMessageEdit = {
+    target,
+    messageId: input.nextMessageId ?? createAgentMessageId(),
+    authorPrincipal: principal,
+    parts: [
+      ...contextParts,
+      ...trigger,
+      ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
+    ],
+  }
+
+  // Checked before anything stops: an edit the budget refuses must not end the turn it replaces.
+  const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+
+  if (thread.activeRunId !== null) {
+    const item = await deferAgentMessageEdit(runtime, execution, thread, edit, {
+      spec,
+      settings,
+      blobStorage,
+    })
+    return { kind: "inbox", item }
+  }
+
+  const documents = await rewoundTurnDocuments(runtime, blobStorage, rewoundRuns, tail)
+
+  let run: ConversationAgentRunRecord
+  let rewind: AgentThreadRewind | undefined
+  let superseded: readonly AgentApprovalRecord[] = []
+  try {
+    run = await runtime.storage.transaction(async (tx) => {
+      const txAgents = tx.agents
+      if (!txAgents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+
+      rewind = await rewindAgentThread(tx, txAgents, {
+        projectId,
+        thread,
+        messageId: edit.target.id,
+        editor: principal,
+        documents,
+      })
+
+      await tx.executions.create(durableExecution)
+      const reported = await reportAgentApprovals(txAgents, {
+        projectId,
+        threadId: thread.id,
+        messageId: edit.messageId,
+      })
+      superseded = reported.superseded
+
+      await txAgents.messages.append({
+        id: edit.messageId,
+        projectId,
+        threadId: thread.id,
+        runId: null,
+        role: "user",
+        parts: [...reported.parts, ...edit.parts],
+        authorPrincipal: principal,
+      })
+
+      return txAgents.runs.create({
+        id: runId,
+        projectId,
+        executionId: durableExecution.id,
+        threadId: thread.id,
+        triggerMessageId: edit.messageId,
+        spec,
+      })
+    })
+  } catch (error) {
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      throw new AgentRequestError("active_run_exists", error.message)
+    }
+    throw error
+  }
+
+  await announceAgentThreadRewind(runtime, rewind, superseded)
+  await publishRunActivity(runtime, run)
+  await dispatchAgentRun(runtime, agents, runId)
+  return { kind: "turn", run, createdThread: false }
+}
+
+/** Where a rewind reads the documents that restore the canvases a rewound turn wrote. */
+type RewindBlobStorage = Pick<BlobStorage, "open" | "put">
+
+/** An edit of an earlier message: the message it replaces, and the one that replaces it. */
+interface AgentMessageEdit {
+  readonly target: AgentMessageRecord
+  readonly messageId: string
+  readonly authorPrincipal: Principal
+  readonly parts: readonly AgentMessagePart[]
+}
+
+/**
+ * Stop the running turn so the edit starts after it: the edit waits in the thread's inbox, sent
+ * now, and the turn's end rewinds the thread and starts it. Stopping a turn is for whoever may: the
+ * person who asked for it, or the thread's owner. A newer edit replaces one still waiting.
+ */
+async function deferAgentMessageEdit(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  thread: AgentThreadRecord,
+  edit: AgentMessageEdit,
+  options: {
+    readonly spec: ConversationAgentRunSpec
+    readonly settings: RequesterSettings
+    readonly blobStorage: RewindBlobStorage | undefined
+  }
+): Promise<AgentInboxItemRecord> {
+  const { spec, settings } = options
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const active = thread.activeRunId
+    ? await agents.runs.getById({ projectId, id: thread.activeRunId })
+    : null
+  if (active?.kind !== "conversation") {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
+  // The turn's end starts the edit as the person who sent it: a request no person sent, with sign-in
+  // off, leaves no one to start it as.
+  if (!execution.requestedBy) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' is answering, and an edit without a signed-in sender cannot wait for it: stop the answer, then edit.`
+    )
+  }
+
+  const mayStop =
+    principalsEqual(edit.authorPrincipal, thread.ownerPrincipal) ||
+    (await askedForTurn(runtime, active, edit.authorPrincipal))
+  if (!mayStop) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they or the thread's owner can stop it. Edit the message once it ends.`
+    )
+  }
+
+  // The request that sends it is recorded with it: the turn that starts it once this request is
+  // gone runs as that request's child.
+  const request = await ensureExecutionRecord(
+    runtime.storage.executions,
+    executionRecordInputFromRuntime({
+      execution,
+      runtimeAuthorization: runtime.runtimeAuthorization,
+    })
+  )
+
+  for (const waiting of await agents.inbox.list({ projectId, threadId: thread.id })) {
+    if (
+      waiting.replacesMessageId !== undefined &&
+      principalsEqual(waiting.authorPrincipal, edit.authorPrincipal)
+    ) {
+      await agents.inbox.remove({ projectId, threadId: thread.id, id: waiting.id })
+    }
+  }
+
+  const { item } = await agents.inbox.enqueue({
+    id: createAgentInboxItemId(),
+    projectId,
+    threadId: thread.id,
+    messageId: edit.messageId,
+    authorPrincipal: edit.authorPrincipal,
+    mode: "queue",
+    immediate: true,
+    replacesMessageId: edit.target.id,
+    parts: edit.parts,
+    // Routed now, against the turn the edit continues: the stopped turn is not one of those.
+    spec: {
+      model: spec.model,
+      ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+      approvalMode: spec.approvalMode,
+    },
+    ...settings,
+    executionId: request.id,
+  })
+
+  // Taken from the turn before it stops: it would read them at its next step.
+  await queueWaitingSteers(agents, projectId, thread.id, edit.authorPrincipal)
+  await stopTurnBefore(runtime, execution, active, options.blobStorage)
+  // The turn may have ended before the edit reached the inbox, its end reading none of it.
+  await startIfThreadIdle(runtime, execution, thread.id, options.blobStorage)
+  return item
+}
+
+/** What a rewind took back, for the events that tell watchers. */
+interface AgentThreadRewind {
+  readonly restoredVersions: readonly PublishedArtifactVersion["version"][]
+  readonly cancelledApprovals: readonly AgentApprovalRecord[]
+}
+
+/**
+ * Take the thread back to just before the edited message, in the caller's transaction: undo the
+ * artifact writes of the turns it removes, newest first, drop their approvals and the summaries
+ * that saw them, then delete the message and everything after it. It checks again what the edit
+ * checked, as the thread may have moved on since, and writes nothing when a check fails.
+ */
+async function rewindAgentThread(
+  tx: Storage,
+  agents: AgentStorage,
+  input: {
+    readonly projectId: string
+    readonly thread: AgentThreadRecord
+    /** The edited message: the thread keeps what came before it. */
+    readonly messageId: string
+    readonly editor: Principal
+    /** Restore documents of the rewound turns' canvases, read before the transaction. */
+    readonly documents: ReadonlyMap<string, Record<string, FileRef>>
+  }
+): Promise<AgentThreadRewind> {
+  const { projectId, thread, editor } = input
+
+  const target = await agents.messages.getById({ projectId, id: input.messageId })
+  if (!target || target.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "message_not_found",
+      `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
+    )
+  }
+  assertEditableMessageAuthority(thread, target, editor)
+
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  assertParticipantCanRewindTail(thread, tail, editor)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  assertRewindsWholeTurns(target, tail, rewoundRuns)
+
+  const restored = new Map<string, PublishedArtifactVersion["version"]>()
+  if (tx.artifacts) {
+    for (const { run, later } of oldestFirst(rewoundRuns, tail)) {
+      const trigger = tail.find((message) => message.id === run.triggerMessageId)
+      const undone = await tx.artifacts.undoTurnWrites({
+        projectId,
+        turnRunId: run.id,
+        laterTurnRunIds: later,
+        documents: input.documents.get(run.id) ?? {},
+        ...(trigger?.authorPrincipal ? { requester: trigger.authorPrincipal } : {}),
+      })
+      for (const entry of undone.restored) restored.set(entry.artifact.id, entry.version)
+      for (const deletedId of undone.deleted) restored.delete(deletedId)
+    }
+  }
+
+  const approvals = await agents.approvals.rewind({
+    projectId,
+    threadId: thread.id,
+    runIds: rewoundRuns.map((run) => run.id),
+    clearedMessageIds: tail.map((message) => message.id),
+  })
+  await agents.checkpoints.deleteAfterSeq({
+    projectId,
+    threadId: thread.id,
+    afterSeq: target.seq - 1,
+  })
+  await agents.messages.deleteFromSeq({ projectId, threadId: thread.id, fromSeq: target.seq })
+  await queueWaitingSteers(agents, projectId, thread.id, editor)
+
+  return { restoredVersions: [...restored.values()], cancelledApprovals: approvals.cancelled }
+}
+
+/**
+ * The editor's steers still waiting were written for a turn the edit takes back: they wait for the
+ * next turn instead, where the tray shows them to keep or withdraw. Someone else's stay as they are.
+ */
+async function queueWaitingSteers(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  editor: Principal
+): Promise<void> {
+  const waiting = await agents.inbox.list({ projectId, threadId, includeClaimed: false })
+  for (const item of waiting) {
+    if (item.mode !== "steer" || item.immediate) continue
+    if (!principalsEqual(item.authorPrincipal, editor)) continue
+
+    try {
+      await agents.inbox.update({ projectId, threadId, id: item.id, mode: "queue" })
+    } catch (error) {
+      // The stopping turn took it meanwhile: its end lets it go, and the rewind queues it then.
+      if (error instanceof AgentStorageError && error.code === "invalid_state") continue
+      throw error
+    }
+  }
+}
+
+/** The documents that restore the canvases the rewound turns wrote, read before the rewind. */
+async function rewoundTurnDocuments(
+  runtime: SixbRuntimeContext,
+  blobStorage: RewindBlobStorage | undefined,
+  rewoundRuns: readonly ConversationAgentRunRecord[],
+  tail: readonly AgentMessageRecord[]
+): Promise<ReadonlyMap<string, Record<string, FileRef>>> {
+  const documents = new Map<string, Record<string, FileRef>>()
+  const artifacts = runtime.storage.artifacts
+  if (!artifacts || !blobStorage) return documents
+
+  for (const { run, later } of oldestFirst(rewoundRuns, tail)) {
+    documents.set(
+      run.id,
+      await undoneTurnDocuments(
+        { projectId: runtime.projectId, storage: artifacts, blobStorage },
+        run.id,
+        later
+      )
+    )
+  }
+  return documents
+}
+
+/**
+ * The rewound turns oldest first, each with the turns after it: undone together, an artifact
+ * several of them wrote goes back to before the first, as no one else wrote it in between. Turns
+ * follow their trigger messages through the thread, and a retry follows the attempt it replaced.
+ */
+function oldestFirst(
+  rewoundRuns: readonly ConversationAgentRunRecord[],
+  tail: readonly AgentMessageRecord[]
+): readonly { readonly run: ConversationAgentRunRecord; readonly later: readonly string[] }[] {
+  const seqOf = new Map(tail.map((message) => [message.id, message.seq]))
+  const started = (run: ConversationAgentRunRecord) => (run.startedAt ?? run.createdAt).getTime()
+  const ordered = [...rewoundRuns].sort(
+    (left, right) =>
+      (seqOf.get(left.triggerMessageId) ?? 0) - (seqOf.get(right.triggerMessageId) ?? 0) ||
+      started(left) - started(right) ||
+      left.attempt - right.attempt
+  )
+
+  return ordered.map((run, index) => ({
+    run,
+    later: ordered.slice(index + 1).map((each) => each.id),
+  }))
+}
+
+async function announceAgentThreadRewind(
+  runtime: SixbRuntimeContext,
+  rewind: AgentThreadRewind | undefined,
+  superseded: readonly AgentApprovalRecord[]
+): Promise<void> {
+  await announceArtifactUpdates(runtime.events, rewind?.restoredVersions ?? [])
+  await announceAgentApprovals(runtime.broker, [
+    ...(rewind?.cancelledApprovals ?? []),
+    ...superseded,
+  ])
+}
+
+function assertEditableMessageAuthority(
+  _thread: AgentThreadRecord,
+  target: AgentMessageRecord,
+  principal: Principal
+): void {
+  if (!isEditableAgentMessage(target)) {
+    throw new AgentRequestError(
+      "message_not_editable",
+      `[Sixb] Only user-authored messages can be edited.`
+    )
+  }
+  if (
+    principal.type === "user" &&
+    (!target.authorPrincipal || !principalsEqual(target.authorPrincipal, principal))
+  ) {
+    throw new AgentRequestError(
+      "not_message_author",
+      `[Sixb] Only the author of message '${target.id}' can edit it.`
+    )
+  }
+}
+
+function assertParticipantCanRewindTail(
+  thread: AgentThreadRecord,
+  tail: readonly AgentMessageRecord[],
+  principal: Principal
+): void {
+  if (principal.type !== "user" || principalsEqual(principal, thread.ownerPrincipal)) return
+
+  const erasesOthers = tail.some(
+    (message) =>
+      message.role === "user" &&
+      countsAsThreadMessage(message) &&
+      message.authorPrincipal !== undefined &&
+      !principalsEqual(message.authorPrincipal, principal)
+  )
+  if (erasesOthers) {
+    throw new AgentRequestError(
+      "not_thread_owner",
+      "[Sixb] Only the thread's owner can rewind past another person's messages."
+    )
+  }
+}
+
+/**
+ * An edit takes back whole turns: each turn it rewinds answered a message it removes. A message a
+ * turn read while it was answering, as a steer, sits inside that turn: rewinding from it would
+ * keep the turn's first part in the chat and undo everything the turn did.
+ */
+function assertRewindsWholeTurns(
+  target: AgentMessageRecord,
+  tail: readonly AgentMessageRecord[],
+  rewoundRuns: readonly ConversationAgentRunRecord[]
+): void {
+  const removed = new Set(tail.map((message) => message.id))
+  const cut = rewoundRuns.find((run) => !removed.has(run.triggerMessageId))
+  if (!cut) return
+
+  throw new AgentRequestError(
+    "message_not_editable",
+    `[Sixb] Agent message '${target.id}' came in while the Agent was answering message '${cut.triggerMessageId}': edit that message instead.`
+  )
+}
+
+async function listAllThreadMessagesFromSeq(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  fromSeq: number
+): Promise<readonly AgentMessageRecord[]> {
+  const messages: AgentMessageRecord[] = []
+  const afterSeq = fromSeq - 1
+  for (;;) {
+    const page = await agents.messages.list({
+      projectId,
+      threadId,
+      afterSeq,
+      order: "asc",
+      limit: 200,
+      offset: messages.length,
+    })
+    messages.push(...page.messages)
+    if (!page.hasMore || page.messages.length === 0) return messages
+  }
+}
+
+/** Conversation runs triggered at or after the rewound message, newest first. */
+async function listRewoundConversationRuns(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  tail: readonly AgentMessageRecord[]
+): Promise<readonly ConversationAgentRunRecord[]> {
+  const removedMessageIds = new Set(tail.map((message) => message.id))
+  const removedRunIds = new Set(
+    tail.flatMap((message) => (message.runId === null ? [] : [message.runId]))
+  )
+  const found: ConversationAgentRunRecord[] = []
+  for (let offset = 0; ; ) {
+    const page = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 100,
+      offset,
+    })
+    for (const run of page.runs) {
+      if (
+        run.kind === "conversation" &&
+        (removedMessageIds.has(run.triggerMessageId) || removedRunIds.has(run.id))
+      ) {
+        found.push(run)
+      }
+    }
+    offset += page.runs.length
+    if (!page.hasMore || page.runs.length === 0) return found
+  }
+}
+
+/**
+ * The newest turn an edit keeps: its trigger message is still in the thread, before the edited one.
+ * Turns the edit rewinds answered a message of `tail`; turns an earlier edit rewound answered a
+ * message that is gone.
+ */
+async function latestRetainedConversationRun(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string,
+  tail: readonly AgentMessageRecord[]
+): Promise<ConversationAgentRunRecord | undefined> {
+  const notRetained = new Set(tail.map((message) => message.id))
+
+  for (let offset = 0; ; ) {
+    const page = await agents.runs.list({
+      projectId,
+      threadId,
+      kinds: ["conversation"],
+      order: "desc",
+      limit: 50,
+      offset,
+    })
+
+    for (const run of page.runs) {
+      if (run.kind !== "conversation" || notRetained.has(run.triggerMessageId)) continue
+      if (await agents.messages.getById({ projectId, id: run.triggerMessageId })) return run
+      notRetained.add(run.triggerMessageId)
+    }
+
+    offset += page.runs.length
+    if (!page.hasMore || page.runs.length === 0) return undefined
   }
 }
 
@@ -460,7 +1091,8 @@ export async function sendAgentMessage(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models: AgentRequestModels,
-  input: SendAgentMessageInput
+  input: SendAgentMessageInput,
+  blobStorage?: RewindBlobStorage
 ): Promise<SendAgentMessageResult> {
   const delivery = input.delivery ?? "auto"
   const agents = requireAgentStorage(runtime)
@@ -531,9 +1163,9 @@ export async function sendAgentMessage(
   })
 
   if (delivery === "send_now") {
-    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord, blobStorage)
   }
-  await startIfThreadIdle(runtime, execution, thread.id)
+  await startIfThreadIdle(runtime, execution, thread.id, blobStorage)
   return { kind: "inbox", item }
 }
 
@@ -562,7 +1194,8 @@ export interface PromoteAgentInboxItemInput {
 export async function promoteAgentInboxItem(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  input: PromoteAgentInboxItemInput
+  input: PromoteAgentInboxItemInput,
+  blobStorage?: RewindBlobStorage
 ): Promise<AgentInboxItemRecord> {
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
@@ -633,9 +1266,9 @@ export async function promoteAgentInboxItem(
     )
   }
   if (input.immediate === true && turn) {
-    await stopTurnBefore(runtime, execution, turn)
+    await stopTurnBefore(runtime, execution, turn, blobStorage)
   }
-  await startIfThreadIdle(runtime, execution, thread.id)
+  await startIfThreadIdle(runtime, execution, thread.id, blobStorage)
   return updated
 }
 
@@ -709,14 +1342,21 @@ async function askedForTurn(
 async function stopTurnBefore(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  active: ConversationAgentRunRecord
+  active: ConversationAgentRunRecord,
+  blobStorage: RewindBlobStorage | undefined
 ): Promise<void> {
   if (active.status === "running") {
     await cancelAgentRun(runtime, active)
     return
   }
   await cancelAgentRun(runtime, active).catch(() => undefined)
-  await startQueuedAgentTurnFromInbox(runtime, execution, active, { onlyImmediate: true })
+  await startQueuedAgentTurnFromInbox(
+    runtime,
+    execution,
+    active,
+    { onlyImmediate: true },
+    blobStorage
+  )
 }
 
 /**
@@ -729,7 +1369,8 @@ async function stopTurnBefore(
 async function startIfThreadIdle(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  threadId: string
+  threadId: string,
+  blobStorage: RewindBlobStorage | undefined
 ): Promise<void> {
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
@@ -751,7 +1392,7 @@ async function startIfThreadIdle(
     // it, setting its held calls aside as a message typed in the chat would.
     const onlyImmediate =
       isAwaitingApprovalRun(last) || !(await turnAnsweredEveryMessage(agents, last))
-    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
+    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate }, blobStorage)
   } catch (error) {
     console.error(
       `[Sixb] Could not start what waits in Agent thread '${threadId}'; the repair pass retries.`,
@@ -804,7 +1445,8 @@ export async function startQueuedAgentTurnFromInbox(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   finishedRun: ConversationAgentRunRecord,
-  input: { readonly onlyImmediate: boolean }
+  input: { readonly onlyImmediate: boolean },
+  blobStorage?: RewindBlobStorage
 ): Promise<AgentQueuedTurnStart> {
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
@@ -834,8 +1476,11 @@ export async function startQueuedAgentTurnFromInbox(
   const runId = createAgentRunId()
   const durableExecution = await prepareResumedExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
+  const documents = await waitingEditDocuments(runtime, blobStorage, thread, principal)
 
   let started: ConversationAgentRunRecord | null
+  let rewind: AgentThreadRewind | undefined
+  let dropped: { readonly item: AgentInboxItemRecord; readonly reason: unknown } | undefined
   let superseded: readonly AgentApprovalRecord[] = []
   try {
     started = await runtime.storage.transaction(async (tx) => {
@@ -853,6 +1498,24 @@ export async function startQueuedAgentTurnFromInbox(
         authorPrincipal: principal,
       })
       if (!item) return null
+
+      // An edit takes the thread back to the message it replaces first. One the thread moved past
+      // since it was sent (that message is gone) is dropped: the checks write nothing.
+      if (item.replacesMessageId !== undefined) {
+        try {
+          rewind = await rewindAgentThread(tx, agents, {
+            projectId,
+            thread,
+            messageId: item.replacesMessageId,
+            editor: item.authorPrincipal,
+            documents,
+          })
+        } catch (error) {
+          if (!(error instanceof AgentRequestError)) throw error
+          dropped = { item, reason: error }
+          return null
+        }
+      }
 
       const inherited = await resolveAgentApprovalMode(agents, {
         projectId,
@@ -905,12 +1568,47 @@ export async function startQueuedAgentTurnFromInbox(
     }
     throw error
   }
+  if (dropped) {
+    console.warn(
+      `[Sixb] Dropped the edit of Agent message '${dropped.item.replacesMessageId}' waiting in thread '${thread.id}': it no longer applies.`,
+      dropped.reason
+    )
+  }
   if (!started) return { status: "nothing" }
 
-  await announceAgentApprovals(runtime.broker, superseded)
+  await announceAgentThreadRewind(runtime, rewind, superseded)
   await publishRunActivity(runtime, started)
   await dispatchAgentRun(runtime, agents, runId)
   return { status: "started", run: started }
+}
+
+/**
+ * The restore documents for the edit the caller's next queued message would make, read before
+ * the transaction that starts it, as an edit on an idle thread reads them. Edits are always sent
+ * now, so the caller's oldest message sent now is the one their turn takes first.
+ */
+async function waitingEditDocuments(
+  runtime: SixbRuntimeContext,
+  blobStorage: RewindBlobStorage | undefined,
+  thread: AgentThreadRecord,
+  principal: Principal
+): Promise<ReadonlyMap<string, Record<string, FileRef>>> {
+  if (!runtime.storage.artifacts || !blobStorage) return new Map()
+
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const waiting = await agents.inbox.list({ projectId, threadId: thread.id, includeClaimed: false })
+  const next = waiting
+    .filter((item) => item.immediate && principalsEqual(item.authorPrincipal, principal))
+    .sort((left, right) => left.seq - right.seq)[0]
+  if (next?.replacesMessageId === undefined) return new Map()
+
+  const target = await agents.messages.getById({ projectId, id: next.replacesMessageId })
+  if (!target || target.threadId !== thread.id) return new Map()
+
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  return rewoundTurnDocuments(runtime, blobStorage, rewoundRuns, tail)
 }
 
 /** A queued message's turn: the finished turn's spec, with the message's own choices over it. */
@@ -921,7 +1619,10 @@ function queuedConversationRunSpec(
   approvalMode: AgentApprovalMode
 ): ConversationAgentRunSpec {
   const model = item.spec?.model ?? kept.model
-  const reasoning = item.spec?.reasoning ?? kept.reasoning
+  // An edit's choices were made against the turn it continues: the stopped turn it rewinds passes
+  // nothing on.
+  const reasoning =
+    item.spec?.reasoning ?? (item.replacesMessageId === undefined ? kept.reasoning : undefined)
   const timeZone = item.timeZone ?? kept.timeZone
   const locale = item.locale ?? kept.locale
   return inPlace(thread, {
@@ -1164,20 +1865,16 @@ function routedTurn(
 
 /** The spec of a turn Sixb picks the model for, compared to the thread's previous turn. */
 async function routedConversationRunSpec(
-  agents: AgentStorage,
   input: RoutedTurn & {
-    readonly projectId: string
-    readonly threadId: string | undefined
+    /** The turn this one continues, absent for a thread's first. */
+    readonly previous: ConversationAgentRunRecord | undefined
     /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
     readonly place: AgentTurnPlace
     readonly settings: RequesterSettings
     readonly language: LanguageModelCatalog | undefined
   }
 ): Promise<ConversationAgentRunSpec> {
-  const previous = input.threadId
-    ? await latestConversationRun(agents, input.projectId, input.threadId)
-    : undefined
-  const choice = await input.router.choose(input.text, previous, input.place)
+  const choice = await input.router.choose(input.text, input.previous, input.place)
 
   return resolveConversationRunSpec({
     models: input.language,
@@ -1239,6 +1936,18 @@ function assertAttachments(attachments: readonly FileRef[] | undefined): void {
 }
 
 function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal): void {
+  assertThreadAcceptsMessages(thread, principal)
+  // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
+  if (thread.activeRunId !== null) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
+}
+
+/** Whether `principal` may send the thread a message: a turn may still be running. */
+function assertThreadAcceptsMessages(thread: AgentThreadRecord, principal: Principal): void {
   assertConversationThread(thread)
   assertSandboxExecutionAvailable(thread)
   // Its owner's computer runs its turns as its owner: nobody else may send it one.
@@ -1246,13 +1955,6 @@ function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal)
     throw new AgentRequestError(
       "not_thread_owner",
       `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can message it. Shared with you, it is yours to read and follow.`
-    )
-  }
-  // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
-  if (thread.activeRunId !== null) {
-    throw new AgentRequestError(
-      "active_run_exists",
-      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
     )
   }
 }

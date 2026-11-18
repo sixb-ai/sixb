@@ -393,6 +393,38 @@ class MovingConversation {
     return this.run(runId)
   }
 
+  /**
+   * Edit an earlier message as `runs.editMessage` does: the thread loses it and every later message
+   * and summary, and the edited text runs where the conversation is now.
+   */
+  async edit(messageNumber: number, text: string): Promise<string> {
+    const agents = this.storage.agents
+    const target = await agents.messages.getById({
+      projectId,
+      id: `${this.threadId}_message_${messageNumber}`,
+    })
+    if (!target) throw new Error(`Expected message ${messageNumber}.`)
+
+    await agents.checkpoints.deleteAfterSeq({
+      projectId,
+      threadId: this.threadId,
+      afterSeq: target.seq - 1,
+    })
+    await agents.messages.deleteFromSeq({ projectId, threadId: this.threadId, fromSeq: target.seq })
+
+    const messageId = `${target.id}_edited`
+    await agents.messages.append({
+      id: messageId,
+      projectId,
+      threadId: this.threadId,
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text }],
+      createdAt: this.now(),
+    })
+    return this.createRun(messageId, `${messageId}_run`)
+  }
+
   async fork(): Promise<MovingConversation> {
     const id = `${this.threadId}_fork`
     await this.storage.agents.threads.fork({
@@ -767,4 +799,215 @@ test("a message sent while a turn waited does not hide where that turn ran", asy
   expect(last.messages[1]?.content[0]).toEqual({ type: "text", text: "Also check the tests." })
   expect(movedMessages(last)).toEqual([])
   expectEachWorkspaceReplaysItsRequests(conversation.requests)
+})
+
+test("an edit after a move sends the messages it keeps as they were, and moves only its own", async () => {
+  // Guard proof: drop the trigger check in `latestSummarizedRun` (run-turn.ts) and the turn U3
+  // rewound reads as the one before U1: U1 gains the move note and its cached prefix is lost.
+  const conversation = await MovingConversation.start()
+  const first = await conversation.turn()
+  await conversation.turn()
+  await conversation.moveTo(APP_FOLDER)
+  await conversation.turn()
+
+  const edited = await conversation.run(await conversation.edit(2, "U2, edited"))
+  const next = await conversation.turn()
+
+  // U1 ran in the cloud and stays as it was sent; the edited U2 runs on the computer, so it alone
+  // says the conversation moved, at this turn and the next.
+  expect(edited.messages[0]).toEqual(first.messages[0])
+  expect(movedMessages(edited)).toEqual(["U2, edited"])
+  expect(movedMessages(next)).toEqual(["U2, edited"])
+  expectStartsWith(next, edited)
+})
+
+test("editing an earlier turn preserves exact prefix bytes, pinned memory, and cache affinity while dropping later turns", async () => {
+  // Guard proof: omit checkpoints.deleteAfterSeq or messages.deleteFromSeq on rewind, or load
+  // memory as of now instead of thread.createdAt; the prefix bytes diverge or Turn 3 leaks.
+  const seeded = await seedThread(false)
+  const { storage } = seeded
+  const agents = storage.agents
+
+  // Save a memory entry AFTER Turn 1/Turn 2 started, as a later Turn 3 might have done.
+  await agents.memory.save({
+    projectId,
+    repoId: "project",
+    baseRevision: 0,
+    message: "Later turn memory",
+    author: { type: "user", id: "user" },
+    changes: [{ path: "MEMORY.md", contents: "# Memory\n\n- Secret from deleted Turn 3\n" }],
+    createdAt: new Date(Date.now() + 60_000),
+  })
+
+  // Capture exact request bytes and caching intent when Turn 2 originally runs.
+  let originalMessagesSent: readonly ModelMessage[] | undefined
+  let originalCaching: unknown
+  const firstModel = new WorkerTestModel({
+    modelId: "mock-model",
+    stream: async (options) => {
+      originalMessagesSent = options.messages
+      originalCaching = options.caching
+      return testStream([
+        { type: "stream-start" },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Original reply 2" },
+        { type: "text-end", id: "answer" },
+        { type: "finish", finishReason: "stop", rawFinishReason: "stop", usage },
+      ])
+    },
+  })
+
+  const baseContext = {
+    id: projectId,
+    authorPrincipal: { type: "serviceAccount" as const, id: "service_agent" },
+    blobStorage: new InMemoryBlobStorage(),
+    tools: [],
+    systemPrompt: "Test system prompt.",
+    projectTimeZone: "UTC",
+    projectLocale: "en",
+  }
+
+  await runTurnInSession({
+    storage: requireWorkerStorage(storage),
+    context: baseContext,
+    plan: {
+      instructions: "Answer clearly.",
+      model: firstModel,
+      recordedModel: firstModel,
+      tools: [],
+      skills: [],
+      ontologyDocs: { files: [], index: [] },
+    },
+    run: seeded.run,
+    signal: new AbortController().signal,
+  })
+
+  // Append Turn 3 + checkpoint that summarizes through Turn 2.
+  await agents.messages.append({
+    id: "message_5",
+    projectId,
+    threadId,
+    runId: null,
+    role: "user",
+    parts: [{ type: "text", text: "Turn 3 secret follow-up" }],
+  })
+  const exec3 = await createTestAgentExecution(storage, { projectId, runId: "run_3" })
+  await agents.runs.create({
+    id: "run_3",
+    projectId,
+    executionId: exec3,
+    threadId,
+    triggerMessageId: "message_5",
+    spec: { model: { provider: "test", modelId: "test-model" } },
+  })
+  await agents.runs.start({
+    id: "run_3",
+    projectId,
+    execution: {
+      token: "execution_3",
+      queueLeaseExpiresAt: new Date("2026-08-27T12:20:00.000Z"),
+    },
+  })
+  await agents.checkpoints.create({
+    id: "checkpoint_future",
+    projectId,
+    threadId,
+    createdByRunId: "run_3",
+    expectedPreviousCheckpointId: null,
+    expectedHeadSeq: 5,
+    executionToken: "execution_3",
+    reason: "threshold",
+    summary: "Summary mentioning Turn 3 secret follow-up.",
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: 4,
+    observedHeadSeq: 5,
+    estimatedInputTokensBefore: 2_000,
+    estimatedInputTokensAfter: 400,
+    summaryModelId: "test-model",
+  })
+  await agents.runs.finish({
+    id: "run_3",
+    projectId,
+    executionToken: "execution_3",
+    status: "succeeded",
+  })
+
+  // Rewind Turn 2 (seq 3): delete checkpoints > 2 and messages >= 3, then append edited Turn 2.
+  await agents.checkpoints.deleteAfterSeq({ projectId, threadId, afterSeq: 2 })
+  await agents.messages.deleteFromSeq({ projectId, threadId, fromSeq: 3 })
+  const editedMsg = await agents.messages.append({
+    id: "message_3_edited",
+    projectId,
+    threadId,
+    runId: null,
+    role: "user",
+    parts: [{ type: "text", text: "three (edited)" }],
+  })
+  expect(editedMsg.seq).toBe(3)
+
+  const execEdited = await createTestAgentExecution(storage, { projectId, runId: "run_2_edited" })
+  await agents.runs.create({
+    id: "run_2_edited",
+    projectId,
+    executionId: execEdited,
+    threadId,
+    triggerMessageId: "message_3_edited",
+    spec: { model: { provider: "test", modelId: "test-model" } },
+  })
+  const startedEdited = await agents.runs.start({
+    id: "run_2_edited",
+    projectId,
+    execution: {
+      token: "execution_2_edited",
+      queueLeaseExpiresAt: new Date("2026-08-27T12:25:00.000Z"),
+    },
+  })
+  if (startedEdited.kind !== "conversation") throw new Error("Expected conversation run")
+
+  let rewoundMessagesSent: readonly ModelMessage[] | undefined
+  let rewoundCaching: unknown
+  const secondModel = new WorkerTestModel({
+    modelId: "mock-model",
+    stream: async (options) => {
+      rewoundMessagesSent = options.messages
+      rewoundCaching = options.caching
+      return testStream([
+        { type: "stream-start" },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Edited reply 2" },
+        { type: "text-end", id: "answer" },
+        { type: "finish", finishReason: "stop", rawFinishReason: "stop", usage },
+      ])
+    },
+  })
+
+  await runTurnInSession({
+    storage: requireWorkerStorage(storage),
+    context: baseContext,
+    plan: {
+      instructions: "Answer clearly.",
+      model: secondModel,
+      recordedModel: secondModel,
+      tools: [],
+      skills: [],
+      ontologyDocs: { files: [], index: [] },
+    },
+    run: startedEdited,
+    signal: new AbortController().signal,
+  })
+
+  if (!originalMessagesSent || !rewoundMessagesSent) {
+    throw new Error("Expected both prompts to be captured.")
+  }
+
+  // Same threadId keeps exact cache intent & x-session-affinity key.
+  expect(rewoundCaching).toEqual(originalCaching)
+  // System prompt + Turn 1 user + Turn 1 assistant prefix is byte-for-byte identical.
+  expect(rewoundMessagesSent.slice(0, -1)).toEqual(originalMessagesSent.slice(0, -1))
+  // Nothing from Turn 2 original, Turn 3, or the deleted checkpoint/memory appears.
+  const serialized = JSON.stringify(rewoundMessagesSent)
+  expect(serialized).toContain("three (edited)")
+  expect(serialized).not.toContain("Original reply 2")
+  expect(serialized).not.toContain("Turn 3 secret")
+  expect(serialized).not.toContain("Secret from deleted Turn 3")
 })

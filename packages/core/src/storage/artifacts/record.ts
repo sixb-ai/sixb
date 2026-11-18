@@ -155,14 +155,20 @@ export function turnUndoable(input: {
 /**
  * Whether someone other than a retried turn and its requester commented on an artifact the turn
  * created. Their words would go with it, so a retry keeps it, as it keeps one someone else wrote:
- * a comment never moves the revision, which is all `turnUndoable` reads.
+ * a comment never moves the revision, which is all `turnUndoable` reads. The later turns undone
+ * with it are the turn's own.
  */
 export function othersCommented(
   comments: readonly Pick<ArtifactCommentRecord, "author" | "origin">[],
-  turn: { readonly turnRunId: string; readonly requester?: Principal }
+  turn: {
+    readonly turnRunId: string
+    readonly laterTurnRunIds?: readonly string[]
+    readonly requester?: Principal
+  }
 ): boolean {
   return comments.some(({ author, origin }) => {
     if (origin?.runId === turn.turnRunId) return false
+    if (origin && turn.laterTurnRunIds?.includes(origin.runId)) return false
     return !turn.requester || author.type === "guest" || !principalsEqual(author, turn.requester)
   })
 }

@@ -40,6 +40,7 @@ import {
   deleteArtifactStateValue,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
+  editAgentThreadMessage,
   exchangeDeviceAuthorization,
   exchangeSharedAccess,
   existsObjects,
@@ -317,6 +318,9 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionError,
   DisconnectConnectorConnectionResponse,
+  EditAgentThreadMessageData,
+  EditAgentThreadMessageError,
+  EditAgentThreadMessageResponse,
   ExchangeDeviceAuthorizationData,
   ExchangeDeviceAuthorizationResponse,
   ExchangeSharedAccessData,
@@ -5088,6 +5092,35 @@ export const updateAgentThreadInboxItemMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await updateAgentThreadInboxItem({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Edit an agent thread message and restart from that turn
+ *
+ * Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message. While a turn runs, the edit stops it and waits in the thread's inbox: the turn's end rewinds the thread and starts the edited message.
+ */
+export const editAgentThreadMessageMutation = (
+  options?: Partial<Options<EditAgentThreadMessageData>>
+): UseMutationOptions<
+  EditAgentThreadMessageResponse,
+  EditAgentThreadMessageError,
+  Options<EditAgentThreadMessageData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    EditAgentThreadMessageResponse,
+    EditAgentThreadMessageError,
+    Options<EditAgentThreadMessageData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await editAgentThreadMessage({
         ...options,
         ...fnOptions,
         throwOnError: true,

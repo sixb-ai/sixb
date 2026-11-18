@@ -3827,5 +3827,175 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" })).toBeNull()
       })
     })
+
+    test("deletes messages from a sequence onward, repairs thread stats, and reuses the sequence", async () => {
+      // Removal proof: skip recounting countsAsThreadMessage in deleteFromSeq; uncounted resume
+      // messages subtract from messageCount and leave it wrong.
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ id: "thr_rewind" }))
+        const t1 = at("2026-06-23T10:00:00.000Z")
+        const t2 = at("2026-06-23T10:01:00.000Z")
+        const t3 = at("2026-06-23T10:02:00.000Z")
+        await storage.messages.append({
+          id: "m1",
+          projectId,
+          threadId: "thr_rewind",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "First" }],
+          createdAt: t1,
+        })
+        await storage.messages.append({
+          id: "m2",
+          projectId,
+          threadId: "thr_rewind",
+          runId: null,
+          role: "user",
+          parts: [
+            {
+              type: "approval-outcome",
+              approvalId: "apr_1",
+              status: "denied",
+              call: { kind: "workflow", workflowId: "wf_1" },
+            },
+          ],
+          createdAt: t2,
+        })
+        await storage.messages.append({
+          id: "m3",
+          projectId,
+          threadId: "thr_rewind",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Second" }],
+          createdAt: t3,
+        })
+        expect(await storage.threads.getById({ projectId, id: "thr_rewind" })).toMatchObject({
+          messageCount: 2,
+          lastMessageAt: t3,
+        })
+
+        await expectAgentError(
+          storage.messages.deleteFromSeq({ projectId, threadId: "thr_rewind", fromSeq: 0 }),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.messages.deleteFromSeq({ projectId, threadId: "missing", fromSeq: 1 }),
+          "thread_not_found"
+        )
+
+        expect(
+          await storage.messages.deleteFromSeq({ projectId, threadId: "thr_rewind", fromSeq: 2 })
+        ).toBe(2)
+        expect(await storage.threads.getById({ projectId, id: "thr_rewind" })).toMatchObject({
+          messageCount: 1,
+          lastMessageAt: t1,
+        })
+
+        const replacement = await storage.messages.append({
+          id: "m2_next",
+          projectId,
+          threadId: "thr_rewind",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Edited second" }],
+          createdAt: at("2026-06-23T10:05:00.000Z"),
+        })
+        expect(replacement.seq).toBe(2)
+
+        expect(
+          await storage.messages.deleteFromSeq({ projectId, threadId: "thr_rewind", fromSeq: 1 })
+        ).toBe(2)
+        expect(await storage.threads.getById({ projectId, id: "thr_rewind" })).toMatchObject({
+          messageCount: 0,
+          lastMessageAt: undefined,
+        })
+      })
+    })
+
+    test("deletes chained checkpoints past a retained sequence without violating chain foreign keys", async () => {
+      // Removal proof: delete checkpoints in ascending order on SQLite/Postgres; previous_checkpoint_id
+      // ON DELETE RESTRICT rejects deleting checkpoint_1 while checkpoint_2 references it.
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ id: "thr_cp" }))
+        for (let i = 1; i <= 3; i += 1) {
+          await storage.messages.append({
+            id: `u_${i}`,
+            projectId,
+            threadId: "thr_cp",
+            runId: null,
+            role: "user",
+            parts: [{ type: "text", text: `Prompt ${i}` }],
+          })
+          const runId = `run_cp_${i}`
+          await createAndStartRun(
+            storage,
+            fixture,
+            runInput({
+              id: runId,
+              threadId: "thr_cp",
+              triggerMessageId: `u_${i}`,
+              execution: execution(`tok_${i}`),
+            })
+          )
+          if (i >= 2) {
+            const headSeq = (i - 1) * 2 + 1
+            await storage.checkpoints.create({
+              id: `cp_${i - 1}`,
+              projectId,
+              threadId: "thr_cp",
+              createdByRunId: runId,
+              expectedPreviousCheckpointId: i === 2 ? null : `cp_${i - 2}`,
+              expectedHeadSeq: headSeq,
+              executionToken: `tok_${i}`,
+              reason: "threshold",
+              summary: `Summary through turn ${i - 1}`,
+              summaryFormatVersion: 1,
+              summarizedThroughSeq: headSeq - 1,
+              observedHeadSeq: headSeq,
+              estimatedInputTokensBefore: 1000,
+              estimatedInputTokensAfter: 300,
+              summaryModelId: "test-model",
+            })
+          }
+          await storage.messages.append({
+            id: `a_${i}`,
+            projectId,
+            threadId: "thr_cp",
+            runId,
+            role: "assistant",
+            parts: [{ type: "text", text: `Reply ${i}` }],
+          })
+          await storage.runs.finish({
+            projectId,
+            id: runId,
+            executionToken: `tok_${i}`,
+            status: "succeeded",
+          })
+        }
+
+        // Rewinding to seq 5 (u_3) deletes cp_2 (observedHeadSeq 5) and keeps cp_1 (observedHeadSeq 3).
+        expect(
+          await storage.checkpoints.deleteAfterSeq({
+            projectId,
+            threadId: "thr_cp",
+            afterSeq: 4,
+          })
+        ).toBe(1)
+        expect((await storage.checkpoints.getLatest({ projectId, threadId: "thr_cp" }))?.id).toBe(
+          "cp_1"
+        )
+
+        // Rewinding to seq 1 deletes the remaining chain cleanly.
+        expect(
+          await storage.checkpoints.deleteAfterSeq({
+            projectId,
+            threadId: "thr_cp",
+            afterSeq: 0,
+          })
+        ).toBe(1)
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_cp" })).toBeNull()
+      })
+    })
   })
 }

@@ -345,10 +345,16 @@ async function questionState(
     .find((run) => run.status !== "failed" && run.status !== "cancelled")
   if (!waiting || !isAwaitingAnswerRun(waiting)) return {}
 
+  const { total } = await agents.messages.list({
+    projectId: waiting.projectId,
+    threadId: conversationId,
+    limit: 1,
+  })
   const [latest] = await agents.runs.listThreadSubagents({
     projectId: waiting.projectId,
     threadId: conversationId,
     spawnKey: waiting.spawnKey,
+    ...(total > 0 ? { retainedTurnsOnly: true } : {}),
     limit: 1,
   })
   if (latest && latest.threadId !== thread.id) return { ended: { reason: "replaced" } }

@@ -4,12 +4,14 @@ import {
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertCreateAgentContextCheckpointInput,
+  assertDeleteAgentContextCheckpointsAfterSeqInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentContextCheckpointRecord,
   type AgentContextCheckpointStore,
   AgentStorageError,
   type CreateAgentContextCheckpointInput,
+  type DeleteAgentContextCheckpointsAfterSeqInput,
 } from "@sixb/core/storage"
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
@@ -176,6 +178,30 @@ export class PgAgentContextCheckpointStore implements AgentContextCheckpointStor
       LIMIT 1
     `
     return row ? rowToContextCheckpointRecord(row) : null
+  }
+
+  async deleteAfterSeq(input: DeleteAgentContextCheckpointsAfterSeqInput): Promise<number> {
+    assertDeleteAgentContextCheckpointsAfterSeqInput(input, "SixbPg")
+
+    return runPgTransaction(this.sql, async (tx) => {
+      const rows = await tx<{ id: string }[]>`
+        SELECT id FROM agent_context_checkpoints
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND observed_head_seq > ${input.afterSeq}
+        ORDER BY summarized_through_seq DESC, created_at DESC, id DESC
+        FOR UPDATE
+      `
+      if (rows.length === 0) return 0
+
+      for (const row of rows) {
+        await tx`
+          DELETE FROM agent_context_checkpoints
+          WHERE project_id = ${input.projectId} AND id = ${row.id}
+        `
+      }
+      return rows.length
+    })
   }
 
   async getByRunIds(input: {

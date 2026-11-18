@@ -145,6 +145,7 @@ const SHIPPED_MIGRATIONS = [
   "104-artifact-pdfs",
   "105-guest-comment-links",
   "106-agent-thread-inbox",
+  "107-agent-inbox-edits",
 ]
 
 const steps = postgresStorageMigrations.steps

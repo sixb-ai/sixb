@@ -1867,6 +1867,11 @@ describe("a sub-agent's thread over HTTP", () => {
       { path: "child-thread/sandbox/recreate", method: "POST", body: { expectedSandboxName: "x" } },
       { path: "child-thread/cancel", method: "POST", body: { runId: "child" } },
       { path: "child-thread/runs/child/retry", method: "POST" },
+      {
+        path: "child-thread/messages/child-task/edit",
+        method: "POST",
+        body: { text: "Changed." },
+      },
     ]
 
     for (const write of writes) {
@@ -2201,5 +2206,134 @@ describe("a shared conversation's artifacts over HTTP", () => {
       expect(await refused.json()).toMatchObject({ code: "not_shared" })
     }
     expect((await call("/api/artifacts/art_0000000009", bob)).status).toBe(404)
+  })
+
+  test("edits a message in place over HTTP, truncates later turns, and enforces author and owner rules", async () => {
+    // Guard proof: omit deleteFromSeq or author checks in editAgentMessage; later turns survive or
+    // another participant edits Alice's prompt.
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    const outsider = await seedSession(storage, "usr_outsider")
+
+    const get = (path: string, as: { headers: Record<string, string> }) =>
+      app.fetch(new Request(`http://localhost${path}`, { headers: as.headers }))
+    const post = (path: string, body: unknown, as: { csrfHeaders: Record<string, string> }) =>
+      app.fetch(jsonRequest(path, "POST", body, as.csrfHeaders))
+
+    const created = await post("/api/agent-threads", { title: "Pricing review" }, alice)
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const base = `/api/agent-threads/${thread.id}`
+    await post(`${base}/participants`, { users: [{ type: "user", id: "usr_bob" }] }, alice)
+
+    // Turn 1 (Alice)
+    const first = await post(
+      `${base}/messages`,
+      { text: "Summarize Q3 deals", messageId: "m1" },
+      alice
+    )
+    const { run: r1 } = (await first.json()) as { run: { id: string } }
+    const tok1 = createAgentRunExecutionToken()
+    await storage.agents.runs.start({
+      id: r1.id,
+      projectId: sixb.id,
+      execution: testExecution(tok1),
+    })
+    await storage.agents.messages.append({
+      id: "a1",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: r1.id,
+      role: "assistant",
+      parts: [{ type: "text", text: "Three deals closed in Q3." }],
+    })
+    await storage.agents.runs.finish({
+      id: r1.id,
+      projectId: sixb.id,
+      executionToken: tok1,
+      status: "succeeded",
+    })
+
+    // Turn 2 (Bob)
+    const second = await post(
+      `${base}/messages`,
+      { text: "Include slipped ones", messageId: "m2" },
+      bob
+    )
+    const { run: r2 } = (await second.json()) as { run: { id: string } }
+    const tok2 = createAgentRunExecutionToken()
+    await storage.agents.runs.start({
+      id: r2.id,
+      projectId: sixb.id,
+      execution: testExecution(tok2),
+    })
+    await storage.agents.messages.append({
+      id: "a2",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: r2.id,
+      role: "assistant",
+      parts: [{ type: "text", text: "Two deals slipped." }],
+    })
+    await storage.agents.runs.finish({
+      id: r2.id,
+      projectId: sixb.id,
+      executionToken: tok2,
+      status: "succeeded",
+    })
+
+    // Outsider gets 404; Bob cannot edit Alice's message (403); assistant message is 409.
+    expect((await post(`${base}/messages/m1/edit`, { text: "Nope" }, outsider)).status).toBe(404)
+    const bobOnAlice = await post(`${base}/messages/m1/edit`, { text: "Nope" }, bob)
+    expect(bobOnAlice.status).toBe(403)
+    expect(await bobOnAlice.json()).toMatchObject({ code: "not_message_author" })
+    const onAssistant = await post(`${base}/messages/a1/edit`, { text: "Nope" }, alice)
+    expect(onAssistant.status).toBe(409)
+    expect(await onAssistant.json()).toMatchObject({ code: "message_not_editable" })
+
+    // Bob can edit his own trailing message m2.
+    const bobEdited = await post(
+      `${base}/messages/m2/edit`,
+      { text: "Include Q4 pipeline too", nextMessageId: "m2_v2" },
+      bob
+    )
+    expect(bobEdited.status).toBe(202)
+    const { run: r2Edited } = (await bobEdited.json()) as {
+      run: { id: string; triggerMessageId: string; status: string }
+    }
+    expect(r2Edited).toMatchObject({ triggerMessageId: "m2_v2", status: "queued" })
+    const tok2Edited = createAgentRunExecutionToken()
+    await storage.agents.runs.start({
+      id: r2Edited.id,
+      projectId: sixb.id,
+      execution: testExecution(tok2Edited),
+    })
+    await storage.agents.runs.finish({
+      id: r2Edited.id,
+      projectId: sixb.id,
+      executionToken: tok2Edited,
+      status: "succeeded",
+    })
+
+    // Alice (owner) edits m1, rewinding past Bob's turn cleanly.
+    const aliceEdited = await post(
+      `${base}/messages/m1/edit`,
+      { text: "Summarize Q4 renewals only", nextMessageId: "m1_v2" },
+      alice
+    )
+    expect(aliceEdited.status).toBe(202)
+
+    const listed = await get(`${base}/messages`, alice)
+    const { messages } = (await listed.json()) as {
+      messages: { id: string; seq: number; parts: { type: string; text?: string }[] }[]
+    }
+    expect(messages.map((m) => ({ id: m.id, seq: m.seq, text: m.parts[0]?.text }))).toEqual([
+      { id: "m1_v2", seq: 1, text: "Summarize Q4 renewals only" },
+    ])
+
+    // Historical runs remain recorded for AI usage and audit history.
+    const runsRes = await get(`${base}/runs`, alice)
+    const { runs } = (await runsRes.json()) as { runs: { id: string }[] }
+    expect(runs.length).toBe(4)
   })
 })

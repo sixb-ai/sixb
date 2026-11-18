@@ -8,32 +8,58 @@ import {
   Marker,
   MarkerContent,
   MarkerIcon,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   ChevronRight,
   Clock3,
   Cloud,
+  Copy,
+  File as FileIcon,
   Folder,
+  Info,
   type LucideIcon,
+  Pencil,
   Plus,
   RotateCcw,
   Unplug,
+  X,
 } from "lucide-react"
-import { memo, type ReactNode, useLayoutEffect, useRef } from "react"
+import {
+  type KeyboardEvent,
+  memo,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
 import type { FileSource } from "../../artifacts/file-source"
 import type { AgentConversationMessage } from "../conversation"
+import { formatMessageTimeAgo, formatMessageTimestamp } from "../format"
+import type { AgentMessageEditDraft } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { riseFromTray } from "../inbox-handoff"
 import { type AuthorLabel, useMessageAuthors } from "../message-authors"
 import { isContinuableDiagnostic } from "../run-presentation"
-import type { AgentFileRef } from "../types"
+import type { AgentContextEntryInput, AgentFileRef } from "../types"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-status"
 import { AgentMessageBody } from "./agent-message-body"
-import { ContextChips } from "./context-chips"
+import {
+  COMPOSER_CHIP_CLASS_NAME,
+  COMPOSER_CHIP_REMOVE_CLASS_NAME,
+  COMPOSER_CHIP_THUMB_CLASS_NAME,
+  ContextChips,
+} from "./context-chips"
 import { FileAttachmentCard } from "./file-attachment-card"
 
 /**
@@ -44,17 +70,44 @@ import { FileAttachmentCard } from "./file-attachment-card"
 export const MessageView = memo(function MessageView({
   message,
   continued = false,
+  canEdit = false,
+  editing = null,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
   onContinue,
   continuing = false,
   after,
 }: {
   readonly message: AgentConversationMessage
   readonly continued?: boolean
+  readonly canEdit?: boolean
+  readonly editing?: AgentMessageEditDraft | null
+  readonly onStartEdit?: (messageId: string) => void
+  readonly onCancelEdit?: () => void
+  readonly onSubmitEdit?: (
+    messageId: string,
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => void
   readonly onContinue?: () => void
   readonly continuing?: boolean
   readonly after?: ReactNode
 }) {
-  if (message.role === "user") return <UserMessage message={message} continued={continued} />
+  if (message.role === "user") {
+    return (
+      <UserMessage
+        message={message}
+        continued={continued}
+        canEdit={canEdit}
+        editing={editing}
+        onStartEdit={onStartEdit}
+        onCancelEdit={onCancelEdit}
+        onSubmitEdit={onSubmitEdit}
+      />
+    )
+  }
 
   return (
     <AssistantMessage
@@ -66,14 +119,41 @@ export const MessageView = memo(function MessageView({
   )
 })
 
+const USER_ACTION_BUTTON_CLASS_NAME = cn(
+  "relative flex size-6 items-center justify-center rounded-md text-muted-foreground/80 outline-none transition-colors",
+  "hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+  // A finger needs more room than the icon: the touch area reaches 40px, the layout stays.
+  "[@media(hover:none)]:after:absolute [@media(hover:none)]:after:-inset-2"
+)
+
+const EDIT_MAX_HEIGHT_PX = 240
+
 function UserMessage({
   message,
   continued,
+  canEdit,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
 }: {
   readonly message: AgentConversationMessage
   readonly continued: boolean
+  readonly canEdit: boolean
+  readonly editing: AgentMessageEditDraft | null
+  readonly onStartEdit?: (messageId: string) => void
+  readonly onCancelEdit?: () => void
+  readonly onSubmitEdit?: (
+    messageId: string,
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => void
 }) {
   const authors = useMessageAuthors()
+  const agentMessages = useAgentMessages()
+  const labels = agentMessages.transcript
+  const locale = useLocale()
   const text = textOf(message)
   const files = message.parts.flatMap((part) => (part.type === "file" ? [part] : []))
   const pending = message.status === "pending"
@@ -86,10 +166,71 @@ function UserMessage({
     if (message.status === "streaming" && ref.current) riseFromTray(ref.current, message.key)
   }, [])
 
-  if (!text && files.length === 0 && message.context.length === 0) return null
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1_600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  // A touch screen has no hover: touching the message shows its time and actions, and touching
+  // anywhere else puts them away.
+  const [touched, setTouched] = useState(false)
+
+  useEffect(() => {
+    if (!touched) return
+    const away = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setTouched(false)
+    }
+    document.addEventListener("pointerdown", away)
+    return () => document.removeEventListener("pointerdown", away)
+  }, [touched])
+
+  if (!text && files.length === 0 && message.context.length === 0 && !editing) return null
+
+  if (editing && message.id && onSubmitEdit && onCancelEdit) {
+    return (
+      <div data-user-message="" className="flex flex-col items-end gap-1.5">
+        {continued ? null : <AuthorLine author={authors?.labelOf(message.author)} />}
+        <UserMessageEditor
+          key={`${editing.messageId}:${editing.nonce}`}
+          draft={editing}
+          onCancel={onCancelEdit}
+          onSubmit={(nextText, nextAttachments, nextContext) =>
+            onSubmitEdit(editing.messageId, nextText, nextAttachments, nextContext)
+          }
+        />
+      </div>
+    )
+  }
+
+  const messageId = message.id
+  const showEdit = Boolean(!pending && canEdit && messageId && onStartEdit)
+  const showCopy = !pending && text.length > 0
+  const age = !pending
+    ? formatMessageTimeAgo(message.createdAt, locale, agentMessages.contextMeter.justNow)
+    : ""
+  const timestampTitle = !pending ? formatMessageTimestamp(message.createdAt, locale) : ""
+  const showHoverBar = !pending && Boolean(age || showEdit || showCopy)
+
+  const handleCopy = () => {
+    if (!text) return
+    void navigator.clipboard?.writeText(text).then(
+      () => setCopied(true),
+      () => {}
+    )
+  }
 
   return (
-    <div ref={ref} className="flex flex-col items-end gap-1.5">
+    <div
+      ref={ref}
+      data-user-message=""
+      className="group/user-message flex flex-col items-end gap-1.5"
+      onPointerUp={(event) => {
+        if (event.pointerType !== "mouse") setTouched(true)
+      }}
+    >
       {continued ? null : <AuthorLine author={authors?.labelOf(message.author)} />}
       <ContextChips
         entries={message.context}
@@ -109,6 +250,259 @@ function UserMessage({
           </BubbleContent>
         </Bubble>
       ) : null}
+      {showHoverBar ? (
+        <TooltipProvider delayDuration={300}>
+          <div
+            data-user-message-actions=""
+            data-visible={copied || touched || undefined}
+            className={cn(
+              "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none [@media(hover:none)]:gap-4",
+              "pointer-events-none opacity-0 transition-opacity duration-150 ease-out",
+              "group-hover/user-message:pointer-events-auto group-hover/user-message:opacity-100",
+              "group-focus-within/user-message:pointer-events-auto group-focus-within/user-message:opacity-100",
+              "data-[visible]:pointer-events-auto data-[visible]:opacity-100"
+            )}
+          >
+            {age ? (
+              <span
+                data-user-message-age=""
+                title={timestampTitle || undefined}
+                className="mr-1.5 text-xs text-muted-foreground/80 tabular-nums"
+              >
+                {age}
+              </span>
+            ) : null}
+            {showEdit && messageId && onStartEdit ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onStartEdit(messageId)}
+                    aria-label={labels.editMessage}
+                    className={USER_ACTION_BUTTON_CLASS_NAME}
+                  >
+                    <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{labels.editMessage}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {showCopy ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    aria-label={copied ? labels.copiedMessage : labels.copyMessage}
+                    className={USER_ACTION_BUTTON_CLASS_NAME}
+                  >
+                    {copied ? (
+                      <Check
+                        className="size-3.5 text-foreground"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Copy className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {copied ? labels.copiedMessage : labels.copyMessage}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
+        </TooltipProvider>
+      ) : null}
+    </div>
+  )
+}
+
+function UserMessageEditor({
+  draft,
+  onCancel,
+  onSubmit,
+}: {
+  readonly draft: AgentMessageEditDraft
+  readonly onCancel: () => void
+  readonly onSubmit: (
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => void
+}) {
+  const agentMessages = useAgentMessages()
+  const labels = agentMessages.transcript
+  const [value, setValue] = useState(draft.text)
+  const [attachments, setAttachments] = useState<readonly AgentFileRef[]>(draft.attachments)
+  const [contextEntries, setContextEntries] = useState<readonly AgentContextEntryInput[]>(
+    draft.context
+  )
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(el.value.length, el.value.length)
+
+    // Reopened after a refused save or a Stop, the editor may sit off screen: once the transcript
+    // has settled, it comes into view, clear of the header and the composer, and keeps the focus.
+    const frame = requestAnimationFrame(() => {
+      el.closest("[data-user-message-editor]")?.scrollIntoView({ block: "nearest" })
+      if (document.activeElement !== el) el.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure height whenever the text changes
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.overflowY = el.scrollHeight > EDIT_MAX_HEIGHT_PX ? "auto" : "hidden"
+    el.style.height = `${Math.min(el.scrollHeight, EDIT_MAX_HEIGHT_PX)}px`
+  }, [value])
+
+  const canSave = value.trim().length > 0 || attachments.length > 0
+
+  const submit = () => {
+    if (!canSave) return
+    onSubmit(value.trim(), attachments, contextEntries)
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter and Escape confirm or dismiss the input method's candidate while one is open; Safari
+    // reports that keydown with keyCode 229 rather than `isComposing`.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    if (event.key === "Escape") {
+      event.preventDefault()
+      onCancel()
+      return
+    }
+    if (event.key !== "Enter" || event.shiftKey) return
+    event.preventDefault()
+    if (event.metaKey || event.ctrlKey) {
+      const el = textareaRef.current
+      const start = el?.selectionStart ?? value.length
+      const end = el?.selectionEnd ?? value.length
+      setValue((current) => `${current.slice(0, start)}\n${current.slice(end)}`)
+      requestAnimationFrame(() => {
+        el?.setSelectionRange(start + 1, start + 1)
+      })
+      return
+    }
+    submit()
+  }
+
+  return (
+    <div
+      data-user-message-editor=""
+      className="flex w-full scroll-mt-20 scroll-mb-48 flex-col items-end gap-2"
+    >
+      <div
+        className={cn(
+          "flex w-full max-w-[min(85%,42rem)] flex-col gap-2 rounded-2xl bg-background px-3.5 py-2.5",
+          "ring-1 ring-[#007aff] shadow-[0_1px_2px_rgb(0_0_0/0.04)] dark:ring-[#0a84ff]"
+        )}
+      >
+        {contextEntries.length > 0 || attachments.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            <ContextChips
+              entries={contextEntries}
+              onRemove={(index) =>
+                setContextEntries((current) =>
+                  current.filter((_, candidateIndex) => candidateIndex !== index)
+                )
+              }
+              className="contents"
+            />
+            {attachments.map((fileRef, index) => (
+              <span
+                key={`${fileRef.blobId}:${index}`}
+                className={cn(COMPOSER_CHIP_CLASS_NAME, "pr-1.5")}
+                title={fileRef.fileName}
+              >
+                <span className={COMPOSER_CHIP_THUMB_CLASS_NAME}>
+                  <FileIcon className="size-3" strokeWidth={2} aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">
+                  {fileRef.fileName || agentMessages.files.file}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAttachments((current) =>
+                      current.filter((_, candidateIndex) => candidateIndex !== index)
+                    )
+                  }
+                  aria-label={
+                    fileRef.fileName
+                      ? agentMessages.composer.removeAttachment(fileRef.fileName)
+                      : agentMessages.composer.removeUnnamedAttachment
+                  }
+                  className={COMPOSER_CHIP_REMOVE_CLASS_NAME}
+                >
+                  <X className="size-[11px]" strokeWidth={2.6} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={handleKeyDown}
+          rows={1}
+          aria-label={labels.editMessage}
+          placeholder={agentMessages.composer.placeholder}
+          className="min-h-6 max-h-[240px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
+        />
+      </div>
+      {draft.error ? (
+        <p role="alert" className="max-w-[min(85%,42rem)] text-right text-xs text-destructive">
+          {draft.error}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-end gap-1.5">
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={labels.editInfo}
+                className="flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <Info className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-64 text-xs">
+              {labels.editInfo}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-7 rounded-lg px-2.5 text-[13px] font-medium text-foreground/80 outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          {labels.cancelEdit}
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSave}
+          className={cn(
+            "h-7 rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+            "bg-foreground text-background hover:bg-foreground/85",
+            "disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+          )}
+        >
+          {labels.saveEdit}
+        </button>
+      </div>
     </div>
   )
 }

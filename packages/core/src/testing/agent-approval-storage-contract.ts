@@ -978,6 +978,129 @@ export function runAgentApprovalStorageContractSuite<
         )
       })
     })
+
+    test("rewinds approvals of truncated turns, unmarks earlier ones, and filters rewound subagents", async () => {
+      // Removal proof: skip clearing reported_in_message_id in approvals.rewind, or omit
+      // retainedTurnsOnly in listThreadSubagents.
+      await withStorage(async (storage) => {
+        const t1 = new Date(t0.getTime() + 1_000)
+        await startTurn(storage)
+        await storage.agents.messages.append({
+          id: "msg_1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Turn 1" }],
+          createdAt: t0,
+        })
+        await storage.agents.approvals.request(approvalInput({ id: "apr_early" }))
+        await storage.agents.approvals.decide({ ...decision("denied"), id: "apr_early" })
+        await finishTurn(storage, "cancelled")
+
+        await storage.agents.messages.append({
+          id: "msg_2",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Turn 2" }],
+          createdAt: t1,
+        })
+        await storage.agents.approvals.markReported({
+          projectId,
+          threadId: "thr_1",
+          ids: ["apr_early"],
+          messageId: "msg_2",
+        })
+
+        const laterExec = await createTestAgentExecution(storage, { projectId, runId: "run_later" })
+        await storage.agents.runs.create({
+          ...runInput("run_later"),
+          executionId: laterExec,
+          triggerMessageId: "msg_2",
+          createdAt: t1,
+        })
+        await storage.agents.runs.start({
+          projectId,
+          id: "run_later",
+          execution: { token: "tok_later", queueLeaseExpiresAt: new Date(t1.getTime() + 60_000) },
+          startedAt: t1,
+        })
+        await storage.agents.approvals.request(
+          approvalInput({
+            id: "apr_rewound",
+            runId: "run_later",
+            callerRunId: "run_later",
+            executionToken: "tok_later",
+            call: sendReminders,
+          })
+        )
+        const childExec = await createTestAgentExecution(storage, {
+          projectId,
+          runId: "child_rewound",
+          sourceExecutionId: laterExec,
+        })
+        await storage.agents.runs.createSubagent({
+          id: "child_rewound",
+          projectId,
+          executionId: childExec,
+          parentRunId: "run_later",
+          parentExecutionToken: "tok_later",
+          spawnKey: "west",
+          spec: { model: { provider: "test", modelId: "fast" }, task: "Ask west.", toolNames: [] },
+          thread: { id: "thr_child_rewound", create: true },
+          trigger: { id: "msg_child_rewound", parts: [{ type: "text", text: "Ask west." }] },
+          maxActiveChildren: 4,
+          createdAt: t1,
+        })
+        await storage.agents.runs.start({
+          projectId,
+          id: "child_rewound",
+          execution: { token: "tok_c", queueLeaseExpiresAt: new Date(t1.getTime() + 60_000) },
+          startedAt: t1,
+        })
+        await storage.agents.runs.finish({
+          projectId,
+          id: "child_rewound",
+          executionToken: "tok_c",
+          status: "succeeded",
+          finishReason: "awaiting_answer",
+          result: { text: "" },
+        })
+        await storage.agents.runs.finish({
+          projectId,
+          id: "run_later",
+          executionToken: "tok_later",
+          status: "succeeded",
+          finishReason: "awaiting_approval",
+        })
+
+        const rewound = await storage.agents.approvals.rewind({
+          projectId,
+          threadId: "thr_1",
+          runIds: ["run_later"],
+          clearedMessageIds: ["msg_2"],
+        })
+        await storage.agents.messages.deleteFromSeq({ projectId, threadId: "thr_1", fromSeq: 2 })
+
+        expect(rewound).toEqual({
+          cancelled: [expect.objectContaining({ id: "apr_rewound", status: "cancelled" })],
+          deleted: 1,
+        })
+        expect(await storage.agents.approvals.getById({ projectId, id: "apr_rewound" })).toBeNull()
+        const earlyAfter = await storage.agents.approvals.getById({ projectId, id: "apr_early" })
+        expect(earlyAfter?.reportedInMessageId).toBeUndefined()
+
+        expect(
+          await storage.agents.runs.listThreadSubagents({
+            projectId,
+            threadId: "thr_1",
+            retainedTurnsOnly: true,
+          })
+        ).toEqual([])
+      })
+    })
   })
 }
 

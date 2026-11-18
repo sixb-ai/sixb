@@ -10,6 +10,7 @@ import {
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import type { AppendAgentMessageInput, ConversationAgentRunRecord } from "../src/storage/agents"
+import type { AiLimitPolicyStatus } from "../src/storage/ai-limits/types"
 import { createTestAgentExecution } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -490,5 +491,216 @@ describe("the inbox repair pass", () => {
 
     expect(await startedTurns(host, thread.id)).toEqual(["msg_inb_now"])
     expect(await inbox(host, thread.id)).toEqual(["msg_inb_later"])
+  })
+})
+
+describe("an edit sent while a turn runs", () => {
+  /** The thread's messages, oldest first, by id. */
+  async function messageIds(host: SixbHost, threadId: string) {
+    const { messages } = await host.storage.agents!.messages.list({
+      projectId: host.id,
+      threadId,
+      order: "asc",
+    })
+    return messages.map((message) => message.id)
+  }
+
+  test("stops the turn, and the turn's end rewinds the thread to the edited message", async () => {
+    // Guard proof: rewind and start the edit right away instead of in deferAgentMessageEdit's
+    // inbox item; `runs.create` refuses it while the turn holds the thread, and the stopped
+    // turn's reply would land after the edited message.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const first = await turn(host, deps, sixb, thread.id, { status: "succeeded" })
+
+    let edit: Awaited<ReturnType<typeof sixb.agent.runs.editMessage>> | undefined
+    const stopped = await turn(
+      host,
+      deps,
+      sixb,
+      thread.id,
+      { status: "cancelled", answer: [{ type: "text", text: "Reading chapter one" }] },
+      async () => {
+        edit = await sixb.agent.runs.editMessage({
+          threadId: thread.id,
+          messageId: first.triggerMessageId,
+          text: "Read only the last chapter.",
+          nextMessageId: "msg_edited",
+        })
+      }
+    )
+
+    // The edit waits for the turn it stopped; nothing is rewound yet.
+    expect(edit?.kind).toBe("inbox")
+    const stopRequested = await host.storage.agents!.runs.getById({
+      projectId: host.id,
+      id: stopped.id,
+    })
+    expect(stopRequested?.cancelRequestedAt).toBeDefined()
+    expect(await inbox(host, thread.id)).toEqual(["msg_edited"])
+    expect(await messageIds(host, thread.id)).toEqual([
+      first.triggerMessageId,
+      stopped.triggerMessageId,
+      "msg_answer",
+    ])
+
+    await afterAgentRunFinished(sessionHost(host, deps), stopped)
+
+    // The stopped turn's reply went with the rest: the edited message alone starts the next turn.
+    expect(await messageIds(host, thread.id)).toEqual(["msg_edited"])
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_edited"])
+    expect(await inbox(host, thread.id)).toEqual([])
+  })
+
+  test("moves the editor's waiting steer to the next turn: it was written for the turn taken back", async () => {
+    // Guard proof: drop both queueWaitingSteers calls (deferAgentMessageEdit, rewindAgentThread);
+    // the steer stays one, and the edited turn reads it at its first step.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const first = await turn(host, deps, sixb, thread.id, { status: "succeeded" })
+
+    const stopped = await turn(host, deps, sixb, thread.id, { status: "cancelled" }, async () => {
+      await sixb.agent.runs.send({
+        threadId: thread.id,
+        text: "Use the March file.",
+        delivery: "steer",
+        messageId: "msg_steer",
+      })
+      await sixb.agent.runs.editMessage({
+        threadId: thread.id,
+        messageId: first.triggerMessageId,
+        text: "Summarize the April file.",
+        nextMessageId: "msg_edited",
+      })
+    })
+    await afterAgentRunFinished(sessionHost(host, deps), stopped)
+
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_edited"])
+    const waiting = await host.storage.agents!.inbox.list({
+      projectId: host.id,
+      threadId: thread.id,
+    })
+    expect(waiting.map((item) => [item.messageId, item.mode])).toEqual([["msg_steer", "queue"]])
+  })
+
+  test("keeps only the newest edit waiting, and drops one whose message is gone by then", async () => {
+    // Guard proof: let rewindAgentThread's refusal throw out of startQueuedAgentTurnFromInbox; the
+    // turn's end fails, and the edit waits for a repair pass that can never start it.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const first = await turn(host, deps, sixb, thread.id, { status: "succeeded" })
+
+    const stopped = await turn(host, deps, sixb, thread.id, { status: "cancelled" }, async () => {
+      for (const text of ["Read chapter two.", "Read chapter three."]) {
+        await sixb.agent.runs.editMessage({
+          threadId: thread.id,
+          messageId: first.triggerMessageId,
+          text,
+        })
+      }
+      expect(await inbox(host, thread.id)).toHaveLength(1)
+
+      // Another tab's edit took the thread back past that message meanwhile.
+      await host.storage.agents!.messages.deleteFromSeq({
+        projectId: host.id,
+        threadId: thread.id,
+        fromSeq: 1,
+      })
+    })
+
+    await afterAgentRunFinished(sessionHost(host, deps), stopped)
+
+    expect(await startedTurns(host, thread.id)).toEqual([])
+    expect(await inbox(host, thread.id)).toEqual([])
+  })
+})
+
+describe("an edit that meets a turn ending", () => {
+  /** A thread with one answered turn, and a second turn claimed by its runner: it runs. */
+  async function answering(host: SixbHost, deps: ReturnType<typeof createTestRuntimeDeps>) {
+    const sixb = await userScope(host, "owner")
+    const thread = await sixb.agent.threads.create({ title: "Release notes" })
+    const first = await turn(host, deps, sixb, thread.id, { status: "succeeded" })
+
+    const { run } = await sixb.agent.runs.request({ threadId: thread.id, text: "Read the rest." })
+    await claimAgentRun(sessionHost(host, deps), {
+      run: run as ConversationAgentRunRecord,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    })
+    return { sixb, thread, first, running: run }
+  }
+
+  test("starts at once when the turn ended before the edit reached the inbox", async () => {
+    // Guard proof: drop startIfThreadIdle from deferAgentMessageEdit; the turn's end read an
+    // empty inbox, so the edit waits for the repair pass while the chat shows it answering.
+    const { host, ...deps } = setup()
+    const { sixb, thread, first, running } = await answering(host, deps)
+
+    // The turn ends right as the edit is sent: its end reads the inbox before the edit is in it.
+    const inbox = host.storage.agents!.inbox
+    const enqueue = inbox.enqueue.bind(inbox)
+    let ending = true
+    inbox.enqueue = async (input) => {
+      if (ending) {
+        ending = false
+        const current = await host.storage.agents!.runs.getById({
+          projectId: host.id,
+          id: running.id,
+        })
+        const ended = await host.storage.agents!.runs.finish({
+          id: running.id,
+          projectId: host.id,
+          executionToken: current?.execution?.token ?? "",
+          status: "succeeded",
+          finishReason: "stop",
+        })
+        await afterAgentRunFinished(sessionHost(host, deps), ended)
+      }
+      return enqueue(input)
+    }
+
+    const edit = await sixb.agent.runs.editMessage({
+      threadId: thread.id,
+      messageId: first.triggerMessageId,
+      text: "Read only the last chapter.",
+      nextMessageId: "msg_edited",
+    })
+
+    expect(edit.kind).toBe("inbox")
+    expect(await startedTurns(host, thread.id)).toEqual(["msg_edited"])
+    expect(await inbox.list({ projectId: host.id, threadId: thread.id })).toEqual([])
+  })
+
+  test("is refused, and stops nothing, when the sender's AI budget is spent", async () => {
+    // Guard proof: check the budget after deferAgentMessageEdit, as only an idle thread's edit
+    // did; the turn stops, and the edit waits for a budget it cannot spend.
+    const { host, ...deps } = setup()
+    const { sixb, thread, first, running } = await answering(host, deps)
+    // The running turn spent what was left of the sender's budget.
+    host.storage.aiLimits!.listPolicyStatuses = async () => [
+      {
+        policy: { subject: { type: "user", id: "owner" } },
+        period: { resetAt: new Date(Date.now() + 3_600_000) },
+        exhausted: true,
+        accountingStatus: "complete",
+        orphaned: false,
+      } as unknown as AiLimitPolicyStatus,
+    ]
+
+    const error = await sixb.agent.runs
+      .editMessage({
+        threadId: thread.id,
+        messageId: first.triggerMessageId,
+        text: "Only chapter 3.",
+      })
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    const turnNow = await host.storage.agents!.runs.getById({ projectId: host.id, id: running.id })
+    expect(turnNow?.cancelRequestedAt).toBeUndefined()
+    expect(await inbox(host, thread.id)).toEqual([])
   })
 })

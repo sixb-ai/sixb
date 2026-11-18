@@ -41,6 +41,8 @@ import type {
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  DeleteAgentContextCheckpointsAfterSeqInput,
+  DeleteAgentMessagesFromSeqInput,
   EnqueueAgentInboxItemInput,
   FinishAgentRunInput,
   ForkAgentThreadInput,
@@ -297,14 +299,32 @@ export interface AgentThreadForkPlan {
   readonly checkpoint?: AgentContextCheckpointRecord
 }
 
-/**
- * Decide what a fork copies. While a turn is running, the fork copies what came before its trigger
- * message, so the copy never has a gap; otherwise it copies everything. Copies keep their `seq`,
- * so the latest checkpoint whose observed head was copied projects unchanged.
- *
- * The plan mints the ids of the copies: which messages are copied is only known here, under the
- * provider's lock, so the caller cannot supply them.
- */
+/** `fromSeq` names a message of the thread: sequences start at 1. */
+export function assertDeleteAgentMessagesFromSeqInput(
+  input: DeleteAgentMessagesFromSeqInput,
+  prefix = "Sixb"
+): void {
+  if (!Number.isSafeInteger(input.fromSeq) || input.fromSeq < 1) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent message 'fromSeq' must be a positive safe integer.`
+    )
+  }
+}
+
+/** `afterSeq` is the last sequence whose summaries stay: 0 keeps none. */
+export function assertDeleteAgentContextCheckpointsAfterSeqInput(
+  input: DeleteAgentContextCheckpointsAfterSeqInput,
+  prefix = "Sixb"
+): void {
+  if (!Number.isSafeInteger(input.afterSeq) || input.afterSeq < 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent context checkpoint 'afterSeq' must be a non-negative safe integer.`
+    )
+  }
+}
+
 /**
  * Whether a message counts in its thread's `messageCount`, which reads as what the conversation
  * shows. The message Sixb writes to resume a paused turn carries only how its calls ended, which the
@@ -316,6 +336,14 @@ export function countsAsThreadMessage(message: Pick<AgentMessageRecord, "parts">
   )
 }
 
+/**
+ * Decide what a fork copies. While a turn is running, the fork copies what came before its trigger
+ * message, so the copy never has a gap; otherwise it copies everything. Copies keep their `seq`,
+ * so the latest checkpoint whose observed head was copied projects unchanged.
+ *
+ * The plan mints the ids of the copies: which messages are copied is only known here, under the
+ * provider's lock, so the caller cannot supply them.
+ */
 export function planAgentThreadFork(
   input: ForkAgentThreadInput,
   source: AgentThreadForkSource,
@@ -1739,6 +1767,15 @@ export function assertEnqueueAgentInboxItemInput(
   assertAgentInboxParts(input.parts, input.mode, prefix)
   assertAgentInboxSpec(input.spec, prefix)
   if (input.executionId !== undefined) assertNonEmptyText(input.executionId, "executionId", prefix)
+  if (input.replacesMessageId !== undefined) {
+    assertNonEmptyText(input.replacesMessageId, "replacesMessageId", prefix)
+    if (input.mode !== "queue" || input.immediate !== true) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] An agent inbox item that replaces a message is a queued message sent now.`
+      )
+    }
+  }
 }
 
 /**
@@ -1860,6 +1897,7 @@ export function newAgentInboxItemRecord(
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
     ...(input.locale ? { locale: input.locale } : {}),
     ...(input.immediate ? { immediate: true } : {}),
+    ...(input.replacesMessageId ? { replacesMessageId: input.replacesMessageId } : {}),
     ...(input.executionId ? { executionId: input.executionId } : {}),
     createdAt,
     updatedAt: new Date(createdAt),
@@ -1885,6 +1923,13 @@ export function updatedAgentInboxItemRecord(
   const nextImmediate = input.immediate === undefined ? current.immediate : input.immediate
   const { spec: _oldSpec, immediate: _oldImmediate, ...base } = current
   const mode = input.mode ?? current.mode
+  // An edit rewinds the thread when it starts: it goes now, after the turn it stopped.
+  if (current.replacesMessageId !== undefined && (mode !== "queue" || nextImmediate !== true)) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[Sixb] Agent inbox item '${current.id}' edits message '${current.replacesMessageId}': it stays a message sent now.`
+    )
+  }
   const parts =
     input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts)
   // Promoting a message that carries a file to a steer would read bytes a replay cannot send.

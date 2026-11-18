@@ -561,6 +561,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
       filters.push("AND child.finish_reason = ?")
       args.push(input.finishReason)
     }
+    if (input.retainedTurnsOnly) {
+      filters.push(
+        "AND EXISTS (SELECT 1 FROM agent_messages m WHERE m.project_id = turn.project_id AND m.thread_id = turn.thread_id AND m.id = turn.trigger_message_id)"
+      )
+    }
     args.push(input.limit ?? 100)
 
     const rows = this.db

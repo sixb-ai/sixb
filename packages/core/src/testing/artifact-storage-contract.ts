@@ -1293,6 +1293,135 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // Regression proofs: in a provider's `undoTurnWrites`, count the turn's writes alone, as
+    // providers once did; art_plan then stays at turn A's content and art_draft at turn A's
+    // version. Count every later turn's comment as someone else's in `othersCommented`, and
+    // art_draft stays for turn B's comment. Keep turn B's records on art_plan once it is undone,
+    // and its restore point is left over.
+    test("undoes later turns with a turn, back to before the first, as an edit takes them back", async () => {
+      await withStorage(async (artifacts) => {
+        const turnA = { threadId: "thr_a", runId: "run_a" }
+        const turnB = { threadId: "thr_b", runId: "run_b" }
+        const write = (artifactId: string, turn: typeof turnA, updatedAt: Date) =>
+          artifacts.publish({
+            ...publishInput({ title: `Turn ${turn.runId}`, origin: turn, updatedAt }, artifactId),
+            turnRunId: turn.runId,
+          })
+
+        // Both turns changed an artifact someone else made.
+        await artifacts.create(createInput({ id: "art_plan" }))
+        await write("art_plan", turnA, at(1))
+        await write("art_plan", turnB, at(2))
+
+        // Turn A created one, and turn B wrote it and commented on it for another participant.
+        await artifacts.create({
+          ...createInput({ id: "art_draft", version: versionInput({ origin: turnA }) }),
+          turnRunId: "run_a",
+        })
+        await write("art_draft", turnB, at(2))
+        await artifacts.createComment({
+          projectId,
+          artifactId: "art_draft",
+          id: "cmt_turn_b",
+          anchor: { revision: 2 },
+          body: "Turn B's note",
+          author: otherOwner,
+          origin: turnB,
+          createdAt: at(3),
+        })
+
+        const undone = await artifacts.undoTurnWrites({
+          projectId,
+          turnRunId: "run_a",
+          laterTurnRunIds: ["run_b"],
+          requester: owner,
+        })
+
+        expect(undone.deleted).toEqual(["art_draft"])
+        expect(undone.restored.map(({ artifact }) => artifact.id)).toEqual(["art_plan"])
+        expect(await artifacts.get({ projectId, id: "art_draft" })).toBeNull()
+        expect(await artifacts.get({ projectId, id: "art_plan" })).toMatchObject({
+          title: "Q3 report",
+          revision: 4,
+          updatedAt: t0,
+        })
+
+        // Turn B's records went with turn A's, and so did the threads they shared it in.
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_plan" })).toEqual([])
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_b" })).toEqual([])
+        expect(await artifacts.listThreadIds({ projectId, id: "art_plan" })).toEqual(["thr_1"])
+        expect(await artifacts.undoTurnWrites({ projectId, turnRunId: "run_b" })).toEqual({
+          restored: [],
+          deleted: [],
+        })
+      })
+    })
+
+    // Regression proof: forget the later turns' records on an artifact kept in a provider's
+    // `undoTurnWrites`; turn B's own undo then finds nothing, and its write stays.
+    test("keeps what anyone wrote between turns undone together, and the later turn's own undo", async () => {
+      await withStorage(async (artifacts) => {
+        const write = (artifactId: string, runId: string, updatedAt: Date) =>
+          artifacts.publish({
+            ...publishInput(
+              { title: `Turn ${runId}`, origin: { threadId: "thr_turn", runId }, updatedAt },
+              artifactId
+            ),
+            turnRunId: runId,
+          })
+        const person = (artifactId: string) =>
+          artifacts.publish(
+            publishInput({ title: "Person's", origin: undefined, updatedAt: at(2) }, artifactId)
+          )
+
+        await artifacts.create(createInput({ id: "art_plan" }))
+        await write("art_plan", "run_a", at(1))
+        await person("art_plan")
+        await write("art_plan", "run_b", at(3))
+
+        await artifacts.create({
+          ...createInput({
+            id: "art_draft",
+            version: versionInput({ origin: { threadId: "thr_turn", runId: "run_a" } }),
+          }),
+          turnRunId: "run_a",
+        })
+        await person("art_draft")
+        await write("art_draft", "run_b", at(3))
+
+        expect(
+          await artifacts.undoTurnWrites({
+            projectId,
+            turnRunId: "run_a",
+            laterTurnRunIds: ["run_b"],
+          })
+        ).toEqual({ restored: [], deleted: [] })
+        expect(await artifacts.get({ projectId, id: "art_plan" })).toMatchObject({
+          title: "Turn run_b",
+          revision: 4,
+        })
+        expect(await artifacts.get({ projectId, id: "art_draft" })).toMatchObject({
+          title: "Turn run_b",
+          revision: 3,
+        })
+
+        // Turn B alone is undone to what the person wrote.
+        const undone = await artifacts.undoTurnWrites({ projectId, turnRunId: "run_b" })
+        expect(undone.restored.map(({ artifact }) => artifact.id).sort()).toEqual([
+          "art_draft",
+          "art_plan",
+        ])
+        expect(await artifacts.get({ projectId, id: "art_plan" })).toMatchObject({
+          title: "Person's",
+          revision: 5,
+        })
+        expect(await artifacts.get({ projectId, id: "art_draft" })).toMatchObject({
+          title: "Person's",
+          revision: 4,
+        })
+      })
+    })
+
     test("keeps comments and their replies, oldest first, and resolves and deletes them", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())

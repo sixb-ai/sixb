@@ -489,6 +489,24 @@ export const AgentMessageListResponseSchema = z.object({
   total: z.number(),
 })
 
+export const EditAgentMessageBodySchema = z
+  .object({
+    /** Required unless `attachments` are the whole message. */
+    text: z.string().trim().min(1).optional(),
+    model: LanguageModelRefSchema.optional(),
+    reasoning: ModelReasoningSchema.optional(),
+    /** IANA time zone of the person asking. The Agent presents dates and times in it. */
+    timeZone: z.string().trim().min(1).max(100).optional(),
+    /** BCP 47 language of the person asking. */
+    locale: z.string().trim().min(1).max(100).optional(),
+    /** What this turn may change without asking you. Omitted: your choice in the thread. */
+    approvalMode: AgentApprovalModeSchema.optional(),
+    attachments: z.array(FileRefSchema).optional(),
+    context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
+    nextMessageId: z.string().trim().min(1).optional(),
+  })
+  .strict()
+
 export const PostAgentMessageBodySchema = z
   .object({
     /** Required unless `continue` is set or `attachments` are the whole message. */
@@ -599,6 +617,8 @@ export const AgentInboxItemSchema = z.object({
   locale: z.string().optional(),
   /** Sent now: it starts even when the turn it waited for ended without answering. */
   immediate: z.boolean().optional(),
+  /** An edit waiting for the turn it stopped: the message it replaces once that turn ends. */
+  replacesMessageId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -634,6 +654,15 @@ export const UpdateAgentInboxItemResponseSchema = z.object({
  * that runs. A message that starts a turn carries `run`, as it always has.
  */
 export const PostAgentMessageResponseSchema = z.object({
+  run: AgentRunSchema.optional(),
+  item: AgentInboxItemSchema.optional(),
+})
+
+/**
+ * `run` when the edit starts its turn now; `item` when it waits, sent now, for the running turn it
+ * stopped to end.
+ */
+export const EditAgentMessageResponseSchema = z.object({
   run: AgentRunSchema.optional(),
   item: AgentInboxItemSchema.optional(),
 })

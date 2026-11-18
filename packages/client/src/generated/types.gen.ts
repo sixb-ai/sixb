@@ -14716,6 +14716,7 @@ export type PostAgentThreadMessageResponses = {
       timeZone?: string
       locale?: string
       immediate?: boolean
+      replacesMessageId?: string
       createdAt: string
       updatedAt: string
     }
@@ -15242,6 +15243,7 @@ export type ListAgentThreadInboxResponses = {
       timeZone?: string
       locale?: string
       immediate?: boolean
+      replacesMessageId?: string
       createdAt: string
       updatedAt: string
     }>
@@ -15758,6 +15760,7 @@ export type UpdateAgentThreadInboxItemResponses = {
       timeZone?: string
       locale?: string
       immediate?: boolean
+      replacesMessageId?: string
       createdAt: string
       updatedAt: string
     }
@@ -15766,6 +15769,659 @@ export type UpdateAgentThreadInboxItemResponses = {
 
 export type UpdateAgentThreadInboxItemResponse =
   UpdateAgentThreadInboxItemResponses[keyof UpdateAgentThreadInboxItemResponses]
+
+export type EditAgentThreadMessageData = {
+  body: {
+    text?: string
+    model?: {
+      provider: string
+      modelId: string
+    }
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
+    timeZone?: string
+    locale?: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    attachments?: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    context?: Array<{
+      context:
+        | {
+            kind: "object"
+            ref: {
+              objectTypeId: string
+              primaryId: string
+            }
+            /**
+             * Shown in the chat instead of the object's title. Never sent to the model.
+             */
+            label?: string
+          }
+        | {
+            kind: "app-state"
+            id: string
+            label: string
+            description: string
+            /**
+             * Any JSON-compatible value.
+             */
+            value:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+      origin: "ambient" | "explicit"
+    }>
+    nextMessageId?: string
+  }
+  path: {
+    threadId: string
+    messageId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/messages/{messageId}/edit"
+}
+
+export type EditAgentThreadMessageErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type EditAgentThreadMessageError =
+  EditAgentThreadMessageErrors[keyof EditAgentThreadMessageErrors]
+
+export type EditAgentThreadMessageResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    run?: {
+      id: string
+      projectId: string
+      kind: "conversation" | "subagent"
+      threadId: string
+      triggerMessageId: string
+      parentRunId?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      tier?: "light" | "standard" | "heavy"
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
+      computer?: {
+        id: string
+        folder: string
+      }
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "timeout"
+        | "interrupted"
+        | "awaiting_approval"
+        | "awaiting_answer"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      diagnostics?: Array<{
+        code: "step_limit_reached" | "output_limit_reached"
+        severity: "warning" | "error"
+        scope: "run"
+        message: string
+      }>
+      error?: {
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
+          | "agent.execution_failed"
+          | "agent.step_limit_reached"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        httpStatus?: number
+        redacted?: true
+        truncated?: true
+      }
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
+    item?: {
+      id: string
+      projectId: string
+      threadId: string
+      messageId: string
+      seq: number
+      authorPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      mode: "steer" | "queue"
+      parts: Array<
+        | {
+            type: "text"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "continuation"
+          }
+        | {
+            type: "approval-outcome"
+            approvalId: string
+            status: "approved" | "denied" | "cancelled" | "superseded" | "expired"
+            call:
+              | {
+                  kind: "action"
+                  actionId: string
+                  subject:
+                    | {
+                        kind: "none"
+                      }
+                    | {
+                        kind: "object"
+                        objectTypeId: string
+                        primaryId: string
+                      }
+                }
+              | {
+                  kind: "workflow"
+                  workflowId: string
+                }
+            outcome?:
+              | {
+                  kind: "action-run"
+                  runId: string
+                  status: "succeeded" | "failed"
+                  error?: {
+                    code:
+                      | "internal.unexpected"
+                      | "runtime.cancelled"
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.timeout"
+                      | "object.unique_violation"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    details: {
+                      actionId: string
+                      runId: string
+                      phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+                    }
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
+              | {
+                  kind: "workflow-run"
+                  runId: string
+                  queuedAt: string
+                }
+              | {
+                  kind: "error"
+                  error: {
+                    code:
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.run_in_progress"
+                      | "action.timeout"
+                      | "agent.approval_authority_lost"
+                      | "agent.context_limit_exceeded"
+                      | "agent.execution_failed"
+                      | "agent.step_limit_reached"
+                      | "ai.usage_limit_exceeded"
+                      | "ai.usage_limit_unavailable"
+                      | "connector.adapter_invalid"
+                      | "connector.authorization_invalid"
+                      | "connector.authorization_required"
+                      | "connector.configuration_invalid"
+                      | "connector.credentials_unavailable"
+                      | "connector.not_found"
+                      | "connector.operation_conflict"
+                      | "connector.operation_in_progress"
+                      | "connector.provider_failed"
+                      | "connector.provider_unavailable"
+                      | "connector.replacement_required"
+                      | "connector.revocation_pending"
+                      | "dataset.change_refused"
+                      | "dataset.not_found"
+                      | "dataset.version_incompatible"
+                      | "dataset.version_not_found"
+                      | "dataset.version_read_inconsistent"
+                      | "event.delivery_failed"
+                      | "internal.unexpected"
+                      | "queue.enqueue_failed"
+                      | "object.not_found"
+                      | "object.unique_violation"
+                      | "pipeline.step_failed"
+                      | "projection.definition_invalid"
+                      | "projection.execution_failed"
+                      | "projection.not_found"
+                      | "projection.run_already_terminal"
+                      | "projection.run_identity_mismatch"
+                      | "runtime.cancelled"
+                      | "runtime.stopping"
+                      | "vector.model_unavailable"
+                      | "vector.response_invalid"
+                      | "vector.outcome_unknown"
+                      | "storage.unavailable"
+                      | "sync.execution_failed"
+                      | "webhook.delivery_failed"
+                      | "webhook.delivery_rejected"
+                      | "workflow.node_failed"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    details?:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
+            caller?: {
+              runId: string
+              key: string
+              continues?: true
+            }
+          }
+        | {
+            type: "reasoning"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "step-start"
+          }
+        | {
+            type: "file"
+            fileRef: {
+              blobId: string
+              digest: string
+              sizeBytes: number
+              fileName?: string
+              mediaType?: string
+              logicalPath?: string
+            }
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "provider-state"
+            providerId: string
+            /**
+             * Any JSON-compatible value.
+             */
+            data:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            context:
+              | {
+                  kind: "object"
+                  ref: {
+                    objectTypeId: string
+                    primaryId: string
+                  }
+                  /**
+                   * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
+                  kind: "app-state"
+                  id: string
+                  label: string
+                  description: string
+                  /**
+                   * Any JSON-compatible value.
+                   */
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<unknown>
+                    | {
+                        [key: string]: unknown
+                      }
+                    | null
+                }
+            origin: "ambient" | "explicit"
+            type: "context"
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-available"
+            /**
+             * Any JSON-compatible value.
+             */
+            output:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            outputFile?: {
+              fileRef: {
+                blobId: string
+                digest: string
+                sizeBytes: number
+                fileName?: string
+                mediaType?: string
+                logicalPath?: string
+              }
+              path: string
+            }
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-error"
+            errorText: string
+          }
+        | {
+            type: "mail"
+            id: string
+            from: "parent"
+            kind: "message" | "answer"
+            inReplyTo?: string
+            text: string
+            afterAnswer?: true
+          }
+      >
+      spec?: {
+        model?: {
+          provider: string
+          modelId: string
+        }
+        reasoning?:
+          | "provider-default"
+          | "none"
+          | "minimal"
+          | "low"
+          | "medium"
+          | "high"
+          | "xhigh"
+          | "max"
+          | {
+              budgetTokens: number
+            }
+        approvalMode?: "manual" | "accept-edits" | "auto"
+      }
+      timeZone?: string
+      locale?: string
+      immediate?: boolean
+      replacesMessageId?: string
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type EditAgentThreadMessageResponse =
+  EditAgentThreadMessageResponses[keyof EditAgentThreadMessageResponses]
 
 export type CancelAgentRunData = {
   body: {

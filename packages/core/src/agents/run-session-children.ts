@@ -177,8 +177,19 @@ export function agentRunChildren(
       const included = await Promise.all(found.map((each) => scope.includes(each.threadId)))
       return found.filter((_, index) => included[index])
     },
-    inConversation: (input) =>
-      agents.runs.listThreadSubagents({ ...input, projectId, threadId: run.threadId }),
+    inConversation: async (input) => {
+      const { total } = await agents.messages.list({
+        projectId,
+        threadId: run.threadId,
+        limit: 1,
+      })
+      return agents.runs.listThreadSubagents({
+        ...input,
+        projectId,
+        threadId: run.threadId,
+        ...(total > 0 ? { retainedTurnsOnly: true } : {}),
+      })
+    },
     async threadRuns(threadId) {
       if (!(await scope.includes(threadId))) return []
       return listSubagentThreadRuns(agents, { projectId, threadId })
