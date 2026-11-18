@@ -296,6 +296,8 @@ export interface AgentThreadForkPlan {
   readonly thread: AgentThreadRecord
   /** The source messages to copy, in `seq` order, with the id of each copy. */
   readonly messages: readonly { readonly sourceId: string; readonly id: string }[]
+  /** The seq of the last message copied, 0 when none: the copy's newest, as copies keep theirs. */
+  readonly headSeq: number
   readonly checkpoint?: AgentContextCheckpointRecord
 }
 
@@ -334,6 +336,24 @@ export function countsAsThreadMessage(message: Pick<AgentMessageRecord, "parts">
   return !(
     message.parts.length > 0 && message.parts.every((part) => part.type === "approval-outcome")
   )
+}
+
+/**
+ * Whether a message past a reader's place is new to them: every Agent answer and every other
+ * person's message. What they wrote themselves is not, and neither is a message the thread does
+ * not count. An Agent answer carries its requester as author, so only a user message is theirs.
+ * The SQL providers say the same in their `unread` count.
+ */
+export function isUnreadFor(
+  message: Pick<AgentMessageRecord, "role" | "authorPrincipal" | "parts">,
+  reader: UserPrincipal
+): boolean {
+  if (!countsAsThreadMessage(message)) return false
+
+  const author = message.authorPrincipal
+  const ownMessage = message.role === "user" && author?.type === "user" && author.id === reader.id
+
+  return !ownMessage
 }
 
 /**
@@ -381,7 +401,6 @@ export function planAgentThreadFork(
     // No `lastMessageAt` until the fork's first new message: threads sort by it, else by their
     // creation, so a fork of an old conversation sorts with what its owner just did.
     messageCount: copied.filter((message) => message.counted !== false).length,
-    lastMessageSeq: lastCopiedSeq,
     createdAt,
     updatedAt: createdAt,
   }
@@ -389,6 +408,7 @@ export function planAgentThreadFork(
   return {
     thread,
     messages: copied.map((message) => ({ sourceId: message.id, id: createAgentMessageId() })),
+    headSeq: lastCopiedSeq,
     ...(checkpoint === undefined
       ? {}
       : {
@@ -1023,7 +1043,6 @@ export function newSubagentThreadRecord(
     activeRunId: input.id,
     lastMessageAt: createdAt,
     messageCount: 1,
-    lastMessageSeq: 1,
     createdAt,
     updatedAt: createdAt,
   }

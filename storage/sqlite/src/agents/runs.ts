@@ -238,8 +238,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
               created_at
             ) VALUES (
               ?, ?, ?, ?, 'user',
-              (SELECT last_message_seq FROM agent_threads
-                WHERE project_id = ? AND id = ?),
+              (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
+                WHERE project_id = ? AND thread_id = ?),
               ?, ?, ?, ?
             )
           `
@@ -703,7 +703,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `
           UPDATE agent_threads
           SET active_run_id = ?, message_count = message_count + 1, last_message_at = ?,
-            last_message_seq = last_message_seq + 1, updated_at = ?
+            updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -733,9 +733,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         INSERT INTO agent_threads (
           project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-          owner_principal_id, status, active_run_id, last_message_at, message_count,
-          last_message_seq, created_at, updated_at
-        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
+          updated_at
+        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -750,7 +750,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
         input.id,
         createdAt.toISOString(),
         thread.messageCount,
-        thread.lastMessageSeq,
         createdAt.toISOString(),
         createdAt.toISOString()
       )

@@ -840,8 +840,6 @@ describe("Postgres storage migrations", () => {
           activeRunId: child.active,
           lastMessageAt: new Date("2026-07-01T12:00:01.000Z"),
           messageCount: 1,
-          // This schema predates the column: it reads as 0 until its migration backfills it.
-          lastMessageSeq: 0,
           createdAt: new Date("2026-07-01T12:00:01.000Z"),
           updatedAt: new Date(
             child.active ? "2026-07-01T12:00:01.000Z" : "2026-07-01T12:00:05.000Z"
@@ -1817,6 +1815,81 @@ describe("Postgres storage migrations", () => {
         "owner_type",
         "owner_id",
         "slot",
+      ])
+    })
+  })
+
+  test("starts every person in an existing conversation at its newest message", async () => {
+    // Removal proofs: drop `owner_principal_type = 'user'` and the system thread's owner breaks
+    // the reads' CHECK, which ON CONFLICT does not absorb: the migration fails. Drop the
+    // participants' insert and Bob starts with everything unread; take the place from `COUNT(*)`
+    // and the gap an edit left lands Alice at 3, before the newest message.
+    const index = indexOf("108-agent-thread-reads")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      const at = "2026-01-01T00:00:00.000Z"
+      const thread = (id: string, ownerType: string, ownerId: string) =>
+        sql.unsafe(
+          `INSERT INTO agent_threads (
+            project_id, id, owner_principal_type, owner_principal_id, status, created_at,
+            updated_at
+          ) VALUES ('p', $1, $2, $3, 'active', $4, $4)`,
+          [id, ownerType, ownerId, at]
+        )
+      await thread("thr_alice", "user", "usr_alice")
+      await thread("thr_empty", "user", "usr_alice")
+      // Without sign-in, every conversation belongs to system code.
+      await thread("thr_system", "system", "system")
+      await thread("thr_service", "serviceAccount", "sa_reports")
+
+      for (const [threadId, seq] of [
+        ["thr_alice", 1],
+        ["thr_alice", 2],
+        ["thr_alice", 5],
+        ["thr_system", 1],
+      ] as const) {
+        await sql.unsafe(
+          `INSERT INTO agent_messages (
+            project_id, id, thread_id, role, seq, parts, content_version, created_at
+          ) VALUES ('p', $1, $2, 'user', $3, '[]'::jsonb, 1, $4)`,
+          [`msg_${threadId}_${seq}`, threadId, seq, at]
+        )
+      }
+      await sql.unsafe(
+        `INSERT INTO agent_thread_participants (
+          project_id, thread_id, principal_type, principal_id, added_at, added_by_type,
+          added_by_id
+        ) VALUES ('p', 'thr_alice', 'user', 'usr_bob', $1, 'user', 'usr_alice')`,
+        [at]
+      )
+
+      await migrateThrough(index + 1)
+
+      const reads = await sql.unsafe<
+        {
+          thread_id: string
+          principal_type: string
+          principal_id: string
+          through_seq: number
+        }[]
+      >(
+        `SELECT thread_id, principal_type, principal_id, through_seq FROM agent_thread_reads
+           ORDER BY thread_id, principal_id`
+      )
+
+      expect([...reads]).toEqual([
+        {
+          thread_id: "thr_alice",
+          principal_type: "user",
+          principal_id: "usr_alice",
+          through_seq: 5,
+        },
+        { thread_id: "thr_alice", principal_type: "user", principal_id: "usr_bob", through_seq: 5 },
+        {
+          thread_id: "thr_empty",
+          principal_type: "user",
+          principal_id: "usr_alice",
+          through_seq: 0,
+        },
       ])
     })
   })

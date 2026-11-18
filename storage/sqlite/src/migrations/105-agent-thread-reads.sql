@@ -1,23 +1,7 @@
 -- Where each person's reading of a conversation has reached: the seq of the last message they saw.
--- Nothing writes here when activity happens. A new message moves the thread's `last_message_seq`
--- past it, and only the reader advances it, so every device reads the same position.
---
--- `last_message_seq` is the thread's high-water mark. It never moves back: a retried turn deletes
--- its messages, and the retry's next message continues past the numbers those held, so a reused
--- number can never hide a new message from a reader.
-ALTER TABLE agent_threads ADD COLUMN last_message_seq INTEGER NOT NULL DEFAULT 0;
-
-UPDATE agent_threads
-SET last_message_seq = COALESCE(
-  (
-    SELECT MAX(seq)
-    FROM agent_messages
-    WHERE agent_messages.project_id = agent_threads.project_id
-      AND agent_messages.thread_id = agent_threads.id
-  ),
-  0
-);
-
+-- Nothing writes here when a message arrives: new ones sit past it until the reader moves it. A
+-- retry or an edit that deletes messages pulls every place inside them back to just before them,
+-- because the numbers they held go to what replaces them.
 CREATE TABLE agent_thread_reads (
   project_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
@@ -30,7 +14,9 @@ CREATE TABLE agent_thread_reads (
 );
 
 -- Everyone starts caught up: the first deploy must not mark every thread that already existed as
--- new. A row is then created as a thread is created and as each participant joins it.
+-- new. Only a person reads, so an owner that is system code or a service account gets no row; it
+-- would break the CHECK above. From here on, a participant gets a row when they join, and an
+-- owner when they first mark the thread read: until then, they read as 0.
 INSERT OR IGNORE INTO agent_thread_reads (
   project_id,
   thread_id,
@@ -44,10 +30,18 @@ SELECT
   id,
   owner_principal_type,
   owner_principal_id,
-  last_message_seq,
+  COALESCE(
+    (
+      SELECT MAX(seq) FROM agent_messages
+      WHERE agent_messages.project_id = agent_threads.project_id
+        AND agent_messages.thread_id = agent_threads.id
+    ),
+    0
+  ),
   strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 FROM agent_threads
-WHERE kind = 'conversation';
+WHERE kind = 'conversation'
+  AND owner_principal_type = 'user';
 
 INSERT OR IGNORE INTO agent_thread_reads (
   project_id,
@@ -62,7 +56,14 @@ SELECT
   participant.thread_id,
   participant.principal_type,
   participant.principal_id,
-  thread.last_message_seq,
+  COALESCE(
+    (
+      SELECT MAX(seq) FROM agent_messages
+      WHERE agent_messages.project_id = thread.project_id
+        AND agent_messages.thread_id = thread.id
+    ),
+    0
+  ),
   strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 FROM agent_thread_participants AS participant
 JOIN agent_threads AS thread

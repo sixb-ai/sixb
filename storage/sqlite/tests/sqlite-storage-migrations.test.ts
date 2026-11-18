@@ -842,6 +842,79 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  // Removal proofs: drop the participants' insert and Bob starts with everything unread; take the
+  // place from `COUNT(*)` and the gap an edit left lands Alice at 3, before the newest message.
+  // Here `OR IGNORE` skips a non-user owner's row either way: the Postgres suite proves the
+  // `owner_principal_type = 'user'` filter, without which its migration fails.
+  test("starts every person in an existing conversation at its newest message", () => {
+    const db = replayedDatabase("105-agent-thread-reads")
+    try {
+      const at = "2026-01-01T00:00:00.000Z"
+      const thread = (id: string, ownerType: string, ownerId: string) =>
+        db.run(
+          `INSERT INTO agent_threads (
+            project_id, id, owner_principal_type, owner_principal_id, status, created_at,
+            updated_at
+          ) VALUES ('p', ?, ?, ?, 'active', ?, ?)`,
+          [id, ownerType, ownerId, at, at]
+        )
+      thread("thr_alice", "user", "usr_alice")
+      thread("thr_empty", "user", "usr_alice")
+      // Without sign-in, every conversation belongs to system code.
+      thread("thr_system", "system", "system")
+      thread("thr_service", "serviceAccount", "sa_reports")
+
+      for (const seq of [1, 2, 5]) {
+        db.run(
+          `INSERT INTO agent_messages (
+            project_id, id, thread_id, role, seq, parts, content_version, created_at
+          ) VALUES ('p', ?, 'thr_alice', 'user', ?, '[]', 1, ?)`,
+          [`msg_${seq}`, seq, at]
+        )
+      }
+      db.run(
+        `INSERT INTO agent_messages (
+          project_id, id, thread_id, role, seq, parts, content_version, created_at
+        ) VALUES ('p', 'msg_system', 'thr_system', 'user', 1, '[]', 1, ?)`,
+        [at]
+      )
+      db.run(
+        `INSERT INTO agent_thread_participants (
+          project_id, thread_id, principal_type, principal_id, added_at, added_by_type,
+          added_by_id
+        ) VALUES ('p', 'thr_alice', 'user', 'usr_bob', ?, 'user', 'usr_alice')`,
+        [at]
+      )
+
+      migration("105-agent-thread-reads").up(db)
+
+      expect(
+        db
+          .query(
+            `SELECT thread_id, principal_type, principal_id, through_seq FROM agent_thread_reads
+             ORDER BY thread_id, principal_id`
+          )
+          .all()
+      ).toEqual([
+        {
+          thread_id: "thr_alice",
+          principal_type: "user",
+          principal_id: "usr_alice",
+          through_seq: 5,
+        },
+        { thread_id: "thr_alice", principal_type: "user", principal_id: "usr_bob", through_seq: 5 },
+        {
+          thread_id: "thr_empty",
+          principal_type: "user",
+          principal_id: "usr_alice",
+          through_seq: 0,
+        },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   // Removal proofs: drop the `json_set` on `$.details.phase` from 060, and the enqueue failure below
   // keeps phase 'enqueue', which `parseActionRunFailure` rejects. Drop the join on
   // `ontology_commits`, and the runs whose edits committed are recorded as failed.

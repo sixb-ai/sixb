@@ -13,7 +13,7 @@ import {
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
-import type { SqlParameter } from "../pg-client"
+import type { SQLClient, SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import { type AgentMessageRow, queryAgentList, rowToMessageRecord } from "./rows"
@@ -43,8 +43,8 @@ export class PgAgentMessageStore implements AgentMessageStore {
           }
         }
 
-        const [thread] = await tx<{ id: string; last_message_seq: number | string }[]>`
-          SELECT id, last_message_seq FROM agent_threads
+        const [thread] = await tx<{ id: string }[]>`
+          SELECT id FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
@@ -56,8 +56,10 @@ export class PgAgentMessageStore implements AgentMessageStore {
           )
         }
 
-        // Past every number the thread ever assigned: a deleted turn's numbers are not reused.
-        const seq = Number(thread.last_message_seq) + 1
+        const [seqRow] = await tx<{ next: number | string }[]>`
+          SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM agent_messages
+          WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+        `
 
         const [row] = await tx<AgentMessageRow[]>`
           INSERT INTO agent_messages (
@@ -82,7 +84,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
             ${input.role},
             ${input.authorPrincipal?.type ?? null},
             ${input.authorPrincipal?.id ?? null},
-            ${seq},
+            ${Number(seqRow.next)},
             ${JSON.stringify(input.parts)}::text::jsonb,
             ${input.metadata === undefined ? null : JSON.stringify(input.metadata)}::text::jsonb,
             ${AGENT_MESSAGE_CONTENT_VERSION},
@@ -97,7 +99,6 @@ export class PgAgentMessageStore implements AgentMessageStore {
           SET
             message_count = message_count + ${countsAsThreadMessage(input) ? 1 : 0},
             last_message_at = ${createdAt},
-            last_message_seq = ${seq},
             updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `
@@ -146,16 +147,23 @@ export class PgAgentMessageStore implements AgentMessageStore {
         )
       }
 
-      const deleted = await tx<{ id: string; parts: AgentMessageRecord["parts"] | string }[]>`
+      const deleted = await tx<
+        { id: string; seq: number | string; parts: AgentMessageRecord["parts"] | string }[]
+      >`
         DELETE FROM agent_messages
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
           AND run_id = ${input.runId}
-        RETURNING id, parts
+        RETURNING id, seq, parts
       `
       if (deleted.length === 0) {
         return 0
       }
+      await pullBackReads(tx, {
+        projectId: input.projectId,
+        threadId: input.threadId,
+        fromSeq: Math.min(...deleted.map((row) => Number(row.seq))),
+      })
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({
@@ -207,6 +215,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
         RETURNING id, parts
       `
       if (deleted.length === 0) return 0
+      await pullBackReads(tx, input)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({
@@ -275,4 +284,20 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
     return { messages: rows.map(rowToMessageRecord), hasMore, total }
   }
+}
+
+/**
+ * Pull every place at or past `fromSeq` back to just before it: those numbers now belong to
+ * whatever replaces the deleted messages, which nobody has read yet.
+ */
+async function pullBackReads(
+  tx: SQLClient,
+  input: { readonly projectId: string; readonly threadId: string; readonly fromSeq: number }
+): Promise<void> {
+  await tx`
+    UPDATE agent_thread_reads SET through_seq = ${input.fromSeq - 1}
+    WHERE project_id = ${input.projectId}
+      AND thread_id = ${input.threadId}
+      AND through_seq >= ${input.fromSeq}
+  `
 }

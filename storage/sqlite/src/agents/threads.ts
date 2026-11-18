@@ -240,7 +240,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
               input.projectId,
               input.id,
               input.ownerPrincipal.id,
-              Math.min(sourceRead.through_seq, plan.thread.lastMessageSeq),
+              Math.min(sourceRead.through_seq, plan.headSeq),
               sourceRead.read_at
             )
         }
@@ -415,13 +415,8 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.db
       .transaction(() => {
         const thread = this.db
-          .query(
-            "SELECT id, kind, last_message_seq FROM agent_threads WHERE project_id = ? AND id = ?"
-          )
-          .get(input.projectId, input.threadId) as Pick<
-          AgentThreadRow,
-          "id" | "kind" | "last_message_seq"
-        > | null
+          .query("SELECT id, kind FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.threadId) as Pick<AgentThreadRow, "id" | "kind"> | null
         if (!thread) {
           throw new AgentStorageError(
             "thread_not_found",
@@ -466,18 +461,16 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             principal_id,
             through_seq,
             read_at
-          ) VALUES (?, ?, ?, ?, ?, ?)
+          ) VALUES (
+            ?1, ?2, ?3, ?4,
+            (SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+              WHERE project_id = ?1 AND thread_id = ?2),
+            ?5
+          )
           ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO NOTHING
         `)
         for (const principal of added) {
-          startRead.run(
-            input.projectId,
-            input.threadId,
-            principal.type,
-            principal.id,
-            thread.last_message_seq,
-            addedAt
-          )
+          startRead.run(input.projectId, input.threadId, principal.type, principal.id, addedAt)
         }
 
         return added.length === 0
@@ -642,11 +635,10 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             active_run_id,
             last_message_at,
             message_count,
-            last_message_seq,
             moved_at,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -660,7 +652,6 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           thread.status,
           thread.lastMessageAt?.toISOString() ?? null,
           thread.messageCount,
-          thread.lastMessageSeq,
           thread.movedAt?.toISOString() ?? null,
           thread.createdAt.toISOString(),
           thread.updatedAt.toISOString()

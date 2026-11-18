@@ -26,8 +26,8 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
     return this.db.transaction(() => {
       const thread = this.db
-        .query("SELECT last_message_seq FROM agent_threads WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.threadId) as { last_message_seq: number } | null
+        .query("SELECT 1 AS present FROM agent_threads WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.threadId) as { present: number } | null
 
       if (!thread) {
         throw new AgentStorageError(
@@ -49,8 +49,11 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         }
       }
 
-      // Past every number the thread ever assigned: a deleted turn's numbers are not reused.
-      const seq = thread.last_message_seq + 1
+      const seqRow = this.db
+        .query(
+          "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM agent_messages WHERE project_id = ? AND thread_id = ?"
+        )
+        .get(input.projectId, input.threadId) as { next: number }
 
       try {
         this.db
@@ -81,7 +84,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
             input.role,
             input.authorPrincipal?.type ?? null,
             input.authorPrincipal?.id ?? null,
-            seq,
+            seqRow.next,
             JSON.stringify(input.parts),
             input.metadata === undefined ? null : JSON.stringify(input.metadata),
             AGENT_MESSAGE_CONTENT_VERSION,
@@ -103,15 +106,13 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         .query(
           `
           UPDATE agent_threads
-          SET message_count = message_count + ?, last_message_at = ?,
-            last_message_seq = ?, updated_at = ?
+          SET message_count = message_count + ?, last_message_at = ?, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
         .run(
           countsAsThreadMessage(input) ? 1 : 0,
           createdAt.toISOString(),
-          seq,
           createdAt.toISOString(),
           input.projectId,
           input.threadId
@@ -149,12 +150,17 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       const deleted = this.db
         .query(
-          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING parts"
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING seq, parts"
         )
-        .all(input.projectId, input.threadId, input.runId) as { parts: string }[]
+        .all(input.projectId, input.threadId, input.runId) as { seq: number; parts: string }[]
       if (deleted.length === 0) {
         return 0
       }
+      this.pullBackReads(
+        input.projectId,
+        input.threadId,
+        Math.min(...deleted.map((row) => row.seq))
+      )
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -204,6 +210,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         )
         .all(input.projectId, input.threadId, input.fromSeq) as { parts: string }[]
       if (deleted.length === 0) return 0
+      this.pullBackReads(input.projectId, input.threadId, input.fromSeq)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -230,6 +237,19 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       return deleted.length
     })()
+  }
+
+  /**
+   * Pull every place at or past `fromSeq` back to just before it: those numbers now belong to
+   * whatever replaces the deleted messages, which nobody has read yet.
+   */
+  private pullBackReads(projectId: string, threadId: string, fromSeq: number): void {
+    this.db
+      .query(`
+        UPDATE agent_thread_reads SET through_seq = ?
+        WHERE project_id = ? AND thread_id = ? AND through_seq >= ?
+      `)
+      .run(fromSeq - 1, projectId, threadId, fromSeq)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {

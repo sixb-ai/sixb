@@ -131,6 +131,7 @@ export type {
   AgentThreadParticipantRecord,
   AgentThreadPlace,
   AgentThreadReadRecord,
+  AgentThreadReadState,
   AgentThreadReadStore,
   AgentThreadRecord,
   AgentThreadSandboxParams,

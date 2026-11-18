@@ -226,8 +226,8 @@ export class PgAgentRunStore implements AgentRunStore {
             created_at
           ) VALUES (
             ${input.projectId}, ${input.trigger.id}, ${input.thread.id}, ${input.id}, ${"user"},
-            (SELECT last_message_seq FROM agent_threads
-              WHERE project_id = ${input.projectId} AND id = ${input.thread.id}),
+            (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
+              WHERE project_id = ${input.projectId} AND thread_id = ${input.thread.id}),
             ${JSON.stringify(input.trigger.parts)}::text::jsonb,
             ${input.trigger.metadata === undefined ? null : JSON.stringify(input.trigger.metadata)}::text::jsonb,
             ${AGENT_MESSAGE_CONTENT_VERSION}, ${createdAt}
@@ -625,8 +625,7 @@ async function claimChildThread(
     await tx`
       UPDATE agent_threads
       SET active_run_id = ${input.id}, message_count = message_count + 1,
-        last_message_at = ${createdAt}, last_message_seq = last_message_seq + 1,
-        updated_at = ${createdAt}
+        last_message_at = ${createdAt}, updated_at = ${createdAt}
       WHERE project_id = ${input.projectId} AND id = ${input.thread.id}
     `
     return
@@ -646,13 +645,13 @@ async function claimChildThread(
   await tx`
     INSERT INTO agent_threads (
       project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-      owner_principal_id, status, active_run_id, last_message_at, message_count,
-      last_message_seq, created_at, updated_at
+      owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
+      updated_at
     ) VALUES (
       ${thread.projectId}, ${thread.id}, ${"subagent"}, ${conversation.id}, ${input.parentRunId},
       ${input.spawnKey}, ${thread.ownerPrincipal.type}, ${thread.ownerPrincipal.id},
-      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount},
-      ${thread.lastMessageSeq}, ${createdAt}, ${createdAt}
+      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount}, ${createdAt},
+      ${createdAt}
     )
   `
 }

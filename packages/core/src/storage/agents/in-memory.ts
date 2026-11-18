@@ -49,6 +49,7 @@ import {
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
+  isUnreadFor,
   LIVE_AGENT_APPROVAL_STATUSES,
   movesComputerPlace,
   newAgentApprovalRecord,
@@ -93,6 +94,7 @@ import type {
   AgentStorage,
   AgentThreadParticipantRecord,
   AgentThreadReadRecord,
+  AgentThreadReadState,
   AgentThreadReadStore,
   AgentThreadRecord,
   AgentThreadSandboxState,
@@ -303,7 +305,6 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       status: input.status ?? "active",
       activeRunId: null,
       messageCount: 0,
-      lastMessageSeq: 0,
       createdAt,
       updatedAt: new Date(input.updatedAt ?? createdAt),
     }
@@ -388,7 +389,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       this.state.reads.set(readKey(input.projectId, input.id, input.ownerPrincipal), {
         ...sourceRead,
         threadId: input.id,
-        throughSeq: Math.min(sourceRead.throughSeq, plan.thread.lastMessageSeq),
+        throughSeq: Math.min(sourceRead.throughSeq, plan.headSeq),
       })
     }
 
@@ -491,12 +492,13 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     const participants = [...existing, ...added].sort(compareAgentThreadParticipants)
     this.state.participants.set(threadKey, participants)
     // Someone who joins starts caught up: what came before is not new to them.
+    const headSeq = headSeqOf(this.state, input.projectId, input.threadId)
     for (const participant of added) {
       this.state.reads.set(readKey(input.projectId, input.threadId, participant.principal), {
         projectId: input.projectId,
         threadId: input.threadId,
         principal: clone(participant.principal),
-        throughSeq: thread.lastMessageSeq,
+        throughSeq: headSeq,
         readAt: new Date(addedAt),
       })
     }
@@ -578,7 +580,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 class InMemoryAgentThreadReadStore implements AgentThreadReadStore {
   constructor(private readonly state: AgentStoreState) {}
 
-  async mark(input: MarkAgentThreadReadInput): Promise<AgentThreadReadRecord> {
+  async mark(input: MarkAgentThreadReadInput): Promise<AgentThreadReadState> {
     const thread = this.state.threads.get(key(input.projectId, input.threadId))
     if (!thread) {
       throw new AgentStorageError(
@@ -587,28 +589,60 @@ class InMemoryAgentThreadReadStore implements AgentThreadReadStore {
       )
     }
 
+    const reached = this.reachedSeq(input)
+    if (reached === null) return this.stateOf(thread, input.principal)
+
     const storedKey = readKey(input.projectId, input.threadId, input.principal)
     const known = this.state.reads.get(storedKey)
-    const throughSeq = Math.min(Math.max(0, Math.trunc(input.throughSeq)), thread.lastMessageSeq)
-    // Never backwards: another device that read further keeps its place.
-    if (known && known.throughSeq >= throughSeq) return clone(known)
+    const readAt = new Date(input.readAt ?? new Date())
 
-    const record: AgentThreadReadRecord = {
+    // Never backwards: another device that read further keeps its place. Looking always counts.
+    this.state.reads.set(storedKey, {
       projectId: input.projectId,
       threadId: input.threadId,
       principal: clone(input.principal),
-      throughSeq,
-      readAt: new Date(input.readAt ?? new Date()),
-    }
-    this.state.reads.set(storedKey, clone(record))
-    return clone(record)
+      throughSeq: Math.max(known?.throughSeq ?? 0, reached),
+      readAt: known && known.readAt > readAt ? known.readAt : readAt,
+    })
+
+    return this.stateOf(thread, input.principal)
   }
 
-  async list(input: ListAgentThreadReadsInput): Promise<readonly AgentThreadReadRecord[]> {
+  async list(input: ListAgentThreadReadsInput): Promise<readonly AgentThreadReadState[]> {
     return [...new Set(input.threadIds)]
-      .map((threadId) => this.state.reads.get(readKey(input.projectId, threadId, input.principal)))
-      .filter((record): record is AgentThreadReadRecord => record !== undefined)
-      .map(clone)
+      .map((threadId) => this.state.threads.get(key(input.projectId, threadId)))
+      .filter((thread): thread is AgentThreadRecord => thread !== undefined)
+      .map((thread) => this.stateOf(thread, input.principal))
+  }
+
+  /** The seq a mark reaches: its message's, or the newest. `null` when the message is gone. */
+  private reachedSeq(input: MarkAgentThreadReadInput): number | null {
+    if (input.throughMessageId === undefined) {
+      return headSeqOf(this.state, input.projectId, input.threadId)
+    }
+
+    const message = this.state.messages.get(key(input.projectId, input.throughMessageId))
+    return message?.threadId === input.threadId ? message.seq : null
+  }
+
+  private stateOf(thread: AgentThreadRecord, reader: UserPrincipal): AgentThreadReadState {
+    const read = this.state.reads.get(readKey(thread.projectId, thread.id, reader))
+    const headSeq = headSeqOf(this.state, thread.projectId, thread.id)
+    const throughSeq = Math.min(read?.throughSeq ?? 0, headSeq)
+
+    let unread = 0
+    for (const message of this.state.messages.values()) {
+      if (message.projectId !== thread.projectId || message.threadId !== thread.id) continue
+      if (message.seq > throughSeq && isUnreadFor(message, reader)) unread += 1
+    }
+
+    return {
+      threadId: thread.id,
+      throughSeq,
+      headSeq,
+      unread,
+      ...(read === undefined ? {} : { readAt: new Date(read.readAt) }),
+    }
   }
 }
 
@@ -788,7 +822,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
         activeRunId: input.id,
         messageCount: existingThread.messageCount + 1,
         lastMessageAt: createdAt,
-        lastMessageSeq: nextMessageSeq(existingThread),
         updatedAt: createdAt,
       }
     }
@@ -813,7 +846,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.thread.id,
       runId: input.id,
       role: "user",
-      seq: thread.lastMessageSeq,
+      seq: nextMessageSeq(this.state, input.projectId, input.thread.id),
       parts: clone(input.trigger.parts),
       ...(input.trigger.metadata === undefined ? {} : { metadata: clone(input.trigger.metadata) }),
       contentVersion: AGENT_MESSAGE_CONTENT_VERSION,
@@ -1157,7 +1190,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     }
 
     const createdAt = new Date(input.createdAt ?? new Date())
-    const seq = nextMessageSeq(thread)
+    const seq = nextMessageSeq(this.state, input.projectId, input.threadId)
     const message: AgentMessageRecord = {
       id: input.id,
       projectId: input.projectId,
@@ -1182,7 +1215,6 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
         ...thread,
         messageCount: thread.messageCount + (countsAsThreadMessage(input) ? 1 : 0),
         lastMessageAt: createdAt,
-        lastMessageSeq: seq,
         updatedAt: createdAt,
       })
     )
@@ -1222,6 +1254,8 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     for (const [messageKey] of messages) {
       this.state.messages.delete(messageKey)
     }
+    const firstDeleted = Math.min(...messages.map(([, message]) => message.seq))
+    pullBackReads(this.state, input.projectId, input.threadId, firstDeleted)
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1265,6 +1299,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     for (const [messageKey] of toDelete) {
       this.state.messages.delete(messageKey)
     }
+    pullBackReads(this.state, input.projectId, input.threadId, input.fromSeq)
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1307,9 +1342,35 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
   }
 }
 
-/** The thread's next message: past every seq it ever assigned, deleted ones included. */
-function nextMessageSeq(thread: Pick<AgentThreadRecord, "lastMessageSeq">): number {
-  return thread.lastMessageSeq + 1
+/** The `seq` of a thread's newest message, 0 when it has none. */
+function headSeqOf(state: AgentStoreState, projectId: string, threadId: string): number {
+  let max = 0
+  for (const message of state.messages.values()) {
+    if (message.projectId === projectId && message.threadId === threadId && message.seq > max) {
+      max = message.seq
+    }
+  }
+  return max
+}
+
+function nextMessageSeq(state: AgentStoreState, projectId: string, threadId: string): number {
+  return headSeqOf(state, projectId, threadId) + 1
+}
+
+/**
+ * Pull every place at or past `fromSeq` back to just before it: those numbers now belong to
+ * whatever replaces the deleted messages, which nobody has read yet.
+ */
+function pullBackReads(
+  state: AgentStoreState,
+  projectId: string,
+  threadId: string,
+  fromSeq: number
+): void {
+  for (const [readKey, read] of state.reads) {
+    if (read.projectId !== projectId || read.threadId !== threadId) continue
+    if (read.throughSeq >= fromSeq) state.reads.set(readKey, { ...read, throughSeq: fromSeq - 1 })
+  }
 }
 
 // ── context checkpoints ──────────────────────────────────────────────────────────────────────

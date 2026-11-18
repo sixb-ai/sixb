@@ -218,7 +218,6 @@ export class PgAgentThreadStore implements AgentThreadStore {
             status,
             last_message_at,
             message_count,
-            last_message_seq,
             moved_at,
             created_at,
             updated_at
@@ -233,7 +232,6 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ${thread.status},
             ${thread.lastMessageAt ?? null},
             ${thread.messageCount},
-            ${thread.lastMessageSeq},
             ${thread.movedAt ?? null},
             ${thread.createdAt},
             ${thread.updatedAt}
@@ -258,7 +256,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
               ${input.id},
               'user',
               ${input.ownerPrincipal.id},
-              LEAST(source.through_seq, ${thread.lastMessageSeq}),
+              LEAST(source.through_seq, ${plan.headSeq}),
               source.read_at
             FROM agent_thread_reads AS source
             WHERE source.project_id = ${input.projectId}
@@ -439,8 +437,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     return runPgTransaction(this.sql, async (tx) => {
       // Concurrent adds to one thread queue on its row, so the limit counts every participant.
-      const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind" | "last_message_seq">[]>`
-        SELECT id, kind, last_message_seq FROM agent_threads
+      const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind">[]>`
+        SELECT id, kind FROM agent_threads
         WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         FOR UPDATE
       `
@@ -493,7 +491,10 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ${input.threadId},
             ${principal.type},
             ${principal.id},
-            ${Number(thread.last_message_seq)},
+            (
+              SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+              WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+            ),
             ${addedAt}
           )
           ON CONFLICT DO NOTHING
