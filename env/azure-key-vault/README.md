@@ -26,8 +26,12 @@ back certificates, so `names` and `read` skip both.
 
 Every call goes straight to Key Vault's REST API. A token comes from, in order:
 
-1. The token the caller passes: a server's credential, a JSON object with `tenant`, `clientId` and
-   `clientSecret`, traded for an access token with Microsoft Entra ID.
+1. The token the caller passes: a server's credential. It's either a JSON object with `tenant`,
+   `clientId` and `clientSecret`, traded for an access token with Microsoft Entra ID, or
+   `{ "identity": "managed" }` (with an optional `clientId`), which asks the VM's instance
+   metadata service at `169.254.169.254` for a token of its managed identity. When `server` is set,
+   the server reads with that identity whatever the token holds: moving a server to a managed
+   identity is a commit, and a token naming one keeps working after a rollback past it.
 2. `az account get-access-token`: a person signed in with `az login`, or a CI job after
    `azure/login`. In a terminal, a person who isn't signed in is sent through `az login` first.
 
@@ -53,6 +57,19 @@ resolves, that's a refusal, so a deploy stops on a misspelled vault instead of r
 read the one vault: the `Key Vault Secrets User` role on a vault using Azure RBAC, or a `get` and
 `list` access policy on one using access policies. If it can't grant that, it deletes the service
 principal again. The secret expires after a year, Azure's default.
+
+With `server: { identity: "managed" }`, `createServerToken` creates nothing and only writes which
+identity reads, because the deployer often can't grant access (a guest in a client's tenant).
+Granting is left to whoever can, so the server's errors name the command for them: Key Vault's 403
+says `ForbiddenByRbac` on a vault using Azure RBAC and `AccessDenied` on one using access policies,
+and the identity's object ID is the token's `oid` claim. "Identity not found" from the metadata
+service means the VM has no such identity, and the instance metadata names the VM in the command
+that assigns one. The metadata service answers on every Azure VM, so no answer at all is a refusal
+(the server isn't one), while 410, 429 and 5xx, which Azure says to retry, are an outage.
+
+The metadata service is called directly rather than through `@azure/identity`'s
+`DefaultAzureCredential`, which would prefer `AZURE_CLIENT_ID` and the rest from the project's
+`.env`, the same reason the CLI path avoids them.
 
 `tests/azure-key-vault.e2e.ts` runs against a real vault and is skipped without
 `AZURE_KEY_VAULT_E2E_VAULT`. See the file for what it needs.

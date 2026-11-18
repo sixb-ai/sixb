@@ -15,6 +15,11 @@ Sixb packages are versioned independently. Each release entry names the packages
   message and how many messages someone else wrote since) and `lastRun`, enough to offer Continue
   or Retry. `sixb.agent.threads.markRead(threadId, { throughMessageId })` moves the place, or to
   the newest message without one; over HTTP, `PUT /api/agent-threads/:threadId/read`.
+- Let a server on an Azure VM read its Key Vault with the VM's managed identity:
+  `@sixb/env-azure-key-vault`'s `azureKeyVault({ vaults, server: { identity: "managed" } })`, with
+  a `clientId` for a user-assigned identity. `sixb deploy setup` then creates no app registration
+  and no secret that expires, and a deploy the vault refuses prints the command that grants the
+  identity access.
 
 ### Upgrade notes
 
