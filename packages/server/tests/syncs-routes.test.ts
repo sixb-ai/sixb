@@ -61,10 +61,7 @@ function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostView {
     },
     definitions: {
       // `syncs/erp/invoices.ts` puts the sync in `erp`.
-      folders: {
-        of: (family: string, id: string) =>
-          family === "syncs" && id === "sync-invoices" ? "erp" : undefined,
-      },
+      folders: { syncs: new Map([["sync-invoices", "erp"]]) },
       syncs: {
         list: () => syncs,
         getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,

@@ -50,7 +50,7 @@ function createSixbStub(
     id: "my-app",
     storage: { workflowRuns },
     definitions: {
-      folders: { of: () => undefined },
+      folders: {},
       workflows: {
         list: () => workflows,
         getById: (id: string) => workflows.find((candidate) => candidate.id === id) ?? null,

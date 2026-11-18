@@ -1,9 +1,4 @@
-import type {
-  DefinitionFolders,
-  PipelineDefinition,
-  PipelineStepExecutor,
-  SixbHostView,
-} from "@sixb/core"
+import type { PipelineDefinition, PipelineStepExecutor, SixbHostView } from "@sixb/core"
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -104,11 +99,11 @@ async function getLatestPipelineRuns(
 function serializePipeline(
   pipeline: PipelineDefinition,
   latestRun: SerializedPipelineRun | null,
-  folders: DefinitionFolders
+  folder: string | undefined
 ): ReturnType<typeof PipelineSchema.parse> {
   return PipelineSchema.parse({
     id: pipeline.id,
-    folder: folders.of("pipelines", pipeline.id),
+    folder,
     triggers: pipeline.triggers,
     graph: {
       kind: pipeline.graph.kind,
@@ -143,7 +138,11 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
         )
 
         return pipelines.map((pipeline) =>
-          serializePipeline(pipeline, latestRuns.get(pipeline.id) ?? null, host.definitions.folders)
+          serializePipeline(
+            pipeline,
+            latestRuns.get(pipeline.id) ?? null,
+            host.definitions.folders.pipelines?.get(pipeline.id)
+          )
         )
       },
       {
@@ -170,7 +169,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
         return serializePipeline(
           pipeline,
           await getLatestPipelineRun(sixb, pipeline.id),
-          host.definitions.folders
+          host.definitions.folders.pipelines?.get(pipeline.id)
         )
       },
       {

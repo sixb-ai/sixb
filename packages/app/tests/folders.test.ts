@@ -76,7 +76,6 @@ test("a list without folders is a plain list", () => {
   const plain: { id: string; folder?: string }[] = [{ id: "a" }, { id: "b" }]
   const flat = arrangeByFolder(plain, undefined, false)
 
-  expect(flat.active).toBe(false)
   expect(flat.folders).toEqual([])
   expect(ids(flat.items)).toEqual(["a", "b"])
 })

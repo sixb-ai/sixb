@@ -227,17 +227,7 @@ export type DiscoveredProjectDefinitions = {
 
 /** The families whose folders the app shows; the rest are kept by id alone. */
 const folderFamilies: ReadonlySet<string> = new Set<Exclude<DefinitionFolderFamily, "objectTypes">>(
-  [
-    "actions",
-    "connectors",
-    "datasets",
-    "pipelines",
-    "projections",
-    "rules",
-    "schedules",
-    "syncs",
-    "workflows",
-  ]
+  ["actions", "connectors", "datasets", "pipelines", "projections", "rules", "syncs", "workflows"]
 )
 
 export async function discoverProjectDefinitions(

@@ -39,7 +39,7 @@ export interface SixbDefinitions {
   readonly syncs: DefinitionCatalog<SyncDefinition>
   readonly workflows: DefinitionCatalog<WorkflowDefinition>
   /** Where each discovered definition sits inside its directory, for browsing them by folder. */
-  readonly folders: DefinitionFolders
+  readonly folders: DefinitionFolderIndex
 }
 
 /** The definition families whose folders are kept, named as their `SixbDefinitions` catalogs. */
@@ -51,31 +51,18 @@ export type DefinitionFolderFamily =
   | "pipelines"
   | "projections"
   | "rules"
-  | "schedules"
   | "syncs"
   | "workflows"
 
 /**
  * Each family's folders by definition id, as POSIX paths below the family's directory:
- * `datasets/raw/erp/orders.ts` puts every dataset it exports in `raw/erp`.
+ * `datasets/raw/erp/orders.ts` puts every dataset it exports in `raw/erp`. Folders only arrange
+ * definitions for people browsing them; ids stay unique across the whole project, so moving a file
+ * renames nothing. A definition at the top of its directory, or passed to createSixb() directly,
+ * has none.
  */
 export type DefinitionFolderIndex = {
   readonly [TFamily in DefinitionFolderFamily]?: ReadonlyMap<string, string>
-}
-
-/**
- * The folder a definition was discovered in, such as `raw/erp`. Folders only arrange definitions
- * for people browsing them; ids stay unique across the whole project, so moving a file renames
- * nothing. A definition at the top of its directory, or passed to createSixb() directly, has none.
- */
-export interface DefinitionFolders {
-  of(family: DefinitionFolderFamily, id: string): string | undefined
-}
-
-export function createDefinitionFolders(index: DefinitionFolderIndex = {}): DefinitionFolders {
-  return Object.freeze({
-    of: (family: DefinitionFolderFamily, id: string) => index[family]?.get(id),
-  })
 }
 
 /** Build a read-only catalog over an already validated definition index. */
