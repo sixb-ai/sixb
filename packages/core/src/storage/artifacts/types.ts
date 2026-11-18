@@ -225,6 +225,13 @@ export interface UndoArtifactTurnInput extends ArtifactTurnInput {
    * bring up to the content.
    */
   readonly documents?: Readonly<Record<string, FileRef>>
+  /**
+   * Later turns undone with this one, as an edit that takes several turns back undoes them, oldest
+   * first: their writes to an artifact this turn wrote count as this turn's, so the artifact goes
+   * back to before this turn when only these turns wrote it since. Undone, their records on it go
+   * too; kept, they stay for their own undo.
+   */
+  readonly laterTurnRunIds?: readonly string[]
 }
 
 /** What undoing a turn's writes changed. */

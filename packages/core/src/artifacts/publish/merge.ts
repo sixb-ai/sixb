@@ -215,16 +215,27 @@ export async function withDocumentHolding<T>(
  * The documents of the artifacts a retry of a turn puts back, by id: each one the undo will put
  * back, as the turn's restore point holds it. Made before the undo, at the revision it requires,
  * so the undo can store them: one written meanwhile is not undone, and its document goes unused.
+ * The later turns undone with it count as it does, as `laterTurnRunIds` says.
  */
 export async function undoneTurnDocuments(
   context: MergeContext,
-  turnRunId: string
+  turnRunId: string,
+  laterTurnRunIds: readonly string[] = []
 ): Promise<Record<string, FileRef>> {
   const { projectId, storage } = context
   const documents: Record<string, FileRef> = {}
 
-  for (const write of await storage.listTurnWrites({ projectId, turnRunId })) {
-    if (write.created) continue
+  const laterWrites = new Map<string, number>()
+  for (const later of laterTurnRunIds) {
+    for (const write of await storage.listTurnWrites({ projectId, turnRunId: later })) {
+      laterWrites.set(write.artifactId, (laterWrites.get(write.artifactId) ?? 0) + write.writes)
+    }
+  }
+
+  for (const own of await storage.listTurnWrites({ projectId, turnRunId })) {
+    if (own.created) continue
+    const write = { ...own, writes: own.writes + (laterWrites.get(own.artifactId) ?? 0) }
+
     const artifact = await storage.get({ projectId, id: write.artifactId })
     if (!artifact || !keepsDocument(artifact.kind)) continue
 

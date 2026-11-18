@@ -327,24 +327,30 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
   async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     return runImmediateTransaction(this.db, () => {
-      const { projectId, turnRunId } = input
+      const { projectId, turnRunId, laterTurnRunIds = [] } = input
+      const later = JSON.stringify(laterTurnRunIds)
 
-      // Each write beside the artifact's revision now: the write transaction holds every change.
+      // Each write beside the artifact's revision now, and the writes of the later turns undone
+      // with it: the write transaction holds every change.
       const rows = this.db
         .query(
           `SELECT w.artifact_id AS artifactId, w.created, w.revision, w.writes,
-             a.revision AS currentRevision
+             a.revision AS currentRevision,
+             (SELECT COALESCE(SUM(l.writes), 0) FROM artifact_turn_writes l
+              WHERE l.project_id = w.project_id AND l.artifact_id = w.artifact_id
+                AND l.turn_run_id IN (SELECT value FROM json_each(?))) AS laterWrites
            FROM artifact_turn_writes w
            JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
            WHERE w.project_id = ? AND w.turn_run_id = ?
            ORDER BY w.artifact_id`
         )
-        .all(projectId, turnRunId) as Row[]
+        .all(later, projectId, turnRunId) as Row[]
 
       const restored: PublishedArtifactVersion[] = []
       const deleted: string[] = []
       for (const row of rows) {
-        const write = parseArtifactTurnWriteRow(row)
+        const own = parseArtifactTurnWriteRow(row)
+        const write = { ...own, writes: own.writes + Number(row.laterWrites) }
         const revision = Number(row.currentRevision)
 
         if (write.created) {
@@ -375,19 +381,30 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
         restored.push(undone)
         // Undone, it holds the turn's restore point again, and leaves the threads only the turn
-        // shared it in; one kept stays where it was made.
+        // shared it in; one kept stays where it was made. The later turns undone with it leave
+        // it too, and one kept keeps their records for their own undo.
+        const turns = JSON.stringify([turnRunId, ...laterTurnRunIds])
         this.db
           .query(
             `DELETE FROM artifact_restore_points
-             WHERE project_id = ? AND artifact_id = ? AND turn_run_id = ?`
+             WHERE project_id = ? AND artifact_id = ?
+               AND turn_run_id IN (SELECT value FROM json_each(?))`
           )
-          .run(projectId, write.artifactId, turnRunId)
+          .run(projectId, write.artifactId, turns)
         this.db
           .query(
             `DELETE FROM artifact_threads
-             WHERE project_id = ? AND artifact_id = ? AND linked_by_run_id = ? AND copied = 0`
+             WHERE project_id = ? AND artifact_id = ? AND copied = 0
+               AND linked_by_run_id IN (SELECT value FROM json_each(?))`
           )
-          .run(projectId, write.artifactId, turnRunId)
+          .run(projectId, write.artifactId, turns)
+        this.db
+          .query(
+            `DELETE FROM artifact_turn_writes
+             WHERE project_id = ? AND artifact_id = ?
+               AND turn_run_id IN (SELECT value FROM json_each(?))`
+          )
+          .run(projectId, write.artifactId, later)
       }
 
       this.db

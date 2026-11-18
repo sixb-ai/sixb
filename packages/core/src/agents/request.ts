@@ -650,12 +650,13 @@ async function rewindAgentThread(
 
   const restored = new Map<string, PublishedArtifactVersion["version"]>()
   if (tx.artifacts) {
-    for (const rewound of rewoundRuns) {
-      const trigger = tail.find((message) => message.id === rewound.triggerMessageId)
+    for (const { run, later } of oldestFirst(rewoundRuns)) {
+      const trigger = tail.find((message) => message.id === run.triggerMessageId)
       const undone = await tx.artifacts.undoTurnWrites({
         projectId,
-        turnRunId: rewound.id,
-        documents: input.documents.get(rewound.id) ?? {},
+        turnRunId: run.id,
+        laterTurnRunIds: later,
+        documents: input.documents.get(run.id) ?? {},
         ...(trigger?.authorPrincipal ? { requester: trigger.authorPrincipal } : {}),
       })
       for (const entry of undone.restored) restored.set(entry.artifact.id, entry.version)
@@ -709,16 +710,31 @@ async function rewoundTurnDocuments(
   const artifacts = runtime.storage.artifacts
   if (!artifacts || !blobStorage) return documents
 
-  for (const run of rewoundRuns) {
+  for (const { run, later } of oldestFirst(rewoundRuns)) {
     documents.set(
       run.id,
       await undoneTurnDocuments(
         { projectId: runtime.projectId, storage: artifacts, blobStorage },
-        run.id
+        run.id,
+        later
       )
     )
   }
   return documents
+}
+
+/**
+ * The rewound turns oldest first, each with the turns after it: undone together, an artifact
+ * several of them wrote goes back to before the first, as no one else wrote it in between.
+ */
+function oldestFirst(
+  rewoundRuns: readonly ConversationAgentRunRecord[]
+): readonly { readonly run: ConversationAgentRunRecord; readonly later: readonly string[] }[] {
+  const ordered = [...rewoundRuns].reverse()
+  return ordered.map((run, index) => ({
+    run,
+    later: ordered.slice(index + 1).map((each) => each.id),
+  }))
 }
 
 async function announceAgentThreadRewind(

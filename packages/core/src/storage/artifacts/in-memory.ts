@@ -261,15 +261,25 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   }
 
   async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
-    const { turnRunId } = input
+    const { turnRunId, laterTurnRunIds = [] } = input
     const restored: PublishedArtifactVersion[] = []
     const deleted: string[] = []
 
     for (const [key, stored] of this.artifacts) {
       if (stored.record.projectId !== input.projectId) continue
 
-      const write = stored.turnWrites.get(turnRunId)
-      if (!write) continue
+      const own = stored.turnWrites.get(turnRunId)
+      if (!own) continue
+
+      // The later turns undone with this one wrote as this one did.
+      const later = laterTurnRunIds.filter((each) => stored.turnWrites.has(each))
+      const write = {
+        ...own,
+        writes: later.reduce(
+          (sum, each) => sum + (stored.turnWrites.get(each)?.writes ?? 0),
+          own.writes
+        ),
+      }
 
       const revision = stored.record.revision
       if (
@@ -296,8 +306,13 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         untouched && point ? undo(stored, point, input.documents?.[stored.record.id]) : null
 
       // Undone, the turn's restore point is what the artifact holds again, and the threads it
-      // alone shared the artifact in no longer do. Kept, the artifact stays where it was made.
-      const next = forgetTurn(undone ?? stored, turnRunId, { undone: undone !== null })
+      // alone shared the artifact in no longer do. Kept, the artifact stays where it was made, and
+      // the later turns keep their records for their own undo.
+      let next = forgetTurn(undone ?? stored, turnRunId, { undone: undone !== null })
+      if (undone) {
+        for (const each of later) next = forgetTurn(next, each, { undone: true })
+      }
+
       this.artifacts.set(key, next)
       if (undone) restored.push(published(next))
     }

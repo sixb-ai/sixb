@@ -613,6 +613,33 @@ describe("a canvas's document", () => {
     await context.follow(id, live)
     expect(await x()).toBe(160)
     expect(documentFiles(live)).toEqual(documentFiles(await context.load(id)))
+
+    // An edit takes two turns back at once: the document is made for the first one's restore point.
+    // Regression proof: count the first turn's writes alone in `undoneTurnDocuments`; it then makes
+    // none, and the undo leaves the document behind.
+    await turn(320, "run_edited")
+    await turn(400, "run_later")
+    await context.follow(id, live)
+    const edited = await undoneTurnDocuments(
+      {
+        projectId: "live-writes",
+        storage: context.artifacts(),
+        blobStorage: context.deps.blobStorage,
+      },
+      "run_edited",
+      ["run_later"]
+    )
+    expect(Object.keys(edited)).toEqual([id])
+
+    await context.artifacts().undoTurnWrites({
+      projectId: "live-writes",
+      turnRunId: "run_edited",
+      laterTurnRunIds: ["run_later"],
+      documents: edited,
+    })
+    await context.follow(id, live)
+    expect(await x()).toBe(160)
+    expect(documentFiles(live)).toEqual(documentFiles(await context.load(id)))
   })
 
   test("of a canvas that kept none yet is built the same by every server that loads it", async () => {

@@ -468,6 +468,81 @@ describe("editing an Agent thread message", () => {
     })
   })
 
+  test("takes back an artifact two rewound turns wrote, as it was before the first", async () => {
+    // Guard proof: pass `laterTurnRunIds: []` in rewindAgentThread, undoing each turn alone;
+    // undoing turn 2 moves the plan's revision, so turn 1 counts as touched by someone else and
+    // its plan stays, though the turn that made it is gone from the thread.
+    const { host, storage } = setup()
+    const sixb = await userScope(host, "alice")
+    const thread = await sixb.agent.threads.create({ title: "Q4 plan" })
+    const alice = { type: "user", id: "alice" } as const
+
+    const document = async (title: string, runId: string) => ({
+      title,
+      entry: "plan.md",
+      files: [
+        {
+          path: "plan.md",
+          file: await host.blobStorage.put({
+            body: new TextEncoder().encode(`# ${title}`),
+            fileName: "plan.md",
+            mediaType: "text/markdown",
+          }),
+        },
+      ],
+      outline: { kind: "document" as const, headings: [] },
+      references: [],
+      author: alice,
+      origin: { threadId: thread.id, runId },
+      updatedAt: new Date(),
+    })
+
+    const turnWriting = async (
+      text: string,
+      messageId: string,
+      write: (runId: string) => Promise<unknown>
+    ) => {
+      const { run } = await sixb.agent.runs.request({ threadId: thread.id, text, messageId })
+      const token = createAgentRunExecutionToken()
+      await storage.agents.runs.start({
+        id: run.id,
+        projectId: host.id,
+        execution: { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+      })
+      await write(run.id)
+      await storage.agents.runs.finish({
+        id: run.id,
+        projectId: host.id,
+        executionToken: token,
+        status: "succeeded",
+      })
+    }
+
+    await turnWriting("Write the Q4 plan", "u1", async (runId) =>
+      storage.artifacts.create({
+        projectId: host.id,
+        id: "art_plan",
+        kind: "document",
+        owner: alice,
+        version: await document("Q4 plan", runId),
+        turnRunId: runId,
+      })
+    )
+    await turnWriting("Add the hiring budget", "u2", async (runId) =>
+      storage.artifacts.publish({
+        projectId: host.id,
+        artifactId: "art_plan",
+        kind: "document",
+        version: await document("Q4 plan with hiring", runId),
+        turnRunId: runId,
+      })
+    )
+
+    await editNow(sixb, { threadId: thread.id, messageId: "u1", text: "Write the Q1 plan" })
+
+    expect(await storage.artifacts.get({ projectId: host.id, id: "art_plan" })).toBeNull()
+  })
+
   test("refuses to edit a message a turn read while it was answering, and leaves the thread as it was", async () => {
     // Guard proof: drop assertRewindsWholeTurns in editAgentMessage; the steer's edit rewinds the
     // whole turn that read it, while the turn's first answer stays in the thread.

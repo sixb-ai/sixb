@@ -312,7 +312,8 @@ export class PgArtifactStorage implements ArtifactStorage {
 
   async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     return runPgTransaction(this.sql, async (tx) => {
-      const { projectId, turnRunId } = input
+      const { projectId, turnRunId, laterTurnRunIds = [] } = input
+      const later = tx.array([...laterTurnRunIds])
 
       // Lock the turn's artifacts first, in id order so two of these never deadlock. A write
       // holds the same lock, and under READ COMMITTED each statement below then reads a snapshot
@@ -326,9 +327,14 @@ export class PgArtifactStorage implements ArtifactStorage {
         ORDER BY id
         FOR UPDATE
       `
+      // Each write beside the artifact's revision now, and the writes of the later turns undone
+      // with it.
       const rows = await tx<PgRow[]>`
         SELECT w.artifact_id AS "artifactId", w.created, w.revision, w.writes,
-          a.revision AS "currentRevision"
+          a.revision AS "currentRevision",
+          (SELECT COALESCE(SUM(l.writes), 0) FROM artifact_turn_writes l
+           WHERE l.project_id = w.project_id AND l.artifact_id = w.artifact_id
+             AND l.turn_run_id = ANY(${later}::text[])) AS "laterWrites"
         FROM artifact_turn_writes w
         JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
         WHERE w.project_id = ${projectId} AND w.turn_run_id = ${turnRunId}
@@ -338,7 +344,8 @@ export class PgArtifactStorage implements ArtifactStorage {
       const restored: PublishedArtifactVersion[] = []
       const deleted: string[] = []
       for (const row of rows) {
-        const write = parseArtifactTurnWriteRow(row)
+        const own = parseArtifactTurnWriteRow(row)
+        const write = { ...own, writes: own.writes + Number(row.laterWrites) }
         const revision = Number(row.currentRevision)
 
         if (write.created) {
@@ -366,17 +373,25 @@ export class PgArtifactStorage implements ArtifactStorage {
       }
 
       // An artifact undone holds its restore point again, and leaves the threads only the turn
-      // shared it in; one kept stays where it was made. A deleted one took its own with it.
+      // shared it in; one kept stays where it was made. A deleted one took its own with it. The
+      // later turns undone with it leave it too, and one kept keeps their records for their own
+      // undo.
       if (restored.length > 0) {
         const undone = restored.map(({ artifact }) => artifact.id)
+        const turns = tx.array([turnRunId, ...laterTurnRunIds])
         await tx`
           DELETE FROM artifact_restore_points
-          WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
+          WHERE project_id = ${projectId} AND turn_run_id = ANY(${turns}::text[])
             AND artifact_id IN ${tx(undone)}
         `
         await tx`
           DELETE FROM artifact_threads
-          WHERE project_id = ${projectId} AND linked_by_run_id = ${turnRunId} AND NOT copied
+          WHERE project_id = ${projectId} AND linked_by_run_id = ANY(${turns}::text[])
+            AND NOT copied AND artifact_id IN ${tx(undone)}
+        `
+        await tx`
+          DELETE FROM artifact_turn_writes
+          WHERE project_id = ${projectId} AND turn_run_id = ANY(${later}::text[])
             AND artifact_id IN ${tx(undone)}
         `
       }
