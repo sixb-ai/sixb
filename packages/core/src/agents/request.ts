@@ -452,7 +452,7 @@ export async function editAgentMessage(
     return { kind: "inbox", item }
   }
 
-  const documents = await rewoundTurnDocuments(runtime, blobStorage, rewoundRuns)
+  const documents = await rewoundTurnDocuments(runtime, blobStorage, rewoundRuns, tail)
 
   let run: ConversationAgentRunRecord
   let rewind: AgentThreadRewind | undefined
@@ -663,7 +663,7 @@ async function rewindAgentThread(
 
   const restored = new Map<string, PublishedArtifactVersion["version"]>()
   if (tx.artifacts) {
-    for (const { run, later } of oldestFirst(rewoundRuns)) {
+    for (const { run, later } of oldestFirst(rewoundRuns, tail)) {
       const trigger = tail.find((message) => message.id === run.triggerMessageId)
       const undone = await tx.artifacts.undoTurnWrites({
         projectId,
@@ -723,13 +723,14 @@ async function queueWaitingSteers(
 async function rewoundTurnDocuments(
   runtime: SixbRuntimeContext,
   blobStorage: RewindBlobStorage | undefined,
-  rewoundRuns: readonly ConversationAgentRunRecord[]
+  rewoundRuns: readonly ConversationAgentRunRecord[],
+  tail: readonly AgentMessageRecord[]
 ): Promise<ReadonlyMap<string, Record<string, FileRef>>> {
   const documents = new Map<string, Record<string, FileRef>>()
   const artifacts = runtime.storage.artifacts
   if (!artifacts || !blobStorage) return documents
 
-  for (const { run, later } of oldestFirst(rewoundRuns)) {
+  for (const { run, later } of oldestFirst(rewoundRuns, tail)) {
     documents.set(
       run.id,
       await undoneTurnDocuments(
@@ -744,12 +745,22 @@ async function rewoundTurnDocuments(
 
 /**
  * The rewound turns oldest first, each with the turns after it: undone together, an artifact
- * several of them wrote goes back to before the first, as no one else wrote it in between.
+ * several of them wrote goes back to before the first, as no one else wrote it in between. Turns
+ * follow their trigger messages through the thread, and a retry follows the attempt it replaced.
  */
 function oldestFirst(
-  rewoundRuns: readonly ConversationAgentRunRecord[]
+  rewoundRuns: readonly ConversationAgentRunRecord[],
+  tail: readonly AgentMessageRecord[]
 ): readonly { readonly run: ConversationAgentRunRecord; readonly later: readonly string[] }[] {
-  const ordered = [...rewoundRuns].reverse()
+  const seqOf = new Map(tail.map((message) => [message.id, message.seq]))
+  const started = (run: ConversationAgentRunRecord) => (run.startedAt ?? run.createdAt).getTime()
+  const ordered = [...rewoundRuns].sort(
+    (left, right) =>
+      (seqOf.get(left.triggerMessageId) ?? 0) - (seqOf.get(right.triggerMessageId) ?? 0) ||
+      started(left) - started(right) ||
+      left.attempt - right.attempt
+  )
+
   return ordered.map((run, index) => ({
     run,
     later: ordered.slice(index + 1).map((each) => each.id),
@@ -1597,7 +1608,7 @@ async function waitingEditDocuments(
 
   const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
   const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
-  return rewoundTurnDocuments(runtime, blobStorage, rewoundRuns)
+  return rewoundTurnDocuments(runtime, blobStorage, rewoundRuns, tail)
 }
 
 /** A queued message's turn: the finished turn's spec, with the message's own choices over it. */
