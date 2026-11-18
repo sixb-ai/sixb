@@ -89,9 +89,8 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
           }
 
           const query = AgentMessagesQuerySchema.parse(context.query)
-          return AgentMessageListResponseSchema.parse(
-            await readThreadMessages(host, storage, thread, query)
-          )
+          // The response schema checks the page once, as it leaves.
+          return await readThreadMessages(host, storage, thread, query)
         } catch (error) {
           return handleAgentRouteError(error, context.set)
         }
