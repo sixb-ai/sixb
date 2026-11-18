@@ -491,7 +491,8 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 
     const participants = [...existing, ...added].sort(compareAgentThreadParticipants)
     this.state.participants.set(threadKey, participants)
-    // Someone who joins starts caught up: what came before is not new to them.
+    // Someone who joins starts caught up: what came before is not new to them. A place left
+    // from an earlier stay, or written by a mark that raced the removal, does not carry over.
     const headSeq = headSeqOf(this.state, input.projectId, input.threadId)
     for (const participant of added) {
       this.state.reads.set(readKey(input.projectId, input.threadId, participant.principal), {
@@ -1254,8 +1255,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     for (const [messageKey] of messages) {
       this.state.messages.delete(messageKey)
     }
-    const firstDeleted = Math.min(...messages.map(([, message]) => message.seq))
-    pullBackReads(this.state, input.projectId, input.threadId, firstDeleted)
+    clampReadsToHead(this.state, input.projectId, input.threadId)
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1299,7 +1299,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     for (const [messageKey] of toDelete) {
       this.state.messages.delete(messageKey)
     }
-    pullBackReads(this.state, input.projectId, input.threadId, input.fromSeq)
+    clampReadsToHead(this.state, input.projectId, input.threadId)
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1358,18 +1358,15 @@ function nextMessageSeq(state: AgentStoreState, projectId: string, threadId: str
 }
 
 /**
- * Pull every place at or past `fromSeq` back to just before it: those numbers now belong to
- * whatever replaces the deleted messages, which nobody has read yet.
+ * Bring every place past the thread's newest message back to it, after a deletion. The next
+ * message takes the number after the newest, so a place left past it would cover what a retry or
+ * an edit writes next. Messages up to the newest kept their numbers and stay read.
  */
-function pullBackReads(
-  state: AgentStoreState,
-  projectId: string,
-  threadId: string,
-  fromSeq: number
-): void {
+function clampReadsToHead(state: AgentStoreState, projectId: string, threadId: string): void {
+  const headSeq = headSeqOf(state, projectId, threadId)
   for (const [readKey, read] of state.reads) {
     if (read.projectId !== projectId || read.threadId !== threadId) continue
-    if (read.throughSeq >= fromSeq) state.reads.set(readKey, { ...read, throughSeq: fromSeq - 1 })
+    if (read.throughSeq > headSeq) state.reads.set(readKey, { ...read, throughSeq: headSeq })
   }
 }
 

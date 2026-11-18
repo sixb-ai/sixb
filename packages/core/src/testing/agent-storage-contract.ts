@@ -1916,7 +1916,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
     test("a retried turn's new answer is unread to whoever read the failed one", async () => {
       await withStorage(async (storage, fixture) => {
         // Bob read the failed answer (2). The retry deletes it and its answer takes seq 2 again.
-        // Removal proof: skip the pull-back in `deleteByRunId`; Bob stays at 2 and never sees it.
+        // Removal proof: skip the clamp in `deleteByRunId`; Bob stays at 2 and never sees it.
         const bob = user("usr_bob")
         await storage.threads.create(threadInput())
         await storage.messages.append({
@@ -1975,10 +1975,50 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("retrying an older turn leaves what came after it read", async () => {
+      await withStorage(async (storage, fixture) => {
+        // Run 1 failed after answering (2); Alice asked again (3) and was answered (4); Bob read
+        // through 4. Retrying run 1 deletes 2, which no later message takes: 3 and 4 stay read.
+        // Removal proof: pull places back to before the first deleted message; Bob reads 3 and 4
+        // as new again.
+        const bob = user("usr_bob")
+        await storage.threads.create(threadInput())
+        const message = (id: string, role: "user" | "assistant", runId: string | null) =>
+          storage.messages.append({
+            id,
+            projectId,
+            threadId: "thr_1",
+            runId,
+            role,
+            authorPrincipal: owner,
+            parts: [{ type: "text", text: id }],
+          })
+
+        await message("m1", "user", null)
+        await createAndStartRun(storage, fixture, runInput({ triggerMessageId: "m1" }))
+        await message("m2", "assistant", "run_1")
+        await storage.runs.finish({
+          id: "run_1",
+          projectId,
+          executionToken: "exec_1",
+          status: "failed",
+        })
+        await message("m3", "user", null)
+        await message("m4", "assistant", null)
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+
+        await storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+
+        expect(
+          await storage.reads.list({ projectId, threadIds: ["thr_1"], principal: bob })
+        ).toMatchObject([{ throughSeq: 4, headSeq: 4, unread: 0 }])
+      })
+    })
+
     test("an edited message is unread to whoever read past it", async () => {
       await withStorage(async (storage) => {
-        // Removal proof: skip the pull-back in `deleteFromSeq`; Bob stays at 3 and the edit,
-        // which takes seq 2 again, reads as read.
+        // Removal proof: skip the clamp in `deleteFromSeq`; Bob stays at 3 and the edit, which
+        // takes seq 2 again, reads as read.
         const bob = user("usr_bob")
         await storage.threads.create(threadInput())
         for (const id of ["m1", "m2", "m3"]) {
@@ -2055,6 +2095,19 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(await bobsPlace()).toEqual([
           { threadId: "thr_1", throughSeq: 0, headSeq: 2, unread: 2 },
         ])
+
+        // A mark that raced his removal leaves a row behind; joining again starts him caught up.
+        // Removal proof: keep `DO NOTHING` on the join's insert; Bob stays at 1.
+        await storage.reads.mark({
+          projectId,
+          threadId: "thr_1",
+          principal: user("usr_bob"),
+          throughMessageId: "m1",
+        })
+        await storage.threads.addParticipants(
+          participantsInput(["usr_bob"], at("2026-06-23T12:00:00.000Z"))
+        )
+        expect(await bobsPlace()).toMatchObject([{ throughSeq: 2, unread: 0 }])
       })
     })
 

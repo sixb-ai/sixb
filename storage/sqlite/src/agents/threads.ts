@@ -452,7 +452,8 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           )
         }
 
-        // Someone who joins starts caught up: what came before is not new to them.
+        // Someone who joins starts caught up: what came before is not new to them. A place left
+        // from an earlier stay, or written by a mark that raced the removal, does not carry over.
         const startRead = this.db.query(`
           INSERT INTO agent_thread_reads (
             project_id,
@@ -467,7 +468,9 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
               WHERE project_id = ?1 AND thread_id = ?2),
             ?5
           )
-          ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO NOTHING
+          ON CONFLICT (project_id, thread_id, principal_type, principal_id) DO UPDATE SET
+            through_seq = excluded.through_seq,
+            read_at = excluded.read_at
         `)
         for (const principal of added) {
           startRead.run(input.projectId, input.threadId, principal.type, principal.id, addedAt)

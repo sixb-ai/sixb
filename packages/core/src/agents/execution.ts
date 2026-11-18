@@ -846,8 +846,9 @@ export function createAgentRuntime<
   }
 
   /**
-   * The caller's place in each thread and its newest run, in one batched read each. Only the
-   * paths that hand a thread to a person call this: an access check does not pay for it.
+   * The caller's place in each thread and its newest run, in one batched read each, plus one
+   * execution read per thread whose newest turn ended short. Only the paths that hand a thread to
+   * a person call this: an access check does not pay for it.
    */
   const withThreadState = async (
     threads: readonly AgentThreadView[],

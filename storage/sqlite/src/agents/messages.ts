@@ -150,17 +150,13 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       const deleted = this.db
         .query(
-          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING seq, parts"
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING parts"
         )
-        .all(input.projectId, input.threadId, input.runId) as { seq: number; parts: string }[]
+        .all(input.projectId, input.threadId, input.runId) as { parts: string }[]
       if (deleted.length === 0) {
         return 0
       }
-      this.pullBackReads(
-        input.projectId,
-        input.threadId,
-        Math.min(...deleted.map((row) => row.seq))
-      )
+      this.clampReadsToHead(input.projectId, input.threadId)
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -210,7 +206,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         )
         .all(input.projectId, input.threadId, input.fromSeq) as { parts: string }[]
       if (deleted.length === 0) return 0
-      this.pullBackReads(input.projectId, input.threadId, input.fromSeq)
+      this.clampReadsToHead(input.projectId, input.threadId)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -240,16 +236,25 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
   }
 
   /**
-   * Pull every place at or past `fromSeq` back to just before it: those numbers now belong to
-   * whatever replaces the deleted messages, which nobody has read yet.
+   * Bring every place past the thread's newest message back to it, after a deletion. The next
+   * message takes the number after the newest, so a place left past it would cover what a retry
+   * or an edit writes next. Messages up to the newest kept their numbers and stay read.
    */
-  private pullBackReads(projectId: string, threadId: string, fromSeq: number): void {
+  private clampReadsToHead(projectId: string, threadId: string): void {
     this.db
       .query(`
-        UPDATE agent_thread_reads SET through_seq = ?
-        WHERE project_id = ? AND thread_id = ? AND through_seq >= ?
+        UPDATE agent_thread_reads
+        SET through_seq = (
+          SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+          WHERE project_id = ?1 AND thread_id = ?2
+        )
+        WHERE project_id = ?1 AND thread_id = ?2
+          AND through_seq > (
+            SELECT COALESCE(MAX(seq), 0) FROM agent_messages
+            WHERE project_id = ?1 AND thread_id = ?2
+          )
       `)
-      .run(fromSeq - 1, projectId, threadId, fromSeq)
+      .run(projectId, threadId)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {

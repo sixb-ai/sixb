@@ -31,7 +31,7 @@ export interface AgentThreadReadView {
   readonly threadId: string
   /** The seq of the last message their reading reached; 0 when it reached none. */
   readonly throughSeq: number
-  /** The thread's newest message seq, which never goes back. */
+  /** The seq of the thread's newest message, 0 when it has none. */
   readonly headSeq: number
   /**
    * Messages past `throughSeq` that someone else wrote: the Agent's answers and other people's

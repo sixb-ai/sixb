@@ -88,8 +88,8 @@ export function useAgentThreadLists(
   )
 
   /**
-   * Record the reader's place in a thread, or its newest when no message is given, which is what Done
-   * sends. The answer is the state it produced, so the caches take it without a refetch.
+   * Record the reader's place in a thread, or its newest when no message is given, which is what
+   * Done sends. The answer is the state it produced, so the caches take it without a refetch.
    */
   const markThreadRead = async (
     threadId: string,

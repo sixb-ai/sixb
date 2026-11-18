@@ -21,8 +21,8 @@ Sixb packages are versioned independently. Each release entry names the packages
 - Run the migrations: PostgreSQL `108-agent-thread-reads`, SQLite `105-agent-thread-reads`. Every
   existing conversation's owner and participants start caught up.
 - A storage provider of your own implements `AgentStorage.reads` and
-  `AgentRunStore.latestByThread`, and its `messages.deleteByRunId` and `deleteFromSeq` move any
-  place inside the deleted messages back to just before them.
+  `AgentRunStore.latestByThread`, and its `messages.deleteByRunId` and `deleteFromSeq` bring any
+  place past the newest message left back to it.
 - `getAiAccountingOverview` takes an optional `timeZone`, an IANA name, and returns its periods on
   that calendar instead of always UTC's. Settings › Usage sends the browser's.
 - A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's

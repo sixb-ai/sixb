@@ -313,9 +313,9 @@ export interface ListAgentThreadParticipantsInput {
  *
  * A watermark, not a flag: nothing writes here when a message arrives, so new ones sit past it
  * until the reader moves it. A mark never moves it backwards, so two devices converge on the later
- * position and a stale one cannot rewind the other. Only a deletion does: a retry or an edit that
- * takes messages away pulls every place inside them back to just before them, because the numbers
- * they held are given to what replaces them.
+ * position and a stale one cannot rewind the other. Only a deletion does: when a retry or an edit
+ * takes the newest messages away, every place past what remains comes back to it, because the next
+ * messages take those numbers again.
  */
 export interface AgentThreadReadRecord {
   readonly projectId: string
@@ -957,12 +957,12 @@ export interface AgentMessageStore {
   append(input: AppendAgentMessageInput): Promise<AgentMessageRecord>
   /**
    * Delete every message produced by one run and repair the thread's message stats. A reader's
-   * place inside them moves back to just before the first: the retry reuses their numbers.
+   * place past the newest message left comes back to it: the next message reuses those numbers.
    */
   deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number>
   /**
    * Delete every message at or after `fromSeq` and repair the thread's message stats. A reader's
-   * place at or past it moves back to `fromSeq - 1`: the edit that follows reuses the numbers.
+   * place past the newest message left comes back to it: the edit that follows reuses the numbers.
    */
   deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>

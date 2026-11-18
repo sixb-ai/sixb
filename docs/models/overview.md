@@ -691,8 +691,9 @@ await sixb.agent.threads.markRead(threadId) // Done: up to its newest message
 
 - **`unread` counts messages someone else wrote**: the agent's answers and other people's
   messages, never your own.
-- **A place never moves back** when a device that read less marks it. A retry or an edit that
-  removes messages moves it back to just before them, so what replaces them reads as new.
+- **A place never moves back** when a device that read less marks it. When a retry or an edit
+  removes the newest messages, a place past what remains comes back to it, so what replaces them
+  reads as new.
 - **Joining starts you caught up.** A fork keeps its owner's place.
 - **`lastRun.requestedBy` is set when the turn ended short** (failed, timed out or interrupted):
   only that person can run it again. `readAt` tells whether you looked after it ended.
