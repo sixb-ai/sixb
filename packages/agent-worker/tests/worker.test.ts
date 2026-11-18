@@ -5085,6 +5085,73 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("tells each turn the model it runs on, when a thread switches models", async () => {
+    // Removal proof: drop runningModel from measureEnvironmentSystemPrompt; no turn names its model.
+    const turns: { readonly modelId: string; readonly system: string }[] = []
+    const answering = (modelId: string, name: string) =>
+      new WorkerTestModel({
+        definition: {
+          kind: "language",
+          providerId: "mock",
+          modelId,
+          name,
+          capabilities: {},
+          contextWindow: 128_000,
+        },
+        stream: async (request) => {
+          turns.push({ modelId, system: systemPromptOf(request.messages) })
+
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "Done" },
+            { type: "text-end", id: "answer" },
+            finish("stop"),
+          ])
+        },
+      })
+    const kimi = answering("kimi-k3.1", "Kimi K3.1 Pro")
+    const deepseek = answering("deepseek-v4.1-flash", "DeepSeek V4.1 Flash")
+    const sixb = buildSixb(kimi, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [kimi, deepseek] },
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      // The thread starts on DeepSeek, which is not the project default, then switches to Kimi.
+      const first = await requestAgent(sixb, {
+        text: "What model are you?",
+        model: { provider: "mock", modelId: deepseek.modelId },
+      })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      const next = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: "And now?",
+        model: { provider: "mock", modelId: kimi.modelId },
+      })
+      expect((await waitForTerminalRun(storage, next.run.id)).status).toBe("succeeded")
+
+      expect(turns.map((turn) => turn.modelId)).toEqual([deepseek.modelId, kimi.modelId])
+      const [onDeepseek, onKimi] = turns.map((turn) => turn.system)
+
+      expect(onDeepseek).toContain(
+        "You are running on DeepSeek V4.1 Flash (mock/deepseek-v4.1-flash)."
+      )
+      expect(onDeepseek).toContain(
+        ["- kimi-k3.1 Kimi K3.1 Pro", "- deepseek-v4.1-flash DeepSeek V4.1 Flash (you)"].join("\n")
+      )
+
+      expect(onKimi).toContain("You are running on Kimi K3.1 Pro (mock/kimi-k3.1).")
+      expect(onKimi).toContain(
+        ["- kimi-k3.1 Kimi K3.1 Pro (you)", "- deepseek-v4.1-flash DeepSeek V4.1 Flash"].join("\n")
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("automatically checkpoints with the selected model's catalog budget", async () => {
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const modelId = "gemini-2.5-flash-image"

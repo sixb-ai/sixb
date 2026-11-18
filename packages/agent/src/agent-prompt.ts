@@ -3,10 +3,10 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition, AgentSystemPromptPartName } from "@sixb/core"
 import type { AgentSystemPromptSize, SandboxModel } from "@sixb/core/internal/agents"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
-import type { ModelMessage } from "@sixb/core/models"
+import type { LanguageModel, ModelMessage } from "@sixb/core/models"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { CHILD_FILES_DIRECTORY, formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
-import { renderModelLine } from "./model-lines"
+import { oneLine, renderModelLine } from "./model-lines"
 import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
@@ -107,17 +107,13 @@ export interface RenderAgentSystemPromptInput {
   readonly conversation?: string
   /** Models the sandbox CLI can call; omitted, the prompt does not mention them. */
   readonly sandboxModels?: readonly SandboxModel[]
-  /** The model this run executes on, as the prompt identifies itself to the user and itself. */
-  readonly runningModel?: RunningAgentModelPromptContext
+  /** The model the run calls, which the prompt names; omitted, it names none. */
+  readonly runningModel?: RunningModel
   readonly memory?: AgentMemoryPromptContext
 }
 
-/** The model this run executes on, as the system prompt names it. */
-export interface RunningAgentModelPromptContext {
-  readonly provider: string
-  readonly modelId: string
-  readonly name?: string
-}
+/** What the prompt reads of the run's model: its identity, and its name when it has one. */
+type RunningModel = Pick<LanguageModel, "providerId" | "modelId" | "definition">
 
 /** The Agent's memory as the prompt shows it. */
 export interface AgentMemoryPromptContext {
@@ -351,7 +347,7 @@ function renderRuntimeContext(
   skills: readonly AgentSkillDefinition[],
   ontologyIndex: readonly OntologyDocsIndexEntry[] = [],
   sandboxModels: readonly SandboxModel[] = [],
-  runningModel?: RunningAgentModelPromptContext
+  runningModel?: RunningModel
 ): { readonly base: string[]; readonly skills: string[]; readonly ontology: string[] } {
   const skillCatalog =
     skills.length === 0
@@ -427,12 +423,13 @@ const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string
 }
 
 /**
- * The commands that call the project's models, each followed by its models with what each is for,
- * so the agent picks one without listing them. Each call is billed.
+ * The model the run is on, then the commands that call the project's models, each followed by its
+ * models with what each is for, so the agent picks one without listing them. Each call is billed.
+ * The first line stays when there are no commands: a project's only model still names itself.
  */
 function renderModelCommands(
   models: readonly SandboxModel[],
-  runningModel?: RunningAgentModelPromptContext
+  runningModel?: RunningModel
 ): string[] {
   const language = renderLanguageModelCommand(
     models.filter((model) => model.kind === "language"),
@@ -451,19 +448,22 @@ function renderModelCommands(
   ]
 }
 
-/** How the prompt identifies the model running the current turn. */
-function formatRunningModel(model: RunningAgentModelPromptContext): string {
-  const reference = `${model.provider}/${model.modelId}`
-  return model.name ? `${model.name} (${reference})` : reference
+/** The run's model as the prompt names it, such as `DeepSeek V4.1 Flash (azure/deepseek-v4.1)`. */
+function formatRunningModel(model: RunningModel): string {
+  const reference = `${model.providerId}/${model.modelId}`
+  const { name } = model.definition
+
+  return name ? `${oneLine(name)} (${reference})` : reference
 }
 
 /**
  * Another model's answer, without a child agent: one generation from the prompt alone. Listed only
- * when the project has several language models, since otherwise there is no other to ask.
+ * when the project has several language models, since otherwise there is no other to ask. The
+ * run's own model is marked `(you)`, so the agent tells itself apart from the others.
  */
 function renderLanguageModelCommand(
   models: readonly SandboxModel[],
-  runningModel?: RunningAgentModelPromptContext
+  runningModel?: RunningModel
 ): string[] {
   if (models.length < 2) return []
 
@@ -472,8 +472,9 @@ function renderLanguageModelCommand(
   const lines = models.map((model) => {
     const isRunning =
       runningModel !== undefined &&
-      model.provider === runningModel.provider &&
+      model.provider === runningModel.providerId &&
       model.modelId === runningModel.modelId
+
     return renderModelLine({
       ...(model.tier === undefined ? {} : { tier: model.tier }),
       reference: cliModelReference(model, models),

@@ -23,6 +23,6 @@ export function renderModelLine(input: {
 }
 
 // A provider's catalog text may span lines; each model keeps to one.
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim()
 }
