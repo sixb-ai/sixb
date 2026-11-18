@@ -1,5 +1,5 @@
 import { can, defineShare } from "@sixb/core"
-import { ServiceContract } from "../ontology/service-contract"
+import { ServiceContract } from "../ontology/customers/service-contract"
 
 // A link a customer opens without an account: their contract, its customer and facilities, and
 // the onboarding plan the contract holds, which they follow live and comment on as a guest.

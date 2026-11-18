@@ -4,8 +4,8 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Technician } from "../../ontology/technician"
-import { WorkOrder } from "../../ontology/work-order"
+import { Technician } from "../../ontology/field-service/technician"
+import { WorkOrder } from "../../ontology/field-service/work-order"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
   formatDateTime,

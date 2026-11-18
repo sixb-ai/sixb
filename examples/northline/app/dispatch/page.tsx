@@ -5,9 +5,9 @@ import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle } from "luci
 import type { CSSProperties, ReactNode } from "react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import { Technician } from "../../ontology/field-service/technician"
+import { WorkOrder } from "../../ontology/field-service/work-order"
 import { ServiceCase } from "../../ontology/service-case"
-import { Technician } from "../../ontology/technician"
-import { WorkOrder } from "../../ontology/work-order"
 import { EquipmentThumb } from "../_components/equipment-picture"
 import { decisionRingClass, ErrorLine, pillClass } from "../_components/next-step"
 import {

@@ -6,11 +6,11 @@ import {
   interventionField,
   ref,
 } from "@sixb/core"
-import { prepareRepairQuote } from "../actions/prepareRepairQuote"
-import { CustomerAccount } from "../ontology/customer-account"
-import { Facility } from "../ontology/facility"
+import { prepareRepairQuote } from "../actions/service-case/prepareRepairQuote"
+import { CustomerAccount } from "../ontology/customers/customer-account"
+import { Facility } from "../ontology/customers/facility"
+import { ServiceVisit } from "../ontology/field-service/service-visit"
 import { ServiceCase } from "../ontology/service-case"
-import { ServiceVisit } from "../ontology/service-visit"
 import { quoteReviewRequested } from "../schedules/operations"
 
 const loadRepairContext = defineWorkflowStep("load-repair-context")
