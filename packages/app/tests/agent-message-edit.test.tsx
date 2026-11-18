@@ -182,12 +182,44 @@ function defaultMessages() {
   ]
 }
 
+/** A thread whose turn for Dana's second question is still answering. */
+const runningThread = {
+  id: "thr_1",
+  projectId: "proj",
+  kind: "conversation",
+  ownerPrincipal: dana,
+  owner: { ...dana, displayName: "Dana Reyes" },
+  participants: [],
+  title: "Outlook images",
+  status: "active",
+  messageCount: 4,
+  activeRunId: "run_active",
+  createdAt: threeDaysAgo,
+  updatedAt: oneHourAgo,
+  approvalMode: "auto",
+  approvalModeSource: "fallback",
+}
+
+const runningTurn = {
+  id: "run_active",
+  projectId: "proj",
+  kind: "conversation",
+  threadId: "thr_1",
+  triggerMessageId: "msg_3",
+  status: "running",
+  attempt: 1,
+  streamId: "stream_active",
+  requestedBy: dana,
+  createdAt: oneHourAgo,
+}
+
 interface Scenario {
   thread: Record<string, unknown>
   messages: Record<string, unknown>[]
   runs: Record<string, unknown>[]
   inbox?: Record<string, unknown>[]
   failEditStatus?: number
+  failEditCode?: string
   editGate?: Promise<void>
 }
 
@@ -277,6 +309,11 @@ function renderChat(as: "dana" | "sam" = "dana", overrides: Partial<Scenario> = 
         if (url.pathname === "/api/agent-threads/thr_1/inbox") {
           return Response.json({ items: state.inbox ?? [] })
         }
+        const withdrawn = url.pathname.match(/^\/api\/agent-threads\/thr_1\/inbox\/([^/]+)$/)
+        if (withdrawn && method === "DELETE") {
+          state.inbox = (state.inbox ?? []).filter((item) => item.id !== withdrawn[1])
+          return new Response(null, { status: 204 })
+        }
         if (url.pathname === "/api/agent-threads/thr_1/approvals") {
           return Response.json({ approvals: [], hasMore: false, total: 0 })
         }
@@ -292,7 +329,7 @@ function renderChat(as: "dana" | "sam" = "dana", overrides: Partial<Scenario> = 
           if (state.editGate) await state.editGate
           if (state.failEditStatus) {
             return Response.json(
-              { error: "Server refused edit", code: "invalid_message" },
+              { error: "Server refused edit", code: state.failEditCode ?? "invalid_message" },
               { status: state.failEditStatus }
             )
           }
@@ -588,6 +625,60 @@ describe("user message hover actions and in-place rewind UX", () => {
 
     fireEvent.pointerDown(document.body, { pointerType: "touch" })
     expect(actions()?.hasAttribute("data-visible")).toBe(false)
+  })
+
+  test("shows an edit waiting in the inbox in place after a reload, and Stop takes it back to the editor", async () => {
+    // Guard proof: drop the inbox rehydration effect in useAgentConversation; after a reload the
+    // old question and its answers come back while the edit still waits to rewind them.
+    const { view, requests } = renderChat("dana", {
+      thread: { ...runningThread },
+      runs: [runningTurn],
+      inbox: [
+        {
+          id: "inb_edit",
+          projectId: "proj",
+          threadId: "thr_1",
+          messageId: "msg_1_edited",
+          seq: 1,
+          authorPrincipal: dana,
+          mode: "queue",
+          parts: [{ type: "text", text: "Only external senders, please" }],
+          immediate: true,
+          replacesMessageId: "msg_1",
+          createdAt: oneHourAgo,
+          updatedAt: oneHourAgo,
+        },
+      ],
+    })
+
+    await view.findByText("Only external senders, please")
+    expect(view.queryByText("Yes, add the domain to Safe Senders.")).toBeNull()
+
+    fireEvent.click(await view.findByRole("button", { name: "Stop generating" }))
+
+    const editor = (await view.findByRole("textbox", {
+      name: "Edit message",
+    })) as HTMLTextAreaElement
+    expect(editor.value).toBe("Only external senders, please")
+    expect(requests.filter((request) => request.method === "DELETE").map((r) => r.path)).toEqual([
+      "/api/agent-threads/thr_1/inbox/inb_edit",
+    ])
+  })
+
+  test("says under the editor why an edit was refused, in words about the edit", async () => {
+    // Guard proof: report edit failures through the composer's send error again; the reason shows
+    // at the bottom of the chat and speaks of sending a message.
+    const { view } = renderChat("dana", { failEditStatus: 403, failEditCode: "not_run_requester" })
+    await view.findByText("Yes, add the domain to Safe Senders.")
+    fireEvent.click(view.getAllByRole("button", { name: "Edit message" })[0]!)
+
+    const editor = await view.findByRole("textbox", { name: "Edit message" })
+    typeIn(editor, "Only external senders")
+    fireEvent.keyDown(editor, { key: "Enter" })
+
+    const reason = await view.findByRole("alert")
+    expect(reason.textContent).toMatch(/save your edit/i)
+    expect(reason.closest("[data-user-message-editor]")).not.toBeNull()
   })
 
   test("restores the inline editor draft and transcript when an edit request fails", async () => {

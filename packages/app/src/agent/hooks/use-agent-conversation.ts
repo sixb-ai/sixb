@@ -16,6 +16,7 @@ import {
   listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
+  listAgentThreadInboxOptions,
   listAgentThreadInboxQueryKey,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
@@ -32,6 +33,7 @@ import {
   updateAgentPreferencesMutation,
   useAgentActivityStream,
   useDesktop,
+  withdrawAgentThreadInboxItemMutation,
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -98,7 +100,9 @@ import {
 } from "../sharing"
 import type {
   AgentContextEntryInput,
+  AgentContextInput,
   AgentFileRef,
+  AgentInboxItem,
   AgentMessageDelivery,
   AgentRun,
   AgentThreadSandboxParams,
@@ -194,6 +198,8 @@ export interface AgentMessageEditDraft {
   readonly context: readonly AgentContextEntryInput[]
   /** Incremented when a failed edit restores this draft, so the editor reseeds. */
   readonly nonce: number
+  /** Why the last save did not go through, said under the editor. */
+  readonly error?: string
 }
 
 export type AgentConversation = ReturnType<typeof useAgentConversation>
@@ -357,6 +363,23 @@ export function useAgentConversation({
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
   const latestRun = runs[0] ?? null
 
+  // An edit the reader saved while a turn answered waits in the thread's inbox until that turn
+  // ends: read from there, it stands in place after a reload, and on another device.
+  const inboxQuery = useQuery({
+    ...listAgentThreadInboxOptions({ path: { threadId: threadId ?? "" } }),
+    enabled: threadId !== null,
+    refetchInterval: (query) => ((query.state.data?.items.length ?? 0) > 0 ? 5_000 : false),
+  })
+  const waitingEdit = useMemo(
+    () =>
+      inboxQuery.data?.items.find(
+        (item) =>
+          item.replacesMessageId !== undefined &&
+          (!user || (item.authorPrincipal.type === "user" && item.authorPrincipal.id === user.id))
+      ) ?? null,
+    [inboxQuery.data, user]
+  )
+
   // Measured against the model the next message goes to; on Auto, the latest turn's.
   const meteredModel = modelSelection.auto ? undefined : selectedModel
   const contextQuery = useQuery({
@@ -502,6 +525,35 @@ export function useAgentConversation({
   }, [pendingUser, threadId, savedMessages])
 
   useEffect(() => {
+    if (threadId === null || !waitingEdit) return
+    setPendingUser((current) =>
+      current?.threadId === threadId ? current : waitingEditPending(threadId, waitingEdit)
+    )
+  }, [threadId, waitingEdit])
+
+  // An edit that waited and never became a message was set aside: withdrawn, or dropped once the
+  // message it replaced was gone. The conversation shows what the thread holds again.
+  useEffect(() => {
+    if (!pendingUser?.replacesMessageId || pendingUser.messageId === null) return
+    if (pendingUser.threadId !== threadId || pendingSend !== null) return
+    if (!inboxQuery.isSuccess || inboxQuery.isFetching || messagesQuery.isFetching) return
+
+    const waiting = inboxQuery.data.items.some((item) => item.messageId === pendingUser.messageId)
+    const saved = savedMessages.some((message) => message.id === pendingUser.messageId)
+    if (!waiting && !saved && activeRunId === null) setPendingUser(null)
+  }, [
+    pendingUser,
+    threadId,
+    pendingSend,
+    inboxQuery.isSuccess,
+    inboxQuery.isFetching,
+    inboxQuery.data,
+    messagesQuery.isFetching,
+    savedMessages,
+    activeRunId,
+  ])
+
+  useEffect(() => {
     setSendError((current) => (current && current.threadId === threadId ? current : null))
     setEditingMessage(null)
   }, [threadId])
@@ -509,6 +561,7 @@ export function useAgentConversation({
   const createThread = useMutation(createAgentThreadMutation())
   const postMessage = useMutation(postAgentThreadMessageMutation())
   const editThreadMessage = useMutation(editAgentThreadMessageMutation())
+  const withdrawInboxItem = useMutation(withdrawAgentThreadInboxItemMutation())
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
@@ -571,7 +624,13 @@ export function useAgentConversation({
     [pendingRun, streamRun, ...runs].find((run) => run !== null && run.id === activeRunId) ?? null
 
   const stop = () => {
-    if (threadId === null || activeRunId === null || !canStop) return
+    if (threadId === null) return
+    // While an edit waits for the turn it stopped, Stop takes the edit back, to the editor.
+    if (waitingEdit && pendingUser?.messageId === waitingEdit.messageId) {
+      withdrawEdit(threadId, waitingEdit)
+      return
+    }
+    if (activeRunId === null || !canStop) return
     setStoppingRunId(activeRunId)
     cancelRun.mutate(
       { path: { threadId }, body: { runId: activeRunId } },
@@ -581,6 +640,29 @@ export function useAgentConversation({
           setSendError({ threadId, failure: "stop" })
           void refreshThread(threadId)
         },
+      }
+    )
+  }
+
+  const withdrawEdit = (targetThreadId: string, item: AgentInboxItem) => {
+    const edit = pendingUser
+    withdrawInboxItem.mutate(
+      { path: { threadId: targetThreadId, itemId: item.id } },
+      {
+        onSuccess: () => {
+          setPendingUser(null)
+          if (edit?.replacesMessageId) {
+            setEditingMessage((current) => ({
+              messageId: edit.replacesMessageId as string,
+              text: edit.text,
+              attachments: edit.attachments,
+              context: edit.context,
+              nonce: (current?.nonce ?? 0) + 1,
+            }))
+          }
+        },
+        // A turn already started from it: Stop again stops that turn.
+        onSettled: () => void refreshThread(targetThreadId),
       }
     )
   }
@@ -1198,8 +1280,12 @@ export function useAgentConversation({
         attachments,
         context,
         nonce: (current?.nonce ?? 0) + 1,
+        error: editFailureMessage(
+          editFailure(error),
+          requestedBySomeoneElse(activeRun, user),
+          labels
+        ),
       }))
-      setSendError({ threadId: targetThreadId, failure: editFailure(error) })
       void refreshThread(targetThreadId)
     }
   }
@@ -1778,6 +1864,41 @@ function editFailure(error: unknown): TurnFailure {
   if (error.code === "sandbox_execution_unavailable") return "sandbox"
 
   return "edit"
+}
+
+/** Why an edit did not go through, in words about the edit, said under the editor. */
+function editFailureMessage(
+  failure: TurnFailure,
+  someoneElse: boolean,
+  labels: ReturnType<typeof useAgentMessages>["chat"]
+): string {
+  switch (failure) {
+    case "busy":
+      return someoneElse ? labels.editBusyOther : labels.editBusy
+    case "sandbox":
+      return labels.sandboxUnavailable
+    case "computer":
+      return labels.computerUnavailable
+    default:
+      return labels.editFailed
+  }
+}
+
+/** The edit a waiting inbox item holds, as the transcript shows one just saved. */
+function waitingEditPending(threadId: string, item: AgentInboxItem): PendingUserMessage {
+  return {
+    key: `edit:${item.id}`,
+    threadId,
+    text: item.parts.map((part) => (part.type === "text" ? part.text : "")).join(""),
+    attachments: item.parts.flatMap((part) => (part.type === "file" ? [part.fileRef] : [])),
+    context: item.parts.flatMap((part) =>
+      part.type === "context"
+        ? [{ context: part.context as AgentContextInput, origin: part.origin }]
+        : []
+    ),
+    messageId: item.messageId,
+    ...(item.replacesMessageId === undefined ? {} : { replacesMessageId: item.replacesMessageId }),
+  }
 }
 
 /**

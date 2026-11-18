@@ -49,6 +49,8 @@ export const en = {
     sharedThreadsLoadFailed: "Could not load the threads shared with you.",
     sendFailed: "Couldn't send your message. Please try again.",
     editFailed: "Couldn't edit your message. Please try again.",
+    editBusy: "An answer is still in progress. Stop it, then save your edit.",
+    editBusyOther: "Someone else's answer is in progress. Save your edit when it finishes.",
     busy: "An answer is already in progress. Send yours when it finishes.",
     busyOther: "Someone else's message is being answered. Send yours when it finishes.",
     sandboxUnavailable: "Choose how the agent goes on before sending another message.",

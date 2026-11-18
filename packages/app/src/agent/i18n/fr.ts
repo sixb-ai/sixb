@@ -43,6 +43,9 @@ export const fr: Translation<AgentMessages> = {
     sharedThreadsLoadFailed: "Impossible de charger les fils partagés avec vous.",
     sendFailed: "Le message n’a pas pu être envoyé. Réessayez.",
     editFailed: "Impossible de modifier ce message. Réessayez.",
+    editBusy: "Une réponse est encore en cours. Arrêtez-la, puis enregistrez votre modification.",
+    editBusyOther:
+      "Une réponse demandée par quelqu’un d’autre est en cours. Enregistrez votre modification quand elle sera terminée.",
     busy: "Une réponse est déjà en cours. Envoyez votre message quand elle sera terminée.",
     busyOther:
       "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",

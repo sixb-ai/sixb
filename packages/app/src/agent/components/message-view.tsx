@@ -120,8 +120,10 @@ export const MessageView = memo(function MessageView({
 })
 
 const USER_ACTION_BUTTON_CLASS_NAME = cn(
-  "flex size-6 items-center justify-center rounded-md text-muted-foreground/80 outline-none transition-colors",
-  "hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+  "relative flex size-6 items-center justify-center rounded-md text-muted-foreground/80 outline-none transition-colors",
+  "hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+  // A finger needs more room than the icon: the touch area reaches 40px, the layout stays.
+  "[@media(hover:none)]:after:absolute [@media(hover:none)]:after:-inset-2"
 )
 
 const EDIT_MAX_HEIGHT_PX = 240
@@ -254,7 +256,7 @@ function UserMessage({
             data-user-message-actions=""
             data-visible={copied || touched || undefined}
             className={cn(
-              "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none",
+              "-mt-0.5 -mb-4 flex h-6 items-center justify-end gap-0.5 pr-0.5 select-none [@media(hover:none)]:gap-3",
               "pointer-events-none opacity-0 transition-opacity duration-150 ease-out",
               "group-hover/user-message:pointer-events-auto group-hover/user-message:opacity-100",
               "group-focus-within/user-message:pointer-events-auto group-focus-within/user-message:opacity-100",
@@ -448,6 +450,11 @@ function UserMessageEditor({
           className="min-h-6 max-h-[240px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
         />
       </div>
+      {draft.error ? (
+        <p role="alert" className="max-w-[min(85%,42rem)] text-right text-xs text-destructive">
+          {draft.error}
+        </p>
+      ) : null}
       <div className="flex items-center justify-end gap-1.5">
         <TooltipProvider delayDuration={200}>
           <Tooltip>
