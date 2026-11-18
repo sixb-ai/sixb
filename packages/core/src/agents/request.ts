@@ -438,6 +438,11 @@ export async function editAgentMessage(
     ],
   }
 
+  // Checked before anything stops: an edit the budget refuses must not end the turn it replaces.
+  const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+
   if (thread.activeRunId !== null) {
     const item = await deferAgentMessageEdit(runtime, execution, thread, edit, {
       spec,
@@ -447,9 +452,6 @@ export async function editAgentMessage(
     return { kind: "inbox", item }
   }
 
-  const runId = createAgentRunId()
-  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
-  await assertAiLimitPreflight(runtime, durableExecution)
   const documents = await rewoundTurnDocuments(runtime, blobStorage, rewoundRuns)
 
   let run: ConversationAgentRunRecord
@@ -552,6 +554,15 @@ async function deferAgentMessageEdit(
       `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
     )
   }
+  // The turn's end starts the edit as the person who sent it: a request no person sent, with sign-in
+  // off, leaves no one to start it as.
+  if (!execution.requestedBy) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' is answering, and an edit without a signed-in sender cannot wait for it: stop the answer, then edit.`
+    )
+  }
+
   const mayStop =
     principalsEqual(edit.authorPrincipal, thread.ownerPrincipal) ||
     (await askedForTurn(runtime, active, edit.authorPrincipal))
@@ -604,6 +615,8 @@ async function deferAgentMessageEdit(
   // Taken from the turn before it stops: it would read them at its next step.
   await queueWaitingSteers(agents, projectId, thread.id, edit.authorPrincipal)
   await stopTurnBefore(runtime, execution, active, options.blobStorage)
+  // The turn may have ended before the edit reached the inbox, its end reading none of it.
+  await startIfThreadIdle(runtime, execution, thread.id, options.blobStorage)
   return item
 }
 
@@ -696,7 +709,13 @@ async function queueWaitingSteers(
     if (item.mode !== "steer" || item.immediate) continue
     if (!principalsEqual(item.authorPrincipal, editor)) continue
 
-    await agents.inbox.update({ projectId, threadId, id: item.id, mode: "queue" })
+    try {
+      await agents.inbox.update({ projectId, threadId, id: item.id, mode: "queue" })
+    } catch (error) {
+      // The stopping turn took it meanwhile: its end lets it go, and the rewind queues it then.
+      if (error instanceof AgentStorageError && error.code === "invalid_state") continue
+      throw error
+    }
   }
 }
 
