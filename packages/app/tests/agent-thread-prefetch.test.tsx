@@ -1,12 +1,14 @@
-import { afterAll, afterEach, expect, test } from "bun:test"
+import { afterAll, afterEach, expect, jest, test } from "bun:test"
 import { client } from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, renderHook } from "@testing-library/react"
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AgentThreads } from "../src/agent/components/agent-threads"
 import { threadQueryOptions, usePrefetchAgentThread } from "../src/agent/hooks/thread-queries"
+import { useAgentConversation } from "../src/agent/hooks/use-agent-conversation"
+import type { AgentThread } from "../src/agent/types"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -36,6 +38,8 @@ const originalConfig = client.getConfig()
 client.setConfig({ baseUrl: "https://api.sixb.test" })
 
 afterEach(() => {
+  jest.useRealTimers()
+  focusManager.setFocused(undefined)
   cleanup()
   client.setConfig({ fetch: originalConfig.fetch })
 })
@@ -44,7 +48,7 @@ afterAll(() => {
   client.setConfig({ baseUrl: originalConfig.baseUrl })
 })
 
-const listed = {
+const listed: AgentThread = {
   id: "thr_1",
   projectId: "demo",
   kind: "conversation",
@@ -62,24 +66,28 @@ const listed = {
   updatedAt: "2026-11-14T10:00:00.000Z",
 }
 
-/** Answers every read the thread list and a prefetch make, and records each one. */
-function serve(): string[] {
+/** Answers every read the thread list, a prefetch and an open make, and records each one. */
+function serve(thread: AgentThread = listed): string[] {
   const requests: string[] = []
   const answer = async (input: Request | URL | string) => {
     const url = new URL(input instanceof Request ? input.url : String(input))
     requests.push(`${url.pathname}${url.search}`)
     const body = (() => {
-      if (url.pathname === "/api/agent-threads/thr_1") return listed
+      if (url.pathname === "/api/agent-threads/thr_1") return thread
       if (url.pathname.endsWith("/messages"))
         return { messages: [], authors: [], hasMore: false, total: 0 }
       if (url.pathname.endsWith("/runs")) return { runs: [], hasMore: false, total: 0 }
       if (url.pathname === "/api/agent-threads") {
-        return { threads: url.searchParams.get("shared") ? [] : [listed], hasMore: false, total: 1 }
+        return { threads: url.searchParams.get("shared") ? [] : [thread], hasMore: false, total: 1 }
       }
       if (url.pathname.includes("approvals")) return { approvals: [], hasMore: false, total: 0 }
-      return {}
+      if (url.pathname.endsWith("/inbox")) return { items: [] }
+      return null
     })()
-    return Response.json(body)
+    // What else opening reads, such as models and preferences, is left unanswered.
+    return body === null
+      ? Response.json({ error: "Not found" }, { status: 404 })
+      : Response.json(body)
   }
   client.setConfig({ fetch: Object.assign(answer, { preconnect: fetch.preconnect }) })
   return requests
@@ -95,6 +103,38 @@ function wrapper(queryClient: QueryClient) {
 
 const opens = (requests: readonly string[]) =>
   requests.filter((request) => request.startsWith("/api/agent-threads/thr_1"))
+
+/** A cache with Dana signed in, as the app has it once the session loads. */
+function signedIn(): QueryClient {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient.setQueryData(getAuthSessionQueryKey(), {
+    authenticated: true,
+    user: { id: "usr_1", email: "dana@example.test", displayName: "Dana" },
+    session: { id: "ses_1", expiresAt: "2026-12-01T00:00:00.000Z" },
+  })
+  return queryClient
+}
+
+/** Prefetches a thread, as resting on its row does, and waits for its three reads to arrive. */
+async function prefetched(queryClient: QueryClient, threadId: string) {
+  const { result } = renderHook(() => usePrefetchAgentThread(), { wrapper: wrapper(queryClient) })
+  act(() => result.current(threadId))
+
+  const reads = threadQueryOptions(threadId)
+  await waitFor(() => {
+    for (const read of [reads.thread, reads.messages, reads.runs]) {
+      expect(queryClient.getQueryState(read.queryKey)?.status).toBe("success")
+    }
+  })
+  return reads
+}
+
+/** Opens a thread with the conversation the app's chat runs on. */
+function open(queryClient: QueryClient, threadId: string) {
+  return renderHook(() => useAgentConversation({ threadId, onThreadCreated: () => {} }), {
+    wrapper: wrapper(queryClient),
+  })
+}
 
 // Opening a thread reads it, its messages and its runs. A prefetch that read anything else, or by
 // other keys, would leave the open to fetch again. Removal proof: prefetch the messages without
@@ -131,40 +171,84 @@ test("prefetches exactly the reads opening a thread makes, and leaves a fresh on
   expect(opens(requests)).toHaveLength(3)
 })
 
-// Passing over the list must not load every thread it crosses. Removal proof: prefetch in
-// onPointerEnter without the intent delay; the brief pass loads the thread.
-test("loads a thread its row is rested on or focused, and none the pointer only crosses", async () => {
-  const requests = serve()
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  queryClient.setQueryData(getAuthSessionQueryKey(), {
-    authenticated: true,
-    user: { id: "usr_1", email: "dana@example.test", displayName: "Dana" },
-    session: { id: "ses_1", expiresAt: "2026-12-01T00:00:00.000Z" },
-  })
+// Passing over the list must not load every thread it crosses, with the pointer or holding an
+// arrow key down it. A started prefetch is in the cache at once, so the cache is what each step
+// reads. Removal proof: prefetch in onPointerEnter, or in onFocus, without the intent delay; the
+// brief pass loads the thread.
+test("loads a thread its row is rested on, by the pointer or the focus, and none either only crosses", async () => {
+  serve()
+  const queryClient = signedIn()
   const view = render(<AgentThreads onSelectThread={() => {}} onNewThread={() => {}} />, {
     wrapper: wrapper(queryClient),
   })
   const row = await view.findByRole("button", { name: /Release notes/ })
+  const messages = threadQueryOptions("thr_1").messages.queryKey
+  const loading = () => queryClient.getQueryState(messages) !== undefined
 
-  await act(async () => {
-    fireEvent.pointerEnter(row)
-    await new Promise((resolve) => setTimeout(resolve, 40))
-    fireEvent.pointerLeave(row)
-    await new Promise((resolve) => setTimeout(resolve, 150))
-  })
-  expect(opens(requests)).toEqual([])
+  jest.useFakeTimers()
+  for (const [rest, leave] of [
+    [() => fireEvent.pointerEnter(row), () => fireEvent.pointerLeave(row)],
+    [() => fireEvent.focus(row), () => fireEvent.blur(row)],
+  ] as const) {
+    queryClient.removeQueries({ queryKey: messages })
 
-  await act(async () => {
-    fireEvent.pointerEnter(row)
-    await new Promise((resolve) => setTimeout(resolve, 150))
-  })
-  expect(opens(requests)).toContain("/api/agent-threads/thr_1/messages?order=asc")
+    act(() => {
+      rest()
+      jest.advanceTimersByTime(40)
+      leave()
+      jest.advanceTimersByTime(200)
+    })
+    expect(loading()).toBe(false)
 
-  queryClient.clear()
-  requests.length = 0
-  await act(async () => {
-    fireEvent.focus(row)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    act(() => {
+      rest()
+      jest.advanceTimersByTime(100)
+    })
+    expect(loading()).toBe(true)
+  }
+})
+
+// Opening a thread its prefetch just read shows what it read and reads nothing again: the
+// thread's messages are its heaviest read. A refetch starts as the conversation mounts, so the
+// reads' fetch status says it at once. Removal proof: drop `staleTime` from the reads in
+// threadQueryOptions and give it to the prefetch alone; opening reads all three again.
+test("opens a thread its prefetch just read without reading it again", async () => {
+  serve()
+  const queryClient = signedIn()
+  const reads = await prefetched(queryClient, "thr_1")
+
+  const { result } = open(queryClient, "thr_1")
+
+  for (const read of [reads.thread, reads.messages, reads.runs]) {
+    expect(queryClient.getQueryState(read.queryKey)?.fetchStatus).toBe("idle")
+  }
+  expect(result.current.currentThread?.id).toBe("thr_1")
+})
+
+// A shared thread can lose its reader without an event, so coming back to the window reads it
+// again even while its last read is fresh. Removal proof: answer `true` instead of "always" from
+// the thread's refetchOnWindowFocus; the fresh read is kept and the wait below times out.
+test("reads a shared thread again when the window comes back, however recent its read", async () => {
+  const requests = serve({
+    ...listed,
+    participants: [
+      {
+        principal: { type: "user", id: "usr_2", displayName: "Lee" },
+        addedAt: "2026-11-14T09:30:00.000Z",
+        addedBy: { type: "user", id: "usr_1" },
+      },
+    ],
   })
-  expect(opens(requests)).toContain("/api/agent-threads/thr_1/messages?order=asc")
+  const queryClient = signedIn()
+  await prefetched(queryClient, "thr_1")
+  open(queryClient, "thr_1")
+  const threadReads = () => requests.filter((request) => request === "/api/agent-threads/thr_1")
+  expect(threadReads()).toHaveLength(1)
+
+  act(() => {
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+  })
+
+  await waitFor(() => expect(threadReads()).toHaveLength(2))
 })

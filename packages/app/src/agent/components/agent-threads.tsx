@@ -379,25 +379,33 @@ function moveRowFocus(event: KeyboardEvent<HTMLDivElement>) {
   event.preventDefault()
 }
 
-/** How long the pointer rests on a thread before it loads: passing over the list loads nothing. */
+/**
+ * How long the pointer or the keyboard rests on a thread before it loads: passing over the list,
+ * or holding an arrow key down it, loads nothing.
+ */
 const PREFETCH_INTENT_MS = 100
 
-/** Load a thread when the pointer rests on its row or the keyboard reaches it, before it opens. */
+/** Load a thread when the pointer or the keyboard focus rests on its row, before it opens. */
 function usePrefetchOnIntent(threadId: string) {
   const prefetchThread = usePrefetchAgentThread()
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   const cancel = () => {
     clearTimeout(timer.current)
     timer.current = undefined
   }
-  // A row that unmounts while the pointer rests on it loads nothing after.
+  const wait = () => {
+    cancel()
+    timer.current = setTimeout(() => prefetchThread(threadId), PREFETCH_INTENT_MS)
+  }
+
+  // A row that unmounts while the pointer or the focus rests on it loads nothing after.
   useEffect(() => () => clearTimeout(timer.current), [])
+
   return {
-    onPointerEnter: () => {
-      cancel()
-      timer.current = setTimeout(() => prefetchThread(threadId), PREFETCH_INTENT_MS)
-    },
+    onPointerEnter: wait,
     onPointerLeave: cancel,
-    onFocus: () => prefetchThread(threadId),
+    onFocus: wait,
+    onBlur: cancel,
   }
 }

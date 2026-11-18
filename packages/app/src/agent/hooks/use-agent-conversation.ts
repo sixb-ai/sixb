@@ -105,7 +105,7 @@ import type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "../types"
-import { THREAD_MESSAGES_CACHE_MS, threadQueryOptions } from "./thread-queries"
+import { threadQueryOptions } from "./thread-queries"
 import {
   ComputerUnavailableError,
   type NewThreadPlaceBody,
@@ -322,9 +322,11 @@ export function useAgentConversation({
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
     // A shared thread can lose its reader without an event, and a computer's sixb can stop
-    // without saying so: read it again when they come back.
+    // without saying so: read it again when they come back, however recent the last read.
     refetchOnWindowFocus: (query) =>
-      isShared(query.state.data ?? null) || query.state.data?.computer !== undefined,
+      isShared(query.state.data ?? null) || query.state.data?.computer !== undefined
+        ? "always"
+        : false,
   })
   // A 404 after a read means the reader no longer reads it, such as a participant someone removed:
   // the last copy the query keeps must not stand in for it.
@@ -349,7 +351,6 @@ export function useAgentConversation({
     ...reads.messages,
     enabled: threadId !== null,
     refetchInterval: messagesRecoveryPollMs,
-    gcTime: THREAD_MESSAGES_CACHE_MS,
   })
   const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
