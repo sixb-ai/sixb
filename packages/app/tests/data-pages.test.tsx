@@ -33,6 +33,7 @@ import {
   ConsoleDatasetPage,
   ConsoleLakeHealthPage,
   ConsoleSyncPage,
+  ConsoleSyncsPage,
   SectionsProvider,
 } from "../src/pages"
 import { DatasetCell, datasetColumnNames } from "../src/pages/console/data/datasets"
@@ -354,7 +355,7 @@ describe("a connector's accounts", () => {
     target: { kind: "dataset", dataset: { id, schema: { columns: [] } } },
     triggers: [],
     latestRun: null,
-    accounts: { total: 3, needsReconnecting: 1, failing: 0 },
+    accounts: { total: 3, running: 0, needsReconnecting: 1, failing: 0, synced: 1 },
   })
   const run = (
     syncId: string,
@@ -505,6 +506,105 @@ describe("a connector's accounts", () => {
     expect(runs.getByText("linus@example.com")).toBeDefined()
     expect(runs.getByText("Needs reconnecting")).toBeDefined()
     expect(runs.queryByText("Reconnect.")).toBeNull()
+  })
+})
+
+describe("a sync of an OAuth connector", () => {
+  // Grace and Ada synced; Linus ran last, and his account needs reconnecting.
+  const linusRun = {
+    id: "run-inbox-linus",
+    projectId: "project",
+    syncId: "inbox",
+    connectionId: "linus",
+    datasetId: "inbox",
+    mode: "merge" as const,
+    status: "failed" as const,
+    attempt: 1,
+    queuedAt: "2026-10-07T11:50:00.000Z",
+    finishedAt: "2026-10-07T11:51:00.000Z",
+    rowsRead: 0,
+    error: {
+      code: "connector.authorization_required" as const,
+      message: "Reconnect.",
+      retryable: false,
+      at: "2026-10-07T11:51:00.000Z",
+    },
+  }
+  const accounts = {
+    total: 3,
+    running: 0,
+    needsReconnecting: 1,
+    failing: 0,
+    synced: 2,
+    lastSyncedAt: "2026-10-07T11:40:00.000Z",
+  }
+  const sync = (summary = accounts): GetSyncResponse => ({
+    id: "inbox",
+    mode: "merge",
+    connector: { id: "outlook", type: "microsoft" },
+    target: { kind: "dataset", dataset: { id: "inbox", schema: { columns: [] } } },
+    triggers: [],
+    latestRun: linusRun,
+    accounts: summary,
+  })
+  const syncKey = getSyncQueryKey({ path: { syncId: "inbox" } })
+
+  // Removal proof: read `sync.latestRun` again in ConsoleSyncPage; Linus's failure becomes the
+  // sync's, in the header and in "The last run failed".
+  test("is described by its accounts on its page, not by the account that ran last", () => {
+    const { view } = renderPage(<ConsoleSyncPage />, {
+      path: "/console/syncs/inbox",
+      data: [
+        [syncKey, sync()],
+        [
+          listSyncRunsQueryKey({ query: { syncId: "inbox", limit: "20", order: "desc" } }),
+          { runs: [linusRun], hasMore: false, total: 1 },
+        ],
+      ],
+    })
+
+    expect(view.getByText("Needs attention")).toBeDefined()
+    expect(view.queryByText("Failed")).toBeNull()
+    expect(view.queryByText("The last run failed")).toBeNull()
+    expect(view.getByText("Need attention").nextElementSibling?.textContent).toBe("1")
+    expect(view.getByText("Synced").nextElementSibling?.textContent).toBe("2")
+  })
+
+  // Removal proof: drop the `sync.accounts` branch of SyncStatusPill; the row says "Failed".
+  test("is described by its accounts in the list of syncs", () => {
+    const { view } = renderPage(<ConsoleSyncsPage />, {
+      path: "/console/syncs",
+      data: [[listSyncsQueryKey(), [sync()]]],
+    })
+
+    expect(view.getByText("Needs attention")).toBeDefined()
+    expect(view.getByText("1 needs reconnecting")).toBeDefined()
+    expect(view.queryByText("Failed")).toBeNull()
+  })
+
+  // Removal proof: drop the `sync.accounts` branches of isSyncing and syncStatus; the button
+  // says "Last sync failed", then "Sync now" while an account still runs.
+  test("gives SyncButton its status, and keeps it busy while an account runs", () => {
+    const synced = { ...accounts, needsReconnecting: 0, synced: 3 }
+
+    for (const [summary, text] of [
+      [accounts, "An account needs reconnecting"],
+      [synced, /^Synced /],
+    ] as const) {
+      const { view } = renderPage(<SyncButton sync="inbox" showStatus />, {
+        path: "/",
+        data: [[syncKey, sync(summary)]],
+      })
+      expect(view.getByText(text)).toBeDefined()
+      cleanup()
+    }
+
+    const { view } = renderPage(<SyncButton sync="inbox" />, {
+      path: "/",
+      data: [[syncKey, sync({ ...synced, running: 1, synced: 2 })]],
+    })
+    const busy = view.getByRole("button", { name: "Syncing…" })
+    expect(busy.hasAttribute("disabled")).toBe(true)
   })
 })
 

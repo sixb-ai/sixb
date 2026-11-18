@@ -91,13 +91,19 @@ export const ConnectorAccountsParamsSchema = z.object({
   connectorId: z.string().min(1),
 })
 
-/** How a sync of an OAuth connector's accounts stand, by their latest runs. */
+/** Where a sync of an OAuth connector's accounts stand, by the latest run of each. */
 const SyncAccountSummarySchema = z.object({
   total: z.number(),
+  /** Their latest run is queued or running. */
+  running: z.number(),
   /** Their latest run failed because the account needs reconnecting. */
   needsReconnecting: z.number(),
   /** Their latest run failed for any other reason. */
   failing: z.number(),
+  /** Their latest run succeeded. */
+  synced: z.number(),
+  /** When the most recent of those successful runs finished. */
+  lastSyncedAt: z.string().optional(),
 })
 
 export const SyncSchema = z.object({

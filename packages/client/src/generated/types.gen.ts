@@ -7055,8 +7055,11 @@ export type ListSyncsResponses = {
     } | null
     accounts?: {
       total: number
+      running: number
       needsReconnecting: number
       failing: number
+      synced: number
+      lastSyncedAt?: string
     }
   }>
 }
@@ -7172,8 +7175,11 @@ export type GetSyncResponses = {
     } | null
     accounts?: {
       total: number
+      running: number
       needsReconnecting: number
       failing: number
+      synced: number
+      lastSyncedAt?: string
     }
   }
 }

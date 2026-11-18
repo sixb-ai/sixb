@@ -1,3 +1,4 @@
+import type { ListSyncsResponse } from "@sixb/client"
 import { getSyncOptions, listSyncRunsOptions, listSyncsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { CalendarClock, ChevronRight, RefreshCw } from "lucide-react"
@@ -25,7 +26,13 @@ import {
   useRunStatusLabels,
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
-import { AccountsMeta, needsReconnecting, useConnectorAccounts } from "./accounts"
+import {
+  AccountsMeta,
+  AccountsStatusPill,
+  needsReconnecting,
+  useAccountsStats,
+  useConnectorAccounts,
+} from "./accounts"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
@@ -78,7 +85,17 @@ export function ConsoleSyncsPage() {
                   {sync.triggers.map((trigger) => (
                     <ScheduleMeta key={trigger.scheduleId} id={trigger.scheduleId} />
                   ))}
-                  {sync.latestRun ? (
+                  {sync.accounts ? (
+                    <>
+                      {sync.accounts.lastSyncedAt ? (
+                        <>
+                          <MetaDot />
+                          <span>{format.relative(sync.accounts.lastSyncedAt)}</span>
+                        </>
+                      ) : null}
+                      <AccountsMeta summary={sync.accounts} />
+                    </>
+                  ) : sync.latestRun ? (
                     <>
                       <MetaDot />
                       <span>
@@ -86,16 +103,11 @@ export function ConsoleSyncsPage() {
                       </span>
                     </>
                   ) : null}
-                  {sync.accounts ? <AccountsMeta summary={sync.accounts} /> : null}
                 </>
               }
               trailing={
                 <>
-                  {sync.latestRun ? (
-                    <RunStatusPill status={sync.latestRun.status} />
-                  ) : (
-                    <Pill tone="muted">{messages.common.neverRun}</Pill>
-                  )}
+                  <SyncStatusPill sync={sync} />
                   <ChevronRight className="size-4 text-muted-foreground/60" />
                 </>
               }
@@ -126,6 +138,7 @@ export function ConsoleSyncPage() {
         : false,
   })
   const sync = syncQuery.data
+  const accountsStats = useAccountsStats(sync?.accounts)
   // Runs name their account: the connector's accounts give their labels.
   const accountsQuery = useConnectorAccounts(sync?.connector.id ?? "", sync?.accounts !== undefined)
   const accountLabels = new Map(
@@ -175,7 +188,8 @@ export function ConsoleSyncPage() {
     )
   }
 
-  const latestRun = sync.latestRun
+  // On a sync of an OAuth connector, the latest run is one account's: the accounts describe it.
+  const latestRun = sync.accounts ? null : sync.latestRun
   // A failed latest run gets its own panel; its row leaves the failure out rather than repeat it.
   const failedLatest = latestRun?.status === "failed" && latestRun.error ? latestRun : null
   const dataset = sync.target.dataset
@@ -190,11 +204,7 @@ export function ConsoleSyncPage() {
       title={humanize(sync.id)}
       meta={
         <>
-          {latestRun ? (
-            <RunStatusPill status={latestRun.status} />
-          ) : (
-            <Pill tone="muted">{messages.common.neverRun}</Pill>
-          )}
+          <SyncStatusPill sync={sync} />
           <span>{messages.common.modes[sync.mode]}</span>
           <MetaDot />
           <Link to={datasetHref} className="hover:text-foreground hover:underline">
@@ -211,25 +221,27 @@ export function ConsoleSyncPage() {
       actions={<SyncButton sync={sync.id} variant="default" />}
     >
       <Stats
-        items={[
-          {
-            label: messages.common.lastRun,
-            value: latestRun ? (
-              statusLabels[latestRun.status]
-            ) : (
-              <span className="text-muted-foreground">{messages.common.neverRun}</span>
-            ),
-          },
-          {
-            label: messages.common.started,
-            value: latestRun ? format.relative(latestRun.startedAt ?? latestRun.queuedAt) : "—",
-          },
-          {
-            label: messages.common.took,
-            value: formatDuration(latestRun?.startedAt, latestRun?.finishedAt),
-          },
-          { label: messages.syncs.rowsRead, value: numbers.count(latestRun?.rowsRead) },
-        ]}
+        items={
+          accountsStats ?? [
+            {
+              label: messages.common.lastRun,
+              value: latestRun ? (
+                statusLabels[latestRun.status]
+              ) : (
+                <span className="text-muted-foreground">{messages.common.neverRun}</span>
+              ),
+            },
+            {
+              label: messages.common.started,
+              value: latestRun ? format.relative(latestRun.startedAt ?? latestRun.queuedAt) : "—",
+            },
+            {
+              label: messages.common.took,
+              value: formatDuration(latestRun?.startedAt, latestRun?.finishedAt),
+            },
+            { label: messages.syncs.rowsRead, value: numbers.count(latestRun?.rowsRead) },
+          ]
+        }
       />
 
       {failedLatest?.error ? (
@@ -384,6 +396,18 @@ export function ConsoleSyncPage() {
 
       <SchemaPanel dataset={dataset} />
     </SectionPage>
+  )
+}
+
+/** How a sync stands: its latest run, or on a sync of an OAuth connector, its accounts. */
+function SyncStatusPill({ sync }: { readonly sync: ListSyncsResponse[number] }) {
+  const messages = useDataMessages()
+  if (sync.accounts) return <AccountsStatusPill summary={sync.accounts} />
+
+  return sync.latestRun ? (
+    <RunStatusPill status={sync.latestRun.status} />
+  ) : (
+    <Pill tone="muted">{messages.common.neverRun}</Pill>
   )
 }
 

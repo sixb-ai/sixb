@@ -21164,14 +21164,23 @@
                           "total": {
                             "type": "number"
                           },
+                          "running": {
+                            "type": "number"
+                          },
                           "needsReconnecting": {
                             "type": "number"
                           },
                           "failing": {
                             "type": "number"
+                          },
+                          "synced": {
+                            "type": "number"
+                          },
+                          "lastSyncedAt": {
+                            "type": "string"
                           }
                         },
-                        "required": ["total", "needsReconnecting", "failing"],
+                        "required": ["total", "running", "needsReconnecting", "failing", "synced"],
                         "additionalProperties": false
                       }
                     },
@@ -21482,14 +21491,23 @@
                         "total": {
                           "type": "number"
                         },
+                        "running": {
+                          "type": "number"
+                        },
                         "needsReconnecting": {
                           "type": "number"
                         },
                         "failing": {
                           "type": "number"
+                        },
+                        "synced": {
+                          "type": "number"
+                        },
+                        "lastSyncedAt": {
+                          "type": "string"
                         }
                       },
-                      "required": ["total", "needsReconnecting", "failing"],
+                      "required": ["total", "running", "needsReconnecting", "failing", "synced"],
                       "additionalProperties": false
                     }
                   },

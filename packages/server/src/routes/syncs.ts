@@ -96,23 +96,41 @@ function connectorAccounts(sixb: RequestSixb) {
   }
 }
 
-/** On a sync of an OAuth connector, how the accounts the caller may see stand in it. */
+/** On a sync of an OAuth connector, where the accounts the caller may see stand in it. */
 async function summarizeAccounts(
   sync: SyncDefinition,
   accountsOf: ReturnType<typeof connectorAccounts>
 ) {
   if (!isOAuthConnectorDefinition(sync.connector)) return undefined
-  const accounts = await accountsOf(sync.connector.id)
-  const failed = accounts.flatMap(({ latestRuns }) =>
-    latestRuns.filter((run) => run.syncId === sync.id && run.status === "failed")
+
+  return summarizeSyncAccounts(sync.id, await accountsOf(sync.connector.id))
+}
+
+/**
+ * Where a sync's accounts stand, by the latest run of each. An account counts once: running,
+ * needing reconnecting, failing or synced. One whose latest run was cancelled, or that never ran,
+ * is in `total` alone.
+ */
+export function summarizeSyncAccounts(syncId: string, accounts: readonly SyncAccount[]) {
+  const latest = accounts.flatMap(({ latestRuns }) =>
+    latestRuns.filter((run) => run.syncId === syncId)
   )
-  const needsReconnecting = failed.filter(
-    (run) => run.error?.code === "connector.authorization_required"
-  ).length
+  const count = (matches: (run: SyncRunRecord) => boolean) => latest.filter(matches).length
+  const reconnect = (run: SyncRunRecord) => run.error?.code === "connector.authorization_required"
+
+  const synced = latest.filter((run) => run.status === "succeeded")
+  const lastSyncedAt = synced.reduce<Date | undefined>((last, run) => {
+    const at = run.finishedAt ?? run.queuedAt
+    return last && last >= at ? last : at
+  }, undefined)
+
   return {
     total: accounts.length,
-    needsReconnecting,
-    failing: failed.length - needsReconnecting,
+    running: count((run) => run.status === "queued" || run.status === "running"),
+    needsReconnecting: count((run) => run.status === "failed" && reconnect(run)),
+    failing: count((run) => run.status === "failed" && !reconnect(run)),
+    synced: synced.length,
+    ...(lastSyncedAt === undefined ? {} : { lastSyncedAt: toIsoString(lastSyncedAt) }),
   }
 }
 

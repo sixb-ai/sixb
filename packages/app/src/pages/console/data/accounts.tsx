@@ -35,6 +35,7 @@ import { useDataMessages } from "./messages"
 type ConnectorAccount = ListConnectorAccountsResponse["accounts"][number]
 type AccountRun = ConnectorAccount["latestRuns"][number]
 type Sync = ListSyncsResponse[number]
+type AccountsSummary = NonNullable<Sync["accounts"]>
 
 /** How many accounts show before "Show all". Problems sort first, so they always show. */
 const SHOWN_ACCOUNTS = 8
@@ -81,6 +82,76 @@ function accountState(account: ConnectorAccount): AccountState {
   if (runs.some((run) => run.status === "failed")) return "failed"
   if (runs.some((run) => isActiveRun(run.status))) return "running"
   return runs.length === 0 ? "never" : "synced"
+}
+
+/**
+ * A sync of an OAuth connector as one state, from the accounts you see. Its latest run only says
+ * how the account that ran last went.
+ */
+type SyncAccountsState = "running" | "attention" | "synced" | "never" | "empty"
+
+function syncAccountsState(summary: AccountsSummary): SyncAccountsState {
+  if (summary.running > 0) return "running"
+  if (summary.needsReconnecting + summary.failing > 0) return "attention"
+  if (summary.synced > 0) return "synced"
+
+  return summary.total === 0 ? "empty" : "never"
+}
+
+/** The pill of a sync of an OAuth connector, on its row and its page. */
+export function AccountsStatusPill({ summary }: { readonly summary: AccountsSummary }) {
+  const messages = useDataMessages()
+
+  switch (syncAccountsState(summary)) {
+    case "running":
+      return <RunStatusPill status="running" />
+    case "attention":
+      return (
+        <Pill tone={summary.failing > 0 ? "error" : "warn"}>{messages.syncs.needsAttention}</Pill>
+      )
+    case "synced":
+      return <RunStatusPill status="succeeded" />
+    case "empty":
+      return <Pill tone="muted">{messages.syncs.noAccounts}</Pill>
+    case "never":
+      return <Pill tone="muted">{messages.common.neverRun}</Pill>
+  }
+}
+
+/**
+ * A sync of an OAuth connector's figures: its accounts, rather than the run that ended last. Null
+ * for a sync of any other connector.
+ */
+export function useAccountsStats(summary: AccountsSummary | undefined) {
+  const messages = useDataMessages().syncs
+  const numbers = useNumbers()
+  const format = useFormat()
+  if (!summary) return null
+
+  const attention = summary.needsReconnecting + summary.failing
+
+  return [
+    { label: messages.accountsStat, value: numbers.count(summary.total) },
+    { label: messages.syncedStat, value: numbers.count(summary.synced) },
+    {
+      label: messages.attentionStat,
+      value: (
+        <span
+          className={cn(
+            summary.failing > 0
+              ? "text-red-600 dark:text-red-400"
+              : attention > 0 && "text-amber-700 dark:text-amber-400"
+          )}
+        >
+          {numbers.count(attention)}
+        </span>
+      ),
+    },
+    {
+      label: messages.lastSynced,
+      value: summary.lastSyncedAt ? format.relative(summary.lastSyncedAt) : "—",
+    },
+  ]
 }
 
 /** On a sync's row or page: how many accounts it runs for, and how many are not syncing. */

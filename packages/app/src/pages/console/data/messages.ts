@@ -41,6 +41,17 @@ export const en = {
     synced: (when: string) => `Synced ${when}`,
     failed: "Last sync failed",
     never: "Never synced",
+    noAccounts: "No account connected",
+    accountsNeedReconnecting: (count: number) =>
+      plural("en", count, {
+        one: "An account needs reconnecting",
+        other: `${count} accounts need reconnecting`,
+      }),
+    accountsFailed: (count: number) =>
+      plural("en", count, {
+        one: "An account failed to sync",
+        other: `${count} accounts failed to sync`,
+      }),
     requestFailed: "The sync could not be started.",
   },
   connectors: {
@@ -99,6 +110,12 @@ export const en = {
     notSyncedYet: "Not synced yet",
     needsReconnecting: "Needs reconnecting",
     syncAccount: (account: string) => `Sync ${account}`,
+    needsAttention: "Needs attention",
+    noAccounts: "No accounts",
+    accountsStat: "Accounts",
+    syncedStat: "Synced",
+    attentionStat: "Need attention",
+    lastSynced: "Last synced",
   },
   datasets: {
     title: "Datasets",
@@ -302,6 +319,17 @@ export const fr: Translation<DataMessages> = {
     synced: (when: string) => `Synchronisé ${when}`,
     failed: "La dernière synchronisation a échoué",
     never: "Jamais synchronisé",
+    noAccounts: "Aucun compte connecté",
+    accountsNeedReconnecting: (count: number) =>
+      plural("fr", count, {
+        one: "Un compte à reconnecter",
+        other: `${count} comptes à reconnecter`,
+      }),
+    accountsFailed: (count: number) =>
+      plural("fr", count, {
+        one: "Un compte en échec",
+        other: `${count} comptes en échec`,
+      }),
     requestFailed: "Impossible de lancer la synchronisation.",
   },
   connectors: {
@@ -363,6 +391,12 @@ export const fr: Translation<DataMessages> = {
     notSyncedYet: "Pas encore synchronisé",
     needsReconnecting: "À reconnecter",
     syncAccount: (account: string) => `Synchroniser ${account}`,
+    needsAttention: "À traiter",
+    noAccounts: "Aucun compte",
+    accountsStat: "Comptes",
+    syncedStat: "Synchronisés",
+    attentionStat: "À traiter",
+    lastSynced: "Dernière synchronisation",
   },
   datasets: {
     title: "Jeux de données",
