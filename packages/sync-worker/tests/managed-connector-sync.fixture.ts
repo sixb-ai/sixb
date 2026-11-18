@@ -99,17 +99,23 @@ export function source(
   }
 }
 
+export interface RunOptions {
+  /** The connection the run reads. Omitted for a run queued before syncs ran per connection. */
+  readonly connectionId?: string
+  readonly signal?: AbortSignal
+}
+
 export async function run(
   fixture: ManagedSyncFixture,
   syncId: string,
   runId: string,
-  signal?: AbortSignal
+  options: RunOptions = {}
 ) {
-  const queued = await queueRun(fixture, syncId, runId)
+  const queued = await queueRun(fixture, syncId, runId, options.connectionId)
   return runSyncJobWithDurableRun({
     runtime: fixture.runtime,
     claim: await claimTestRun(fixture.runtime.syncRunsStorage, queued),
-    ...(signal === undefined ? {} : { signal }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   })
 }
 
@@ -117,9 +123,10 @@ export async function seedSuccessfulCheckpoint(
   fixture: ManagedSyncFixture,
   syncId: string,
   runId: string,
-  checkpoint: JsonValue
+  checkpoint: JsonValue,
+  connectionId?: string
 ): Promise<void> {
-  const queued = await queueRun(fixture, syncId, runId)
+  const queued = await queueRun(fixture, syncId, runId, connectionId)
   await startTestRun(fixture.runtime.syncRunsStorage, {
     projectId: fixture.runtime.id,
     id: queued.id,
@@ -150,7 +157,12 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Prom
   throw new Error("Timed out waiting for managed Sync state.")
 }
 
-async function queueRun(fixture: ManagedSyncFixture, syncId: string, runId: string) {
+async function queueRun(
+  fixture: ManagedSyncFixture,
+  syncId: string,
+  runId: string,
+  connectionId?: string
+) {
   const sync = fixture.runtime.syncs.getById(syncId)
   if (!sync) throw new Error(`[Test] Unknown Sync '${syncId}'.`)
   const executionId = `exec:${runId}`
@@ -170,6 +182,7 @@ async function queueRun(fixture: ManagedSyncFixture, syncId: string, runId: stri
     projectId: fixture.runtime.id,
     executionId,
     syncId: sync.id,
+    ...(connectionId === undefined ? {} : { connectionId }),
     datasetId: sync.target.dataset.id,
     mode: sync.config.mode,
   })

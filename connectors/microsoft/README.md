@@ -151,7 +151,8 @@ What to expect:
 ### Notifications from people's accounts
 
 Each person subscribes to their own mailbox, and `onEvent` gets the connections of the person whose
-subscription sent the notification:
+subscription sent the notification. A change runs the inbox sync for that person alone, and
+notifications that arrive before that run starts join it:
 
 ```ts
 // connectors/outlook.ts
@@ -168,8 +169,11 @@ export const outlook = defineConnector(
     webhookSecret: process.env.MICROSOFT_WEBHOOK_SECRET!, // 1–128 characters
     async onEvent({ event, accountId, connections, sixb }) {
       if (connections.length === 0) return // They disconnected; the subscription expires on its own.
-      if (event.kind === "change" || event.lifecycleEvent === "missed")
-        return recordMailboxChange(sixb, event, connections) // Your durable signal.
+      if (event.kind === "change" || event.lifecycleEvent === "missed") {
+        for (const { connection } of connections)
+          await sixb.syncs.request({ syncId: "inbox", connectionId: connection.id })
+        return
+      }
 
       // Only lifecycle events need their token. If they must reconnect, skip it: throwing would
       // fail the whole batch, other people's notifications included. The nightly run catches up.

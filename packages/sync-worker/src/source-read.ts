@@ -10,11 +10,8 @@ import {
 import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
 import { createSixbError, isSixbError, summarizeErrorMessage } from "@sixb/core/internal/errors"
 import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
-import {
-  ConnectionCheckpoints,
-  createSyncCheckpointCodec,
-  type SyncCheckpointCodec,
-} from "./checkpoints"
+import type { SyncRunRecord } from "@sixb/core/storage"
+import { connectionCheckpoint, singleCheckpoint } from "./checkpoints"
 import { normalizeReadResult, runAbortable, throwIfAborted } from "./normalize"
 import type { SyncWorkerContext } from "./types"
 
@@ -23,9 +20,68 @@ export interface SyncSourceValue {
   readonly connection?: SyncConnectorConnection
 }
 
+/** What one run reads: a static connector's client, or one connection of an OAuth connector. */
+export type SyncRunSource =
+  | { readonly kind: "static"; readonly source: SyncConnectorSource }
+  | {
+      readonly kind: "connection"
+      readonly source: SyncConnectorSource
+      readonly connection: SyncConnectorConnection
+    }
+
+/** The run has nothing left to read, so it ends `cancelled` without reading. */
+export class SyncRunSourceGoneError extends Error {
+  override readonly name = "SyncRunSourceGoneError"
+}
+
+/**
+ * Resolve what this run reads. A sync of an OAuth connector runs once per connection, so a run
+ * reads the connection it was queued for, and ends without reading if that connection is no longer
+ * connected or its owner was suspended since.
+ */
+export async function resolveSyncRunSource(
+  runtime: SyncWorkerContext,
+  sync: SyncDefinition,
+  run: Pick<SyncRunRecord, "id" | "connectionId">
+): Promise<SyncRunSource> {
+  const sources = await runtime.connectorSources.list(sync.connector)
+
+  if (!isOAuthConnectorDefinition(sync.connector)) {
+    if (run.connectionId !== undefined) {
+      throw sourceInvariant(sync.id, `Static connector run '${run.id}' names a connection.`)
+    }
+    const [source] = sources
+    if (sources.length !== 1 || !source || source.connection !== undefined) {
+      throw sourceInvariant(sync.id, "Static connectors must resolve exactly one source.")
+    }
+    return { kind: "static", source }
+  }
+
+  if (run.connectionId === undefined) {
+    throw new SyncRunSourceGoneError(
+      `[SixbSyncWorker] Sync run '${run.id}' was queued before a sync of an OAuth connector ran once per connection. The sync's next trigger runs each connection.`
+    )
+  }
+
+  const source = sources.find((candidate) => candidate.connection?.id === run.connectionId)
+  if (!source?.connection) {
+    throw new SyncRunSourceGoneError(
+      `[SixbSyncWorker] Connection '${run.connectionId}' of sync '${sync.id}' is no longer connected, or its owner is suspended.`
+    )
+  }
+  if (source.connection.connectorId !== sync.connector.id) {
+    throw sourceInvariant(
+      sync.id,
+      `Connection '${source.connection.id}' belongs to connector '${source.connection.connectorId}', not '${sync.connector.id}'.`
+    )
+  }
+  return { kind: "connection", source, connection: source.connection }
+}
+
 interface ReadSyncValuesInput {
   readonly runtime: SyncWorkerContext
   readonly sync: SyncDefinition
+  readonly source: SyncRunSource
   readonly runId: string
   readonly datasetId: string
   readonly signal: AbortSignal
@@ -35,74 +91,25 @@ interface ReadSyncValuesInput {
   setCheckpoint(next: JsonValue | undefined): void
 }
 
-/** Resolve and invoke every source contributing to one atomic Sync run. */
+/** Invoke the source of one atomic Sync run. */
 export async function readSyncValues(
   options: ReadSyncValuesInput
 ): Promise<AsyncIterable<SyncSourceValue>> {
-  const sources = await options.runtime.connectorSources.list(options.sync.connector)
-  if (!isOAuthConnectorDefinition(options.sync.connector)) {
-    if (sources.length !== 1 || sources[0]?.connection !== undefined) {
-      throw sourceInvariant(options.sync.id, "Static connectors must resolve exactly one source.")
-    }
-    const checkpointCodec = createSyncCheckpointCodec({
-      syncId: options.sync.id,
-      connectorId: options.sync.connector.id,
-      strategy: "single",
-    })
-    return readStaticSource(options, sources[0], checkpointCodec)
-  }
-
-  const connectionIds = new Set<string>()
-  const managedSources = sources.map((source) => {
-    if (!source.connection) {
-      throw sourceInvariant(
-        options.sync.id,
-        "OAuth connector sources must include connection metadata."
-      )
-    }
-    const connection = source.connection
-    if (connection.connectorId !== options.sync.connector.id) {
-      throw sourceInvariant(
-        options.sync.id,
-        `Connection '${connection.id}' belongs to connector '${connection.connectorId}', not '${options.sync.connector.id}'.`
-      )
-    }
-    if (connectionIds.has(connection.id)) {
-      throw sourceInvariant(options.sync.id, `Connection '${connection.id}' was resolved twice.`)
-    }
-    connectionIds.add(connection.id)
-    return {
-      connection,
-      connect: (signal: AbortSignal) => source.connect(signal),
-    }
-  })
-  managedSources.sort((left, right) => left.connection.id.localeCompare(right.connection.id))
-  const checkpointCodec = createSyncCheckpointCodec({
-    syncId: options.sync.id,
-    connectorId: options.sync.connector.id,
-    strategy: "connections",
-  })
-  const checkpoints = ConnectionCheckpoints.from(
-    options.sync.id,
-    checkpointCodec.read(options.previousCheckpoint)
-  )
-  checkpoints.reconcile(managedSources.map((source) => source.connection))
-  const storeCheckpoint = () =>
-    options.setCheckpoint(checkpointCodec.serialize(checkpoints.serialize()))
-  storeCheckpoint()
-
-  return readManagedSources(options, managedSources, checkpoints, storeCheckpoint)
+  const { source } = options
+  return source.kind === "static"
+    ? readStaticSource(options, source.source)
+    : readConnectionSource(options, source.source, source.connection)
 }
 
 async function readStaticSource(
   options: ReadSyncValuesInput,
-  source: SyncConnectorSource,
-  checkpointCodec: SyncCheckpointCodec
+  source: SyncConnectorSource
 ): Promise<AsyncIterable<SyncSourceValue>> {
-  const previousCheckpoint = checkpointCodec.read(options.previousCheckpoint)
+  const identity = checkpointIdentity(options.sync)
+  const previousCheckpoint = singleCheckpoint.read(identity, options.previousCheckpoint)
   if (previousCheckpoint !== undefined) {
     // Migrate legacy raw checkpoints only after the complete run succeeds.
-    options.setCheckpoint(checkpointCodec.serialize(previousCheckpoint))
+    options.setCheckpoint(singleCheckpoint.serialize(identity, previousCheckpoint))
   }
   const client = await runAbortable(options.signal, () => source.connect(options.signal))
   throwIfAborted(options.signal)
@@ -110,16 +117,12 @@ async function readStaticSource(
     options.sync.read(
       client as never,
       {
-        projectId: options.runtime.id,
-        syncId: options.sync.id,
-        signal: options.signal,
-        blobs: options.blobStorage,
-        logger: options.logger,
+        ...readContext(options),
         checkpoint:
           previousCheckpoint === undefined ? undefined : cloneJsonValue(previousCheckpoint),
         setCheckpoint(next: unknown) {
           assertJsonValue(next, `Sync '${options.sync.id}' checkpoint`)
-          options.setCheckpoint(checkpointCodec.serialize(cloneJsonValue(next)))
+          options.setCheckpoint(singleCheckpoint.serialize(identity, cloneJsonValue(next)))
         },
       } as never
     )
@@ -127,50 +130,34 @@ async function readStaticSource(
   return sourceValues(normalizeReadResult(readResult, options.sync.id, options.signal))
 }
 
-async function* readManagedSources(
+async function* readConnectionSource(
   options: ReadSyncValuesInput,
-  sources: readonly (SyncConnectorSource & {
-    readonly connection: SyncConnectorConnection
-  })[],
-  checkpoints: ConnectionCheckpoints,
-  storeCheckpoint: () => void
+  source: SyncConnectorSource,
+  connection: SyncConnectorConnection
 ): AsyncIterable<SyncSourceValue> {
-  for (const source of sources) {
-    yield* readManagedSource(options, source, checkpoints, storeCheckpoint)
-  }
-}
+  const identity = checkpointIdentity(options.sync)
+  const previous = connectionCheckpoint.read(identity, connection, options.previousCheckpoint)
+  // A checkpoint carried from an older format becomes this connection's own on success.
+  options.setCheckpoint(connectionCheckpoint.serialize(identity, connection, previous))
 
-async function* readManagedSource(
-  options: ReadSyncValuesInput,
-  source: SyncConnectorSource & { readonly connection: SyncConnectorConnection },
-  checkpoints: ConnectionCheckpoints,
-  storeCheckpoint: () => void
-): AsyncIterable<SyncSourceValue> {
-  const { connection } = source
   try {
     throwIfAborted(options.signal)
     let client: unknown
     try {
       client = await runAbortable(options.signal, () => source.connect(options.signal))
     } catch (error) {
-      if (!skipsUnauthorizedConnection(options.sync, connection, error)) throw error
-      // The connection keeps its checkpoint and its rows; its owner sees it needs reconnecting.
-      console.warn(
-        `[SixbSyncWorker] Sync '${options.sync.id}' skipped connection '${connection.id}' (${connection.account.label}): it needs reconnecting.`
-      )
-      return
+      if (isSixbError(error) && error.code === "connector.authorization_required") {
+        throw needsReconnecting(options, connection, error)
+      }
+      throw error
     }
     throwIfAborted(options.signal)
-    const previous = checkpoints.get(connection)
+
     const readResult = await runAbortable(options.signal, () =>
       options.sync.read(
         client as never,
         {
-          projectId: options.runtime.id,
-          syncId: options.sync.id,
-          signal: options.signal,
-          blobs: options.blobStorage,
-          logger: options.logger,
+          ...readContext(options),
           connection,
           checkpoint: previous === undefined ? undefined : cloneJsonValue(previous),
           setCheckpoint(next: unknown) {
@@ -178,8 +165,9 @@ async function* readManagedSource(
               next,
               `Sync '${options.sync.id}' connection '${connection.id}' checkpoint`
             )
-            checkpoints.set(connection, cloneJsonValue(next))
-            storeCheckpoint()
+            options.setCheckpoint(
+              connectionCheckpoint.serialize(identity, connection, cloneJsonValue(next))
+            )
           },
         } as never
       )
@@ -189,39 +177,61 @@ async function* readManagedSource(
     }
   } catch (error) {
     if (options.signal.aborted) throw error
+    if (isSixbError(error) && error.code === "connector.authorization_required") throw error
     throw createSixbError(
       "sync.execution_failed",
-      summarizeErrorMessage(error, "Managed connector Sync source failed."),
-      {
-        cause: error,
-        details: {
-          syncId: options.sync.id,
-          runId: options.runId,
-          datasetId: options.datasetId,
-          connectionId: connection.id,
-          accountId: connection.account.id,
-        },
-      }
+      summarizeErrorMessage(error, "Connector connection Sync source failed."),
+      { cause: error, details: connectionDetails(options, connection) }
     )
   }
 }
 
 /**
- * One person's account that needs reconnecting must not fail everyone's run. A snapshot run still
- * fails: leaving the account out would drop its rows from the dataset. A project connection still
- * fails the run, so the project's own expired grant reaches `onError` as it always has.
+ * The connection's grant can no longer give a token. Its owner reconnects it, and the next run
+ * resumes from its checkpoint. A person's own connection is theirs to fix, so it is not reported.
  */
-function skipsUnauthorizedConnection(
-  sync: SyncDefinition,
+function needsReconnecting(
+  options: ReadSyncValuesInput,
   connection: SyncConnectorConnection,
-  error: unknown
-): boolean {
-  return (
-    sync.config.mode !== "snapshot" &&
-    connection.owner.type === "user" &&
-    isSixbError(error) &&
-    error.code === "connector.authorization_required"
+  cause: unknown
+): Error {
+  if (connection.owner.type === "user") {
+    console.warn(
+      `[SixbSyncWorker] Sync '${options.sync.id}' could not read connection '${connection.id}': it needs reconnecting.`
+    )
+  }
+  return createSixbError(
+    "connector.authorization_required",
+    `[SixbSyncWorker] Connection '${connection.id}' of sync '${options.sync.id}' needs reconnecting.`,
+    {
+      cause,
+      details: { ...connectionDetails(options, connection), ownerType: connection.owner.type },
+    }
   )
+}
+
+function readContext(options: ReadSyncValuesInput) {
+  return {
+    projectId: options.runtime.id,
+    syncId: options.sync.id,
+    signal: options.signal,
+    blobs: options.blobStorage,
+    logger: options.logger,
+  }
+}
+
+function checkpointIdentity(sync: SyncDefinition) {
+  return { syncId: sync.id, connectorId: sync.connector.id }
+}
+
+function connectionDetails(options: ReadSyncValuesInput, connection: SyncConnectorConnection) {
+  return {
+    syncId: options.sync.id,
+    runId: options.runId,
+    datasetId: options.datasetId,
+    connectionId: connection.id,
+    accountId: connection.account.id,
+  }
 }
 
 function sourceInvariant(syncId: string, message: string): Error {

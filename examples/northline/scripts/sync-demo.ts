@@ -21,7 +21,7 @@ export async function synchronizeDemo(): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ commitMessage: "Northline demo synchronization" }),
     })
-    const runId = field(requested, "runId")
+    const runId = onlyRunId(requested)
     await waitUntil(`${syncId} to finish`, async () => {
       const sync = await apiRequest(`/syncs/${encodeURIComponent(syncId)}`)
       if (!isRecord(sync) || !isRecord(sync.latestRun) || sync.latestRun.id !== runId) return false
@@ -45,11 +45,16 @@ export async function synchronizeDemo(): Promise<void> {
   }
 }
 
-function field(value: unknown, key: string): string {
-  if (!isRecord(value) || typeof value[key] !== "string") {
-    throw new Error(`[Northline] API response is missing '${key}'.`)
+// Northline's syncs read static connectors, so a request queues exactly one run.
+function onlyRunId(value: unknown): string {
+  const runs = isRecord(value) ? value.runs : undefined
+  const run = Array.isArray(runs) && runs.length === 1 ? runs[0] : undefined
+
+  if (!isRecord(run) || typeof run.runId !== "string") {
+    throw new Error("[Northline] Expected the sync request to queue exactly one run.")
   }
-  return value[key]
+
+  return run.runId
 }
 
 if (import.meta.main) {

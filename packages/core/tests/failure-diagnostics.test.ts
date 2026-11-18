@@ -35,10 +35,10 @@ describe("durable failure diagnostics", () => {
 
   test("keeps a specific Sixb cause without adding a second code/message pair", () => {
     const failure = captureSixbFailure(
-      createSixbError("connector.authorization_required", "provider-secret"),
+      createSixbError("connector.configuration_invalid", "provider-secret"),
       options
     )
-    expect(failure.message).toBe("Sync execution failed. Connector authorization is required.")
+    expect(failure.message).toBe("Sync execution failed. Connector configuration is invalid.")
     expect(failure.code).toBe("sync.execution_failed")
     expect(failure).not.toHaveProperty("diagnostics")
   })

@@ -280,6 +280,7 @@ function syncLane({ projectId, storage, queues }: LaneInput) {
         payload: {
           syncId: run.syncId,
           runId: run.id,
+          ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
           status: "cancelled",
           datasetId: run.datasetId,
           error: failure,

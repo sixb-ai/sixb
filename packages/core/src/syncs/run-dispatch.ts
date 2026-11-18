@@ -1,3 +1,4 @@
+import { isOAuthConnectorDefinition } from "../connectors"
 import { reportRunFailure } from "../error-reporting/capability"
 import { toSixbFailure } from "../errors/internal"
 import type { RunDispatcher } from "../execution/dispatch"
@@ -13,6 +14,7 @@ import {
   type QueuedRunStore,
   type RunPublication,
 } from "../workers/queued-run-dispatch"
+import { findSyncConnections } from "./connections"
 import { SyncValidationError } from "./errors"
 import type { SyncRunRequestOptions, SyncRunRequestResult } from "./request"
 import type { SyncDefinition } from "./types"
@@ -27,9 +29,18 @@ export interface AutomaticSyncRunDispatchInput extends SyncRunRequestOptions {
   readonly source: AutomaticSyncExecutionSource
   readonly correlationId: string
   readonly metadata?: Readonly<Record<string, string>>
+  /**
+   * The connection the triggering event is about. A sync of that connection's connector runs for
+   * it alone; any other sync runs for every connection as usual.
+   */
+  readonly connection?: { readonly id: string; readonly connectorId: string }
 }
 
-export type SyncRunDispatchPort = RunDispatcher<AutomaticSyncRunDispatchInput, SyncRunRequestResult>
+/** A sync of a static connector queues one run; a sync of an OAuth connector one per connection. */
+export type SyncRunDispatchPort = RunDispatcher<
+  AutomaticSyncRunDispatchInput,
+  readonly SyncRunRequestResult[]
+>
 
 export interface SyncRunDispatcherDependencies {
   readonly id: string
@@ -42,6 +53,8 @@ interface DispatchSyncRunInput extends SyncRunRequestOptions {
   readonly errorReporterHost: object
   readonly projectId: string
   readonly sync: SyncDefinition
+  /** The connection this run reads, on a sync of an OAuth connector. */
+  readonly connectionId?: string
   readonly storage: Storage
   readonly queue: Queues["syncRuns"]
   readonly metadata?: Readonly<Record<string, string>>
@@ -57,18 +70,45 @@ interface DispatchSyncRunInput extends SyncRunRequestOptions {
 export class SyncRunDispatcher implements SyncRunDispatchPort {
   constructor(private readonly dependencies: SyncRunDispatcherDependencies) {}
 
-  async dispatch(input: AutomaticSyncRunDispatchInput): Promise<SyncRunRequestResult> {
+  async dispatch(input: AutomaticSyncRunDispatchInput): Promise<readonly SyncRunRequestResult[]> {
     assertAutomaticDispatchInput(input)
     const sync = this.dependencies.definitions.syncs.getById(input.syncId)
     if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
 
+    if (!isOAuthConnectorDefinition(sync.connector)) {
+      return [await this.dispatchRun(sync, input, input.runId)]
+    }
+
+    const connectionIds =
+      input.connection?.connectorId === sync.connector.id
+        ? [input.connection.id]
+        : await listSyncConnectionIds(this.dependencies, sync)
+
+    // Each run id comes from the trigger's and the connection's, so a redelivered trigger, or one
+    // retried after some of its runs were queued, queues nothing twice.
+    const results: SyncRunRequestResult[] = []
+    for (const connectionId of connectionIds) {
+      results.push(
+        await this.dispatchRun(sync, input, `${input.runId}:${connectionId}`, connectionId)
+      )
+    }
+    return results
+  }
+
+  private dispatchRun(
+    sync: SyncDefinition,
+    input: AutomaticSyncRunDispatchInput,
+    runId: string,
+    connectionId?: string
+  ): Promise<SyncRunRequestResult> {
     return dispatchSyncRun({
       errorReporterHost: this.dependencies,
       projectId: this.dependencies.id,
       sync,
+      ...(connectionId === undefined ? {} : { connectionId }),
       storage: this.dependencies.storage,
       queue: this.dependencies.queues.syncRuns,
-      runId: input.runId,
+      runId,
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
       metadata: input.metadata,
@@ -76,10 +116,10 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
       validateExistingRun: (run, storage) =>
         assertAutomaticExecutionIdentity(storage, this.dependencies.id, input, run),
       joinQueuedRun: true,
-      createExecution: async (executionId, runId) =>
+      createExecution: async (executionId, queuedRunId) =>
         createPrimitiveExecutionRecord({
           id: executionId,
-          primitive: { kind: "sync", id: sync.id, runId },
+          primitive: { kind: "sync", id: sync.id, runId: queuedRunId },
           origin: {
             type: "automatic",
             projectId: this.dependencies.id,
@@ -170,6 +210,7 @@ function syncRunStore(
       const { runs: queued } = await runs.list({
         projectId,
         syncId: sync.id,
+        connectionId: input.connectionId ?? null,
         statuses: ["queued"],
         order: "asc",
         limit: 1,
@@ -184,6 +225,7 @@ function syncRunStore(
         id: run.id,
         executionId: run.executionId,
         syncId: sync.id,
+        ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
         datasetId: sync.target.dataset.id,
         mode: sync.config.mode,
         queuedAt: run.queuedAt,
@@ -197,6 +239,7 @@ function syncRunStore(
         id: run.id,
         executionId: run.executionId,
         syncId: run.syncId,
+        ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
         datasetId: run.datasetId,
         mode: run.mode,
         queuedAt,
@@ -208,14 +251,18 @@ function syncRunStore(
 
 /**
  * A run that has not started reads its source when it starts, so it already covers a trigger that
- * arrives now. One queued with another request payload is not joined.
+ * arrives now. One queued for another connection, or with another request payload, is not joined.
  */
 function runMatchesRequest(
   existing: SyncRunRecord,
-  input: Pick<DispatchSyncRunInput, "sync" | "expectedLatestVersionId" | "commitMessage">
+  input: Pick<
+    DispatchSyncRunInput,
+    "sync" | "connectionId" | "expectedLatestVersionId" | "commitMessage"
+  >
 ): boolean {
   return (
     existing.syncId === input.sync.id &&
+    existing.connectionId === input.connectionId &&
     existing.datasetId === input.sync.target.dataset.id &&
     existing.mode === input.sync.config.mode &&
     existing.expectedLatestVersionId === input.expectedLatestVersionId &&
@@ -227,10 +274,25 @@ function toRequestResult(run: SyncRunRecord, publication?: RunPublication): Sync
   return {
     syncId: run.syncId,
     runId: run.id,
+    ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
     queuedAt: (publication?.queuedAt ?? run.queuedAt).toISOString(),
     ...(publication ? { jobId: publication.jobId } : {}),
     created: publication?.created ?? false,
   }
+}
+
+async function listSyncConnectionIds(
+  host: object,
+  sync: SyncDefinition
+): Promise<readonly string[]> {
+  if (!isOAuthConnectorDefinition(sync.connector)) return []
+  const connections = findSyncConnections(host)
+  if (!connections) {
+    throw new SyncValidationError(
+      `[Sixb] Sync '${sync.id}' reads OAuth connector '${sync.connector.id}', whose connections this host cannot list.`
+    )
+  }
+  return (await connections.list(sync.connector)).map((connection) => connection.id)
 }
 
 function requireSyncRunStorage(storage: Storage): NonNullable<Storage["syncRuns"]> {

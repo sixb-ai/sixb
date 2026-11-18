@@ -2,8 +2,10 @@ export { defineSync } from "./builders"
 export { SyncValidationError } from "./errors"
 export type {
   RequestSyncRunInput,
+  RequestSyncRunOptions,
   SyncRunRequestOptions,
   SyncRunRequestResult,
+  SyncRunRequestResults,
 } from "./request"
 export { requestSyncRun } from "./request"
 export {

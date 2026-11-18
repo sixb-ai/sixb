@@ -10,6 +10,7 @@ export function canRequeueSyncRunAfterEnqueueFailure(
     existing.error.retryable &&
     existing.executionId === input.executionId &&
     existing.syncId === input.syncId &&
+    existing.connectionId === input.connectionId &&
     existing.datasetId === input.datasetId &&
     existing.mode === input.mode &&
     existing.expectedLatestVersionId === input.expectedLatestVersionId &&

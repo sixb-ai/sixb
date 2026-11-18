@@ -369,6 +369,15 @@ async function enqueueEventScheduleTarget(
         source: { type: "event", eventId: sourceEvent.id },
         correlationId: correlationIdForEvent(sourceEvent),
         metadata,
+        // A connection that just became usable runs alone, so its backfill waits on no one.
+        ...(sourceEvent.type === "connector.connection.connected"
+          ? {
+              connection: {
+                id: sourceEvent.payload.connection.id,
+                connectorId: sourceEvent.payload.connectorId,
+              },
+            }
+          : {}),
       })
       return
     case "pipelines":

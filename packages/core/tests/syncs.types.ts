@@ -108,7 +108,7 @@ const syncOrdersWithCheckpoint = defineSync("sync-orders-with-checkpoint")
   })
   .intoDataset(rawOrdersDataset)
 
-const syncManagedAccounts = defineSync("sync-managed-accounts")
+const syncManagedAccounts = defineSync("sync-managed-accounts", { mode: "append" })
   .checkpoint<{ cursor: string }>()
   .from(social)
   .read((client, context) => {

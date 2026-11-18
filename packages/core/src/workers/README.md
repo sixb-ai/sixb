@@ -111,7 +111,10 @@ the run failed, and if the lake cannot say, the run stays open for the next deli
 
 A checkpoint is one cursor, and two runs reading from it read the same rows. So a queued sync run
 waits while another run of that sync is `running`, however that one is doing, and triggers that
-arrive meanwhile join it, through one job per run. The check holds in the transaction that claims the
+arrive meanwhile join it, through one job per run. A sync of an OAuth connector runs once per
+connection, with a checkpoint for each, and the rule still holds per sync: every connection's runs
+commit to the one dataset, and a merge run's commit fails if anything committed since its read
+began. A trigger joins only its own connection's queued run. The check holds in the transaction that claims the
 run (an advisory lock on PostgreSQL). Datasets stay multi-writer, which is why this is a rule about
 syncs and not about the dataset: guarding every sync from its start would fail it for any ingest that
 landed while it read.

@@ -13,6 +13,7 @@ import {
 import { createPrimitiveExecutionRecord } from "../src/execution/durable"
 import { dispatchPipelineRun, PipelineRunDispatcher } from "../src/pipelines/run-dispatch"
 import { createDefinitionCatalog } from "../src/runtime/definitions"
+import { registerSyncConnections } from "../src/syncs/connections"
 import { dispatchSyncRun, SyncRunDispatcher } from "../src/syncs/run-dispatch"
 
 const source = defineConnector("source", {
@@ -408,13 +409,16 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
 
   return {
     queue: queues.syncRuns,
-    dispatch: (eventId, sourceType = "event") =>
-      dispatcher.dispatch({
+    dispatch: async (eventId, sourceType = "event") => {
+      const [result] = await dispatcher.dispatch({
         syncId: sync.id,
         runId: automaticRunId(kind, eventId),
         source: { type: sourceType, eventId },
         correlationId: eventId,
-      }),
+      })
+      if (!result) throw new Error("[Test] A static Sync queues one run.")
+      return result
+    },
     request: (runId, options = {}) =>
       dispatchSyncRun({
         errorReporterHost: {},
@@ -592,12 +596,14 @@ describe("automatic Sync dispatch", () => {
     }
 
     const replay = (dispatcher: SyncRunDispatcher) =>
-      dispatcher.dispatch({
-        syncId: sync.id,
-        runId,
-        source: { type: "event", eventId: "event-1" },
-        correlationId: "event-1",
-      })
+      dispatcher
+        .dispatch({
+          syncId: sync.id,
+          runId,
+          source: { type: "event", eventId: "event-1" },
+          correlationId: "event-1",
+        })
+        .then(([result]) => result)
 
     test("returns the run that answered a replayed trigger", async () => {
       const storage = new InMemoryStorage()
@@ -665,5 +671,110 @@ describe("automatic Sync dispatch", () => {
         message: expect.stringContaining("already exists with a different request payload"),
       })
     })
+  })
+})
+
+describe("automatic dispatch of a Sync on an OAuth connector", () => {
+  const projectId = "test"
+  const social = defineConnector("social", {
+    type: "social-oauth",
+    authentication: {
+      type: "oauth2",
+      authorizationUrl: () => "https://provider.test/oauth",
+      exchangeCode: () => ({ accessToken: "access" }),
+      refresh: () => ({ accessToken: "refreshed" }),
+    },
+    discoverAccounts: () => [],
+    connect: () => ({}),
+  })
+  const inbox = defineSync("inbox", { mode: "append" })
+    .from(social)
+    .read(() => [])
+    .intoDataset(rawOrders)
+  const connection = (id: string) => ({
+    id,
+    connectorId: social.id,
+    owner: { type: "user", id: `usr_${id}` } as const,
+    slot: "default",
+    account: { id: `account_${id}`, label: `${id}@example.com` },
+  })
+
+  function createDispatcher(connectionIds: readonly string[]) {
+    const storage = new InMemoryStorage()
+    const dependencies = {
+      id: projectId,
+      storage,
+      queues: new InMemoryQueues(),
+      definitions: { syncs: createDefinitionCatalog(new Map([[inbox.id, inbox]])) },
+    }
+    registerSyncConnections(dependencies, { list: async () => connectionIds.map(connection) })
+    const dispatcher = new SyncRunDispatcher(dependencies)
+    const dispatch = (
+      eventId: string,
+      event?: { readonly id: string; readonly connectorId: string }
+    ) =>
+      dispatcher.dispatch({
+        syncId: inbox.id,
+        runId: `sync:${eventId}`,
+        source: { type: "event", eventId },
+        correlationId: eventId,
+        ...(event === undefined ? {} : { connection: event }),
+      })
+    const runs = async () =>
+      (await storage.syncRuns.list({ projectId, order: "asc" })).runs.map(
+        ({ id, connectionId }) => ({
+          id,
+          connectionId,
+        })
+      )
+    return { dispatch, runs }
+  }
+
+  // Drop the connection from the run id in `SyncRunDispatcher.dispatch` to watch this fail: Grace's
+  // run answers to Ada's id.
+  test("queues one run per connection, and a redelivered trigger queues none", async () => {
+    const { dispatch, runs } = createDispatcher(["ada", "grace"])
+
+    expect(await dispatch("event-1")).toMatchObject([
+      { runId: "sync:event-1:ada", created: true },
+      { runId: "sync:event-1:grace", created: true },
+    ])
+    expect(await dispatch("event-1")).toMatchObject([
+      { runId: "sync:event-1:ada", created: false },
+      { runId: "sync:event-1:grace", created: false },
+    ])
+    expect(await runs()).toEqual([
+      { id: "sync:event-1:ada", connectionId: "ada" },
+      { id: "sync:event-1:grace", connectionId: "grace" },
+    ])
+  })
+
+  test("a trigger joins the queued run of the same connection only", async () => {
+    const { dispatch, runs } = createDispatcher(["ada", "grace"])
+
+    await dispatch("event-1", { id: "ada", connectorId: social.id })
+    expect(await dispatch("event-2")).toMatchObject([
+      { runId: "sync:event-1:ada", created: false },
+      { runId: "sync:event-2:grace", created: true },
+    ])
+    expect(await runs()).toHaveLength(2)
+  })
+
+  test("a connection event runs only that connection, unless it is another connector's", async () => {
+    const { dispatch, runs } = createDispatcher(["ada", "grace"])
+
+    expect(await dispatch("connected-1", { id: "grace", connectorId: social.id })).toMatchObject([
+      { runId: "sync:connected-1:grace", connectionId: "grace" },
+    ])
+    expect(await runs()).toEqual([{ id: "sync:connected-1:grace", connectionId: "grace" }])
+
+    expect(await dispatch("connected-2", { id: "other", connectorId: "gmail" })).toHaveLength(2)
+  })
+
+  test("queues nothing while no one is connected", async () => {
+    const { dispatch, runs } = createDispatcher([])
+
+    expect(await dispatch("event-1")).toEqual([])
+    expect(await runs()).toEqual([])
   })
 })

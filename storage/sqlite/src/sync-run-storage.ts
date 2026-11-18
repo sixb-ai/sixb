@@ -96,6 +96,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             id,
             execution_id,
             sync_id,
+            connection_id,
             dataset_id,
             mode,
             status,
@@ -103,7 +104,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             started_at,
             expected_latest_version_id,
             commit_message
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
         `
         )
         .run(
@@ -111,6 +112,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
           input.id,
           input.executionId,
           input.syncId,
+          input.connectionId ?? null,
           input.datasetId,
           input.mode,
           "queued",
@@ -314,6 +316,13 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       args.push(...input.syncIds)
     }
 
+    if (input.connectionId === null) {
+      whereClauses.push("connection_id IS NULL")
+    } else if (input.connectionId !== undefined) {
+      whereClauses.push("connection_id = ?")
+      args.push(input.connectionId)
+    }
+
     if (input.datasetId) {
       whereClauses.push("dataset_id = ?")
       args.push(input.datasetId)
@@ -376,6 +385,7 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
     projectId: row.project_id,
     executionId: row.execution_id,
     syncId: row.sync_id,
+    ...(row.connection_id === null ? {} : { connectionId: row.connection_id }),
     datasetId: row.dataset_id,
     mode: row.mode,
     status: row.status,
@@ -407,6 +417,7 @@ interface DatabaseRow extends SqliteRunExecutionColumns {
   id: string
   execution_id: string
   sync_id: string
+  connection_id: string | null
   dataset_id: string
   mode: SyncRunRecord["mode"]
   status: SyncRunRecord["status"]

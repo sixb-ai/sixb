@@ -1,10 +1,26 @@
 import { describe, expect, test } from "bun:test"
-import { AuthorizationError, defineConnector, type Sixb, SixbHost } from "../src"
+import {
+  AuthorizationError,
+  can,
+  col,
+  defineConnector,
+  defineDataset,
+  defineGroup,
+  defineRole,
+  defineSync,
+  resolveAuthorizationContext,
+  type Sixb,
+  SixbHost,
+} from "../src"
 import { getSandboxConnectionTokenAccess } from "../src/connectors/connections/internal"
 import { ConnectorService } from "../src/connectors/service"
 import type { AuthorizablePrincipal, TrustedPrimitiveRef } from "../src/execution"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
-import { createTestActionExecution, createTestAutomaticWorkflowExecution } from "../src/testing"
+import {
+  createTestActionExecution,
+  createTestAutomaticWorkflowExecution,
+  createTestSixb,
+} from "../src/testing"
 import {
   callbackUrl,
   connectAccount,
@@ -295,6 +311,47 @@ describe("personal connector connections", () => {
   })
 })
 
+/** Ada (user-a) connects account-a and Ben (user-b) account-b, each in their own `default` slot. */
+async function connectAdaAndBen(
+  harness: ReturnType<typeof createHarness>,
+  dependencies: ReturnType<typeof createTestRuntimeDeps>,
+  projectId: string
+): Promise<void> {
+  await seedConnectorActors(dependencies.storage, projectId, new Date("2026-08-19T12:00:00.000Z"))
+  const process = requireConnectionProcess(
+    new ConnectorService(projectId, [harness.connector], {
+      storage: dependencies.storage,
+      credentialProtector: harness.protector,
+    })
+  )
+  for (const [userId, accountId] of [
+    ["user-a", "account-a"],
+    ["user-b", "account-b"],
+  ] as const) {
+    const command = managementCommand(sessions[userId], {
+      principalId: userId,
+      manage: false,
+      projectId,
+    })
+    const started = await process.startAuthorization(command, connectorId, {
+      owner: userOwner(userId),
+      slot: "default",
+      redirectUri: callbackUrl,
+    })
+    const { authorizationId } = await process.completeAuthorization(command, connectorId, {
+      state: new URL(started.authorizationUrl).searchParams.get("state")!,
+      code: "authorization-code",
+      redirectUri: callbackUrl,
+    })
+    await process.selectAccount(command, connectorId, {
+      authorizationId,
+      accountId,
+      owner: userOwner(userId),
+      slot: "default",
+    })
+  }
+}
+
 describe("personal connections in actions and workflows", () => {
   const projectId = "default"
 
@@ -302,39 +359,7 @@ describe("personal connections in actions and workflows", () => {
   async function personalHost() {
     const harness = createHarness({ owners: ["user"] })
     const dependencies = createTestRuntimeDeps()
-    await seedConnectorActors(dependencies.storage, projectId, new Date("2026-08-19T12:00:00.000Z"))
-    const process = requireConnectionProcess(
-      new ConnectorService(projectId, [harness.connector], {
-        storage: dependencies.storage,
-        credentialProtector: harness.protector,
-      })
-    )
-    for (const [userId, accountId] of [
-      ["user-a", "account-a"],
-      ["user-b", "account-b"],
-    ] as const) {
-      const command = managementCommand(sessions[userId], {
-        principalId: userId,
-        manage: false,
-        projectId,
-      })
-      const started = await process.startAuthorization(command, connectorId, {
-        owner: userOwner(userId),
-        slot: "default",
-        redirectUri: callbackUrl,
-      })
-      const { authorizationId } = await process.completeAuthorization(command, connectorId, {
-        state: new URL(started.authorizationUrl).searchParams.get("state")!,
-        code: "authorization-code",
-        redirectUri: callbackUrl,
-      })
-      await process.selectAccount(command, connectorId, {
-        authorizationId,
-        accountId,
-        owner: userOwner(userId),
-        slot: "default",
-      })
-    }
+    await connectAdaAndBen(harness, dependencies, projectId)
 
     const host = new SixbHost({
       ontology: [],
@@ -600,5 +625,95 @@ describe("personal connections in actions and workflows", () => {
     })
     const suspended = expectSixbError(await rejectionOf(adaSource.get()), "connector.not_found")
     expect(suspended.message).toContain("suspended member")
+  })
+})
+
+describe("sync runs people request", () => {
+  const projectId = "default"
+  const rows = defineDataset("raw.social.rows", { schema: [col("id", "string")] })
+  const members = defineGroup("members")
+  const managers = defineGroup("managers")
+
+  async function syncHost() {
+    const harness = createHarness({ owners: ["user"] })
+    const dependencies = createTestRuntimeDeps()
+    await connectAdaAndBen(harness, dependencies, projectId)
+    const inbox = defineSync("inbox", { mode: "append" })
+      .from(harness.connector)
+      .read(() => [])
+      .intoDataset(rows)
+    const host = new SixbHost({
+      ontology: [],
+      datasets: [rows],
+      connectors: [harness.connector],
+      syncs: [inbox],
+      groups: [members, managers],
+      roles: [
+        defineRole("inbox.runner", { grantedTo: [members, managers], grants: [can.run(inbox)] }),
+        defineRole("social.manager", {
+          grantedTo: [managers],
+          grants: [can.manage(harness.connector)],
+        }),
+      ],
+      connectorConnections: { encryptionKey },
+      ...dependencies,
+    })
+    const connections = await dependencies.storage.connectorConnections.listConnections({
+      projectId,
+      connectorId,
+    })
+    const connectionOf = (userId: User) => {
+      const found = connections.find(({ owner }) => owner.type === "user" && owner.id === userId)
+      if (!found) throw new Error(`Expected ${userId}'s connection.`)
+      return found.id
+    }
+    const as = (userId: User, group: typeof members | typeof managers) =>
+      createTestSixb(host, {
+        authorization: resolveAuthorizationContext({
+          principal: { type: "user", id: userId },
+          groupIds: [group.id],
+          roles: host.definitions.security.listResolvedRoles(),
+        }),
+      }).syncs
+    return { inbox, as, connectionOf }
+  }
+
+  const runConnections = (result: { readonly runs: readonly { connectionId?: string }[] }) =>
+    result.runs.map(({ connectionId }) => connectionId).sort()
+
+  // Removal proof: return true from mayRequestConnectionRun; Ada's request runs Ben's account too.
+  test("a member runs their own connection, and a manager runs everyone's", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+
+    expect(runConnections(await as("user-a", members).request({ syncId: inbox.id }))).toEqual([
+      connectionOf("user-a"),
+    ])
+    expect(runConnections(await as("user-a", managers).request({ syncId: inbox.id }))).toEqual(
+      [connectionOf("user-a"), connectionOf("user-b")].sort()
+    )
+  })
+
+  test("a member can't name someone else's connection", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ada = as("user-a", members)
+
+    const refused = await rejectionOf(
+      ada.request({ syncId: inbox.id, connectionId: connectionOf("user-b") })
+    )
+    expect(String(refused)).toContain("has no connection")
+    expect(
+      runConnections(await ada.request({ syncId: inbox.id, connectionId: connectionOf("user-a") }))
+    ).toEqual([connectionOf("user-a")])
+  })
+
+  // Removal proof: drop `joinQueuedRun` from requestSyncRun; each request queues its own run.
+  test("requests for one connection join its queued run", async () => {
+    const { inbox, as, connectionOf } = await syncHost()
+    const ada = as("user-a", members)
+    const request = () => ada.request({ syncId: inbox.id, connectionId: connectionOf("user-a") })
+
+    const [first, second] = [await request(), await request()]
+    expect(second.runs[0]?.runId).toBe(first.runs[0]?.runId)
+    expect(second.runs[0]?.created).toBe(false)
   })
 })

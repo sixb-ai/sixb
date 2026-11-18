@@ -225,6 +225,7 @@ const shippedMigrationIds = [
   "103-agent-thread-inbox",
   "104-agent-inbox-edits",
   "105-agent-thread-reads",
+  "106-sync-run-connections",
 ]
 
 afterEach(async () => {

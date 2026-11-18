@@ -27,6 +27,7 @@ function serializeSyncRun(run: SyncRunRecord) {
     id: run.id,
     projectId: run.projectId,
     syncId: run.syncId,
+    connectionId: run.connectionId,
     datasetId: run.datasetId,
     mode: run.mode,
     status: run.status,
@@ -149,6 +150,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
 
           const result = await sixb.syncs.runs.list({
             syncId: parsed.syncId,
+            ...(parsed.connectionId === undefined ? {} : { connectionId: parsed.connectionId }),
             datasetId: parsed.datasetId,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
@@ -193,10 +195,13 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
 
           set.status = 202
           return {
-            runId: result.runId,
-            jobId: result.jobId ?? "",
-            syncId: result.syncId,
-            queuedAt: result.queuedAt,
+            runs: result.runs.map((run) => ({
+              runId: run.runId,
+              jobId: run.jobId ?? "",
+              syncId: run.syncId,
+              connectionId: run.connectionId,
+              queuedAt: run.queuedAt,
+            })),
           }
         } catch (error) {
           return handleRouteError(error, set)

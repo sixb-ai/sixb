@@ -315,7 +315,8 @@ events
         | "internal.unexpected"
         | "runtime.cancelled"
         | "queue.enqueue_failed"
-        | "sync.execution_failed" = event.payload.error.code
+        | "sync.execution_failed"
+        | "connector.authorization_required" = event.payload.error.code
       const message: string = event.payload.error.message
       // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code

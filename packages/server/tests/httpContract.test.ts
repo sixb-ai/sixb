@@ -2559,10 +2559,10 @@ describe("SixbServer HTTP contract", () => {
         body: JSON.stringify({ commitMessage: "manual import" }),
       })
       expect(requestSyncRunResponse.status).toBe(202)
-      const requestSyncRunBody = (await requestSyncRunResponse.json()) as {
-        runId: string
-        jobId: string
-        syncId: string
+      const {
+        runs: [requestSyncRunBody],
+      } = (await requestSyncRunResponse.json()) as {
+        runs: [{ runId: string; jobId: string; syncId: string }]
       }
       expect(requestSyncRunBody.runId).toStartWith("run_")
       expect(requestSyncRunBody.jobId).toBeTruthy()

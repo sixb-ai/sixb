@@ -1,4 +1,11 @@
-import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type {
+  DomainEventLog,
+  LakeStorage,
+  Queues,
+  SixbDefinitions,
+  SixbFailure,
+  Storage,
+} from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
@@ -13,6 +20,7 @@ import {
   type RunClaim,
   type RunExecution,
   SYNC_RUN_FAILURE_CODES,
+  type SyncRunFailureCode,
   type SyncRunRecord,
   type SyncRunStatus,
   type SyncRunStorage,
@@ -102,6 +110,7 @@ export class SyncWorker extends RunWorker<
         await this.wakeNextRun(finished)
       },
       onRunFailed: (error, run, failure) => {
+        if (isPersonalReconnect(failure)) return
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
           attempt: run.attempt,
@@ -149,7 +158,7 @@ export class SyncWorker extends RunWorker<
 
 async function emitSyncRunStarted(
   host: SyncWorkerHost,
-  run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">,
+  run: Pick<SyncRunRecord, "id" | "syncId" | "connectionId" | "startedAt">,
   correlationId: string
 ): Promise<void> {
   if (!run.startedAt) {
@@ -163,6 +172,7 @@ async function emitSyncRunStarted(
           payload: {
             syncId: run.syncId,
             runId: run.id,
+            ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
             startedAt: run.startedAt.toISOString(),
           },
         },
@@ -175,7 +185,10 @@ async function emitSyncRunStarted(
 
 async function emitSyncRunFinishedEvents(
   host: SyncWorkerHost,
-  run: Pick<SyncRunRecord, "id" | "syncId" | "datasetId" | "status" | "output" | "error">,
+  run: Pick<
+    SyncRunRecord,
+    "id" | "syncId" | "connectionId" | "datasetId" | "status" | "output" | "error"
+  >,
   correlationId: string,
   createdVersion?: DatasetVersion
 ): Promise<void> {
@@ -209,6 +222,7 @@ async function emitSyncRunFinishedEvents(
           payload: {
             syncId: run.syncId,
             runId: run.id,
+            ...(run.connectionId === undefined ? {} : { connectionId: run.connectionId }),
             status: requireTerminalStatus(run.status, `Sync run '${run.id}'`),
             datasetId: run.datasetId,
             ...(run.output ? { versionId: run.output.versionId } : {}),
@@ -219,6 +233,16 @@ async function emitSyncRunFinishedEvents(
       correlationId,
     },
     { source: SOURCE }
+  )
+}
+
+/** A person's own connection needs reconnecting: theirs to fix, so not the project's error. */
+function isPersonalReconnect(failure: SixbFailure<SyncRunFailureCode>): boolean {
+  const details = failure.details
+  return (
+    failure.code === "connector.authorization_required" &&
+    isRecord(details) &&
+    details.ownerType === "user"
   )
 }
 
@@ -256,4 +280,8 @@ function buildSyncContext(
       list: (definition) => resolveSyncConnectorSources(sixb.connector, definition),
     },
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

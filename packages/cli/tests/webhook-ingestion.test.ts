@@ -269,9 +269,11 @@ test("verified webhooks and snapshots feed merged contacts through orchestration
     expect(handled).toBe(2)
 
     snapshotRows = [{ ...person, revision: 7, name: "Stale snapshot" }]
-    const syncRun = await sixb.syncs.request({ syncId: sync.id })
+    const {
+      runs: [syncRun],
+    } = await sixb.syncs.request({ syncId: sync.id })
     await waitFor(
-      () => host.storage.syncRuns!.getById({ projectId: host.id, id: syncRun.runId }),
+      () => host.storage.syncRuns!.getById({ projectId: host.id, id: syncRun!.runId }),
       (run) => run?.status === "succeeded"
     )
     expect((await contact())?.properties.name).toBe("Preferred")

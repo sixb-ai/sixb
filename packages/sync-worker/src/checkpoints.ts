@@ -10,160 +10,133 @@ import { createSixbError } from "@sixb/core/internal/errors"
 const SYNC_CHECKPOINT_KIND = "sync_checkpoint"
 const SYNC_CHECKPOINT_VERSION = 1
 
-type SyncCheckpointStrategy = "single" | "connections"
+/**
+ * `single` is a static connector's one cursor. `connection` is one connection's cursor, bound to
+ * the account it read. `connections` held every connection's cursor when one run read them all:
+ * a connection's first run of its own still starts from its entry there.
+ */
+type SyncCheckpointStrategy = "single" | "connection" | "connections"
 
-interface ConnectionCheckpointEntry {
-  readonly connectionId: string
-  readonly accountId: string
-  readonly checkpoint?: JsonValue
-}
-
-export interface SyncCheckpointCodec {
-  read(value: JsonValue | undefined): JsonValue | undefined
-  serialize(value: JsonValue): JsonValue
-}
-
-/** Bind opaque handler checkpoints to the framework source contract stored beside the run. */
-export function createSyncCheckpointCodec(options: {
+interface SyncCheckpointIdentity {
   readonly syncId: string
   readonly connectorId: string
-  readonly strategy: SyncCheckpointStrategy
-}): SyncCheckpointCodec {
-  return {
-    read(value) {
-      if (value === undefined) return undefined
-      if (!isSyncCheckpoint(value)) {
-        // Static Sync checkpoints predate the framework envelope. Preserve them in place and
-        // migrate the next successful run; managed fan-out has no compatible legacy raw format.
-        if (options.strategy === "single") return cloneJsonValue(value)
-        throw incompatibleCheckpoint(options, "format")
-      }
-      if (value.version !== SYNC_CHECKPOINT_VERSION) {
-        throw incompatibleCheckpoint(options, "version")
-      }
-      if (value.connectorId !== options.connectorId) {
-        throw incompatibleCheckpoint(options, "connector")
-      }
-      if (value.strategy !== options.strategy) {
-        throw incompatibleCheckpoint(options, "strategy")
-      }
-      if (!("value" in value) || !isJsonValue(value.value)) {
-        throw invalidFrameworkCheckpoint(options.syncId)
-      }
-      return cloneJsonValue(value.value)
-    },
-    serialize(value) {
-      const envelope: unknown = {
-        kind: SYNC_CHECKPOINT_KIND,
-        version: SYNC_CHECKPOINT_VERSION,
-        connectorId: options.connectorId,
-        strategy: options.strategy,
-        value: cloneJsonValue(value),
-      }
-      assertJsonValue(envelope, "Sync checkpoint envelope")
-      return envelope
-    },
-  }
 }
 
-/** Per-connection cursor state carried inside a framework-managed checkpoint envelope. */
-export class ConnectionCheckpoints {
-  private readonly entries: Map<string, ConnectionCheckpointEntry>
+type SyncCheckpointEnvelope = JsonValue & {
+  readonly kind: typeof SYNC_CHECKPOINT_KIND
+  readonly version?: JsonValue
+  readonly connectorId?: JsonValue
+  readonly strategy?: JsonValue
+  readonly value?: JsonValue
+}
 
-  private constructor(entries: Map<string, ConnectionCheckpointEntry>) {
-    this.entries = entries
-  }
+/** A static connector's checkpoint: the handler's value inside the framework envelope. */
+export const singleCheckpoint = {
+  read(identity: SyncCheckpointIdentity, value: JsonValue | undefined): JsonValue | undefined {
+    if (value === undefined) return undefined
+    // Static Sync checkpoints predate the framework envelope. Preserve them in place and migrate
+    // the next successful run.
+    if (!isSyncCheckpoint(value)) return cloneJsonValue(value)
+    return openEnvelope(identity, value, ["single"]).value
+  },
+  serialize(identity: SyncCheckpointIdentity, value: JsonValue): JsonValue {
+    return envelope(identity, "single", value)
+  },
+}
 
-  static from(syncId: string, value: JsonValue | undefined): ConnectionCheckpoints {
-    if (value === undefined) return new ConnectionCheckpoints(new Map())
-    if (!isConnectionCheckpoint(value)) throw invalidConnectionCheckpoint(syncId)
+/** One connection's checkpoint. A replaced account starts over. */
+export const connectionCheckpoint = {
+  read(
+    identity: SyncCheckpointIdentity,
+    connection: SyncConnectorConnection,
+    value: JsonValue | undefined
+  ): JsonValue | undefined {
+    if (value === undefined) return undefined
+    if (!isSyncCheckpoint(value)) throw incompatibleCheckpoint(identity, "format")
 
-    const entries = new Map<string, ConnectionCheckpointEntry>()
-    for (const candidate of value.entries) {
-      if (
-        !isRecord(candidate) ||
-        typeof candidate.connectionId !== "string" ||
-        !candidate.connectionId.trim() ||
-        typeof candidate.accountId !== "string" ||
-        !candidate.accountId.trim() ||
-        entries.has(candidate.connectionId)
-      ) {
-        throw invalidConnectionCheckpoint(syncId)
-      }
-      if ("checkpoint" in candidate && !isJsonValue(candidate.checkpoint)) {
-        throw invalidConnectionCheckpoint(syncId)
-      }
-      entries.set(candidate.connectionId, {
-        connectionId: candidate.connectionId,
-        accountId: candidate.accountId,
-        ...(candidate.checkpoint === undefined
-          ? {}
-          : { checkpoint: cloneJsonValue(candidate.checkpoint as JsonValue) }),
-      })
+    const opened = openEnvelope(identity, value, ["connection", "connections"])
+    const entry =
+      opened.strategy === "connection"
+        ? opened.value
+        : legacyEntries(identity.syncId, opened.value).find(
+            (candidate) => candidate.connectionId === connection.id
+          )
+    if (entry === undefined) return undefined
+    if (!isRecord(entry) || typeof entry.accountId !== "string") {
+      throw invalidCheckpoint(identity.syncId)
     }
-    return new ConnectionCheckpoints(entries)
-  }
-
-  reconcile(connections: readonly SyncConnectorConnection[]): void {
-    for (const connection of connections) {
-      const existing = this.entries.get(connection.id)
-      if (existing && existing.accountId !== connection.account.id) {
-        this.entries.delete(connection.id)
-      }
-    }
-  }
-
-  get(connection: SyncConnectorConnection): JsonValue | undefined {
-    const entry = this.entries.get(connection.id)
-    if (entry?.accountId !== connection.account.id || entry.checkpoint === undefined) {
+    if (entry.accountId !== connection.account.id || entry.checkpoint === undefined) {
       return undefined
     }
+    if (!isJsonValue(entry.checkpoint)) throw invalidCheckpoint(identity.syncId)
     return cloneJsonValue(entry.checkpoint)
-  }
-
-  set(connection: SyncConnectorConnection, checkpoint: JsonValue): void {
-    this.entries.set(connection.id, {
-      connectionId: connection.id,
+  },
+  serialize(
+    identity: SyncCheckpointIdentity,
+    connection: SyncConnectorConnection,
+    checkpoint: JsonValue | undefined
+  ): JsonValue {
+    return envelope(identity, "connection", {
       accountId: connection.account.id,
-      checkpoint: cloneJsonValue(checkpoint),
+      ...(checkpoint === undefined ? {} : { checkpoint: cloneJsonValue(checkpoint) }),
     })
-  }
+  },
+}
 
-  serialize(): JsonValue {
-    const value: unknown = {
-      entries: [...this.entries.values()]
-        .sort((left, right) => left.connectionId.localeCompare(right.connectionId))
-        .map((entry) => ({
-          connectionId: entry.connectionId,
-          accountId: entry.accountId,
-          ...(entry.checkpoint === undefined
-            ? {}
-            : { checkpoint: cloneJsonValue(entry.checkpoint) }),
-        })),
-    }
-    assertJsonValue(value, "Managed connector Sync checkpoint")
-    return value
+function openEnvelope(
+  identity: SyncCheckpointIdentity,
+  value: SyncCheckpointEnvelope,
+  strategies: readonly SyncCheckpointStrategy[]
+): { readonly strategy: SyncCheckpointStrategy; readonly value: JsonValue } {
+  if (value.version !== SYNC_CHECKPOINT_VERSION) throw incompatibleCheckpoint(identity, "version")
+  if (value.connectorId !== identity.connectorId) {
+    throw incompatibleCheckpoint(identity, "connector")
   }
+  const strategy = strategies.find((candidate) => candidate === value.strategy)
+  if (!strategy) throw incompatibleCheckpoint(identity, "strategy")
+  if (!("value" in value) || !isJsonValue(value.value)) throw invalidCheckpoint(identity.syncId)
+  return { strategy, value: cloneJsonValue(value.value) }
+}
+
+function envelope(
+  identity: SyncCheckpointIdentity,
+  strategy: SyncCheckpointStrategy,
+  value: JsonValue
+): JsonValue {
+  const serialized: unknown = {
+    kind: SYNC_CHECKPOINT_KIND,
+    version: SYNC_CHECKPOINT_VERSION,
+    connectorId: identity.connectorId,
+    strategy,
+    value: cloneJsonValue(value),
+  }
+  assertJsonValue(serialized, "Sync checkpoint envelope")
+  return serialized
+}
+
+function legacyEntries(syncId: string, value: JsonValue): readonly Record<string, unknown>[] {
+  if (!isRecord(value) || !Array.isArray(value.entries)) throw invalidCheckpoint(syncId)
+  return value.entries.flatMap((entry) => (isRecord(entry) ? [entry] : []))
 }
 
 function incompatibleCheckpoint(
-  options: { readonly syncId: string; readonly connectorId: string },
+  identity: SyncCheckpointIdentity,
   reason: "format" | "version" | "connector" | "strategy"
 ): Error {
   return createSixbError(
     "sync.execution_failed",
-    `[SixbSyncWorker] Sync '${options.syncId}' has a checkpoint incompatible with connector '${options.connectorId}'. Use a new Sync id to reset its ingestion state.`,
+    `[SixbSyncWorker] Sync '${identity.syncId}' has a checkpoint incompatible with connector '${identity.connectorId}'. Use a new Sync id to reset its ingestion state.`,
     {
       details: {
-        syncId: options.syncId,
-        connectorId: options.connectorId,
+        syncId: identity.syncId,
+        connectorId: identity.connectorId,
         reason: `checkpoint_${reason}`,
       },
     }
   )
 }
 
-function invalidFrameworkCheckpoint(syncId: string): Error {
+function invalidCheckpoint(syncId: string): Error {
   return createSixbError(
     "internal.unexpected",
     `[SixbSyncWorker] Sync '${syncId}' has an invalid checkpoint envelope.`,
@@ -171,28 +144,8 @@ function invalidFrameworkCheckpoint(syncId: string): Error {
   )
 }
 
-function invalidConnectionCheckpoint(syncId: string): Error {
-  return createSixbError(
-    "internal.unexpected",
-    `[SixbSyncWorker] Sync '${syncId}' has an invalid managed connector checkpoint.`,
-    { details: { syncId } }
-  )
-}
-
-function isSyncCheckpoint(value: JsonValue): value is JsonValue & {
-  readonly kind: typeof SYNC_CHECKPOINT_KIND
-  readonly version?: JsonValue
-  readonly connectorId?: JsonValue
-  readonly strategy?: JsonValue
-  readonly value?: JsonValue
-} {
+function isSyncCheckpoint(value: JsonValue): value is SyncCheckpointEnvelope {
   return isRecord(value) && value.kind === SYNC_CHECKPOINT_KIND
-}
-
-function isConnectionCheckpoint(value: JsonValue): value is JsonValue & {
-  readonly entries: JsonValue[]
-} {
-  return isRecord(value) && Array.isArray(value.entries)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
