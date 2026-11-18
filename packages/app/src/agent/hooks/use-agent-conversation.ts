@@ -1069,16 +1069,31 @@ export function useAgentConversation({
     ) {
       return new Set()
     }
+    // An edit takes back whole turns: a message a turn read while it answered, as a steer, sits
+    // inside that turn, which started at an earlier message.
+    const indexOf = new Map(messages.map((entry, index) => [entry.id, index]))
+    const turnStart = new Map(runs.map((run) => [run.id, indexOf.get(run.triggerMessageId)]))
+    let earliestTurnAfter = Number.POSITIVE_INFINITY
+
     const allowed = new Set<string>()
     let seenOtherUser = false
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const entry = messages[index]
-      if (!entry || entry.role !== "user") continue
+      if (!entry) continue
+
+      if (entry.role === "assistant" && entry.runId !== null) {
+        const start = turnStart.get(entry.runId)
+        if (start !== undefined) earliestTurnAfter = Math.min(earliestTurnAfter, start)
+      }
+      if (entry.role !== "user") continue
+
       const ownMessage = !user || !entry.author || entry.author.isReader
+      const insideTurn = earliestTurnAfter < index
       if (
         entry.id !== null &&
         entry.status === "complete" &&
         ownMessage &&
+        !insideTurn &&
         (access === "owner" || !seenOtherUser)
       ) {
         allowed.add(entry.id)
@@ -1095,6 +1110,7 @@ export function useAgentConversation({
     isRunning,
     canStop,
     messages,
+    runs,
     user,
   ])
 

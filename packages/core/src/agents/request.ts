@@ -398,6 +398,8 @@ export async function editAgentMessage(
 
   const tailBefore = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
   assertParticipantCanRewindTail(thread, tailBefore, principal)
+  const preRewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tailBefore)
+  assertRewindsWholeTurns(target, tailBefore, preRewoundRuns)
 
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
@@ -424,7 +426,6 @@ export async function editAgentMessage(
   const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
   // Prepare restore documents for any canvas artifacts touched by turns being rewound.
-  const preRewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tailBefore)
   const artifacts = runtime.storage.artifacts
   const documentsByRun = new Map<string, Record<string, FileRef>>()
   if (artifacts && blobStorage) {
@@ -474,6 +475,7 @@ export async function editAgentMessage(
 
       const removedMessageIds = tail.map((message) => message.id)
       const rewoundRuns = await listRewoundConversationRuns(txAgents, projectId, thread.id, tail)
+      assertRewindsWholeTurns(currentTarget, tail, rewoundRuns)
       const rewoundRunIds = rewoundRuns.map((entry) => entry.id)
 
       // Undo untouched artifact writes from newest rewound turn back to oldest.
@@ -607,6 +609,26 @@ function assertParticipantCanRewindTail(
       "[Sixb] Only the thread's owner can rewind past another person's messages."
     )
   }
+}
+
+/**
+ * An edit takes back whole turns: each turn it rewinds answered a message it removes. A message a
+ * turn read while it was answering, as a steer, sits inside that turn: rewinding from it would
+ * keep the turn's first part in the chat and undo everything the turn did.
+ */
+function assertRewindsWholeTurns(
+  target: AgentMessageRecord,
+  tail: readonly AgentMessageRecord[],
+  rewoundRuns: readonly ConversationAgentRunRecord[]
+): void {
+  const removed = new Set(tail.map((message) => message.id))
+  const cut = rewoundRuns.find((run) => !removed.has(run.triggerMessageId))
+  if (!cut) return
+
+  throw new AgentRequestError(
+    "message_not_editable",
+    `[Sixb] Agent message '${target.id}' came in while the Agent was answering message '${cut.triggerMessageId}': edit that message instead.`
+  )
 }
 
 async function listAllThreadMessagesFromSeq(

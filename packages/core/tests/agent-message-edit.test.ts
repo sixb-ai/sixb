@@ -458,6 +458,61 @@ describe("editing an Agent thread message", () => {
     })
   })
 
+  test("refuses to edit a message a turn read while it was answering, and leaves the thread as it was", async () => {
+    // Guard proof: drop assertRewindsWholeTurns in editAgentMessage; the steer's edit rewinds the
+    // whole turn that read it, while the turn's first answer stays in the thread.
+    const { host, storage } = setup()
+    const sixb = await userScope(host, "alice")
+    const thread = await sixb.agent.threads.create({ title: "Q4 deck" })
+
+    const turn = await sixb.agent.runs.request({
+      threadId: thread.id,
+      text: "Make the Q4 deck",
+      messageId: "u1",
+    })
+    const token = createAgentRunExecutionToken()
+    await storage.agents.runs.start({
+      id: turn.run.id,
+      projectId: host.id,
+      execution: { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+    })
+    // The turn answers, reads Alice's steer, and answers it: one turn around her message.
+    for (const message of [
+      { id: "a1", runId: turn.run.id, role: "assistant", text: "I made the Q4 deck." },
+      { id: "s1", runId: null, role: "user", text: "Add hiring" },
+      { id: "a2", runId: turn.run.id, role: "assistant", text: "Hiring added." },
+    ] as const) {
+      await storage.agents.messages.append({
+        id: message.id,
+        projectId: host.id,
+        threadId: thread.id,
+        runId: message.runId,
+        role: message.role,
+        parts: [{ type: "text", text: message.text }],
+        ...(message.role === "user" ? { authorPrincipal: { type: "user", id: "alice" } } : {}),
+      })
+    }
+    await storage.agents.runs.finish({
+      id: turn.run.id,
+      projectId: host.id,
+      executionToken: token,
+      status: "succeeded",
+    })
+
+    const error = await sixb.agent.runs
+      .editMessage({ threadId: thread.id, messageId: "s1", text: "Add the budget" })
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(AgentRequestError)
+    expect(error.code).toBe("message_not_editable")
+    const { messages } = await storage.agents.messages.list({
+      projectId: host.id,
+      threadId: thread.id,
+      order: "asc",
+    })
+    expect(messages.map((message) => message.id)).toEqual(["u1", "a1", "s1", "a2"])
+  })
+
   test("prevents a shared-thread participant from rewinding past another person's message", async () => {
     const { host, storage } = setup()
     const alice = await userScope(host, "alice")

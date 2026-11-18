@@ -544,6 +544,47 @@ describe("user message hover actions and in-place rewind UX", () => {
     expect(view.getByRole("alert").textContent).toContain("Couldn't edit your message.")
   })
 
+  test("offers no edit on a message the answering turn read as a steer", async () => {
+    // Guard proof: drop `insideTurn` from editableMessageIds; the steer gets a pencil the server
+    // refuses, since its turn started at the message before it.
+    const turn = { ...baseMsg, runId: "run_1", role: "assistant", createdAt: oneHourAgo }
+    const { view } = renderChat("dana", {
+      messages: [
+        { ...defaultMessages()[0]!, createdAt: oneHourAgo },
+        { ...turn, id: "msg_2", seq: 2, parts: [{ type: "text", text: "Checking Outlook." }] },
+        {
+          ...baseMsg,
+          id: "msg_steer",
+          runId: null,
+          role: "user",
+          authorPrincipal: dana,
+          seq: 3,
+          createdAt: oneHourAgo,
+          parts: [{ type: "text", text: "Only for acme.com" }],
+        },
+        { ...turn, id: "msg_4", seq: 4, parts: [{ type: "text", text: "Done for acme.com." }] },
+      ],
+      runs: [
+        {
+          id: "run_1",
+          projectId: "proj",
+          kind: "conversation",
+          threadId: "thr_1",
+          triggerMessageId: "msg_1",
+          status: "succeeded",
+          attempt: 1,
+          streamId: "stream_1",
+          requestedBy: dana,
+          createdAt: oneHourAgo,
+        },
+      ],
+    })
+
+    await view.findByText("Only for acme.com")
+    expect(view.getAllByRole("button", { name: "Copy message" })).toHaveLength(2)
+    expect(view.getAllByRole("button", { name: "Edit message" })).toHaveLength(1)
+  })
+
   test("shows edit only on messages a shared-thread participant is allowed to rewind", async () => {
     const { view } = renderChat("sam", {
       thread: {
