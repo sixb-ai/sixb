@@ -175,6 +175,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
       ontologyDocs: { modules: discoveredOntology.modules, ...ontologyFiles },
     },
     shares: [...(options.shares ?? []), ...definitions.shares],
+    definitionFolders: { ...definitions.folders, objectTypes: discoveredOntology.folders },
     auth: options.auth,
   })
 }
