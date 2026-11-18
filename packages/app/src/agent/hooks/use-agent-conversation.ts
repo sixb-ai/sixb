@@ -542,9 +542,9 @@ export function useAgentConversation({
     return cut === -1 ? savedMessages : savedMessages.slice(0, cut)
   }, [activePending?.replacesMessageId, savedMessages])
 
-  const editInFlight = Boolean(
-    activePending?.replacesMessageId !== undefined && activePending.messageId === null
-  )
+  // From Save until the thread holds the edited message: the turns it replaces, and any turn it
+  // stopped, are gone from the transcript.
+  const editInFlight = activePending?.replacesMessageId !== undefined
   const basePresentation = presentActiveTurn({
     activeRunId: editInFlight ? null : activeRunId,
     pendingRun,
@@ -1141,116 +1141,68 @@ export function useAgentConversation({
     setEditingMessage(null)
   }, [])
 
-  const editStateRef = useRef({
-    threadId,
-    editableMessageIds,
-    messages,
-    isRunning,
-    activeRunId,
-    canStop,
-    modelRequest: modelSelection.request,
-    turnApprovalMode,
-    recordAcceptedSend,
-    refreshThread,
-  })
-  editStateRef.current = {
-    threadId,
-    editableMessageIds,
-    messages,
-    isRunning,
-    activeRunId,
-    canStop,
-    modelRequest: modelSelection.request,
-    turnApprovalMode,
-    recordAcceptedSend,
-    refreshThread,
-  }
+  /**
+   * Replace an earlier message and take the conversation back to it. A turn still answering stops
+   * first: the server holds the edit until that turn ends, then rewinds. Meanwhile the transcript
+   * shows the edit in place of the message, with the turns after it gone.
+   */
+  const editMessage = async (
+    messageId: string,
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => {
+    const targetThreadId = threadId
+    if (targetThreadId === null || !editableMessageIds.has(messageId)) return
 
-  const editMessage = useCallback(
-    async (
-      messageId: string,
-      text: string,
-      attachments: readonly AgentFileRef[],
-      context: readonly AgentContextEntryInput[]
-    ) => {
-      const current = editStateRef.current
-      const targetThreadId = current.threadId
-      if (targetThreadId === null || !current.editableMessageIds.has(messageId)) return
+    setSendError(null)
+    setEditingMessage(null)
+    const key =
+      messages.find((entry) => entry.id === messageId)?.key ?? `sent:${++sentMessageCount}`
+    setPendingUser({
+      key,
+      threadId: targetThreadId,
+      text,
+      attachments,
+      context,
+      messageId: null,
+      replacesMessageId: messageId,
+    })
 
-      setSendError(null)
-      setEditingMessage(null)
-      const existing = current.messages.find((entry) => entry.id === messageId)
-      const key = existing?.key ?? `sent:${++sentMessageCount}`
-      setPendingUser({
-        key,
-        threadId: targetThreadId,
+    try {
+      const response = await sendWithRequesterSettings((settings) =>
+        editThreadMessage.mutateAsync({
+          path: { threadId: targetThreadId, messageId },
+          body: {
+            ...messageBody(text, attachments, context, modelSelection.request, settings),
+            ...turnApprovalMode,
+          },
+        })
+      )
+
+      if (response.run) {
+        recordAcceptedSend(response.run, key)
+      } else if (response.item) {
+        // It waits for the turn it stopped: its message takes this id once that turn ends.
+        const waitingId = response.item.messageId
+        setPendingUser((current) =>
+          current && current.key === key ? { ...current, messageId: waitingId } : current
+        )
+      }
+      await refreshThread(targetThreadId)
+    } catch (error) {
+      setPendingUser(null)
+      setEditingMessage((current) => ({
+        messageId,
         text,
         attachments,
         context,
-        messageId: null,
-        replacesMessageId: messageId,
-      })
-
-      const stoppedActive = current.isRunning && current.activeRunId !== null && current.canStop
-      try {
-        if (stoppedActive && current.activeRunId !== null) {
-          setStoppingRunId(current.activeRunId)
-          await cancelRun.mutateAsync({
-            path: { threadId: targetThreadId },
-            body: { runId: current.activeRunId },
-          })
-        }
-
-        const submitEdit = () =>
-          sendWithRequesterSettings((settings) =>
-            editThreadMessage.mutateAsync({
-              path: { threadId: targetThreadId, messageId },
-              body: {
-                ...messageBody(text, attachments, context, current.modelRequest, settings),
-                ...current.turnApprovalMode,
-              },
-            })
-          )
-
-        let response: Awaited<ReturnType<typeof submitEdit>> | undefined
-        for (let attempt = 0; ; attempt += 1) {
-          try {
-            response = await submitEdit()
-            break
-          } catch (error) {
-            const settlingStop =
-              stoppedActive &&
-              attempt < 20 &&
-              isSixbApiError(error) &&
-              error.status === 409 &&
-              error.code === "active_run_exists"
-            if (!settlingStop) throw error
-            await new Promise((resolve) => setTimeout(resolve, 75))
-          }
-        }
-
-        setStoppingRunId(null)
-        current.recordAcceptedSend(response.run, key)
-        await current.refreshThread(targetThreadId)
-      } catch (error) {
-        setStoppingRunId(null)
-        setPendingUser(null)
-        setEditingMessage((prev) => ({
-          messageId,
-          text,
-          attachments,
-          context,
-          nonce: (prev?.nonce ?? 0) + 1,
-        }))
-        setSendError({
-          threadId: targetThreadId,
-          failure: editFailure(error),
-        })
-        void current.refreshThread(targetThreadId)
-      }
-    },
-    [cancelRun, editThreadMessage]
-  )
+        nonce: (current?.nonce ?? 0) + 1,
+      }))
+      setSendError({ threadId: targetThreadId, failure: editFailure(error) })
+      void refreshThread(targetThreadId)
+    }
+  }
 
   const answeringAuthor = useMemo(
     () =>
@@ -1818,7 +1770,10 @@ function sendFailure(error: unknown): TurnFailure {
 
 function editFailure(error: unknown): TurnFailure {
   if (error instanceof ComputerUnavailableError) return "computer"
-  if (!isSixbApiError(error) || error.status !== 409) return "edit"
+  if (!isSixbApiError(error)) return "edit"
+  // Someone else's answer runs, which only they or the thread's owner may stop.
+  if (error.status === 403 && error.code === "not_run_requester") return "busy"
+  if (error.status !== 409) return "edit"
   if (error.code === "active_run_exists") return "busy"
   if (error.code === "sandbox_execution_unavailable") return "sandbox"
 

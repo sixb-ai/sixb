@@ -91,6 +91,16 @@ async function userScope(host: ReturnType<typeof setup>["host"], id: string) {
   })
 }
 
+/** Edit a message of an idle thread: the edit starts its turn at once. */
+async function editNow(
+  sixb: Awaited<ReturnType<typeof userScope>>,
+  input: Parameters<Awaited<ReturnType<typeof userScope>>["agent"]["runs"]["editMessage"]>[0]
+) {
+  const result = await sixb.agent.runs.editMessage(input)
+  if (result.kind !== "turn") throw new Error("Expected the edit to start its turn now.")
+  return result
+}
+
 async function completeTurn(
   storage: ReturnType<typeof setup>["storage"],
   projectId: string,
@@ -227,7 +237,7 @@ describe("editing an Agent thread message", () => {
     })
 
     // Editing Turn 3 keeps cp_before_t2 (observedHeadSeq 3 <= 4) and drops cp_before_t3 (observedHeadSeq 5).
-    const editedT3 = await sixb.agent.runs.editMessage({
+    const editedT3 = await editNow(sixb, {
       threadId: thread.id,
       messageId: "u3",
       text: "Turn 3 revised",
@@ -255,7 +265,7 @@ describe("editing an Agent thread message", () => {
     await completeTurn(storage, host.id, editedT3.run.id, thread.id, "Turn 3 revised answer")
 
     // Editing Turn 1 rewinds to seq 1, dropping cp_before_t2 too while preserving all 4 past runs.
-    const editedT1 = await sixb.agent.runs.editMessage({
+    const editedT1 = await editNow(sixb, {
       threadId: thread.id,
       messageId: "u1",
       text: "Fresh start",
@@ -346,7 +356,7 @@ describe("editing an Agent thread message", () => {
     })
 
     // Now edit u2: apr_turn2 is deleted, while apr_turn1 is re-reported onto u2_v2.
-    await sixb.agent.runs.editMessage({
+    await editNow(sixb, {
       threadId: thread.id,
       messageId: "u2",
       text: "Skip payment and check contracts instead",
@@ -398,7 +408,7 @@ describe("editing an Agent thread message", () => {
     await completeTurn(storage, host.id, t2.run.id, thread.id, "42 rows.")
 
     // Editing u2 keeps Turn 1's warm opus cache.
-    const editedU2 = await sixb.agent.runs.editMessage({
+    const editedU2 = await editNow(sixb, {
       threadId: thread.id,
       messageId: "u2",
       text: "Count active rows",
@@ -408,7 +418,7 @@ describe("editing an Agent thread message", () => {
     await completeTurn(storage, host.id, editedU2.run.id, thread.id, "30 active rows.")
 
     // Editing u1 (seq 1) has no retained prefix before it, so a light prompt routes to flash.
-    const editedU1 = await sixb.agent.runs.editMessage({
+    const editedU1 = await editNow(sixb, {
       threadId: thread.id,
       messageId: "u1",
       text: "Hi!",
@@ -445,7 +455,7 @@ describe("editing an Agent thread message", () => {
     await completeTurn(storage, host.id, t2.run.id, thread.id, "12 changes.", "a2", folder)
 
     nextTier = { light: 0.9, standard: 0.1, heavy: 0 }
-    const edited = await sixb.agent.runs.editMessage({
+    const edited = await editNow(sixb, {
       threadId: thread.id,
       messageId: "u2",
       text: "List the breaking changes",

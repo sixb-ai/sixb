@@ -45,7 +45,9 @@ import {
   applicableAiLimitPolicyStatuses,
 } from "../storage/ai-limits/enforcement"
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
+import type { PublishedArtifactVersion } from "../storage/artifacts/types"
 import type { ExecutionRecord } from "../storage/executions"
+import type { Storage } from "../storage/types"
 import {
   type AgentTurnReadiness,
   announceAgentApprovals,
@@ -338,20 +340,23 @@ export function isEditableAgentMessage(
 }
 
 /**
- * Edit an earlier user message in place, truncating that message and everything after it, and
- * trigger a new turn from the edited prompt.
+ * Edit an earlier user message in place: the thread loses that message and everything after it,
+ * and the edited message starts a new turn.
  *
- * Historical `agent_runs` and `executions` remain intact for AI usage and cost accounting, while
- * messages, checkpoints, and unreported approvals from the rewound tail are cleaned up in one
- * transaction so the new turn sees only the prefix before the edited message.
+ * On an idle thread the rewind and the new turn are one transaction. While a turn runs, the edit
+ * waits in the thread's inbox, sent now: the turn stops, and its end rewinds the thread and starts
+ * the edited message (see `startQueuedAgentTurnFromInbox`), so nothing the stopped turn still
+ * writes lands after the edit.
+ *
+ * Historical `agent_runs` and `executions` remain intact for AI usage and cost accounting.
  */
 export async function editAgentMessage(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models: AgentRequestModels,
   input: EditAgentMessageInput,
-  blobStorage?: Pick<BlobStorage, "open" | "put">
-): Promise<RequestAgentRunResult> {
+  blobStorage?: RewindBlobStorage
+): Promise<SendAgentMessageResult> {
   const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
@@ -385,7 +390,7 @@ export async function editAgentMessage(
       `[Sixb] Agent thread '${input.threadId}' not found.`
     )
   }
-  assertThreadAcceptsRun(thread, principal)
+  assertThreadAcceptsMessages(thread, principal)
 
   const target = await agents.messages.getById({ projectId, id: input.messageId })
   if (!target || target.threadId !== thread.id) {
@@ -396,14 +401,10 @@ export async function editAgentMessage(
   }
   assertEditableMessageAuthority(thread, target, principal)
 
-  const tailBefore = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
-  assertParticipantCanRewindTail(thread, tailBefore, principal)
-  const preRewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tailBefore)
-  assertRewindsWholeTurns(target, tailBefore, preRewoundRuns)
-
-  const runId = createAgentRunId()
-  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
-  await assertAiLimitPreflight(runtime, durableExecution)
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  assertParticipantCanRewindTail(thread, tail, principal)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  assertRewindsWholeTurns(target, tail, rewoundRuns)
 
   const approvalMode =
     input.approvalMode ??
@@ -417,7 +418,7 @@ export async function editAgentMessage(
     "router" in requested
       ? await routedConversationRunSpec({
           ...requested,
-          previous: await latestRetainedConversationRun(agents, projectId, thread.id, tailBefore),
+          previous: await latestRetainedConversationRun(agents, projectId, thread.id, tail),
           place,
           settings,
           language: models.language,
@@ -425,27 +426,34 @@ export async function editAgentMessage(
       : requested
   const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
 
-  // Prepare restore documents for any canvas artifacts touched by turns being rewound.
-  const artifacts = runtime.storage.artifacts
-  const documentsByRun = new Map<string, Record<string, FileRef>>()
-  if (artifacts && blobStorage) {
-    for (const rewound of preRewoundRuns) {
-      documentsByRun.set(
-        rewound.id,
-        await undoneTurnDocuments({ projectId, storage: artifacts, blobStorage }, rewound.id)
-      )
-    }
+  const edit: AgentMessageEdit = {
+    target,
+    messageId: input.nextMessageId ?? createAgentMessageId(),
+    authorPrincipal: principal,
+    parts: [
+      ...contextParts,
+      ...trigger,
+      ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
+    ],
   }
 
-  const replacementMessageId = input.nextMessageId ?? createAgentMessageId()
-  let run: ConversationAgentRunRecord
-  let cancelledApprovals: readonly AgentApprovalRecord[] = []
-  let supersededApprovals: readonly AgentApprovalRecord[] = []
-  const restoredVersions = new Map<
-    string,
-    import("../storage/artifacts/types").PublishedArtifactVersion["version"]
-  >()
+  if (thread.activeRunId !== null) {
+    const item = await deferAgentMessageEdit(runtime, execution, thread, edit, {
+      spec,
+      settings,
+      blobStorage,
+    })
+    return { kind: "inbox", item }
+  }
 
+  const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+  const documents = await rewoundTurnDocuments(runtime, blobStorage, rewoundRuns)
+
+  let run: ConversationAgentRunRecord
+  let rewind: AgentThreadRewind | undefined
+  let superseded: readonly AgentApprovalRecord[] = []
   try {
     run = await runtime.storage.transaction(async (tx) => {
       const txAgents = tx.agents
@@ -456,86 +464,29 @@ export async function editAgentMessage(
         )
       }
 
-      const currentTarget = await txAgents.messages.getById({ projectId, id: input.messageId })
-      if (!currentTarget || currentTarget.threadId !== thread.id) {
-        throw new AgentRequestError(
-          "message_not_found",
-          `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
-        )
-      }
-      assertEditableMessageAuthority(thread, currentTarget, principal)
-
-      const tail = await listAllThreadMessagesFromSeq(
-        txAgents,
+      rewind = await rewindAgentThread(tx, txAgents, {
         projectId,
-        thread.id,
-        currentTarget.seq
-      )
-      assertParticipantCanRewindTail(thread, tail, principal)
-
-      const removedMessageIds = tail.map((message) => message.id)
-      const rewoundRuns = await listRewoundConversationRuns(txAgents, projectId, thread.id, tail)
-      assertRewindsWholeTurns(currentTarget, tail, rewoundRuns)
-      const rewoundRunIds = rewoundRuns.map((entry) => entry.id)
-
-      // Undo untouched artifact writes from newest rewound turn back to oldest.
-      if (tx.artifacts) {
-        for (const rewound of rewoundRuns) {
-          const triggerMsg = tail.find((message) => message.id === rewound.triggerMessageId)
-          const undone = await tx.artifacts.undoTurnWrites({
-            projectId,
-            turnRunId: rewound.id,
-            documents: documentsByRun.get(rewound.id) ?? {},
-            ...(triggerMsg?.authorPrincipal ? { requester: triggerMsg.authorPrincipal } : {}),
-          })
-          for (const entry of undone.restored) {
-            restoredVersions.set(entry.artifact.id, entry.version)
-          }
-          for (const deletedId of undone.deleted) {
-            restoredVersions.delete(deletedId)
-          }
-        }
-      }
-
-      const rewoundApprovals = await txAgents.approvals.rewind({
-        projectId,
-        threadId: thread.id,
-        runIds: rewoundRunIds,
-        clearedMessageIds: removedMessageIds,
-      })
-      cancelledApprovals = rewoundApprovals.cancelled
-
-      await txAgents.checkpoints.deleteAfterSeq({
-        projectId,
-        threadId: thread.id,
-        afterSeq: currentTarget.seq - 1,
-      })
-      await txAgents.messages.deleteFromSeq({
-        projectId,
-        threadId: thread.id,
-        fromSeq: currentTarget.seq,
+        thread,
+        messageId: edit.target.id,
+        editor: principal,
+        documents,
       })
 
       await tx.executions.create(durableExecution)
       const reported = await reportAgentApprovals(txAgents, {
         projectId,
         threadId: thread.id,
-        messageId: replacementMessageId,
+        messageId: edit.messageId,
       })
-      supersededApprovals = reported.superseded
+      superseded = reported.superseded
 
       await txAgents.messages.append({
-        id: replacementMessageId,
+        id: edit.messageId,
         projectId,
         threadId: thread.id,
         runId: null,
         role: "user",
-        parts: [
-          ...reported.parts,
-          ...contextParts,
-          ...trigger,
-          ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
-        ],
+        parts: [...reported.parts, ...edit.parts],
         authorPrincipal: principal,
       })
 
@@ -544,7 +495,7 @@ export async function editAgentMessage(
         projectId,
         executionId: durableExecution.id,
         threadId: thread.id,
-        triggerMessageId: replacementMessageId,
+        triggerMessageId: edit.messageId,
         spec,
       })
     })
@@ -555,16 +506,208 @@ export async function editAgentMessage(
     throw error
   }
 
-  await announceArtifactUpdates(runtime.events, [...restoredVersions.values()])
-  await announceAgentApprovals(runtime.broker, [...cancelledApprovals, ...supersededApprovals])
+  await announceAgentThreadRewind(runtime, rewind, superseded)
   await publishRunActivity(runtime, run)
-  const jobId = await dispatchAgentRun(runtime, agents, runId)
+  await dispatchAgentRun(runtime, agents, runId)
+  return { kind: "turn", run, createdThread: false }
+}
 
-  return {
-    run,
-    ...(jobId ? { jobId } : {}),
-    createdThread: false,
+/** Where a rewind reads the documents that restore the canvases a rewound turn wrote. */
+type RewindBlobStorage = Pick<BlobStorage, "open" | "put">
+
+/** An edit of an earlier message: the message it replaces, and the one that replaces it. */
+interface AgentMessageEdit {
+  readonly target: AgentMessageRecord
+  readonly messageId: string
+  readonly authorPrincipal: Principal
+  readonly parts: readonly AgentMessagePart[]
+}
+
+/**
+ * Stop the running turn so the edit starts after it: the edit waits in the thread's inbox, sent
+ * now, and the turn's end rewinds the thread and starts it. Stopping a turn is for whoever may: the
+ * person who asked for it, or the thread's owner. A newer edit replaces one still waiting.
+ */
+async function deferAgentMessageEdit(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  thread: AgentThreadRecord,
+  edit: AgentMessageEdit,
+  options: {
+    readonly spec: ConversationAgentRunSpec
+    readonly settings: RequesterSettings
+    readonly blobStorage: RewindBlobStorage | undefined
   }
+): Promise<AgentInboxItemRecord> {
+  const { spec, settings } = options
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const active = thread.activeRunId
+    ? await agents.runs.getById({ projectId, id: thread.activeRunId })
+    : null
+  if (active?.kind !== "conversation") {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
+  const mayStop =
+    principalsEqual(edit.authorPrincipal, thread.ownerPrincipal) ||
+    (await askedForTurn(runtime, active, edit.authorPrincipal))
+  if (!mayStop) {
+    throw new AgentRequestError(
+      "not_run_requester",
+      `[Sixb] Agent thread '${thread.id}' runs a turn someone else asked for: only they or the thread's owner can stop it. Edit the message once it ends.`
+    )
+  }
+
+  // The request that sends it is recorded with it: the turn that starts it once this request is
+  // gone runs as that request's child.
+  const request = await ensureExecutionRecord(
+    runtime.storage.executions,
+    executionRecordInputFromRuntime({
+      execution,
+      runtimeAuthorization: runtime.runtimeAuthorization,
+    })
+  )
+
+  for (const waiting of await agents.inbox.list({ projectId, threadId: thread.id })) {
+    if (
+      waiting.replacesMessageId !== undefined &&
+      principalsEqual(waiting.authorPrincipal, edit.authorPrincipal)
+    ) {
+      await agents.inbox.remove({ projectId, threadId: thread.id, id: waiting.id })
+    }
+  }
+
+  const { item } = await agents.inbox.enqueue({
+    id: createAgentInboxItemId(),
+    projectId,
+    threadId: thread.id,
+    messageId: edit.messageId,
+    authorPrincipal: edit.authorPrincipal,
+    mode: "queue",
+    immediate: true,
+    replacesMessageId: edit.target.id,
+    parts: edit.parts,
+    // Routed now, against the turn the edit continues: the stopped turn is not one of those.
+    spec: {
+      model: spec.model,
+      ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+      approvalMode: spec.approvalMode,
+    },
+    ...settings,
+    executionId: request.id,
+  })
+
+  await stopTurnBefore(runtime, execution, active, options.blobStorage)
+  return item
+}
+
+/** What a rewind took back, for the events that tell watchers. */
+interface AgentThreadRewind {
+  readonly restoredVersions: readonly PublishedArtifactVersion["version"][]
+  readonly cancelledApprovals: readonly AgentApprovalRecord[]
+}
+
+/**
+ * Take the thread back to just before the edited message, in the caller's transaction: undo the
+ * artifact writes of the turns it removes, newest first, drop their approvals and the summaries
+ * that saw them, then delete the message and everything after it. It checks again what the edit
+ * checked, as the thread may have moved on since, and writes nothing when a check fails.
+ */
+async function rewindAgentThread(
+  tx: Storage,
+  agents: AgentStorage,
+  input: {
+    readonly projectId: string
+    readonly thread: AgentThreadRecord
+    /** The edited message: the thread keeps what came before it. */
+    readonly messageId: string
+    readonly editor: Principal
+    /** Restore documents of the rewound turns' canvases, read before the transaction. */
+    readonly documents: ReadonlyMap<string, Record<string, FileRef>>
+  }
+): Promise<AgentThreadRewind> {
+  const { projectId, thread, editor } = input
+
+  const target = await agents.messages.getById({ projectId, id: input.messageId })
+  if (!target || target.threadId !== thread.id) {
+    throw new AgentRequestError(
+      "message_not_found",
+      `[Sixb] Agent message '${input.messageId}' not found in thread '${thread.id}'.`
+    )
+  }
+  assertEditableMessageAuthority(thread, target, editor)
+
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  assertParticipantCanRewindTail(thread, tail, editor)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  assertRewindsWholeTurns(target, tail, rewoundRuns)
+
+  const restored = new Map<string, PublishedArtifactVersion["version"]>()
+  if (tx.artifacts) {
+    for (const rewound of rewoundRuns) {
+      const trigger = tail.find((message) => message.id === rewound.triggerMessageId)
+      const undone = await tx.artifacts.undoTurnWrites({
+        projectId,
+        turnRunId: rewound.id,
+        documents: input.documents.get(rewound.id) ?? {},
+        ...(trigger?.authorPrincipal ? { requester: trigger.authorPrincipal } : {}),
+      })
+      for (const entry of undone.restored) restored.set(entry.artifact.id, entry.version)
+      for (const deletedId of undone.deleted) restored.delete(deletedId)
+    }
+  }
+
+  const approvals = await agents.approvals.rewind({
+    projectId,
+    threadId: thread.id,
+    runIds: rewoundRuns.map((run) => run.id),
+    clearedMessageIds: tail.map((message) => message.id),
+  })
+  await agents.checkpoints.deleteAfterSeq({
+    projectId,
+    threadId: thread.id,
+    afterSeq: target.seq - 1,
+  })
+  await agents.messages.deleteFromSeq({ projectId, threadId: thread.id, fromSeq: target.seq })
+
+  return { restoredVersions: [...restored.values()], cancelledApprovals: approvals.cancelled }
+}
+
+/** The documents that restore the canvases the rewound turns wrote, read before the rewind. */
+async function rewoundTurnDocuments(
+  runtime: SixbRuntimeContext,
+  blobStorage: RewindBlobStorage | undefined,
+  rewoundRuns: readonly ConversationAgentRunRecord[]
+): Promise<ReadonlyMap<string, Record<string, FileRef>>> {
+  const documents = new Map<string, Record<string, FileRef>>()
+  const artifacts = runtime.storage.artifacts
+  if (!artifacts || !blobStorage) return documents
+
+  for (const run of rewoundRuns) {
+    documents.set(
+      run.id,
+      await undoneTurnDocuments(
+        { projectId: runtime.projectId, storage: artifacts, blobStorage },
+        run.id
+      )
+    )
+  }
+  return documents
+}
+
+async function announceAgentThreadRewind(
+  runtime: SixbRuntimeContext,
+  rewind: AgentThreadRewind | undefined,
+  superseded: readonly AgentApprovalRecord[]
+): Promise<void> {
+  await announceArtifactUpdates(runtime.events, rewind?.restoredVersions ?? [])
+  await announceAgentApprovals(runtime.broker, [
+    ...(rewind?.cancelledApprovals ?? []),
+    ...superseded,
+  ])
 }
 
 function assertEditableMessageAuthority(
@@ -879,7 +1022,8 @@ export async function sendAgentMessage(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models: AgentRequestModels,
-  input: SendAgentMessageInput
+  input: SendAgentMessageInput,
+  blobStorage?: RewindBlobStorage
 ): Promise<SendAgentMessageResult> {
   const delivery = input.delivery ?? "auto"
   const agents = requireAgentStorage(runtime)
@@ -950,9 +1094,9 @@ export async function sendAgentMessage(
   })
 
   if (delivery === "send_now") {
-    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord)
+    await stopTurnBefore(runtime, execution, active as ConversationAgentRunRecord, blobStorage)
   }
-  await startIfThreadIdle(runtime, execution, thread.id)
+  await startIfThreadIdle(runtime, execution, thread.id, blobStorage)
   return { kind: "inbox", item }
 }
 
@@ -981,7 +1125,8 @@ export interface PromoteAgentInboxItemInput {
 export async function promoteAgentInboxItem(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  input: PromoteAgentInboxItemInput
+  input: PromoteAgentInboxItemInput,
+  blobStorage?: RewindBlobStorage
 ): Promise<AgentInboxItemRecord> {
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
@@ -1052,9 +1197,9 @@ export async function promoteAgentInboxItem(
     )
   }
   if (input.immediate === true && turn) {
-    await stopTurnBefore(runtime, execution, turn)
+    await stopTurnBefore(runtime, execution, turn, blobStorage)
   }
-  await startIfThreadIdle(runtime, execution, thread.id)
+  await startIfThreadIdle(runtime, execution, thread.id, blobStorage)
   return updated
 }
 
@@ -1128,14 +1273,21 @@ async function askedForTurn(
 async function stopTurnBefore(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  active: ConversationAgentRunRecord
+  active: ConversationAgentRunRecord,
+  blobStorage: RewindBlobStorage | undefined
 ): Promise<void> {
   if (active.status === "running") {
     await cancelAgentRun(runtime, active)
     return
   }
   await cancelAgentRun(runtime, active).catch(() => undefined)
-  await startQueuedAgentTurnFromInbox(runtime, execution, active, { onlyImmediate: true })
+  await startQueuedAgentTurnFromInbox(
+    runtime,
+    execution,
+    active,
+    { onlyImmediate: true },
+    blobStorage
+  )
 }
 
 /**
@@ -1148,7 +1300,8 @@ async function stopTurnBefore(
 async function startIfThreadIdle(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  threadId: string
+  threadId: string,
+  blobStorage: RewindBlobStorage | undefined
 ): Promise<void> {
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
@@ -1170,7 +1323,7 @@ async function startIfThreadIdle(
     // it, setting its held calls aside as a message typed in the chat would.
     const onlyImmediate =
       isAwaitingApprovalRun(last) || !(await turnAnsweredEveryMessage(agents, last))
-    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate })
+    await startQueuedAgentTurnFromInbox(runtime, execution, last, { onlyImmediate }, blobStorage)
   } catch (error) {
     console.error(
       `[Sixb] Could not start what waits in Agent thread '${threadId}'; the repair pass retries.`,
@@ -1223,7 +1376,8 @@ export async function startQueuedAgentTurnFromInbox(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   finishedRun: ConversationAgentRunRecord,
-  input: { readonly onlyImmediate: boolean }
+  input: { readonly onlyImmediate: boolean },
+  blobStorage?: RewindBlobStorage
 ): Promise<AgentQueuedTurnStart> {
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
@@ -1253,8 +1407,11 @@ export async function startQueuedAgentTurnFromInbox(
   const runId = createAgentRunId()
   const durableExecution = await prepareResumedExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
+  const documents = await waitingEditDocuments(runtime, blobStorage, thread, principal)
 
   let started: ConversationAgentRunRecord | null
+  let rewind: AgentThreadRewind | undefined
+  let dropped: { readonly item: AgentInboxItemRecord; readonly reason: unknown } | undefined
   let superseded: readonly AgentApprovalRecord[] = []
   try {
     started = await runtime.storage.transaction(async (tx) => {
@@ -1272,6 +1429,24 @@ export async function startQueuedAgentTurnFromInbox(
         authorPrincipal: principal,
       })
       if (!item) return null
+
+      // An edit takes the thread back to the message it replaces first. One the thread moved past
+      // since it was sent (that message is gone) is dropped: the checks write nothing.
+      if (item.replacesMessageId !== undefined) {
+        try {
+          rewind = await rewindAgentThread(tx, agents, {
+            projectId,
+            thread,
+            messageId: item.replacesMessageId,
+            editor: item.authorPrincipal,
+            documents,
+          })
+        } catch (error) {
+          if (!(error instanceof AgentRequestError)) throw error
+          dropped = { item, reason: error }
+          return null
+        }
+      }
 
       const inherited = await resolveAgentApprovalMode(agents, {
         projectId,
@@ -1324,12 +1499,47 @@ export async function startQueuedAgentTurnFromInbox(
     }
     throw error
   }
+  if (dropped) {
+    console.warn(
+      `[Sixb] Dropped the edit of Agent message '${dropped.item.replacesMessageId}' waiting in thread '${thread.id}': it no longer applies.`,
+      dropped.reason
+    )
+  }
   if (!started) return { status: "nothing" }
 
-  await announceAgentApprovals(runtime.broker, superseded)
+  await announceAgentThreadRewind(runtime, rewind, superseded)
   await publishRunActivity(runtime, started)
   await dispatchAgentRun(runtime, agents, runId)
   return { status: "started", run: started }
+}
+
+/**
+ * The restore documents for the edit the caller's next queued message would make, read before
+ * the transaction that starts it, as an edit on an idle thread reads them. Edits are always sent
+ * now, so the caller's oldest message sent now is the one their turn takes first.
+ */
+async function waitingEditDocuments(
+  runtime: SixbRuntimeContext,
+  blobStorage: RewindBlobStorage | undefined,
+  thread: AgentThreadRecord,
+  principal: Principal
+): Promise<ReadonlyMap<string, Record<string, FileRef>>> {
+  if (!runtime.storage.artifacts || !blobStorage) return new Map()
+
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const waiting = await agents.inbox.list({ projectId, threadId: thread.id, includeClaimed: false })
+  const next = waiting
+    .filter((item) => item.immediate && principalsEqual(item.authorPrincipal, principal))
+    .sort((left, right) => left.seq - right.seq)[0]
+  if (next?.replacesMessageId === undefined) return new Map()
+
+  const target = await agents.messages.getById({ projectId, id: next.replacesMessageId })
+  if (!target || target.threadId !== thread.id) return new Map()
+
+  const tail = await listAllThreadMessagesFromSeq(agents, projectId, thread.id, target.seq)
+  const rewoundRuns = await listRewoundConversationRuns(agents, projectId, thread.id, tail)
+  return rewoundTurnDocuments(runtime, blobStorage, rewoundRuns)
 }
 
 /** A queued message's turn: the finished turn's spec, with the message's own choices over it. */
@@ -1340,7 +1550,10 @@ function queuedConversationRunSpec(
   approvalMode: AgentApprovalMode
 ): ConversationAgentRunSpec {
   const model = item.spec?.model ?? kept.model
-  const reasoning = item.spec?.reasoning ?? kept.reasoning
+  // An edit's choices were made against the turn it continues: the stopped turn it rewinds passes
+  // nothing on.
+  const reasoning =
+    item.spec?.reasoning ?? (item.replacesMessageId === undefined ? kept.reasoning : undefined)
   const timeZone = item.timeZone ?? kept.timeZone
   const locale = item.locale ?? kept.locale
   return inPlace(thread, {
@@ -1654,6 +1867,18 @@ function assertAttachments(attachments: readonly FileRef[] | undefined): void {
 }
 
 function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal): void {
+  assertThreadAcceptsMessages(thread, principal)
+  // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
+  if (thread.activeRunId !== null) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
+}
+
+/** Whether `principal` may send the thread a message: a turn may still be running. */
+function assertThreadAcceptsMessages(thread: AgentThreadRecord, principal: Principal): void {
   assertConversationThread(thread)
   assertSandboxExecutionAvailable(thread)
   // Its owner's computer runs its turns as its owner: nobody else may send it one.
@@ -1661,13 +1886,6 @@ function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal)
     throw new AgentRequestError(
       "not_thread_owner",
       `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can message it. Shared with you, it is yours to read and follow.`
-    )
-  }
-  // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
-  if (thread.activeRunId !== null) {
-    throw new AgentRequestError(
-      "active_run_exists",
-      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
     )
   }
 }

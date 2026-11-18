@@ -44,6 +44,7 @@ interface AgentInboxRow {
   readonly time_zone: string | null
   readonly locale: string | null
   readonly immediate: boolean
+  readonly replaces_message_id: string | null
   readonly execution_id: string | null
   readonly claimed_by_run_id: string | null
   readonly claimed_by_token: string | null
@@ -117,7 +118,7 @@ export class PgAgentInboxStore implements AgentInboxStore {
           INSERT INTO agent_thread_inbox (
             project_id, id, thread_id, message_id, seq,
             author_principal_type, author_principal_id, mode, parts, spec,
-            time_zone, locale, immediate, execution_id, created_at, updated_at
+            time_zone, locale, immediate, replaces_message_id, execution_id, created_at, updated_at
           ) VALUES (
             ${record.projectId},
             ${record.id},
@@ -132,6 +133,7 @@ export class PgAgentInboxStore implements AgentInboxStore {
             ${record.timeZone ?? null},
             ${record.locale ?? null},
             ${Boolean(record.immediate)},
+            ${record.replacesMessageId ?? null},
             ${record.executionId ?? null},
             ${record.createdAt},
             ${record.updatedAt}
@@ -410,6 +412,7 @@ function rowToInboxItem(row: AgentInboxRow): AgentInboxItemRecord {
     ...(row.time_zone ? { timeZone: row.time_zone } : {}),
     ...(row.locale ? { locale: row.locale } : {}),
     ...(row.immediate ? { immediate: true } : {}),
+    ...(row.replaces_message_id ? { replacesMessageId: row.replaces_message_id } : {}),
     ...(row.execution_id ? { executionId: row.execution_id } : {}),
     ...(claimedBy ? { claimedBy } : {}),
     createdAt: new Date(row.created_at),

@@ -1765,6 +1765,15 @@ export function assertEnqueueAgentInboxItemInput(
   assertAgentInboxParts(input.parts, input.mode, prefix)
   assertAgentInboxSpec(input.spec, prefix)
   if (input.executionId !== undefined) assertNonEmptyText(input.executionId, "executionId", prefix)
+  if (input.replacesMessageId !== undefined) {
+    assertNonEmptyText(input.replacesMessageId, "replacesMessageId", prefix)
+    if (input.mode !== "queue" || input.immediate !== true) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] An agent inbox item that replaces a message is a queued message sent now.`
+      )
+    }
+  }
 }
 
 /**
@@ -1886,6 +1895,7 @@ export function newAgentInboxItemRecord(
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
     ...(input.locale ? { locale: input.locale } : {}),
     ...(input.immediate ? { immediate: true } : {}),
+    ...(input.replacesMessageId ? { replacesMessageId: input.replacesMessageId } : {}),
     ...(input.executionId ? { executionId: input.executionId } : {}),
     createdAt,
     updatedAt: new Date(createdAt),
@@ -1911,6 +1921,13 @@ export function updatedAgentInboxItemRecord(
   const nextImmediate = input.immediate === undefined ? current.immediate : input.immediate
   const { spec: _oldSpec, immediate: _oldImmediate, ...base } = current
   const mode = input.mode ?? current.mode
+  // An edit rewinds the thread when it starts: it goes now, after the turn it stopped.
+  if (current.replacesMessageId !== undefined && (mode !== "queue" || nextImmediate !== true)) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[Sixb] Agent inbox item '${current.id}' edits message '${current.replacesMessageId}': it stays a message sent now.`
+    )
+  }
   const parts =
     input.parts !== undefined ? structuredClone(input.parts) : structuredClone(current.parts)
   // Promoting a message that carries a file to a steer would read bytes a replay cannot send.

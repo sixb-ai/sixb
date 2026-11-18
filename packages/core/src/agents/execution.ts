@@ -329,7 +329,7 @@ export interface AgentRunsRuntime {
    * Edit an earlier user message in place, rewinding the thread to that point and starting a new
    * turn from the edited prompt.
    */
-  editMessage(input: ExecutionAgentEditMessageInput): Promise<ExecutionAgentRunResult>
+  editMessage(input: ExecutionAgentEditMessageInput): Promise<ExecutionAgentSendResult>
   /**
    * Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights.
    * A sub-agent's run is never retried: its turn decides whether to spawn it again.
@@ -775,7 +775,7 @@ export function createAgentRuntime<
     try {
       // Someone who left the thread no longer starts turns in it.
       if (!(await rule.read(run.threadId))) return { status: "closed" }
-      return await startQueuedAgentTurnFromInbox(runtime, execution, run, options)
+      return await startQueuedAgentTurnFromInbox(runtime, execution, run, options, blobStorage)
     } catch (error) {
       console.error(`[Sixb] Could not start a queued message of Agent run '${run.id}'.`, error)
       return { status: "closed" }
@@ -1082,7 +1082,12 @@ export function createAgentRuntime<
             `[Sixb] Agent thread '${threadId}' not found.`
           )
         }
-        return promoteAgentInboxItem(runtime, execution, { ...input, threadId, itemId })
+        return promoteAgentInboxItem(
+          runtime,
+          execution,
+          { ...input, threadId, itemId },
+          blobStorage
+        )
       },
       remove: async (threadId, itemId) => {
         if (!(await getVisibleThreadRecord(threadId))) {
@@ -1107,7 +1112,7 @@ export function createAgentRuntime<
             `[Sixb] Agent thread '${input.threadId}' not found.`
           )
         }
-        const result = await sendAgentMessage(runtime, execution, turnModels, input)
+        const result = await sendAgentMessage(runtime, execution, turnModels, input, blobStorage)
         return result.kind === "turn"
           ? { ...result, run: await attachRunView(runtime, result.run) }
           : result
@@ -1151,7 +1156,9 @@ export function createAgentRuntime<
           { ...input, principal },
           blobStorage
         )
-        return { ...result, run: await attachRunView(runtime, result.run) }
+        return result.kind === "turn"
+          ? { ...result, run: await attachRunView(runtime, result.run) }
+          : result
       },
       retry: async (runId) => {
         const failedRun = await getControllableRun(runId, "retry")

@@ -1457,6 +1457,11 @@ export interface AgentInboxItemRecord {
   /** Marked by Send now so `afterAgentRunFinished` dispatches it across a user cancel. */
   readonly immediate?: boolean
   /**
+   * An edit waiting for the turn it stopped to end: the earlier message it replaces. When it
+   * starts, the thread first rewinds to that message. Always sent now, as a queued message.
+   */
+  readonly replacesMessageId?: string
+  /**
    * The execution of the request that sent it. A turn that starts it without a request of its
    * sender's runs as a child of this one, with the sender's grants as they are then.
    */
@@ -1478,6 +1483,11 @@ export interface EnqueueAgentInboxItemInput {
   readonly timeZone?: string
   readonly locale?: string
   readonly immediate?: boolean
+  /**
+   * An edit waiting for the turn it stopped to end: the earlier message it replaces. When it
+   * starts, the thread first rewinds to that message. Always sent now, as a queued message.
+   */
+  readonly replacesMessageId?: string
   readonly executionId?: string
   readonly createdAt?: Date
 }

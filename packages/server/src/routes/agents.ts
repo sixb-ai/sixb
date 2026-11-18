@@ -276,6 +276,7 @@ export function serializeAgentInboxItem(
     timeZone: item.timeZone,
     locale: item.locale,
     immediate: item.immediate === true ? true : undefined,
+    replacesMessageId: item.replacesMessageId,
     createdAt: toIsoString(item.createdAt),
     updatedAt: toIsoString(item.updatedAt),
   })
@@ -1228,11 +1229,13 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           })
 
           set.status = 202
-          return EditAgentMessageResponseSchema.parse({
-            run: serializeAgentRun(result.run),
-          })
+          return EditAgentMessageResponseSchema.parse(
+            result.kind === "turn"
+              ? { run: serializeAgentRun(result.run) }
+              : { item: serializeAgentInboxItem(result.item) }
+          )
         } catch (error) {
-          return handleAgentRouteError(error, set)
+          return handleAgentInboxRouteError(error, set)
         }
       },
       {
@@ -1250,7 +1253,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Edit an agent thread message and restart from that turn",
           description:
-            "Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message.",
+            "Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message. While a turn runs, the edit stops it and waits in the thread's inbox: the turn's end rewinds the thread and starts the edited message.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "editAgentThreadMessage",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,

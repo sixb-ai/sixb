@@ -335,6 +335,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("101-artifact-pdfs", artifactPdfsSql),
     sqliteSql("102-guest-comment-links", guestCommentLinksSql),
     sqliteSql("103-agent-thread-inbox", agentThreadInboxSql),
+    sqliteSql("104-agent-inbox-edits", agentInboxEditsSql),
   ],
 })
 
@@ -775,3 +776,4 @@ import scriptExecutionsSql from "./migrations/100-script-executions.sql" with { 
 import artifactPdfsSql from "./migrations/101-artifact-pdfs.sql" with { type: "text" }
 import guestCommentLinksSql from "./migrations/102-guest-comment-links.sql" with { type: "text" }
 import agentThreadInboxSql from "./migrations/103-agent-thread-inbox.sql" with { type: "text" }
+import agentInboxEditsSql from "./migrations/104-agent-inbox-edits.sql" with { type: "text" }

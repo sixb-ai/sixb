@@ -5105,7 +5105,7 @@ export const updateAgentThreadInboxItemMutation = (
 /**
  * Edit an agent thread message and restart from that turn
  *
- * Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message.
+ * Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message. While a turn runs, the edit stops it and waits in the thread's inbox: the turn's end rewinds the thread and starts the edited message.
  */
 export const editAgentThreadMessageMutation = (
   options?: Partial<Options<EditAgentThreadMessageData>>

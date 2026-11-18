@@ -617,6 +617,8 @@ export const AgentInboxItemSchema = z.object({
   locale: z.string().optional(),
   /** Sent now: it starts even when the turn it waited for ended without answering. */
   immediate: z.boolean().optional(),
+  /** An edit waiting for the turn it stopped: the message it replaces once that turn ends. */
+  replacesMessageId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -656,9 +658,13 @@ export const PostAgentMessageResponseSchema = z.object({
   item: AgentInboxItemSchema.optional(),
 })
 
-/** An edit always starts the turn that answers the edited message. */
+/**
+ * `run` when the edit starts its turn now; `item` when it waits, sent now, for the running turn it
+ * stopped to end.
+ */
 export const EditAgentMessageResponseSchema = z.object({
-  run: AgentRunSchema,
+  run: AgentRunSchema.optional(),
+  item: AgentInboxItemSchema.optional(),
 })
 
 export const CancelAgentRunResponseSchema = z.object({

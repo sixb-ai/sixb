@@ -186,6 +186,7 @@ interface Scenario {
   thread: Record<string, unknown>
   messages: Record<string, unknown>[]
   runs: Record<string, unknown>[]
+  inbox?: Record<string, unknown>[]
   failEditStatus?: number
   editGate?: Promise<void>
 }
@@ -273,6 +274,9 @@ function renderChat(as: "dana" | "sam" = "dana", overrides: Partial<Scenario> = 
         if (url.pathname === "/api/agent-threads/thr_1/runs") {
           return Response.json({ runs: state.runs, hasMore: false, total: state.runs.length })
         }
+        if (url.pathname === "/api/agent-threads/thr_1/inbox") {
+          return Response.json({ items: state.inbox ?? [] })
+        }
         if (url.pathname === "/api/agent-threads/thr_1/approvals") {
           return Response.json({ approvals: [], hasMore: false, total: 0 })
         }
@@ -293,6 +297,25 @@ function renderChat(as: "dana" | "sam" = "dana", overrides: Partial<Scenario> = 
             )
           }
           const editedId = editMatch[1]!
+          // A turn runs: the server stops it, and the edit waits in the inbox for its end.
+          if (state.thread.activeRunId) {
+            const item = {
+              id: "inb_edit",
+              projectId: "proj",
+              threadId: "thr_1",
+              messageId: `${editedId}_edited`,
+              seq: 1,
+              authorPrincipal: dana,
+              mode: "queue",
+              parts: [{ type: "text", text: (parsed as { text?: string }).text ?? "" }],
+              immediate: true,
+              replacesMessageId: editedId,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
+            state.inbox = [item]
+            return Response.json({ item }, { status: 202 })
+          }
           const cutIndex = state.messages.findIndex((m) => m.id === editedId)
           const kept = cutIndex === -1 ? state.messages : state.messages.slice(0, cutIndex)
           const bodyObj = parsed as { text?: string; context?: unknown[] }
@@ -475,8 +498,9 @@ describe("user message hover actions and in-place rewind UX", () => {
     )
   })
 
-  test("stops an active run automatically when saving an edit on an earlier message", async () => {
-    // Guard proof: omit stoppedActive cancelRun in editMessage; POST /edit fires without /cancel.
+  test("sends an edit while a turn runs as one request, and shows the thread rewound meanwhile", async () => {
+    // Guard proof: drop the `replacesMessageId` filter in pending-messages.tsx; the waiting edit
+    // also shows in the tray, as a message of its own after the turn.
     const { view, requests } = renderChat("dana", {
       thread: {
         id: "thr_1",
@@ -520,11 +544,17 @@ describe("user message hover actions and in-place rewind UX", () => {
 
     await waitFor(() => {
       const paths = requests.filter((r) => r.method === "POST").map((r) => r.path)
-      expect(paths).toEqual([
-        "/api/agent-threads/thr_1/cancel",
-        "/api/agent-threads/thr_1/messages/msg_1/edit",
-      ])
+      expect(paths).toEqual(["/api/agent-threads/thr_1/messages/msg_1/edit"])
     })
+
+    // The server stops the turn; until it ends, the edit stands in place of the first question,
+    // the answers after it are gone, and the tray does not list it as a message of its own.
+    await view.findByText("Updated first question while streaming")
+    await waitFor(() => {
+      expect(view.queryByText("Yes, add the domain to Safe Senders.")).toBeNull()
+      expect(view.queryByText(/outlook message from unknow people/)).toBeNull()
+    })
+    expect(view.getAllByText("Updated first question while streaming")).toHaveLength(1)
   })
 
   test("restores the inline editor draft and transcript when an edit request fails", async () => {

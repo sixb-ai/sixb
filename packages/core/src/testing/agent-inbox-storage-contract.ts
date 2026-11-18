@@ -648,6 +648,65 @@ export function runAgentInboxStorageContractSuite<
       })
     })
 
+    test("an edit waiting for its turn keeps the message it replaces, and stays a message sent now", async () => {
+      await withStorage(async (storage) => {
+        await storage.agents.threads.create({
+          id: "thr_edit",
+          projectId,
+          ownerPrincipal: alice,
+          createdAt: t0,
+        })
+        await startConversationRun(storage, "thr_edit", "run_stopping", "tok_stopping")
+
+        const edit = {
+          id: "inb_edit",
+          projectId,
+          threadId: "thr_edit",
+          messageId: "msg_edited",
+          authorPrincipal: alice,
+          mode: "queue",
+          immediate: true,
+          replacesMessageId: "msg_original",
+          parts: [{ type: "text", text: "Only the breaking changes" }],
+        } as const
+
+        // An edit rewinds when it starts: it is never a steer, nor kept for a later turn.
+        for (const invalid of [
+          { ...edit, mode: "steer" },
+          { ...edit, immediate: false },
+        ] as const) {
+          const error = await storage.agents.inbox.enqueue(invalid).catch((caught) => caught)
+          expect(error).toBeInstanceOf(AgentStorageError)
+          expect(error.code).toBe("invalid_input")
+        }
+
+        const { item } = await storage.agents.inbox.enqueue(edit)
+        expect(item.replacesMessageId).toBe("msg_original")
+        const [listed] = await storage.agents.inbox.list({ projectId, threadId: "thr_edit" })
+        expect(listed?.replacesMessageId).toBe("msg_original")
+
+        const demoted = await storage.agents.inbox
+          .update({ projectId, threadId: "thr_edit", id: "inb_edit", immediate: false })
+          .catch((caught) => caught)
+        expect(demoted).toBeInstanceOf(AgentStorageError)
+        expect(demoted.code).toBe("invalid_state")
+
+        await storage.agents.runs.finish({
+          projectId,
+          id: "run_stopping",
+          executionToken: "tok_stopping",
+          status: "cancelled",
+        })
+        const popped = await storage.agents.inbox.takeNextQueued({
+          projectId,
+          threadId: "thr_edit",
+          onlyImmediate: true,
+        })
+        expect(popped?.id).toBe("inb_edit")
+        expect(popped?.replacesMessageId).toBe("msg_original")
+      })
+    })
+
     test("takeNextQueued waits for idle and orders immediate, steer, then queue", async () => {
       await withStorage(async (storage) => {
         await storage.agents.threads.create({

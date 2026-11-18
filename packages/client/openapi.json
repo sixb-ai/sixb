@@ -43574,6 +43574,9 @@
                         "immediate": {
                           "type": "boolean"
                         },
+                        "replacesMessageId": {
+                          "type": "string"
+                        },
                         "createdAt": {
                           "type": "string"
                         },
@@ -44998,6 +45001,9 @@
                           "immediate": {
                             "type": "boolean"
                           },
+                          "replacesMessageId": {
+                            "type": "string"
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -46320,6 +46326,9 @@
                         "immediate": {
                           "type": "boolean"
                         },
+                        "replacesMessageId": {
+                          "type": "string"
+                        },
                         "createdAt": {
                           "type": "string"
                         },
@@ -46585,7 +46594,7 @@
     "/api/agent-threads/{threadId}/messages/{messageId}/edit": {
       "post": {
         "summary": "Edit an agent thread message and restart from that turn",
-        "description": "Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message.",
+        "description": "Replaces a user-authored message in place, removes any messages and compaction summaries from that turn onward, and starts a new turn from the edited message. While a turn runs, the edit stops it and waits in the thread's inbox: the turn's end rewinds the thread and starts the edited message.",
         "tags": ["Agent Threads"],
         "operationId": "editAgentThreadMessage",
         "security": [
@@ -47586,9 +47595,1021 @@
                         "createdAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "item": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "messageId": {
+                          "type": "string"
+                        },
+                        "seq": {
+                          "type": "number"
+                        },
+                        "authorPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": ["steer", "queue"]
+                        },
+                        "parts": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["text"]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "providerMetadata": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["type", "text"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["continuation"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["approval-outcome"]
+                                  },
+                                  "approvalId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "approved",
+                                      "denied",
+                                      "cancelled",
+                                      "superseded",
+                                      "expired"
+                                    ]
+                                  },
+                                  "call": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "subject": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["none"]
+                                                  }
+                                                },
+                                                "required": ["kind"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["object"]
+                                                  },
+                                                  "objectTypeId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "primaryId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  }
+                                                },
+                                                "required": ["kind", "objectTypeId", "primaryId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "subject"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["workflow"]
+                                          },
+                                          "workflowId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "workflowId"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action-run"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["succeeded", "failed"]
+                                          },
+                                          "error": {
+                                            "type": "object",
+                                            "properties": {
+                                              "code": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "internal.unexpected",
+                                                  "runtime.cancelled",
+                                                  "action.phase_failed",
+                                                  "action.read_conflict",
+                                                  "action.rejected",
+                                                  "action.timeout",
+                                                  "object.unique_violation"
+                                                ]
+                                              },
+                                              "message": {
+                                                "type": "string",
+                                                "maxLength": 4096
+                                              },
+                                              "retryable": {
+                                                "type": "boolean"
+                                              },
+                                              "at": {
+                                                "type": "string",
+                                                "format": "date-time"
+                                              },
+                                              "details": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "actionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  },
+                                                  "phase": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "validation",
+                                                      "writeback",
+                                                      "edits",
+                                                      "commit",
+                                                      "effects"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": ["actionId", "runId", "phase"],
+                                                "additionalProperties": false
+                                              },
+                                              "httpStatus": {
+                                                "type": "integer",
+                                                "minimum": 100,
+                                                "maximum": 599
+                                              },
+                                              "redacted": {
+                                                "type": "boolean",
+                                                "enum": [true]
+                                              },
+                                              "truncated": {
+                                                "type": "boolean",
+                                                "enum": [true]
+                                              }
+                                            },
+                                            "required": [
+                                              "code",
+                                              "message",
+                                              "retryable",
+                                              "at",
+                                              "details"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": ["kind", "runId", "status"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["workflow-run"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          },
+                                          "queuedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "runId", "queuedAt"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["error"]
+                                          },
+                                          "error": {
+                                            "type": "object",
+                                            "properties": {
+                                              "code": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "action.phase_failed",
+                                                  "action.read_conflict",
+                                                  "action.rejected",
+                                                  "action.run_in_progress",
+                                                  "action.timeout",
+                                                  "agent.approval_authority_lost",
+                                                  "agent.context_limit_exceeded",
+                                                  "agent.execution_failed",
+                                                  "agent.step_limit_reached",
+                                                  "ai.usage_limit_exceeded",
+                                                  "ai.usage_limit_unavailable",
+                                                  "connector.adapter_invalid",
+                                                  "connector.authorization_invalid",
+                                                  "connector.authorization_required",
+                                                  "connector.configuration_invalid",
+                                                  "connector.credentials_unavailable",
+                                                  "connector.not_found",
+                                                  "connector.operation_conflict",
+                                                  "connector.operation_in_progress",
+                                                  "connector.provider_failed",
+                                                  "connector.provider_unavailable",
+                                                  "connector.replacement_required",
+                                                  "connector.revocation_pending",
+                                                  "dataset.change_refused",
+                                                  "dataset.not_found",
+                                                  "dataset.version_incompatible",
+                                                  "dataset.version_not_found",
+                                                  "dataset.version_read_inconsistent",
+                                                  "event.delivery_failed",
+                                                  "internal.unexpected",
+                                                  "queue.enqueue_failed",
+                                                  "object.not_found",
+                                                  "object.unique_violation",
+                                                  "pipeline.step_failed",
+                                                  "projection.definition_invalid",
+                                                  "projection.execution_failed",
+                                                  "projection.not_found",
+                                                  "projection.run_already_terminal",
+                                                  "projection.run_identity_mismatch",
+                                                  "runtime.cancelled",
+                                                  "runtime.stopping",
+                                                  "vector.model_unavailable",
+                                                  "vector.response_invalid",
+                                                  "vector.outcome_unknown",
+                                                  "storage.unavailable",
+                                                  "sync.execution_failed",
+                                                  "webhook.delivery_failed",
+                                                  "webhook.delivery_rejected",
+                                                  "workflow.node_failed"
+                                                ]
+                                              },
+                                              "message": {
+                                                "type": "string",
+                                                "maxLength": 4096
+                                              },
+                                              "retryable": {
+                                                "type": "boolean"
+                                              },
+                                              "at": {
+                                                "type": "string",
+                                                "format": "date-time"
+                                              },
+                                              "details": {
+                                                "description": "Any JSON-compatible value.",
+                                                "nullable": true,
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string"
+                                                  },
+                                                  {
+                                                    "type": "number"
+                                                  },
+                                                  {
+                                                    "type": "boolean"
+                                                  },
+                                                  {
+                                                    "type": "array",
+                                                    "items": {}
+                                                  },
+                                                  {
+                                                    "type": "object",
+                                                    "additionalProperties": true
+                                                  }
+                                                ]
+                                              },
+                                              "httpStatus": {
+                                                "type": "integer",
+                                                "minimum": 100,
+                                                "maximum": 599
+                                              },
+                                              "redacted": {
+                                                "type": "boolean",
+                                                "enum": [true]
+                                              },
+                                              "truncated": {
+                                                "type": "boolean",
+                                                "enum": [true]
+                                              }
+                                            },
+                                            "required": ["code", "message", "retryable", "at"],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": ["kind", "error"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "caller": {
+                                    "type": "object",
+                                    "properties": {
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "key": {
+                                        "type": "string"
+                                      },
+                                      "continues": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["runId", "key"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["type", "approvalId", "status", "call"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["reasoning"]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "providerMetadata": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["type", "text"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["step-start"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["file"]
+                                  },
+                                  "fileRef": {
+                                    "type": "object",
+                                    "properties": {
+                                      "blobId": {
+                                        "type": "string"
+                                      },
+                                      "digest": {
+                                        "type": "string",
+                                        "pattern": "^sha256:[a-f0-9]{64}$"
+                                      },
+                                      "sizeBytes": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "fileName": {
+                                        "type": "string"
+                                      },
+                                      "mediaType": {
+                                        "type": "string"
+                                      },
+                                      "logicalPath": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["blobId", "digest", "sizeBytes"],
+                                    "additionalProperties": false
+                                  },
+                                  "providerMetadata": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["type", "fileRef"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["provider-state"]
+                                  },
+                                  "providerId": {
+                                    "type": "string"
+                                  },
+                                  "data": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["type", "providerId", "data"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "context": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["object"]
+                                          },
+                                          "ref": {
+                                            "type": "object",
+                                            "properties": {
+                                              "objectTypeId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "primaryId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": ["objectTypeId", "primaryId"],
+                                            "additionalProperties": false
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200,
+                                            "description": "Shown in the chat instead of the object's title. Never sent to the model."
+                                          }
+                                        },
+                                        "required": ["kind", "ref"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["app-state"]
+                                          },
+                                          "id": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "description": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "value": {
+                                            "description": "Any JSON-compatible value.",
+                                            "nullable": true,
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "number"
+                                              },
+                                              {
+                                                "type": "boolean"
+                                              },
+                                              {
+                                                "type": "array",
+                                                "items": {}
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": true
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "id", "label", "description", "value"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "origin": {
+                                    "type": "string",
+                                    "enum": ["ambient", "explicit"]
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["context"]
+                                  }
+                                },
+                                "required": ["context", "origin", "type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["tool-call"]
+                                  },
+                                  "toolCallId": {
+                                    "type": "string"
+                                  },
+                                  "toolName": {
+                                    "type": "string"
+                                  },
+                                  "dynamic": {
+                                    "type": "boolean"
+                                  },
+                                  "providerExecuted": {
+                                    "type": "boolean"
+                                  },
+                                  "input": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "providerMetadata": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": ["output-available"]
+                                  },
+                                  "output": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "outputFile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "fileRef": {
+                                        "type": "object",
+                                        "properties": {
+                                          "blobId": {
+                                            "type": "string"
+                                          },
+                                          "digest": {
+                                            "type": "string",
+                                            "pattern": "^sha256:[a-f0-9]{64}$"
+                                          },
+                                          "sizeBytes": {
+                                            "type": "integer",
+                                            "minimum": 0
+                                          },
+                                          "fileName": {
+                                            "type": "string"
+                                          },
+                                          "mediaType": {
+                                            "type": "string"
+                                          },
+                                          "logicalPath": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["blobId", "digest", "sizeBytes"],
+                                        "additionalProperties": false
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["fileRef", "path"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "toolCallId",
+                                  "toolName",
+                                  "input",
+                                  "state",
+                                  "output"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["tool-call"]
+                                  },
+                                  "toolCallId": {
+                                    "type": "string"
+                                  },
+                                  "toolName": {
+                                    "type": "string"
+                                  },
+                                  "dynamic": {
+                                    "type": "boolean"
+                                  },
+                                  "providerExecuted": {
+                                    "type": "boolean"
+                                  },
+                                  "input": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "providerMetadata": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": ["output-error"]
+                                  },
+                                  "errorText": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "toolCallId",
+                                  "toolName",
+                                  "input",
+                                  "state",
+                                  "errorText"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["mail"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "from": {
+                                    "type": "string",
+                                    "enum": ["parent"]
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["message", "answer"]
+                                  },
+                                  "inReplyTo": {
+                                    "type": "string"
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "afterAnswer": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  }
+                                },
+                                "required": ["type", "id", "from", "kind", "text"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "spec": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "modelId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["provider", "modelId"],
+                              "additionalProperties": false
+                            },
+                            "reasoning": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "provider-default",
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "budgetTokens": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": ["budgetTokens"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "approvalMode": {
+                              "type": "string",
+                              "enum": ["manual", "accept-edits", "auto"]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "timeZone": {
+                          "type": "string"
+                        },
+                        "locale": {
+                          "type": "string"
+                        },
+                        "immediate": {
+                          "type": "boolean"
+                        },
+                        "replacesMessageId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "threadId",
+                        "messageId",
+                        "seq",
+                        "authorPrincipal",
+                        "mode",
+                        "parts",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["run"],
                   "additionalProperties": false
                 }
               }
