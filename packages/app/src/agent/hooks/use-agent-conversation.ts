@@ -219,16 +219,15 @@ export interface AgentConversationMessagesError {
 
 const MESSAGES_LOAD_ERROR: AgentConversationMessagesError = { code: "load" }
 
+/** How often an open thread's messages are read again while the activity feed is away. */
+const MESSAGES_RECOVERY_POLL_MS = 30_000
+
 /**
  * Everything one conversation with the project's agent needs: its threads, messages, turn and
  * model choice, and the actions on them. Route-independent; the built-in chat and custom chats
  * both render it, by spreading `transcriptProps` and `composerProps` or by drawing `messages` and
  * `turn` themselves.
  */
-
-/** How often an open thread's messages are read again while the activity feed is away. */
-const MESSAGES_RECOVERY_POLL_MS = 30_000
-
 export function useAgentConversation({
   threadId,
   onThreadCreated,
