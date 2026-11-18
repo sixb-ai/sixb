@@ -67,7 +67,7 @@ test("restores the selected model with every supported saved reasoning level", (
   }
 })
 
-test("with tiers, the browser's choice for every conversation pins none", async () => {
+test("with tiers, a thread without its own choice is Auto, not the browser's choice", async () => {
   const opus: LanguageModel = {
     provider: "anthropic",
     modelId: "claude-opus-5-5",
@@ -112,8 +112,8 @@ test("with tiers, the browser's choice for every conversation pins none", async 
     },
   })
 
-  // Removal proof: read the list's preference with tiers too; the tiered message asks for Opus
-  // and the conversation's choice is Opus, not Auto.
+  // Removal proof: read a thread's model as `modelPins[threadId] ?? modelPreference`; the tiered
+  // message asks for Opus and the thread's choice is Opus, not Auto.
   const chat = async (language: readonly LanguageModel[]) => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(listModelsOptions().queryKey, {

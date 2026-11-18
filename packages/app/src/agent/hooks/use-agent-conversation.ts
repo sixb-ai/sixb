@@ -299,16 +299,15 @@ export function useAgentConversation({
   })
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
-  // With a list, the browser remembers one choice for every conversation. With tiers, each
-  // conversation starts on Auto and keeps the model pinned in it; a new one keeps its pin in
-  // memory until its first message creates the thread.
+  // The browser remembers one choice: a new conversation starts on it, and with tiers each
+  // conversation keeps the model pinned in it. Without tiers, that one choice serves every
+  // conversation.
   const tiered = hasTiers(models)
   const [modelPreference, setModelPreference] = useState(readModelPreference)
   const [modelPins, setModelPins] = useState(() => readModelPins() ?? {})
-  const [newThreadPin, setNewThreadPin] = useState<ModelPreference | null>(null)
   const modelSelection = resolveModelSelection(
     models,
-    tiered ? (threadId === null ? newThreadPin : (modelPins[threadId] ?? null)) : modelPreference
+    tiered ? (threadId === null ? modelPreference : (modelPins[threadId] ?? null)) : modelPreference
   )
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
@@ -690,6 +689,8 @@ export function useAgentConversation({
         : delivery
     setSendError(null)
     const targetThreadId = threadId
+    // What this message asks for, and what the thread it creates keeps pinned.
+    const selection = modelSelection.request
     const key = `sent:${++sentMessageCount}`
     let createdThreadId: string | null = null
     try {
@@ -710,7 +711,7 @@ export function useAgentConversation({
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
             body: {
-              ...messageBody(text, attachments, context, modelSelection.request, settings),
+              ...messageBody(text, attachments, context, selection, settings),
               ...turnApprovalMode,
               ...(where === "auto" ? {} : { delivery: where }),
             },
@@ -774,7 +775,7 @@ export function useAgentConversation({
         postMessage.mutateAsync({
           path: { threadId: newThreadId },
           body: {
-            ...messageBody(text, attachments, context, modelSelection.request, settings),
+            ...messageBody(text, attachments, context, selection, settings),
             ...turnApprovalMode,
           },
         })
@@ -783,7 +784,7 @@ export function useAgentConversation({
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
-      showCreatedThread(createdThreadId)
+      showCreatedThread(createdThreadId, selection)
     } catch (error) {
       // Restore the exact submitted snapshot. In particular, do not re-read ambient page context:
       // navigation may have changed it while the request was in flight.
@@ -799,7 +800,7 @@ export function useAgentConversation({
         threadId: createdThreadId ?? targetThreadId,
         failure: sendFailure(error),
       })
-      if (createdThreadId) showCreatedThread(createdThreadId)
+      if (createdThreadId) showCreatedThread(createdThreadId, selection)
 
       // A refusal can mean another turn holds the thread: read who asked for it, too.
       if (targetThreadId !== null) void refreshThread(targetThreadId)
@@ -807,9 +808,9 @@ export function useAgentConversation({
     }
   }
 
-  // A model pinned before the thread existed stays pinned in it, from the moment it shows.
-  const showCreatedThread = (createdThreadId: string) => {
-    if (tiered && newThreadPin) pinModel(createdThreadId, newThreadPin)
+  // The model the first message ran on is pinned in the thread it created, from the moment it shows.
+  const showCreatedThread = (createdThreadId: string, pin: ModelPreference | undefined) => {
+    if (tiered && pin) pinModel(createdThreadId, pin)
     onThreadCreated(createdThreadId)
   }
 
@@ -1025,15 +1026,11 @@ export function useAgentConversation({
   /** Follow the project defaults again, including later changes to them; with tiers, Auto. */
   const resetModelSelection = () => updateModelPreference(null)
 
+  /** The reader's choice: what a new conversation starts on, and the model pinned in this thread. */
   const updateModelPreference = (preference: ModelPreference | null) => {
-    if (!tiered) {
-      setModelPreference(preference)
-      writeModelPreference(preference)
-      return
-    }
-
-    if (threadId === null) setNewThreadPin(preference)
-    else pinModel(threadId, preference)
+    setModelPreference(preference)
+    writeModelPreference(preference)
+    if (tiered && threadId !== null) pinModel(threadId, preference)
   }
 
   // Start from the stored pins, so the ones another tab wrote since are kept.
@@ -1043,15 +1040,11 @@ export function useAgentConversation({
     writeModelPins(pins)
   }
 
-  // Leaving a new conversation, or its first message creating the thread, ends its own pin.
-  useEffect(() => {
-    if (threadId !== null) setNewThreadPin(null)
-  }, [threadId])
-
-  // Another tab pinned a model, or went back to Auto.
+  // Another tab chose a model, pinned one, or went back to Auto.
   useEffect(() => {
     const follow = (event: StorageEvent) => {
       if (event.key === MODEL_PINS_KEY) setModelPins(readModelPins() ?? {})
+      if (event.key === MODEL_PREFERENCE_KEY) setModelPreference(readModelPreference())
     }
     window.addEventListener("storage", follow)
     return () => window.removeEventListener("storage", follow)
