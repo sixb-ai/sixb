@@ -28,9 +28,13 @@ describe("the server a render opens its files from", () => {
       ["clip.mp4", "video/mp4"],
       ["clip.webm", "video/webm"],
       ["clip.mov", "video/quicktime"],
+      ["clip.mkv", "video/x-matroska"],
       ["theme.mp3", "audio/mpeg"],
       ["voice.wav", "audio/wav"],
+      ["voice.oga", "audio/ogg"],
+      ["voice.weba", "audio/webm"],
       ["captions.vtt", "text/vtt; charset=utf-8"],
+      ["captions.srt", "application/x-subrip; charset=utf-8"],
     ] as const) {
       writeFileSync(join(root, file), "bytes")
       const response = await fetch(`http://127.0.0.1:${address.port}/${file}`)

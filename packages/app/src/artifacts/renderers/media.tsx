@@ -1,9 +1,18 @@
 import { Button, Slider } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, Pause, Play } from "lucide-react"
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react"
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import type { FileSource } from "../file-source"
 import { useArtifactMessages } from "../messages"
+import { useNearScreen } from "../near-screen"
+import { formatClock, MEDIA_FRAME, revealDuration } from "../playback"
 import { ViewerNotice } from "./notice"
 
 // Video and sound files, played in place. Video keeps the browser's own controls, which already
@@ -53,8 +62,12 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
       aria-label={name}
       onLoadedMetadata={(event) => {
         const { videoWidth, videoHeight } = event.currentTarget
-        if (videoWidth > 0 && videoHeight > 0) setRatio(videoWidth / videoHeight)
-        else setState("soundOnly")
+        if (videoWidth === 0 || videoHeight === 0) {
+          setState("soundOnly")
+          return
+        }
+        setRatio(videoWidth / videoHeight)
+        revealDuration(event.currentTarget)
       }}
       onLoadedData={() => setState("ready")}
       onError={() => setState("failed")}
@@ -62,7 +75,7 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
         "block transition-colors duration-300",
         // A quiet surface until the first frame arrives, then black around the picture.
         state === "loading" ? "bg-muted" : "bg-black",
-        layout === "fill" ? "size-full object-contain" : cn("mx-auto rounded-xl", FRAME)
+        layout === "fill" ? "size-full object-contain" : cn("mx-auto rounded-xl", MEDIA_FRAME)
       )}
       style={layout === "fill" ? undefined : videoSize(layout, shape)}
     />
@@ -80,8 +93,9 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
 }
 
 /**
- * A video's first frame, under a play mark, for a card: the browser reads just enough of the file
- * to draw it. A file it cannot read, or one that holds sound alone, shows `fallback` instead.
+ * A video's first frame, under a play mark, for a card: once the card nears the screen, the
+ * browser reads just enough of the file to draw it. A file it cannot read, or one that holds sound
+ * alone, shows `fallback` instead.
  */
 export function VideoPoster(props: PosterProps) {
   // Another file starts over: whether it has a frame to show is its own.
@@ -94,29 +108,40 @@ interface PosterProps {
 }
 
 function Poster({ source, fallback }: PosterProps) {
+  const box = useRef<HTMLSpanElement | null>(null)
+  const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined")
   const [state, setState] = useState<"loading" | "ready" | "fallback">("loading")
+  useNearScreen(box, "400px 0px", () => setNear(true), !near)
+
   if (state === "fallback") return fallback
   return (
     <span
+      ref={box}
       className={cn(
         "pointer-events-none absolute inset-0",
         state === "loading" ? "sixb-media-developing" : "bg-black"
       )}
     >
-      <video
-        src={firstFrameUrl(source)}
-        muted
-        playsInline
-        preload="metadata"
-        tabIndex={-1}
-        aria-hidden="true"
-        onLoadedMetadata={(event) => {
-          if (event.currentTarget.videoWidth === 0) setState("fallback")
-        }}
-        onLoadedData={() => setState("ready")}
-        onError={() => setState("fallback")}
-        className={cn("size-full object-cover", state === "ready" ? "sixb-media-in" : "opacity-0")}
-      />
+      {/* Until the card nears the screen, it keeps the surface the frame develops from. */}
+      {near ? (
+        <video
+          src={firstFrameUrl(source)}
+          muted
+          playsInline
+          preload="metadata"
+          tabIndex={-1}
+          aria-hidden="true"
+          onLoadedMetadata={(event) => {
+            if (event.currentTarget.videoWidth === 0) setState("fallback")
+          }}
+          onLoadedData={() => setState("ready")}
+          onError={() => setState("fallback")}
+          className={cn(
+            "size-full object-cover",
+            state === "ready" ? "sixb-media-in" : "opacity-0"
+          )}
+        />
+      ) : null}
       {state === "ready" ? (
         <span className="absolute inset-0 grid place-items-center">
           <span className="grid size-9 place-items-center rounded-full bg-black/45 text-white ring-1 ring-white/25 backdrop-blur-md">
@@ -135,9 +160,6 @@ function Poster({ source, fallback }: PosterProps) {
 function firstFrameUrl(source: FileSource): string {
   return `${source.inlineUrl}#t=0.001`
 }
-
-const FRAME =
-  "ring-1 ring-black/[0.06] shadow-[0_1px_2px_rgb(0_0_0/0.05),0_12px_32px_-12px_rgb(0_0_0/0.28)] dark:ring-white/10 dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),0_12px_32px_-12px_rgb(0_0_0/0.7)]"
 
 /**
  * As large as the space allows at the video's shape: the whole stage, or the column's width, never
@@ -195,13 +217,31 @@ function Audio({ source, name }: MediaProps) {
     if (element.paused) void element.play().catch(() => {})
     else element.pause()
   }
-  const known = duration !== null && Number.isFinite(duration) && duration > 0
+
+  // How long it lasts, once the browser knows.
+  const length = duration !== null && Number.isFinite(duration) && duration > 0 ? duration : null
+  const seek = (to: number) => {
+    const element = audio.current
+    if (!element || length === null) return
+    const position = Math.min(Math.max(to, 0), length)
+    element.currentTime = position
+    setTime(position)
+  }
+
+  // The track drags as finely as it is wide; the keys move by whole steps instead of its 0.1 s.
+  const seekByKey = (event: KeyboardEvent) => {
+    const direction = SEEK_KEYS[event.key]
+    if (direction === undefined || length === null) return
+    event.preventDefault()
+    const leap = event.shiftKey || event.key.startsWith("Page")
+    seek(time + direction * (leap ? KEY_LEAP : KEY_STEP))
+  }
 
   return (
     <div
       className={cn(
         "flex w-[min(28rem,100%)] items-center gap-3 rounded-2xl bg-card p-2.5 pr-4",
-        FRAME
+        MEDIA_FRAME
       )}
     >
       <button
@@ -222,25 +262,23 @@ function Audio({ source, name }: MediaProps) {
         </p>
         <div className="flex items-center gap-2.5">
           <span className="w-9 shrink-0 text-[11px] text-muted-foreground tabular-nums">
-            {clock(time)}
+            {formatClock(time)}
           </span>
           <Slider
-            value={[known ? Math.min(time, duration) : 0]}
-            max={known ? duration : 1}
+            value={[length === null ? 0 : Math.min(time, length)]}
+            max={length ?? 1}
             step={0.1}
-            disabled={!known}
+            disabled={length === null}
             aria-label={messages.position}
             onValueChange={([value]) => {
-              const element = audio.current
-              if (!element || value === undefined) return
-              element.currentTime = value
-              setTime(value)
+              if (value !== undefined) seek(value)
             }}
+            onKeyDown={seekByKey}
             // A taller reach than the thin track, for a finger.
             className="-my-2 py-2 [&_[data-slot=slider-range]]:bg-foreground/80 [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:border-foreground/30 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-foreground/15"
           />
           <span className="w-9 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
-            {known ? clock(duration) : "–:––"}
+            {length === null ? "–:––" : formatClock(length)}
           </span>
         </div>
       </div>
@@ -248,7 +286,10 @@ function Audio({ source, name }: MediaProps) {
         ref={audio}
         src={source.inlineUrl}
         preload="metadata"
-        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onLoadedMetadata={(event) => {
+          setDuration(event.currentTarget.duration)
+          revealDuration(event.currentTarget)
+        }}
         onDurationChange={(event) => setDuration(event.currentTarget.duration)}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -263,13 +304,18 @@ function Audio({ source, name }: MediaProps) {
   )
 }
 
-/** `m:ss`, or `h:mm:ss` past an hour. */
-function clock(seconds: number): string {
-  const whole = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
-  const hours = Math.floor(whole / 3600)
-  const minutes = Math.floor((whole % 3600) / 60)
-  const rest = String(whole % 60).padStart(2, "0")
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`
+/** Seconds a key moves the position by, and with Shift or Page Up and Page Down. */
+const KEY_STEP = 5
+const KEY_LEAP = 15
+
+/** Which way each key the track answers moves the position. */
+const SEEK_KEYS: Readonly<Record<string, -1 | 1>> = {
+  ArrowLeft: -1,
+  ArrowDown: -1,
+  PageDown: -1,
+  ArrowRight: 1,
+  ArrowUp: 1,
+  PageUp: 1,
 }
 
 /** A file the browser could not play: why, and its download. */

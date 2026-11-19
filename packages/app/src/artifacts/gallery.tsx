@@ -6,15 +6,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Layers } from "lucide-react"
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { artifactHref } from "../pages/routes"
 import { useFormat } from "../pages/section-ui"
@@ -23,6 +15,7 @@ import { ArtifactLabel, ArtifactPreview, SlideFace } from "./card-preview"
 import { ArtifactFrame } from "./frame"
 import { ArtifactKindIcon } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
+import { useNearScreen } from "./near-screen"
 import { type ArtifactVersion, useArtifactTheme, useArtifactVersion } from "./queries"
 import { PageScreen } from "./renderers/page"
 import { artifactThemeAttributes } from "./theme"
@@ -377,30 +370,4 @@ function LoadMore({ onVisible, busy }: { readonly onVisible: () => void; readonl
   const sentinel = useRef<HTMLDivElement | null>(null)
   useNearScreen(sentinel, "600px 0px", onVisible, !busy)
   return <div ref={sentinel} className="h-px" aria-hidden="true" />
-}
-
-/**
- * Calls `onNear` each time an element comes within `margin` of the screen, while `active`. Where
- * the browser cannot tell, it never calls it.
- */
-function useNearScreen(
-  element: RefObject<Element | null>,
-  margin: string,
-  onNear: () => void,
-  active: boolean
-): void {
-  const callback = useRef(onNear)
-  callback.current = onNear
-  useEffect(() => {
-    const target = element.current
-    if (!active || !target || typeof IntersectionObserver === "undefined") return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) callback.current()
-      },
-      { rootMargin: margin }
-    )
-    observer.observe(target)
-    return () => observer.disconnect()
-  }, [element, margin, active])
 }

@@ -107,6 +107,22 @@ describe("canonicalMediaType", () => {
     }
   })
 
+  // Reproduce by returning the lowercased type as it is from canonicalMediaType: each alias stays,
+  // and a browser opens its file as a download.
+  test("names common aliases as browsers know them, keeping their parameters", () => {
+    for (const [value, canonical] of [
+      ["audio/x-m4a", "audio/mp4"],
+      ["Audio/X-WAV", "audio/wav"],
+      ["audio/mp3", "audio/mpeg"],
+      ["audio/x-flac", "audio/flac"],
+      ["video/x-m4v", "video/mp4"],
+      ["image/jpg", "image/jpeg"],
+      ["audio/wave; codecs=1", "audio/wav;codecs=1"],
+    ]) {
+      expect(canonicalMediaType(value), value).toBe(canonical)
+    }
+  })
+
   test("rejects lists and anything else that is not one well-formed media type", () => {
     for (const value of [
       // A browser reads a list as its last type.
@@ -247,6 +263,10 @@ describe("inferFileMediaType", () => {
       ["voice.weba", media.webm, "audio/webm"],
       ["voice.m4a", media.mp4, "audio/mp4"],
       ["voice.webm", media.webm, "video/webm"],
+      // An Ogg signature names its codec, so Theora is video under a sound's name. Reproduce by
+      // letting the name speak for any video container in inferFileMediaType.
+      ["film.ogg", media.theora, "video/ogg"],
+      ["voice.ogg", media.opus, "audio/ogg"],
     ] as const) {
       expect(inferFileMediaType(fileName, content), fileName).toBe(mediaType)
     }
