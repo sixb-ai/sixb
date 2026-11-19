@@ -1,5 +1,5 @@
 import { type GetArtifactMediaResponse, getArtifactMedia } from "@sixb/client"
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { apiFileUrl } from "../../../file-source"
 import type { ArtifactVersion } from "../../../queries"
 import { readMediaPart } from "../../../waveform"
@@ -74,39 +74,59 @@ export interface MediaTarget {
 
 /** What is derived of a recording of the video, as it comes. */
 export function useMediaParts(target: MediaTarget | null, path: string | undefined): MediaParts {
+  const asked = askMediaParts(target, path)
+  const query = useQuery(asked.query)
+  return asked.read(query.data)
+}
+
+/** What is derived of each of these recordings, as it comes, in their order. */
+export function useMediaPartsOf(target: MediaTarget, paths: readonly string[]): MediaParts[] {
+  const unique = [...new Set(paths)]
+  const asked = unique.map((path) => askMediaParts(target, path))
+  const queries = useQueries({ queries: asked.map((each) => each.query) })
+  return paths.map((path) => {
+    const index = unique.indexOf(path)
+    return asked[index]?.read(queries[index]?.data) ?? NOTHING
+  })
+}
+
+/** How a recording's parts are asked for, and read once they come. */
+function askMediaParts(target: MediaTarget | null, path: string | undefined) {
   const held = target && path ? target.files.find((file) => file.path === path) : undefined
   // Only videos and sounds have parts: a picture has none to read.
   const kind = held ? importKind({ type: held.file.mediaType ?? "", name: held.path }) : null
   const recording = kind === "video" || kind === "audio"
 
-  const query = useQuery({
-    queryKey: [
-      "artifact-media",
-      target?.artifactId,
-      target?.version,
-      path,
-      held?.file.digest,
-      "editor",
-    ],
-    queryFn: async ({ signal }): Promise<MediaParts> => {
-      if (!target || !path) return NOTHING
-      const { data, response } = await getArtifactMedia({
-        path: { artifactId: target.artifactId, version: String(target.version) },
-        query: { path },
-        signal,
-      })
-      // The version holds no recording there: nothing will come of asking again.
-      if (!data || !response.ok) return UNDERIVED
-      return readMediaParts(data)
+  return {
+    query: {
+      queryKey: [
+        "artifact-media",
+        target?.artifactId,
+        target?.version,
+        path,
+        held?.file.digest,
+        "editor",
+      ],
+      queryFn: async ({ signal }: { readonly signal: AbortSignal }): Promise<MediaParts> => {
+        if (!target || !path) return NOTHING
+        const { data, response } = await getArtifactMedia({
+          path: { artifactId: target.artifactId, version: String(target.version) },
+          query: { path },
+          signal,
+        })
+        // The version holds no recording there: nothing will come of asking again.
+        if (!data || !response.ok) return UNDERIVED
+        return readMediaParts(data)
+      },
+      enabled: !!target && !!path && recording,
+      staleTime: 30_000,
+      retry: false,
+      refetchInterval: (state: { readonly state: { readonly data: MediaParts | undefined } }) =>
+        pollAgainIn(state.state.data),
     },
-    enabled: !!target && !!path && recording,
-    staleTime: 30_000,
-    retry: false,
-    refetchInterval: (state) => pollAgainIn(state.state.data),
-  })
-
-  if (held && !recording) return UNDERIVED
-  return query.data ?? NOTHING
+    read: (data: MediaParts | undefined): MediaParts =>
+      held && !recording ? UNDERIVED : (data ?? NOTHING),
+  }
 }
 
 /**
@@ -161,13 +181,30 @@ export function useTranscript(url: string | undefined): {
   readonly transcript: Transcript | undefined
   readonly failed: boolean
 } {
-  const query = useQuery({
+  const query = useQuery(askTranscript(url))
+  return { transcript: query.data, failed: query.isError }
+}
+
+/** The transcripts of these recordings, as {@link useTranscript} reads each, in their order. */
+export function useTranscriptsOf(urls: readonly (string | undefined)[]): {
+  readonly transcript: Transcript | undefined
+  readonly failed: boolean
+}[] {
+  const unique = [...new Set(urls)]
+  const queries = useQueries({ queries: unique.map(askTranscript) })
+  return urls.map((url) => {
+    const query = queries[unique.indexOf(url)]
+    return { transcript: query?.data, failed: query?.isError ?? false }
+  })
+}
+
+function askTranscript(url: string | undefined) {
+  return {
     queryKey: ["artifact-media-transcript", url],
-    queryFn: async ({ signal }): Promise<Transcript> =>
+    queryFn: async ({ signal }: { readonly signal: AbortSignal }): Promise<Transcript> =>
       readTranscript(await readMediaPart(url ?? "", signal)),
     enabled: !!url,
     staleTime: Number.POSITIVE_INFINITY,
     retry: 1,
-  })
-  return { transcript: query.data, failed: query.isError }
+  }
 }

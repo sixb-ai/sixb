@@ -86,3 +86,62 @@ export function sceneName(scene: VideoScene): string {
 export function sceneFootage(timeline: VideoFileTimeline | undefined): VideoClip | undefined {
   return timeline?.clips.find((clip) => clip.kind === "video" && clip.src)
 }
+
+/** A recording the Transcript tab can show: the file whose clips play it, and those clips. */
+export interface SpokenRecording {
+  readonly src: string
+  /** The open scene's file, or `index.html` for the video's own, such as a voice-over. */
+  readonly file: string
+  readonly clips: readonly LaidClip[]
+}
+
+/**
+ * The recordings heard in the open scene, the sounds and the footage not muted, as the Transcript
+ * tab offers them: the scene's own before the video's, and in each, the one under the playhead
+ * first, then the one heard longest in the scene, then the longest.
+ */
+export function heardRecordings(
+  clips: readonly LaidClip[],
+  open: VideoScene | undefined,
+  timeMs: number
+): SpokenRecording[] {
+  const byRecording = new Map<string, SpokenRecording>()
+  for (const laid of clips) {
+    const { kind, src, silent } = laid.clip
+    if (!src || silent || (kind !== "video" && kind !== "audio")) continue
+
+    const key = `${laid.file}\n${src}`
+    const found = byRecording.get(key)
+    byRecording.set(key, {
+      src,
+      file: laid.file,
+      clips: [...(found?.clips ?? []), laid],
+    })
+  }
+
+  const sceneStart = open?.startMs ?? 0
+  const sceneEnd = open ? open.startMs + open.durationMs : Number.POSITIVE_INFINITY
+  const rank = (recording: SpokenRecording) => ({
+    own: recording.file === VIDEO_ENTRY ? 0 : 1,
+    under: recording.clips.some((laid) => laid.startMs <= timeMs && timeMs < laid.endMs) ? 1 : 0,
+    inScene: sum(recording.clips, (laid) =>
+      Math.max(0, Math.min(laid.endMs, sceneEnd) - Math.max(laid.startMs, sceneStart))
+    ),
+    length: sum(recording.clips, (laid) => laid.endMs - laid.startMs),
+  })
+
+  return [...byRecording.values()]
+    .map((recording) => ({ recording, rank: rank(recording) }))
+    .sort(
+      (a, b) =>
+        b.rank.own - a.rank.own ||
+        b.rank.under - a.rank.under ||
+        b.rank.inScene - a.rank.inScene ||
+        b.rank.length - a.rank.length
+    )
+    .map(({ recording }) => recording)
+}
+
+function sum<T>(items: readonly T[], of: (item: T) => number): number {
+  return items.reduce((total, item) => total + of(item), 0)
+}
