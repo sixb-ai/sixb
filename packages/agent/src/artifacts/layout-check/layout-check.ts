@@ -19,7 +19,8 @@ import type { VideoFrame } from "./video-check"
 
 /** The check's library and each check's files, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
-const CHECKS = "checks"
+/** Each check's files: the screenshots and contact sheets a publish names, which a reviewer gets. */
+export const CHECKS_DIRECTORY = "checks"
 /** Chromium's start, a deck's fonts, and two passes over up to 100 slides, or a page at two widths. */
 const CHECK_TIMEOUT_MS = 120_000
 /**
@@ -138,7 +139,7 @@ export async function checkLayout(
   const { sandbox } = input.handle
   const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
   const library = contextPath(input.handle, LIBRARY)
-  const output = contextPath(input.handle, CHECKS, input.name)
+  const output = contextPath(input.handle, CHECKS_DIRECTORY, input.name)
   // Each page to open, with the kit and the runtime as its frame serves them. The sandbox has no
   // way to the API: what the version shows from other artifacts is a placeholder, and what its
   // queries return is read beforehand.
@@ -249,7 +250,7 @@ export async function checkLayout(
   const reached = { deck: "Slides", page: "Widths", document: "Pages", canvas: "Boards" }[
     input.layout
   ]
-  const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
+  const checks = posix.join(input.handle.contextDirectory, CHECKS_DIRECTORY, input.name)
   const named = (path: string) => posix.join(checks, posix.relative(output, path))
   const screenshots = (report.screenshots ?? []).map(named)
   return {
