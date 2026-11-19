@@ -31,6 +31,7 @@ export {
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
   normalizeAiModelCallOperation,
+  normalizeAiModelCallOperationResult,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
   normalizeAiModelCallStart,

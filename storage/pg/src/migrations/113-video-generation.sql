@@ -5,7 +5,8 @@ ALTER TABLE ai_model_call_usage
 -- A model call the provider keeps running after the request that started it, such as a video
 -- generation. It is kept before the provider starts it, then takes the provider's handle, which a
 -- later request reads to check on the call and record how it ended, under the execution attempt
--- that admitted it.
+-- that admitted it. A pending call keeps its result once it is in the ledger, before its files
+-- are stored.
 CREATE TABLE ai_model_call_operations (
   project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
   call_id TEXT NOT NULL CHECK (length(trim(call_id)) > 0),
@@ -31,7 +32,7 @@ CREATE TABLE ai_model_call_operations (
   FOREIGN KEY (project_id, execution_id)
     REFERENCES executions(project_id, id),
   CHECK ((status = 'pending') = (settled_at IS NULL)),
-  CHECK ((status = 'pending') = (result IS NULL)),
+  CHECK (status = 'pending' OR result IS NOT NULL),
   CHECK (operation IS NOT NULL OR status <> 'completed'),
   CHECK (error IS NULL OR status = 'failed')
 );

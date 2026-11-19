@@ -24,13 +24,18 @@ const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_MAX_VIDEO_BYTES = 512 * 1024 * 1024
 const MAX_REPLY_BYTES = 1024 * 1024
 const DEFAULT_INPUT_IMAGES = { maxCount: 1, maxBytes: 20 * 1024 * 1024 }
+/** The slowest a clip may download: its deadline grows with its size, at this rate. */
+const MIN_DOWNLOAD_BYTES_PER_SECOND = 1024 * 1024
 
 export interface VercelGatewayVideoOptions {
   /** When to pick this model, for people and the agent. Defaults to the catalog's description. */
   readonly description?: string
   /** Passed through to the routed provider, such as `{ vertex: { enhancePrompt: false } }`. */
   readonly providerOptions?: JsonObject
-  /** Bounds each start and status request. Defaults to 60 seconds. */
+  /**
+   * Bounds each start and status request, and a clip's download until its first byte; the rest of
+   * the download gets a second per MiB on top. Defaults to 60 seconds.
+   */
   readonly timeoutMs?: number
   /** Client memory guard for each downloaded video. Defaults to 512 MiB. */
   readonly maxVideoBytes?: number
@@ -190,15 +195,19 @@ export function createGatewayVideo(
     async status(input: { readonly operation: ReadonlyJsonValue; readonly signal?: AbortSignal }) {
       if (!resolution) return (await resolve()).status(input)
 
-      const signal = requestSignal(input.signal, timeoutMs)
       const { payload, requestId } = await post(
         transport.statusUrl,
         // The Gateway takes back the operation it handed out, as it was.
         { operation: input.operation as JsonValue },
         "Video generation status",
-        signal
+        requestSignal(input.signal, timeoutMs)
       )
-      return statusReply(payload, requestId, transport, signal, maxVideoBytes)
+      // A clip can take far longer to download than the status request: each has its own bound.
+      return statusReply(payload, requestId, transport, {
+        ...(input.signal ? { signal: input.signal } : {}),
+        timeoutMs,
+        maxVideoBytes,
+      })
     },
   })
   return binding
@@ -267,12 +276,17 @@ function wireImage(image: VideoInputImage): JsonObject {
     : { type: "file", mediaType: image.mediaType, data: Buffer.from(image.data).toString("base64") }
 }
 
+interface DownloadLimits {
+  readonly signal?: AbortSignal
+  readonly timeoutMs: number
+  readonly maxVideoBytes: number
+}
+
 async function statusReply(
   payload: JsonObject,
   requestId: string | undefined,
   transport: VideoTransport,
-  signal: AbortSignal,
-  maxVideoBytes: number
+  limits: DownloadLimits
 ): Promise<VideoModelStatus> {
   if (payload.status === "pending") return { status: "pending" }
 
@@ -293,7 +307,7 @@ async function statusReply(
   const entries = Array.isArray(payload.videos) ? payload.videos : []
   const videos: VideoData[] = []
   for (const entry of entries) {
-    const video = await videoData(entry, transport, signal, maxVideoBytes)
+    const video = await videoData(entry, transport, limits)
     // An unreadable entry leaves the reply short; the runtime records it and fails the call.
     if (!video) return { status: "completed", output: { videos: [] }, ...metadata }
     videos.push(video)
@@ -311,9 +325,9 @@ async function statusReply(
 async function videoData(
   entry: unknown,
   transport: VideoTransport,
-  signal: AbortSignal,
-  maxVideoBytes: number
+  limits: DownloadLimits
 ): Promise<VideoData | undefined> {
+  const maxVideoBytes = limits.maxVideoBytes
   if (!isJsonObject(entry) || typeof entry.mediaType !== "string") return undefined
   const mediaType = entry.mediaType.split(";", 1)[0]!.trim().toLowerCase()
   if (!/^video\/[a-z0-9.+-]+$/.test(mediaType)) return undefined
@@ -326,16 +340,49 @@ async function videoData(
     return undefined
   }
 
-  // A hosted result is the provider's own URL: Gateway credentials never go with it.
-  const response = await transport.fetch(entry.url, { signal })
-  if (!response.ok || Number(response.headers.get("content-length")) > maxVideoBytes) {
-    void response.body?.cancel().catch(() => undefined)
-    throw new Error(
-      `[SixbVercelGateway] Could not download the generated video (HTTP ${response.status}).`
-    )
+  const deadline = downloadDeadline(limits)
+  try {
+    // A hosted result is the provider's own URL: Gateway credentials never go with it.
+    const response = await transport.fetch(entry.url, { signal: deadline.signal })
+    const length = Number(response.headers.get("content-length")) || undefined
+    if (!response.ok || (length ?? 0) > maxVideoBytes) {
+      void response.body?.cancel().catch(() => undefined)
+      throw new Error(
+        `[SixbVercelGateway] Could not download the generated video (HTTP ${response.status}).`
+      )
+    }
+
+    deadline.extend(length ?? maxVideoBytes)
+    const data = new Uint8Array(await response.arrayBuffer())
+    return data.byteLength > 0 && data.byteLength <= maxVideoBytes ? { data, mediaType } : undefined
+  } finally {
+    deadline.clear()
   }
-  const data = new Uint8Array(await response.arrayBuffer())
-  return data.byteLength > 0 && data.byteLength <= maxVideoBytes ? { data, mediaType } : undefined
+}
+
+/**
+ * A clip's download bound: the request timeout until the response starts, then a second per MiB
+ * of the clip on top, its announced length or the most Sixb accepts.
+ */
+function downloadDeadline(limits: DownloadLimits) {
+  const controller = new AbortController()
+  const abort = () =>
+    controller.abort(
+      new DOMException("[SixbVercelGateway] The video download timed out.", "TimeoutError")
+    )
+  let timer = setTimeout(abort, limits.timeoutMs)
+
+  return {
+    signal: limits.signal ? AbortSignal.any([limits.signal, controller.signal]) : controller.signal,
+    extend(bytes: number) {
+      clearTimeout(timer)
+      const transferMs = Math.ceil((bytes / MIN_DOWNLOAD_BYTES_PER_SECOND) * 1_000)
+      timer = setTimeout(abort, limits.timeoutMs + transferMs)
+    },
+    clear() {
+      clearTimeout(timer)
+    },
+  }
 }
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {

@@ -103,21 +103,25 @@ export async function checkVideoOperation(
     return settle(context, record, event, warnings, "The provider returned no readable video.")
   }
 
-  const blobs = context.blobs
-  if (!blobs) throw new Error("[SixbModels] Video generation requires blob storage.")
-  const files: FileRef[] = []
-  for (const video of returned) {
-    files.push(
-      await blobs.put({
-        body: video.data,
-        expectedSizeBytes: video.data.byteLength,
-        mediaType: video.mediaType,
-      })
-    )
-  }
-  await accounting.recordFiles(record.callId, files)
+  // Kept before the videos are stored: a check that cannot store them still knows the call is in
+  // the ledger, so it never marks the budget the call spent as unknown.
+  const result = videoResult(event, warnings)
+  await context.storage.aiUsage.recordModelCallOperationResult({
+    projectId: record.projectId,
+    callId: record.callId,
+    result: result as unknown as ReadonlyJsonObject,
+  })
 
-  return settle(context, record, event, warnings)
+  try {
+    const files = await storeVideos(context.blobs, returned)
+    await accounting.recordFiles(record.callId, files)
+  } catch (error) {
+    // Past the ceiling, the call ends without its videos instead of being retried forever.
+    if (pastCeiling) return settleRecord(context.storage.aiUsage, record, unstored(result))
+    throw error
+  }
+
+  return settleRecord(context.storage.aiUsage, record, { result })
 }
 
 export function storedVideoRequest(record: AiModelCallOperationRecord): StoredVideoRequest {
@@ -222,6 +226,11 @@ async function expire(
   context: VideoCheckContext,
   record: AiModelCallOperationRecord
 ): Promise<AiModelCallOperationRecord> {
+  // Already in the ledger: what the provider billed stands, only the videos are missing.
+  if (record.result !== undefined) {
+    return settleRecord(context.storage.aiUsage, record, unstored(storedVideoResult(record)))
+  }
+
   const minutes = VIDEO_GENERATION_CEILING_MS / 60_000
   return abandonVideoOperation(
     context.storage.aiUsage,
@@ -259,11 +268,39 @@ async function settle(
   warnings: readonly string[],
   error?: string
 ): Promise<AiModelCallOperationRecord> {
-  const { raw: _, ...usage } = event.usage
   return settleRecord(context.storage.aiUsage, record, {
     ...(error === undefined ? {} : { error }),
-    result: { usage, cost: event.cost, warnings },
+    result: videoResult(event, warnings),
   })
+}
+
+function videoResult(event: ModelCallEndEvent, warnings: readonly string[]): StoredVideoResult {
+  const { raw: _, ...usage } = event.usage
+  return { usage, cost: event.cost, warnings }
+}
+
+/** A call recorded in the ledger whose videos Sixb could not store. */
+function unstored(result: StoredVideoResult) {
+  return { error: "The provider made the video, but Sixb could not store it.", result }
+}
+
+async function storeVideos(
+  blobs: BlobStorage | undefined,
+  videos: readonly VideoData[]
+): Promise<FileRef[]> {
+  if (!blobs) throw new Error("[SixbModels] Video generation requires blob storage.")
+
+  const files: FileRef[] = []
+  for (const video of videos) {
+    files.push(
+      await blobs.put({
+        body: video.data,
+        expectedSizeBytes: video.data.byteLength,
+        mediaType: video.mediaType,
+      })
+    )
+  }
+  return files
 }
 
 /** Two checks may see the job end at once; both answer with the first one's outcome. */
