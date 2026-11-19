@@ -62,7 +62,11 @@ import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
-import { limitRequestBody, RequestBodyTooLargeError } from "./utils/request-body"
+import {
+  declaredBodyTooLarge,
+  limitRequestBody,
+  RequestBodyTooLargeError,
+} from "./utils/request-body"
 import {
   markRequestAuthorized,
   type SixbRequestTimingOptions,
@@ -673,9 +677,13 @@ function startApiServer(
     port: options.port,
     hostname: options.host,
     // No route reads more than a staged upload's content, so Bun rejects anything larger with 413.
-    // Every other body stays capped by `limitRequestBody` below, as it streams.
+    // Every other body is refused below when it declares more than its route reads, and capped by
+    // `limitRequestBody` as it streams.
     maxRequestBodySize: MAX_FILE_UPLOAD_BYTES,
     fetch: (incoming: Request, server: Server<unknown>) => {
+      const tooLarge = declaredBodyTooLarge(incoming)
+      if (tooLarge) return Response.json({ error: tooLarge.message }, { status: 413 })
+
       const socketAddress = server.requestIP(incoming)?.address
       // Elysia parses a body before the auth guard runs, so cap it here, as it streams. The capped
       // request replaces this one before any state is keyed to it.
