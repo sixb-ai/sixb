@@ -121,7 +121,9 @@ export function FileRefUploadField({
   const mediaLabel = value && fileName ? fileMediaLabel(value.mediaType, fileName) : null
 
   return (
-    <div className="w-full min-w-0 space-y-2">
+    // Sized by where it sits, never by its content: a long file name is cut short with an ellipsis
+    // instead of widening a dialog, as `truncate` alone does not prevent.
+    <div className="w-full min-w-0 space-y-2 [contain:inline-size]">
       <input
         ref={inputRef}
         id={inputId}
