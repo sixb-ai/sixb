@@ -3,16 +3,18 @@ import type { BlobStorage } from "../../blob-storage/types"
 import { isValidFileRef } from "../../blob-storage/validation"
 import type { ArtifactFile } from "../../storage/artifacts/types"
 import { ArtifactRequestError } from "../errors"
-import { ARTIFACT_LIMITS } from "../limits"
+import type { ArtifactKind } from "../kinds"
+import { ARTIFACT_LIMITS, artifactSizeLimits } from "../limits"
 
 export type ArtifactBlobStorage = Pick<BlobStorage, "stat" | "open">
 
 /**
- * Checks a version's files before anything reads them: safe unique paths, the per-version limits,
+ * Checks a version's files before anything reads them: safe unique paths, the limits of its kind,
  * and stored bytes that match each reference.
  */
 export async function checkArtifactFiles(
   blobStorage: ArtifactBlobStorage,
+  kind: ArtifactKind,
   files: readonly ArtifactFile[]
 ): Promise<void> {
   if (files.length === 0) throw invalidArtifact("A version needs at least one file.")
@@ -22,6 +24,7 @@ export async function checkArtifactFiles(
     )
   }
 
+  const { maxFileBytes, maxVersionBytes } = artifactSizeLimits(kind)
   const paths = new Set<string>()
   let totalBytes = 0
   for (const entry of files) {
@@ -35,16 +38,16 @@ export async function checkArtifactFiles(
     if (!isValidFileRef(entry.file)) {
       throw invalidArtifact(`'${entry.path}' does not have a valid file reference.`)
     }
-    if (entry.file.sizeBytes > ARTIFACT_LIMITS.maxFileBytes) {
+    if (entry.file.sizeBytes > maxFileBytes) {
       throw invalidArtifact(
-        `'${entry.path}' is ${entry.file.sizeBytes} bytes; a file may be at most ${ARTIFACT_LIMITS.maxFileBytes}.`
+        `'${entry.path}' is ${entry.file.sizeBytes} bytes; in a ${kind} artifact, a file may be at most ${maxFileBytes}.`
       )
     }
     totalBytes += entry.file.sizeBytes
   }
-  if (totalBytes > ARTIFACT_LIMITS.maxVersionBytes) {
+  if (totalBytes > maxVersionBytes) {
     throw invalidArtifact(
-      `The files total ${totalBytes} bytes; a version may hold at most ${ARTIFACT_LIMITS.maxVersionBytes}.`
+      `The files total ${totalBytes} bytes; a version of a ${kind} artifact may hold at most ${maxVersionBytes}.`
     )
   }
 

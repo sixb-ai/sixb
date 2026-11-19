@@ -39,6 +39,10 @@ const { artifact } = await sixb.artifacts.create({
 })
 ```
 
+A version holds at most 500 files: 25 MiB each and 250 MiB in all, except a `file` artifact,
+whose one file may reach 2 GiB, such as a recording. Every file counts at its full size, also one
+an earlier version holds already.
+
 `sixb.artifacts.update(artifact.id, input)` replaces the current version's content. An update
 checks the whole version first: a document's images must be files in that version or another
 artifact's address, so it reads the same wherever it opens.
@@ -58,7 +62,8 @@ position, yours wins; words you both typed in the same text are both kept. A can
 with `artifact_moved` when Sixb no longer holds the files of `baseRevision`.
 
 From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{artifactId}/content`
-with files uploaded through `POST /api/files`.
+with files uploaded through `POST /api/files`, or staged past 25 MiB, as `sixb files upload` does
+([Files](../server/overview.md#files)).
 
 ## Versions and restore points
 

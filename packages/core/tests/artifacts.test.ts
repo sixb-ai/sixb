@@ -31,6 +31,8 @@ function setup() {
   return { host, deps, as, put }
 }
 
+const MiB = 1024 * 1024
+
 async function expectRequestError(
   promise: Promise<unknown>,
   code: ArtifactRequestErrorCode,
@@ -224,7 +226,36 @@ describe("publishing any version", () => {
         files: [page, ...assets(11).map((file) => ({ ...file, file: large }))],
       }),
       "invalid_artifact",
-      `a version may hold at most ${250 * 1024 * 1024}`
+      `a version of a page artifact may hold at most ${250 * 1024 * 1024}`
+    )
+  })
+
+  test("lets a file artifact's one file reach 2 GiB, and keeps 25 MiB for every other kind", async () => {
+    const { as, put } = setup()
+    const page = await put("index.html", "<!doctype html><title>Film</title><p>Film</p>")
+    const film = await put("film.mp4", "not really a film", "video/mp4")
+    // Counted from the reference before any byte is read: past the limit refuses it, and within
+    // it the check goes on to find nothing stored under that size.
+    const sized = (sizeBytes: number) => ({ ...film, file: { ...film.file, sizeBytes } })
+
+    await expectRequestError(
+      as("alice").artifacts.create({ kind: "file", title: "Film", files: [sized(300 * MiB)] }),
+      "invalid_artifact",
+      "refers to a file that is not stored"
+    )
+    await expectRequestError(
+      as("alice").artifacts.create({ kind: "file", title: "Film", files: [sized(2048 * MiB + 1)] }),
+      "invalid_artifact",
+      `in a file artifact, a file may be at most ${2048 * MiB}`
+    )
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page",
+        title: "Film",
+        files: [page, { ...sized(25 * MiB + 1), path: "film.mp4" }],
+      }),
+      "invalid_artifact",
+      `in a page artifact, a file may be at most ${25 * MiB}`
     )
   })
 
