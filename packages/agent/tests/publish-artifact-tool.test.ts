@@ -2575,11 +2575,19 @@ describe("a video", () => {
     )) as { artifactId: string; layoutCheck: { frames: unknown[] } }
 
     const checks = join(root, `.sixb/agent/checks/${published.artifactId}-r1`)
-    // Its HTML as a frame serves it, an address it cannot reach dropped; every other file linked
-    // from where the Agent wrote it.
-    expect(
-      read(`.sixb/agent/checks/${published.artifactId}-r1/project/scenes/intro.html`)
-    ).not.toContain("artifact:")
+    // Its HTML as a frame serves it, an address pointed at the file it lends, fetched as the
+    // export fetches it; every other file linked from where the Agent wrote it.
+    // Guard proof: give checkVideo no lent files or targets (publish-tool.ts); the picture from
+    // the other artifact is dropped from the check's frames, which the export shows.
+    const intro = read(`.sixb/agent/checks/${published.artifactId}-r1/project/scenes/intro.html`)
+    expect(intro).not.toContain("artifact:")
+    expect(intro).toContain(`__sixb/ref/${shot.artifactId}@latest/a.png`)
+    expect(JSON.parse(readFileSync(join(checks, "fetches.json"), "utf8"))).toEqual([
+      {
+        path: `__sixb/ref/${shot.artifactId}@latest/a.png`,
+        args: ["files", "download", "artifact", shot.artifactId, "1", "--path", "a.png"],
+      },
+    ])
     expect(JSON.parse(readFileSync(join(checks, "links.json"), "utf8"))).toEqual({
       "media/clip.mp4": join(root, "film/media/clip.mp4"),
       "media/logo.svg": join(root, "film/media/logo.svg"),

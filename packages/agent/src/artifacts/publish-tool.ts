@@ -14,6 +14,7 @@ import {
   ARTIFACT_THEME_FILE,
   CANVAS_FILE,
   type Canvas,
+  parseArtifactAddress,
   parseArtifactTheme,
   parseCanvas,
 } from "@sixb/core/artifacts"
@@ -23,7 +24,7 @@ import {
   type AgentRunArtifacts,
   type AgentRunFileStore,
 } from "@sixb/core/internal/agents"
-import { frameLayout } from "@sixb/core/internal/artifacts/frames"
+import { FRAME_REFERENCE_PREFIX, frameLayout } from "@sixb/core/internal/artifacts/frames"
 import { isLiveTextPath } from "@sixb/core/internal/artifacts/live"
 import {
   ARTIFACT_LIMITS,
@@ -32,6 +33,7 @@ import {
   DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
+  resolveVideoMedia,
   VIDEO_ENTRY,
   videoFilesPlayed,
 } from "@sixb/core/internal/artifacts/publish"
@@ -41,7 +43,7 @@ import {
   UNTYPED_MEDIA_TYPE,
 } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
-import type { ArtifactFile, ArtifactRecord } from "@sixb/core/storage"
+import type { ArtifactFile, ArtifactFrameTarget, ArtifactRecord } from "@sixb/core/storage"
 import { agentToolErrorText } from "../model-adapters"
 import {
   listSandboxFiles,
@@ -649,13 +651,63 @@ async function checkPublishedVideo(
     if ("file" in file) files.push(await remoteRecording(input, published, file, signal))
   }
 
+  const lent = await lentFiles(input, published)
   return checkVideo({
     handle,
-    files,
+    files: [...files, ...lent.files],
+    targets: lent.targets,
     outline: version.outline,
     name: `${artifact.id}-r${version.revision}`,
     signal,
   })
+}
+
+/**
+ * What a video embeds from other artifacts, by `artifact:` address, as its export lends it: each
+ * file fetched under `__sixb/ref/`, where its HTML is pointed, read as the Agent's requester reads
+ * it. An address it cannot read is left out, and its HTML loses the file, as a frame shows it.
+ */
+async function lentFiles(
+  input: PublishToolsInput,
+  { version }: PublishedArtifact
+): Promise<{ readonly targets: ArtifactFrameTarget[]; readonly files: VideoCheckFile[] }> {
+  // Each artifact's version as read, to fetch the very file the address resolved to.
+  const read = new Map<string, number>()
+  const media = await resolveVideoMedia(version, async (artifactId, number) => {
+    const found = await input.artifacts.getVersion(artifactId, number)
+    if (found) read.set(`${artifactId}@${number}`, found.version)
+    return found
+  })
+
+  const targets: ArtifactFrameTarget[] = []
+  const files: VideoCheckFile[] = []
+  for (const { address, file } of media) {
+    const parsed = parseArtifactAddress(address)
+    if (!file || !parsed?.path) continue
+
+    const target = {
+      address,
+      artifactId: parsed.artifactId,
+      version: parsed.version ?? ("latest" as const),
+    }
+    const number = read.get(`${target.artifactId}@${target.version}`)
+    if (number === undefined) continue
+
+    targets.push(target)
+    files.push({
+      path: `${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${parsed.path}`,
+      fetch: [
+        "files",
+        "download",
+        "artifact",
+        target.artifactId,
+        String(number),
+        "--path",
+        parsed.path,
+      ],
+    })
+  }
+  return { targets, files }
 }
 
 /** How the check fetches a recording the version keeps in the API: its proxy, or a sound whole. */
