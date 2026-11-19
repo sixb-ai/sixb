@@ -30,7 +30,8 @@ const HOST_PLACE = "<!-- scene -->"
  *   with what it writes, its length, and its start from the scene's, in the order `index.html`
  *   lists them, which stacks them;
  * - its start in the video, only when the root plays or animates something of its own
- *   (`rootTimeline`): only then does what the scene shows depend on when it plays;
+ *   (`rootTimeline`): only then does what the scene shows depend on when it plays. A scene's own
+ *   CSS animations and GSAP timeline run from its start, wherever it plays (measured: README);
  * - every other file of the version, with what it holds, but the other scenes' HTML and the videos
  *   and sounds neither the root, the scene, nor a scene on screen with it plays.
  *
@@ -53,9 +54,11 @@ export function sceneRenderKeys(input: {
   readonly files: readonly ArtifactFile[]
   /** What the root plays itself. */
   readonly rootLoads: ReadonlySet<string>
+  /** Whether the root plays or animates something of its own, its linked files read. */
+  readonly rootTimeline: boolean
   readonly loads: ReadonlyMap<string, ReadonlySet<string>>
 }): ReadonlyMap<string, string> {
-  const { index, composition, files, rootLoads, loads } = input
+  const { index, composition, files, rootLoads, rootTimeline, loads } = input
   const { scenes } = composition
 
   const durationAt = composition.root.attributes["data-duration"]
@@ -105,7 +108,7 @@ export function sceneRenderKeys(input: {
         scene.id,
         sha256(root),
         beside.map((each) => [hostOf(each), each.startMs - scene.startMs, each.durationMs]),
-        composition.rootTimeline ? scene.startMs : null,
+        rootTimeline ? scene.startMs : null,
         loaded,
       ]
       return [scene.id, sha256(JSON.stringify(key))] as const

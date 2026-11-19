@@ -160,8 +160,13 @@ describe("a video's composition", () => {
       timeline('<div class="logo"></div>', 'data-width="1920" data-height="1080" data-start="0"')
     ).toBe(false)
 
+    // A library, or a stylesheet, is read with the version's files: see the publishing tests.
+    expect(
+      timeline('<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>')
+    ).toBe(false)
+    expect(timeline('<link rel="stylesheet" href="styles.css">')).toBe(false)
+
     expect(timeline("<style>@keyframes grain { to { opacity: 0 } }</style>")).toBe(true)
-    expect(timeline('<link rel="stylesheet" href="styles.css">')).toBe(true)
     expect(timeline("<script>window.__timelines = {}</script>")).toBe(true)
     expect(timeline('<div style="transition: opacity 1s"></div>')).toBe(true)
     expect(timeline(MUSIC, 'data-width="1920" data-height="1080" data-duration="2"')).toBe(true)
@@ -552,6 +557,48 @@ describe("publishing a video", () => {
       demo: expect.not.stringMatching(before.demo ?? ""),
       outro: expect.not.stringMatching(before.outro ?? ""),
     })
+  })
+
+  // Removal proof: let linksMove return false, and the moving stylesheet, the stylesheet from
+  // elsewhere, and the timeline script leave the outro's key as it was; let it return true, and the
+  // libraries and the still stylesheets change it.
+  test("reads what the root links to tell whether it moves", async () => {
+    const { publish } = setup()
+    const silent = (LAUNCH["index.html"] ?? "").replace(MUSIC, "").replace(' data-duration="7"', "")
+    const outroMoves = async (head: string, files: Record<string, string> = {}) => {
+      const linked = silent.replace("<html>", `<html><head>${head}</head>`)
+      const keys = async (root: string) =>
+        keysOf((await publish({ ...LAUNCH, ...files, "index.html": root })).version.outline).outro
+      return (
+        (await keys(linked)) !==
+        (await keys(linked.replace('data-duration="3"', 'data-duration="2.5"')))
+      )
+    }
+    const css = (href: string) => `<link rel="stylesheet" href="${href}">`
+    const script = (src: string) => `<script src="${src}"></script>`
+
+    // Still: a stylesheet of the version without motion, Google Fonts, and libraries.
+    expect(await outroMoves(css("styles.css"))).toBe(false)
+    expect(await outroMoves(css("https://fonts.googleapis.com/css2?family=Inter"))).toBe(false)
+    expect(
+      await outroMoves(script("https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"))
+    ).toBe(false)
+    expect(await outroMoves(script("lib.js"), { "lib.js": "window.ease = (t) => t" })).toBe(false)
+
+    // Moving: a stylesheet that animates, one nobody can read, and a script that registers a timeline.
+    expect(
+      await outroMoves(css("styles.css"), {
+        "styles.css": "@keyframes grain { to { opacity: 0 } }",
+      })
+    ).toBe(true)
+    expect(
+      await outroMoves(css("https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css"))
+    ).toBe(true)
+    expect(
+      await outroMoves(script("timeline.js"), {
+        "timeline.js": "window.__timelines = { main: gsap.timeline({ paused: true }) }",
+      })
+    ).toBe(true)
   })
 
   // Removal proof: let sceneRenderKeys take the scene alone as `beside`, and the outro keeps its
