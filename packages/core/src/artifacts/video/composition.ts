@@ -288,7 +288,7 @@ function readRoot(html: string): VideoRoot {
     width,
     height,
     fps,
-    durationMs: videoLength(root, hosts, scenes),
+    durationMs: videoLength(root, hosts, fps, scenes),
     scenes,
     media: mediaOf(document.childNodes),
     root: hostSource(root),
@@ -304,6 +304,7 @@ function readRoot(html: string): VideoRoot {
 function videoLength(
   root: Element,
   hosts: readonly Element[],
+  fps: number,
   scenes: readonly { readonly id: string; readonly startMs: number; readonly durationMs: number }[]
 ): number {
   const end = Math.max(...scenes.map((scene) => scene.startMs + scene.durationMs))
@@ -323,7 +324,9 @@ function videoLength(
     ? readSeconds(root, "data-duration", "the root composition")
     : end
 
-  if (durationMs < end) {
+  // A rounded start or length can leave the last scene ending a little past the video. Less than
+  // a frame past, the video cuts nothing anyone sees; a frame or more past, it cuts a frame.
+  if ((end - durationMs) * fps >= 1000) {
     const last = scenes.find((scene) => scene.startMs + scene.durationMs === end)
     throw new CompositionError(
       `scene '${last?.id}' ends at ${end / 1000} s, after the root composition's data-duration of ${durationMs / 1000} s: lengthen the video, or end the scene sooner.`
