@@ -824,7 +824,8 @@ A range shows as a table formatted the way its sheet formats it, a chart as the 
 its text, an image file as the image, a video or sound file as a player, a deck as its first slide,
 a page live, as tall as it lays out up to 800px and then scrolling, and any other whole artifact as
 a card. Under each, a line names the source and whether it follows the latest version or a fixed
-one. Something shown inside a shown artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
+one. Something shown inside a shown artifact appears as a link. In a sheet, a `link` or `image`
+column cell can hold an address.
 
 Publishing resolves every address in a version against what its author can read, and refuses one
 that names nothing, saying what the target has instead, and one pinned to a version still open.
