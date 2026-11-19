@@ -18,6 +18,7 @@ import {
   type BlobStorage,
   defineMarking,
   defineObjectType,
+  type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -42,6 +43,7 @@ import { videoFilesPlayed } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import * as Y from "yjs"
 import {
@@ -50,6 +52,7 @@ import {
   materializeThreadArtifacts,
 } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
+import { prepareAgentAttachments } from "../src/attachments"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 import { AgentFileBudget } from "../src/tools/tool-files"
@@ -260,6 +263,8 @@ type ToolOptions = {
   readonly blobStorage?: BlobStorage
   /** The run's environment in its sandbox, as `sixb` reads it. */
   readonly env?: Readonly<Record<string, string>>
+  /** The run's attachments, as `$SIXB_ATTACHMENTS` lists them; none when omitted. */
+  readonly attachments?: Awaited<ReturnType<typeof prepareAgentAttachments>>["entries"]
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -340,6 +345,7 @@ function tools(options: ToolOptions = {}) {
       ...(options.env ? { env: options.env } : {}),
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
+    ...(options.attachments ? { attachments: options.attachments } : {}),
   })
   // One tool: `version` is it, called with an id.
   return { create, version: create, open }
@@ -2827,5 +2833,153 @@ describe("a video", () => {
     } finally {
       api.close()
     }
+  })
+
+  /** The conversation's attachments as a run lists them: a user's message in `threadId`. */
+  async function attachmentsOf(threadId: string, messageId: string, file: FileRef) {
+    const message: AgentMessageRecord = {
+      id: messageId,
+      projectId,
+      threadId,
+      runId: null,
+      role: "user",
+      seq: 1,
+      parts: [
+        { type: "text", text: "Here is the talk." },
+        { type: "file", fileRef: file },
+      ],
+      contentVersion: 2,
+      createdAt: new Date(0),
+    }
+    const { entries } = await prepareAgentAttachments({
+      projectId,
+      threadId,
+      messages: [message],
+      blobStorage,
+      apiBaseUrl: "http://sixb.test",
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      inlineImages: false,
+    })
+    return entries
+  }
+
+  /** A user's recording, stored as they attached it. */
+  function talk(contents = "the talk") {
+    const body = new TextEncoder().encode(contents)
+    return blobStorage.put({ body, fileName: "IMG_0042.MOV", mediaType: "video/quicktime" })
+  }
+
+  /** A film whose demo plays the user's talk, which its folder does not hold. */
+  function writeTalkFilm(folder: string) {
+    writeFilm(folder, scene("demo", '<video src="media/talk.mov" muted></video>'))
+    rmSync(join(root, folder, "media/clip.mp4"))
+  }
+
+  // Guard proof: leave the attachments out of the version (attachedFiles in publish-tool.ts); its
+  // demo then plays a file it does not hold, and publishing refuses it. Warn only of what the
+  // sandbox reports missing (checkVideo, video-check.ts), and the first check goes without the
+  // recording silently.
+  test("holds an attachment as it is stored, never reading it, and keeps it on later updates", async () => {
+    const recording = await talk()
+    const attachments = await attachmentsOf(run.threadId, "msg_talk", recording)
+    writeTalkFilm("film")
+    // Neither the tool nor the install reads the recording's bytes.
+    const refusing = refusingToOpen([recording.blobId])
+    const installed = install({ blobStorage: refusing })
+
+    const published = (await publish(
+      {
+        path: "film",
+        kind: "video",
+        title: "Talk",
+        attachments: [{ path: "media/talk.mov", key: attachments[0]?.key }],
+      },
+      { installed, blobStorage: refusing, attachments, check: videoCheck }
+    )) as { artifactId: string; warnings: unknown[] }
+    const { artifactId } = published
+    const held = async () =>
+      (await storage.artifacts.getVersion({ projectId, artifactId, version: 1 }))?.files.find(
+        (file) => file.path === "media/talk.mov"
+      )?.file
+
+    expect(await held()).toEqual(recording)
+    expect(existsSync(join(root, "film/media/talk.mov"))).toBe(false)
+    // It has no proxy yet: the check says it went without it.
+    expect(published.warnings).toContainEqual({
+      code: "video_unchecked_media",
+      message: expect.stringMatching(
+        /^media\/talk\.mov was not checked, and its frames show without it: it has no proxy: [^.]+\.$/
+      ),
+    })
+
+    // An update from the folder keeps it, and the check fetches its proxy once it is ready.
+    await derive(recording.digest)
+    write("film/index.html", film(4))
+    const updated = (await publishVersion(
+      { id: artifactId, path: "film", title: "Talk" },
+      { installed, blobStorage: refusing, check: videoCheck }
+    )) as { revision: number }
+
+    expect(await held()).toEqual(recording)
+    const fetches = JSON.parse(
+      read(`.sixb/agent/checks/${artifactId}-r${updated.revision}/fetches.json`)
+    )
+    expect(fetches).toEqual([
+      {
+        path: "media/talk.mov",
+        args: [
+          "artifacts",
+          "media",
+          artifactId,
+          "--version",
+          "1",
+          "--path",
+          "media/talk.mov",
+          "--part",
+          "proxy",
+        ],
+      },
+    ])
+  })
+
+  /** Why publishing the talk film with this attachment key is refused. */
+  async function attachmentRefusal(
+    key: string,
+    attachments: Awaited<ReturnType<typeof attachmentsOf>>
+  ): Promise<string> {
+    writeTalkFilm("film")
+    const { create } = tools({ attachments })
+    const input = {
+      path: "film",
+      kind: "video",
+      title: "Talk",
+      attachments: [{ path: "media/talk.mov", key }],
+    }
+
+    const error = await create.execute(create.parseInput(input), context).catch((each) => each)
+    expect(error).toBeInstanceOf(AgentToolPublicError)
+    expect((await storage.artifacts.list({ projectId })).artifacts).toEqual([])
+    return create.errorText(error)
+  }
+
+  // Guard proof: drop the refusal of a key the run does not list (attachedFiles in
+  // publish-tool.ts); the publish then fails reading a file of nothing, which the Agent cannot act
+  // on.
+  test("refuses an attachment key the conversation does not list, saying where keys are", async () => {
+    const attachments = await attachmentsOf(run.threadId, "msg_talk", await talk())
+
+    expect(await attachmentRefusal("msg_nope:1", attachments)).toBe(
+      "[SixbAgent] publish_artifact refused: 'msg_nope:1' is not an attachment of this conversation: pass a key $SIXB_ATTACHMENTS lists."
+    )
+  })
+
+  test("refuses another conversation's attachment", async () => {
+    await startRun("thr_2", owner)
+    const ours = await attachmentsOf(run.threadId, "msg_talk", await talk())
+    const theirs = await attachmentsOf("thr_2", "msg_theirs", await talk("their talk"))
+    const key = theirs[0]?.key ?? ""
+
+    expect(key).not.toBe(ours[0]?.key)
+    expect(await attachmentRefusal(key, ours)).toContain(`'${key}' is not an attachment`)
   })
 })

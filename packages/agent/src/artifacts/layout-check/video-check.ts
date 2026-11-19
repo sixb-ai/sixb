@@ -233,9 +233,16 @@ export async function checkVideo(input: {
     warnings: [
       ...craftWarnings(input.outline, taken),
       ...videoWarnings(report.findings ?? [], input.outline),
-      ...(report.missing ?? []).map(({ path, why }) => ({
+      // Left out before the check ran, such as a recording whose proxy is still being made, or
+      // whose fetch failed in it.
+      ...[
+        ...input.files.flatMap((file) =>
+          "missing" in file ? [{ path: file.path, why: file.missing }] : []
+        ),
+        ...(report.missing ?? []),
+      ].map(({ path, why }) => ({
         code: "video_unchecked_media",
-        message: `${path} was not checked, and its frames show without it: ${why.slice(0, 200)}.`,
+        message: `${path} was not checked, and its frames show without it: ${why.slice(0, 200).replace(/\.$/, "")}.`,
       })),
       ...(report.stopped === undefined
         ? []
