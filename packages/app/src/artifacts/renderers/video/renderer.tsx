@@ -1,11 +1,19 @@
 import { resolveArtifactAddress, type VideoOutline } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
+import { lazy, Suspense } from "react"
+import { useArtifactEditing } from "../../edit-session"
+import { useLiveArtifactState, useViewerLiveArtifact } from "../../live/hooks"
+import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
+import { ViewerLoading } from "../notice"
 import { chapterStart } from "./chapters"
 import { VideoPlayer } from "./player"
 
 // A video, played in the app: its player opens at the scene or the instant an address names, or
-// at its start.
+// at its start. Editing it, the reader cuts it on its timeline, live, in an editor loaded only
+// then.
+
+const VideoEditor = lazy(() => import("./editor/editor"))
 
 export function VideoRenderer({
   version,
@@ -14,8 +22,20 @@ export function VideoRenderer({
   readonly version: ArtifactVersion
   readonly part?: string
 }) {
+  const messages = useArtifactMessages()
+  const editing = useArtifactEditing()
+  const live = useViewerLiveArtifact()
+  const liveState = useLiveArtifactState(live)
   const { outline } = version
   if (outline.kind !== "video") return null
+
+  if (editing && live && liveState.synced && !liveState.left && liveState.access === "edit") {
+    return (
+      <Suspense fallback={<ViewerLoading label={messages.viewer.loading} />}>
+        <VideoEditor version={version} outline={outline} live={live} />
+      </Suspense>
+    )
+  }
 
   return <VideoPlayer version={version} outline={outline} start={startOf(version, outline, part)} />
 }

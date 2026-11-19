@@ -4,6 +4,7 @@ import { liveDocumentOf } from "./document"
 import type { LiveNoticeReason } from "./header"
 import { useLiveArtifact, useLiveArtifactState } from "./hooks"
 import type { LiveArtifact, LiveArtifactState } from "./session"
+import { liveVideoOf } from "./video"
 
 /** A viewer's hold on an artifact edited live, and whether the reader is editing it. */
 export interface LiveView {
@@ -32,11 +33,12 @@ const noSubscription = () => () => {}
  * Holds the artifact live while its latest version is shown: null for an older version, and for
  * an artifact that is not edited live. A canvas is drawn from the document once it holds it;
  * until then, and if the server never holds it live, the version does, and editing it is a draft.
- * A designed document is typed into through its frame, and its undo is the document's.
+ * A designed document is typed into through its frame, and its undo is the document's. A video is
+ * cut on its timeline, and its undo is the video's.
  */
 export function useLiveView(
   artifactId: string | null,
-  kind: "canvas" | "document" = "canvas"
+  kind: "canvas" | "document" | "video" = "canvas"
 ): LiveView | null {
   const live = useLiveArtifact(artifactId)
   const state = useLiveArtifactState(live)
@@ -64,7 +66,13 @@ export function useLiveView(
   }, [notice])
 
   const editor =
-    live && state.synced ? (kind === "canvas" ? liveCanvasOf(live) : liveDocumentOf(live)) : null
+    live && state.synced
+      ? kind === "canvas"
+        ? liveCanvasOf(live)
+        : kind === "video"
+          ? liveVideoOf(live)
+          : liveDocumentOf(live)
+      : null
   const history = useSyncExternalStore(
     editor?.subscribe ?? noSubscription,
     editor?.getHistory ?? (() => NO_HISTORY),
