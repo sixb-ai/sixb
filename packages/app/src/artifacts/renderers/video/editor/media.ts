@@ -1,7 +1,7 @@
 import { getArtifactMedia } from "@sixb/client"
 import { useQuery } from "@tanstack/react-query"
 import { apiFileUrl } from "../../../file-source"
-import type { TranscriptWord } from "./transcript"
+import { readTranscript, type Transcript } from "./transcript"
 
 // What the editor reads of a recording of the video: how long it is, its filmstrip, its sound's
 // peaks, its cuts and its transcript, as Sixb derives them once the version holds it. A recording
@@ -129,28 +129,20 @@ export function usePeaks(url: string | undefined): Peaks | undefined {
   }).data
 }
 
-/** The words a transcript's file holds, in spoken order, once read. */
-export function useTranscriptWords(url: string | undefined): {
-  readonly words: readonly TranscriptWord[] | undefined
+/** A recording's transcript, as {@link readTranscript} reads its file, once read. */
+export function useTranscript(url: string | undefined): {
+  readonly transcript: Transcript | undefined
   readonly failed: boolean
 } {
   const query = useQuery({
     queryKey: ["artifact-media-transcript", url],
-    queryFn: async ({ signal }): Promise<readonly TranscriptWord[]> => {
-      const body = await readJson(url ?? "", signal)
-      const words = Array.isArray(body.words) ? body.words : []
-      return words.flatMap((word: unknown) => {
-        if (typeof word !== "object" || word === null) return []
-        const { text, startMs, endMs } = word as Record<string, unknown>
-        if (typeof text !== "string" || !isNumber(startMs) || !isNumber(endMs)) return []
-        return [{ text: text.trim(), startMs, endMs: Math.max(endMs, startMs) }]
-      })
-    },
+    queryFn: async ({ signal }): Promise<Transcript> =>
+      readTranscript(await readJson(url ?? "", signal)),
     enabled: !!url,
     staleTime: Number.POSITIVE_INFINITY,
     retry: 1,
   })
-  return { words: query.data, failed: query.isError }
+  return { transcript: query.data, failed: query.isError }
 }
 
 async function readJson(url: string, signal: AbortSignal): Promise<Record<string, unknown>> {

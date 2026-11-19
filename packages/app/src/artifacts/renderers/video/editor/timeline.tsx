@@ -1,6 +1,8 @@
 import {
+  type ArtifactLiveUser,
   VIDEO_ENTRY,
   type VideoComposition,
+  type VideoFileTimeline,
   type VideoScene,
   type VideoTrack,
 } from "@sixb/core/artifacts/live"
@@ -9,6 +11,7 @@ import { AudioLines, Image as ImageIcon, Type, Video } from "lucide-react"
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -27,11 +30,13 @@ import {
   trackRows,
   zoomAround,
 } from "./model"
-import { FilmstripFrame } from "./scenes"
-import { clipName, type EditorSelection, sceneName } from "./selection"
+import { useReorder } from "./reorder"
+import { FilmstripFrame, type SceneActions, SceneBlock, SceneDropMark } from "./scenes"
+import { clipName, type EditorSelection } from "./selection"
 
-// The timeline: one axis for the whole video, its scenes along the top, the open scene's clips
-// under them on the picture, text and sound tracks, and the video's own soundtrack at the foot.
+// The timeline: one axis for the whole video, its scenes along the top, each with its picture, the
+// open scene's clips under them on the picture, text and sound tracks, and the video's own
+// soundtrack at the foot. A scene is dragged along its track to reorder it.
 // Clips are dragged to move and trimmed by their edges, snapping to the playhead, the marks, every
 // edge and the cuts of their footage; Shift lets them go free. Ctrl or ⌘ with the wheel, or a
 // pinch, zooms around the pointer.
@@ -43,10 +48,21 @@ const TAIL_PX = 160
 
 const ROW_PX: Record<"ruler" | "scenes" | VideoTrack, number> = {
   ruler: 24,
-  scenes: 40,
+  scenes: 52,
   picture: 44,
   text: 26,
   sound: 36,
+}
+
+/**
+ * Each track's colour, from the app's own tokens so it sits in its palette, light and dark: the
+ * picture in the project's colour, words on a tint of it, sound on the neutral. Labels keep the
+ * contrast their tokens are made for.
+ */
+export const TRACK_TONE: Record<VideoTrack, string> = {
+  picture: "bg-primary text-primary-foreground",
+  text: "bg-[color-mix(in_oklab,var(--primary)_16%,var(--background))] text-foreground",
+  sound: "bg-[color-mix(in_oklab,var(--foreground)_11%,var(--background))] text-foreground",
 }
 
 /** A clip, or a scene's end, being dragged: where it was, and where it is now. */
@@ -83,6 +99,8 @@ export interface TimelineEdits {
   readonly moveClip: (clip: LaidClip, startMs: number) => void
   readonly trimClip: (clip: LaidClip, edge: "start" | "end", atMs: number) => void
   readonly sceneLength: (scene: VideoScene, ms: number) => void
+  /** Reorders, duplicates, deletes or renames a scene. */
+  readonly scene: SceneActions
 }
 
 export function Timeline({
@@ -94,11 +112,14 @@ export function Timeline({
   marks,
   snapping,
   agentScenes,
+  people,
+  timelines,
   target,
   uploads,
   toolbar,
   edits,
   dropTarget,
+  formatLength,
 }: {
   readonly composition: VideoComposition
   /** The open scene's clips and the video's own, laid out in its time. */
@@ -109,6 +130,10 @@ export function Timeline({
   readonly marks: { readonly in?: number; readonly out?: number }
   readonly snapping: boolean
   readonly agentScenes: ReadonlySet<string>
+  /** Who else has each scene open, by its id. */
+  readonly people: ReadonlyMap<string, readonly ArtifactLiveUser[]>
+  /** Each file's clips and texts, which a scene's picture falls back on. */
+  readonly timelines: ReadonlyMap<string, VideoFileTimeline>
   readonly target: MediaTarget
   /** Files being uploaded, shown where they will land. */
   readonly uploads: readonly {
@@ -123,9 +148,22 @@ export function Timeline({
   readonly edits: TimelineEdits
   /** Whether files are being dragged over the editor. */
   readonly dropTarget: boolean
+  /** A scene's length, as the reader reads it. */
+  readonly formatLength: (ms: number) => string
 }) {
   const messages = useArtifactMessages().videoEditor
   const scroller = useRef<HTMLDivElement | null>(null)
+  const scenesRow = useRef<HTMLDivElement | null>(null)
+
+  // A scene dragged along its track lands before the scene whose middle it passes.
+  const { drag: reorder, start: startReorder } = useReorder({
+    items: () => [...(scenesRow.current?.querySelectorAll<HTMLElement>("[data-reorder-id]") ?? [])],
+    axis: "x",
+    onMove: (id, _from, to) => {
+      const scene = composition.scenes.find((each) => each.id === id)
+      if (scene) edits.scene.move(scene, to)
+    },
+  })
   const [width, setWidth] = useState(0)
   const [pxPerSecond, setPxPerSecond] = useState<number | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -364,6 +402,12 @@ export function Timeline({
     })
   }
 
+  /** Where a scene dropped in `slot` goes: the start of the scene there, or the video's end. */
+  const dropAt = (slot: number) => {
+    const scene = composition.scenes[slot]
+    return px(scene ? scene.startMs : composition.durationMs)
+  }
+
   const snapLine =
     drag && "target" in drag && drag.target !== undefined ? px(drag.target) : undefined
   const { major, minor } = rulerSteps(zoom)
@@ -426,54 +470,52 @@ export function Timeline({
           <Row
             label={messages.tracks.scenes}
             height={ROW_PX.scenes}
+            rowRef={scenesRow}
             onBackground={(event) => edits.seek(msAt(event.clientX), "commit")}
           >
-            {composition.scenes.map((scene) => {
+            {composition.scenes.map((scene, index) => {
               const dragged = drag?.type === "scene" && drag.scene.id === scene.id ? drag : null
               const end = dragged ? dragged.endMs : scene.startMs + scene.durationMs
-              const selected = open?.id === scene.id
               return (
                 <div
                   key={scene.id}
                   data-timeline-scene={scene.id}
-                  className={cn(
-                    "group/sceneblock absolute inset-y-1 overflow-hidden rounded-md border text-left",
-                    selected
-                      ? "border-primary bg-primary/15 dark:bg-primary/25"
-                      : "border-border bg-muted hover:bg-muted/70",
-                    agentScenes.has(scene.id) && "sixb-agent-board"
-                  )}
+                  data-reorder-id={scene.id}
+                  className="absolute inset-y-1"
                   style={{ left: px(scene.startMs), width: Math.max(4, px(end - scene.startMs)) }}
                 >
-                  <button
-                    type="button"
-                    className="absolute inset-0 flex items-center gap-1.5 px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => edits.open(scene)}
-                    onDoubleClick={() => edits.select({ type: "scene", scene: scene.id })}
-                    aria-pressed={selection?.type === "scene" && selection.scene === scene.id}
-                    aria-label={sceneName(scene)}
+                  <SceneBlock
+                    scene={scene}
+                    index={index}
+                    count={composition.scenes.length}
+                    timeline={timelines.get(scene.src)}
+                    target={target}
+                    open={open?.id === scene.id}
+                    agent={agentScenes.has(scene.id)}
+                    people={people.get(scene.id) ?? []}
+                    dragging={reorder?.id === scene.id}
+                    length={formatLength(end - scene.startMs)}
+                    actions={edits.scene}
+                    onPress={(event) => startReorder(event, scene.id, () => edits.open(scene))}
                   >
-                    <span className="truncate text-xs font-medium text-foreground">
-                      {sceneName(scene)}
-                    </span>
-                  </button>
-                  <EdgeHandle
-                    edge="end"
-                    label={messages.length}
-                    onPointerDown={(event) =>
-                      startDrag(event, {
-                        type: "scene",
-                        scene,
-                        x: event.clientX,
-                        endMs: scene.startMs + scene.durationMs,
-                      })
-                    }
-                    {...dragHandlers}
-                  />
+                    <EdgeHandle
+                      edge="end"
+                      label={messages.length}
+                      onPointerDown={(event) =>
+                        startDrag(event, {
+                          type: "scene",
+                          scene,
+                          x: event.clientX,
+                          endMs: scene.startMs + scene.durationMs,
+                        })
+                      }
+                      {...dragHandlers}
+                    />
+                  </SceneBlock>
                 </div>
               )
             })}
+            {reorder ? <SceneDropMark left={dropAt(reorder.slot)} /> : null}
           </Row>
 
           {tracks.map((track) => (
@@ -578,7 +620,7 @@ export function Timeline({
           {marks.in !== undefined || marks.out !== undefined ? (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 bottom-0 z-10 border-x-2 border-amber-500/80 bg-amber-400/10"
+              className="pointer-events-none absolute top-0 bottom-0 z-10 border-x-2 border-warning/80 bg-warning/10"
               style={{
                 left: LABELS_PX + px(marks.in ?? 0),
                 width: Math.max(2, px((marks.out ?? composition.durationMs) - (marks.in ?? 0))),
@@ -589,7 +631,7 @@ export function Timeline({
           {snapLine !== undefined ? (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-amber-500"
+              className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-warning"
               style={{ left: LABELS_PX + snapLine }}
             />
           ) : null}
@@ -633,6 +675,7 @@ function Row({
   icon,
   height,
   muted = false,
+  rowRef,
   onBackground,
   children,
 }: {
@@ -640,6 +683,7 @@ function Row({
   readonly icon?: ReactNode
   readonly height: number
   readonly muted?: boolean
+  readonly rowRef?: Ref<HTMLDivElement>
   readonly onBackground: (event: ReactPointerEvent) => void
   readonly children: ReactNode
 }) {
@@ -653,6 +697,7 @@ function Row({
         <span className="truncate">{label}</span>
       </div>
       <div
+        ref={rowRef}
         className={cn("relative flex-1", muted && "opacity-50")}
         onPointerDown={(event) => {
           if (event.button === 0 && event.target === event.currentTarget) onBackground(event)
@@ -782,6 +827,7 @@ function ClipBlock({
   const name = clipName(clip)
   // Where in its file the block's left edge is: a start trimmed moves into it.
   const mediaAt = clip.mediaStartMs + (viewStartMs - laid.startMs)
+  const filmed = clip.kind === "video" && !!parts.filmstrip
 
   return (
     <div
@@ -792,9 +838,7 @@ function ClipBlock({
       data-timeline-clip={clip.ref}
       className={cn(
         "group/clip absolute touch-none overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
-        clip.track === "picture" && "bg-sky-700/85 text-white dark:bg-sky-800/90",
-        clip.track === "text" && "bg-violet-600/85 text-white dark:bg-violet-700/90",
-        clip.track === "sound" && "bg-emerald-700/80 text-white dark:bg-emerald-800/90",
+        TRACK_TONE[clip.track],
         selected
           ? "z-10 ring-2 ring-foreground ring-offset-1 ring-offset-background"
           : "ring-1 ring-black/10 dark:ring-white/10",
@@ -811,7 +855,7 @@ function ClipBlock({
       }}
       {...dragHandlers}
     >
-      {clip.kind === "video" && parts.filmstrip ? (
+      {filmed && parts.filmstrip ? (
         <FilmstripRun
           filmstrip={parts.filmstrip}
           fromMs={mediaAt}
@@ -836,13 +880,21 @@ function ClipBlock({
         />
       ) : null}
 
-      <span className="relative flex h-full min-w-0 items-start gap-1 px-1.5 pt-1 text-[11px] leading-tight font-medium [text-shadow:0_1px_2px_rgb(0_0_0/0.45)]">
+      <span className="relative flex h-full min-w-0 items-start gap-1 px-1.5 pt-1 text-[11px] leading-tight font-medium">
         {clip.kind === "image" ? (
           <ImageIcon className="mt-px size-3 shrink-0" aria-hidden="true" />
         ) : null}
-        <span className="truncate">{name}</span>
+        {/* Over its frames, the name sits on a shade of its own, whatever they show. */}
+        <span
+          className={cn(
+            "truncate",
+            filmed && "-mx-0.5 rounded-[3px] bg-black/55 px-1 text-white backdrop-blur-sm"
+          )}
+        >
+          {name}
+        </span>
         {media && parts.processing ? (
-          <span className="ml-auto shrink-0 rounded bg-black/40 px-1 text-[10px] font-normal">
+          <span className="ml-auto shrink-0 rounded bg-black/55 px-1 text-[10px] font-normal text-white">
             {messages.processing}
           </span>
         ) : null}

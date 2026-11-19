@@ -7,7 +7,7 @@ import {
 } from "@sixb/core/artifacts/live"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render } from "@testing-library/react"
+import { cleanup, fireEvent, render } from "@testing-library/react"
 import type { ReactNode } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
@@ -24,12 +24,13 @@ import {
   trackRows,
   zoomAround,
 } from "../src/artifacts/renderers/video/editor/model"
-import { ScenesStrip } from "../src/artifacts/renderers/video/editor/scenes"
+import { SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
 import {
   fillers,
   findWords,
   isFiller,
   rangesLength,
+  readTranscript,
   silences,
   type TranscriptWord,
   wordAt,
@@ -232,6 +233,60 @@ describe("editing by the transcript", () => {
   })
 })
 
+describe("a transcript timed by phrase", () => {
+  // Guard proof: return `timing: "words"` from readTranscript whatever it reads; the whole text,
+  // one entry, then reads as one word, and cutting it cuts everything.
+  test("a model that times the whole text as one entry gives phrases, never words", () => {
+    const whole = { text: "So, um, thanks for having me.", startMs: 0, endMs: 9000 }
+    expect(readTranscript({ text: whole.text, words: [whole] })).toEqual({
+      words: [whole],
+      timing: "phrases",
+    })
+  })
+
+  test("its sentences are taken when they are finer than its words", () => {
+    const read = readTranscript({
+      words: [{ text: "So, um, thanks for having me. I should start.", startMs: 0, endMs: 6000 }],
+      segments: [
+        { text: "So, um, thanks for having me.", startMs: 0, endMs: 2500 },
+        { text: "I should start.", startMs: 3000, endMs: 6000 },
+      ],
+    })
+    expect(read.timing).toBe("phrases")
+    expect(read.words.map((phrase) => phrase.text)).toEqual([
+      "So, um, thanks for having me.",
+      "I should start.",
+    ])
+  })
+
+  test("words timed one by one stay words, a name of two aside", () => {
+    const words = [
+      "Dana Reyes",
+      "runs",
+      "field",
+      "service",
+      "teams",
+      "for",
+      "a",
+      "living",
+      "now",
+      "here",
+    ]
+    const read = readTranscript({
+      words: words.map((text, index) => ({ text, startMs: index * 300, endMs: index * 300 + 250 })),
+    })
+    expect(read.timing).toBe("words")
+  })
+
+  test("a search finds the phrase that holds it whole", () => {
+    const phrases = [
+      { text: "Thanks for having me.", startMs: 0, endMs: 2000 },
+      { text: "Twelve years of field service.", startMs: 2500, endMs: 5000 },
+    ]
+    expect(findWords(phrases, "field service", "phrases")).toEqual([1])
+  })
+})
+
 describe("the live video", () => {
   const live = () => {
     const doc = createArtifactDocument("video", FILES)
@@ -322,42 +377,55 @@ function wrap(children: ReactNode) {
 }
 
 describe("the editor's pieces", () => {
-  test("the scenes strip selects a scene, and Alt with an arrow moves it", () => {
+  test("a scene on the timeline opens, moves with Alt and an arrow, and renames on a double click", () => {
     const moves: [string, number][] = []
     const selected: string[] = []
+    const renamed: string[] = []
+    const pressed: string[] = []
+    const talk = composition().scenes[1]
+    if (!talk) throw new Error("No interview scene.")
+
     const view = render(
       wrap(
-        <ScenesStrip
-          composition={composition()}
-          timelines={new Map()}
+        <SceneBlock
+          scene={talk}
+          index={1}
+          count={2}
+          timeline={undefined}
           target={{ artifactId: "art_video", version: 1 }}
-          selected="title"
-          playing="title"
-          agentScenes={new Set(["talk"])}
-          people={new Map()}
-          formatLength={(ms) => `${ms / 1000} s`}
+          open={false}
+          agent
+          people={[]}
+          dragging={false}
+          length="7 s"
+          onPress={() => pressed.push(talk.id)}
           actions={{
             select: (scene) => selected.push(scene.id),
             move: (scene, to) => moves.push([scene.id, to]),
             duplicate: () => {},
             remove: () => {},
-            rename: () => {},
+            rename: (scene, label) => renamed.push(`${scene.id}: ${label}`),
           }}
         />
       )
     )
 
-    const interview = view.getByRole("button", { name: "Scene 2, Interview, 7 s" })
-    expect(interview.className).toContain("sixb-agent-board")
-    expect(interview.getAttribute("title")).toBe("The agent is editing this scene")
+    const block = view.getByRole("button", { name: "Scene 2, Interview, 7 s" })
+    expect(block.parentElement?.className).toContain("sixb-agent-board")
+    expect(block.getAttribute("title")).toBe("The agent is editing this scene")
 
-    act(() => {
-      fireEvent.pointerDown(interview, { button: 0, clientX: 10, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, pointerId: 1 }))
-    })
-    fireEvent.keyDown(interview, { key: "ArrowLeft", altKey: true })
-
+    // A press is the timeline's to follow; a click without one, from the keyboard, opens it.
+    fireEvent.pointerDown(block, { button: 0, clientX: 10, pointerId: 1 })
+    fireEvent.click(block, { detail: 0 })
+    fireEvent.keyDown(block, { key: "ArrowLeft", altKey: true })
+    expect(pressed).toEqual(["talk"])
     expect(selected).toEqual(["talk"])
     expect(moves).toEqual([["talk", 0]])
+
+    fireEvent.doubleClick(block)
+    const field = view.getByRole("textbox", { name: "Name" })
+    fireEvent.change(field, { target: { value: "In their words" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(renamed).toEqual(["talk: In their words"])
   })
 })

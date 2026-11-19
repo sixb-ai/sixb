@@ -1,9 +1,4 @@
-import type {
-  ArtifactLiveUser,
-  VideoComposition,
-  VideoFileTimeline,
-  VideoScene,
-} from "@sixb/core/artifacts/live"
+import type { ArtifactLiveUser, VideoFileTimeline, VideoScene } from "@sixb/core/artifacts/live"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,22 +8,17 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowLeft, ArrowRight, Copy, Ellipsis, Pencil, Sparkles, Trash2 } from "lucide-react"
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
+import { useSize } from "../player"
 import { type MediaTarget, sceneStillUrl, useMediaParts } from "./media"
-import { useReorder } from "./reorder"
 import { sceneFootage, sceneName } from "./selection"
 
-// The video's scenes as a row of cards, in play order: each a picture of its middle, its name and
-// its length. A card is dragged to reorder, and its menu renames, duplicates, moves or deletes it.
-// The scene the Agent is changing glows as a canvas's boards do; the people on the video show on
-// the scene they have open.
+// A scene on the timeline's Scenes track: a picture of its middle, its name and its length, along
+// the time it plays. It is dragged along the track to reorder, its end to make it longer or
+// shorter, double-clicked to rename, and its menu, or a right click, duplicates, moves or deletes
+// it. The scene the Agent is changing glows as a canvas's boards do; the people on the video show
+// on the scene they have open.
 
 export interface SceneActions {
   readonly select: (scene: VideoScene) => void
@@ -38,208 +28,134 @@ export interface SceneActions {
   readonly rename: (scene: VideoScene, label: string) => void
 }
 
-export function ScenesStrip({
-  composition,
-  timelines,
-  target,
-  selected,
-  playing,
-  agentScenes,
-  people,
-  actions,
-  formatLength,
-}: {
-  readonly composition: VideoComposition
-  readonly timelines: ReadonlyMap<string, VideoFileTimeline>
-  readonly target: MediaTarget
-  /** The scene open on the timeline. */
-  readonly selected: string | undefined
-  /** The scene under the playhead. */
-  readonly playing: string | undefined
-  readonly agentScenes: ReadonlySet<string>
-  /** Who else has each scene open, by its id. */
-  readonly people: ReadonlyMap<string, readonly ArtifactLiveUser[]>
-  readonly actions: SceneActions
-  readonly formatLength: (ms: number) => string
-}) {
-  const messages = useArtifactMessages().videoEditor
-  const list = useRef<HTMLOListElement | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const { scenes } = composition
-  const { drag, start } = useReorder({
-    items: () => [...(list.current?.querySelectorAll<HTMLElement>("[data-reorder-id]") ?? [])],
-    axis: "x",
-    onMove: (id, _from, to) => {
-      const scene = scenes.find((each) => each.id === id)
-      if (scene) actions.move(scene, to)
-    },
-  })
+/** The narrowest a scene shows its picture at, and how wide it shows it, in pixels. */
+const PICTURE_FROM_PX = 120
+const PICTURE_PX = 72
 
-  const onKeyDown = (event: ReactKeyboardEvent, scene: VideoScene, index: number) => {
-    if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
-    event.preventDefault()
-    actions.move(scene, index + (event.key === "ArrowLeft" ? -1 : 1))
-  }
-
-  return (
-    <section aria-label={messages.scenes} className="relative min-w-0">
-      <ol
-        ref={list}
-        className="m-0 flex list-none gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:thin]"
-      >
-        {scenes.map((scene, index) => (
-          <li key={scene.id} className="relative flex shrink-0 items-stretch">
-            {drag && drag.slot === index && drag.id !== scene.id ? <DropMark /> : null}
-            <SceneCard
-              scene={scene}
-              index={index}
-              timeline={timelines.get(scene.src)}
-              target={target}
-              selected={scene.id === selected}
-              playing={scene.id === playing}
-              agent={agentScenes.has(scene.id)}
-              people={people.get(scene.id) ?? []}
-              dragging={drag?.id === scene.id}
-              renaming={renaming === scene.id}
-              length={formatLength(scene.durationMs)}
-              onPointerDown={(event) => {
-                if (renaming !== scene.id) start(event, scene.id, () => actions.select(scene))
-              }}
-              onKeyDown={(event) => onKeyDown(event, scene, index)}
-              onRename={(label) => {
-                setRenaming(null)
-                if (label !== null) actions.rename(scene, label)
-              }}
-              menu={
-                <SceneMenu
-                  name={sceneName(scene)}
-                  first={index === 0}
-                  last={index === scenes.length - 1}
-                  only={scenes.length === 1}
-                  onRename={() => setRenaming(scene.id)}
-                  onDuplicate={() => actions.duplicate(scene)}
-                  onMove={(by) => actions.move(scene, index + by)}
-                  onDelete={() => actions.remove(scene)}
-                />
-              }
-            />
-            {drag && drag.slot === scenes.length && index === scenes.length - 1 ? (
-              <DropMark end />
-            ) : null}
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
-}
-
-function DropMark({ end = false }: { readonly end?: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "absolute inset-y-1 z-10 w-0.5 rounded-full bg-primary",
-        end ? "-right-[5px]" : "-left-[5px]"
-      )}
-    />
-  )
-}
-
-function SceneCard({
+export function SceneBlock({
   scene,
   index,
+  count,
   timeline,
   target,
-  selected,
-  playing,
+  open,
   agent,
   people,
   dragging,
-  renaming,
   length,
-  menu,
-  onRename,
-  ...handlers
+  actions,
+  onPress,
+  children,
 }: {
   readonly scene: VideoScene
   readonly index: number
+  /** How many scenes the video has. */
+  readonly count: number
   readonly timeline: VideoFileTimeline | undefined
   readonly target: MediaTarget
-  readonly selected: boolean
-  readonly playing: boolean
+  /** Whether it is the scene open on the timeline. */
+  readonly open: boolean
   readonly agent: boolean
+  /** Who else has it open. */
   readonly people: readonly ArtifactLiveUser[]
   readonly dragging: boolean
-  readonly renaming: boolean
   readonly length: string
-  readonly menu: React.ReactNode
-  readonly onRename: (label: string | null) => void
-  readonly onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void
-  readonly onKeyDown: (event: ReactKeyboardEvent) => void
+  readonly actions: SceneActions
+  /** A press on it, which a drag reorders and a tap opens. */
+  readonly onPress: (event: ReactPointerEvent) => void
+  /** What lies over it: the handle that drags its end. */
+  readonly children?: React.ReactNode
 }) {
   const messages = useArtifactMessages().videoEditor
   const name = sceneName(scene)
+  const [renaming, setRenaming] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const box = useRef<HTMLDivElement | null>(null)
+  const { width } = useSize(box)
 
   return (
     <div
-      data-scene-card={scene.id}
-      data-reorder-id={scene.id}
+      ref={box}
       className={cn(
-        "group/scene relative w-36 rounded-lg transition-opacity",
+        "group/sceneblock absolute inset-0 overflow-hidden rounded-md border text-left transition-opacity",
+        open
+          ? "border-primary bg-[color-mix(in_oklab,var(--primary)_12%,var(--background))]"
+          : "border-border bg-muted hover:bg-[color-mix(in_oklab,var(--foreground)_7%,var(--muted))]",
+        agent && "sixb-agent-board",
         dragging && "opacity-40"
       )}
     >
       <button
         type="button"
-        aria-pressed={selected}
+        aria-pressed={open}
         aria-label={messages.sceneLabel(index + 1, name, length)}
-        title={agent ? messages.agentEditing : messages.reorderHint}
-        className={cn(
-          "relative block w-full touch-none overflow-hidden rounded-lg bg-muted text-left outline-none ring-offset-2 ring-offset-background transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
-          selected ? "ring-2 ring-primary" : "ring-1 ring-border hover:ring-foreground/30",
-          agent && "sixb-agent-board"
-        )}
-        {...handlers}
+        title={agent ? messages.agentEditing : messages.sceneHint}
+        className="absolute inset-0 flex touch-none items-center gap-2 p-1 pr-9 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        onPointerDown={(event) => {
+          if (event.button !== 0 || renaming) return
+          event.stopPropagation()
+          onPress(event)
+        }}
+        // A press opens it as it lifts; Enter or Space, which press no pointer, open it here.
+        onClick={(event) => {
+          if (event.detail === 0) actions.select(scene)
+        }}
+        onDoubleClick={() => setRenaming(true)}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          setMenu(true)
+        }}
+        onKeyDown={(event) => {
+          if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
+          event.preventDefault()
+          event.stopPropagation()
+          actions.move(scene, index + (event.key === "ArrowLeft" ? -1 : 1))
+        }}
       >
-        <SceneThumbnail scene={scene} timeline={timeline} target={target} />
-        <span className="absolute top-1.5 left-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/60 px-1.5 text-[11px] font-semibold text-white tabular-nums backdrop-blur-sm">
-          {index + 1}
-        </span>
-        {playing ? (
+        {width >= PICTURE_FROM_PX ? (
           <span
-            aria-hidden="true"
-            className="absolute right-1.5 bottom-1.5 size-1.5 rounded-full bg-white shadow-[0_0_0_2px_rgb(0_0_0/0.4)]"
-          />
-        ) : null}
-        {agent ? (
-          <span className="absolute bottom-1.5 left-1.5 flex h-5 items-center gap-1 rounded-full bg-primary px-1.5 text-[10px] font-medium text-primary-foreground">
-            <Sparkles className="size-3" aria-hidden="true" />
-            {messages.agentShort}
+            className="relative h-full shrink-0 overflow-hidden rounded-[4px]"
+            style={{ width: PICTURE_PX }}
+          >
+            <SceneThumbnail scene={scene} timeline={timeline} target={target} fill />
           </span>
         ) : null}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          {renaming ? null : (
+            <span className="truncate text-xs font-medium text-foreground">{name}</span>
+          )}
+          <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground tabular-nums">
+            {agent ? (
+              <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+            ) : null}
+            {length}
+          </span>
+        </span>
       </button>
 
-      <div className="mt-1.5 flex items-center gap-1 px-0.5">
-        {renaming ? (
-          <RenameField name={scene.label ?? ""} placeholder={scene.id} onDone={onRename} />
-        ) : (
-          <span
-            className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
-            title={name}
-          >
-            {name}
-          </span>
-        )}
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{length}</span>
-      </div>
+      {renaming ? (
+        <div
+          className="absolute top-1 right-9 z-10"
+          style={{ left: width >= PICTURE_FROM_PX ? PICTURE_PX + 12 : 4 }}
+        >
+          <RenameField
+            name={scene.label ?? ""}
+            placeholder={scene.id}
+            onDone={(label) => {
+              setRenaming(false)
+              if (label !== null) actions.rename(scene, label)
+            }}
+          />
+        </div>
+      ) : null}
 
       {people.length > 0 ? (
-        <span className="absolute -top-1.5 -right-1.5 flex -space-x-1">
+        <span className="pointer-events-none absolute right-3 bottom-1 flex -space-x-1">
           {people.slice(0, 3).map((person) => (
             <span
               key={person.id}
               title={messages.peerSelected(person.name)}
-              className="grid size-5 place-items-center rounded-full text-[10px] font-semibold text-white ring-2 ring-background"
+              className="grid size-4 place-items-center rounded-full text-[9px] font-semibold text-white ring-2 ring-background"
               style={{ background: person.color }}
             >
               {(person.name || "?").slice(0, 1).toUpperCase()}
@@ -248,15 +164,50 @@ function SceneCard({
         </span>
       ) : null}
 
-      <div className="absolute top-1 right-1 opacity-0 transition-opacity group-focus-within/scene:opacity-100 group-hover/scene:opacity-100 has-[[data-state=open]]:opacity-100 [@media(pointer:coarse)]:opacity-100">
-        {menu}
+      <div
+        className={cn(
+          "absolute top-1 right-3 z-10 transition-opacity",
+          open || menu
+            ? "opacity-100"
+            : "opacity-0 group-focus-within/sceneblock:opacity-100 group-hover/sceneblock:opacity-100"
+        )}
+      >
+        <SceneMenu
+          name={name}
+          open={menu}
+          onOpenChange={setMenu}
+          renaming={renaming}
+          first={index === 0}
+          last={index === count - 1}
+          only={count === 1}
+          onRename={() => setRenaming(true)}
+          onDuplicate={() => actions.duplicate(scene)}
+          onMove={(by) => actions.move(scene, index + by)}
+          onDelete={() => actions.remove(scene)}
+        />
       </div>
+
+      {children}
     </div>
+  )
+}
+
+/** Where a scene dragged along the track lands: a line at the edge it would take. */
+export function SceneDropMark({ left }: { readonly left: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-y-0.5 z-20 w-0.5 -translate-x-1/2 rounded-full bg-primary"
+      style={{ left: Math.max(2, left) }}
+    />
   )
 }
 
 function SceneMenu({
   name,
+  open,
+  onOpenChange,
+  renaming,
   first,
   last,
   only,
@@ -266,6 +217,10 @@ function SceneMenu({
   onDelete,
 }: {
   readonly name: string
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  /** Its name is being typed: the menu, closing, leaves the focus there. */
+  readonly renaming: boolean
   readonly first: boolean
   readonly last: boolean
   readonly only: boolean
@@ -276,17 +231,24 @@ function SceneMenu({
 }) {
   const messages = useArtifactMessages().videoEditor
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           aria-label={messages.sceneOptions(name)}
-          className="grid size-6 place-items-center rounded-md bg-black/55 text-white outline-none backdrop-blur-sm hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-white"
+          onPointerDown={(event) => event.stopPropagation()}
+          className="grid size-5 place-items-center rounded text-muted-foreground outline-none hover:bg-background/80 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Ellipsis className="size-4" aria-hidden="true" />
+          <Ellipsis className="size-3.5" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
+      <DropdownMenuContent
+        align="end"
+        className="min-w-44"
+        onCloseAutoFocus={(event) => {
+          if (renaming) event.preventDefault()
+        }}
+      >
         <DropdownMenuItem onSelect={onRename}>
           <Pencil />
           {messages.rename}
@@ -361,10 +323,13 @@ export function SceneThumbnail({
   scene,
   timeline,
   target,
+  fill = false,
 }: {
   readonly scene: VideoScene
   readonly timeline: VideoFileTimeline | undefined
   readonly target: MediaTarget
+  /** Fills its box, rather than taking the video's shape at its width. */
+  readonly fill?: boolean
 }) {
   const still = sceneStillUrl(target, scene.id)
   // Each address is tried once: a scene renamed or another version tries again.
@@ -384,7 +349,12 @@ export function SceneThumbnail({
     : 0
 
   return (
-    <span className="relative block aspect-video w-full overflow-hidden bg-neutral-900">
+    <span
+      className={cn(
+        "relative block overflow-hidden bg-neutral-900",
+        fill ? "size-full" : "aspect-video w-full"
+      )}
+    >
       {shown !== "fallback" ? (
         <img
           src={still}

@@ -1,7 +1,7 @@
 import { type FrameEvent, type VideoOutline, videoPosterMs } from "@sixb/core/artifacts"
 import { Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Play, RotateCcw } from "lucide-react"
+import { CloudOff, Play, RotateCcw } from "lucide-react"
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../../frame"
 import { useArtifactMessages } from "../../../messages"
@@ -10,9 +10,16 @@ import { type Playback, usePlayback } from "../playback"
 import { useSize } from "../player"
 
 // The editor's picture: the video as its latest save holds it, played by HyperFrames' runtime in
-// its frame, as the player plays it. Each save is a new revision, which the frame loads again,
-// where the reader left the playhead; until it is saved, the timeline is ahead of the picture,
-// and the picture says it is catching up.
+// its frame, as the player plays it. Each save is a new revision, which a second frame loads
+// behind the first, where the reader left the playhead: once it has drawn that instant, it takes
+// the first one's place, so the picture never goes blank. Until a change is saved, the timeline
+// is ahead of the picture, and the picture says it is catching up.
+
+/** How long a new frame that went to the playhead has to draw it before it shows. */
+const SETTLE_MS = 150
+
+/** How long it is waited for at most, when its fonts and pictures never say they loaded. */
+const SETTLE_MAX_MS = 1_500
 
 /**
  * Plays the version in a frame the caller places with {@link PreviewScreen}: the playback is the
@@ -47,15 +54,32 @@ export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
     else playback.seek(Math.min(resumeAt.current, playback.duration))
   }, [playback.phase, playback.seek, playback.cue, playback.duration, version.revision, outline])
 
-  return { frame, playback }
+  // The version the reader sees: the last one shown, until the new one has drawn the playhead.
+  const [shown, setShown] = useState(version)
+  useEffect(() => {
+    if (shown.revision === version.revision) return
+    if (playback.phase === "failed") {
+      setShown(version)
+      return
+    }
+    if (playback.phase !== "ready" || resumed.current !== version.revision) return
+    const timer = setTimeout(() => setShown(version), playback.loaded ? SETTLE_MS : SETTLE_MAX_MS)
+    return () => clearTimeout(timer)
+  }, [shown.revision, version, playback.phase, playback.loaded])
+
+  /** The version still on screen while a newer one loads behind it, if one does. */
+  const cover = shown.revision === version.revision ? null : shown
+  return { frame, playback, cover }
 }
 
 export function PreviewScreen({
   version,
   outline,
   frame,
+  cover,
   playback,
   updating,
+  offline = false,
   compact = false,
   onPick,
   onFrameEvent,
@@ -64,9 +88,13 @@ export function PreviewScreen({
   readonly version: ArtifactVersion
   readonly outline: VideoOutline
   readonly frame: RefObject<ArtifactFrameHandle | null>
+  /** The version still shown over the one loading behind it, as {@link usePreview} says. */
+  readonly cover: ArtifactVersion | null
   readonly playback: Playback
   /** The timeline holds changes the picture does not show yet. */
   readonly updating: boolean
+  /** The connection is lost: the picture shows the last save until the reader reconnects. */
+  readonly offline?: boolean
   readonly compact?: boolean
   /**
    * A click on the paused picture, at a point in fractions of it: the editor looks for words
@@ -86,7 +114,9 @@ export function PreviewScreen({
 
   const [failed, setFailed] = useState<number | null>(null)
   const loading = playback.phase !== "ready" && failed !== version.revision
-  const showLoading = useDelayed(loading, 400)
+  // Over the last picture, a new one loads unseen.
+  const showLoading = useDelayed(loading && !cover, 400)
+  const shownCover = failed === version.revision ? null : cover
 
   return (
     <div
@@ -110,19 +140,35 @@ export function PreviewScreen({
           visibility: scale > 0 ? undefined : "hidden",
         }}
       >
-        <ArtifactFrame
-          key={version.revision}
-          version={version}
-          title={version.title}
-          handle={frame}
-          sound
-          className="size-full"
-          onEvent={(event) => {
-            if (event.event === "failed") setFailed(version.revision)
-            onFrameEvent?.(event)
-          }}
-          onFailure={() => setFailed(version.revision)}
-        />
+        {/*
+          The new version's frame loads after the one still shown, which stays where it is: a frame
+          moved in the page loads again. The one shown lies over it until it takes its place.
+        */}
+        {[...(shownCover ? [shownCover] : []), version].map((each) =>
+          each.revision === version.revision ? (
+            <ArtifactFrame
+              key={each.revision}
+              version={each}
+              title={each.title}
+              handle={frame}
+              sound
+              className="absolute inset-0 size-full"
+              onEvent={(event) => {
+                if (event.event === "failed") setFailed(each.revision)
+                onFrameEvent?.(event)
+              }}
+              onFailure={() => setFailed(each.revision)}
+            />
+          ) : (
+            <ArtifactFrame
+              key={each.revision}
+              version={each}
+              title={each.title}
+              sound
+              className="absolute inset-0 z-[1] size-full"
+            />
+          )
+        )}
       </div>
 
       {/* The app's layer: the picture takes no click of its own. */}
@@ -180,10 +226,15 @@ export function PreviewScreen({
         aria-live="polite"
         className={cn(
           "pointer-events-none absolute top-3 left-3 z-10 m-0 flex h-7 items-center gap-1.5 rounded-full bg-black/60 px-2.5 text-xs font-medium text-white/90 ring-1 ring-white/15 backdrop-blur-md transition-opacity duration-300 motion-reduce:transition-none",
-          updating ? "opacity-100" : "opacity-0"
+          updating || cover ? "opacity-100" : "opacity-0"
         )}
       >
-        {updating ? (
+        {offline && updating ? (
+          <>
+            <CloudOff className="size-3.5 text-white/80" aria-hidden="true" />
+            {messages.videoEditor.offlinePicture}
+          </>
+        ) : updating || cover ? (
           <>
             <Spinner className="size-3 text-white/80" />
             {messages.videoEditor.updating}
