@@ -8,21 +8,25 @@ import type { SixbRuntimeContext } from "../../runtime/types"
 import type { AiModelCallOperationRecord, AiUsageStorage } from "../../storage"
 import type { ModelCatalog } from "../catalog"
 import { ModelProviderError } from "../errors"
-import type { ModelCallEndEvent, ModelUsage } from "../events"
-import type { AiModelCallRecorder } from "../execution/model-call-recorder"
 import type { ModelExecutionSession } from "../execution/session"
 import { prepareModelInputFile, readModelInputFile } from "../input-file"
-import { estimateModelCall, type ModelCallCost, type ModelMoney } from "../pricing"
-import type { ModelPricingDimensions } from "../rate-card"
+import type { ModelMoney } from "../pricing"
 import { assertVideoModel } from "./catalog"
+import {
+  checkVideoOperation,
+  isWarnings,
+  resolveVideoModel,
+  type StoredVideoRequest,
+  scheduleVideoCheck,
+  storedVideoRequest,
+  storedVideoResult,
+} from "./check"
 import { VideoModelResponseError } from "./errors"
 import type {
-  VideoData,
   VideoGenerateInput,
   VideoGeneration,
   VideoInputImage,
   VideoModel,
-  VideoModelResponseMetadata,
   VideoModelStart,
   VideoModelsRuntime,
   VideoReservationInput,
@@ -30,8 +34,6 @@ import type {
 
 /** How often `generate()` checks on its job: providers take minutes, and bill per job, not per look. */
 const POLL_INTERVAL_MS = 5_000
-/** How long `generate()` waits before leaving the job to `get()`. */
-const GENERATION_TIMEOUT_MS = 30 * 60_000
 /** A provider may queue a job before it fetches its input images. */
 const INPUT_URL_EXPIRY_MS = 60 * 60_000
 
@@ -54,20 +56,6 @@ interface PreparedRequest {
 }
 
 /** What the operation record keeps to price the call once it ends. */
-interface StoredRequest {
-  readonly n: number
-  readonly durationSeconds?: number
-  readonly dimensions?: ModelPricingDimensions
-  readonly warnings: readonly string[]
-}
-
-/** What a settled call reported, for every later look at it. */
-interface StoredResult {
-  readonly usage: Omit<ModelUsage, "raw">
-  readonly cost: ModelCallCost
-  readonly warnings: readonly string[]
-}
-
 export interface VideoRuntimeDependencies {
   readonly blobs: BlobStorage | undefined
   /** Whether the caller sees what an execution's model calls produced. */
@@ -110,7 +98,7 @@ export function createVideoRuntime(
     const accounting = await session.accounting()
     accounting.assertHealthy()
 
-    const model = await resolveModel(binding)
+    const model = await resolveVideoModel(binding)
     assertRequestSupport(model, request)
 
     const images = {
@@ -179,7 +167,7 @@ export function createVideoRuntime(
     }
 
     // The job runs now, whatever happens to this request: its handle must be kept.
-    const stored: StoredRequest = {
+    const stored: StoredVideoRequest = {
       n: request.n,
       ...optional("durationSeconds", request.durationSeconds),
       ...optional("dimensions", started.pricingDimensions),
@@ -207,6 +195,16 @@ export function createVideoRuntime(
       )
     }
 
+    // Settled from the queue if no one asks again: nothing holds its budget forever.
+    try {
+      await scheduleVideoCheck(runtime.queues.agents, record)
+    } catch (error) {
+      console.error(
+        `[SixbModels] Could not schedule a check of video generation '${callId}'; it settles when it is next read.`,
+        error
+      )
+    }
+
     return { generation: await generationFrom(record), model }
   }
 
@@ -225,84 +223,22 @@ export function createVideoRuntime(
     if (!(await dependencies.canReadCallsOf(record.executionId))) return null
     if (record.status !== "pending") return generationFrom(record)
 
-    const blobs = requireBlobs(dependencies.blobs)
-    const signal = session.signal(callerSignal)
-    const model = await resolveModel(binding ?? catalogModel(catalog, record))
-
-    const status = await model.status({ operation: record.operation, signal })
-    if (status?.status === "pending") return generationFrom(record)
-    if (status?.status !== "completed" && status?.status !== "failed") {
-      throw new VideoModelResponseError(
-        "[SixbModels] Invalid video status response.",
-        model.providerId,
-        model.modelId,
-        {}
-      )
-    }
-
-    // The job ended: record it as the execution attempt that admitted it.
-    const origin = await runtime.storage.executions.getById({ projectId, id: record.executionId })
-    if (!origin) {
-      throw new Error(`[SixbModels] Video generation '${callId}' has no execution record.`)
-    }
-    const accounting = await session.accountingFor(origin, record.attempt)
-    accounting.resumeCall(callId, record.reserved)
-
-    const stored = storedRequest(record)
-    if (status.status === "failed") {
-      const event = await recordVideos(accounting, model, record, stored, status, 0)
-      return settle(operations, record, event, stored.warnings, describeFailure(status.error))
-    }
-
-    // A completed, billable reply is recorded before its videos are checked or stored.
-    const returned = Array.isArray(status.output?.videos) ? status.output.videos : undefined
-    const event = await recordVideos(accounting, model, record, stored, status, returned?.length)
-    const warnings = [...stored.warnings, ...(isWarnings(status.warnings) ? status.warnings : [])]
-    if (!returned?.length || !returned.every(isVideoData)) {
-      return settle(operations, record, event, warnings, "The provider returned no readable video.")
-    }
-
-    const files: FileRef[] = []
-    for (const video of returned) {
-      files.push(
-        await blobs.put({
-          body: video.data,
-          expectedSizeBytes: video.data.byteLength,
-          mediaType: video.mediaType,
-        })
-      )
-    }
-    await accounting.recordFiles(callId, files)
-
-    return settle(operations, record, event, warnings)
-  }
-
-  async function settle(
-    operations: AiUsageStorage,
-    record: AiModelCallOperationRecord,
-    event: ModelCallEndEvent,
-    warnings: readonly string[],
-    error?: string
-  ): Promise<VideoGeneration> {
-    const { raw: _, ...usage } = event.usage
-    const result: StoredResult = { usage, cost: event.cost, warnings }
-    const settled = await operations.settleModelCallOperation({
-      projectId,
-      callId: record.callId,
-      status: error === undefined ? "completed" : "failed",
-      ...optional("error", error),
-      result: result as unknown as ReadonlyJsonObject,
-    })
-    if (!settled) {
-      throw new Error(`[SixbModels] Video generation '${record.callId}' disappeared.`)
-    }
-
-    // Two checks may see the job end at once; both answer with the first one's outcome.
-    return generationFrom(settled)
+    const checked = await checkVideoOperation(
+      {
+        projectId,
+        storage: { executions: runtime.storage.executions, aiUsage: operations },
+        catalog,
+        blobs: dependencies.blobs,
+        accountingFor: (origin, attempt) => session.accountingFor(origin, attempt),
+      },
+      record,
+      { ...(binding ? { binding } : {}), signal: session.signal(callerSignal) }
+    )
+    return generationFrom(checked)
   }
 
   async function generationFrom(record: AiModelCallOperationRecord): Promise<VideoGeneration> {
-    const stored = storedRequest(record)
+    const stored = storedVideoRequest(record)
     const base = {
       callId: record.callId,
       model: { providerId: record.providerId, modelId: record.modelId },
@@ -312,7 +248,7 @@ export function createVideoRuntime(
       return { ...base, status: "pending", files: [], warnings: [...stored.warnings] }
     }
 
-    const result = record.result as unknown as StoredResult
+    const result = storedVideoResult(record)
     const files =
       record.status === "completed"
         ? ((await runtime.storage.aiUsage?.getModelCallFiles({ projectId, callId: record.callId }))
@@ -358,14 +294,9 @@ export function createVideoRuntime(
     async generate(input) {
       const { generation, model } = await start(input)
 
+      // Past the ceiling a check settles the generation, so the wait ends.
       let current = generation
-      for (let waited = 0; current.status === "pending"; waited += POLL_INTERVAL_MS) {
-        if (waited >= GENERATION_TIMEOUT_MS) {
-          throw new Error(
-            `[SixbModels] Video generation '${generation.callId}' is still running after 30 minutes. Follow it with models.video.get().`
-          )
-        }
-
+      while (current.status === "pending") {
         await delay(POLL_INTERVAL_MS, session.signal(input.signal))
         const next = await check(generation.callId, model, input.signal)
         if (!next) {
@@ -469,34 +400,6 @@ function selectModel(
   return selected
 }
 
-/** The binding a stored generation names; checking on it needs the project to still list it. */
-function catalogModel(
-  catalog: ModelCatalog | undefined,
-  record: AiModelCallOperationRecord
-): VideoModel {
-  const entry = catalog?.video?.getByRef({ provider: record.providerId, modelId: record.modelId })
-  if (!entry) {
-    throw new Error(
-      `[SixbModels] Video model '${record.providerId}/${record.modelId}' is no longer configured, so generation '${record.callId}' cannot be checked.`
-    )
-  }
-
-  return entry.model
-}
-
-async function resolveModel(binding: VideoModel): Promise<VideoModel> {
-  assertVideoModel(binding)
-  const model = binding.resolve ? await binding.resolve() : binding
-  assertVideoModel(model)
-  if (model.providerId !== binding.providerId || model.modelId !== binding.modelId) {
-    throw new TypeError(
-      "[SixbModels] Resolved video model identity does not match the selected model."
-    )
-  }
-
-  return model
-}
-
 function assertRequestSupport(model: VideoModel, request: PreparedRequest): void {
   const definition = model.definition
   if (definition.maxVideosPerCall !== undefined && request.n > definition.maxVideosPerCall) {
@@ -575,58 +478,6 @@ function estimateReservationCost(
   }
 }
 
-async function recordVideos(
-  accounting: AiModelCallRecorder,
-  model: VideoModel,
-  record: AiModelCallOperationRecord,
-  stored: StoredRequest,
-  metadata: VideoModelResponseMetadata,
-  returnedVideos: number | undefined
-): Promise<ModelCallEndEvent> {
-  // Providers bill the length they were asked for, per clip they returned.
-  const outputVideoMs =
-    metadata.usage?.outputVideoMs ??
-    (returnedVideos === 0
-      ? 0
-      : returnedVideos !== undefined && stored.durationSeconds !== undefined
-        ? returnedVideos * stored.durationSeconds * 1_000
-        : undefined)
-  const usage: ModelUsage = {
-    ...metadata.usage,
-    ...optional("outputVideoMs", outputVideoMs),
-  }
-  const estimate = estimateModelCall(model, {
-    usage,
-    route: metadata.route,
-    responseModelId: metadata.responseModelId,
-    dimensions: stored.dimensions,
-  })
-  const event: ModelCallEndEvent = {
-    callId: record.callId,
-    modelKind: "video",
-    providerId: model.providerId,
-    modelId: model.modelId,
-    responseId: metadata.providerIds?.responseId ?? record.callId,
-    providerIds: metadata.providerIds,
-    responseModelId: metadata.responseModelId,
-    usage,
-    cost: metadata.reportedCost ? { status: "reported", ...metadata.reportedCost } : estimate,
-    ...(metadata.reportedCost ? { estimate } : {}),
-    route: metadata.route,
-  }
-
-  await accounting.onModelCallEnd(event)
-  return event
-}
-
-function storedRequest(record: AiModelCallOperationRecord): StoredRequest {
-  return record.request as unknown as StoredRequest
-}
-
-function describeFailure(error: unknown): string {
-  return typeof error === "string" && error.trim() ? error : "The provider failed the generation."
-}
-
 function requireBlobs(blobs: BlobStorage | undefined): BlobStorage {
   if (!blobs) throw new Error("[SixbModels] Video generation requires blob storage.")
   return blobs
@@ -659,20 +510,6 @@ function isStart(value: unknown): value is VideoModelStart {
     start.operation !== undefined &&
     (start.warnings === undefined || isWarnings(start.warnings))
   )
-}
-
-function isVideoData(value: unknown): value is VideoData {
-  const video = value as Partial<VideoData> | null
-  return (
-    video?.data instanceof Uint8Array &&
-    video.data.byteLength > 0 &&
-    typeof video.mediaType === "string" &&
-    /^video\/[a-z0-9.+-]+$/.test(video.mediaType)
-  )
-}
-
-function isWarnings(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((warning) => typeof warning === "string")
 }
 
 function optional<TKey extends string, TValue>(

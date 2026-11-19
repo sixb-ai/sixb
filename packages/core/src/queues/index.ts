@@ -16,6 +16,7 @@ export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
   AgentAiUsageRecordRequestedQueueJob,
+  AgentModelCallCheckRequestedQueueJob,
   AgentQueueJob,
   AgentQueueJobFailureCode,
   AgentRunRequestedQueueJob,

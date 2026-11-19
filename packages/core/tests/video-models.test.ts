@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, setSystemTime, test } from "bun:test"
 import { SixbHost } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
@@ -9,6 +9,7 @@ import {
   type VideoModel,
   type VideoModelStatus,
 } from "../src/models"
+import { runScheduledVideoCheck, VIDEO_GENERATION_CEILING_MS } from "../src/models/video/check"
 import { setApiPublicOrigin } from "../src/runtime/public-origin"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -113,7 +114,25 @@ async function untilTimer(): Promise<void> {
 
 afterEach(() => {
   jest.useRealTimers()
+  setSystemTime()
 })
+
+/** The scheduled check the agent worker would run next, claimed once it is due. */
+async function dueCheck(deps: ReturnType<typeof createTestRuntimeDeps>) {
+  const [claimed] = await deps.queues.agents.claim({ projectId: "videos", workerId: "test" })
+  return claimed
+}
+
+/** What a fresh process, sharing only durable storage and queues, checks a generation with. */
+function restartedHost(deps: ReturnType<typeof createTestRuntimeDeps>, model: VideoModel) {
+  return {
+    projectId: "videos",
+    storage: deps.storage,
+    queues: deps.queues,
+    catalog: createModelCatalog({ video: [model] }),
+    blobs: deps.blobStorage,
+  }
+}
 
 describe("video generation", () => {
   // Removal proof: remove assertModelAccess from start() in video/runtime.ts; the call starts.
@@ -409,5 +428,103 @@ describe("video generation", () => {
     expect(() =>
       createModelCatalog({ video: [createVideoModel([], {}, { maxVideosPerCall: 0 }).model] })
     ).toThrow("maxVideosPerCall")
+  })
+
+  // Removal proof: drop scheduleVideoCheck from start(); no check is queued and nothing settles.
+  test("a generation nobody reads again settles from the queue, even after a restart", async () => {
+    const { model, calls } = createVideoModel([{ status: "pending" }, COMPLETED], {
+      costEstimator: {
+        estimateReservation: () => ({ currency: "USD", amountNanos: "800000000" }),
+        estimate: () => ({ status: "unpriceable", reason: "missing-rate-card" }),
+      },
+    })
+    const deps = await setup(model)
+    await createCostLimit(deps.storage)
+    const startedAt = new Date("2026-11-18T10:00:00.000Z")
+    setSystemTime(startedAt)
+
+    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox", duration: 4 })
+    expect(await dueCheck(deps)).toBeUndefined()
+
+    // The first look is a minute later, from another process: the job is still running.
+    setSystemTime(new Date(startedAt.getTime() + 60_000))
+    const first = await dueCheck(deps)
+    expect(first?.job).toMatchObject({
+      type: "agent.model-call.check.requested",
+      payload: { callId },
+    })
+    await runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+    await deps.queues.agents.complete({
+      projectId: "videos",
+      jobId: first!.job.id,
+      leaseId: first!.leaseId,
+    })
+
+    // Removal proof: skip the rescheduling in runScheduledVideoCheck; no second look comes.
+    setSystemTime(new Date(startedAt.getTime() + 120_000))
+    const second = await dueCheck(deps)
+    expect(second?.job.payload).toEqual({ callId })
+    await runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+
+    expect(calls.checks).toBe(2)
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({
+      status: "completed",
+      files: [{ mediaType: "video/mp4" }],
+    })
+    const [status] = await deps.storage.aiLimits.listPolicyStatuses({ projectId: "videos" })
+    expect(status!.consumption.reserved).toMatchObject({ amount: { amountNanos: "0" } })
+  })
+
+  // Removal proof: drop the ceiling from checkVideoOperation; the job stays pending and reserved.
+  test("past the ceiling, a job still running fails and its budget becomes unknown", async () => {
+    const { model } = createVideoModel([{ status: "pending" }], {
+      costEstimator: {
+        estimateReservation: () => ({ currency: "USD", amountNanos: "800000000" }),
+        estimate: () => ({ status: "unpriceable", reason: "missing-rate-card" }),
+      },
+    })
+    const deps = await setup(model)
+    await createCostLimit(deps.storage)
+    const startedAt = new Date("2026-11-18T10:00:00.000Z")
+    setSystemTime(startedAt)
+    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox" })
+
+    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS - 1))
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "pending" })
+
+    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
+    await runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({
+      status: "failed",
+      error: "The provider did not finish the video within 60 minutes.",
+      cost: { status: "unpriceable" },
+    })
+    const [status] = await deps.storage.aiLimits.listPolicyStatuses({ projectId: "videos" })
+    expect(status!.consumption).toMatchObject({
+      reserved: { amount: { amountNanos: "0" } },
+      unknown: { amount: { amountNanos: "800000000" } },
+    })
+  })
+
+  test("past the ceiling, a job Sixb can no longer ask about fails too", async () => {
+    const { model } = createVideoModel([], {
+      async status() {
+        throw new Error("Gateway unreachable")
+      },
+    })
+    const deps = await setup(model)
+    const startedAt = new Date("2026-11-18T10:00:00.000Z")
+    setSystemTime(startedAt)
+    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox" })
+    const check = () =>
+      runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+
+    // Before it, the worker retries the job.
+    expect(await check().catch((error) => error)).toMatchObject({ message: "Gateway unreachable" })
+
+    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
+    await check()
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "failed" })
   })
 })

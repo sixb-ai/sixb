@@ -103,7 +103,10 @@ the dearest one when the request names none, times the requested length, or the 
 | Per second, by resolution and sound (Veo, Wan, Grok Imagine, Seedance 1.0, MiniMax) | Runs. |
 | By tokens or by quality mode (Seedance 2.x, Kling, HeyGen) | Blocked: Sixb cannot match the price before the call. |
 
-A generation that fails is recorded with what the provider billed for it, usually nothing.
+A generation that fails is recorded with what the provider billed for it, usually nothing. Sixb
+follows every generation itself until it ends, whether anyone asks for it again or not; one still
+running after an hour is failed, and its reservation counts as spent until the month ends, since
+whether the provider billed it is unknown.
 
 ## Reranking
 

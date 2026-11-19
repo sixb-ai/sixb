@@ -244,10 +244,24 @@ export interface ArtifactPdfRequestedQueueJob
     }
   > {}
 
+/**
+ * A model call the provider keeps running after its request, such as a video generation: the
+ * agent worker checks on it until it ends, so it settles even when no client asks again. One job
+ * per call.
+ */
+export interface AgentModelCallCheckRequestedQueueJob
+  extends QueueJob<
+    "agent.model-call.check.requested",
+    {
+      readonly callId: string
+    }
+  > {}
+
 export type AgentQueueJob =
   | AgentRunRequestedQueueJob
   | AgentWorkflowNodeRequestedQueueJob
   | AgentAiUsageRecordRequestedQueueJob
+  | AgentModelCallCheckRequestedQueueJob
 
 /** Internal lane hosted by ProjectionWorker. */
 export type VectorIndexingQueueJob = QueueJob<
