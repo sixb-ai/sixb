@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
 import { client, type GetArtifactMediaResponse } from "@sixb/client"
 import {
   type LiveFiles,
@@ -8,8 +8,8 @@ import {
 } from "@sixb/core/artifacts/live"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
+import { type ReactNode, useLayoutEffect } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
 import { LiveVideo } from "../src/artifacts/live/video"
@@ -40,7 +40,7 @@ import {
   zoomAround,
 } from "../src/artifacts/renderers/video/editor/model"
 import { RenameField, SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
-import { laidClips } from "../src/artifacts/renderers/video/editor/selection"
+import { heardRecordings, laidClips } from "../src/artifacts/renderers/video/editor/selection"
 import { Timeline } from "../src/artifacts/renderers/video/editor/timeline"
 import {
   fillers,
@@ -53,7 +53,10 @@ import {
   wordAt,
   wordsCut,
 } from "../src/artifacts/renderers/video/editor/transcript"
-import { TranscriptPanel } from "../src/artifacts/renderers/video/editor/transcript-panel"
+import {
+  TranscriptPanel,
+  TranscriptTab,
+} from "../src/artifacts/renderers/video/editor/transcript-panel"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -68,6 +71,7 @@ installDom([
   "HTMLButtonElement",
   "HTMLImageElement",
   "Event",
+  "CustomEvent",
   "KeyboardEvent",
   "MouseEvent",
   "PointerEvent",
@@ -82,6 +86,19 @@ installDom([
 ])
 
 afterEach(cleanup)
+
+// Radix picks its layout effect when it loads, a no-op without a `document`, and its menus then
+// never mount. It is given React's own for this file, and its own back after.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof import("react").useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+afterAll(() => {
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
+})
 
 const originalConfig = client.getConfig()
 afterEach(() => client.setConfig({ fetch: originalConfig.fetch }))
@@ -742,6 +759,159 @@ describe("what is derived of a recording", () => {
     expect(pollAgainIn(read("media/talk.mp4"))).toBe(4000)
     expect(pollAgainIn(read("media/voice.m4a"))).toBe(false)
     expect(pollAgainIn(read("media/broken.mp4"))).toBe(false)
+  })
+})
+
+describe("the Transcript tab", () => {
+  /** A voice-over along the whole video; a title, then an interview over muted b-roll. */
+  const SPOKEN_INDEX = `<div data-composition-id="main" data-width="1280" data-height="720" data-duration="10">
+  <audio id="narration" src="media/narration.m4a" data-start="0" data-duration="10"></audio>
+  <div id="title" data-composition-id="title" data-composition-src="scenes/title.html" data-start="0" data-duration="3" data-label="Title"></div>
+  <div id="talk" data-composition-id="talk" data-composition-src="scenes/talk.html" data-start="title" data-duration="7" data-label="Interview"></div>
+</div>`
+  const SPOKEN_TALK = `<template>
+  <div data-composition-id="talk" data-width="1280" data-height="720">
+    <video id="broll" src="media/broll.mp4" data-start="0" data-duration="7" muted></video>
+    <audio id="answer" src="media/answer.m4a" data-start="0.5" data-duration="6"></audio>
+  </div>
+</template>`
+
+  const blob = (path: string, mediaType: string) => ({
+    path,
+    file: { blobId: path, digest: `sha256:${path}`, sizeBytes: 1, mediaType },
+  })
+  const target: MediaTarget = {
+    artifactId: "art_video",
+    version: 3,
+    files: [
+      blob("media/narration.m4a", "audio/mp4"),
+      blob("media/broll.mp4", "video/mp4"),
+      blob("media/answer.m4a", "audio/mp4"),
+    ],
+  }
+
+  /** What each recording says, as its transcription model timed it. */
+  const said: Record<string, string[]> = {
+    "media/narration.m4a": ["Every", "boiler", "tells", "a", "story."],
+    "media/answer.m4a": ["We", "fixed", "it", "before", "lunch."],
+    "media/broll.mp4": [],
+  }
+
+  /** The API, answering each recording's parts and its transcript's file. */
+  function serve() {
+    const unavailable = { status: "unavailable", reason: "It has no picture." }
+    const parts = (path: string) => ({
+      probe: { status: "ready", durationMs: 7000, container: "mp4" },
+      proxy: unavailable,
+      poster: unavailable,
+      filmstrip: unavailable,
+      waveform: unavailable,
+      cuts: unavailable,
+      transcript: {
+        status: "ready",
+        url: `/transcripts/${encodeURIComponent(path)}`,
+        mediaType: "application/json",
+        sizeBytes: 1,
+      },
+    })
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = new URL(new Request(input, init).url).searchParams.get("path") ?? ""
+          return Response.json({ path, version: 3, parts: parts(path) })
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+
+    const original = globalThis.fetch
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        const { pathname } = new URL(String(input))
+        const path = decodeURIComponent(pathname.replace(/^\/transcripts\//, ""))
+        const words = (said[path] ?? []).map((text, index) => ({
+          text,
+          startMs: index * 400,
+          endMs: index * 400 + 300,
+        }))
+        return Response.json({ text: words.map((word) => word.text).join(" "), words })
+      },
+      { preconnect: original.preconnect }
+    )
+    return () => {
+      globalThis.fetch = original
+    }
+  }
+
+  function tab(sceneId: string, timeMs: number) {
+    const files: LiveFiles = new Map([
+      ["index.html", { text: SPOKEN_INDEX }],
+      ["scenes/title.html", { text: TITLE }],
+      ["scenes/talk.html", { text: SPOKEN_TALK }],
+    ])
+    const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+    const shown = state.composition
+    const scene = shown?.scenes.find((each) => each.id === sceneId)
+    if (!shown || !scene) throw new Error(`No scene ${sceneId}.`)
+
+    const clips = laidClips(state, shown, scene)
+    return wrap(
+      <TranscriptTab
+        target={target}
+        scene={scene.id}
+        recordings={heardRecordings(clips, scene, timeMs)}
+        selected={undefined}
+        timeMs={timeMs}
+        onSeek={() => {}}
+        onRemove={() => {}}
+      />
+    )
+  }
+
+  // Reproduce by showing only the selected clip's recording in TranscriptTab (drop
+  // `?? speaking[0]`), or by offering only footage in heardRecordings, as the editor did: with
+  // nothing selected, the tab then says nothing is said, though the interview and the voice-over
+  // speak.
+  test("opens on the open scene's spoken recording with nothing selected, and switches to another", async () => {
+    const restore = serve()
+    try {
+      const view = render(tab("talk", 4000))
+      await waitFor(() => view.getByText("lunch."))
+      expect(view.container.textContent).not.toContain("boiler")
+
+      // The muted b-roll says nothing, so only the voice-over is offered beside the answer.
+      await act(async () => {
+        fireEvent.pointerDown(view.getByRole("button", { name: /^Transcript of answer\.m4a/ }), {
+          button: 0,
+          ctrlKey: false,
+          pointerType: "mouse",
+        })
+      })
+      const items = await view.findAllByRole("menuitem")
+      expect(items.map((item) => item.textContent)).toEqual([
+        expect.stringContaining("answer.m4a"),
+        expect.stringContaining("narration.m4a"),
+      ])
+
+      await act(async () => {
+        fireEvent.click(view.getByRole("menuitem", { name: /narration\.m4a/ }))
+      })
+      await waitFor(() => view.getByText("boiler"))
+    } finally {
+      restore()
+    }
+  })
+
+  test("falls back on the video's own voice-over when the scene has no recording", async () => {
+    const restore = serve()
+    try {
+      const view = render(tab("title", 1000))
+      await waitFor(() => view.getByText("boiler"))
+      expect(view.container.textContent).toContain("Soundtrack")
+    } finally {
+      restore()
+    }
   })
 })
 

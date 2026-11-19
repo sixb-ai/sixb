@@ -1,19 +1,39 @@
-import type { VideoRange } from "@sixb/core/artifacts/live"
-import { Button, Spinner } from "@sixb/ui/components"
+import { VIDEO_ENTRY, type VideoRange } from "@sixb/core/artifacts/live"
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Spinner,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
+  AudioLines,
+  Check,
   ChevronDown,
+  ChevronsUpDown,
   ChevronUp,
   Info,
+  MicOff,
   Scissors,
   Search,
   TextCursorInput,
+  Video,
   WandSparkles,
 } from "lucide-react"
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
-import { type MediaTarget, useMediaParts, useTranscript } from "./media"
+import { formatClock } from "../../../playback"
+import {
+  type MediaTarget,
+  useMediaParts,
+  useMediaPartsOf,
+  useTranscript,
+  useTranscriptsOf,
+} from "./media"
 import type { LaidClip } from "./model"
+import { clipName, type SpokenRecording } from "./selection"
 import {
   fillers,
   findWords,
@@ -30,6 +50,182 @@ import {
 // Delete cuts them; "Remove silences" and "Remove filler words" show what they would cut first,
 // and cut it all at once, a single step to undo. A transcript timed only by sentence is cut by
 // sentence, and says so: it cannot say where a word inside one starts.
+//
+// The tab opens on what is said in the open scene without anything selected: the recording heard
+// there that has words, the one under the playhead first, else the one heard longest, and the
+// video's own, such as a voice-over, when the scene's have none. A clip selected on the timeline
+// shows its recording instead, and a menu switches between those that speak.
+
+/** What the tab knows of what a recording says. */
+type Speech = "words" | "transcribing" | "no_model" | "none"
+
+export function TranscriptTab({
+  target,
+  scene,
+  recordings,
+  selected,
+  timeMs,
+  onSeek,
+  onRemove,
+}: {
+  readonly target: MediaTarget
+  /** The open scene, by its id. */
+  readonly scene: string | undefined
+  /** The recordings heard in the open scene, best first, as `heardRecordings` ranks them. */
+  readonly recordings: readonly SpokenRecording[]
+  /** The recording of the clip selected on the timeline, when one is. */
+  readonly selected: SpokenRecording | undefined
+  readonly timeMs: number
+  readonly onSeek: (ms: number) => void
+  readonly onRemove: (recording: SpokenRecording, ranges: readonly VideoRange[]) => void
+}) {
+  const messages = useArtifactMessages().videoEditor
+  const parts = useMediaPartsOf(
+    target,
+    recordings.map((recording) => recording.src)
+  )
+  const transcripts = useTranscriptsOf(parts.map((part) => part.transcriptUrl))
+  const speech = parts.map((part, index): Speech => {
+    const read = transcripts[index]
+    if (read?.transcript && read.transcript.words.length > 0) return "words"
+    if (part.transcript === "processing") return "transcribing"
+    if (part.transcriptUrl && !read?.transcript && !read?.failed) return "transcribing"
+    return part.transcriptLacks === "transcription_model" ? "no_model" : "none"
+  })
+  const speaking = recordings.filter((_, index) => speech[index] === "words")
+
+  // A clip selected on the timeline shows its recording, until another is chosen in the menu. The
+  // choice lasts until the reader opens another scene or selects another clip.
+  const [chosen, setChosen] = useState<string | null>(null)
+  const following = `${scene ?? ""}\n${selected ? keyOf(selected) : ""}`
+  const [followed, setFollowed] = useState(following)
+  if (followed !== following) {
+    setFollowed(following)
+    setChosen(null)
+  }
+
+  const shown =
+    recordings.find((recording) => keyOf(recording) === chosen) ?? selected ?? speaking[0]
+
+  if (!shown) {
+    if (recordings.length === 0) {
+      return (
+        <Empty icon={<AudioLines aria-hidden="true" />} title={messages.noRecording}>
+          {messages.noRecordingHint}
+        </Empty>
+      )
+    }
+    if (speech.includes("transcribing")) {
+      return (
+        <Notice>
+          <Spinner className="size-4" />
+          {messages.transcribing}
+        </Notice>
+      )
+    }
+    if (speech.includes("no_model")) return <NoTranscriptionModel />
+    return (
+      <Empty icon={<MicOff aria-hidden="true" />} title={messages.noSpeech}>
+        {messages.noSpeechHint}
+      </Empty>
+    )
+  }
+
+  const choices = speaking.some((recording) => keyOf(recording) === keyOf(shown))
+    ? speaking
+    : [shown, ...speaking]
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-11 shrink-0 items-center border-b border-border/70 px-2">
+        {choices.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={messages.chooseRecording(recordingName(shown))}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted"
+              >
+                <RecordingLabel recording={shown} />
+                <ChevronsUpDown
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-(--radix-dropdown-menu-trigger-width) min-w-60"
+            >
+              {choices.map((recording) => (
+                <DropdownMenuItem
+                  key={keyOf(recording)}
+                  onSelect={() => setChosen(keyOf(recording))}
+                >
+                  <RecordingLabel recording={recording} />
+                  {keyOf(recording) === keyOf(shown) ? (
+                    <Check className="ml-auto" aria-hidden="true" />
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <div className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2">
+            <RecordingLabel recording={shown} />
+          </div>
+        )}
+      </div>
+
+      <TranscriptPanel
+        key={keyOf(shown)}
+        target={target}
+        src={shown.src}
+        clips={shown.clips}
+        timeMs={timeMs}
+        onSeek={onSeek}
+        onRemove={(ranges) => onRemove(shown, ranges)}
+      />
+    </div>
+  )
+}
+
+function keyOf(recording: SpokenRecording): string {
+  return `${recording.file}\n${recording.src}`
+}
+
+function recordingName(recording: SpokenRecording): string {
+  const first = recording.clips[0]
+  return first ? clipName(first.clip) : recording.src.replace(/^.*\//, "")
+}
+
+/** A recording by its name, what it is and when it is first heard. */
+function RecordingLabel({ recording }: { readonly recording: SpokenRecording }) {
+  const messages = useArtifactMessages().videoEditor
+  const first = recording.clips[0]
+  const sound = first?.clip.kind === "audio"
+  const what =
+    recording.file === VIDEO_ENTRY
+      ? messages.tracks.soundtrack
+      : messages.clipKinds[sound ? "audio" : "video"]
+
+  return (
+    <>
+      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground [&_svg]:size-3.5">
+        {sound ? <AudioLines aria-hidden="true" /> : <Video aria-hidden="true" />}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate text-[13px] font-medium text-foreground">
+          {recordingName(recording)}
+        </span>
+        <span className="truncate text-[11px] text-muted-foreground tabular-nums">
+          {what}
+          {first ? ` · ${formatClock(first.startMs / 1000)}` : null}
+        </span>
+      </span>
+    </>
+  )
+}
 
 export function TranscriptPanel({
   target,
@@ -64,21 +260,7 @@ export function TranscriptPanel({
   }
   if (failed) return <Notice>{messages.transcriptFailed}</Notice>
   // Nothing the reader can do here: what to set up for it, rather than a dead end.
-  if (parts.transcriptLacks === "transcription_model") {
-    return (
-      <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-        <span className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground [&_svg]:size-4">
-          <TextCursorInput aria-hidden="true" />
-        </span>
-        <p className="m-0 text-[13px] font-medium text-foreground">
-          {messages.noTranscriptionModel}
-        </p>
-        <p className="m-0 max-w-64 text-[13px] text-muted-foreground">
-          {messages.noTranscriptionModelHint}
-        </p>
-      </div>
-    )
-  }
+  if (parts.transcriptLacks === "transcription_model") return <NoTranscriptionModel />
   if (!transcript || !words || words.length === 0) {
     return <Notice>{parts.transcriptReason ?? messages.noTranscript}</Notice>
   }
@@ -96,9 +278,39 @@ export function TranscriptPanel({
   )
 }
 
-function Notice({ children }: { readonly children: React.ReactNode }) {
+function Notice({ children }: { readonly children: ReactNode }) {
   return (
     <p className="m-0 flex items-center gap-2 p-4 text-[13px] text-muted-foreground">{children}</p>
+  )
+}
+
+/** Why there is nothing to read, and what would change that. */
+function Empty({
+  icon,
+  title,
+  children,
+}: {
+  readonly icon: ReactNode
+  readonly title: string
+  readonly children: ReactNode
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+      <span className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground [&_svg]:size-4">
+        {icon}
+      </span>
+      <p className="m-0 text-[13px] font-medium text-foreground">{title}</p>
+      <p className="m-0 max-w-64 text-[13px] text-muted-foreground">{children}</p>
+    </div>
+  )
+}
+
+function NoTranscriptionModel() {
+  const messages = useArtifactMessages().videoEditor
+  return (
+    <Empty icon={<TextCursorInput aria-hidden="true" />} title={messages.noTranscriptionModel}>
+      {messages.noTranscriptionModelHint}
+    </Empty>
   )
 }
 
