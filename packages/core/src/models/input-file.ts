@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { unaliasMediaType } from "../blob-storage/media-type"
 import type { BlobStorage, FileRef } from "../blob-storage/types"
 import { isFileRef } from "../blob-storage/validation"
 
@@ -39,11 +40,15 @@ export function prepareModelInputBytes(
   return { bytes: input.data.slice(), mediaType }
 }
 
-/** The essence of a media type, such as `audio/webm` for `audio/webm;codecs=opus`. */
+/**
+ * The essence of a media type, such as `audio/webm` for `audio/webm;codecs=opus`, under its
+ * registered name (`audio/x-m4a` -> `audio/mp4`, `audio/x-wav` -> `audio/wav`).
+ */
 function modelInputMediaType(value: unknown, type: "audio" | "image"): string | undefined {
   if (typeof value !== "string") return undefined
 
-  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase()
+  const essence = value.split(";", 1)[0]?.trim().toLowerCase()
+  const mediaType = essence && unaliasMediaType(essence)
   return mediaType && new RegExp(`^${type}/[a-z0-9.+-]+$`).test(mediaType) ? mediaType : undefined
 }
 

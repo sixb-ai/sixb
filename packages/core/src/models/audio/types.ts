@@ -8,7 +8,10 @@ export interface TranscriptionModelDefinition extends ModelDefinition {
   readonly kind: "transcription"
   /** Bounds memory consumption before a file is opened. Providers may impose lower limits. */
   readonly maxInputBytes: number
-  /** Omitted when the provider does not publish a reliable format list. */
+  /**
+   * Omitted when the provider does not publish a reliable format list. Requests carry registered
+   * names, such as `audio/mp4` for a file labelled `audio/x-m4a`, so list those.
+   */
   readonly mediaTypes?: readonly string[]
 }
 

@@ -179,6 +179,27 @@ describe("audio transcription", () => {
     })
   })
 
+  // Removal proof: drop unaliasMediaType from modelInputMediaType; the file is refused as an
+  // unsupported format, though the model reads WAV.
+  test("hands the model a file under the registered name of its format", async () => {
+    let received: string | undefined
+    const { sixb, blobStorage } = await setup(
+      createTranscriber(async (request) => {
+        received = request.mediaType
+        return { output: { text: "Hello" } }
+      })
+    )
+    // What Bun labels an uploaded `.wav`, whatever type its uploader declared.
+    const audio = await blobStorage.put({
+      body: new Uint8Array([1, 2, 3]),
+      mediaType: "audio/x-wav",
+    })
+
+    await sixb.models.audio.transcribe({ audio })
+
+    expect(received).toBe("audio/wav")
+  })
+
   test("rejects empty, oversized and non-audio bytes before inference", async () => {
     let calls = 0
     const { sixb } = await setup(
