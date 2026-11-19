@@ -245,6 +245,8 @@ export async function requestAgentRun(
     "router" in requested
       ? await routedConversationRunSpec({
           ...requested,
+          agents,
+          projectId,
           previous: existingThread
             ? await latestConversationRun(agents, projectId, existingThread.id)
             : undefined,
@@ -419,6 +421,8 @@ export async function editAgentMessage(
     "router" in requested
       ? await routedConversationRunSpec({
           ...requested,
+          agents,
+          projectId,
           previous: await latestRetainedConversationRun(agents, projectId, thread.id, tail),
           place,
           settings,
@@ -1866,6 +1870,8 @@ function routedTurn(
 /** The spec of a turn Sixb picks the model for, compared to the thread's previous turn. */
 async function routedConversationRunSpec(
   input: RoutedTurn & {
+    readonly agents: AgentStorage
+    readonly projectId: string
     /** The turn this one continues, absent for a thread's first. */
     readonly previous: ConversationAgentRunRecord | undefined
     /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
@@ -1874,7 +1880,11 @@ async function routedConversationRunSpec(
     readonly language: LanguageModelCatalog | undefined
   }
 ): Promise<ConversationAgentRunSpec> {
-  const choice = await input.router.choose(input.text, input.previous, input.place)
+  const previous = input.previous && {
+    run: input.previous,
+    text: await messageWords(input.agents, input.projectId, input.previous.triggerMessageId),
+  }
+  const choice = await input.router.choose({ text: input.text, previous, place: input.place })
 
   return resolveConversationRunSpec({
     models: input.language,
@@ -1882,6 +1892,22 @@ async function routedConversationRunSpec(
     settings: input.settings,
     tierProbabilities: choice.tierProbabilities,
   })
+}
+
+/** What a person wrote in a message, without the context or files sent with it. */
+async function messageWords(
+  agents: AgentStorage,
+  projectId: string,
+  messageId: string
+): Promise<string | undefined> {
+  const message = await agents.messages.getById({ projectId, id: messageId })
+  if (!message) return undefined
+
+  const words = message.parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n")
+    .trim()
+  return words || undefined
 }
 
 async function latestConversationRun(

@@ -90,7 +90,15 @@ one pins it, with a reasoning control, in that conversation and on that browser;
 Auto. On Auto, without a [decision model](#decision-models), every message runs on `standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
-names none. Before the answer starts, the default decision model scores the message's tiers:
+names none. Before the answer starts, the default decision model scores the message's tiers. It
+reads:
+
+- the message;
+- in a conversation, the first 2,000 characters of the message before it and the tier that one
+  ran on, so "Go ahead" after a plan for a large change takes the plan's tier, not the tier of a
+  thank-you;
+- what each tier is for, with the [description](#name-and-description) of the model it runs on:
+  describe what your project uses each tier for to steer the choice.
 
 | Probability | Tier |
 | --- | --- |
@@ -127,7 +135,8 @@ const gptModel = vercelGateway("openai/gpt-5.5", {
 ```
 
 They show in the chat's model picker, in the models the Agent can ask for a second opinion, and in
-the models it can [delegate](./overview.md#it-delegates) to. Each replaces the provider's own text;
+the models it can [delegate](./overview.md#it-delegates) to. The description of each tier's first
+model also steers which tier [Auto](#tiers) picks for a message. Each replaces the provider's own text;
 without them, the provider's name and description apply.
 
 ### Default reasoning
