@@ -157,10 +157,13 @@ export function VideoPlayer({
   }, [commenting.panel])
 
   const fullscreen = useFullscreen(screen)
+  // Filling the screen, the video shows alone: what opens beside it would not show.
+  const filling = fullscreen.on || fullscreen.pseudo
   const [announcement, setAnnouncement] = useState("")
   const controls = useControlsShown(screen, playback.playing && !commenting.commenting)
 
   const chapter = chapterAt(outline, playback.time)
+  const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
   const many = outline.scenes.length > 1
 
   const goTo = (seconds: number, say?: string) => {
@@ -305,7 +308,7 @@ export function VideoPlayer({
         !controls.shown && "cursor-none"
       )}
       style={
-        fullscreen.on || fullscreen.pseudo
+        filling
           ? undefined
           : compact
             ? { aspectRatio: String(ratio), maxHeight: "70vh" }
@@ -419,7 +422,10 @@ export function VideoPlayer({
 
       {commenting.commenting && !commenting.draft ? (
         <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center px-3">
-          <CommentModeHint hint={messages.commentHint} onExit={() => setCommenting(false)} />
+          <CommentModeHint
+            hint={touch ? messages.commentHintTouch : messages.commentHint}
+            onExit={() => setCommenting(false)}
+          />
         </div>
       ) : null}
 
@@ -427,7 +433,9 @@ export function VideoPlayer({
       <div
         className={cn(
           "pointer-events-none absolute inset-x-0 bottom-0 z-20 rounded-b-[inherit] bg-gradient-to-t from-black/75 via-black/35 to-transparent pt-16 transition-opacity duration-300 motion-reduce:transition-none",
-          controls.shown && !broken ? "opacity-100 *:pointer-events-auto" : "opacity-0"
+          controls.shown && !broken && !commenting.draft
+            ? "opacity-100 *:pointer-events-auto"
+            : "opacity-0"
         )}
       >
         <div onPointerEnter={controls.hold} onPointerLeave={controls.release}>
@@ -442,13 +450,13 @@ export function VideoPlayer({
                     placing: commenting.commenting,
                     panel: commenting.panel,
                     onPlace: placeComments,
-                    onPanel: () => showComments(!commenting.panel),
+                    onPanel: filling ? null : () => showComments(!commenting.panel),
                   }
                 : null
             }
             chaptersOpen={chaptersOpen}
-            onChapters={many ? () => showChapters(!chaptersOpen) : null}
-            fullscreen={fullscreen.on || fullscreen.pseudo}
+            onChapters={many && !filling ? () => showChapters(!chaptersOpen) : null}
+            fullscreen={filling}
             onFullscreen={fullscreen.toggle}
             onCopyLink={copyLink}
             copied={copied}
