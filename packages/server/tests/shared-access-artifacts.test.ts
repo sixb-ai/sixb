@@ -20,6 +20,7 @@ import {
 } from "@sixb/core"
 import { CANVAS_FILE } from "@sixb/core/artifacts"
 import { decodeLiveData, encodeLiveData } from "@sixb/core/artifacts/live"
+import { videoExportPlan, videoStillKey } from "@sixb/core/internal/artifacts/publish"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
@@ -409,6 +410,77 @@ describe("a shared link's guest", () => {
     )
     expect(refused.status).toBe(404)
     expect(await refused.json()).toMatchObject({ code: "preview_not_found" })
+  })
+
+  // A video's poster, its chapters' stills and its MP4 load as an `<img>` and a download link do,
+  // and a still shows what its scenes play from other artifacts as Marie reads them. Guard proof:
+  // drop `/still`, `/poster` and `/video` from LOADED_BY_TAGS (auth/shared-access.ts), and each
+  // load is refused; return true from seesVideoStill (routes/artifacts.ts), and the guest loads the
+  // stills that show Marie's logo; check the still's scene alone there, and the guest loads the
+  // credits', which fade in over it.
+  test("loads a video's poster, its stills and its MP4 the way a browser's tags do", async () => {
+    const { app, storage, blobStorage, marie, put, meetings, visit } = await setup()
+
+    const logo = await marie.artifacts.create({
+      kind: "file",
+      title: "Logo",
+      files: await put({ "logo.png": "logo" }),
+    })
+    const scene = (id: string, body = "") =>
+      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"><h1>${id}</h1>${body}</div></template>`
+    const host = (id: string, start: string) =>
+      `<div data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="2"></div>`
+    const video = await marie.artifacts.create({
+      kind: "video",
+      title: "Recap",
+      files: await put({
+        "index.html": `<html><body><div data-composition-id="main" data-width="1280" data-height="720">${host("intro", "0")}${host("outro", "intro")}${host("credits", "outro - 0.5")}</div></body></html>`,
+        "scenes/intro.html": scene("intro"),
+        "scenes/outro.html": scene("outro", `<img src="artifact:${logo.artifact.id}/logo.png">`),
+        "scenes/credits.html": scene("credits"),
+      }),
+    })
+    await meetings.upsert({ properties: { id: "m1", board: artifactRef(video.artifact.id) } })
+    const guest = await visit()
+
+    // The worker snapshotted every scene and joined the MP4 the guest's export names: the logo,
+    // which the link does not grant, resolves to nothing for them.
+    const { version } = video
+    if (version.outline.kind !== "video") throw new Error("Expected a video.")
+    const keep = async (key: string, body: string) =>
+      storage.artifacts.putVideoRender({
+        projectId,
+        key,
+        file: await blobStorage.put({ body: new TextEncoder().encode(body), fileName: "still" }),
+        createdAt: new Date(),
+      })
+    for (const each of version.outline.scenes) await keep(videoStillKey(each), each.id)
+    const plan = videoExportPlan({
+      outline: version.outline,
+      files: version.files,
+      references: version.references,
+      media: [{ address: `artifact:${logo.artifact.id}/logo.png` }],
+    })
+    await keep(plan.key, "mp4")
+
+    const base = `http://api.localhost/api/artifacts/${video.artifact.id}/versions/1`
+    const load = (path: string) =>
+      app.fetch(
+        new Request(`${base}${path}?shareGrant=${guest.grantId}`, {
+          headers: { cookie: guest.cookie },
+        })
+      )
+
+    expect(await (await load("/poster")).text()).toBe("intro")
+    expect(await (await load("/scenes/intro/still")).text()).toBe("intro")
+    expect(await (await load("/video")).text()).toBe("mp4")
+
+    // The outro shows the logo, and so may the credits, which fade in over it.
+    for (const id of ["outro", "credits"]) {
+      const refused = await load(`/scenes/${id}/still`)
+      expect(refused.status, id).toBe(404)
+      expect(await refused.json()).toMatchObject({ code: "still_not_found" })
+    }
   })
 
   // Guard proof: opt any of these routes into `sharedSession` in core's api-routes.ts; the

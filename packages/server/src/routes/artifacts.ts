@@ -26,6 +26,7 @@ import {
   boardPreviews,
   boardsReadLiveData,
   documentPdfKey,
+  playTogether,
   type VideoStill,
   videoPoster,
   videoStillKey,
@@ -851,14 +852,22 @@ function seesBoardPreviews(context: unknown, version: ArtifactVersionRecord): bo
 }
 
 /**
- * A still shows what the scene plays from other artifacts as the version's publisher reads it: a
- * guest of a shared link sees one only of a scene that plays none, nor its root.
+ * A still shows what the scenes on screen play from other artifacts as the version's publisher
+ * reads it: a guest of a shared link sees one only when neither its root, its scene, nor a scene
+ * on screen with it, as one fades into the next, plays any.
  */
 function seesVideoStill(context: unknown, version: ArtifactVersionRecord, scene: string): boolean {
-  return (
-    !requestAuthState(context).sharedSession ||
-    !version.references.some((reference) => reference.at === scene || reference.at === "")
-  )
+  if (!requestAuthState(context).sharedSession) return true
+  if (version.outline.kind !== "video") return false
+
+  const shown = version.outline.scenes.find((each) => each.id === scene)
+  const onScreen = new Set([
+    "",
+    ...version.outline.scenes
+      .filter((each) => shown && playTogether(shown, each))
+      .map((each) => each.id),
+  ])
+  return !version.references.some((reference) => onScreen.has(reference.at))
 }
 
 /** The render key a canvas version's outline gives one of its boards. */
