@@ -74,10 +74,9 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 ## Source positions
 
 Each host, and the root, keeps the span of its whole element, of its start tag, and of every
-attribute it writes, and each file reference
-the span of its attribute, as offsets into the text it was read from. An editor patches a
-`data-start`, a `data-duration`, or a `src` in place with them, so a change stays one small text
-edit, in the live document and in the Agent's diffs.
+attribute it writes, and each file reference the span of its attribute, as offsets into the text it
+was read from. An editor patches a `data-start`, a `data-duration`, or a `src` in place with them,
+so a change stays one small text edit, in the live document and in the Agent's diffs.
 
 ## Render keys
 
