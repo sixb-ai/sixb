@@ -130,6 +130,43 @@ describe("a video's composition", () => {
     expect(starts("intro-2 + 1")).toBe(3000)
   })
 
+  // Removal proof: drop the host ids from resolveStarts' names, and the outro starts after no scene.
+  test("finds a scene by its host's own id, as HyperFrames' templates write it", () => {
+    const layer = (id: string, start: string, duration: string) =>
+      host(id, start, duration).replace(`id="${id}"`, `id="${id}-layer"`)
+    const composition = composed({
+      "index.html": index([layer("intro", "0", "2"), layer("outro", "intro-layer + 1", "2")]),
+      "scenes/intro.html": scene("intro"),
+      "scenes/outro.html": scene("outro"),
+    })
+
+    expect(composition.scenes.map(({ id, hostId, startMs }) => ({ id, hostId, startMs }))).toEqual([
+      { id: "intro", hostId: "intro-layer", startMs: 0 },
+      { id: "outro", hostId: "outro-layer", startMs: 3000 },
+    ])
+  })
+
+  // Removal proof: let playsOnItsOwn return false, and only the plain root reads as still.
+  test("says when the root plays or animates something of its own", () => {
+    const timeline = (extra: string, root = 'data-width="1920" data-height="1080"') =>
+      composed({
+        "index.html": index([host("intro", "0", "2"), extra], root),
+        "scenes/intro.html": scene("intro"),
+      }).rootTimeline
+
+    expect(timeline("")).toBe(false)
+    expect(timeline("<style>h1 { color: red; }</style>")).toBe(false)
+    expect(
+      timeline('<div class="logo"></div>', 'data-width="1920" data-height="1080" data-start="0"')
+    ).toBe(false)
+
+    expect(timeline("<style>@keyframes grain { to { opacity: 0 } }</style>")).toBe(true)
+    expect(timeline('<link rel="stylesheet" href="styles.css">')).toBe(true)
+    expect(timeline("<script>window.__timelines = {}</script>")).toBe(true)
+    expect(timeline('<div style="transition: opacity 1s"></div>')).toBe(true)
+    expect(timeline(MUSIC, 'data-width="1920" data-height="1080" data-duration="2"')).toBe(true)
+  })
+
   test("plays at 30 frames a second, for as long as its scenes, or its root's own length", () => {
     const root = LAUNCH["index.html"] ?? ""
     const silent = root.replace(MUSIC, "").replace(' data-duration="7"', "")
@@ -226,14 +263,30 @@ describe("a video's composition", () => {
     ],
     ["two scenes of one id", withHosts([intro, intro]), "two scenes are 'intro'"],
     [
-      "an id apart from its composition id",
-      withHosts([intro.replace('id="intro"', 'id="opening"')]),
-      `scene 'intro' has id "opening"`,
+      "two hosts of one id",
+      withHosts([
+        intro.replace('id="intro"', 'id="layer"'),
+        host("demo", "0", "2").replace('id="demo"', 'id="layer"'),
+      ]),
+      'two scene hosts have id "layer"',
+    ],
+    [
+      "a host's id that is another scene's",
+      withHosts([
+        intro.replace('id="intro"', 'id="demo"'),
+        host("demo", "0", "2").replace('id="demo" ', ""),
+      ]),
+      `scene 'intro''s host has id "demo", which is scene 'demo''s id`,
     ],
     [
       "another element of a scene's id",
       withHosts([intro.replace('id="intro" ', ""), '<p id="intro">Hi</p>']),
-      `<p id="intro"> takes the id of scene 'intro'`,
+      `<p id="intro"> takes the name of a scene`,
+    ],
+    [
+      "another element of a host's id",
+      withHosts([intro.replace('id="intro"', 'id="opening"'), '<p id="opening">Hi</p>']),
+      `<p id="opening"> takes the name of a scene`,
     ],
     [
       "a file outside the project",
@@ -434,8 +487,8 @@ describe("publishing a video", () => {
     })
   })
 
-  // Guard proof: let every file into every scene's key in validateVideo (an empty `others`), and
-  // changing one scene changes them all.
+  // Removal proof: let sceneRenderKeys keep every file (drop its filter's last line), and a clip
+  // only the demo plays renders every scene again.
   test("renders again only the scenes a version changes, and shares them with a copy", async () => {
     const { publish } = setup()
     const before = keysOf((await publish(LAUNCH)).version.outline)
@@ -445,45 +498,117 @@ describe("publishing a video", () => {
     // Another artifact holding the same files renders the same scenes.
     expect(await after({})).toEqual(before)
 
-    // A scene's own HTML, or a file it alone plays, is its alone.
+    // A scene's own HTML, or a recording only it plays, is its alone.
     expect(await after({ "scenes/intro.html": scene("intro", "<h1>Hello</h1>") })).toEqual({
       ...before,
       intro: expect.not.stringMatching(before.intro ?? ""),
     })
-    const clip = await after({ "media/clip.mp4": "another clip" })
-    expect([clip.intro, clip.demo, clip.outro]).toEqual([
-      before.intro,
-      expect.not.stringMatching(before.demo ?? ""),
-      before.outro,
-    ])
+    expect(await after({ "media/clip.mp4": "another clip" })).toEqual({
+      ...before,
+      demo: expect.not.stringMatching(before.demo ?? ""),
+    })
 
-    // What the root plays, a stylesheet any scene may load, or the timeline: every scene.
-    const retimed = LAUNCH["index.html"]?.replace('data-duration="3"', 'data-duration="2.5"') ?? ""
+    // What the root plays, and any image or stylesheet, which a scene may load from its CSS or a
+    // script as well as from its HTML: every scene.
     const everyScene: Record<string, string>[] = [
       { "media/music.m4a": "other music" },
+      { "media/logo.png": "another logo" },
       { "styles.css": "h1 { color: red; }" },
-      { "index.html": retimed },
     ]
     for (const changes of everyScene) {
       const keys = await after(changes)
       for (const id of ["intro", "demo", "outro"]) expect(keys[id]).not.toBe(before[id])
     }
+  })
 
-    // An outro that fades in over the demo's last half second is in the demo's frames, and the
-    // demo in its. Removal proof: let `own` take the scene alone in validateVideo, and the demo
-    // keeps its key under a new logo.
-    const faded = (changes: Record<string, string> = {}) =>
-      after({
-        "index.html": LAUNCH["index.html"]?.replace("demo + 0.5", "demo - 0.5") ?? "",
-        ...changes,
-      })
-    const crossfade = await faded()
-    const logo = await faded({ "media/logo.png": "another logo" })
-    expect([logo.intro, logo.demo, logo.outro]).toEqual([
-      crossfade.intro,
-      expect.not.stringMatching(crossfade.demo ?? ""),
-      expect.not.stringMatching(crossfade.outro ?? ""),
-    ])
+  // Removal proof: let sceneRenderKeys hash all of index.html instead of `root`, and trimming the
+  // demo renders the intro again; let it always leave out the scene's start, and the outro of the
+  // video with music keeps its key.
+  test("renders a trimmed scene again, and the scenes after it when the root plays music", async () => {
+    const { publish } = setup()
+    const keys = async (root: string) =>
+      keysOf((await publish({ ...LAUNCH, "index.html": root })).version.outline)
+    const trim = (root: string) => root.replace('data-duration="3"', 'data-duration="2.5"')
+
+    // Without music, each scene shows the same frames wherever it plays.
+    const silent = (LAUNCH["index.html"] ?? "").replace(MUSIC, "").replace(' data-duration="7"', "")
+    const untrimmed = await keys(silent)
+    expect(await keys(trim(silent))).toEqual({
+      ...untrimmed,
+      demo: expect.not.stringMatching(untrimmed.demo ?? ""),
+    })
+
+    // A start written otherwise, or a new label, shows the same frames.
+    const rewritten = silent.replace('data-start="intro"', 'data-start="2"')
+    expect(await keys(rewritten.replace('data-label="Opening"', 'data-label="Hello"'))).toEqual(
+      untrimmed
+    )
+
+    // Over music, the outro now plays over another bar of it.
+    const scored = LAUNCH["index.html"] ?? ""
+    const before = await keys(scored)
+    expect(await keys(trim(scored))).toEqual({
+      intro: before.intro,
+      demo: expect.not.stringMatching(before.demo ?? ""),
+      outro: expect.not.stringMatching(before.outro ?? ""),
+    })
+  })
+
+  // Removal proof: let sceneRenderKeys take the scene alone as `beside`, and the outro keeps its
+  // key under the demo's new clip.
+  test("renders a scene again with the scene that fades into it", async () => {
+    const { publish } = setup()
+    const crossfade = (LAUNCH["index.html"] ?? "").replace("demo + 0.5", "demo - 0.5")
+    const keys = async (changes: Record<string, string> = {}) =>
+      keysOf((await publish({ ...LAUNCH, "index.html": crossfade, ...changes })).version.outline)
+
+    const before = await keys()
+    expect(await keys({ "media/clip.mp4": "another clip" })).toEqual({
+      intro: before.intro,
+      demo: expect.not.stringMatching(before.demo ?? ""),
+      outro: expect.not.stringMatching(before.outro ?? ""),
+    })
+  })
+
+  // Removal proof: drop the nesting loop in validateVideo's `load`, and the missing composition
+  // publishes, and the scene keeps its key under a new clip.
+  test("reads the compositions a scene nests, and what they play", async () => {
+    const { publish } = setup()
+    const lower = (body: string) =>
+      `<template><div data-composition-id="lower" data-width="1920" data-height="1080">${body}</div></template>`
+    const nesting = {
+      ...LAUNCH,
+      "scenes/intro.html": scene(
+        "intro",
+        '<div data-composition-id="lower" data-composition-src="compositions/lower.html" data-start="0.5" data-duration="1"></div>'
+      ),
+      "compositions/lower.html": lower('<video src="media/wave.mp4" muted></video>'),
+      "media/wave.mp4": "wave",
+    }
+    const keys = async (changes: Record<string, string> = {}) =>
+      keysOf((await publish({ ...nesting, ...changes })).version.outline)
+
+    const before = await keys()
+    expect(await keys({ "media/wave.mp4": "another wave" })).toEqual({
+      ...before,
+      intro: expect.not.stringMatching(before.intro ?? ""),
+    })
+
+    const { "compositions/lower.html": _, ...missing } = nesting
+    expect(await refusal(publish(missing))).toContain(
+      'scenes/intro.html: <div data-composition-src="compositions/lower.html"> nests a composition that is not one of the video\'s files'
+    )
+    expect(
+      await refusal(
+        publish({ ...nesting, "compositions/lower.html": lower('<img src="media/x.png">') })
+      )
+    ).toContain("compositions/lower.html: <img src=\"media/x.png\"> plays 'media/x.png'")
+    const loop = lower(
+      '<div data-composition-id="intro" data-composition-src="scenes/intro.html"></div>'
+    )
+    expect(await refusal(publish({ ...nesting, "compositions/lower.html": loop }))).toContain(
+      "nests 'scenes/intro.html', which nests compositions/lower.html in turn"
+    )
   })
 
   test("resolves the files of other artifacts its scenes play", async () => {
@@ -654,6 +779,7 @@ describe("comments on a video", () => {
     [{ at: 1.5 }, "`at` is 0 to 7000 milliseconds"],
     [{ point: { x: 0.5, y: 0.5 } }, "A comment's point is on the frame at its instant"],
     [{ at: 1000, point: { x: 1.5, y: 0.5 } }, "x and y from 0 to 1"],
+    [{ at: 1000, scene: "outro" }, "Scene 'outro' plays from 5500 to 7000 milliseconds"],
     [{ board: "intro" }, "A comment on a video is about an instant or a scene, not a board."],
   ])("refuses an anchor %o", async (anchor, message) => {
     const { sixb, publish } = setup()
