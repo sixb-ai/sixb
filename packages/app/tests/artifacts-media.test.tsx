@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { client } from "@sixb/client"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render as renderInDom, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import {
@@ -51,7 +51,8 @@ installDom(
 function render(ui: ReactNode, derived: readonly (readonly [FileSource, DerivedMedia])[] = []) {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   for (const [file, media] of derived) cache.setQueryData(derivedMediaQueryKey(file), media)
-  return renderInDom(<QueryClientProvider client={cache}>{ui}</QueryClientProvider>)
+  const view = renderInDom(<QueryClientProvider client={cache}>{ui}</QueryClientProvider>)
+  return Object.assign(view, { cache })
 }
 
 const originalConfig = client.getConfig()
@@ -145,6 +146,37 @@ describe("a video in the viewer", () => {
     const video = view.container.querySelector("video")
     expect(video?.getAttribute("src")).toBe(proxy)
     expect(video?.getAttribute("poster")).toBe(poster)
+  })
+
+  // Reproduce by returning `answer` alone from useDerivedMedia: the proxy read again swaps the
+  // source under the playhead, and the player starts over.
+  test("keeps playing what it started with when a proxy is ready meanwhile", async () => {
+    const clip = source("launch.mov", "video/quicktime")
+    const view = render(<VideoPlayer source={clip} name="launch.mov" layout="stage" />, [
+      [clip, {}],
+    ])
+
+    // The cache tells its readers within the act, as it does a browser's next task.
+    notifyManager.setScheduler(queueMicrotask)
+    try {
+      const proxy = "https://api.sixb.test/proxy.mp4"
+      await act(async () => {
+        view.cache.setQueryData(derivedMediaQueryKey(clip), { proxy })
+      })
+      expect(view.container.querySelector("video")?.getAttribute("src")).toBe(
+        `${clip.inlineUrl}#t=0.001`
+      )
+
+      // Opened again, it plays the proxy.
+      view.rerender(
+        <QueryClientProvider client={view.cache}>
+          <VideoPlayer source={clip} name="launch.mov" layout="stage" key="again" />
+        </QueryClientProvider>
+      )
+      expect(view.container.querySelector("video")?.getAttribute("src")).toBe(proxy)
+    } finally {
+      notifyManager.setScheduler((callback) => setTimeout(callback, 0))
+    }
   })
 
   test("plays the original until then, once it is known there is no proxy", async () => {
