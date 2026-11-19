@@ -9,13 +9,12 @@ import {
   parseVideoScene,
   VIDEO_ENTRY,
   type VideoMediaReference,
-  type VideoScene,
   type VideoSceneFile,
   videoFilePath,
 } from "../../video/composition"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
 import type { FoundReference } from "../references"
-import { sceneRenderKey } from "../video"
+import { sceneRenderKeys } from "../video"
 import { refuseFrameAssetPaths } from "./html"
 
 /**
@@ -45,7 +44,8 @@ export async function validateVideo(
   const read = (file: ArtifactFile) =>
     readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxSceneBytes)
 
-  const root = parseVideoRoot(await read(index))
+  const indexText = await read(index)
+  const root = parseVideoRoot(indexText)
   if ("error" in root) throw invalidArtifact(root.error)
 
   // One at a time, so the same version is always refused for the same scene.
@@ -65,23 +65,66 @@ export async function validateVideo(
 
   const references: FoundReference[] = []
   const exists = (path: string) => byPath.has(path)
-  const playedBy = (file: string, at: string, media: readonly VideoMediaReference[]) =>
-    played({ file, at, media, exists, references })
 
-  const rootPlays = playedBy(VIDEO_ENTRY, "", composition.media)
-  const scenePlays = new Map(
-    composition.scenes.map((scene) => [scene.id, playedBy(scene.src, scene.id, scene.media)])
-  )
+  // A nested composition's file is read as a scene file is: a <template> holding one.
+  const parsed = async (file: ArtifactFile): Promise<VideoSceneFile> => {
+    const scene = parseVideoScene(await read(file), file.path)
+    if ("error" in scene) throw invalidArtifact(scene.error)
+    return scene.scene
+  }
 
-  // What only other scenes load stays out of a scene's key: a scene's own HTML, and each file a
-  // scene plays that neither this scene nor the root does. A scene that plays while it does, as
-  // one fades into the next, is in its frames, so in its key.
-  const sceneOwned = new Set([
-    ...composition.scenes.map((scene) => scene.src),
-    ...[...scenePlays.values()].flatMap((paths) => [...paths]),
-  ])
-  const loads = (scene: VideoScene) => [scene.src, ...(scenePlays.get(scene.id) ?? [])]
+  // What each composition file loads: itself, what it plays, and what it nests, all the way down.
+  // Each is read once, whichever scene nests it first.
+  const loaded = new Map<string, ReadonlySet<string>>()
+  const load = async (
+    path: string,
+    file: VideoSceneFile,
+    at: string,
+    nesting: readonly string[]
+  ): Promise<ReadonlySet<string>> => {
+    const known = loaded.get(path)
+    if (known) return known
 
+    const paths = new Set([
+      path,
+      ...played({ file: path, at, media: file.media, exists, references }),
+    ])
+    for (const { element, value } of file.compositions) {
+      const nested = videoFilePath(VIDEO_ENTRY, value, exists)
+      const nestedEntry = nested === undefined ? undefined : byPath.get(nested)
+      const tag = `<${element} data-composition-src="${value.trim()}">`
+      if (nested === undefined || !nestedEntry) {
+        throw invalidArtifact(
+          `${path}: ${tag} nests a composition that is not one of the video's files: name it by its path from the video's root, such as compositions/lower-third.html.`
+        )
+      }
+      if (nested === path || nesting.includes(nested)) {
+        throw invalidArtifact(
+          `${path}: ${tag} nests '${nested}', which nests ${path} in turn: a composition never holds itself.`
+        )
+      }
+
+      const nestedFile = scenes.get(nested) ?? (await parsed(nestedEntry))
+      for (const each of await load(nested, nestedFile, at, [...nesting, path])) paths.add(each)
+    }
+
+    loaded.set(path, paths)
+    return paths
+  }
+  const rootLoads = played({
+    file: VIDEO_ENTRY,
+    at: "",
+    media: composition.media,
+    exists,
+    references,
+  })
+  const loads = new Map<string, ReadonlySet<string>>()
+  for (const scene of composition.scenes) {
+    const file = scenes.get(scene.src)
+    if (file) loads.set(scene.id, await load(scene.src, file, scene.id, []))
+  }
+
+  const keys = sceneRenderKeys({ index: indexText, composition, files, rootLoads, loads })
   return {
     entry: VIDEO_ENTRY,
     outline: {
@@ -90,26 +133,16 @@ export async function validateVideo(
       height: composition.height,
       fps: composition.fps,
       durationMs: composition.durationMs,
-      scenes: composition.scenes.map((scene) => {
-        const beside = composition.scenes.filter((other) => playTogether(scene, other))
-        const own = new Set([...rootPlays, ...beside.flatMap(loads)])
-        const others = new Set([...sceneOwned].filter((path) => !own.has(path)))
-        return {
-          id: scene.id,
-          ...(scene.label ? { label: scene.label } : {}),
-          startMs: scene.startMs,
-          durationMs: scene.durationMs,
-          renderKey: sceneRenderKey({ scene, files, others }),
-        }
-      }),
+      scenes: composition.scenes.map((scene) => ({
+        id: scene.id,
+        ...(scene.label ? { label: scene.label } : {}),
+        startMs: scene.startMs,
+        durationMs: scene.durationMs,
+        renderKey: keys.get(scene.id) ?? "",
+      })),
     },
     references,
   }
-}
-
-/** Whether two scenes are on screen at once, for a moment at least. */
-function playTogether(a: VideoScene, b: VideoScene): boolean {
-  return a.startMs < b.startMs + b.durationMs && b.startMs < a.startMs + a.durationMs
 }
 
 /**
