@@ -1,16 +1,17 @@
 import type { VideoRange } from "@sixb/core/artifacts/live"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronDown, ChevronUp, Scissors, Search, WandSparkles } from "lucide-react"
+import { ChevronDown, ChevronUp, Info, Scissors, Search, WandSparkles } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
-import { type MediaTarget, useMediaParts, useTranscriptWords } from "./media"
+import { type MediaTarget, useMediaParts, useTranscript } from "./media"
 import type { LaidClip } from "./model"
 import {
   fillers,
   findWords,
   rangesLength,
   silences,
+  type TranscriptTiming,
   type TranscriptWord,
   wordAt,
   wordsCut,
@@ -19,7 +20,8 @@ import {
 // Editing a recording by what is said in it. Its transcript reads as text, the word being said
 // lit as it plays, and what the video no longer plays struck through. Selecting words and pressing
 // Delete cuts them; "Remove silences" and "Remove filler words" show what they would cut first,
-// and cut it all at once, a single step to undo.
+// and cut it all at once, a single step to undo. A transcript timed only by sentence is cut by
+// sentence, and says so: it cannot say where a word inside one starts.
 
 export function TranscriptPanel({
   target,
@@ -41,9 +43,10 @@ export function TranscriptPanel({
 }) {
   const messages = useArtifactMessages().videoEditor
   const parts = useMediaParts(target, src)
-  const { words, failed } = useTranscriptWords(parts.transcriptUrl)
+  const { transcript, failed } = useTranscript(parts.transcriptUrl)
+  const words = transcript?.words
 
-  if (parts.transcript === "processing" || (parts.transcriptUrl && !words && !failed)) {
+  if (parts.transcript === "processing" || (parts.transcriptUrl && !transcript && !failed)) {
     return (
       <Notice>
         <Spinner className="size-4" />
@@ -52,13 +55,14 @@ export function TranscriptPanel({
     )
   }
   if (failed) return <Notice>{messages.transcriptFailed}</Notice>
-  if (!words || words.length === 0) {
+  if (!transcript || !words || words.length === 0) {
     return <Notice>{parts.transcriptReason ?? messages.noTranscript}</Notice>
   }
 
   return (
     <Words
       words={words}
+      timing={transcript.timing}
       cuts={parts.cuts}
       clips={clips}
       timeMs={timeMs}
@@ -82,6 +86,7 @@ interface Proposal {
 
 function Words({
   words,
+  timing,
   cuts,
   clips,
   timeMs,
@@ -89,6 +94,7 @@ function Words({
   onRemove,
 }: {
   readonly words: readonly TranscriptWord[]
+  readonly timing: TranscriptTiming
   readonly cuts: readonly number[]
   readonly clips: readonly LaidClip[]
   readonly timeMs: number
@@ -96,6 +102,7 @@ function Words({
   readonly onRemove: (ranges: readonly VideoRange[]) => void
 }) {
   const messages = useArtifactMessages().videoEditor
+  const phrases = timing === "phrases"
   const list = useRef<HTMLDivElement | null>(null)
   const [selection, setSelection] = useState<{
     readonly anchor: number
@@ -127,8 +134,9 @@ function Words({
   const nowMs = playing ? playing.clip.mediaStartMs + timeMs - playing.startMs : undefined
   const current = nowMs === undefined ? -1 : wordAt(words, nowMs)
 
-  const found = useMemo(() => findWords(words, query), [words, query])
-  const queryWords = query.trim().split(/\s+/).length
+  const found = useMemo(() => findWords(words, query, timing), [words, query, timing])
+  // How many entries a match spans: its words, or the one phrase that holds it.
+  const queryWords = phrases ? 1 : query.trim().split(/\s+/).length
   // A new search starts at its first match.
   const [searched, setSearched] = useState(query)
   if (searched !== query) {
@@ -263,7 +271,7 @@ function Words({
           <div className="flex items-center gap-2">
             <Button size="sm" className="h-7" onClick={cutSelection}>
               <Scissors />
-              {messages.cutWords(to - from + 1)}
+              {phrases ? messages.cutPhrases(to - from + 1) : messages.cutWords(to - from + 1)}
             </Button>
             <Button size="sm" variant="ghost" className="h-7" onClick={() => setSelection(null)}>
               {messages.cancel}
@@ -275,12 +283,30 @@ function Words({
               <WandSparkles />
               {messages.removeSilences}
             </Button>
-            <Button size="sm" variant="outline" className="h-7" onClick={() => propose("fillers")}>
-              <WandSparkles />
-              {messages.removeFillers}
-            </Button>
+            {/* A filler is a word: a phrase cannot say where one is inside it. */}
+            {phrases ? null : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                onClick={() => propose("fillers")}
+              >
+                <WandSparkles />
+                {messages.removeFillers}
+              </Button>
+            )}
           </div>
         )}
+
+        {phrases ? (
+          <div className="flex gap-2 rounded-md bg-muted/60 px-2.5 py-2 text-[12px] leading-snug text-muted-foreground">
+            <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="m-0 text-foreground">{messages.phrasesNote}</p>
+              <p className="m-0">{messages.phrasesHint}</p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -288,7 +314,10 @@ function Words({
         tabIndex={0}
         aria-label={messages.transcript}
         aria-describedby="sixb-transcript-hint"
-        className="min-h-0 flex-1 touch-pan-y overflow-y-auto p-4 text-[15px] leading-8 outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+        className={cn(
+          "min-h-0 flex-1 touch-pan-y overflow-y-auto p-4 text-[15px] outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50",
+          phrases ? "flex flex-col gap-1 leading-6" : "leading-8"
+        )}
         onKeyDown={(event) => {
           if ((event.key === "Delete" || event.key === "Backspace") && selection) {
             event.preventDefault()
@@ -335,7 +364,7 @@ function Words({
         }}
       >
         <p id="sixb-transcript-hint" className="sr-only">
-          {messages.wordsHint}
+          {phrases ? messages.phrasesHintShort : messages.wordsHint}
         </p>
         {words.map((word, index) => {
           const cutAway = !playedAt(word.startMs + Math.min(40, (word.endMs - word.startMs) / 2))
@@ -354,16 +383,23 @@ function Words({
               <span
                 data-word={index}
                 className={cn(
-                  "cursor-text rounded-[3px] px-[1px] py-0.5 transition-colors",
+                  "cursor-text rounded-[3px] transition-colors",
+                  phrases
+                    ? "-mx-1.5 block rounded-md px-1.5 py-1 hover:bg-muted/70"
+                    : "px-[1px] py-0.5",
                   cutAway && "text-muted-foreground/60 line-through decoration-muted-foreground/50",
                   index === current && !selected && "bg-primary/15 text-foreground",
                   matched && !selected && "bg-amber-300/40 dark:bg-amber-400/30",
                   proposed && "bg-amber-500/25 line-through",
-                  selected && "bg-primary text-primary-foreground"
+                  selected && "bg-primary text-primary-foreground hover:bg-primary"
                 )}
               >
                 {word.text}
-              </span>{" "}
+              </span>
+              {/* The space between two words selected is selected too: one stretch, not islands. */}
+              {phrases ? null : (
+                <span className={cn(selected && index < to && "bg-primary")}> </span>
+              )}
             </Fragment>
           )
         })}
