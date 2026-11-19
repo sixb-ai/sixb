@@ -169,6 +169,49 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
       })
     })
 
+    // A video's segment carries the files it renders from, so it renders what was asked for.
+    test("renders carry a video segment's files and what its addresses resolved to", async () => {
+      await withQueues(async (queues) => {
+        const file = (seed: string, mediaType: string) => ({
+          blobId: `blob_${seed.repeat(64)}`,
+          digest: `sha256:${seed.repeat(64)}` as const,
+          sizeBytes: 2048,
+          mediaType,
+        })
+        const payload = {
+          artifactId: "art_v1",
+          version: 2,
+          key: "b".repeat(64),
+          segment: { kind: "scene" as const, scene: "intro", startFrame: 0, endFrame: 120 },
+          video: { width: 1920, height: 1080, fps: 30, durationMs: 14_000 },
+          files: [
+            { path: "index.html", file: file("a", "text/html") },
+            { path: "media/clip.mp4", file: file("b", "video/mp4") },
+          ],
+          media: [
+            { address: "artifact:art_k3m9q2x7tp/media/logo.mp4", file: file("c", "video/mp4") },
+            { address: "artifact:art_q8w2e4r6ty/media/hidden.mp4" },
+          ],
+          frames: { from: 0, to: 120 },
+        }
+        await queues.renders.enqueue({
+          projectId: "project-a",
+          jobs: [
+            {
+              id: `art_vseg_${"b".repeat(64)}`,
+              type: "artifact.video.segment.requested" as const,
+              payload,
+            },
+          ],
+        })
+
+        const claimed = await queues.renders.claim({ projectId: "project-a", workerId: "render" })
+        expect(claimed.map(({ job }) => [job.type, job.payload])).toEqual([
+          ["artifact.video.segment.requested", payload],
+        ])
+      })
+    })
+
     describe("enqueue", () => {
       test("returns envelopes with generated id, createdAt, availableAt, attempt=0", async () => {
         await withQueues(async (queues) => {

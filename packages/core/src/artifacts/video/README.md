@@ -63,8 +63,9 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 ## Where it is stricter
 
 - Frames are at most 3,840 pixels a side, in even numbers, as H.264 encodes them, at 24, 25, 30,
-  50, or 60 fps: a frame rate every segment of an export cuts cleanly at. Both are written in
-  digits alone, which HyperFrames' `parseInt` reads as `Number()` does.
+  or 60 fps: the rates HyperFrames renders a range of a film at, as an export renders a scene that
+  overlaps another. Both are written in digits alone, which HyperFrames' `parseInt` reads as
+  `Number()` does.
 - A root that plays something on its own timeline, a soundtrack or any element with `data-start`,
   writes its own `data-duration`. Without one, HyperFrames plays until the last of them ends, and a
   sound without `data-duration` lasts as long as its file: a length the HTML does not say.
@@ -93,10 +94,13 @@ so a change stays one small text edit, in the live document and in the Agent's d
   A soundtrack trimmed with the video spares the scenes before the cut;
 - the scene's host and those of the scenes on screen with it, as one fades into the next, with
   their times resolved and their order in `index.html`, which stacks them;
-- the scene's start in the video, only when the root plays or animates something of its own: a
-  timed element, a recording, a script that may build a timeline, or CSS that moves;
-- every other file, but two kinds: the other scenes' HTML, and the videos and sounds neither the
-  root, the scene, nor a scene beside it plays, the heavy files a version mostly changes.
+- the scene's start in the video, only when the root shows something that moves of its own: a
+  timed element, a video, a script that may build a timeline, or CSS that moves;
+- every other file, but three kinds: the other scenes' HTML, the videos neither the root, the
+  scene, nor a scene beside it plays, the heavy files a version mostly changes, and every sound.
+
+A segment is pictures alone. The export mixes the whole video's sound once, apart, so a soundtrack
+changed, trimmed or moved renders no scene again (see Export below).
 
 `rootTimeline` reads `index.html` alone; publishing then reads what it links. An inline script
 counts, as it may build the root's timeline, and so does a script of the version that registers
@@ -111,7 +115,7 @@ rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are
 distinct. The control, the same box animated in the root, differs on all 60 frames.
 
 So trimming a scene re-renders it and the scenes it overlaps, and those after it only when the
-root has a timeline of its own. An image, a stylesheet, a font, a script, or a nested composition
+root moves on its own. An image, a stylesheet, a font, a script, or a nested composition
 is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
 video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
 the scene's segment. So a recording a script plays is named in HTML too, by a `<video>` or an
@@ -119,5 +123,5 @@ the scene's segment. So a recording a script plays is named in HTML too, by a `<
 
 The key names no artifact: a segment is the scene's frames, rendered from these files alone, so a
 copy shares it. An `artifact:` file a scene plays is in its HTML as an address, which follows its
-target's latest version, so the key does not cover what it resolves to: whatever renders a segment
-of such a scene adds that to the key it keeps the segment under.
+target's latest version, so the key does not cover what it resolves to: the export adds that to
+the key it keeps the segment under (see Export below).
