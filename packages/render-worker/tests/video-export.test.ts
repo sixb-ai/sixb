@@ -74,7 +74,7 @@ class VideoSandboxes implements Pick<SandboxFactory, "create" | "supportsRequest
         const body =
           mode === "assemble"
             ? rest
-                .slice(4)
+                .slice(5)
                 .map((path) => readFileSync(path, "utf8"))
                 .join("|")
             : mode === "segment"
@@ -268,10 +268,11 @@ describe("a video's export in the render worker", () => {
 
     await assemble(job)
     const joined = sandboxes.ran.at(-1)
-    // Its frames, the sound, then each scene's segment, in the order they play.
+    // Its frames and their rate, the sound, then each scene's segment, in the order they play.
     expect(joined?.mode).toBe("assemble")
     expect(joined?.args[2]).toBe("180")
-    expect(joined?.args[3]).toEndWith("/sound.m4a")
+    expect(joined?.args[3]).toBe("30")
+    expect(joined?.args[4]).toEndWith("/sound.m4a")
 
     const plan = videoExportPlan(job.payload)
     const [mp4] = await artifacts().listVideoRenders({ projectId, keys: [plan.key] })
