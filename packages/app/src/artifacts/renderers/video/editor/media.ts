@@ -108,6 +108,8 @@ export function useMediaParts(target: MediaTarget | null, path: string | undefin
 export interface Peaks {
   readonly peaksPerSecond: number
   readonly peaks: readonly number[]
+  /** The loudest of them, which a waveform scales to. */
+  readonly loudest: number
 }
 
 /** The peaks a waveform's file holds, once read. */
@@ -118,7 +120,8 @@ export function usePeaks(url: string | undefined): Peaks | undefined {
       const body = await readJson(url ?? "", signal)
       const peaks = Array.isArray(body.peaks) ? body.peaks.filter(isNumber) : []
       const peaksPerSecond = isNumber(body.peaksPerSecond) ? body.peaksPerSecond : 50
-      return { peaksPerSecond, peaks }
+      const loudest = peaks.reduce((max, peak) => Math.max(max, peak), 1)
+      return { peaksPerSecond, peaks, loudest }
     },
     enabled: !!url,
     staleTime: Number.POSITIVE_INFINITY,
