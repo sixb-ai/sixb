@@ -11,7 +11,8 @@ CREATE TABLE artifact_media (
 );
 
 -- Transcribing a media runs as the kernel operation `artifacts.transcribeMedia`, on the project's
--- model budget.
+-- model budget. The check is `NOT VALID`: a widened list cannot break a row that exists, and
+-- validating would scan `executions` under this lock.
 ALTER TABLE executions DROP CONSTRAINT executions_authority_kernel_operation_check;
 ALTER TABLE executions ADD CONSTRAINT executions_authority_kernel_operation_check
   CHECK (
@@ -19,4 +20,4 @@ ALTER TABLE executions ADD CONSTRAINT executions_authority_kernel_operation_chec
       OR authority_kernel_operation IN (
         'ontology.recover', 'ontology.indexVectors', 'artifacts.transcribeMedia'
       )
-  );
+  ) NOT VALID;
