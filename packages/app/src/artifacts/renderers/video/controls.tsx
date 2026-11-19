@@ -82,7 +82,14 @@ export function ControlBar({
   const silent = muted || volume === 0
 
   return (
-    <div className="flex flex-col gap-1 px-3 pb-2 sm:px-4 sm:pb-3">
+    <div
+      className={cn(
+        "flex flex-col gap-1 px-3 pb-2 sm:px-4 sm:pb-3",
+        // Filling a phone, the bar stays clear of its home indicator and, sideways, its notch.
+        fullscreen &&
+          "pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]"
+      )}
+    >
       {scrubber}
 
       <div className="flex items-center gap-0.5 text-white">
