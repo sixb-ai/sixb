@@ -1,9 +1,15 @@
-import type { ArtifactFrameTarget } from "../../storage/artifacts/types"
+import type {
+  ArtifactFile,
+  ArtifactFrameTarget,
+  ArtifactMediaRecord,
+} from "../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { decodeHtmlEntities, HTML_FILE_ATTRIBUTES } from "../html"
+import { mediaProxyReference } from "../media/media"
 import type { DocumentHeading } from "../outline"
 import type { DocumentPaper } from "../paper"
 import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
+import { videoFilePath } from "../video/composition"
 import { documentData } from "./document-data"
 import type { FrameLayout } from "./entries"
 import { HYPERFRAMES_RUNTIME } from "./hyperframes"
@@ -178,4 +184,37 @@ export function rewriteFrameReferences(
     })
   }
   return rewriter.transform(html)
+}
+
+/**
+ * Points each recording a video's HTML file plays, a `<video>`'s, an `<audio>`'s or a
+ * `<source>`'s, at its proxy once one is ready: the path as written, with the proxy's name in its
+ * query, as `mediaProxyReference` names it, so HyperFrames finds the proxy wherever it finds the
+ * original. A recording with no ready proxy plays its original. `path` is where the file is in
+ * the version: its references are read from there, as HyperFrames reads them.
+ */
+export function rewriteVideoProxies(
+  html: string,
+  path: string,
+  files: readonly ArtifactFile[],
+  media: ReadonlyMap<string, ArtifactMediaRecord>
+): string {
+  const held = new Map(files.map((file) => [file.path, file]))
+  return new HTMLRewriter()
+    .on("video[src], audio[src], source[src]", {
+      element(element) {
+        const written = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
+        const target = videoFilePath(path, written, (candidate) => held.has(candidate))
+        const file = target === undefined ? undefined : held.get(target)
+        const proxy = file ? mediaProxyReference(file, media.get(file.file.digest)) : null
+        if (!proxy) return
+
+        // Only the query: the path stays as written, which HyperFrames resolves as it did.
+        element.setAttribute(
+          "src",
+          `${written.replace(/[?#].*$/, "")}${proxy.slice(proxy.indexOf("?"))}`
+        )
+      },
+    })
+    .transform(html)
 }
