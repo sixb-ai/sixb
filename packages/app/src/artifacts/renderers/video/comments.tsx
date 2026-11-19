@@ -166,9 +166,9 @@ export function VideoCommentPins({
   const messages = useArtifactMessages().comments
   const { marked, active, draft } = commenting
 
+  // Only around its instant, the open one too: elsewhere a pin would point at another scene.
   const shown = marked.filter(
-    ({ thread, seconds }) =>
-      thread.comment.id === active || (time >= seconds - 0.05 && time <= seconds + PIN_SECONDS)
+    ({ seconds }) => time >= seconds - 0.05 && time <= seconds + PIN_SECONDS
   )
   let unplaced = 0
 
