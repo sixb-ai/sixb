@@ -1,7 +1,8 @@
-import { access } from "node:fs/promises"
+import { basename } from "node:path"
 import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp, requireExact } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
+import { type UploadProgress, uploadFile } from "../upload"
 import { GROUP_HELP } from "./metadata"
 import { idSegment } from "./shared"
 
@@ -11,17 +12,26 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
   if (sub === "upload") {
     const { positionals, options } = parseCommandArgs(
       rest,
-      { "--logical-path": "string" },
+      { "--logical-path": "string", "--media-type": "string" },
       "files upload",
       1
     )
     const source = positionals[0] ?? ""
+    const logicalPath = options["--logical-path"]
+    const mediaType = options["--media-type"]
+    const progress = process.stderr.isTTY ? progressLine(basename(source)) : undefined
     try {
-      await access(source)
-    } catch {
-      fail(`Upload file '${source}' does not exist.`)
+      const fileRef = await uploadFile(api, source, {
+        ...(logicalPath ? { logicalPath } : {}),
+        ...(mediaType ? { mediaType } : {}),
+        ...(progress ? { onProgress: progress.show } : {}),
+      })
+      progress?.clear()
+      return writeJson(fileRef)
+    } catch (error) {
+      progress?.clear()
+      throw error
     }
-    return writeJson(await api.upload("/api/files", source, options["--logical-path"]))
   }
   if (sub === "download") {
     const { positionals, options } = parseCommandArgs(
@@ -59,6 +69,36 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
     return writeJson({ downloaded: true, output })
   }
   fail(`Unknown files command '${sub}'.`)
+}
+
+/**
+ * One line on a terminal's stderr that follows a large upload, and is cleared once it ends: stdout
+ * keeps only the FileRef, and nothing is drawn where no one watches.
+ */
+function progressLine(name: string): {
+  readonly show: (progress: UploadProgress) => void
+  readonly clear: () => void
+} {
+  let shown = ""
+  return {
+    show({ stage, loadedBytes, totalBytes }) {
+      const percent = Math.floor((loadedBytes / Math.max(1, totalBytes)) * 100)
+      const line =
+        stage === "hash"
+          ? `Checking ${name}… ${percent}%`
+          : `Uploading ${name}… ${percent}% of ${megabytes(totalBytes)}`
+      if (line === shown) return
+      shown = line
+      process.stderr.write(`\r\x1b[2K${line}`)
+    },
+    clear() {
+      if (shown) process.stderr.write("\r\x1b[2K")
+    },
+  }
+}
+
+function megabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /** A Sixb API file content URL: only its path and query are used, never its origin. */
