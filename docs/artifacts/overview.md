@@ -775,8 +775,9 @@ media/<name>        the footage, sound, and images the scenes play
   or `intro + 0.5` and `intro - 0.5`, to start that much later or sooner. `data-duration` is its
   length, and `data-label` its name as a chapter.
 - A root that plays something itself, such as a soundtrack, gives its own `data-duration`.
-- A scene file's composition has its host's id. Every file a scene plays is one of the version's,
-  or another artifact's file by its address.
+- A scene file's composition has its host's `data-composition-id`, the scene's id in addresses
+  and comments. Every file a scene plays or nests is one of the version's; one it plays may also
+  be another artifact's, by its address.
 - `artifact:…#demo` opens the video at a scene, and `artifact:…#t=12.5` at an instant.
 - A video holds at most 200 scenes and plays at most 10 minutes. Its frame is at most 3,840 pixels
   a side, in even numbers, at 24, 25, 30, 50, or 60 frames a second, 30 by default. Each HTML file
