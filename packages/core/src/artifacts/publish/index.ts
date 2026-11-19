@@ -6,7 +6,7 @@
 export { BOARD_PREVIEW_JOB } from "../canvas-display"
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
-export { ARTIFACT_LIMITS } from "../limits"
+export { ARTIFACT_LIMITS, artifactSizeLimits } from "../limits"
 export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {

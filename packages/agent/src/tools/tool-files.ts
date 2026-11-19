@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import type { AgentToolFile, AgentToolFilePutInput, AgentToolFiles } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
-import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
+import { ARTIFACT_KINDS, artifactSizeLimits } from "@sixb/core/artifacts"
 import {
   AGENT_FILE_MAX_BYTES,
   type AgentRunFileStore,
@@ -11,8 +11,10 @@ import {
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 export { AGENT_FILE_MAX_BYTES }
-/** What a run stores in all: at least an artifact's version as large as one may be. */
-const DEFAULT_RUN_MAX_BYTES = ARTIFACT_LIMITS.maxVersionBytes
+/** What a run stores in all: at least an artifact's version as large as any kind's may be. */
+const DEFAULT_RUN_MAX_BYTES = Math.max(
+  ...ARTIFACT_KINDS.map((kind) => artifactSizeLimits(kind).maxVersionBytes)
+)
 
 interface CreateAgentToolFilesInput {
   readonly toolName: string
@@ -86,7 +88,7 @@ export class AgentFileBudget {
   }
 }
 
-class AgentFileReservation {
+export class AgentFileReservation {
   #bytes: number
   readonly #contents: string[] = []
   #released = false

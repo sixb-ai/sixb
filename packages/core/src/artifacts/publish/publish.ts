@@ -151,7 +151,7 @@ export async function prepareArtifactVersion(
   input: PublishArtifactInput
 ): Promise<PreparedArtifactVersion> {
   const title = checkTitle(input.title)
-  await checkArtifactFiles(context.blobStorage, input.files)
+  await checkArtifactFiles(context.blobStorage, input.kind, input.files)
   const theme =
     input.kind === "file" ? undefined : await readTheme(context.blobStorage, input.files)
 

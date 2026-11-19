@@ -1,8 +1,26 @@
+import { MAX_FILE_UPLOAD_BYTES } from "../blob-storage/constants"
+import type { ArtifactKind } from "./kinds"
+
+/** How many bytes one file, and all of a version's files together, may hold. */
+export interface ArtifactSizeLimits {
+  readonly maxFileBytes: number
+  /** Every file the version lists, counted at full size, even one an earlier version holds. */
+  readonly maxVersionBytes: number
+}
+
 /** What one version may hold. Publishing refuses a version over any of these. */
 export const ARTIFACT_LIMITS = {
   maxFiles: 500,
+  /** Any kind's sizes, unless `sizesByKind` gives its own: read them with `artifactSizeLimits`. */
   maxFileBytes: 25 * 1024 * 1024,
   maxVersionBytes: 250 * 1024 * 1024,
+  /**
+   * The kinds whose files may be larger. A file artifact's one file may be a long recording, as
+   * large as one upload may be: it is uploaded staged and served by range, never read whole.
+   */
+  sizesByKind: {
+    file: { maxFileBytes: MAX_FILE_UPLOAD_BYTES, maxVersionBytes: MAX_FILE_UPLOAD_BYTES },
+  } satisfies Partial<Record<ArtifactKind, ArtifactSizeLimits>>,
   maxPathLength: 512,
   maxTitleLength: 200,
   /** A document's Markdown is parsed whole when it is published. */
@@ -45,6 +63,17 @@ export const ARTIFACT_LIMITS = {
   /** What one query returns at most; past it, its result says it is truncated. */
   maxQueryRows: 10_000,
 } as const
+
+/** What one file, and one version, of an artifact of `kind` may hold. */
+export function artifactSizeLimits(kind: ArtifactKind): ArtifactSizeLimits {
+  const sizes: Partial<Record<ArtifactKind, ArtifactSizeLimits>> = ARTIFACT_LIMITS.sizesByKind
+  return (
+    sizes[kind] ?? {
+      maxFileBytes: ARTIFACT_LIMITS.maxFileBytes,
+      maxVersionBytes: ARTIFACT_LIMITS.maxVersionBytes,
+    }
+  )
+}
 
 /**
  * What a page may keep for each reader with `sixb.state`, across its versions: values are JSON,
