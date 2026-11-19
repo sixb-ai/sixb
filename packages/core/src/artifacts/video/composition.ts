@@ -20,7 +20,8 @@ const DEFAULT_FPS = 30
 
 /**
  * Where a scene starts, as its host's `data-start` writes it: at a number of seconds, or when
- * another scene ends, `offset` seconds later (`demo + 0.5`) or earlier (`demo - 1`).
+ * another scene ends, `offset` seconds later (`demo + 0.5`) or earlier (`demo - 1`). `scene` is
+ * the name as written: the other scene's id, or its host's own `id`.
  */
 export type VideoStart =
   | { readonly type: "at"; readonly seconds: number }
@@ -42,8 +43,13 @@ export interface VideoMediaReference {
   readonly at: VideoSourceSpan
 }
 
-/** A scene's host in `index.html`, where an editor changes its attributes in place. */
+/**
+ * An element of `index.html`, a scene's host or the root, where an editor changes its attributes in
+ * place.
+ */
 export interface VideoSceneHost {
+  /** The whole element, its end tag included. */
+  readonly element: VideoSourceSpan
   /** Its start tag. */
   readonly tag: VideoSourceSpan
   /** Each attribute it writes, by name, as the span of its name and value. */
@@ -51,8 +57,13 @@ export interface VideoSceneHost {
 }
 
 export interface VideoScene {
-  /** Its host's `data-composition-id`, which its file's composition and `#<id>` addresses name. */
+  /**
+   * Its host's `data-composition-id`, which its file's composition, `#<id>` addresses, comments and
+   * the outline name it by.
+   */
   readonly id: string
+  /** Its host's own `id`, when it writes another: `data-start` may name the scene by either. */
+  readonly hostId?: string
   /** Its host's `data-label`, HyperFrames' name for a scene. */
   readonly label?: string
   /** Its file in the version, from its host's `data-composition-src`. */
@@ -62,6 +73,8 @@ export interface VideoScene {
   readonly durationMs: number
   /** What its file plays and shows. */
   readonly media: readonly VideoMediaReference[]
+  /** The compositions its file nests, each by its `data-composition-src`. */
+  readonly compositions: readonly VideoMediaReference[]
   readonly host: VideoSceneHost
 }
 
@@ -75,6 +88,14 @@ export interface VideoComposition {
   readonly scenes: readonly VideoScene[]
   /** What `index.html` plays and shows itself, under or over every scene: a soundtrack, a logo. */
   readonly media: readonly VideoMediaReference[]
+  /** The root composition's element. */
+  readonly root: VideoSceneHost
+  /**
+   * Whether `index.html` plays or animates anything beside its scenes, as it runs: a timed element,
+   * a video or a sound, a script, a CSS animation or transition, or a stylesheet it links, which may
+   * hold one. What a scene shows then depends on when it plays.
+   */
+  readonly rootTimeline: boolean
 }
 
 /**
@@ -82,14 +103,19 @@ export interface VideoComposition {
  * and length, but not what the scene files play.
  */
 export interface VideoRoot extends Omit<VideoComposition, "scenes"> {
-  readonly scenes: readonly Omit<VideoScene, "media">[]
+  readonly scenes: readonly Omit<VideoScene, "media" | "compositions">[]
 }
 
-/** A scene file, read on its own. */
+/** A scene file, read on its own, or a composition a scene nests. */
 export interface VideoSceneFile {
   /** The `data-composition-id` of the composition its `<template>` holds. */
   readonly id: string
   readonly media: readonly VideoMediaReference[]
+  /**
+   * The compositions it nests, each an element with `data-composition-src` in its composition,
+   * whose file loads from the project's root, as `index.html`'s scenes do.
+   */
+  readonly compositions: readonly VideoMediaReference[]
 }
 
 type Read<T> = T | { readonly error: string }
@@ -167,7 +193,7 @@ export function composeVideo(
         error: `${scene.src} holds composition '${file.id}', but its host in ${VIDEO_ENTRY} is '${scene.id}': give both one id.`,
       }
     }
-    scenes.push({ ...scene, media: file.media })
+    scenes.push({ ...scene, media: file.media, compositions: file.compositions })
   }
 
   return { composition: { ...root, scenes } }
@@ -243,7 +269,7 @@ function readRoot(html: string): VideoRoot {
   }
 
   const read = hosts.map((host) => readHost(host, root))
-  checkIds(read, live, hosts)
+  checkNames(read, live, hosts)
 
   const starts = resolveStarts(read)
   // Sorting keeps the order of scenes that start together: the order index.html lists them.
@@ -258,6 +284,8 @@ function readRoot(html: string): VideoRoot {
     durationMs: videoLength(root, hosts, scenes),
     scenes,
     media: mediaOf(document.childNodes),
+    root: hostSource(root),
+    rootTimeline: playsOnItsOwn(document.childNodes, root, hosts),
   }
 }
 
@@ -306,17 +334,47 @@ function videoLength(
  * video or sound, which HyperFrames plays from 0 without one. What a host holds is its scene's.
  */
 function ownTimeline(root: Element, hosts: readonly Element[]): Element | undefined {
-  const hosted = new Set(hosts.flatMap((host) => [host, ...elements(host.childNodes)]))
-  return elements(root.childNodes).find(
-    (element) =>
-      !hosted.has(element) &&
-      (has(element, "data-start") || element.tagName === "audio" || element.tagName === "video")
-  )
+  const hosted = hostedBy(hosts)
+  return elements(root.childNodes).find((element) => !hosted.has(element) && isTimed(element))
+}
+
+/** CSS that moves on its own as time passes. */
+const CSS_MOTION = /@keyframes|\banimation\b|\btransition\b/i
+
+/**
+ * Whether `index.html` plays or animates anything beside its scenes, anywhere in it: what
+ * `VideoComposition.rootTimeline` says. A stylesheet it links is not read here, so it counts.
+ */
+function playsOnItsOwn(nodes: readonly Node[], root: Element, hosts: readonly Element[]): boolean {
+  const hosted = hostedBy(hosts)
+  return elements(nodes).some((element) => {
+    if (hosted.has(element) || element === root) return false
+
+    const rel = attribute(element, "rel") ?? ""
+    return (
+      isTimed(element) ||
+      element.tagName === "script" ||
+      (element.tagName === "link" && /\bstylesheet\b/i.test(rel)) ||
+      (element.tagName === "style" && CSS_MOTION.test(textOf(element))) ||
+      CSS_MOTION.test(attribute(element, "style") ?? "")
+    )
+  })
+}
+
+/** An element on a timeline: one with `data-start`, or a video or a sound. */
+function isTimed(element: Element): boolean {
+  return has(element, "data-start") || element.tagName === "audio" || element.tagName === "video"
+}
+
+/** The hosts and what they hold: their scenes', not the root's. */
+function hostedBy(hosts: readonly Element[]): ReadonlySet<Element> {
+  return new Set(hosts.flatMap((host) => [host, ...elements(host.childNodes)]))
 }
 
 /** A scene as its host in `index.html` writes it, before its start is resolved. */
 interface HostedScene {
   readonly id: string
+  readonly hostId?: string
   readonly label?: string
   readonly src: string
   readonly start: VideoStart
@@ -343,12 +401,7 @@ function readHost(host: Element, root: Element): HostedScene {
     )
   }
 
-  const own = attribute(host, "id")
-  if (own !== undefined && own !== id) {
-    throw new CompositionError(
-      `scene '${id}' has id "${own}": give its host id="${id}", its data-composition-id, or none, so data-start finds it by either.`
-    )
-  }
+  const hostId = attribute(host, "id")?.trim()
 
   const src = normalizePath(decodePath(attribute(host, "data-composition-src") ?? ""))
   if (src === undefined) {
@@ -360,6 +413,7 @@ function readHost(host: Element, root: Element): HostedScene {
   const label = attribute(host, "data-label")?.replace(/\s+/g, " ").trim()
   return {
     id,
+    ...(hostId && hostId !== id ? { hostId } : {}),
     ...(label ? { label: label.slice(0, ARTIFACT_LIMITS.maxTitleLength) } : {}),
     src,
     start: readStart(host, id),
@@ -371,27 +425,45 @@ function readHost(host: Element, root: Element): HostedScene {
 }
 
 /**
- * Refuses two scenes of one id, and another element of the scene's id: HyperFrames finds what
- * `data-start` names by its `id` first, so the other element would be what a scene starts after.
+ * Refuses a name `data-start` could read two ways. HyperFrames finds what it names by element `id`
+ * first, then by `data-composition-id`: so no two scenes share an id or a host's `id`, no host's
+ * `id` is another scene's id, and no other element takes either name.
  */
-function checkIds(
+function checkNames(
   hosts: readonly HostedScene[],
   all: readonly Element[],
   hostElements: readonly Element[]
 ): void {
-  const seen = new Set<string>()
+  const ids = new Set<string>()
   for (const { id } of hosts) {
-    if (seen.has(id)) throw new CompositionError(`two scenes are '${id}': give each its own id.`)
-    seen.add(id)
+    if (ids.has(id)) throw new CompositionError(`two scenes are '${id}': give each its own id.`)
+    ids.add(id)
+  }
+
+  const hostIds = new Set<string>()
+  for (const { id, hostId } of hosts) {
+    if (hostId === undefined) continue
+    if (hostIds.has(hostId)) {
+      throw new CompositionError(`two scene hosts have id "${hostId}": give each its own, or none.`)
+    }
+    if (ids.has(hostId)) {
+      throw new CompositionError(
+        `scene '${id}''s host has id "${hostId}", which is scene '${hostId}''s id, so data-start="${hostId}" would find '${id}': give the host another id, or none.`
+      )
+    }
+    hostIds.add(hostId)
   }
 
   const other = all.find((element) => {
     const own = attribute(element, "id")
-    return own !== undefined && seen.has(own) && !hostElements.includes(element)
+    return (
+      own !== undefined && (ids.has(own) || hostIds.has(own)) && !hostElements.includes(element)
+    )
   })
   if (other) {
+    const name = attribute(other, "id")
     throw new CompositionError(
-      `<${other.tagName} id="${attribute(other, "id")}"> takes the id of scene '${attribute(other, "id")}', which data-start would find instead of the scene: rename the element.`
+      `<${other.tagName} id="${name}"> takes the name of a scene, which data-start would find instead of the scene: rename the element.`
     )
   }
 }
@@ -415,7 +487,23 @@ function readScene(html: string): VideoSceneFile {
     throw new CompositionError(`its <template> holds no composition: write it as ${example}.`)
   }
 
-  return { id, media: mediaOf(fragment.childNodes) }
+  return {
+    id,
+    media: mediaOf(fragment.childNodes),
+    compositions: elements(composition.childNodes).flatMap((element) => {
+      const value = attribute(element, "data-composition-src")
+      const at = element.sourceCodeLocation?.attrs?.["data-composition-src"]
+      if (value === undefined || !at) return []
+      return [
+        {
+          element: element.tagName,
+          attribute: "data-composition-src",
+          value,
+          at: { start: at.startOffset, end: at.endOffset },
+        },
+      ]
+    }),
+  }
 }
 
 /**
@@ -423,7 +511,11 @@ function readScene(html: string): VideoSceneFile {
  * ends, so a chain is resolved from its first scene; one that leads back to itself never starts.
  */
 function resolveStarts(hosts: readonly HostedScene[]): ReadonlyMap<string, number> {
-  const byId = new Map(hosts.map((host) => [host.id, host]))
+  // A host's own id first, as HyperFrames looks a name up; checkNames keeps the two apart.
+  const byName = new Map([
+    ...hosts.map((host) => [host.id, host] as const),
+    ...hosts.flatMap((host) => (host.hostId ? [[host.hostId, host] as const] : [])),
+  ])
   const starts = new Map<string, number>()
   const resolving: string[] = []
 
@@ -448,7 +540,7 @@ function resolveStarts(hosts: readonly HostedScene[]): ReadonlyMap<string, numbe
     if (start.type === "at") {
       startMs = Math.round(start.seconds * 1000)
     } else {
-      const after = byId.get(start.scene)
+      const after = byName.get(start.scene)
       if (!after) {
         const others = hosts.filter((other) => other.id !== host.id).map((other) => `'${other.id}'`)
         throw new CompositionError(
@@ -562,6 +654,7 @@ function hostSource(host: Element): VideoSceneHost {
     end: at?.endOffset ?? 0,
   })
   return {
+    element: span(location ?? undefined),
     tag: span(location?.startTag),
     attributes: Object.fromEntries(
       Object.entries(location?.attrs ?? {}).map(([name, at]) => [name, span(at)])
@@ -607,6 +700,11 @@ function closestComposition(element: Element): Element | undefined {
     parent = parent.parentNode
   }
   return undefined
+}
+
+/** The text an element holds, such as a `<style>`'s CSS. */
+function textOf(element: Element): string {
+  return element.childNodes.map((node) => ("value" in node ? node.value : "")).join("")
 }
 
 function attribute(element: Element, name: string): string | undefined {

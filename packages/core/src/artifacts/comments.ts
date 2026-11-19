@@ -368,8 +368,12 @@ async function checkScenePlace(
       `A comment's instant is in the video: \`at\` is 0 to ${outline.durationMs} milliseconds.`
     )
   }
-  if (scene !== undefined && !outline.scenes.some((candidate) => candidate.id === scene)) {
-    throw invalid(`The video has no scene '${scene}'.`)
+  const named = scene === undefined ? undefined : outline.scenes.find((each) => each.id === scene)
+  if (scene !== undefined && !named) throw invalid(`The video has no scene '${scene}'.`)
+  if (named && at !== undefined && (at < named.startMs || at > named.startMs + named.durationMs)) {
+    throw invalid(
+      `Scene '${named.id}' plays from ${named.startMs} to ${named.startMs + named.durationMs} milliseconds: a comment's \`at\` is in the scene it names.`
+    )
   }
 
   return {
