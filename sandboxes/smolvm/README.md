@@ -52,6 +52,7 @@ the archive is missing, `create()` throws a message telling you what to run.
 ## Custom images
 
 Any image works if it has Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+.
+Files reach the guest through `dd` with `iflag=fullblock`, which GNU coreutils and BusyBox have.
 Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:<version>`, or use a smaller image for
 faster boots. Run-time installs will not work: egress is locked down and commands are not root
 (see below).
