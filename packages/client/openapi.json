@@ -73055,6 +73055,82 @@
         ]
       }
     },
+    "/api/artifacts/{artifactId}/versions/{version}/poster": {
+      "get": {
+        "summary": "Get a video's poster",
+        "description": "A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.",
+        "tags": ["Artifacts"],
+        "operationId": "getArtifactVideoPoster",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          },
+          {
+            "sixbSharedGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The poster",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The poster is unchanged; reuse the privately cached one"
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:latest|[1-9]\\d*)$",
+              "description": "A version number, or \"latest\""
+            }
+          }
+        ]
+      }
+    },
     "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview": {
       "get": {
         "summary": "Get the preview of a canvas's board",

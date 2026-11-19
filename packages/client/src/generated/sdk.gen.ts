@@ -225,6 +225,9 @@ import type {
   GetArtifactVersionResponses,
   GetArtifactVideoData,
   GetArtifactVideoErrors,
+  GetArtifactVideoPosterData,
+  GetArtifactVideoPosterErrors,
+  GetArtifactVideoPosterResponses,
   GetArtifactVideoResponses,
   GetArtifactVideoStillData,
   GetArtifactVideoStillErrors,
@@ -4556,6 +4559,28 @@ export const getArtifactVideoStill = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/scenes/{scene}/still",
+    ...options,
+  })
+
+/**
+ * Get a video's poster
+ *
+ * A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.
+ */
+export const getArtifactVideoPoster = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactVideoPosterData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactVideoPosterResponses,
+    GetArtifactVideoPosterErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/poster",
     ...options,
   })
 

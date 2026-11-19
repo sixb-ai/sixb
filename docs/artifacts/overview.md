@@ -865,8 +865,9 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
 - A project without a [sandbox provider](../sandboxes/overview.md) renders nothing: asking fails
   with `video_unavailable`.
 - Each scene also gets a still, a picture of its middle, a few seconds after the video is
-  published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The first scene's
-  is the video's poster.
+  published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The video's poster,
+  `GET …/versions/{version}/poster`, is the instant its root's `data-poster` names, or the first
+  scene's still.
 
 ## Declare a query
 

@@ -25746,6 +25746,43 @@ export type GetArtifactVideoStillResponses = {
 export type GetArtifactVideoStillResponse =
   GetArtifactVideoStillResponses[keyof GetArtifactVideoStillResponses]
 
+export type GetArtifactVideoPosterData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}/poster"
+}
+
+export type GetArtifactVideoPosterErrors = {
+  /**
+   * Response for status 403
+   */
+  403: ArtifactErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ArtifactErrorResponse
+}
+
+export type GetArtifactVideoPosterError =
+  GetArtifactVideoPosterErrors[keyof GetArtifactVideoPosterErrors]
+
+export type GetArtifactVideoPosterResponses = {
+  /**
+   * The poster
+   */
+  200: Blob | File
+}
+
+export type GetArtifactVideoPosterResponse =
+  GetArtifactVideoPosterResponses[keyof GetArtifactVideoPosterResponses]
+
 export type GetArtifactBoardPreviewData = {
   body?: never
   path: {

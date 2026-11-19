@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -11,7 +11,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
-import { videoStillKey } from "@sixb/core/internal/artifacts/publish"
+import { VIDEO_ENGINE, videoStills } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { createTestSixb } from "@sixb/core/testing"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
@@ -71,7 +71,7 @@ const INDEX = `<!doctype html>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
   <style>html, body { margin: 0; background: #000; } .scene { position: absolute; inset: 0; }</style>
 </head><body>
-  <div id="main" data-composition-id="main" data-width="640" data-height="360" data-fps="30" data-duration="5.5">
+  <div id="main" data-composition-id="main" data-width="640" data-height="360" data-fps="30" data-duration="5.5" data-poster="0.5">
     <div id="intro" class="scene" data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2"></div>
     <div id="demo" class="scene" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="2"></div>
     <div id="outro" class="scene" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo - 0.5" data-duration="2"></div>
@@ -286,18 +286,18 @@ describe.skipIf(!tools)("a video exported scene by scene", () => {
         expect(second.file.digest).not.toBe(first.file.digest)
         expect([...segments].sort()).toEqual(["intro", "sound"])
 
-        // Each scene of the latest version gets its still, asked for once the video rests: a JPEG
-        // of its middle, at the video's own width.
+        // Each scene of the latest version gets its still, and the video its poster at the instant
+        // its root names, asked for once the video rests: JPEGs at the video's own width.
         const latest = await sixb.artifacts.getVersion(version.artifactId, "latest")
         if (latest?.outline.kind !== "video") throw new Error("Expected a video.")
-        const keys = latest.outline.scenes.map(videoStillKey)
+        const keys = videoStills(latest.outline).map((still) => still.key)
         const deadline = Date.now() + 120_000
         let stills = await storage.artifacts.listVideoRenders({ projectId: "video", keys })
         while (stills.length < keys.length && Date.now() < deadline) {
           await Bun.sleep(1000)
           stills = await storage.artifacts.listVideoRenders({ projectId: "video", keys })
         }
-        expect(stills).toHaveLength(3)
+        expect(stills).toHaveLength(4)
         for (const still of stills) {
           if ("failure" in still) throw new Error(`A still failed: ${still.failure}`)
           const jpeg = Buffer.from(
@@ -321,5 +321,53 @@ describe.skipIf(!tools)("a video exported scene by scene", () => {
       }
     },
     { timeout: 600_000 }
+  )
+
+  // The sound is mixed by HyperFrames' producer, which video.cjs finds in the CLI's bundle by what
+  // it exports: a HyperFrames that moves it fails here, by name, before any export does. Reproduce
+  // by renaming planV2 in video.cjs's PRODUCER: the report says no module exports it.
+  test(
+    "mixes the sound with HyperFrames' own plan, in the HyperFrames every key names",
+    async () => {
+      const version = (await run("hyperframes", ["--version"])).toString("utf8").trim()
+      expect(`hyperframes@${version}`).toBe(VIDEO_ENGINE)
+
+      const project = join(dir, "sound")
+      await mkdir(join(project, "scenes"), { recursive: true })
+      await run("ffmpeg", [
+        ...["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2"],
+        ...["-c:a", "aac", "-y", join(project, "music.m4a")],
+      ])
+      await writeFile(
+        join(project, "index.html"),
+        `<html><body><div data-composition-id="main" data-width="640" data-height="360" data-duration="2">
+          <div data-composition-id="a" data-composition-src="scenes/a.html" data-start="0" data-duration="2"></div>
+          <audio src="music.m4a" data-start="0" data-duration="2"></audio>
+        </div></body></html>`
+      )
+      await writeFile(join(project, "scenes/a.html"), scene("a", "    <h1>a</h1>"))
+      const scripts = join(dir, "scripts")
+      await mkdir(scripts, { recursive: true })
+      for (const name of ["video.cjs", "shared.cjs"]) {
+        await writeFile(join(scripts, name), await readFile(join(import.meta.dir, "../src", name)))
+      }
+
+      const out = join(dir, "sound.m4a")
+      const report = JSON.parse(
+        (
+          await run("node", [
+            join(scripts, "video.cjs"),
+            ...["sound", project, out, "120000", VIDEO_ENGINE, "30", "60"],
+          ])
+        )
+          .toString("utf8")
+          .trim()
+          .split("\n")
+          .at(-1) ?? "{}"
+      )
+      expect(report).toMatchObject({ status: "ready", mediaType: "audio/mp4" })
+      expect(report.silent).toBeUndefined()
+    },
+    { timeout: 180_000 }
   )
 })

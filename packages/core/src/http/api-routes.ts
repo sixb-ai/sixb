@@ -753,6 +753,14 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     sharedSession: true,
   },
   {
+    operationId: "getArtifactVideoPoster",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/versions/:version/poster",
+    accessToken: true,
+    agentApi: false,
+    sharedSession: true,
+  },
+  {
     operationId: "getArtifactBoardPreview",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
