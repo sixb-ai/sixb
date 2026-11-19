@@ -9,7 +9,12 @@ import {
 import type { ArtifactVideoSegmentRequestedQueueJob } from "@sixb/core/queues"
 import { inRenderSandbox, renderApiOrigin, storeSandboxFile } from "./sandbox"
 import { nudgeVideoExport, type VideoExportHost } from "./video-export"
-import { cannotRender, placeVideoProject, runVideoScript } from "./video-project"
+import {
+  cannotRender,
+  placeVideoProject,
+  runVideoScript,
+  type VideoRenderFailure,
+} from "./video-project"
 
 // A segment of a video's export, which its export asked for: the frames of one scene, rendered
 // alone by HyperFrames from a project that holds that scene and those on screen with it, or the
@@ -42,13 +47,16 @@ export async function renderVideoSegment(input: {
   if (kept) return
 
   // Kept, or why not: the export that waits for it looks again at once.
-  const keep = async (made: { readonly file: FileRef } | { readonly failure: string }) => {
+  const keep = async (made: { readonly file: FileRef } | VideoRenderFailure) => {
     await artifacts.putVideoRender({ projectId: host.id, key, createdAt: new Date(), ...made })
     await nudgeVideoExport(host, job.payload.waitingExport)
   }
 
   if (!host.sandboxes) {
-    await keep({ failure: "This project has no sandboxes to render videos in." })
+    await keep({
+      failure: "This project has no sandboxes to render videos in.",
+      lacks: "sandboxes",
+    })
     return
   }
 
@@ -104,8 +112,11 @@ export async function renderVideoSegment(input: {
             { timeoutMs: left(), signal }
           )
 
-      const reason = cannotRender(report)
-      if (reason) return { failure: reason }
+      const lacking = cannotRender(report)
+      if (lacking) {
+        console.warn(`[SixbRenderWorker] Could not render ${segmentName(job)}: ${lacking.failure}`)
+        return lacking
+      }
       if (
         report?.status !== "ready" ||
         typeof report.path !== "string" ||

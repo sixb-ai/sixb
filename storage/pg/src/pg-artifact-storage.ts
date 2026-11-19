@@ -136,7 +136,7 @@ const MEDIA_COLUMNS = `
 `
 
 const VIDEO_RENDER_COLUMNS = `
-  project_id AS "projectId", key, file, failure, created_at AS "createdAt"
+  project_id AS "projectId", key, file, failure, lacks, created_at AS "createdAt"
 `
 
 export class PgArtifactStorage implements ArtifactStorage {
@@ -820,13 +820,14 @@ export class PgArtifactStorage implements ArtifactStorage {
   async putVideoRender(input: ArtifactVideoRenderRecord): Promise<void> {
     const file = "failure" in input ? null : JSON.stringify(input.file)
     await this.sql`
-      INSERT INTO artifact_video_renders (project_id, key, file, failure, created_at)
+      INSERT INTO artifact_video_renders (project_id, key, file, failure, lacks, created_at)
       VALUES (
         ${input.projectId}, ${input.key}, ${file}::text::jsonb,
-        ${"failure" in input ? input.failure : null}, ${input.createdAt}
+        ${"failure" in input ? input.failure : null},
+        ${"failure" in input ? (input.lacks ?? null) : null}, ${input.createdAt}
       )
       ON CONFLICT (project_id, key) DO UPDATE SET
-        file = excluded.file, failure = NULL, created_at = excluded.created_at
+        file = excluded.file, failure = NULL, lacks = NULL, created_at = excluded.created_at
       WHERE artifact_video_renders.failure IS NOT NULL AND excluded.failure IS NULL
     `
   }

@@ -2043,8 +2043,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         await artifacts.clearVideoRenderFailures({ projectId, keys: [key, kept] })
         expect(await artifacts.listVideoRenders({ projectId, keys: [key, kept] })).toEqual([ready])
 
-        // A render made after all replaces the failure.
-        await artifacts.putVideoRender(failure("No browser."))
+        // What the project lacks is kept with why.
+        const lacking = { ...failure("No HyperFrames."), lacks: "sandbox_tools" as const }
+        await artifacts.putVideoRender(lacking)
+        expect(await artifacts.listVideoRenders({ projectId, keys: [key] })).toEqual([lacking])
+
+        // A render made after all replaces the failure, and what was lacking with it.
         const rendered = { projectId, key, file: fileRef("2", "video/mp4"), createdAt: at(2) }
         await artifacts.putVideoRender(rendered)
         expect(await artifacts.listVideoRenders({ projectId, keys: [key] })).toEqual([rendered])

@@ -25700,9 +25700,13 @@ export type ExportArtifactVideoResponses = {
     | {
         status: "failed"
         /**
-         * Why it could not be rendered: which scene, or the sound
+         * Why it could not be rendered: which scene, the sound, or what the project lacks
          */
         reason: string
+        /**
+         * What the project lacks to render it, when the video is not why: retry=true renders it once the project has it
+         */
+        lacks?: "sandboxes" | "sandbox_tools"
       }
 }
 

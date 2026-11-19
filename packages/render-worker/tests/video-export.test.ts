@@ -13,6 +13,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
+  VIDEO_ENGINE,
   VIDEO_EXPORT_JOB,
   videoExportJobId,
   videoExportPlan,
@@ -343,7 +344,8 @@ describe("a video's export in the render worker", () => {
   })
 
   // Reproduce by throwing for a skipped report in renderVideoSegment: the job tries again with a
-  // sandbox that will never have HyperFrames.
+  // sandbox that will never have HyperFrames. Reproduce `lacks` by leaving it out of cannotRender:
+  // the app then offers a retry that cannot work.
   test("keeps why a sandbox cannot render at once, which fails the export", async () => {
     const sandboxes = new VideoSandboxes((mode) =>
       mode === "segment" ? { skipped: "engine", engine: "hyperframes@0.9.70" } : undefined
@@ -357,8 +359,8 @@ describe("a video's export in the render worker", () => {
     await assemble(job)
     expect(await sixb.artifacts.video(version.artifactId)).toEqual({
       status: "failed",
-      reason:
-        "This project's sandboxes run hyperframes@0.9.70, and videos render with hyperframes@0.9.68, as the agent image installs it.",
+      reason: `This project's sandboxes run hyperframes@0.9.70, and videos render with ${VIDEO_ENGINE}, as the agent image installs it.`,
+      lacks: "sandbox_tools",
     })
   })
 

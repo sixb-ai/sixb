@@ -1013,7 +1013,6 @@ export type {
   ListArtifactsRuntimeInput,
   UpdateArtifactRuntimeInput,
 } from "./artifacts/execution"
-export type { VideoExportProgress } from "./artifacts/video/export"
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"
 export type { PublishedArtifact } from "./artifacts/publish/publish"
@@ -1026,6 +1025,7 @@ export type {
   ArtifactQuerySchema,
 } from "./artifacts/queries"
 export type { ArtifactReference } from "./artifacts/references"
+export type { VideoExportProgress } from "./artifacts/video/export"
 export type { ArtifactWarning } from "./artifacts/warnings"
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
@@ -1338,6 +1338,7 @@ export type {
   ArtifactOrigin,
   ArtifactRecord,
   ArtifactVersionRecord,
+  ArtifactVideoRenderLack,
   ListArtifactsResult,
   ListArtifactVersionsResult,
 } from "./storage/artifacts"
