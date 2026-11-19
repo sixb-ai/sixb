@@ -125,3 +125,53 @@ The key names no artifact: a segment is the scene's frames, rendered from these 
 copy shares it. An `artifact:` file a scene plays is in its HTML as an address, which follows its
 target's latest version, so the key does not cover what it resolves to: the export adds that to
 the key it keeps the segment under (see Export below).
+
+## Export
+
+A version exports to one MP4 joined from segments kept apart from it under keys that hash what
+each is made of (`export.ts`), in `ArtifactStorage`'s video renders, which no artifact owns:
+
+| Segment | Its key holds |
+| --- | --- |
+| A scene's frames, from the frame it starts on up to the one the next scene starts on (the first from frame 0), silent | the scene's render key, where it starts from the scene's start and how many frames, the engine (`VIDEO_ENGINE`), the encoder settings, and what the `artifact:` addresses played by the root and the scenes on screen with it resolve to |
+| The whole video's sound | every file, the frame rate and count, the engine, and what every address resolves to |
+| The MP4 | its segments' keys, in order |
+
+So a version that changes one scene renders that scene's segment again, and the scenes it overlaps,
+and mixes the sound again, which takes seconds; a copy shares every segment. Scenes that start on
+one frame render in the first one's segment. Every scene on screen during a segment overlaps its
+scene, so the segment's scene key covers all it shows.
+
+```text
+sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
+  → artifact.video.export.requested   one job per export, carrying the version as it was asked for
+      asks for each missing segment, then for itself again, VIDEO_EXPORT_JOB.recheckMs later
+  → artifact.video.segment.requested  one job per segment key, shared by exports
+      a scene: `index.html` keeping the scenes on screen with it (project.ts), in a sandbox
+      the sound: HyperFrames' own mix, through its distributed plan, which captures no frame
+  → the export, once every segment is kept: joined without encoding again, the sound muxed
+```
+
+- **A scene's project.** `videoSegmentRender` keeps the scenes on screen with the segment's scene
+  and moves them earlier by as many whole frames as none of them starts before, up to the
+  segment's start, so each keeps its place between frames. When nothing starts before the segment
+  and the root does not move, the segment starts at frame 0 of its project, and HyperFrames renders
+  it whole, in parallel browsers. Otherwise, a crossfade from the scene before or a root that moves
+  on its own, it renders the range `--start`/`--end` of the project, which HyperFrames captures in
+  short chunks one after the other, about twice slower.
+- **Joining.** Every segment is H.264 at one quality, `VIDEO_SEGMENT_SETTINGS`, and starts on a
+  keyframe, so the MP4 is the segments as they are, with the sound, index first. Its frame count is
+  checked against the plan's.
+- **The sound** is one mix of the whole video, so music that crosses a cut never breaks: the
+  `audio.m4a` of HyperFrames' distributed plan (`planV2`), the very track its own render muxes,
+  bit for bit (measured on 0.9.68). A video with no sound gets silence, so every MP4 has a track.
+- **Waiting** is a job, not a worker: the export looks again a few seconds later in a job it asks
+  for in its own place, asking for nothing then. A segment job always keeps its file or why not,
+  so asking again for a segment never strands an export; a retry forgets the failures and asks
+  anew with `replace`.
+- **Failures.** A segment that fails after `VIDEO_SEGMENT_JOB.attempts` fails the export, naming
+  the scene. A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why
+  at once: rendering there would keep frames under a key that does not name what made them.
+- **Stills** (`stills.ts`): each scene's middle, snapshotted with `hyperframes snapshot` when a
+  version is published, once it rests, and kept under the scene's key. The first scene's is the
+  video's poster: HyperFrames has no notion of one.
