@@ -40,8 +40,8 @@ export interface FileDownloadUrl {
 /** What issuing and revoking need from the execution that asks. */
 export interface FileDownloadUrlContext {
   readonly projectId: string
-  readonly storage: Storage
-  readonly blobStorage: BlobStorage
+  readonly storage: Pick<Storage, "fileDownloadGrants">
+  readonly blobStorage: Pick<BlobStorage, "stat">
   readonly executionId: string
   readonly apiPublicOrigin: string | undefined
 }
@@ -119,7 +119,9 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex")
 }
 
-function requireGrantStorage(storage: Storage): FileDownloadGrantStorage {
+function requireGrantStorage(
+  storage: Pick<Storage, "fileDownloadGrants">
+): FileDownloadGrantStorage {
   if (!storage.fileDownloadGrants) {
     throw new Error("[Sixb] Download URLs require storage.fileDownloadGrants.")
   }
