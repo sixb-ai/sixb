@@ -19,6 +19,8 @@ import {
   ModelProviderError,
   type SpeechModel,
   type TranscriptionModel,
+  type VideoModel,
+  type VideoModelStatus,
 } from "@sixb/core/models"
 import { Elysia } from "elysia"
 import { registerModelCallRoutes } from "../src/routes/model-calls"
@@ -29,6 +31,7 @@ import { limitRequestBody } from "../src/utils/request-body"
 const projectId = "model-generations"
 const PNG = new Uint8Array([137, 80, 78, 71, 1])
 const MP3 = new Uint8Array([255, 243, 196, 196, 1])
+const MP4 = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])
 
 const writer: LanguageModel = {
   providerId: "test",
@@ -95,10 +98,23 @@ const transcriber: TranscriptionModel = {
   transcribe: async () => ({ output: { text: "Hello there." }, usage: { audioDurationMs: 1250 } }),
 }
 
+/** A video model whose job answers each status check with the next of `statuses`. */
+function director(statuses: readonly VideoModelStatus[]): VideoModel {
+  let checks = 0
+  return {
+    providerId: "test",
+    modelId: "director",
+    definition: { kind: "video", providerId: "test", modelId: "director", durations: [4, 8] },
+    start: async () => ({ operation: "job_1" }),
+    status: async () => statuses[Math.min(checks++, statuses.length - 1)]!,
+  }
+}
+
 async function setup(
   options: {
     readonly language?: ModelCatalogInput["language"]
     readonly image?: readonly ImageModel[]
+    readonly video?: readonly VideoModel[]
     readonly transcription?: readonly TranscriptionModel[]
   } = {}
 ) {
@@ -119,6 +135,7 @@ async function setup(
     models: {
       language: options.language ?? [writer],
       image: options.image ?? [painter("painter"), painter("sketcher")],
+      video: options.video ?? [director([{ status: "pending" }])],
       audio: { speech: [voice], transcription: options.transcription ?? [transcriber] },
     },
   })
@@ -369,6 +386,73 @@ describe("model generation routes", () => {
     })
     const failed = await image({ model: { provider: "test", modelId: "broken" } })
     expect(failed.status).toBe(502)
+  })
+
+  // Removal proof: answer the start route with 200; the caller is not told the job is running.
+  test("a video generation starts at once and is polled until it ends", async () => {
+    const { granted } = await setup({
+      video: [
+        director([
+          { status: "pending" },
+          {
+            status: "completed",
+            output: { videos: [{ data: MP4, mediaType: "video/mp4" }] },
+            reportedCost: { money: { currency: "USD", amountNanos: "400000000" } },
+          },
+        ]),
+      ],
+    })
+
+    const started = await granted("/api/models/video/generations", { prompt: "a fox", duration: 4 })
+    expect(started.status).toBe(202)
+    const { callId, ...pending } = await started.response.json()
+    expect(pending).toMatchObject({
+      model: { provider: "test", modelId: "director" },
+      status: "pending",
+      files: [],
+    })
+    expect(pending).not.toHaveProperty("cost")
+
+    const poll = () => granted(`/api/models/video/generations/${callId}`)
+    expect(await (await poll()).response.json()).toMatchObject({ status: "pending" })
+
+    const done = await (await poll()).response.json()
+    expect(done).toMatchObject({
+      callId,
+      status: "completed",
+      files: [{ mediaType: "video/mp4" }],
+      usage: { outputVideoMs: 4000 },
+      cost: { status: "reported", money: { amountNanos: "400000000" } },
+    })
+    const content = await granted(`/api/ai/model-calls/${callId}/files/content?path=/files/0`)
+    expect(new Uint8Array(await content.response.arrayBuffer())).toEqual(MP4)
+
+    const catalog = await (await granted("/api/models")).response.json()
+    expect(catalog.video).toEqual([
+      {
+        provider: "test",
+        modelId: "director",
+        isDefault: true,
+        name: "director",
+        durations: [4, 8],
+      },
+    ])
+  })
+
+  test("a video generation is refused, or not found, as the caller's rights say", async () => {
+    const { granted, plain } = await setup()
+
+    expect((await plain("/api/models/video/generations", { prompt: "a fox" })).status).toBe(403)
+    expect((await granted("/api/models/video/generations/call_missing")).status).toBe(404)
+
+    const started = await granted("/api/models/video/generations", { prompt: "a fox" })
+    const { callId } = await started.response.json()
+    // Another user, granted the models or not, does not see someone else's generation.
+    expect((await plain(`/api/models/video/generations/${callId}`)).status).toBe(404)
+
+    const length = await granted("/api/models/video/generations", { prompt: "a fox", duration: 5 })
+    expect(length.status).toBe(400)
+    expect((await length.response.json()).error).toContain("Use one of: 4, 8 seconds.")
   })
 
   test("a text request may name a tier, as generate() does", async () => {

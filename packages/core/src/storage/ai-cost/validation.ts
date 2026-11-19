@@ -33,6 +33,7 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.output.audio": 11,
   "images.output": 12,
   "characters.input": 13,
+  "video.output.milliseconds": 14,
 }
 const METERS = new Set(Object.keys(METER_ORDER) as AiBillableMeter[])
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
@@ -141,6 +142,7 @@ const UNIT_METERS = [
   ["audio.input.milliseconds", "audioDurationMs"],
   ["characters.input", "inputCharacters"],
   ["images.output", "outputImages"],
+  ["video.output.milliseconds", "outputVideoMs"],
 ] as const
 
 function componentsMatchUsage(

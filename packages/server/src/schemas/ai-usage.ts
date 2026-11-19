@@ -25,5 +25,8 @@ export const AiUsageSummarySchema = z.object({
   inputCharacters: TokenCountSchema.optional().describe(
     "Input characters, counted by the provider's own billing rule."
   ),
+  outputVideoMs: TokenCountSchema.optional().describe(
+    "Milliseconds of video the call returned, every clip together, as the provider bills them."
+  ),
   reportingStatus: z.enum(["complete", "partial", "unavailable"]),
 })

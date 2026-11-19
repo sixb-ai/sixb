@@ -5,6 +5,7 @@ import type {
   ModelRateCard,
   SpeechModelEntry,
   TranscriptionModelEntry,
+  VideoModelEntry,
 } from "@sixb/core/models"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -70,6 +71,32 @@ async function serializeImageModel(entry: ImageModelEntry, defaultEntry: ImageMo
   }
 }
 
+async function serializeVideoModel(entry: VideoModelEntry, defaultEntry: VideoModelEntry) {
+  const model = await resolvedForDisplay(entry)
+  const definition = model.definition
+  return {
+    ...catalogEntry(entry, defaultEntry, model),
+    ...(definition.maxVideosPerCall === undefined
+      ? {}
+      : { maxVideosPerCall: definition.maxVideosPerCall }),
+    ...(definition.resolutions ? { resolutions: [...definition.resolutions] } : {}),
+    ...(definition.aspectRatios ? { aspectRatios: [...definition.aspectRatios] } : {}),
+    ...(definition.durations ? { durations: [...definition.durations] } : {}),
+    ...(definition.audio === undefined ? {} : { audio: definition.audio }),
+    ...(definition.inputImages
+      ? {
+          inputImages: {
+            maxCount: definition.inputImages.maxCount,
+            maxBytes: definition.inputImages.maxBytes,
+            ...(definition.inputImages.mediaTypes
+              ? { mediaTypes: [...definition.inputImages.mediaTypes] }
+              : {}),
+          },
+        }
+      : {}),
+  }
+}
+
 async function serializeSpeechModel(entry: SpeechModelEntry, defaultEntry: SpeechModelEntry) {
   const model = await resolvedForDisplay(entry)
   const definition = model.definition
@@ -105,6 +132,7 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
       const models = host.definitions.models
       const language = models?.language
       const image = models?.image
+      const video = models?.video
       const speech = models?.audio?.speech
       const transcription = models?.audio?.transcription
       return ModelCatalogSchema.parse({
@@ -119,6 +147,11 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
         image: image
           ? await Promise.all(
               image.list().map((entry) => serializeImageModel(entry, image.default))
+            )
+          : [],
+        video: video
+          ? await Promise.all(
+              video.list().map((entry) => serializeVideoModel(entry, video.default))
             )
           : [],
         audio: {

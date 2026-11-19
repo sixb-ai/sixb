@@ -85,7 +85,7 @@ export interface AgentRunDelegationModel extends LanguageModelRef {
   readonly defaultReasoning?: AgentReasoning
 }
 
-export type SandboxModelKind = "language" | "image" | "speech" | "transcription"
+export type SandboxModelKind = "language" | "image" | "video" | "speech" | "transcription"
 
 /** One model the agent reaches through `sixb models`, as its prompt describes it. */
 export interface SandboxModel {
@@ -220,6 +220,7 @@ export function listSandboxModels(models: ModelCatalog | undefined): readonly Sa
   const media = (
     [
       ["image", models?.image],
+      ["video", models?.video],
       ["speech", models?.audio?.speech],
       ["transcription", models?.audio?.transcription],
     ] as const

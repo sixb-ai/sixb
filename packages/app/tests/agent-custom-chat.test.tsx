@@ -89,6 +89,7 @@ function seeded(messages: readonly AgentMessage[], runs: readonly AgentRun[]): Q
   queryClient.setQueryData(listModelsOptions().queryKey, {
     language: [],
     image: [],
+    video: [],
     audio: { speech: [], transcription: [] },
     capabilities: { run: false },
   })

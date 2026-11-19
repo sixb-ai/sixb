@@ -1049,6 +1049,21 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentEffect: "model",
   },
   {
+    operationId: "startVideoGeneration",
+    method: "POST",
+    path: "/api/models/video/generations",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "model",
+  },
+  {
+    operationId: "getVideoGeneration",
+    method: "GET",
+    path: "/api/models/video/generations/:callId",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
     operationId: "generateSpeech",
     method: "POST",
     path: "/api/models/audio/speech",

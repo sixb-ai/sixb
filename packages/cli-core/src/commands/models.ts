@@ -2,11 +2,11 @@ import { access, mkdir, stat } from "node:fs/promises"
 import { dirname, extname, join, parse } from "node:path"
 import type { ApiClient } from "../api-client"
 import { enumValue, integerInRange, isHelp, parseCommandArgs, requestsHelp } from "../arguments"
-import { fail, writeJson, writeText } from "../output"
+import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { idSegment, readText } from "./shared"
 
-export const MODEL_KINDS = ["language", "image", "speech", "transcription"] as const
+export const MODEL_KINDS = ["language", "image", "video", "speech", "transcription"] as const
 export type ModelKind = (typeof MODEL_KINDS)[number]
 
 type TokenPrice =
@@ -28,6 +28,7 @@ export interface RateCard {
   readonly images?: VariantPrice
   readonly characters?: VariantPrice
   readonly audioInputSeconds?: VariantPrice
+  readonly videoOutputSeconds?: VariantPrice
 }
 
 interface CatalogEntry {
@@ -44,6 +45,8 @@ interface CatalogEntry {
 interface Catalog {
   readonly language: readonly CatalogEntry[]
   readonly image: readonly CatalogEntry[]
+  /** Absent from servers that came before video models. */
+  readonly video?: readonly CatalogEntry[]
   readonly audio: {
     readonly speech: readonly CatalogEntry[]
     readonly transcription: readonly CatalogEntry[]
@@ -89,6 +92,7 @@ export async function models(api: ApiClient, args: readonly string[]): Promise<v
   }
   if (sub === "text") return generateText(api, rest)
   if (sub === "image") return generateImages(api, rest)
+  if (sub === "video") return generateVideos(api, rest)
   if (sub === "speech") return generateSpeech(api, rest)
   if (sub === "transcribe") return transcribe(api, rest)
   if (sub === "calls") return calls(api, rest)
@@ -118,6 +122,16 @@ interface TranscriptionResult extends CallResult {
   readonly language?: string
 }
 
+/** A video generation, as POST and GET /api/models/video/generations answer. */
+interface VideoGeneration extends CallResult {
+  readonly status: "pending" | "completed" | "failed"
+  readonly error?: string
+}
+
+/** How often a waiting command checks on its video, and how often it says it still waits. */
+const VIDEO_POLL_MS = 5_000
+const VIDEO_PROGRESS_MS = 60_000
+
 const SPEECH_FORMATS = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -142,6 +156,7 @@ const MEDIA_TYPES: Readonly<Record<string, string>> = {
   ".opus": "audio/opus",
   ".m4a": "audio/mp4",
   ".webm": "audio/webm",
+  ".mp4": "video/mp4",
 }
 const EXTENSIONS: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(MEDIA_TYPES)
@@ -217,6 +232,130 @@ async function generateImages(api: ApiClient, args: readonly string[]): Promise<
     ...(images.length > 0 ? { images } : {}),
   })) as CallResult
   writeJson(await savedResult(api, result, output))
+}
+
+/**
+ * Start a video and wait for it: minutes, for most models. The job runs on the server whatever
+ * happens to this command, so a command stopped while it waits leaves a call `--call` follows.
+ */
+async function generateVideos(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--output": "string",
+      "--call": "string",
+      "--no-wait": "boolean",
+      "--model": "string",
+      "--n": "string",
+      "--duration": "string",
+      "--resolution": "string",
+      "--aspect-ratio": "string",
+      "--audio": "boolean",
+      "--no-audio": "boolean",
+      "--seed": "string",
+      "--first-frame": "string",
+      "--last-frame": "string",
+      "--reference": "strings",
+    },
+    "models video",
+    [0, 1]
+  )
+  const wait = options["--no-wait"] !== true
+  const output = wait ? requireOutput(options["--output"], "models video") : options["--output"]
+  const callId = options["--call"]
+  if ((callId === undefined) === (positionals[0] === undefined)) {
+    fail('models video takes a "<prompt>" to start a video, or --call <call-id> to follow one.')
+  }
+
+  let generation: VideoGeneration
+  if (callId !== undefined) {
+    generation = await videoGeneration(api, callId)
+  } else {
+    const seed = options["--seed"]
+    if (seed !== undefined && !/^-?[0-9]+$/.test(seed)) fail("--seed must be an integer.")
+    if (options["--audio"] && options["--no-audio"]) fail("Use --audio or --no-audio, not both.")
+    const resolution = options["--resolution"]
+    if (resolution !== undefined && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(resolution)) {
+      fail("--resolution must be a frame size, such as 1280x720.")
+    }
+
+    const model = await modelRef(api, options["--model"], "video")
+    const firstFrame = options["--first-frame"]
+    const lastFrame = options["--last-frame"]
+    const references = []
+    for (const path of options["--reference"] ?? []) {
+      references.push(await uploadInput(api, path, "image"))
+    }
+    generation = (await api.post("/api/models/video/generations", {
+      ...model,
+      prompt: positionals[0],
+      ...(options["--n"] === undefined ? {} : { n: integerInRange("--n", options["--n"], 1, 8) }),
+      ...(options["--duration"] === undefined
+        ? {}
+        : { duration: integerInRange("--duration", options["--duration"], 1, 600) }),
+      ...optional("resolution", resolution),
+      ...optional("aspectRatio", options["--aspect-ratio"]),
+      ...(options["--audio"] ? { audio: true } : {}),
+      ...(options["--no-audio"] ? { audio: false } : {}),
+      ...(seed === undefined ? {} : { seed: Number(seed) }),
+      ...(firstFrame === undefined
+        ? {}
+        : { firstFrame: await uploadInput(api, firstFrame, "image") }),
+      ...(lastFrame === undefined ? {} : { lastFrame: await uploadInput(api, lastFrame, "image") }),
+      ...(references.length > 0 ? { referenceImages: references } : {}),
+    })) as VideoGeneration
+  }
+
+  if (wait) generation = await waitForVideo(api, generation)
+  if (generation.status === "failed") {
+    const reason = generation.error ?? "the provider gave no reason"
+    throw new CliError(
+      {
+        code: "generation_failed",
+        message: `Video generation ${generation.callId} failed: ${reason}`,
+      },
+      EXIT_API
+    )
+  }
+  if (generation.status === "pending" || output === undefined) {
+    return writeJson({
+      callId: generation.callId,
+      model: generation.model.modelId,
+      status: generation.status,
+      ...(generation.status === "pending" ? {} : { files: generation.files }),
+      ...(generation.warnings?.length ? { warnings: generation.warnings } : {}),
+      ...(generation.status === "pending" ? {} : { cost: describeCost(generation.cost) }),
+    })
+  }
+
+  writeJson(await savedResult(api, generation, output))
+}
+
+async function videoGeneration(api: ApiClient, callId: string): Promise<VideoGeneration> {
+  return (await api.get(`/api/models/video/generations/${idSegment(callId)}`)) as VideoGeneration
+}
+
+/** Check on a video until it ends, saying now and then that it still runs, and how to resume. */
+async function waitForVideo(api: ApiClient, started: VideoGeneration): Promise<VideoGeneration> {
+  const startedAt = Date.now()
+  let said = startedAt
+  let generation = started
+  if (generation.status === "pending") {
+    process.stderr.write(
+      `Generating video ${generation.callId}. If this command stops, follow it with: sixb models video --call ${generation.callId} --output <path>\n`
+    )
+  }
+
+  while (generation.status === "pending") {
+    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_MS))
+    generation = await videoGeneration(api, generation.callId)
+    if (generation.status === "pending" && Date.now() - said >= VIDEO_PROGRESS_MS) {
+      said = Date.now()
+      const minutes = Math.round((said - startedAt) / VIDEO_PROGRESS_MS)
+      process.stderr.write(`Still generating ${generation.callId}, ${minutes} min so far.\n`)
+    }
+  }
+  return generation
 }
 
 async function generateSpeech(api: ApiClient, args: readonly string[]): Promise<void> {
@@ -429,6 +568,7 @@ function catalogEntries(catalog: Catalog): { kind: ModelKind; entry: CatalogEntr
   return [
     ...catalog.language.map((entry) => ({ kind: "language" as const, entry })),
     ...catalog.image.map((entry) => ({ kind: "image" as const, entry })),
+    ...(catalog.video ?? []).map((entry) => ({ kind: "video" as const, entry })),
     ...catalog.audio.speech.map((entry) => ({ kind: "speech" as const, entry })),
     ...catalog.audio.transcription.map((entry) => ({ kind: "transcription" as const, entry })),
   ]
@@ -481,6 +621,7 @@ export function describePrice(card: RateCard | undefined): string {
     variantPrice(card.images, "per image", "at"),
     variantPrice(card.characters, "per 1M characters", "for"),
     variantPrice(card.audioInputSeconds, "per second of audio", "for"),
+    variantPrice(card.videoOutputSeconds, "per second of video", "at"),
     card.input !== undefined && card.output !== undefined
       ? `${dollars(tokenPrice(card.input))} input · ${dollars(tokenPrice(card.output))} output per 1M tokens`
       : undefined,

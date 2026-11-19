@@ -65,6 +65,8 @@ export interface ModelUsage {
   readonly outputImages?: number
   /** Input characters, counted by the provider's own billing rule. */
   readonly inputCharacters?: number
+  /** Milliseconds of video the call returned, every clip together, as the provider bills them. */
+  readonly outputVideoMs?: number
   readonly raw?: JsonObject
 }
 

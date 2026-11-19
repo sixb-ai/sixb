@@ -27,6 +27,7 @@ function render(node: ReactNode, locale?: string): string {
   queryClient.setQueryData(listModelsOptions().queryKey, {
     language: [],
     image: [],
+    video: [],
     audio: { speech: [], transcription: [] },
     capabilities: { run: false },
   })

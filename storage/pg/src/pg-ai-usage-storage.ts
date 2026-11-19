@@ -3,23 +3,28 @@ import {
   assertAiUsageExecutionId,
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
+  normalizeAiModelCallSettlement,
 } from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
-import type { ReadonlyJsonObject } from "@sixb/core/storage"
+import type { ReadonlyJsonObject, ReadonlyJsonValue } from "@sixb/core/storage"
 import {
   type AiModelCallFilesRecord,
+  type AiModelCallOperationRecord,
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
+  type CreateAiModelCallOperationInput,
   type GetAiModelCallFilesInput,
   type GetLatestAiModelCallForExecutionInput,
   type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
+  type SettleAiModelCallOperationInput,
   type SummarizeAiUsageExecutionInput,
   type SummarizeAiUsageExecutionsInput,
 } from "@sixb/core/storage"
@@ -64,6 +69,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           audio_output_tokens,
           output_images,
           input_characters,
+          output_video_ms,
           reporting_status,
           raw_usage,
           occurred_at,
@@ -98,6 +104,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.usage.audioOutputTokens ?? null},
           ${record.usage.outputImages ?? null},
           ${record.usage.inputCharacters ?? null},
+          ${record.usage.outputVideoMs ?? null},
           ${record.usage.reportingStatus},
           ${record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage)}::text::jsonb,
           ${record.occurredAt},
@@ -283,6 +290,75 @@ export class PgAiUsageStorage implements AiUsageStorage {
     return this.findCallFiles(this.sql, input.projectId, input.callId)
   }
 
+  async createModelCallOperation(
+    input: CreateAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord> {
+    const record = normalizeAiModelCallOperation(input)
+    return runPgTransaction(this.sql, async (tx) => {
+      await this.assertExecutionExists(tx, record.projectId, record.executionId)
+      const inserted = await tx<OperationRow[]>`
+        INSERT INTO ai_model_call_operations (
+          project_id, call_id, execution_id, attempt, model_kind, provider_id, model_id,
+          operation, request, reserved, status, created_at
+        )
+        VALUES (
+          ${record.projectId},
+          ${record.callId},
+          ${record.executionId},
+          ${record.attempt},
+          ${record.modelKind},
+          ${record.providerId},
+          ${record.modelId},
+          ${JSON.stringify(record.operation)}::text::jsonb,
+          ${JSON.stringify(record.request)}::text::jsonb,
+          ${record.reserved},
+          ${record.status},
+          ${record.createdAt}
+        )
+        ON CONFLICT (project_id, call_id) DO NOTHING
+        RETURNING *
+      `
+      if (inserted[0]) return operationFromRow(inserted[0])
+      throw new AiUsageStorageError(
+        "duplicate_id",
+        `[SixbPg] AI model call '${record.callId}' already has an operation.`
+      )
+    })
+  }
+
+  async getModelCallOperation(
+    input: GetAiModelCallFilesInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    const [row] = await this.sql<OperationRow[]>`
+      SELECT * FROM ai_model_call_operations
+      WHERE project_id = ${input.projectId} AND call_id = ${input.callId}
+    `
+    return row ? operationFromRow(row) : null
+  }
+
+  async settleModelCallOperation(
+    input: SettleAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const settlement = normalizeAiModelCallSettlement(input)
+
+    // Only a pending call settles; whoever comes second reads the first outcome back.
+    const [settled] = await this.sql<OperationRow[]>`
+      UPDATE ai_model_call_operations
+      SET status = ${settlement.status},
+        error = ${settlement.error ?? null},
+        result = ${JSON.stringify(settlement.result)}::text::jsonb,
+        settled_at = ${settlement.settledAt}
+      WHERE project_id = ${settlement.projectId}
+        AND call_id = ${settlement.callId}
+        AND status = 'pending'
+      RETURNING *
+    `
+    if (settled) return operationFromRow(settled)
+
+    return this.getModelCallOperation(settlement)
+  }
+
   private async findCallFiles(
     sql: PgStoreClient,
     projectId: string,
@@ -330,6 +406,44 @@ function callFilesFromRow(row: CallFilesRow): AiModelCallFilesRecord {
   }
 }
 
+interface OperationRow {
+  readonly project_id: string
+  readonly call_id: string
+  readonly execution_id: string
+  readonly attempt: number | string
+  readonly model_kind: AiModelCallOperationRecord["modelKind"]
+  readonly provider_id: string
+  readonly model_id: string
+  readonly operation: ReadonlyJsonValue
+  readonly request: ReadonlyJsonObject
+  readonly reserved: boolean
+  readonly status: AiModelCallOperationRecord["status"]
+  readonly error: string | null
+  readonly result: ReadonlyJsonObject | null
+  readonly created_at: Date | string
+  readonly settled_at: Date | string | null
+}
+
+function operationFromRow(row: OperationRow): AiModelCallOperationRecord {
+  return {
+    projectId: row.project_id,
+    callId: row.call_id,
+    executionId: row.execution_id,
+    attempt: Number(row.attempt),
+    modelKind: row.model_kind,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    operation: row.operation,
+    request: row.request,
+    reserved: row.reserved,
+    status: row.status,
+    ...(row.error === null ? {} : { error: row.error }),
+    ...(row.result === null ? {} : { result: row.result }),
+    createdAt: new Date(row.created_at),
+    ...(row.settled_at === null ? {} : { settledAt: new Date(row.settled_at) }),
+  }
+}
+
 interface AiUsageRow {
   readonly project_id: string
   readonly id: string
@@ -356,6 +470,7 @@ interface AiUsageRow {
   readonly audio_output_tokens: number | string | null
   readonly output_images: number | string | null
   readonly input_characters: number | string | null
+  readonly output_video_ms: number | string | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: ReadonlyJsonObject | string | null
   readonly occurred_at: Date | string
@@ -408,6 +523,7 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       : { audioOutputTokens: Number(row.audio_output_tokens) }),
     ...(row.output_images === null ? {} : { outputImages: Number(row.output_images) }),
     ...(row.input_characters === null ? {} : { inputCharacters: Number(row.input_characters) }),
+    ...(row.output_video_ms === null ? {} : { outputVideoMs: Number(row.output_video_ms) }),
   }
 }
 

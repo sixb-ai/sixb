@@ -5,7 +5,11 @@ import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createAudioRuntime } from "./audio/runtime"
-import { createModelCallsRuntime, type ModelCallRunVisibility } from "./calls"
+import {
+  createModelCallsRuntime,
+  createModelCallVisibility,
+  type ModelCallRunVisibility,
+} from "./calls"
 import { type ModelCatalog, selectLanguageModel } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
@@ -24,6 +28,7 @@ import { modelReasoningSupportIssue } from "./language-model"
 import type { ModelMessage } from "./messages"
 import { languageModelOutput } from "./output"
 import { resolveLanguageModel } from "./resolve"
+import { createVideoRuntime } from "./video/runtime"
 
 export function createModelsRuntime(
   runtime: SixbRuntimeContext,
@@ -31,7 +36,8 @@ export function createModelsRuntime(
   catalog: ModelCatalog | undefined,
   session: ModelExecutionSession,
   runs: ModelCallRunVisibility,
-  blobs?: BlobStorage
+  blobs?: BlobStorage,
+  apiPublicOrigin: () => string | undefined = () => undefined
 ): ModelsRuntime {
   function generate<const TShape extends LanguageModelOutputShape | undefined = undefined>(
     input: LanguageModelGenerateInput<TShape>
@@ -127,6 +133,11 @@ export function createModelsRuntime(
     decision: createDecisionRuntime(runtime, execution, catalog, session, "models"),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
     image: createImageRuntime(runtime, execution, catalog, session, blobs),
+    video: createVideoRuntime(runtime, execution, catalog, session, {
+      blobs,
+      canReadCallsOf: createModelCallVisibility(runtime, runs, execution.id),
+      apiPublicOrigin,
+    }),
     calls: createModelCallsRuntime(runtime, runs, execution.id),
   }
   registerModelExecutionBinding(models, (input) => {
