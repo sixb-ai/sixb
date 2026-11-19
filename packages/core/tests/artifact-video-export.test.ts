@@ -9,7 +9,11 @@ import {
   videoExportKeys,
   videoExportPlan,
 } from "../src/artifacts/video/export"
-import { videoSegmentIndex, videoSegmentRender } from "../src/artifacts/video/project"
+import {
+  videoPosterMs,
+  videoSegmentIndex,
+  videoSegmentRender,
+} from "../src/artifacts/video/project"
 import {
   missingVideoStills,
   VIDEO_STILLS_JOB,
@@ -487,11 +491,15 @@ describe("a video's stills", () => {
       ["outro", 5750],
     ])
     expect(videoPoster(plain)?.key).toBe(videoSceneStills(plain)[0]?.key)
+    // The player opens on the instant the card pictures. Reproduce by having videoPosterMs fall
+    // back on another instant of the first scene: the two then show different frames.
+    expect(videoPosterMs(plain)).toBe(1000)
 
     // 5 seconds in, the outro has started over the demo: its segment holds the instant.
     const posted = await outlineOf("5")
     const poster = videoPoster(posted)
     expect(poster).toMatchObject({ scene: "outro", atMs: 5000 })
+    expect(videoPosterMs(posted)).toBe(5000)
     expect(videoStills(posted).slice(0, 3)).toEqual(videoStills(plain))
     expect(videoStills(posted).at(3)).toEqual(poster)
     expect(videoPoster(await outlineOf("6"))?.key).not.toBe(poster?.key)

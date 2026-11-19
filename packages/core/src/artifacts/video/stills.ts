@@ -3,13 +3,14 @@ import type { Queue, RenderQueueJob } from "../../queues"
 import type { ArtifactStorage, ArtifactVersionRecord } from "../../storage/artifacts/types"
 import type { VideoOutline } from "../outline"
 import { resolveVideoMedia, VIDEO_ENGINE } from "./export"
-import { videoSegmentFrames } from "./project"
+import { videoSegmentFrames, videoSegmentMiddleMs } from "./project"
 
 // Each scene of a video gets a still: a picture of the middle of its segment, which the player
-// shows for its chapter. It is kept under the scene's render key, so a version that keeps a scene as it was keeps
-// its still. The video's poster is the still at the instant its root's `data-poster` names, or the
-// first scene's. Like a canvas's previews, stills are asked for when a version is published, once
-// the video rests.
+// shows for its chapter. It is kept under the scene's render key, so a version that keeps a scene
+// as it was keeps its still. The video's poster is the still at the instant its root's
+// `data-poster` names, or the first scene's: the instant the player opens on, `videoPosterMs`.
+// Like a canvas's previews, stills are asked for when a version is published, once the video
+// rests.
 
 /**
  * How the render worker snapshots a version's stills: each attempt within `timeoutMs`, up to
@@ -51,8 +52,7 @@ export function videoSceneStills(outline: VideoOutline): VideoStill[] {
     const segment = segments.get(scene.id)
     if (!segment) return []
 
-    const middle = (segment.startFrame + segment.endFrame) / 2
-    const atMs = Math.floor((middle * 1000) / outline.fps)
+    const atMs = videoSegmentMiddleMs(segment, outline.fps)
     const key = hash([STILL_FORMAT, VIDEO_ENGINE, scene.renderKey, atMs - scene.startMs])
     return [{ key, atMs, scene: scene.id }]
   })
@@ -69,7 +69,7 @@ export function videoStills(outline: VideoOutline): VideoStill[] {
 }
 
 /**
- * The still a card and the player show before the video plays: the one at the instant its root's
+ * The still a card shows, of the instant the player opens on, `videoPosterMs`: the one its root's
  * `data-poster` names, else the first scene's.
  */
 export function videoPoster(outline: VideoOutline): VideoStill | undefined {
