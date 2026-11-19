@@ -68,7 +68,7 @@ export class PgVectorIndexingStorage implements OntologyVectorIndexingStorage {
   async dispatched(input: Parameters<OntologyVectorIndexingStorage["dispatched"]>[0]) {
     if (!input.ids.length) return
     await this.run(async (sql) => {
-      await sql`UPDATE object_vector_indexing SET dispatch_at = ${input.nextDispatchAt} WHERE project_id = ${input.projectId} AND id = ANY(${sql.array([...input.ids])}::text[])`
+      await sql`UPDATE object_vector_indexing SET dispatch_at = ${input.nextDispatchAt} WHERE project_id = ${input.projectId} AND id = ANY(${[...input.ids]}::text[])`
     })
   }
   async get(input: Parameters<OntologyVectorIndexingStorage["get"]>[0]) {

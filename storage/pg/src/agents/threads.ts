@@ -299,8 +299,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
               message.created_at,
               message.completed_at
             FROM unnest(
-              ${tx.array(plan.messages.map((copy) => copy.sourceId))}::text[],
-              ${tx.array(plan.messages.map((copy) => copy.id))}::text[]
+              ${plan.messages.map((copy) => copy.sourceId)}::text[],
+              ${plan.messages.map((copy) => copy.id)}::text[]
             ) AS copy(source_id, id)
             JOIN agent_messages AS message
               ON message.project_id = ${input.projectId} AND message.id = copy.source_id
@@ -352,7 +352,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
       SELECT *
       FROM agent_threads
       WHERE project_id = ${params.projectId}
-        AND id = ANY(${this.sql.array(ids)}::text[])
+        AND id = ANY(${ids}::text[])
     `
 
     const byId = new Map(rows.map((row) => [row.id, row]))
@@ -657,7 +657,7 @@ async function selectParticipants(
     SELECT *
     FROM agent_thread_participants
     WHERE project_id = ${projectId}
-      AND thread_id = ANY(${sql.array([...threadIds])}::text[])
+      AND thread_id = ANY(${[...threadIds]}::text[])
     ORDER BY added_at, principal_id COLLATE "C", thread_id COLLATE "C"
   `
 
@@ -712,7 +712,7 @@ async function remapCopiedParts(
 
   const rows = await sql<{ id: string; parts: string }[]>`
     SELECT id, parts::text AS parts FROM agent_messages
-    WHERE project_id = ${projectId} AND id = ANY(${sql.array([...messageIds])}::text[])
+    WHERE project_id = ${projectId} AND id = ANY(${[...messageIds]}::text[])
   `
   for (const row of rows) {
     const parts = remapArtifactIds(row.parts, copies)

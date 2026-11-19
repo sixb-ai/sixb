@@ -83,7 +83,7 @@ export class PgAiCostStorage implements AiCostStorage {
     const ids = [...new Set(input.executionIds)]
     const rows = await this.sql<SummaryRow[]>`
       WITH requested(execution_id) AS (
-        SELECT DISTINCT * FROM unnest(${this.sql.array(ids)}::text[])
+        SELECT DISTINCT * FROM unnest(${ids}::text[])
       )
       SELECT usage.execution_id,
         cost.status,

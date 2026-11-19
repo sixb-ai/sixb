@@ -708,7 +708,7 @@ async function endpoints(
           AND primary_id = requested.key::jsonb->>1
       )
     ) AS exists
-    FROM unnest(${sql.array(unique.map((ref) => objectRefKey(ref)))}::text[]) AS requested(key)
+    FROM unnest(${unique.map((ref) => objectRefKey(ref))}::text[]) AS requested(key)
   `
   const existence = new Map(rows.map((row) => [row.key, row.exists] as const))
   return unique.map((ref) => ({ ref, exists: existence.get(objectRefKey(ref)) ?? false }))

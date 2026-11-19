@@ -313,7 +313,7 @@ export class PgArtifactStorage implements ArtifactStorage {
   async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     return runPgTransaction(this.sql, async (tx) => {
       const { projectId, turnRunId, laterTurnRunIds = [] } = input
-      const later = tx.array([...laterTurnRunIds])
+      const later = [...laterTurnRunIds]
 
       // Lock the turn's artifacts first, in id order so two of these never deadlock. A write
       // holds the same lock, and under READ COMMITTED each statement below then reads a snapshot
@@ -378,7 +378,7 @@ export class PgArtifactStorage implements ArtifactStorage {
       // undo.
       if (restored.length > 0) {
         const undone = restored.map(({ artifact }) => artifact.id)
-        const turns = tx.array([turnRunId, ...laterTurnRunIds])
+        const turns = [turnRunId, ...laterTurnRunIds]
         await tx`
           DELETE FROM artifact_restore_points
           WHERE project_id = ${projectId} AND turn_run_id = ANY(${turns}::text[])
@@ -709,7 +709,7 @@ export class PgArtifactStorage implements ArtifactStorage {
     const rows = await this.sql<PgRow[]>`
       SELECT ${this.sql.unsafe(BOARD_PREVIEW_COLUMNS)} FROM artifact_board_previews
       WHERE project_id = ${input.projectId}
-        AND render_key = ANY(${this.sql.array([...new Set(input.renderKeys)])}::text[])
+        AND render_key = ANY(${[...new Set(input.renderKeys)]}::text[])
       ORDER BY render_key COLLATE "C", theme COLLATE "C", size COLLATE "C"
     `
     return rows.map(parseArtifactBoardPreviewRow)

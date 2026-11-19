@@ -174,8 +174,8 @@ export async function lockAdvisoryKeys(sql: SQLClient, keys: readonly string[]):
   await sql`
     SELECT pg_advisory_xact_lock(locks.first_key, locks.second_key)
     FROM unnest(
-      ${sql.array(locks.map(([first]) => first))}::integer[],
-      ${sql.array(locks.map(([, second]) => second))}::integer[]
+      ${locks.map(([first]) => first)}::integer[],
+      ${locks.map(([, second]) => second)}::integer[]
     ) WITH ORDINALITY AS locks(first_key, second_key, lock_order)
     ORDER BY locks.lock_order
   `

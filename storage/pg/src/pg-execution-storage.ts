@@ -170,7 +170,7 @@ export class PgExecutionStorage implements ExecutionStorage {
     input: ListExecutionDescendantsInput
   ): Promise<readonly ExecutionDescendant[]> {
     if (input.executionIds.length === 0) return []
-    const ids = this.sql.array([...new Set(input.executionIds)])
+    const ids = [...new Set(input.executionIds)]
 
     // UNION, not UNION ALL: an execution asked about may sit below another one asked about, and
     // the walk would otherwise reach what it caused twice.

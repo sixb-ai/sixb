@@ -373,7 +373,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       SELECT * FROM ontology_sources
       WHERE project_id = ${projectId}
         AND source_id = ANY(
-          ${this.sql.array(expectedSources.map((expected) => expected.source.projectionId))}::text[]
+          ${expectedSources.map((expected) => expected.source.projectionId)}::text[]
         )
         AND status = 'active'
       FOR UPDATE

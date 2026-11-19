@@ -96,7 +96,7 @@ export class PgShareGrantStorage implements ShareGrantStorage {
       SELECT *
       FROM share_grants
       WHERE project_id = ${input.projectId}
-        AND id = ANY(${this.sql.array(ids)}::text[])
+        AND id = ANY(${ids}::text[])
     `
 
     const byId = new Map(rows.map((row) => [row.id, row]))

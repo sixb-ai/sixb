@@ -149,7 +149,7 @@ export class PgActionRunStorage implements ActionRunStorage {
       SELECT *
       FROM action_runs
       WHERE project_id = ${params.projectId}
-        AND execution_id = ANY(${this.sql.array(executionIds)}::text[])
+        AND execution_id = ANY(${executionIds}::text[])
     `
 
     const byExecution = new Map(rows.map((row) => [row.execution_id, row]))

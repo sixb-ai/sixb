@@ -302,7 +302,7 @@ export class PgActivityStorage implements ActivityStorage {
         FROM activity_visits v
         WHERE v.project_id = ${input.projectId}
           AND v.actor_type = 'user'
-          AND v.session_id = ANY(${this.sql.array([...input.sessionIds])}::text[])
+          AND v.session_id = ANY(${[...input.sessionIds]}::text[])
           AND v.user_id = ${input.userId}
       ) ranked
       WHERE position <= ${input.limit}
@@ -387,7 +387,7 @@ async function readStoredEvents(
     FROM activity_page_views p
     JOIN activity_visits v ON v.project_id = p.project_id AND v.id = p.visit_id
     WHERE p.project_id = ${input.projectId}
-      AND p.id = ANY(${sql.array(ids)}::text[])
+      AND p.id = ANY(${ids}::text[])
       AND v.actor_type = ${input.actor.type}
       AND v.session_id = ${input.sessionId}
     UNION ALL
@@ -395,7 +395,7 @@ async function readStoredEvents(
     FROM activity_interactions i
     JOIN activity_visits v ON v.project_id = i.project_id AND v.id = i.visit_id
     WHERE i.project_id = ${input.projectId}
-      AND i.id = ANY(${sql.array(ids)}::text[])
+      AND i.id = ANY(${ids}::text[])
       AND v.actor_type = ${input.actor.type}
       AND v.session_id = ${input.sessionId}
   `

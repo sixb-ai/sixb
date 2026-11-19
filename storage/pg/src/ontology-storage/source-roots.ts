@@ -160,7 +160,7 @@ export async function stageSourceRoots(
   >`
     SELECT root_key, staging_ordinal, deleted FROM ontology_source_roots
     WHERE version_id = ${manifest.version_id}
-      AND root_key = ANY(${sql.array(skipped.map((root) => root.rootKey))}::text[])
+      AND root_key = ANY(${skipped.map((root) => root.rootKey)}::text[])
   `
   const existing = new Map(stored.map((root) => [root.root_key, root]))
   if (

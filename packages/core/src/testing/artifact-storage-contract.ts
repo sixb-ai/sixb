@@ -1859,6 +1859,16 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // A process's first query may ask for one board: Postgres refused one key sent through
+    // postgres.js's `sql.array` before the client had read the server's array types.
+    test("reads one board's pictures first", async () => {
+      await withStorage(async (artifacts) => {
+        expect(
+          await artifacts.listBoardPreviews({ projectId, renderKeys: ["a".repeat(64)] })
+        ).toEqual([])
+      })
+    })
+
     test("keeps a PDF by render key, the first one kept staying", async () => {
       await withStorage(async (artifacts) => {
         const renderKey = "c".repeat(64)

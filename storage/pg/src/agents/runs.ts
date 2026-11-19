@@ -500,7 +500,7 @@ export class PgAgentRunStore implements AgentRunStore {
       SELECT DISTINCT ON (thread_id) *
       FROM agent_runs
       WHERE project_id = ${input.projectId}
-        AND thread_id = ANY(${this.sql.array([...input.threadIds])}::text[])
+        AND thread_id = ANY(${[...input.threadIds]}::text[])
       ORDER BY thread_id, created_at DESC, id DESC
     `
 
