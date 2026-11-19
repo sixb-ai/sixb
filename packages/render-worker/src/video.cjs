@@ -95,7 +95,7 @@ async function segment(left) {
 async function sound(left) {
   const [project, out, , , fps, frames] = args
   const producer = await hyperframesProducer()
-  if (!producer) return { skipped: "no_producer" }
+  if (typeof producer === "string") return { skipped: "no_producer", detail: producer }
 
   // The plan HyperFrames' distributed render makes mixes the whole film's sound once, as a render
   // mixes it, and captures no frame: its `audio.m4a` is what a render of the film plays.
@@ -117,10 +117,22 @@ async function sound(left) {
     const config = producer.distributedConfigFromRequest(request, {})
     const planDir = path.join(work, "plan")
     const planned = await within(producer.planV2(path.resolve(project), config, planDir), left())
-    const manifest = JSON.parse(fs.readFileSync(planned.manifestPath, "utf8"))
+
+    // What the plan is read by: its manifest, and its artifacts stored by their SHA-256.
+    const manifest =
+      typeof planned?.manifestPath === "string" && fs.existsSync(planned.manifestPath)
+        ? JSON.parse(fs.readFileSync(planned.manifestPath, "utf8"))
+        : null
+    if (!Array.isArray(manifest?.artifacts)) {
+      return { skipped: "no_producer", detail: "planV2 wrote no manifest of artifacts" }
+    }
     const audio = manifest.artifacts.find((artifact) => artifact.path === "audio.m4a")
     if (audio) {
-      fs.copyFileSync(path.join(planDir, "artifacts", "sha256", audio.sha256.slice(0, 2), audio.sha256), out)
+      const stored = path.join(planDir, "artifacts", "sha256", String(audio.sha256).slice(0, 2), String(audio.sha256))
+      if (!fs.existsSync(stored)) {
+        return { skipped: "no_producer", detail: "planV2's audio.m4a is not where its manifest says" }
+      }
+      fs.copyFileSync(stored, out)
       return ready(out, "audio/mp4", {})
     }
   } finally {
@@ -203,25 +215,34 @@ async function stills(left) {
   return { stills: made }
 }
 
-/** HyperFrames' producer, as the CLI bundles it: the module that exports its distributed plan. */
+/** What the sound needs of HyperFrames' producer, its distributed render's own functions. */
+const PRODUCER = ["planV2", "resolveConfig", "createRenderRequest", "distributedConfigFromRequest"]
+
+/**
+ * HyperFrames' producer, as the CLI bundles it: the module of its `dist` that exports what
+ * `PRODUCER` names. No package export reaches it, so it is found by what it exports, only in the
+ * one HyperFrames every key names; else why not, naming what is missing.
+ */
 async function hyperframesProducer() {
   const cli = await execute("bash", ["-c", "readlink -f \"$(command -v hyperframes)\""], {
     timeoutMs: 10_000,
     stdout: true,
   })
-  if (cli.failed) return null
+  if (cli.failed) return "the hyperframes command resolves to no file"
   const dist = path.resolve(path.dirname(cli.stdout.toString("utf8").trim()), "..", "dist")
+  if (!fs.existsSync(dist)) return `${dist} does not exist`
 
-  for (const name of fs.existsSync(dist) ? fs.readdirSync(dist) : []) {
+  for (const name of fs.readdirSync(dist)) {
     if (!/^src-.*\.js$/.test(name)) continue
     const text = fs.readFileSync(path.join(dist, name), "utf8")
-    if (!/\bplanV2,\n/.test(text) || !/\bdistributedConfigFromRequest,\n/.test(text)) continue
+    if (!PRODUCER.every((each) => new RegExp(`\\b${each},\\n`).test(text))) continue
 
     const producer = await import(pathToFileURL(path.join(dist, name)).href)
-    const needs = ["planV2", "resolveConfig", "createRenderRequest", "distributedConfigFromRequest"]
-    if (needs.every((name) => typeof producer[name] === "function")) return producer
+    const missing = PRODUCER.filter((each) => typeof producer[each] !== "function")
+    if (missing.length === 0) return producer
+    return `${name} exports no function ${missing.join(", ")}`
   }
-  return null
+  return `no module of ${dist} exports ${PRODUCER.join(", ")}`
 }
 
 async function hyperframesVersion() {

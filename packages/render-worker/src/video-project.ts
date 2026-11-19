@@ -109,7 +109,12 @@ export function cannotRender(report: Record<string, unknown> | null): string | n
     return `This project's sandboxes run ${String(report?.engine)}, and videos render with ${VIDEO_ENGINE}, as the agent image installs it.`
   }
   if (skipped === "no_producer") {
-    return `This project's sandboxes run a HyperFrames that cannot mix a video's sound; videos render with ${VIDEO_ENGINE}, as the agent image installs it.`
+    // The engine is the one every key names, yet its producer moved: the scan in video.cjs needs
+    // updating, as the video README says. Its detail names what changed, for the logs.
+    console.error(
+      `[SixbRenderWorker] ${VIDEO_ENGINE}'s producer cannot mix a video's sound: ${String(report?.detail ?? "it was not found")}.`
+    )
+    return `This project's HyperFrames cannot mix a video's sound (${String(report?.detail ?? "its producer was not found")}). Videos render with ${VIDEO_ENGINE}, as the agent image installs it.`
   }
 
   const tools: Record<string, string> = {
