@@ -8,7 +8,6 @@ import {
 import { createSixbError } from "@sixb/core/internal/errors"
 import { ModelUsageRecordingError } from "@sixb/core/internal/model-execution"
 import { isAbortError } from "@sixb/core/internal/workers"
-import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
@@ -26,6 +25,7 @@ import type { AgentRunFailure } from "./failure"
 import type { FamilyMailbox } from "./family-mailbox"
 import { agentRequester } from "./requester"
 import { runAgentTurn, stoppedByWorker } from "./run-agent-turn"
+import type { ChildParent } from "./run-child"
 import {
   type ConversationAgentExecutionEnvironment,
   createConversationAgentEnvironment,
@@ -57,14 +57,20 @@ export interface ConversationTurnRunner {
     readonly thread: AgentThreadRecord | null
   }): OpenRunSandbox
   /**
-   * Run a child the turn spawned or continues, beside the turn, on the turn's mailbox, its
-   * `web_fetch` following the network the turn's sandbox declared.
+   * Run a child the turn spawned or continues, beside the turn, on the turn's mailbox: in the
+   * turn's workspace when it lends one, its `web_fetch` following the network the turn's sandbox
+   * declared.
    */
   startChild(
     run: SubagentRunRecord,
     family: FamilyMailbox,
-    networkPolicy: SandboxNetworkPolicy | undefined
+    turn: Pick<ChildParent, "networkPolicy" | "workspace">
   ): void
+  /**
+   * Stop the turn's children still running, and wait for them to record it. A turn that lends its
+   * workspace calls it before saving it, so no child works in a workspace being saved.
+   */
+  stopChildren(runId: string): Promise<void>
   /** A sandbox teardown that outlives the turn: the runner waits for it before it stops. */
   onDetachedTeardown(teardown: Promise<void>): void
   /** A turn that failed: the runner reports it, once its end is recorded. */
@@ -110,14 +116,19 @@ export async function runConversationTurn(input: {
       runner.settings,
       run,
       session,
-      (child, family) => {
+      (child, family, inParentWorkspace) => {
         // Children start from the turn's tools, once its environment holds its sandbox.
         if (!environment) {
           throw new Error(
             `[SixbAgent] Agent run '${run.id}' started a sub-agent before its sandbox.`
           )
         }
-        runner.startChild(child, family, environment.networkPolicy)
+        runner.startChild(child, family, {
+          ...(environment.networkPolicy ? { networkPolicy: environment.networkPolicy } : {}),
+          ...(inParentWorkspace && environment.lendWorkspace
+            ? { workspace: environment.lendWorkspace }
+            : {}),
+        })
       },
       prepared.thread?.movedAt
     )
@@ -139,6 +150,7 @@ export async function runConversationTurn(input: {
         execution: prepared.execution,
         thread: prepared.thread,
       }),
+      stopChildren: () => runner.stopChildren(run.id),
       preflight: { budget: prepared.model.budget, runtime },
       context: prepared.context,
       plan,

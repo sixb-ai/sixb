@@ -969,6 +969,14 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
       `[${prefix}] Subagent run 'maxSteps' must be a positive safe integer.`
     )
   }
+  for (const flag of ["readOnly", "inParentWorkspace"] as const) {
+    if (input.spec[flag] !== undefined && input.spec[flag] !== true) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Subagent run '${flag}' must be true or absent.`
+      )
+    }
+  }
   assertApprovalModeField(input.spec.approvalMode, "Subagent run", prefix)
 
   assertSubagentRunFiles(input.spec.files, "spec.files", prefix)

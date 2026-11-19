@@ -47,6 +47,23 @@ describe("agent model tool specifications", () => {
     ])
   })
 
+  // Regression proof: list EDIT_TOOL_SPEC and WRITE_TOOL_SPEC whatever readOnly says; a read-only
+  // child then describes tools its environment never gave it.
+  test("describes no edit and no write for a read-only child", () => {
+    const names = agentModelToolSpecs([], { publishes: false, readOnly: true }).map(
+      (spec) => spec.name
+    )
+
+    expect(names).toEqual([
+      READ_TOOL_SPEC.name,
+      GLOB_TOOL_SPEC.name,
+      GREP_TOOL_SPEC.name,
+      BASH_TOOL_SPEC.name,
+      WAIT_TOOL_SPEC.name,
+      STOP_TOOL_SPEC.name,
+    ])
+  })
+
   // Regression proof: offer the spec whenever plan.web is set; a run without a search model then
   // describes a tool it does not have.
   test("describes web_search only when the plan names a search model", () => {

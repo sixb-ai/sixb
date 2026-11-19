@@ -56,7 +56,11 @@ import { ChildMailClosedError, FamilyMailbox } from "./family-mailbox"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { TurnChildren } from "./run-agent-turn"
-import { continuationTrigger } from "./subagent-continuation"
+import {
+  type ContinuationWorkspace,
+  continuationTrigger,
+  continuesInParentWorkspace,
+} from "./subagent-continuation"
 import type { WaitableChildren } from "./tools/background"
 import type { AgentRunFiles, AgentRunSettings } from "./types"
 
@@ -106,6 +110,8 @@ export interface SpawnSubagentInput {
   readonly maxSteps?: number
   /** Files and directories in the parent's sandbox, copied into the child's at the same paths. */
   readonly files?: readonly string[]
+  /** The child gets no `edit` and no `write` tool: it leaves the files as they are. */
+  readonly readOnly?: boolean
 }
 
 export interface SpawnSubagentOutput {
@@ -240,7 +246,12 @@ export class SubagentCoordinator {
      * it claims the child's run, opens its session and environment, and records its fate.
      * Starting a run already running is a no-op.
      */
-    private readonly startChild: (run: SubagentRunRecord, family: FamilyMailbox) => void,
+    private readonly startChild: (
+      run: SubagentRunRecord,
+      family: FamilyMailbox,
+      /** It runs in the turn's workspace, which the turn lends it. */
+      inParentWorkspace: boolean
+    ) => void,
     /** When the parent conversation last moved workspaces, so paused child sandboxes know. */
     private readonly movedAt?: Date
   ) {
@@ -295,15 +306,15 @@ export class SubagentCoordinator {
     for (const { child, outcomes } of paused) {
       signal.throwIfAborted()
       await this.clearDeadAttempts(child, signal)
-      const keepsWorkspace = await this.childKeepsWorkspace(child)
-      const { spec, continuation } = this.continuationOf(child, outcomes, keepsWorkspace)
+      const workspace = await this.continuationWorkspace(child)
+      const { spec, continuation } = this.continuationOf(child, outcomes, workspace)
       await this.admitInTurn(() =>
         this.admit(
           createSubagentRunId(this.parentRun.id, child.spawnKey),
           child.spawnKey,
           spec,
           signal,
-          continuation
+          { ...continuation, lends: continuesInParentWorkspace(workspace) }
         )
       )
     }
@@ -392,6 +403,7 @@ export class SubagentCoordinator {
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
         `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait's result when it finishes, which lists where each file is.`,
+        "Pass readOnly for a review or an investigation that must leave the files as they are: the child gets no edit or write tool; its commands still run.",
         `A child that has not answered after ${this.models.maxSteps} steps (model calls) stops and fails with agent.step_limit_reached; pass maxSteps to stop it sooner.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
@@ -624,9 +636,12 @@ export class SubagentCoordinator {
         )
       }
       await this.clearDeadAttempts(paused, signal)
-      const keepsWorkspace = await this.childKeepsWorkspace(paused)
-      const { spec, continuation } = this.continuationOf(paused, [answer], keepsWorkspace)
-      return this.admit(runId, key, spec, signal, continuation)
+      const workspace = await this.continuationWorkspace(paused)
+      const { spec, continuation } = this.continuationOf(paused, [answer], workspace)
+      return this.admit(runId, key, spec, signal, {
+        ...continuation,
+        lends: continuesInParentWorkspace(workspace),
+      })
     })
 
     const output: MessageSubagentOutput = {
@@ -799,12 +814,30 @@ export class SubagentCoordinator {
     const model = this.resolveModel(input.model)
     const reasoning = input.reasoning ?? model.defaultReasoning
     const maxSteps = this.resolveMaxSteps(input.maxSteps)
+    const readOnly = input.readOnly === true
+    // Recorded, so its continuations keep the kind of sandbox it started with.
+    const inParentWorkspace = this.lendsWorkspace()
+    // A child that works in this turn's workspace sees its files already.
+    if (input.files?.length && inParentWorkspace) {
+      throw new AgentToolPublicError(
+        "[SixbAgent] spawn_agent takes no files here: the child works in your workspace, on the same files. Name the paths it needs in its task instead."
+      )
+    }
     const sources = input.files?.length
       ? await listHandedSources({ files: this.runFiles(), paths: input.files, signal })
       : undefined
     const runId = createSubagentRunId(this.parentRun.id, key)
     const specWith = (files: readonly SubagentRunFile[] | undefined) =>
-      this.childSpec({ task, model, tier: model.tier, reasoning, maxSteps, files })
+      this.childSpec({
+        task,
+        model,
+        tier: model.tier,
+        reasoning,
+        maxSteps,
+        files,
+        readOnly,
+        inParentWorkspace,
+      })
 
     // One admission at a time: only this turn adds children to it, so admission's answer is known
     // before any file is read, and a refused spawn reads and stores none.
@@ -891,7 +924,27 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Whether a paused child finds its workspace where it left it: its provider keeps them, the
+   * Where a paused child continues: in the kind of sandbox it started with. One that worked in its
+   * parent's workspace goes on there while this turn lends it and the conversation did not move
+   * since it paused, and is told when the workspace was recreated meanwhile; otherwise it gets a
+   * blank sandbox of its own, and is told. One with a sandbox of its own keeps it, as
+   * `childKeepsWorkspace` says, whether this turn lends or not.
+   */
+  private async continuationWorkspace(paused: SubagentRunRecord): Promise<ContinuationWorkspace> {
+    if (paused.spec.inParentWorkspace) {
+      if (!this.lendsWorkspace() || this.movedSince(paused)) return "left-parent"
+
+      // Recreated after it paused: what it changed there is gone, and it is told.
+      const resetAt = await this.runFiles().workspaceResetAt?.()
+      return resetAt !== undefined && new Date(resetAt).getTime() > pausedAt(paused).getTime()
+        ? "parent-reset"
+        : "parent"
+    }
+    return (await this.childKeepsWorkspace(paused)) ? "kept" : "restarted"
+  }
+
+  /**
+   * Whether a paused child finds its own workspace where it left it: its provider keeps them, the
    * conversation did not move to a computer since it paused, and it did not move to another
    * workspace before that pause ended.
    */
@@ -899,8 +952,12 @@ export class SubagentCoordinator {
     if (!this.context.keepsChildWorkspaces) return false
     const parent = await this.session.children.get(paused.parentRunId)
     if (parent?.kind === "conversation" && parent.spec?.runsOn === "computer") return false
-    const pausedAt = paused.completedAt ?? paused.startedAt ?? paused.createdAt
-    return !this.movedAt || this.movedAt.getTime() <= pausedAt.getTime()
+    return !this.movedSince(paused)
+  }
+
+  /** Whether the conversation moved to another workspace after `paused` paused. */
+  private movedSince(paused: SubagentRunRecord): boolean {
+    return this.movedAt !== undefined && this.movedAt.getTime() > pausedAt(paused).getTime()
   }
 
   /**
@@ -911,7 +968,7 @@ export class SubagentCoordinator {
   private continuationOf(
     paused: SubagentRunRecord,
     goesOnWith: readonly AgentMessagePart[],
-    keepsWorkspace: boolean
+    workspace: ContinuationWorkspace
   ): {
     readonly spec: SubagentRunSpec
     readonly continuation: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
@@ -923,12 +980,15 @@ export class SubagentCoordinator {
       reasoning: paused.spec.reasoning,
       maxSteps: paused.spec.maxSteps,
       files: paused.spec.files,
+      readOnly: paused.spec.readOnly === true,
+      // Its thread's: where it works, and the run files its history names, wherever it continues.
+      inParentWorkspace: paused.spec.inParentWorkspace === true,
     })
     const createdAt = new Date()
     const parts = continuationTrigger({
       goesOnWith,
       paused,
-      keepsWorkspace,
+      workspace,
       createdAt,
       settings: sentSettings(spec, this.context),
     })
@@ -950,8 +1010,11 @@ export class SubagentCoordinator {
     readonly reasoning: AgentReasoning | undefined
     readonly maxSteps: number | undefined
     readonly files: readonly SubagentRunFile[] | undefined
+    readonly readOnly: boolean
+    /** Its thread works in its parent's workspace (`SubagentRunSpec.inParentWorkspace`). */
+    readonly inParentWorkspace: boolean
   }): SubagentRunSpec {
-    const { task, model, tier, reasoning, maxSteps, files } = input
+    const { task, model, tier, reasoning, maxSteps, files, readOnly, inParentWorkspace } = input
     const { approvalMode, timeZone, locale } = this.parentRun.spec ?? {}
     return {
       model: { provider: model.provider, modelId: model.modelId },
@@ -964,37 +1027,51 @@ export class SubagentCoordinator {
       ...(timeZone === undefined ? {} : { timeZone }),
       ...(locale === undefined ? {} : { locale }),
       ...(files === undefined ? {} : { files }),
+      ...(readOnly ? { readOnly: true } : {}),
+      ...(inParentWorkspace ? { inParentWorkspace: true } : {}),
     }
   }
 
   /**
    * Admit a child of this turn. A spawned child works in a thread of its own, which starts with its
-   * task and its files; a continuation goes into its thread with the outcomes it continues with.
+   * task and its files, and in the turn's workspace when its spec says so; a continuation goes into
+   * its thread with the outcomes it continues with, in the turn's workspace when `lends` says so.
    */
   private async admit(
     runId: string,
     key: string,
     spec: SubagentRunSpec,
     signal: AbortSignal,
-    continuation?: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
+    continuation?: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt"> & {
+      readonly lends: boolean
+    }
   ): Promise<SpawnSubagentOutput> {
+    const lends = continuation ? continuation.lends : spec.inParentWorkspace === true
     let run: SubagentRunRecord
     try {
       run = await this.session.children.spawn({
         spawnKey: key,
         spec,
-        ...(continuation ?? {
-          thread: { create: true },
-          trigger: {
-            id: createAgentMessageId(),
-            parts: [
-              { type: "text", text: spec.task },
-              ...(spec.files === undefined
-                ? []
-                : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
-            ],
-          },
-        }),
+        ...(continuation
+          ? {
+              thread: continuation.thread,
+              trigger: continuation.trigger,
+              ...(continuation.createdAt === undefined
+                ? {}
+                : { createdAt: continuation.createdAt }),
+            }
+          : {
+              thread: { create: true },
+              trigger: {
+                id: createAgentMessageId(),
+                parts: [
+                  { type: "text", text: spec.task },
+                  ...(spec.files === undefined
+                    ? []
+                    : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
+                ],
+              },
+            }),
       })
       if (run.id !== runId) {
         throw new Error(`[SixbAgent] Child '${key}' was admitted as '${run.id}', not '${runId}'.`)
@@ -1004,7 +1081,7 @@ export class SubagentCoordinator {
     }
 
     signal.throwIfAborted()
-    if (run.status === "queued") this.startChild(run, this.#family)
+    if (run.status === "queued") this.startChild(run, this.#family, lends)
 
     return {
       runId: run.id,
@@ -1271,6 +1348,11 @@ export class SubagentCoordinator {
     }
   }
 
+  /** Whether the turn lends its children its workspace: never before its environment started. */
+  private lendsWorkspace(): boolean {
+    return this.#runFiles?.lendsWorkspace === true
+  }
+
   private runFiles(): AgentRunFiles {
     if (!this.#runFiles) {
       throw new Error("[SixbAgent] Delegation tools ran before their run's environment.")
@@ -1428,6 +1510,11 @@ function spawnInputSchema(models: AgentRunDelegation): JsonObject {
         items: { type: "string", minLength: 1 },
         description:
           "Paths of files or directories in your sandbox, such as an attachment from $SIXB_ATTACHMENTS or out/chart.png.",
+      },
+      readOnly: {
+        type: "boolean",
+        description:
+          "The child gets no edit or write tool, for a review or an investigation that must leave the files as they are; its commands still run.",
       },
     },
     required: ["key", "task"],
@@ -1649,11 +1736,11 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (
     !isJsonObject(value) ||
     Object.keys(value).some(
-      (key) => !["key", "task", "model", "reasoning", "maxSteps", "files"].includes(key)
+      (key) => !["key", "task", "model", "reasoning", "maxSteps", "files", "readOnly"].includes(key)
     )
   ) {
     throw new AgentToolPublicError(
-      "[SixbAgent] spawn_agent expects key, task, and optional model/reasoning/maxSteps/files."
+      "[SixbAgent] spawn_agent expects key, task, and optional model/reasoning/maxSteps/files/readOnly."
     )
   }
   const key = requireNonEmpty("spawn_agent", value.key, "key", 128)
@@ -1689,6 +1776,9 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   ) {
     throw new AgentToolPublicError("[SixbAgent] spawn_agent maxSteps must be a positive integer.")
   }
+  if (value.readOnly !== undefined && typeof value.readOnly !== "boolean") {
+    throw new AgentToolPublicError("[SixbAgent] spawn_agent readOnly must be true or false.")
+  }
   const files = parseSpawnFiles(value.files)
   return {
     key,
@@ -1697,6 +1787,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
     ...(value.reasoning === undefined ? {} : { reasoning: value.reasoning }),
     ...(value.maxSteps === undefined ? {} : { maxSteps: value.maxSteps }),
     ...(files === undefined ? {} : { files }),
+    ...(value.readOnly === true ? { readOnly: true } : {}),
   }
 }
 
@@ -1732,4 +1823,9 @@ function stoppedReading(error: unknown, key: string): unknown {
   return new AgentToolPublicError(
     `[SixbAgent] '${key}' stopped as you sent this, so it will not read it: it paused or ended. Wait for it with wait to see which.`
   )
+}
+
+/** When a paused child stopped. */
+function pausedAt(paused: SubagentRunRecord): Date {
+  return paused.completedAt ?? paused.startedAt ?? paused.createdAt
 }

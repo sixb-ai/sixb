@@ -82,6 +82,15 @@ export interface AgentRunFiles {
   readonly blobStorage: AgentRunFileStore
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
+  /** Its children work in its workspace: they need no files handed over, and hand none back. */
+  readonly lendsWorkspace?: boolean
+  /** It works in its parent's workspace, which sees what it changes: it hands no files back. */
+  readonly inParentWorkspace?: boolean
+  /**
+   * When the workspace it lends was last recreated, as its opening read it: a child that paused
+   * before then finds none of its changes there.
+   */
+  workspaceResetAt?(): Promise<string | undefined>
   /**
    * Install the latest revision of each thread artifact the run's turn wrote, its children's
    * writes among them, in the run's `$SIXB_ARTIFACTS`, and in the folder the Agent last published

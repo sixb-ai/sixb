@@ -2778,6 +2778,33 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("keeps a child's read-only and workspace flags, and rejects one that is not true", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const spec = {
+          ...subagentInput("parent_token").spec,
+          readOnly: true as const,
+          inParentWorkspace: true as const,
+        }
+
+        await createSubagent(storage, fixture, { spec })
+        expect((await storage.runs.getById({ projectId, id: "child_1" }))?.spec).toEqual(spec)
+
+        // Proven by removal: drop either flag from the check in assertCreateSubagentRunInput.
+        for (const flag of ["readOnly", "inParentWorkspace"] as const) {
+          await expectAgentError(
+            createSubagent(storage, fixture, {
+              id: "child_2",
+              executionId: "test_agent_execution:child_2",
+              spawnKey: `invalid-${flag}`,
+              spec: { ...spec, [flag]: false as unknown as true },
+            }),
+            "invalid_input"
+          )
+        }
+      })
+    })
+
     test("enforces the active-child limit atomically", async () => {
       await withStorage(async (storage, fixture) => {
         await createRunningParent(storage, fixture)

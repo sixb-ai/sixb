@@ -60,6 +60,8 @@ let blocking: (() => Promise<void>) | undefined
 /** Notes a child keeps outside out/: only its workspace keeps them. */
 const WRITE_NOTES = "write-notes"
 const READ_NOTES = "read-notes"
+/** Prints where the run's files are. */
+const PRINT_CONTEXT_DIR = "print-context-dir"
 const NOTES = "INV-2041: approval requested.\n"
 /** The parent writes a brief it hands its child, which edits it. */
 const WRITE_BRIEF = "write-brief"
@@ -223,6 +225,7 @@ class GatewaySandbox implements Sandbox {
       await this.writeFiles([{ path: "brief.md", contents: brief }])
       return ok("")
     }
+    if (script === PRINT_CONTEXT_DIR) return ok(`${options.env?.SIXB_CONTEXT_DIR ?? ""}\n`)
     if (script === READ_NOTES) {
       const notes = this.files.get(join(this.workingDirectory, "notes/progress.md"))
       return notes
@@ -351,6 +354,8 @@ function setup(scripts: {
     /** Creation of a named sandbox waits for it. */
     readonly created?: Promise<void>
   }
+  /** The conversation works in a workspace of its own, which its turns lend their children. */
+  readonly workspace?: boolean
 }) {
   const storage = new InMemoryStorage()
   const parentRequests: LanguageModelRequest[] = []
@@ -407,6 +412,7 @@ function setup(scripts: {
           resumed.push(name)
           return kept
         },
+        ...(scripts.workspace ? { configuration: { params: {}, resolve: () => ({}) } } : {}),
       }
     : { supportsRequestCredentials: true, create }
   const host: SixbHost = new SixbHost({
@@ -628,14 +634,22 @@ function payRunIdOf(request: LanguageModelRequest): string {
   return spawned.runId
 }
 
-/** Request a turn as Alice and run it until it ends. */
+/** Request a turn as Alice and run it until it ends, in a conversation with a workspace if asked. */
 async function requestTurn(
   harness: ReturnType<typeof setup>,
-  text = "Pay INV-2041 and list the open invoices."
+  text = "Pay INV-2041 and list the open invoices.",
+  options: { readonly workspace?: boolean } = {}
 ) {
   const alicesSixb = await signedIn(harness.host)
+  const thread = options.workspace
+    ? await settle(alicesSixb.agent.threads.create({ sandbox: {} }), "thread")
+    : undefined
   const { run } = await settle(
-    alicesSixb.agent.runs.request({ text, approvalMode: "manual" }),
+    alicesSixb.agent.runs.request({
+      text,
+      approvalMode: "manual",
+      ...(thread ? { threadId: thread.id } : {}),
+    }),
     "request"
   )
   return { run, paused: await terminal(harness.agents, run.id), alicesSixb }
@@ -1008,6 +1022,48 @@ describe("a paused child, once its requester decides", () => {
     }
   })
 
+  // Removal proof: drop `readOnly` from the spec continuationOf builds; the continuation then has
+  // edit and write. Append createEditTool and createWriteTool whatever readOnly says in
+  // startAgentEnvironment; the paused child has them too.
+  test("a read-only child stays read-only in its continuation", async () => {
+    const tools = (request: LanguageModelRequest | undefined) =>
+      (request?.tools ?? []).map((tool) => tool.name)
+    const harness = setup({
+      parent: (request, call) => {
+        if (call === 1) {
+          return toolCalls(["spawn", "spawn_agent", { ...spawn(PAY), readOnly: true }])
+        }
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
+        if (call === 3) return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
+        return answer("INV-2041 is paid.")
+      },
+      children: {
+        pay: () => toolCalls(["held", "bash", { command: HELD_COMMAND }]),
+        "pay'": () => answer("I marked INV-2041 paid."),
+      },
+    })
+    await seedInvoice(harness.host)
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run, alicesSixb } = await requestTurn(harness)
+      const { resumed } = await decide(harness, alicesSixb, run.threadId, "approve")
+      const continued = await child(harness.agents, createSubagentRunId(resumed.id, PAY.key))
+
+      expect(continued).toMatchObject({ status: "succeeded", spec: { readOnly: true } })
+      for (const request of [harness.childRequests("pay")[0], harness.childRequests("pay'")[0]]) {
+        expect(tools(request)).toContain("read")
+        expect(tools(request)).toContain("bash")
+        expect(tools(request)).not.toContain("edit")
+        expect(tools(request)).not.toContain("write")
+      }
+      // Only the parent keeps them.
+      expect(tools(harness.parentRequests[0])).toContain("edit")
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
   // Removal proof: skip the deletion in clearDeadAttempts; the retried turn's continuation reads
   // the failed attempt's outcome and answer in its thread, before its own outcome.
   test("continues again when its resumed turn is retried, without the failed attempt's work", async () => {
@@ -1340,6 +1396,142 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
+  })
+
+  describe("of a conversation with a workspace", () => {
+    /**
+     * Pay writes notes, then waits for approval; once decided, it reads them back, and says where
+     * its run files are.
+     */
+    function payWithNotes(options: { readonly lost?: (name: string) => boolean } = {}) {
+      return setup({
+        persistent: { ...(options.lost ? { lost: options.lost } : {}) },
+        workspace: true,
+        parent: (request, call) => {
+          if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(PAY)])
+          if (call === 2) return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
+          if (call === 3) {
+            return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
+          }
+          return answer("INV-2041 is paid.")
+        },
+        children: {
+          pay: (_request, call) =>
+            call === 1
+              ? toolCalls(["notes", "bash", { command: WRITE_NOTES }])
+              : toolCalls(["held", "bash", { command: HELD_COMMAND }]),
+          "pay'": (_request, call) =>
+            call === 1
+              ? toolCalls(
+                  ["read", "bash", { command: READ_NOTES }],
+                  ["where", "bash", { command: PRINT_CONTEXT_DIR }]
+                )
+              : answer("I marked INV-2041 paid."),
+        },
+      })
+    }
+
+    /** Where a continuation's run files were, as its second request reads it. */
+    function contextDirOf(request: LanguageModelRequest | undefined): string {
+      return JSON.stringify(toolOutput(request, "where"))
+    }
+
+    // Removal proof: pass `lends: false` for every continuation in continuePausedChildren; the
+    // continuation gets a blank sandbox of its own, without the notes.
+    test("continues a child that worked in it there, with what it changed", async () => {
+      const harness = payWithNotes()
+      await seedInvoice(harness.host)
+      jest.useFakeTimers()
+      await harness.worker.start()
+      try {
+        const { run, alicesSixb } = await requestTurn(harness, undefined, { workspace: true })
+        const pay = await child(harness.agents, createSubagentRunId(run.id, PAY.key))
+        const { resumed } = await decide(harness, alicesSixb, run.threadId, "approve")
+        const continued = await child(harness.agents, createSubagentRunId(resumed.id, PAY.key))
+        const [first, second] = harness.childRequests("pay'")
+
+        expect(pay.spec.inParentWorkspace).toBe(true)
+        expect(continued).toMatchObject({ status: "succeeded", spec: { inParentWorkspace: true } })
+        // One workspace, the conversation's: the notes are there, and the continuation read them.
+        expect(persisted(harness)).toHaveLength(1)
+        expect(persisted(harness)[0]?.text("notes/progress.md")).toBe(NOTES)
+        expect(JSON.stringify(toolOutput(second, "read"))).toContain(NOTES.trim())
+        expect(JSON.stringify(first?.messages.at(-1))).not.toContain("no longer work")
+      } finally {
+        await settle(harness.worker.stop(), "worker stop")
+      }
+    })
+
+    // Removal proof: return "parent" whatever workspaceResetAt says in continuationWorkspace; the
+    // child goes on in the recreated workspace, unaware its notes are gone.
+    test("tells a child that worked in it when the workspace was recreated meanwhile", async () => {
+      let lost = ""
+      const harness = payWithNotes({ lost: (name) => name === lost })
+      await seedInvoice(harness.host)
+      jest.useFakeTimers()
+      await harness.worker.start()
+      try {
+        const { run, alicesSixb } = await requestTurn(harness, undefined, { workspace: true })
+        const pay = await child(harness.agents, createSubagentRunId(run.id, PAY.key))
+        // The conversation's saved workspace expires while the child waits, a second later.
+        lost = persisted(harness)[0]?.persistedAs ?? ""
+        jest.advanceTimersByTime(1_000)
+
+        const { resumed } = await decide(harness, alicesSixb, run.threadId, "approve")
+        const continued = await child(harness.agents, createSubagentRunId(resumed.id, PAY.key))
+        const [first, second] = harness.childRequests("pay'")
+
+        expect(continued).toMatchObject({ status: "succeeded", spec: { inParentWorkspace: true } })
+        expect(JSON.stringify(first?.messages.at(-1))).toContain(
+          "Your parent's workspace was recreated while you were paused: the changes you made there are gone. You still work in it"
+        )
+        // In the recreated workspace, the parent's: its notes are gone.
+        expect(JSON.stringify(toolOutput(second, "read"))).toContain("No such file")
+        expect(contextDirOf(second)).toContain(`.sixb/agent/threads/${pay.threadId}`)
+        expect(persisted(harness)).toHaveLength(2)
+      } finally {
+        await settle(harness.worker.stop(), "worker stop")
+      }
+    })
+
+    // Removal proof: drop `this.movedSince(paused)` from continuationWorkspace; the child goes on
+    // in the parent's workspace, unaware that the conversation moved. Open its own sandbox without
+    // `ownSandbox` in ChildRunner; its run files are no longer where its history names them.
+    test("tells a child that worked in it when it continues elsewhere, once the conversation moved", async () => {
+      const harness = payWithNotes()
+      await seedInvoice(harness.host)
+      jest.useFakeTimers()
+      await harness.worker.start()
+      try {
+        const { run, alicesSixb } = await requestTurn(harness, undefined, { workspace: true })
+        const pay = await child(harness.agents, createSubagentRunId(run.id, PAY.key))
+        // To a computer and back while the child waits, after it paused: fake time stands still.
+        const movedAt = new Date((pay.completedAt ?? new Date()).getTime() + 1_000)
+        await harness.agents.threads.assignComputer({
+          projectId,
+          id: run.threadId,
+          computer: { id: "laptop", name: "Laptop", folder: "/work" },
+          movedAt,
+        })
+        await harness.agents.threads.moveToCloud({ projectId, id: run.threadId, movedAt })
+
+        const { resumed } = await decide(harness, alicesSixb, run.threadId, "approve")
+        const continued = await child(harness.agents, createSubagentRunId(resumed.id, PAY.key))
+        const [first, second] = harness.childRequests("pay'")
+
+        expect(continued.status).toBe("succeeded")
+        expect(JSON.stringify(first?.messages.at(-1))).toContain(
+          "You no longer work in your parent's workspace: you continue in a blank sandbox of your own, and the changes you made there are not here."
+        )
+        expect(JSON.stringify(first?.messages.at(-1))).not.toContain("out/")
+        // A blank sandbox of its own: no notes, but its run files where its history names them.
+        expect(JSON.stringify(toolOutput(second, "read"))).toContain("No such file")
+        expect(continued.spec.inParentWorkspace).toBe(true)
+        expect(contextDirOf(second)).toContain(`.sixb/agent/threads/${pay.threadId}`)
+      } finally {
+        await settle(harness.worker.stop(), "worker stop")
+      }
+    })
   })
 
   // Removal proofs: save in finishSubagent whatever its finish reason (`discard: false`), and the

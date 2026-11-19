@@ -81,9 +81,14 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   (else its last text). A child whose call waits for approval pauses, its work in its thread, and comes
   back `awaiting_approval`; the turn pauses once no other child is at work, and the turn that
   resumes it continues the child first (see
-  [paused children](../agent/docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
-  paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
-  back as files of `wait`'s result, under `.sixb/agent/children/<key>/` for the turn and in
+  [paused children](../agent/docs/runtime-design.md#paused-children)). A child of a conversation
+  with a workspace runs its tools in that workspace, through the parent's session, with its own
+  run named in `x-sixb-run` on its parent's token and its own run files, and its continuations
+  keep the kind of sandbox it started with (see
+  [children in the workspace](../agent/docs/runtime-design.md#children-in-the-workspace)); it takes
+  no files and returns none, and `readOnly` takes its `edit` and `write` away. Otherwise
+  `spawn_agent`'s `files` copy paths of the parent's sandbox into the child's; what a child that
+  succeeds writes to `out/` comes back as files of `wait`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is
   installed in the parent's `$SIXB_ARTIFACTS` (see
   [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns once they have all
@@ -266,8 +271,8 @@ The terminal run state is stored on the run record:
 - `apiBaseUrl`: required for agent execution; the Sixb server origin the run's commands call. The
   run's token is one of the sandbox's request credentials, so commands get the sandbox's
   credentialed address as `SIXB_API_BASE_URL`, never the token; the worker refuses to start on
-  sandboxes that cannot add credentials. The worker installs the self-documenting `sixb` CLI on
-  `PATH`, writes the run's project skills into
+  sandboxes that cannot add credentials. A child in its parent's workspace calls with the parent's
+  token and names its own run (`x-sixb-run`), which the server acts as. The worker installs the self-documenting `sixb` CLI on `PATH`, writes the run's project skills into
   `SIXB_SKILLS_DIR` and ontology docs into `SIXB_ONTOLOGY_DIR`, and creates the sandbox with a
   restricted network policy allowing the server origin. The run token opens only the routes marked
   `agentApi`, as the run, while the run holds its execution; it carries no other credential.

@@ -1,4 +1,6 @@
+import { posix } from "node:path"
 import { type Sandbox, SandboxNotRunningError } from "@sixb/core"
+import { SANDBOX_CONTEXT_DIRECTORY } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
@@ -61,6 +63,19 @@ export interface RunSandbox {
   readonly networkPolicy?: SandboxNetworkPolicy
   /** Where `web_fetch` reads pages from. Absent: Sixb's servers. */
   readonly webNetwork?: WebFetchNetwork
+  /**
+   * The workspace of the run's parent, lent by its `lend`: the run hands back no files, as its
+   * parent sees what it changes, and its commands call the API with the parent's token, saying
+   * which run they are (`SIXB_RUN_ID`).
+   */
+  readonly lent?: boolean
+  /**
+   * Lend this workspace to a child the run spawns: the child runs its tools here, on the same
+   * files, and the parent still decides when the workspace is saved. The child keeps everything
+   * else of its own: its run, its token, its context directory. Absent when the run has no
+   * workspace to lend, such as a blank sandbox: each child then gets a sandbox of its own.
+   */
+  readonly lend?: (child: LentRunSandboxChild) => RunSandbox
   /** Called once, when the run environment starts. */
   acquire(): Promise<AcquiredRunSandbox>
   /**
@@ -70,6 +85,41 @@ export interface RunSandbox {
   release?(acquired: AcquiredRunSandbox): Promise<void>
   /** Confirm preservation before the run's terminal write. Idempotent: the first call decides. */
   beforeFinalize?(options?: BeforeFinalizeOptions): Promise<void>
+}
+
+/** The child a run lends its workspace to. */
+export interface LentRunSandboxChild {
+  readonly runId: string
+  readonly threadId: string
+  /** Stops the child's provisioning: its cancellation, or its runner stopping. */
+  readonly signal: AbortSignal
+}
+
+/**
+ * Where a child's run files go when its thread works in its parent's workspace, in whatever sandbox
+ * a run of the thread works in: beside the parent's, and the same for each of its runs, so the
+ * paths its history names hold. The directory a Git checkout excludes covers it.
+ */
+export function threadContextDirectory(threadId: string): string {
+  return posix.join(SANDBOX_CONTEXT_DIRECTORY, "threads", threadId)
+}
+
+/** `sandbox` with its run's files in `contextDirectory` instead. */
+export function withContextDirectory(sandbox: RunSandbox, contextDirectory: string): RunSandbox {
+  return {
+    waitBeforeModel: sandbox.waitBeforeModel,
+    contextDirectory,
+    ...(sandbox.background ? { background: sandbox.background } : {}),
+    ...(sandbox.networkPolicy ? { networkPolicy: sandbox.networkPolicy } : {}),
+    ...(sandbox.webNetwork ? { webNetwork: sandbox.webNetwork } : {}),
+    acquire: () => sandbox.acquire(),
+    ...(sandbox.release
+      ? { release: (acquired) => sandbox.release?.(acquired) ?? Promise.resolve() }
+      : {}),
+    ...(sandbox.beforeFinalize
+      ? { beforeFinalize: (options) => sandbox.beforeFinalize?.(options) ?? Promise.resolve() }
+      : {}),
+  }
 }
 
 /** How a run's end leaves its thread's workspace. */

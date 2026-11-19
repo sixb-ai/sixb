@@ -548,6 +548,19 @@ export interface SubagentRunSpec {
   readonly locale?: string
   /** Files the parent handed over, copied into the child's sandbox at these paths. */
   readonly files?: readonly SubagentRunFile[]
+  /**
+   * The child leaves the files as it found them, for a review or an investigation: it has no
+   * `edit` and no `write` tool. Absent: it has both.
+   */
+  readonly readOnly?: true
+  /**
+   * The child's thread works in its parent's workspace, as the turn that spawned it lent it: its
+   * runs keep their files under its thread's own directory there, and a continuation goes on in
+   * the workspace while its turn lends it and the conversation did not move, else in a blank
+   * sandbox of its own, with the same run files directory. Absent: a sandbox of its own, which its
+   * continuations keep.
+   */
+  readonly inParentWorkspace?: true
 }
 
 /** A file a parent and its child hand each other, stored once and copied into a sandbox. */
