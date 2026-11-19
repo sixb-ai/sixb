@@ -4543,7 +4543,7 @@ export const exportArtifactVideo = <ThrowOnError extends boolean = false>(
 /**
  * Get the still of a video's scene
  *
- * A JPEG of the scene at its middle, at most 1280 pixels wide, which a player shows for its chapter; the first scene's is the video's poster. It shows what the scene plays from other artifacts as the version's publisher reads it, so a shared link's guest gets none of a scene that plays any. A frozen version's still never changes, and is cached as such. 404 still_not_found until it is snapshotted, a few seconds after the video is published, or when it never will be.
+ * A JPEG of the scene at the middle of its chapter, until the next scene starts, at most 1280 pixels wide, which a player shows for its chapter; the first scene's is the video's poster. It shows what the scene plays from other artifacts as the version's publisher reads it, so a shared link's guest gets none of a scene that plays any. A frozen version's still never changes, and is cached as such. 404 still_not_found until it is snapshotted, a few seconds after the video is published, or when it never will be.
  */
 export const getArtifactVideoStill = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactVideoStillData, ThrowOnError>

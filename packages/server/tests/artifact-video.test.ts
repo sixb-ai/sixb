@@ -11,7 +11,7 @@ import {
 import {
   type VideoMediaFile,
   videoExportPlan,
-  videoStillKey,
+  videoSceneStills,
 } from "@sixb/core/internal/artifacts/publish"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
@@ -236,12 +236,12 @@ describe("a video's MP4 over the API", () => {
     expect(await missing.json()).toMatchObject({ code: "still_not_found" })
 
     if (version.outline.kind !== "video") throw new Error("Expected a video.")
-    const outro = version.outline.scenes[1]
-    if (!outro) throw new Error("Expected the outro.")
+    const [intro, outro] = videoSceneStills(version.outline)
+    if (!intro || !outro) throw new Error("Expected two stills.")
     const jpeg = await fixture.put("outro.jpg", "jpeg", "image/jpeg")
     await fixture.storage.artifacts?.putVideoRender({
       projectId: PROJECT_ID,
-      key: videoStillKey(outro),
+      key: outro.key,
       file: jpeg.file,
       createdAt: new Date(),
     })
@@ -259,11 +259,9 @@ describe("a video's MP4 over the API", () => {
         })
       )
     expect((await poster()).status).toBe(404)
-    const intro = version.outline.scenes[0]
-    if (!intro) throw new Error("Expected the intro.")
     await fixture.storage.artifacts?.putVideoRender({
       projectId: PROJECT_ID,
-      key: videoStillKey(intro),
+      key: intro.key,
       file: (await fixture.put("intro.jpg", "intro", "image/jpeg")).file,
       createdAt: new Date(),
     })

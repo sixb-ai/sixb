@@ -41,7 +41,7 @@ export function ChaptersPanel({
   inline = false,
 }: {
   readonly outline: VideoOutline
-  /** Where a scene's still is, a picture of its middle, which shows once snapshotted. */
+  /** Where a scene's still is, a picture of its chapter's middle, which shows once snapshotted. */
   readonly still?: (scene: VideoOutlineScene) => string
   /** The scene playing, by its id. */
   readonly current: string | undefined
@@ -109,7 +109,7 @@ export function ChaptersPanel({
 }
 
 /**
- * A chapter's number, on its still once it has loaded: a picture of the scene's middle, at the
+ * A chapter's number, on its still once it has loaded: a picture of the chapter's middle, at the
  * video's shape, the number in its corner. Until then, or without one, the number alone, so a
  * still not snapshotted yet moves nothing.
  */

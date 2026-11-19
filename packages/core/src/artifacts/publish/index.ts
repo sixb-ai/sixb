@@ -48,7 +48,7 @@ export {
   VIDEO_STILLS_JOB,
   type VideoStill,
   videoPoster,
-  videoStillKey,
+  videoSceneStills,
   videoStills,
 } from "../video/stills"
 export {

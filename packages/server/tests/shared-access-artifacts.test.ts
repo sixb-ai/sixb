@@ -20,7 +20,7 @@ import {
 } from "@sixb/core"
 import { CANVAS_FILE } from "@sixb/core/artifacts"
 import { decodeLiveData, encodeLiveData } from "@sixb/core/artifacts/live"
-import { videoExportPlan, videoStillKey } from "@sixb/core/internal/artifacts/publish"
+import { videoExportPlan, videoSceneStills } from "@sixb/core/internal/artifacts/publish"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
@@ -454,7 +454,7 @@ describe("a shared link's guest", () => {
         file: await blobStorage.put({ body: new TextEncoder().encode(body), fileName: "still" }),
         createdAt: new Date(),
       })
-    for (const each of version.outline.scenes) await keep(videoStillKey(each), each.id)
+    for (const each of videoSceneStills(version.outline)) await keep(each.key, each.scene)
     const plan = videoExportPlan({
       outline: version.outline,
       files: version.files,
