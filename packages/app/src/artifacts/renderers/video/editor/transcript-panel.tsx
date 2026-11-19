@@ -1,7 +1,15 @@
 import type { VideoRange } from "@sixb/core/artifacts/live"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronDown, ChevronUp, Info, Scissors, Search, WandSparkles } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronUp,
+  Info,
+  Scissors,
+  Search,
+  TextCursorInput,
+  WandSparkles,
+} from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
 import { type MediaTarget, useMediaParts, useTranscript } from "./media"
@@ -55,6 +63,22 @@ export function TranscriptPanel({
     )
   }
   if (failed) return <Notice>{messages.transcriptFailed}</Notice>
+  // Nothing the reader can do here: what to set up for it, rather than a dead end.
+  if (parts.transcriptLacks === "transcription_model") {
+    return (
+      <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+        <span className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground [&_svg]:size-4">
+          <TextCursorInput aria-hidden="true" />
+        </span>
+        <p className="m-0 text-[13px] font-medium text-foreground">
+          {messages.noTranscriptionModel}
+        </p>
+        <p className="m-0 max-w-64 text-[13px] text-muted-foreground">
+          {messages.noTranscriptionModelHint}
+        </p>
+      </div>
+    )
+  }
   if (!transcript || !words || words.length === 0) {
     return <Notice>{parts.transcriptReason ?? messages.noTranscript}</Notice>
   }
