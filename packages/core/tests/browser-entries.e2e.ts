@@ -5,6 +5,8 @@ import { join, resolve } from "node:path"
 
 const packageRoot = resolve(import.meta.dir, "..")
 const BUNDLE_BUDGET_MS = 60_000
+/** An import of Node's or Bun's modules, which `bundleForBrowser` leaves for the browser to fail. */
+const SERVER_IMPORT = /from\s*"(node|bun):|require\("(node|bun):/
 
 const roots: string[] = []
 
@@ -69,11 +71,12 @@ await Bun.write(${JSON.stringify(output)}, result.outputs[0])
 describe("@sixb/core/security in the browser", () => {
   // An app layout imports the project's group files to decide who sees which screens, so this entry
   // and everything it reaches must bundle for the browser. Regression proof: add
-  // `export { createSixb } from "../runtime/create"` to src/security/public.ts and this build fails
-  // on the runtime's server-only imports.
+  // `export { createSixb } from "../runtime/create"` to src/security/public.ts and the bundle
+  // imports the runtime's Node modules.
   test("bundles for the browser", async () => {
-    const { exitCode, stderr } = await bundleForBrowser("security/public.ts")
+    const { exitCode, stderr, bundle } = await bundleForBrowser("security/public.ts")
     expect(exitCode, stderr).toBe(0)
+    expect(bundle.match(SERVER_IMPORT)?.[0]).toBeUndefined()
   }, 90_000)
 })
 
@@ -84,7 +87,7 @@ describe("a video's composition in the browser", () => {
   test("bundles for the browser, needing nothing of Node or Bun", async () => {
     const { exitCode, stderr, bundle } = await bundleForBrowser("artifacts/video/composition.ts")
     expect(exitCode, stderr).toBe(0)
-    expect(bundle).not.toMatch(/from\s*"(node|bun):|require\("(node|bun):/)
-    expect(bundle).not.toMatch(/\bHTMLRewriter\b|\bBun\./)
+    expect(bundle.match(SERVER_IMPORT)?.[0]).toBeUndefined()
+    expect(bundle.match(/\bHTMLRewriter\b|\bBun\./)?.[0]).toBeUndefined()
   }, 90_000)
 })
