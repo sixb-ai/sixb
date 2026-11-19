@@ -95,10 +95,13 @@ export default function VideoEditor({
   version,
   outline,
   live,
+  start,
 }: {
   readonly version: ArtifactVersion
   readonly outline: VideoOutline
   readonly live: LiveArtifact
+  /** Where it opens, in seconds: the instant or scene its address names. */
+  readonly start?: number
 }) {
   const messages = useArtifactMessages().videoEditor
   const video = liveVideoOf(live)
@@ -115,7 +118,7 @@ export default function VideoEditor({
   const { width } = useSize(root)
   const compact = width > 0 && width < COMPACT_WIDTH
 
-  const { frame, playback, cover } = usePreview(version, outline)
+  const { frame, playback, cover } = usePreview(version, outline, start)
   const timeMs = Math.round(playback.time * 1000)
 
   const [selection, setSelection] = useState<EditorSelection>(null)
