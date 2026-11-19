@@ -184,6 +184,29 @@ describe("a video's composition", () => {
     expect(composed({ ...LAUNCH, "index.html": longer }).durationMs).toBe(9000)
   })
 
+  test("shows the instant its root's data-poster names before it plays, within its length", () => {
+    const root = LAUNCH["index.html"] ?? ""
+    const poster = (value: string) =>
+      read({
+        ...LAUNCH,
+        "index.html": root.replace(
+          'data-duration="7">',
+          `data-duration="7" data-poster="${value}">`
+        ),
+      })
+
+    expect(composed(LAUNCH).posterMs).toBeUndefined()
+    expect(poster("2.4")).toMatchObject({ composition: { posterMs: 2400 } })
+    expect(poster("0")).toMatchObject({ composition: { posterMs: 0 } })
+    for (const outside of ["7", "-1", "soon"]) {
+      expect(poster(outside)).toEqual({
+        error: expect.stringContaining(
+          `the root composition's data-poster is the instant that shows the video before it plays, in seconds from 0 up to its length of 7 s, such as 2.5; it is "${outside}".`
+        ),
+      })
+    }
+  })
+
   test("lists what each scene and the root play, where each is written", () => {
     const composition = composed(LAUNCH)
     const root = LAUNCH["index.html"] ?? ""
@@ -551,6 +574,21 @@ describe("publishing a video", () => {
       const keys = await after(changes)
       for (const id of ["intro", "demo", "outro"]) expect(keys[id]).not.toBe(before[id])
     }
+  })
+
+  // Removal proof: drop `data-poster` from what sceneRenderKeys cuts from the root, and moving the
+  // poster renders every scene again.
+  test("outlines its poster's instant, which renders no scene again", async () => {
+    const { publish } = setup()
+    const before = (await publish(LAUNCH)).version.outline
+    const root = (LAUNCH["index.html"] ?? "").replace(
+      'data-duration="7">',
+      'data-duration="7" data-poster="2.4">'
+    )
+    const after = (await publish({ ...LAUNCH, "index.html": root })).version.outline
+
+    expect(after).toMatchObject({ kind: "video", posterMs: 2400 })
+    expect(keysOf(after)).toEqual(keysOf(before))
   })
 
   // Removal proof: let sceneRenderKeys hash all of index.html instead of `root`, and trimming the

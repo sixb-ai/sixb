@@ -84,6 +84,11 @@ export interface VideoComposition {
   readonly height: number
   readonly fps: number
   readonly durationMs: number
+  /**
+   * The instant that shows the video before it plays, from the root's `data-poster`, in
+   * milliseconds within its length; none when the root writes none.
+   */
+  readonly posterMs?: number
   /** In the order they start; scenes that start together, in the order `index.html` lists them. */
   readonly scenes: readonly VideoScene[]
   /** What `index.html` plays and shows itself, under or over every scene: a soundtrack, a logo. */
@@ -289,11 +294,15 @@ function readRoot(html: string): VideoRoot {
     .map((scene) => ({ ...scene, startMs: starts.get(scene.id) ?? 0 }))
     .sort((a, b) => a.startMs - b.startMs)
 
+  const durationMs = videoLength(root, hosts, fps, scenes)
+  const posterMs = readPoster(root, durationMs)
+
   return {
     width,
     height,
     fps,
-    durationMs: videoLength(root, hosts, fps, scenes),
+    durationMs,
+    ...(posterMs === undefined ? {} : { posterMs }),
     scenes,
     media: mediaOf(document.childNodes),
     root: hostSource(root),
@@ -666,6 +675,23 @@ function readFps(root: Element): number {
     )
   }
   return fps
+}
+
+/**
+ * The root's `data-poster`, the instant in seconds that shows the video before it plays, as
+ * milliseconds: from its start up to its last moment. HyperFrames reads no such attribute.
+ */
+function readPoster(root: Element, durationMs: number): number | undefined {
+  const written = attribute(root, "data-poster")?.trim()
+  if (written === undefined || written === "") return undefined
+
+  const ms = Math.round(Number(written) * 1000)
+  if (!Number.isFinite(ms) || ms < 0 || ms >= durationMs) {
+    throw new CompositionError(
+      `the root composition's data-poster is the instant that shows the video before it plays, in seconds from 0 up to its length of ${durationMs / 1000} s, such as 2.5; it is "${written}".`
+    )
+  }
+  return ms
 }
 
 /** A length in seconds, a millisecond or more, as milliseconds. */
