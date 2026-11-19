@@ -237,8 +237,9 @@ async function proxy(probed) {
  * or a title card's backdrop says little of a video. The moment with the most detail otherwise.
  */
 async function poster(source, durationMs) {
+  // A share of a short clip may come before one second: it is looked at from one second on.
   const moments = [1000, 0.1, 0.25, 0.5, 0.75]
-    .map((at) => (at < 1 ? Math.round(durationMs * at) : at))
+    .map((at) => (at < 1 ? Math.max(1000, Math.round(durationMs * at)) : at))
     .filter((at) => at < durationMs)
   if (moments.length === 0) moments.push(Math.floor(durationMs / 2))
 
