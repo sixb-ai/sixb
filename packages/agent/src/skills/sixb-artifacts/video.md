@@ -6,7 +6,7 @@ the export renders the same files to MP4, frame by frame.
 
 | The work | Publish |
 | --- | --- |
-| A teaser, a product demo, an explainer, an ad, a social clip, a cut of an interview | a `video` |
+| A teaser, a product demo, an explainer, an ad, a social clip, a reel or a short cut from the user's clips, a cut of an interview | a `video`, which they edit and comment on and export to MP4: never an MP4 you render yourself |
 | A recording the user wants delivered as it is | a `file` |
 | Shots side by side, a storyboard to approve before filming | a `canvas` |
 
