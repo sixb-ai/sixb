@@ -10,7 +10,7 @@ import {
 } from "@sixb/core/artifacts/live"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { AudioLines, Image as ImageIcon, Type, Video } from "lucide-react"
+import { AudioLines, Image as ImageIcon, TriangleAlert, Type, Video } from "lucide-react"
 import {
   Fragment,
   type ReactNode,
@@ -917,6 +917,8 @@ function ClipBlock({
   const parts = useMediaParts(media ? target : null, clip.src)
   const kind = clip.caption ? messages.clipKinds.caption : messages.clipKinds[clip.kind]
   const name = clipName(clip)
+  // A recording that cannot be read plays nothing: it says so, rather than look like the others.
+  const failed = media && parts.failed !== undefined
   // Where in its file the block's left edge is: a start trimmed moves into it.
   const mediaAt = clip.mediaStartMs + (viewStartMs - laid.startMs)
   const filmed = clip.kind === "video" && !!parts.filmstrip
@@ -932,18 +934,34 @@ function ClipBlock({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`${kind}, ${name}`}
+      aria-label={failed ? `${kind}, ${name}, ${messages.unreadable}` : `${kind}, ${name}`}
       data-timeline-clip={clip.ref}
+      data-failed={failed ? "" : undefined}
       className={cn(
         "group/clip absolute touch-none overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
-        TRACK_TONE[clip.track],
+        failed
+          ? "bg-[color-mix(in_oklab,var(--destructive)_10%,var(--background))] text-destructive"
+          : TRACK_TONE[clip.track],
         selected
           ? "z-10 ring-2 ring-foreground ring-offset-1 ring-offset-background"
-          : "ring-1 ring-black/10 dark:ring-white/10",
+          : failed
+            ? "ring-1 ring-destructive/45"
+            : "ring-1 ring-black/10 dark:ring-white/10",
         dragging && "z-20 shadow-lg opacity-90",
         "cursor-grab active:cursor-grabbing"
       )}
-      style={{ left, width, top: top + 2, height: height - 4 }}
+      style={{
+        left,
+        width,
+        top: top + 2,
+        height: height - 4,
+        ...(failed
+          ? {
+              backgroundImage:
+                "repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in oklab, var(--destructive) 14%, transparent) 5px 6px)",
+            }
+          : {}),
+      }}
       onPointerDown={onPointerDown}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -985,10 +1003,12 @@ function ClipBlock({
       ) : null}
 
       <span className="pointer-events-none relative flex h-full min-w-0 items-start gap-1 px-1.5 pt-1 text-[11px] leading-tight font-medium">
-        {clip.kind === "image" ? (
+        {failed ? (
+          <TriangleAlert className="mt-px size-3 shrink-0" aria-hidden="true" />
+        ) : clip.kind === "image" ? (
           <ImageIcon className="mt-px size-3 shrink-0" aria-hidden="true" />
         ) : null}
-        {/* Over its frames, the name sits on a shade of its own, whatever they show. */}
+        {/* Over its frames or its peaks, the name sits on a shade of its own, whatever they show. */}
         <span
           className={cn(
             "truncate",
@@ -1001,7 +1021,9 @@ function ClipBlock({
         >
           {name}
         </span>
-        {media && parts.processing ? (
+        {failed ? (
+          <span className="ml-auto shrink-0 text-[10px] font-medium">{messages.unreadable}</span>
+        ) : media && parts.processing ? (
           <span className="ml-auto shrink-0 rounded bg-black/55 px-1 text-[10px] font-normal text-white">
             {messages.processing}
           </span>
