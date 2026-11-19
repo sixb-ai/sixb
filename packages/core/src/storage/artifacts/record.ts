@@ -247,7 +247,14 @@ export function parseArtifactVideoRenderRow(row: Row): ArtifactVideoRenderRecord
     createdAt: date(row.createdAt, "createdAt", where),
   }
   if (row.failure !== null && row.failure !== undefined) {
-    return { ...kept, failure: text(row.failure, "failure", where) }
+    const failure = text(row.failure, "failure", where)
+    if (row.lacks === null || row.lacks === undefined) return { ...kept, failure }
+
+    const lacks = row.lacks
+    if (lacks !== "sandboxes" && lacks !== "sandbox_tools") {
+      throw corrupt(where, "lacks is not sandboxes or sandbox_tools")
+    }
+    return { ...kept, failure, lacks }
   }
   const file = json(row.file, "file", where)
   if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")

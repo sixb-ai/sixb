@@ -39,6 +39,7 @@ export type {
   ArtifactVersionInput,
   ArtifactVersionRecord,
   ArtifactVideoRenderKey,
+  ArtifactVideoRenderLack,
   ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,

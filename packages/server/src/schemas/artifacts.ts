@@ -265,7 +265,15 @@ export const ArtifactVideoExportResponseSchema = z.discriminatedUnion("status", 
   }),
   z.object({
     status: z.literal("failed"),
-    reason: z.string().describe("Why it could not be rendered: which scene, or the sound"),
+    reason: z
+      .string()
+      .describe("Why it could not be rendered: which scene, the sound, or what the project lacks"),
+    lacks: z
+      .enum(["sandboxes", "sandbox_tools"])
+      .optional()
+      .describe(
+        "What the project lacks to render it, when the video is not why: retry=true renders it once the project has it"
+      ),
   }),
 ])
 

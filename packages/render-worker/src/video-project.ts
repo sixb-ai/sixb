@@ -6,7 +6,7 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import { VIDEO_ENGINE, type VideoMediaFile } from "@sixb/core/internal/artifacts/publish"
-import type { ArtifactFrameTarget } from "@sixb/core/storage"
+import type { ArtifactFrameTarget, ArtifactVideoRenderLack } from "@sixb/core/storage"
 import type { RenderHost } from "./host"
 import {
   downloadIntoSandbox,
@@ -99,11 +99,23 @@ export async function runVideoScript(
   )
 }
 
+/** Why a render could not be made, and what the project lacks when the video is not why. */
+export interface VideoRenderFailure {
+  readonly failure: string
+  readonly lacks?: ArtifactVideoRenderLack
+}
+
 /**
- * Why a sandbox cannot render a video, as whoever asked hears it, from a report that skipped:
- * a tool it lacks, or another HyperFrames than every key names. Null for any other report.
+ * Why a sandbox cannot render a video, as a developer reads it, from a report that skipped: a tool
+ * it lacks, or another HyperFrames than every key names. Either way the project lacks the tools,
+ * which no retry brings. Null for any other report.
  */
-export function cannotRender(report: Record<string, unknown> | null): string | null {
+export function cannotRender(report: Record<string, unknown> | null): VideoRenderFailure | null {
+  const failure = cannotRenderReason(report)
+  return failure ? { failure, lacks: "sandbox_tools" } : null
+}
+
+function cannotRenderReason(report: Record<string, unknown> | null): string | null {
   const skipped = report?.skipped
   if (skipped === "engine") {
     return `This project's sandboxes run ${String(report?.engine)}, and videos render with ${VIDEO_ENGINE}, as the agent image installs it.`

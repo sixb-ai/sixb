@@ -184,8 +184,10 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
 - **Failures.** A segment that fails after `VIDEO_SEGMENT_JOB.attempts` fails the export, naming
   the scene by its label, else its id. An export asked for by a Sixb whose keys differ from the
   worker's, as while a deploy rolls out, tries again until its attempts are spent, then keeps why.
-  A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why at once:
-  rendering there would keep frames under a key that does not name what made them.
+  A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why at once,
+  with `lacks: "sandbox_tools"`, which the app reads as export not being available rather than
+  offering a retry: rendering there would keep frames under a key that does not name what made
+  them.
 - **Stills** (`stills.ts`): the middle of each scene's segment, what its chapter plays until the
   next scene starts, snapshotted with `hyperframes snapshot` when a version is published, once it
   rests, and kept under the scene's key. The poster is the instant the root's `data-poster` names,

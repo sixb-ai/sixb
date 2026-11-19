@@ -14,7 +14,13 @@ import {
 import type { ArtifactVideoStillsRequestedQueueJob } from "@sixb/core/queues"
 import type { RenderHost } from "./host"
 import { inRenderSandbox, renderApiOrigin, storeSandboxFile } from "./sandbox"
-import { cannotRender, placeVideoProject, runVideoScript, type VideoHost } from "./video-project"
+import {
+  cannotRender,
+  placeVideoProject,
+  runVideoScript,
+  type VideoHost,
+  type VideoRenderFailure,
+} from "./video-project"
 
 // The stills of a video version's scenes, asked for when it is published: the worker opens a blank
 // sandbox of the project that reaches the API, lays out a project holding the scenes that miss one
@@ -80,7 +86,7 @@ export async function renderVideoStills(input: {
     sounds: true,
   }).map((entry) => (entry.path === "index.html" ? { ...entry, file: index } : entry))
 
-  const keep = (key: string, made: { readonly file: FileRef } | { readonly failure: string }) =>
+  const keep = (key: string, made: { readonly file: FileRef } | VideoRenderFailure) =>
     artifacts.putVideoRender({ projectId: host.id, key, createdAt: new Date(), ...made })
 
   await inRenderSandbox(
@@ -117,9 +123,9 @@ export async function renderVideoStills(input: {
         { timeoutMs: left(), signal }
       )
 
-      const reason = cannotRender(report)
-      if (reason) {
-        for (const still of missing) await keep(still.key, { failure: reason })
+      const lacking = cannotRender(report)
+      if (lacking) {
+        for (const still of missing) await keep(still.key, lacking)
         return
       }
       const stills = Array.isArray(report?.stills) ? report.stills : []

@@ -122,7 +122,8 @@ const PDF_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, file, pages, failure, created_at AS createdAt"
 const MEDIA_COLUMNS = "project_id AS projectId, digest, parts, attempts, updated_at AS updatedAt"
 
-const VIDEO_RENDER_COLUMNS = "project_id AS projectId, key, file, failure, created_at AS createdAt"
+const VIDEO_RENDER_COLUMNS =
+  "project_id AS projectId, key, file, failure, lacks, created_at AS createdAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -828,10 +829,10 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   async putVideoRender(input: ArtifactVideoRenderRecord): Promise<void> {
     this.db
       .query(
-        `INSERT INTO artifact_video_renders (project_id, key, file, failure, created_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO artifact_video_renders (project_id, key, file, failure, lacks, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (project_id, key) DO UPDATE SET
-           file = excluded.file, failure = NULL, created_at = excluded.created_at
+           file = excluded.file, failure = NULL, lacks = NULL, created_at = excluded.created_at
          WHERE artifact_video_renders.failure IS NOT NULL AND excluded.failure IS NULL`
       )
       .run(
@@ -839,6 +840,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         input.key,
         "failure" in input ? null : JSON.stringify(input.file),
         "failure" in input ? input.failure : null,
+        "failure" in input ? (input.lacks ?? null) : null,
         input.createdAt.toISOString()
       )
   }

@@ -4,6 +4,7 @@ import type { Queue, RenderQueueJob } from "../../queues"
 import type {
   ArtifactStorage,
   ArtifactVersionRecord,
+  ArtifactVideoRenderLack,
   ArtifactVideoRenderRecord,
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
@@ -182,19 +183,30 @@ export function videoExportStatus(
   kept: readonly ArtifactVideoRenderRecord[]
 ):
   | { readonly status: "ready"; readonly file: FileRef }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed"
+      readonly reason: string
+      /** What the project lacks, when the video is not why. */
+      readonly lacks?: ArtifactVideoRenderLack
+    }
   | { readonly status: "rendering"; readonly progress: VideoExportProgress } {
   const byKey = new Map(kept.map((record) => [record.key, record]))
 
   const done = byKey.get(plan.key)
-  if (done && "failure" in done) return { status: "failed", reason: done.failure }
+  if (done && "failure" in done) return failed(done)
   if (done) return { status: "ready", file: done.file }
 
   for (const segment of plan.segments) {
     const record = byKey.get(segment.key)
-    if (record && "failure" in record) return { status: "failed", reason: record.failure }
+    if (record && "failure" in record) return failed(record)
   }
   return { status: "rendering", progress: videoExportProgress(plan, kept) }
+}
+
+/** Why a render kept failed, and what the project lacks when it says. */
+function failed(record: Extract<ArtifactVideoRenderRecord, { failure: string }>) {
+  const lacks = record.lacks ? { lacks: record.lacks } : {}
+  return { status: "failed" as const, reason: record.failure, ...lacks }
 }
 
 /** How many of an export's segments are rendered: those that failed are not. */

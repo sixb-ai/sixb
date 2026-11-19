@@ -19,6 +19,7 @@ import type {
   ArtifactRestorePointRecord,
   ArtifactStorage,
   ArtifactVersionRecord,
+  ArtifactVideoRenderLack,
   ListArtifactsResult,
   ListArtifactVersionsResult,
   PublishedArtifactVersion,
@@ -356,7 +357,16 @@ export type ArtifactVideoExport =
       /** Its segments rendered, of all of them, then the MP4 being joined from them. */
       readonly progress: VideoExportProgress
     }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed"
+      /** Why, as a developer reads it: the scene, the sound, or what the project lacks. */
+      readonly reason: string
+      /**
+       * What the project lacks to render it, when the video is not why: asking again with
+       * `retry` renders it once the project has it, and fails the same until then.
+       */
+      readonly lacks?: ArtifactVideoRenderLack
+    }
 
 /** What Sixb derives of a video or a sound of a version. */
 export interface ArtifactMedia {
