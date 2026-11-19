@@ -349,6 +349,23 @@ describe("the player", () => {
     expect(posted.at(-1)).toMatchObject({ action: "seek", timeSeconds: 5.5 })
   })
 
+  test("plays the chapter just picked on Space, rather than picking it again", async () => {
+    // Reproduce by dropping the focus from `goToChapter` in player.tsx: Space presses the chapter's
+    // button again, which goes back to its start.
+    const { view, controls } = await openPlayer()
+    if (!view.queryByRole("complementary", { name: "Chapters" })) {
+      fireEvent.click(view.getByRole("button", { name: "Chapters" }))
+    }
+    const chapter = within(view.getByRole("complementary", { name: "Chapters" }))
+      .getByText("Thanks")
+      .closest("button") as HTMLElement
+    chapter.focus()
+    fireEvent.click(chapter)
+
+    fireEvent.keyDown(document.activeElement as Element, { key: " " })
+    expect(controls().at(-1)).toBe("play")
+  })
+
   test("drags the playhead through the frames, and lands where it is let go", async () => {
     const { view, posted } = await openPlayer()
     const track = view.getByRole("slider", { name: "Position" })

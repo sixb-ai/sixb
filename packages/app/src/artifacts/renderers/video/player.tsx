@@ -179,8 +179,11 @@ export function VideoPlayer({
     playback.seek(seconds)
     if (say) setAnnouncement(say)
   }
-  const goToChapter = (scene: VideoOutlineScene) =>
+  // The focus goes to the video, so Space plays the chapter rather than pressing it again.
+  const goToChapter = (scene: VideoOutlineScene) => {
     goTo(scene.startMs / 1000, messages.chapterAnnounced(chapterName(scene)))
+    screen.current?.focus({ preventScroll: true, focusVisible: false })
+  }
 
   const placeComments = () => {
     if (!commenting.enabled) return
