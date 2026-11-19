@@ -904,6 +904,7 @@ export const en = {
     cutAway: "Cut",
     refused: "That change would break the video",
     dismiss: "Dismiss",
+    inPlaceHint: "Enter to keep · Esc to leave as it was",
     broken: "The video’s files don’t read as a video right now",
     phoneNote: "Open this video on a computer to edit its timeline, clips and transcript.",
     titles: "Titles",
@@ -1850,6 +1851,7 @@ export const fr: Translation<ArtifactMessages> = {
     cutAway: "Coupé",
     refused: "Cette modification casserait la vidéo",
     dismiss: "Fermer",
+    inPlaceHint: "Entrée pour garder · Échap pour laisser tel quel",
     broken: "Les fichiers de la vidéo ne se lisent pas comme une vidéo pour l’instant",
     phoneNote:
       "Ouvrez cette vidéo sur un ordinateur pour monter sa timeline, ses plans et sa transcription.",

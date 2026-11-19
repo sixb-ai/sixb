@@ -958,17 +958,22 @@ function Waveform({
   )
 }
 
-/** One bar every two pixels: the loudest peak under each, from 0 to 100. */
+/**
+ * One bar every two pixels: the loudest peak under each, scaled to the file's loudest, so a quiet
+ * recording still shows where it speaks and pauses.
+ */
 function barsOf(peaks: Peaks, fromMs: number, width: number, zoom: number): number[] {
   const bars: number[] = []
   const perPixel = peaks.peaksPerSecond / zoom
+  const scale = 100 / peaks.loudest
   for (let x = 0; x < width; x += 2) {
     const first = Math.floor((fromMs / 1000) * peaks.peaksPerSecond + x * perPixel)
     const last = Math.max(first + 1, Math.floor(first + 2 * perPixel))
     let loudest = 0
-    for (let index = first; index < last; index += 1)
+    for (let index = first; index < last; index += 1) {
       loudest = Math.max(loudest, peaks.peaks[index] ?? 0)
-    bars.push(Math.max(2, loudest))
+    }
+    bars.push(Math.max(2, loudest * scale * 0.9))
   }
   return bars
 }

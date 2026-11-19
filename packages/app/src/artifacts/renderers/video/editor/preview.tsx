@@ -1,4 +1,4 @@
-import { type VideoOutline, videoPosterMs } from "@sixb/core/artifacts"
+import { type FrameEvent, type VideoOutline, videoPosterMs } from "@sixb/core/artifacts"
 import { Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Play, RotateCcw } from "lucide-react"
@@ -31,8 +31,9 @@ export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
   // A frame loaded again, for a new save, shows where the reader was, paused.
   const resumeAt = useRef(0)
   const reloading = useRef(false)
-  if (playback.phase === "ready") resumeAt.current = playback.time
-  else reloading.current = true
+  // Where the reader is, until a new frame loads: its first reports are its own start, not theirs.
+  if (playback.phase !== "ready") reloading.current = true
+  else if (!reloading.current) resumeAt.current = playback.time
   const resumed = useRef<number | null>(null)
   useEffect(() => {
     if (playback.phase !== "ready" || resumed.current === version.revision) return
@@ -56,6 +57,8 @@ export function PreviewScreen({
   playback,
   updating,
   compact = false,
+  onPick,
+  onFrameEvent,
   children,
 }: {
   readonly version: ArtifactVersion
@@ -65,7 +68,13 @@ export function PreviewScreen({
   /** The timeline holds changes the picture does not show yet. */
   readonly updating: boolean
   readonly compact?: boolean
-  /** What lies over the picture, in its own pixels: a title being typed into. */
+  /**
+   * A click on the paused picture, at a point in fractions of it: the editor looks for words
+   * there to type over. Without it, or while it plays, a click plays or pauses.
+   */
+  readonly onPick?: (point: { readonly x: number; readonly y: number }) => void
+  readonly onFrameEvent?: (event: FrameEvent) => void
+  /** What lies over the picture: a title being typed into. */
   readonly children?: ReactNode
 }) {
   const messages = useArtifactMessages()
@@ -110,6 +119,7 @@ export function PreviewScreen({
           className="size-full"
           onEvent={(event) => {
             if (event.event === "failed") setFailed(version.revision)
+            onFrameEvent?.(event)
           }}
           onFailure={() => setFailed(version.revision)}
         />
@@ -120,7 +130,22 @@ export function PreviewScreen({
         className="absolute"
         style={{ ...shown, ...offset }}
         onPointerUp={(event) => {
-          if (event.button === 0 && !event.defaultPrevented) playback.toggle()
+          if (
+            event.button !== 0 ||
+            event.defaultPrevented ||
+            event.target !== event.currentTarget
+          ) {
+            return
+          }
+          if (onPick && !playback.playing) {
+            const area = event.currentTarget.getBoundingClientRect()
+            onPick({
+              x: (event.clientX - area.left) / area.width,
+              y: (event.clientY - area.top) / area.height,
+            })
+            return
+          }
+          playback.toggle()
         }}
       >
         {children}
