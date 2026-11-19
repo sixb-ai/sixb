@@ -110,10 +110,11 @@ motion designer would ship.
 - **Motion with intent.** Things arrive eased out (`power3.out`) in 0.4 to 0.8 s, staggered
   0.1 to 0.2 s, and leave faster than they came. Push in slowly on what matters. No spins,
   bounces, or effects for their own sake; one move at a time.
-- **Interface footage reads.** A whole 1280-wide screen in a 1080p frame is too small to read on a
-  phone: show the part where the action happens, at 1.5 to 2 times, so its text is at least 24 px
-  on the frame, and frame it with a radius and a shadow on a quiet ground. Mark what a push-in
-  moves past its frame `data-layout-allow-overflow`.
+- **Interface footage reads.** An app at its own size in a 1080p frame is unreadable on a phone:
+  its 14 px text needs to be 24 px or more on the frame. Record at the frame's size with the page
+  zoomed 1.6 to 1.8 times (Real footage), so the app lays itself out larger and stays sharp, and
+  push in on the part where the action happens. Frame it with a radius and a shadow on a quiet
+  ground, and mark what a push-in moves past its frame `data-layout-allow-overflow`.
 - **Restraint with blur.** `filter: blur()` and `backdrop-filter` double the export's time: one
   soft background at most, never on what moves.
 - **Sound.** Music under a voice sits at about a fifth of its volume (`data-volume="0.2"`) and
@@ -139,10 +140,12 @@ reads, rehearse once with screenshots, and record a change once, when the story 
 const { chromium } = require(process.env.SIXB_PLAYWRIGHT ?? "/opt/sixb/js/node_modules/playwright")
 ;(async () => {
   const browser = await chromium.launch()
-  const size = { width: 1280, height: 720 }
+  const size = { width: 1920, height: 1080 }
   const context = await browser.newContext({ viewport: size, recordVideo: { dir: "work/rec", size } })
   const page = await context.newPage()
   await page.goto(process.argv[2], { waitUntil: "networkidle" })
+  // Its text read on a phone: 14 px becomes about 24 px on the frame.
+  await page.evaluate(() => { document.documentElement.style.zoom = "1.75" })
   await page.waitForTimeout(1500)
   await page.click("text=Assign")
   await page.waitForTimeout(3000)
@@ -210,13 +213,15 @@ the scripts and fonts as they are.
 Agents believe they succeeded far more often than they did: a video that publishes is not a video
 that works. Never say it is ready without having looked.
 
-1. Open each contact sheet with `read`. For every frame, ask what a viewer sees: is the one thing
-   to read readable, is nothing cut off or stacked, does the footage show what the words claim?
+1. Open each contact sheet with `read`. For every frame, ask what a viewer sees on a phone: is the
+   one thing to read readable, is the app's text in the footage readable too, is nothing cut off,
+   stacked, loading or empty, does the footage show what the words claim? Is the end card three
+   to four seconds? A frame that fails is fixed before anything else.
 2. Have it reviewed by someone who did not make it: `spawn_agent` a reviewer with the contact
    sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
-   but not your intent or your plan, and ask what is weak, confusing, slow or broken. A review
-   needs eyes, not the strongest model: give it `model: "standard"`, unless that model cannot
-   read images. Fix what it finds.
+   but not your intent or your plan, and ask what is weak, confusing, slow, unreadable on a phone
+   or broken. A review needs eyes, not the strongest model: give it `model: "standard"`, unless
+   that model cannot read images. Fix what it finds.
 3. Fix what the warnings name and what you saw, update the artifact with its `id`, and look again.
    Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
    folder, take `timeoutMs` up to ten minutes, or run in the background. Where HyperFrames takes
