@@ -941,41 +941,109 @@ function chainedStart(after: string, offset: number): string {
 
 /**
  * Writes the root's length once its scenes moved: what it played past the last scene, it still
- * plays past it, and a sound of its own that ran to its end runs to the new one. A poster past the
- * end moves to its last frame.
+ * plays past it, and a sound of its own that ran to its end runs to the new one. What the root
+ * plays during one scene, a line of voice-over, moves with that scene, and goes with it; so does
+ * the poster, kept within it. A poster past the end moves to its last frame.
  */
 function fitRoot(work: Working, before: VideoRoot): void {
+  const now = rootOf(work)
   const end = (root: VideoRoot) =>
     Math.max(...root.scenes.map((scene) => scene.startMs + scene.durationMs))
   const tail = Math.max(0, before.durationMs - end(before))
-  const duration = end(rootOf(work)) + tail
+  const duration = end(now) + tail
 
-  // A sound of the root's own that ran to the video's end runs to its new one.
-  if (duration !== before.durationMs) {
-    const ending = (readRootTimeline(work.text(VIDEO_ENTRY))?.clips ?? []).filter(
-      (clip) =>
-        clip.durationMs !== undefined &&
-        Math.abs(clip.startMs + clip.durationMs - before.durationMs) <= SAME_MS &&
-        duration - clip.startMs >= MIN_CLIP_MS
-    )
-    rewriteClips(
-      work,
-      VIDEO_ENTRY,
-      new Map(
-        ending.map((clip) => [clip.ref, { "data-duration": seconds(duration - clip.startMs) }])
-      )
-    )
+  // Where each scene of the root before now is: none for one removed.
+  const moved = (scene: VideoRoot["scenes"][number] | undefined) =>
+    scene && now.scenes.find((each) => each.id === scene.id)
+
+  // A clip of the root's own goes with the scene it belongs to, and keeps its time into it. Once
+  // that scene is gone, what followed it keeps its time, as when a clip is removed.
+  const owners = new Map<string, VideoRoot["scenes"][number]>()
+  for (const clip of readRootTimeline(work.text(VIDEO_ENTRY))?.clips ?? []) {
+    const owner = numericStart(work, VIDEO_ENTRY, clip) ? sceneOfClip(before, clip) : undefined
+    if (owner) owners.set(clip.ref, owner)
   }
+  freezeFollowers(work, VIDEO_ENTRY, (clip) => {
+    const owner = owners.get(clip.ref)
+    return owner !== undefined && !moved(owner)
+  })
+
+  const plan = new Map<string, ClipChange>()
+  for (const clip of readRootTimeline(work.text(VIDEO_ENTRY))?.clips ?? []) {
+    const owner = owners.get(clip.ref)
+    const scene = moved(owner)
+    if (owner && !scene) {
+      plan.set(clip.ref, "remove")
+      continue
+    }
+
+    const start = scene && owner ? clip.startMs + scene.startMs - owner.startMs : clip.startMs
+    const change: Record<string, string> = {}
+    if (start !== clip.startMs) change["data-start"] = seconds(start)
+
+    // A sound that ran to the video's end runs to its new one.
+    if (
+      duration !== before.durationMs &&
+      clip.durationMs !== undefined &&
+      Math.abs(clip.startMs + clip.durationMs - before.durationMs) <= SAME_MS &&
+      duration - start >= MIN_CLIP_MS
+    ) {
+      change["data-duration"] = seconds(duration - start)
+    }
+    if (Object.keys(change).length > 0) plan.set(clip.ref, change)
+  }
+  rewriteClips(work, VIDEO_ENTRY, plan)
 
   // Its length and its poster at once: either alone may not read as a video.
-  const poster =
-    before.posterMs !== undefined && before.posterMs >= duration
-      ? seconds(Math.max(0, duration - Math.ceil(1000 / before.fps)))
-      : undefined
+  const poster = posterAfter(before, now, duration)
   setAttributes(work, VIDEO_ENTRY, rootOf(work).root, {
     ...(before.root.attributes["data-duration"] ? { "data-duration": seconds(duration) } : {}),
-    ...(poster === undefined ? {} : { "data-poster": poster }),
+    ...(poster === undefined || poster === before.posterMs
+      ? {}
+      : { "data-poster": seconds(poster) }),
   })
+}
+
+/**
+ * The scene a clip of the root belongs to: the one it plays most during, when it lasts no longer
+ * than that scene. A line of voice-over belongs to the scene it is said over; a soundtrack under
+ * every scene belongs to none.
+ */
+function sceneOfClip(root: VideoRoot, clip: VideoClip): VideoRoot["scenes"][number] | undefined {
+  if (clip.durationMs === undefined) return undefined
+
+  const clipEnd = clip.startMs + clip.durationMs
+  let owner: VideoRoot["scenes"][number] | undefined
+  let most = 0
+  for (const scene of root.scenes) {
+    const during =
+      Math.min(clipEnd, scene.startMs + scene.durationMs) - Math.max(clip.startMs, scene.startMs)
+    if (during > 0 && during >= most) {
+      owner = scene
+      most = during
+    }
+  }
+  return owner && clip.durationMs <= owner.durationMs + SAME_MS ? owner : undefined
+}
+
+/**
+ * Where the poster is once the scenes moved: as far into its scene as it was, the scene on top at
+ * its instant, and within it; where it was without one. Past the end, the last frame.
+ */
+function posterAfter(before: VideoRoot, now: VideoRoot, duration: number): number | undefined {
+  const posterMs = before.posterMs
+  if (posterMs === undefined) return undefined
+
+  const frame = Math.ceil(1000 / before.fps)
+  const owner = before.scenes
+    .filter((scene) => scene.startMs <= posterMs && posterMs < scene.startMs + scene.durationMs)
+    .at(-1)
+  const scene = owner && now.scenes.find((each) => each.id === owner.id)
+  const at =
+    owner && scene
+      ? scene.startMs + Math.min(posterMs - owner.startMs, Math.max(0, scene.durationMs - frame))
+      : posterMs
+  return at >= duration ? Math.max(0, duration - frame) : at
 }
 
 /**

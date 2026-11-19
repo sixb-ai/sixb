@@ -120,8 +120,9 @@ has a model for it (`sixb models list` says which). Use what the brief calls for
   `hyperframes normalize-audio --target <id> --write` evens out a clip's loudness,
   `hyperframes audio <file> --only beats` finds its beats, and `hyperframes timeline --json` lists
   the scenes' timing. `hyperframes transcribe` needs whisper.cpp, which the sandbox does not have.
-- **Speech.** One `sixb models speech` call per line, each its own `<audio>`, lets its caption share
-  its start and length.
+- **Speech.** One `sixb models speech` call per line, each its own `<audio>` in the scene it is said
+  over, timed from the scene's start: it shares its caption's start and length, and moves with its
+  scene when someone trims or reorders it. Only what plays under every scene sits in `index.html`.
 - **Music** comes from the user or the project's files: the sandbox cannot fetch any from the web,
   so ask for a track when the video needs one.
 
