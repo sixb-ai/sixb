@@ -780,8 +780,29 @@ async function listSources(
 
   if (listing.files.length === 0 && !listing.truncated) {
     if (listing.directory) throw publishError(tool, `'${path}' is an empty directory`)
+    // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
+    const sourcePath =
+      kind === "document"
+        ? /\.html?$/i.test(absolutePath)
+          ? "document.html"
+          : "document.md"
+        : posix.basename(absolutePath)
+
     // A missing path lists nothing as well; reading it says which. A small file is read now, once;
-    // a large one is uploaded from the sandbox when it is stored.
+    // a large one is only sized, and uploaded from the sandbox when it is stored.
+    const bytes = await readSandboxFile(handle, {
+      path: absolutePath,
+      maxBytes: SANDBOX_INLINE_BYTES,
+      signal,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      if (error instanceof SandboxFileError && error.reason === "too_large") return undefined
+      throw toPublishError(error, tool, path)
+    })
+    if (bytes) {
+      return [{ path: sourcePath, absolutePath, sizeBytes: bytes.byteLength, bytes }]
+    }
+
     const sizeBytes = await statSandboxFile(handle, {
       path: absolutePath,
       signal,
@@ -789,29 +810,8 @@ async function listSources(
     }).catch((error: unknown) => {
       throw toPublishError(error, tool, path)
     })
-    const source = {
-      // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
-      path:
-        kind === "document"
-          ? /\.html?$/i.test(absolutePath)
-            ? "document.html"
-            : "document.md"
-          : posix.basename(absolutePath),
-      absolutePath,
-      sizeBytes,
-    }
-    checkFileSize(tool, kind, source.path, sizeBytes)
-    if (sizeBytes > SANDBOX_INLINE_BYTES) return [source]
-
-    const bytes = await readSandboxFile(handle, {
-      path: absolutePath,
-      maxBytes: SANDBOX_INLINE_BYTES,
-      signal,
-      timeoutMs: SANDBOX_TIMEOUT_MS,
-    }).catch((error: unknown) => {
-      throw toPublishError(error, tool, path)
-    })
-    return [{ ...source, sizeBytes: bytes.byteLength, bytes }]
+    checkFileSize(tool, kind, sourcePath, sizeBytes)
+    return [{ path: sourcePath, absolutePath, sizeBytes }]
   }
 
   const files = listing.files.filter(
