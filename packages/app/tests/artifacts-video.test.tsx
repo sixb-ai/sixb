@@ -8,7 +8,12 @@ import { versionSummary } from "../src/artifacts/card-details"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { frameLinkKey } from "../src/artifacts/frame"
 import { en, fr } from "../src/artifacts/messages"
+import type { CommentThread } from "../src/artifacts/comments/comments"
 import { chapterAt } from "../src/artifacts/renderers/video/chapters"
+import {
+  type VideoCommenting,
+  VideoCommentPins,
+} from "../src/artifacts/renderers/video/comments"
 import {
   controlMessage,
   HYPERFRAMES_PROTOCOL_VERSION,
@@ -500,6 +505,45 @@ describe("the player", () => {
     await runtime({ ...RUNTIME, protocolVersion: 2, type: "state", currentTime: 0 })
     expect(view.getByRole("alert").textContent).toContain("This video can’t play here")
     expect(view.queryByRole("button", { name: "Try again" })).toBeNull()
+  })
+})
+
+describe("a video's comments", () => {
+  // Reproduce by showing the open comment's pin at any instant in `VideoCommentPins`.
+  test("show a pin only around its instant, the open one too", () => {
+    const thread = {
+      comment: { id: "cmt_1", body: "Make this caption bigger", anchor: { at: 25_000 } },
+      replies: [],
+      number: 1,
+    } as unknown as CommentThread
+    const commenting = {
+      marked: [{ thread, seconds: 25, label: "Comment 1", excerpt: thread.comment.body }],
+      active: "cmt_1",
+      draft: null,
+    } as unknown as VideoCommenting
+
+    const pins = (time: number) => {
+      const view = render(
+        <Wrap cache={new QueryClient()}>
+          <VideoCommentPins
+            commenting={commenting}
+            outline={OUTLINE}
+            time={time}
+            width={640}
+            height={360}
+            onOpen={() => {}}
+          />
+        </Wrap>
+      )
+      const count = view.container.querySelectorAll("[data-comment-pin]").length
+      view.unmount()
+      return count
+    }
+
+    expect(pins(25)).toBe(1)
+    expect(pins(26)).toBe(1)
+    expect(pins(0)).toBe(0)
+    expect(pins(30)).toBe(0)
   })
 })
 
