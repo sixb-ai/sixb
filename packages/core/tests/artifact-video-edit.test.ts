@@ -573,8 +573,8 @@ describe("cutting by the transcript", () => {
   })
 
   test("a range cut through a scene splits the recordings it crosses, and closes the gap", () => {
-    // 1–2 s of the demo: talk is split around it, the first caption loses its middle.
-    const files = applied(cutRange(SOURCES, "scenes/demo.html", { startMs: 1000, endMs: 2000 }))
+    // 1–2 s into the demo: talk is split around it, the first caption loses its middle.
+    const files = applied(cutRange(SOURCES, { startMs: 3500, endMs: 4500 }))
 
     expect(
       demoClips(files).map((clip) => [clip.ref, clip.startMs, clip.durationMs, clip.mediaStartMs])
@@ -586,6 +586,33 @@ describe("cutting by the transcript", () => {
       ["#4", 1500, 2000, 0],
     ])
     expect(times(files)[1]).toEqual(["demo", 2500, 7000])
+  })
+
+  // Guard proof: cut only the share of the first scene the range meets in cutRange; the outro
+  // keeps its first second.
+  test("a range across scenes cuts each scene's share, and a scene it covers whole goes", () => {
+    // From 1 s before the demo ends to 1 s into the outro: the demo loses its last second, the
+    // outro its first, and the video two seconds.
+    const across = applied(cutRange(SOURCES, { startMs: 9500, endMs: 11_500 }))
+    expect(times(across)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 7000],
+      ["outro", 9500, 3500],
+    ])
+    expect(composition(across).durationMs).toBe(13_000)
+
+    // From 1 s into the hook to 1 s into the outro: the demo goes, and the outro takes its place
+    // after the hook, its crossfade included.
+    const covered = applied(cutRange(SOURCES, { startMs: 1000, endMs: 11_500 }))
+    expect(times(covered)).toEqual([
+      ["hook", 0, 1500],
+      ["outro", 1000, 3500],
+    ])
+    expect(covered.has("scenes/demo.html")).toBe(false)
+
+    expect(cutRange(SOURCES, { startMs: 0, endMs: 15_000 })).toEqual({
+      error: "A video keeps at least one scene.",
+    })
   })
 
   test("a recording's stretch is cut wherever a clip plays it", () => {
@@ -655,10 +682,7 @@ describe("a clip that follows another", () => {
   // Guard proof: drop the freezeFollowers call in rippleRemove; the caption then follows the
   // first part of the cut talk and shows at 2 s.
   test("moves back by what a cut takes before it", () => {
-    const files = applied(
-      cutRange(chained, "scenes/demo.html", { startMs: 1000, endMs: 2000 }),
-      chained
-    )
+    const files = applied(cutRange(chained, { startMs: 3500, endMs: 4500 }), chained)
     expect(after(files)?.startMs).toBe(5000)
   })
 })

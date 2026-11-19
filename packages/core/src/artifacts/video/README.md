@@ -225,7 +225,8 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - **Texts**: the elements holding words alone, timed or not, which an editor types over.
 - **Operations** take the files as they are and return an edit or a refusal: a scene's length,
   label, place, copy and removal; a clip's timing, trim, move, split, removal, sound and words; an
-  import; a range cut from a scene; stretches of a recording cut wherever it plays.
+  import; a range cut from the video, each scene it spans losing its share; stretches of a
+  recording cut wherever it plays.
 
 How an operation works:
 
@@ -250,9 +251,11 @@ What moves with what:
   after the change moves as much. A reorder or a removal chains the scenes whose predecessor
   changed, each keeping its own overlap or gap.
 - A ripple trim moves what starts after the edge, the scene's end included. A cut (a ripple
-  delete, a marked range, words of a transcript) takes stretches out of the scene: a recording cut
+  delete, a marked range, words of a transcript) takes stretches out of a scene: a recording cut
   through is split around them, each part playing on from where its file was cut; any other clip
-  is shortened; a clip with nothing left goes; the scene ends as much sooner.
+  is shortened; a clip with nothing left goes; the scene ends as much sooner. A marked range
+  across scenes cuts from each its share, from its start up to the next scene's, so a crossfade
+  is cut once, and removes a scene it covers whole.
 - A clip whose `data-start` names another clip follows it, and a ripple does not move it. Once
   that clip is split, it follows the last part; once it is removed or cut, it starts at the time
   it did, which the ripple then moves as any other's.

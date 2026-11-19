@@ -301,11 +301,11 @@ export default function VideoEditor({
     )
   }
 
+  /** Cuts the marked range out of the video, from every scene it spans. */
   const cutMarks = () => {
-    if (!open || marks.in === undefined || marks.out === undefined) return false
-    const startMs = Math.max(marks.in, open.startMs) - open.startMs
-    const endMs = Math.min(marks.out, open.startMs + open.durationMs) - open.startMs
-    if (edit((sources) => cutRange(sources, open.src, { startMs, endMs }))) setMarks({})
+    if (marks.in === undefined || marks.out === undefined) return false
+    const range = { startMs: Math.min(marks.in, marks.out), endMs: Math.max(marks.in, marks.out) }
+    if (edit((sources) => cutRange(sources, range))) setMarks({})
     return true
   }
 
