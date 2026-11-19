@@ -220,17 +220,18 @@ The picture plays the latest save; the timeline under it changes as you edit.
 
 | In a video | |
 | --- | --- |
-| Scenes | The row of cards: drag to reorder, or ⌥← ⌥→; its menu renames, duplicates, moves or deletes. Chained scenes follow |
+| Scenes | The timeline's first track, each scene with its picture: drag to reorder, or ⌥← ⌥→; double-click to rename; its menu, or a right click, duplicates, moves or deletes. Chained scenes follow |
 | Timeline | The open scene's clips on picture, text and sound tracks, over the video's soundtrack. Drag to move, drag an edge to trim; edges snap to the playhead, the marks, every edge and the footage's cuts (Shift: free) |
 | Magnetic | On by default: trimming or deleting a clip closes the gap, and the scene's end follows |
 | Keys | Space or K, J and L (1 s), ← → (a frame, a second with Shift), ↑ ↓ (edit points), I and O (marks), S (split at the playhead), ⌫ (delete, or cut between the marks), ⌘D (duplicate the scene), ⌘Z ⇧⌘Z |
 | Words | Click words in the paused picture to retype them where they show |
 | Inspector | A scene's name, length and words on screen; a clip's start, length, where it starts in its file, volume, fades and words |
-| Transcript | A recording's words, the one being said lit as it plays. Select words and press Delete to cut them; **Remove silences** and **Remove filler words** show what they cut first |
+| Transcript | A recording's words, the one being said lit as it plays. Select words and press Delete to cut them; **Remove silences** and **Remove filler words** show what they cut first. A transcript timed by sentence cuts whole sentences: for single words, use a [model that times each word](../models/configuration.md#audio-transcription) |
 | Add media | Drop videos, sounds or pictures on the editor, or use **Add media**: each joins the open scene at the playhead |
+| Offline | Your edits are kept, and saved when you reconnect; the header says so |
 | Phone | Reorder scenes, change their length, retype their words and delete clips |
 
-Each edit changes the fewest characters it can in `index.html` or a scene's file, and is refused
+Each edit changes the fewest attributes and words it can in `index.html` or a scene's file, and is refused
 when it would leave something that is not a video. Motion a scene's script writes keeps its own
 times.
 
