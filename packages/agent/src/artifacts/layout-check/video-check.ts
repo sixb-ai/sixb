@@ -2,6 +2,7 @@ import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { VideoOutline } from "@sixb/core/artifacts"
 import { FRAME_CDN_ALLOWLIST, rewriteFrameReferences } from "@sixb/core/internal/artifacts/frames"
+import type { ArtifactFrameTarget } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import type { LayoutCheck, LayoutWarning } from "./layout-check"
@@ -113,6 +114,8 @@ interface VideoFinding {
 export async function checkVideo(input: {
   readonly handle: AgentSandboxHandle
   readonly files: readonly VideoCheckFile[]
+  /** What its HTML embeds from other artifacts, pointed where `files` lends each, as the export does. */
+  readonly targets?: readonly ArtifactFrameTarget[]
   readonly outline: VideoOutline
   /** Names the check's directory, so each version's frames stay apart. */
   readonly name: string
@@ -136,7 +139,11 @@ export async function checkVideo(input: {
         ? [
             {
               path: posix.join(output, "project", file.path),
-              contents: rewriteFrameReferences(decoder.decode(file.html), [], file.path),
+              contents: rewriteFrameReferences(
+                decoder.decode(file.html),
+                input.targets ?? [],
+                file.path
+              ),
             },
           ]
         : []
