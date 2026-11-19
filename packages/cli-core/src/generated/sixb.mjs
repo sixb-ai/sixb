@@ -1016,8 +1016,9 @@ async function files(api, args) {
     } else
       fail(`Unknown file download context '${context}'.`);
     const path = options["--path"];
-    if (!path)
-      fail("files download requires --path <json-pointer>.");
+    if (!path) {
+      fail(`files download requires --path <${context === "artifact" ? "file-path" : "json-pointer"}>.`);
+    }
     if (!output)
       fail("files download requires --output <local-path>.");
     await api.download(route, output, { path });
