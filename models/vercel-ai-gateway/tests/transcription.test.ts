@@ -96,12 +96,18 @@ test("carries the words the provider timed, and the speaker of each", async () =
   })
 })
 
-// Removal proof: read only `elevenlabs.words`; Azure's speakers and timings never arrive.
-test("carries Azure's phrases as timed words, with the speaker of each phrase", async () => {
+// Removal proof: read only `elevenlabs.words`; Azure's speakers and timings never arrive. Prefer
+// the Gateway's own segments; who said each phrase is lost.
+test("carries Azure's timed words, and each phrase as a segment with its speaker", async () => {
   const model = createVercelGateway({
     fetch: async () =>
       Response.json({
-        text: "Hello there. Goodbye. How are you?",
+        text: "Hello there. Goodbye.",
+        // The same speech as the phrases, without who said it.
+        segments: [
+          { text: "Hello there.", startSecond: 0, endSecond: 0.9 },
+          { text: "Goodbye.", startSecond: 1.2, endSecond: 1.8 },
+        ],
         providerMetadata: {
           azure: {
             phrases: [
@@ -115,20 +121,12 @@ test("carries Azure's phrases as timed words, with the speaker of each phrase", 
                   { text: "there.", offsetMilliseconds: 400, durationMilliseconds: 500 },
                 ],
               },
-              // A phrase whose words carry no timing falls back to the phrase itself.
               {
                 text: "Goodbye.",
                 offsetMilliseconds: 1200,
                 durationMilliseconds: 600,
                 speaker: 1,
-                words: [{ text: "Goodbye.", offsetMilliseconds: null, durationMilliseconds: null }],
-              },
-              // Phrases without word timings still say who spoke, and when.
-              {
-                text: "How are you?",
-                offsetMilliseconds: 2000,
-                durationMilliseconds: 700,
-                speaker: 0,
+                words: [{ text: "Goodbye.", offsetMilliseconds: 1200, durationMilliseconds: 600 }],
               },
             ],
           },
@@ -138,12 +136,76 @@ test("carries Azure's phrases as timed words, with the speaker of each phrase", 
 
   const result = await model.transcribe({ audio, mediaType: "audio/wav" })
 
-  expect(result.output.words).toEqual([
-    { text: "Hello", startMs: 0, endMs: 320, speaker: "speaker_0" },
-    { text: "there.", startMs: 400, endMs: 900, speaker: "speaker_0" },
-    { text: "Goodbye.", startMs: 1200, endMs: 1800, speaker: "speaker_1" },
-    { text: "How are you?", startMs: 2000, endMs: 2700, speaker: "speaker_0" },
-  ])
+  expect(result.output).toEqual({
+    text: "Hello there. Goodbye.",
+    words: [
+      { text: "Hello", startMs: 0, endMs: 320, speaker: "speaker_0" },
+      { text: "there.", startMs: 400, endMs: 900, speaker: "speaker_0" },
+      { text: "Goodbye.", startMs: 1200, endMs: 1800, speaker: "speaker_1" },
+    ],
+    segments: [
+      { text: "Hello there.", startMs: 0, endMs: 900, speaker: "speaker_0" },
+      { text: "Goodbye.", startMs: 1200, endMs: 1800, speaker: "speaker_1" },
+    ],
+  })
+})
+
+// Removal proof: hand each untimed phrase on as one word, as phraseTimings once did; the
+// minute-long phrase comes back as a word. Keep the words of a mixed transcript; its first minute
+// reads as silence between words.
+test("never hands a phrase on as a word when the model times only phrases", async () => {
+  const phrases = [
+    {
+      text: "Welcome back to the weekly planning call, let's start with the roadmap.",
+      offsetMilliseconds: 0,
+      durationMilliseconds: 62_000,
+      speaker: 0,
+    },
+    {
+      text: "Sounds good.",
+      offsetMilliseconds: 62_400,
+      durationMilliseconds: 900,
+      speaker: 1,
+      // Azure may list a phrase's words without timing them.
+      words: [{ text: "Sounds", offsetMilliseconds: null, durationMilliseconds: null }],
+    },
+  ]
+  const segments = [
+    {
+      text: "Welcome back to the weekly planning call, let's start with the roadmap.",
+      startMs: 0,
+      endMs: 62_000,
+      speaker: "speaker_0",
+    },
+    { text: "Sounds good.", startMs: 62_400, endMs: 63_300, speaker: "speaker_1" },
+  ]
+  const transcribe = (azure: unknown) =>
+    createVercelGateway({
+      fetch: async () =>
+        Response.json({ text: "Welcome back. Sounds good.", providerMetadata: { azure } }),
+    })
+      .transcription("test/transcribe")
+      .transcribe({ audio, mediaType: "audio/wav" })
+
+  // Phrases only: who spoke when survives, as segments, and nothing claims to be a word.
+  expect((await transcribe({ phrases })).output).toEqual({
+    text: "Welcome back. Sounds good.",
+    segments,
+  })
+
+  // One phrase timed word by word is not enough: the other would read as silence between words.
+  const [welcome, sounds] = phrases
+  const timed = {
+    ...sounds,
+    words: [
+      { text: "Sounds", offsetMilliseconds: 62_400, durationMilliseconds: 400 },
+      { text: "good.", offsetMilliseconds: 62_850, durationMilliseconds: 450 },
+    ],
+  }
+  expect((await transcribe({ phrases: [welcome, timed] })).output).toEqual({
+    text: "Welcome back. Sounds good.",
+    segments,
+  })
 })
 
 // Removal proof: return only words and text; the caller hears neither segments nor language.
