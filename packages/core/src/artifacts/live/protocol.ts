@@ -89,13 +89,15 @@ export interface ArtifactLiveUser {
 export const USER_AWARENESS_FIELD = "user"
 
 /**
- * The awareness field the server sets for the Agent while a turn changes boards of the canvas:
- * each turn at work, with the boards it changed. A client's own state never holds it.
+ * The awareness field the server sets for the Agent while a turn changes boards of a canvas, or
+ * scenes of a video: each turn at work, with the boards or scenes it changed. A client's own state
+ * never holds it.
  */
 export const AGENT_AWARENESS_FIELD = "sixbAgent"
 
 export interface ArtifactAgentPresence {
   readonly runId: string
+  /** The boards it changed, by id; for a video, its scenes. */
   readonly boards: readonly string[]
 }
 

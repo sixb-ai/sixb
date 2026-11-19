@@ -38,7 +38,9 @@ import {
 // Markdown document holds `document.md` as the blocks its editor edits, a `Y.XmlFragment`
 // (`./blocks`), so typing in one paragraph and moving another merge as block edits do. A designed
 // document holds `document.html` as a page, its body's blocks a `Y.XmlFragment` too (`./page`),
-// unless its source is not one an editor can hold whole: then it is text.
+// unless its source is not one an editor can hold whole: then it is text. A video holds none: its
+// `index.html` and scenes are texts, which its editor changes attribute by attribute
+// (`../video/edit.ts`), and its recordings are references.
 
 /** One file of an artifact as the live layer reads it: its text, or its stored bytes. */
 export type LiveFile = { readonly text: string } | { readonly file: FileRef }

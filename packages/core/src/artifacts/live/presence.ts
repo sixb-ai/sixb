@@ -42,7 +42,7 @@ export type ArtifactLiveRecord =
       readonly name: "awareness"
       readonly payload: { readonly instance: string; readonly update: string }
     }
-  /** An Agent turn wrote these boards, and is still at work. */
+  /** An Agent turn wrote these boards, or these scenes of a video, and is still at work. */
   | {
       readonly name: "agent"
       readonly payload: {
@@ -105,15 +105,27 @@ export async function appendArtifactLive(
 }
 
 /**
- * The boards of a canvas a write changed: added, or showing something else, as their render keys
- * say. A board only moved shows what it showed. Both versions are keyed as the write's author's:
- * a render key names its author too, and a board left as it was is no news because someone else
- * wrote the version before.
+ * The boards of a canvas, or the scenes of a video, a write changed: added, or showing something
+ * else, as their render keys say. A board only moved shows what it showed. Both versions of a
+ * canvas are keyed as the write's author's: a board's render key names its author too, and a
+ * board left as it was is no news because someone else wrote the version before. A scene's key
+ * names no one, and covers the scenes on screen with it, so a crossfade's two scenes change
+ * together.
  */
 export function changedBoards(
   before: Pick<ArtifactVersionRecord, "outline" | "files"> | null,
   after: Pick<ArtifactVersionRecord, "artifactId" | "outline" | "files" | "author">
 ): string[] {
+  if (after.outline.kind === "video") {
+    const kept = new Map(
+      before?.outline.kind === "video"
+        ? before.outline.scenes.map((scene) => [scene.id, scene.renderKey])
+        : []
+    )
+    return after.outline.scenes.flatMap((scene) =>
+      kept.get(scene.id) === scene.renderKey ? [] : [scene.id]
+    )
+  }
   if (after.outline.kind !== "canvas") return []
 
   const kept = boardKeys(before, after)
