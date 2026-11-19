@@ -10,8 +10,8 @@ publish_artifact({ path: "work/service-report.pdf", kind: "file", title: "Harbor
 
 - The artifact keeps the file's name, which is what the user downloads. Name it for the
   deliverable: `harbor-point-service-report.pdf`, not `output.pdf`.
-- The app shows images, PDFs, Markdown, CSV and TSV tables, and plain text in place. Other formats
-  download.
+- The app shows images, PDFs, Markdown, CSV and TSV tables, and plain text in place, and plays
+  video (MP4, WebM, MOV) and sound (MP3, M4A, WAV, Ogg) with a player. Other formats download.
 - Check the file before publishing it: render documents, decks, and spreadsheets with
   `sixb-render` and inspect the previews; open a CSV and check its header row and a few rows.
 - Publish each file the user asked for as its own artifact.

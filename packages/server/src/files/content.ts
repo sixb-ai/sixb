@@ -271,9 +271,24 @@ function matchesIfNoneMatch(header: string | null | undefined, etag: string): bo
   )
 }
 
+/** The video and sound formats browsers play, which a browser opens as a page with a player. */
+const PLAYABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  "audio/aac",
+  "audio/flac",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "audio/webm",
+  "video/mp4",
+  "video/ogg",
+  "video/quicktime",
+  "video/webm",
+])
+
 /**
- * The only types a browser displays instead of downloading: raster images, PDF, and plain-text
- * formats. Everything else, including HTML, SVG, and XML, downloads.
+ * The only types a browser displays instead of downloading: raster images, the video and sound it
+ * plays, PDF, and plain-text formats. Everything else, including HTML, SVG, and XML, downloads.
  */
 const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   "application/json",
@@ -286,17 +301,23 @@ const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   "image/webp",
   "text/markdown",
   "text/plain",
+  ...PLAYABLE_MEDIA_TYPES,
 ])
 
 // Keeps any file from running script on the API origin, even when a browser renders it as a page.
 // A sandboxed page cannot run script, but Chrome's PDF viewer does not render in one, so PDFs go
 // without `sandbox`: `default-src 'none'` still blocks script, and `object-src 'self'` lets
 // browsers that show a PDF as an embedded object load it. `style-src 'unsafe-inline'` lets
-// browsers keep the styling of their built-in viewers. Video and audio play in media elements,
-// which ignore the policy of the file they load.
+// browsers keep the styling of their built-in viewers.
 const FILE_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 const PDF_CONTENT_SECURITY_POLICY =
   "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'"
+// Video and sound play in media elements, which ignore the policy of the file they load. Opened as
+// a page, a browser plays one in a page of its own that loads the file again as media: Chrome's
+// stays empty in a sandbox, whatever `media-src` allows, so these go without it, as PDFs do, and
+// `default-src 'none'` still blocks script.
+const MEDIA_CONTENT_SECURITY_POLICY =
+  "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'"
 
 function fileContentHeaders(
   fileRef: FileRef,
@@ -316,10 +337,7 @@ function fileContentHeaders(
   headers.set("content-type", mediaType)
   headers.set("content-length", stat.sizeBytes.toString())
   headers.set("content-disposition", contentDispositionHeader(disposition, fileNameFor(fileRef)))
-  headers.set(
-    "content-security-policy",
-    baseType === "application/pdf" ? PDF_CONTENT_SECURITY_POLICY : FILE_CONTENT_SECURITY_POLICY
-  )
+  headers.set("content-security-policy", contentSecurityPolicy(baseType))
   // Metadata belongs to the reference, not the blob; changing it must also invalidate caches.
   const representation = JSON.stringify([
     fileRef.digest,
@@ -334,6 +352,12 @@ function fileContentHeaders(
     headers.set("accept-ranges", "bytes")
   }
   return headers
+}
+
+function contentSecurityPolicy(baseType: string): string {
+  if (baseType === "application/pdf") return PDF_CONTENT_SECURITY_POLICY
+  if (PLAYABLE_MEDIA_TYPES.has(baseType)) return MEDIA_CONTENT_SECURITY_POLICY
+  return FILE_CONTENT_SECURITY_POLICY
 }
 
 interface ParsedByteRange {

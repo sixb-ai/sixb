@@ -171,7 +171,77 @@ describe("inferFileMediaType", () => {
     expect(sniffFileMediaType(new TextEncoder().encode("<svg></svg>"))).toBeUndefined()
     expect(sniffFileMediaType(new Uint8Array())).toBeUndefined()
   })
+
+  // The first bytes of files FFmpeg wrote, except the Theora stream, which the encoder this was
+  // made with lacks: its first packet is written by hand.
+  const media = {
+    mp4: bytes("000000206674797069736f6d0000020069736f6d69736f32617663316d703431"),
+    mov: bytes("00000014667479707174202000000200717420200000000877696465000004ef"),
+    m4a: bytes("0000001c667479704d344120000002004d34412069736f6d69736f3200000008"),
+    webm: bytes("1a45dfa39f4286810142f7810142f2810442f381084282847765626d42878102"),
+    mkv: bytes("1a45dfa3a34286810142f7810142f2810442f381084282886d6174726f736b61"),
+    mp3: bytes("49443304000000000022545353450000000e0000034c61766636332e312e3130"),
+    mp3WithoutTag: bytes("fffb50c400000a2c432e55948001811566233ad00007aac38e3385d364f1a1c1"),
+    aac: bytes("fff1504020fffcdc004c61766336332e312e313031000260ac5ba9507226a578"),
+    wav: bytes("524946462e45000057415645666d7420100000000100010044ac000088580100"),
+    flac: bytes("664c614300000022040004000001210001840ac440f000002274b4f27f6fef49"),
+    opus: bytes("4f676753000200000000000000005bca460c00000000280d469501134f707573486561640101"),
+    theora: bytes(`4f6767530002${"00".repeat(20)}01${Buffer.from("\x80theora").toString("hex")}`),
+  }
+
+  test("recognizes video and audio containers by their signature", () => {
+    expect(sniffFileMediaType(media.mp4)).toBe("video/mp4")
+    expect(sniffFileMediaType(media.mov)).toBe("video/quicktime")
+    expect(sniffFileMediaType(media.m4a)).toBe("audio/mp4")
+    expect(sniffFileMediaType(media.webm)).toBe("video/webm")
+    expect(sniffFileMediaType(media.mkv)).toBe("video/x-matroska")
+    expect(sniffFileMediaType(media.mp3)).toBe("audio/mpeg")
+    expect(sniffFileMediaType(media.mp3WithoutTag)).toBe("audio/mpeg")
+    expect(sniffFileMediaType(media.aac)).toBe("audio/aac")
+    expect(sniffFileMediaType(media.wav)).toBe("audio/wav")
+    expect(sniffFileMediaType(media.flac)).toBe("audio/flac")
+    expect(sniffFileMediaType(media.opus)).toBe("audio/ogg")
+    expect(sniffFileMediaType(media.theora)).toBe("video/ogg")
+  })
+
+  // Reproduce by answering `video/mp4` for any `ftyp` box, or `audio/mpeg` for the sync bits alone.
+  test("leaves look-alike media signatures to the name", () => {
+    // An AVIF image is an ISO media file too; only its brand tells it from a video.
+    const avif = bytes("0000001c6674797061766966000000006176696600000000")
+    // Reserved bitrate and sampling rate: the sync bits alone are not an MP3.
+    const notMp3 = bytes("fffbfc00")
+    // An EBML file that is neither WebM nor Matroska.
+    const otherEbml = bytes("1a45dfa39f42828465626d6c")
+
+    for (const unknown of [avif, notMp3, otherEbml]) {
+      expect(sniffFileMediaType(unknown)).toBeUndefined()
+    }
+    expect(inferFileMediaType("photo.avif", avif)).toBe("application/octet-stream")
+  })
+
+  test("names captions and media by their extension, and lets it say a container holds sound", () => {
+    for (const [fileName, content, mediaType] of [
+      ["intro.MP4", undefined, "video/mp4"],
+      ["intro.mov", undefined, "video/quicktime"],
+      ["episode.mp3", undefined, "audio/mpeg"],
+      ["captions.vtt", undefined, "text/vtt"],
+      ["captions.srt", undefined, "application/x-subrip"],
+      // A signature wins over a name that disagrees about the format.
+      ["clip.mp3", media.mp4, "video/mp4"],
+      // Only the name can tell a WebM or an MP4 holding sound alone. Reproduce by returning the
+      // sniffed type first in inferFileMediaType: both read as video.
+      ["voice.weba", media.webm, "audio/webm"],
+      ["voice.m4a", media.mp4, "audio/mp4"],
+      ["voice.webm", media.webm, "video/webm"],
+    ] as const) {
+      expect(inferFileMediaType(fileName, content), fileName).toBe(mediaType)
+    }
+  })
 })
+
+function bytes(hex: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(hex, "hex"))
+}
 
 describe("fileNameFor", () => {
   test("prefers the fileName tail, then the logicalPath tail, then a synthetic name", () => {

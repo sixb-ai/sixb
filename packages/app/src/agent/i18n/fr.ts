@@ -114,6 +114,8 @@ export const fr: Translation<AgentMessages> = {
   files: {
     spreadsheet: "Feuille de calcul",
     image: "Image",
+    video: "Vidéo",
+    audio: "Audio",
     pdf: "PDF",
     markdown: "Markdown",
     text: "Texte",

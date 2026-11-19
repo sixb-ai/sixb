@@ -74,6 +74,14 @@ describe("file views", () => {
     [{ mediaType: "text/markdown; charset=utf-8" }, "markdown"],
     [{ mediaType: "text/csv" }, "csv"],
     [{ mediaType: "application/json" }, "text"],
+    // The browser decides what plays; one it cannot shows why, with the download.
+    [{ mediaType: "video/mp4" }, "video"],
+    [{ mediaType: "video/x-msvideo" }, "video"],
+    [{ mediaType: "audio/mpeg" }, "audio"],
+    [{ mediaType: "application/octet-stream", fileName: "walkthrough.MOV" }, "video"],
+    [{ fileName: "site-notes.m4a" }, "audio"],
+    [{ mediaType: "text/vtt" }, "text"],
+    [{ fileName: "captions.srt" }, "text"],
     // A generic type defers to the name.
     [{ mediaType: "application/octet-stream", fileName: "regions.TSV" }, "tsv"],
     [{ fileName: "notes.md" }, "markdown"],

@@ -8,13 +8,14 @@ import { type FileSource, useFileName } from "../file-source"
 import { fileView } from "../file-view"
 import { useArtifactMessages } from "../messages"
 import { useFileText } from "../queries"
+import { AudioPlayer, VideoPlayer } from "./media"
 import { ViewerLoading, ViewerNotice } from "./notice"
 import { fileSheetModel } from "./sheet/model"
 import { SheetTable } from "./sheet/sheet"
 
 /**
- * One file as its type allows: images, PDFs, Markdown, tables, and plain text in place, anything
- * else as a card to download it. File artifacts, message attachments, and files a tool returned
+ * One file as its type allows: images, video, sound, PDFs, Markdown, tables, and plain text in
+ * place, anything else as a card to download it. File artifacts, message attachments, and files a tool returned
  * all open here.
  */
 export function FileRenderer({ source }: { readonly source: FileSource }) {
@@ -31,6 +32,10 @@ export function FileRenderer({ source }: { readonly source: FileSource }) {
           />
         </div>
       )
+    case "video":
+      return <VideoPlayer source={source} name={name} layout="stage" />
+    case "audio":
+      return <AudioPlayer source={source} name={name} stage />
     case "pdf":
       return <PdfFile source={source} name={name} />
     case "markdown":
