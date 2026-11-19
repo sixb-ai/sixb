@@ -12,6 +12,8 @@ publish_artifact({ path: "work/service-report.pdf", kind: "file", title: "Harbor
   deliverable: `harbor-point-service-report.pdf`, not `output.pdf`.
 - The app shows images, PDFs, Markdown, CSV and TSV tables, and plain text in place, and plays
   video (MP4, WebM, MOV) and sound (MP3, M4A, WAV, Ogg) with a player. Other formats download.
+- The file may be up to 2 GB, such as a screen recording: publish it from where it is, without
+  splitting or compressing it to fit.
 - Check the file before publishing it: render documents, decks, and spreadsheets with
   `sixb-render` and inspect the previews; open a CSV and check its header row and a few rows.
 - Publish each file the user asked for as its own artifact.
