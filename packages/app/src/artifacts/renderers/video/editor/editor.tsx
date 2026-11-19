@@ -43,6 +43,7 @@ import {
   Play,
   Plus,
   Scissors,
+  SeparatorVertical,
   SquareDashedMousePointer,
   Trash2,
   TriangleAlert,
@@ -934,12 +935,14 @@ function Toolbar({
   const files = useRef<HTMLInputElement | null>(null)
   const marked = marks.in !== undefined && marks.out !== undefined
 
+  // Narrower than its labels, as on a tablet or beside the comments, its buttons keep their icons
+  // and say the rest in their tooltips; narrower still, the row scrolls rather than lose a control.
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
+    <div className="@container/toolbar flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]">
       <ToolButton label={playing ? messages.video.pause : messages.video.play} onClick={onToggle}>
         {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
       </ToolButton>
-      <span className="mr-2 ml-1 text-[13px] text-foreground tabular-nums">
+      <span className="mr-2 ml-1 shrink-0 text-[13px] whitespace-nowrap text-foreground tabular-nums">
         {clockTenths(timeMs)}
         <span className="text-muted-foreground"> / {clockTenths(durationMs)}</span>
       </span>
@@ -959,12 +962,19 @@ function Toolbar({
       </ToolButton>
       {marked ? (
         <>
-          <Button size="sm" variant="secondary" className="h-7 gap-1" onClick={onCutMarks}>
+          <Button size="sm" variant="secondary" className="h-7 shrink-0 gap-1" onClick={onCutMarks}>
             <SquareDashedMousePointer />
             {editor.cutMarked(formatLength((marks.out ?? 0) - (marks.in ?? 0)))}
           </Button>
-          <Button size="sm" variant="ghost" className="h-7" onClick={onClearMarks}>
-            {editor.clearMarks}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 shrink-0 @max-5xl/toolbar:px-1.5"
+            title={editor.clearMarks}
+            onClick={onClearMarks}
+          >
+            <X className="hidden @max-5xl/toolbar:block" aria-hidden="true" />
+            <span className="@max-5xl/toolbar:sr-only">{editor.clearMarks}</span>
           </Button>
         </>
       ) : null}
@@ -973,11 +983,12 @@ function Toolbar({
       <Button
         size="sm"
         variant="ghost"
-        className="h-8 gap-1.5"
+        className="h-8 shrink-0 gap-1.5 @max-4xl/toolbar:px-2"
+        title={editor.addMedia}
         onClick={() => files.current?.click()}
       >
         <Plus />
-        {editor.addMedia}
+        <span className="@max-4xl/toolbar:sr-only">{editor.addMedia}</span>
       </Button>
       <input
         ref={files}
@@ -992,7 +1003,7 @@ function Toolbar({
         }}
       />
 
-      <div className="ml-auto flex items-center gap-0.5">
+      <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Toggle
@@ -1003,7 +1014,7 @@ function Toolbar({
               className="h-8 gap-1.5 px-2 text-[13px]"
             >
               <Magnet />
-              {editor.magnetic}
+              <span className="@max-4xl/toolbar:sr-only">{editor.magnetic}</span>
             </Toggle>
           </TooltipTrigger>
           <TooltipContent>{editor.magneticHint}</TooltipContent>
@@ -1015,9 +1026,10 @@ function Toolbar({
               pressed={snapping}
               onPressedChange={onSnapping}
               aria-label={editor.snapping}
-              className="h-8 px-2 text-[13px]"
+              className="h-8 gap-1.5 px-2 text-[13px]"
             >
-              {editor.snapping}
+              <SeparatorVertical />
+              <span className="@max-4xl/toolbar:sr-only">{editor.snapping}</span>
             </Toggle>
           </TooltipTrigger>
           <TooltipContent>{editor.snappingHint}</TooltipContent>
@@ -1083,7 +1095,7 @@ function ToolButton({
           disabled={disabled}
           onClick={onClick}
           className={cn(
-            "grid size-8 place-items-center rounded-md text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35 [&_svg]:size-4",
+            "grid size-8 shrink-0 place-items-center rounded-md text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35 [&_svg]:size-4",
             pressed && "bg-muted text-primary"
           )}
         >
@@ -1115,7 +1127,7 @@ function shortcuts(
 }
 
 function Divider() {
-  return <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
+  return <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-border" />
 }
 
 function clockTenths(ms: number): string {
