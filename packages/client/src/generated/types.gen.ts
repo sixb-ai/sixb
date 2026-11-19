@@ -21454,6 +21454,10 @@ export type CreateArtifactResponses = {
             fps: number
             durationMs: number
             /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
+            /**
              * Its scenes, in the order they start
              */
             scenes: Array<{
@@ -22755,6 +22759,10 @@ export type UpdateArtifactResponses = {
             fps: number
             durationMs: number
             /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
+            /**
              * Its scenes, in the order they start
              */
             scenes: Array<{
@@ -23138,6 +23146,10 @@ export type FreezeArtifactVersionResponses = {
              */
             fps: number
             durationMs: number
+            /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
             /**
              * Its scenes, in the order they start
              */
@@ -24378,6 +24390,10 @@ export type GetArtifactRestorePointResponses = {
           fps: number
           durationMs: number
           /**
+           * The instant that shows it before it plays: its root's data-poster
+           */
+          posterMs?: number
+          /**
            * Its scenes, in the order they start
            */
           scenes: Array<{
@@ -24772,6 +24788,10 @@ export type RestoreArtifactResponses = {
              */
             fps: number
             durationMs: number
+            /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
             /**
              * Its scenes, in the order they start
              */
@@ -25215,6 +25235,10 @@ export type GetArtifactVersionResponses = {
            */
           fps: number
           durationMs: number
+          /**
+           * The instant that shows it before it plays: its root's data-poster
+           */
+          posterMs?: number
           /**
            * Its scenes, in the order they start
            */

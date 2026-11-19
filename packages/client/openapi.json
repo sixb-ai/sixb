@@ -62074,6 +62074,10 @@
                                 "durationMs": {
                                   "type": "integer"
                                 },
+                                "posterMs": {
+                                  "type": "integer",
+                                  "description": "The instant that shows it before it plays: its root's data-poster"
+                                },
                                 "scenes": {
                                   "type": "array",
                                   "items": {
@@ -65397,6 +65401,10 @@
                                 "durationMs": {
                                   "type": "integer"
                                 },
+                                "posterMs": {
+                                  "type": "integer",
+                                  "description": "The instant that shows it before it plays: its root's data-poster"
+                                },
                                 "scenes": {
                                   "type": "array",
                                   "items": {
@@ -66400,6 +66408,10 @@
                                 },
                                 "durationMs": {
                                   "type": "integer"
+                                },
+                                "posterMs": {
+                                  "type": "integer",
+                                  "description": "The instant that shows it before it plays: its root's data-poster"
                                 },
                                 "scenes": {
                                   "type": "array",
@@ -69535,6 +69547,10 @@
                             "durationMs": {
                               "type": "integer"
                             },
+                            "posterMs": {
+                              "type": "integer",
+                              "description": "The instant that shows it before it plays: its root's data-poster"
+                            },
                             "scenes": {
                               "type": "array",
                               "items": {
@@ -70442,6 +70458,10 @@
                                 },
                                 "durationMs": {
                                   "type": "integer"
+                                },
+                                "posterMs": {
+                                  "type": "integer",
+                                  "description": "The instant that shows it before it plays: its root's data-poster"
                                 },
                                 "scenes": {
                                   "type": "array",
@@ -71649,6 +71669,10 @@
                             },
                             "durationMs": {
                               "type": "integer"
+                            },
+                            "posterMs": {
+                              "type": "integer",
+                              "description": "The instant that shows it before it plays: its root's data-poster"
                             },
                             "scenes": {
                               "type": "array",

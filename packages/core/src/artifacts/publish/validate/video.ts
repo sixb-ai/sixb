@@ -154,6 +154,7 @@ export async function validateVideo(
       height: composition.height,
       fps: composition.fps,
       durationMs: composition.durationMs,
+      ...(composition.posterMs === undefined ? {} : { posterMs: composition.posterMs }),
       scenes: composition.scenes.map((scene) => ({
         id: scene.id,
         ...(scene.label ? { label: scene.label } : {}),

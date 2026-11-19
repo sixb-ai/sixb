@@ -929,13 +929,19 @@ function useDelayed(value: boolean, ms: number): boolean {
   return shown
 }
 
+/** How far into its first scene a video without a poster shows before it plays. */
+const POSTER_INTO_FIRST_SCENE = 0.7
+
 /**
- * Where a video shows before it first plays: the middle of its first scene, where its opening has
- * come in, rather than its first frame, which is often still blank.
+ * Where a video shows before it first plays: the instant its root's `data-poster` names, else most
+ * of the way into its first scene, where its opening has come in, rather than its first frame,
+ * which is often still blank.
  */
 function posterAt(outline: VideoOutline): number {
+  if (outline.posterMs !== undefined) return outline.posterMs / 1000
+
   const first = outline.scenes[0]
-  return first ? (first.startMs + first.durationMs / 2) / 1000 : 0
+  return first ? (first.startMs + first.durationMs * POSTER_INTO_FIRST_SCENE) / 1000 : 0
 }
 
 function clamp(value: number): number {

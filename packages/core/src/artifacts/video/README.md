@@ -71,6 +71,9 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 - A scene ends by the root's `data-duration`, where HyperFrames would cut it, or less than a frame
   after it: a rounded start or length, which cuts nothing a frame shows.
 - A scene host sits in the root composition itself, never in another composition.
+- The root's `data-poster`, which HyperFrames does not read (its lint passes it), is the instant
+  that shows the video before it plays, in seconds from 0 to before its end. The app's player
+  opens on it; without one, 70% into the first scene, where an opening has come in.
 - A scene file is one `<template>`, nothing beside it.
 
 ## Source positions
@@ -85,9 +88,9 @@ so a change stays one small text edit, in the live document and in the Agent's d
 `publish/video.ts` names each scene by `sceneRenderKeys`, a hash of what its frames are made of:
 
 - the frame kit;
-- `index.html` without its scene hosts, the root's `data-duration`, and its `<audio>` elements,
-  which show nothing: the frame, the root's styles, and what it shows itself. A soundtrack
-  trimmed with the video spares the scenes before the cut;
+- `index.html` without its scene hosts, the root's `data-duration` and `data-poster`, and its
+  `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself.
+  A soundtrack trimmed with the video spares the scenes before the cut;
 - the scene's host and those of the scenes on screen with it, as one fades into the next, with
   their times resolved and their order in `index.html`, which stacks them;
 - the scene's start in the video, only when the root plays or animates something of its own: a

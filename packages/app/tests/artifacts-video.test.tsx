@@ -399,12 +399,13 @@ describe("the player", () => {
     // Reproduce by dropping `playback.cue` from the effect that starts the video in player.tsx: no
     // seek is posted, and the stage shows the opening's first, often blank, frame.
     const { view, posted, runtime } = await openPlayer()
+    // 70% into the opening's 2 seconds, where it has come in.
     expect(posted.filter((message) => message.action === "seek")).toMatchObject([
-      { timeSeconds: 1 },
+      { timeSeconds: 1.4 },
     ])
 
     // The poster's frame is not where the playhead is.
-    await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: false })
+    await runtime({ ...RUNTIME, type: "state", currentTime: 1.4, isPlaying: false })
     const track = view.getByRole("slider", { name: "Position" })
     expect(track.getAttribute("aria-valuetext")).toBe("0:00 of 0:07, Opening")
 
@@ -414,6 +415,32 @@ describe("the player", () => {
       ["seek", 0],
       ["play", undefined],
     ])
+  })
+
+  test("opens on the instant its root's data-poster names", async () => {
+    // Reproduce by dropping the `posterMs` read from `posterAt` in player.tsx.
+    const outline = { ...OUTLINE, posterMs: 4200 }
+    const view = render(
+      <Wrap cache={frameCache()}>
+        <VideoRenderer version={{ ...FILM, outline }} />
+      </Wrap>
+    )
+    const target = view.container.querySelector("iframe")?.contentWindow
+    const posted: Record<string, unknown>[] = []
+    target!.postMessage = ((message: Record<string, unknown>) => posted.push(message)) as never
+    for (const data of [
+      { protocol: FRAME_PROTOCOL, event: "ready", params: {} },
+      { ...RUNTIME, type: "ready" },
+      { ...RUNTIME, type: "timeline", durationSeconds: 7 },
+    ]) {
+      await act(async () => {
+        browser.dispatchEvent(
+          new browser.MessageEvent("message", { data, source: target as never })
+        )
+      })
+    }
+
+    expect(posted.find((message) => message.action === "seek")).toMatchObject({ timeSeconds: 4.2 })
   })
 
   test("shows its large play mark before the first play and at the end, never on a pause", async () => {

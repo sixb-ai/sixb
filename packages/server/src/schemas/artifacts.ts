@@ -103,6 +103,11 @@ const VideoOutlineSchema = z.object({
   height: z.number().int().describe("The frame's height, in pixels"),
   fps: z.number().int().describe("Frames a second"),
   durationMs: z.number().int(),
+  posterMs: z
+    .number()
+    .int()
+    .optional()
+    .describe("The instant that shows it before it plays: its root's data-poster"),
   scenes: z
     .array(
       z.object({
