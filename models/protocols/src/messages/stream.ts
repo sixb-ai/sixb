@@ -9,6 +9,7 @@ import {
   type ProviderData,
 } from "@sixb/core/models"
 import { contextWindowRejection } from "../context-window"
+import { STREAM_CLOSED_EARLY, streamInterruption } from "../interruption"
 import { integer, object, string } from "../json"
 import { decodeServerSentEvents } from "../sse"
 import { messagesUsage } from "./usage"
@@ -53,7 +54,10 @@ export async function* messagesEvents(
       `${options.errorPrefix} Provider stream ended without a terminal message event.`,
       options.providerId,
       options.modelId,
-      options.requestId === undefined ? undefined : { requestId: options.requestId }
+      {
+        ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
+        ...STREAM_CLOSED_EARLY,
+      }
     )
   }
 }
@@ -101,6 +105,7 @@ class MessageState {
                 code: string(error?.type),
                 message: string(error?.message),
               }),
+              ...streamInterruption({ code: string(error?.type) }),
             }
           ),
         },

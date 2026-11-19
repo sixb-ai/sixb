@@ -2,6 +2,7 @@ import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   lostConnectionCode,
   MODEL_CALL_RETRY,
+  modelCallInterrupted,
   modelCallRetryDelay,
 } from "../src/agents/model-call-retry"
 import { ModelProviderError, ModelStreamError } from "../src/models"
@@ -65,6 +66,40 @@ describe("lostConnectionCode", () => {
     ["anything else", new Error("[test] boom")],
   ])("names nothing for %s", (_, error) => {
     expect(lostConnectionCode(error)).toBeUndefined()
+  })
+})
+
+describe("modelCallInterrupted", () => {
+  // Reproduce: return true for any ModelProviderError with a reason; a request too long for the
+  // model is then made again, unchanged, instead of being compacted.
+  test.each([
+    ["a lost connection", withCode(new TypeError("ECONNRESET: closed"), "ECONNRESET"), true],
+    [
+      "a response its provider interrupted",
+      new ModelProviderError("[test] Overloaded.", "mock", "model", {
+        code: "overloaded_error",
+        reason: "interrupted",
+      }),
+      true,
+    ],
+    [
+      "a request too long for the model",
+      new ModelProviderError("[test] Too long.", "mock", "model", {
+        reason: "context-window-exceeded",
+      }),
+      false,
+    ],
+    [
+      "an HTTP refusal its binding already retried",
+      new ModelProviderError("[test] Overloaded.", "mock", "model", {
+        status: 529,
+        code: "overloaded_error",
+        retryable: true,
+      }),
+      false,
+    ],
+  ])("says whether %s was interrupted", (_, error, interrupted) => {
+    expect(modelCallInterrupted(error)).toBe(interrupted)
   })
 })
 

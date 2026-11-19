@@ -35,7 +35,7 @@ import type {
 import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 import { waitUnlessAborted } from "../shared/backoff"
-import { lostConnectionCode, MODEL_CALL_RETRY, modelCallRetryDelay } from "./model-call-retry"
+import { MODEL_CALL_RETRY, modelCallInterrupted, modelCallRetryDelay } from "./model-call-retry"
 import { coerceToolInput } from "./tool-input-coercion"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -160,7 +160,7 @@ interface ParsedToolCall {
 /**
  * Run a provider-neutral, streaming model/tool loop.
  *
- * One step is one provider call, made again as a new call when its connection drops (see
+ * One step is one provider call, made again as a new call when it is interrupted (see
  * {@link MODEL_CALL_RETRY}) or `recoverStep` asks it again. Lifecycle and stream callbacks are
  * awaited so the caller controls backpressure and can fail closed before another billable call
  * starts.
@@ -242,15 +242,15 @@ export async function runModelLoop(
         return { status: "aborted", steps, partialContent: accumulator.partialContent() }
       }
 
-      // A call whose connection dropped, before it answered or while it streamed, is made again
-      // as a new call, admitted and recorded on its own: the lost one may have been billed, so it
-      // stays recorded with its usage unknown. Nothing it streamed was acted on, and its reader
-      // drops it.
-      if (call.failure?.connectionLost && retries < MODEL_CALL_RETRY.retries) {
+      // A call interrupted before it answered or while it streamed (its connection lost, its
+      // provider overloaded or failing) is made again as a new call, admitted and recorded on its
+      // own: the interrupted one may have been billed, so it stays recorded with its usage
+      // unknown. Nothing it streamed was acted on, and its reader drops it.
+      if (call.failure?.interrupted && retries < MODEL_CALL_RETRY.retries) {
         const delayMs = modelCallRetryDelay(retries)
         retries += 1
         console.warn(
-          `[SixbModels] Model call '${callId}' lost its connection to the provider; asking again in ${delayMs} ms.`,
+          `[SixbModels] Model call '${callId}' was interrupted; asking again in ${delayMs} ms.`,
           call.failure.error
         )
         if (accumulator.streamed) await input.onEvent?.({ type: "start-step", retry: true })
@@ -457,7 +457,7 @@ export async function runModelLoop(
 /**
  * One provider call of a step, streamed into its accumulator. A cancel, or an abort error, leaves
  * what arrived partial; any other error is the call's failure, whether it came before the
- * stream's finish or after it, and says whether the call lost its connection to the provider.
+ * stream's finish or after it, and says whether the call was interrupted.
  */
 async function callModel(
   input: RunModelLoopInput<unknown>,
@@ -472,7 +472,7 @@ async function callModel(
 ): Promise<{
   readonly cost: ModelCallCost
   readonly aborted: boolean
-  readonly failure?: { readonly error: unknown; readonly connectionLost: boolean }
+  readonly failure?: { readonly error: unknown; readonly interrupted: boolean }
 }> {
   const { accumulator } = call
   const maxOutputTokens =
@@ -481,7 +481,7 @@ async function callModel(
       : Math.min(call.maxOutputTokens, input.maxOutputTokens ?? Number.POSITIVE_INFINITY)
   let accepted = false
   let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
-  let failure: { readonly error: unknown; readonly connectionLost: boolean } | undefined
+  let failure: { readonly error: unknown; readonly interrupted: boolean } | undefined
   let cancelled = false
   try {
     const stream = await input.model.stream({
@@ -516,8 +516,8 @@ async function callModel(
     if (input.signal.aborted || isAbortError(error)) {
       cancelled = true
     } else {
-      const connectionLost = !accumulator.readerFailed && lostConnectionCode(error) !== undefined
-      failure = { error, connectionLost }
+      const interrupted = !accumulator.readerFailed && modelCallInterrupted(error)
+      failure = { error, interrupted }
     }
   } finally {
     // The step's cost, as the model records the call: the model is what records it (see

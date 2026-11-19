@@ -30,6 +30,17 @@ export class RequestDiagnostics {
     // Rebuild rather than attaching an unsanitized cause, stack or custom properties.
     const sanitized = new Error(this.text(error instanceof Error ? error.message : String(error)))
     sanitized.name = error instanceof Error ? this.text(error.name) : "Error"
+
+    // A failed connection's code, such as ECONNRESET, on fetch's error (Bun) or its cause (Node):
+    // it tells the model loop the call may be made again.
+    const code = errorCode(error) ?? errorCode(error instanceof Error ? error.cause : undefined)
+    if (code !== undefined) Object.assign(sanitized, { code: this.text(code) })
     return sanitized
   }
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined
+  const code: unknown = Reflect.get(error, "code")
+  return typeof code === "string" ? code : undefined
 }

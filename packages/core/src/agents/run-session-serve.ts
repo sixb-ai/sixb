@@ -458,6 +458,13 @@ async function streamModelCall(session: AgentRunSession, request: Request): Prom
           await session.close()
           return
         }
+
+        // An error event crosses as the error it carries, which the runner throws as its model
+        // loop would in process. Letting the call go records it, as the loop's reader does.
+        if (next.value.type === "error") {
+          await iterator.return?.()
+          throw next.value.error
+        }
         controller.enqueue(encoder.encode(`${encodeWireValue({ event: next.value })}\n`))
       } catch (error) {
         controller.enqueue(

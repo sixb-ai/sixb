@@ -21,14 +21,15 @@ import {
   type StreamSink,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
-import { lostConnectionCode } from "../src/agents/model-call-retry"
+import { lostConnectionCode, modelCallInterrupted } from "../src/agents/model-call-retry"
 import type { UserPrincipal } from "../src/auth"
 import { emptyGrantIndex } from "../src/authorization/types"
-import type {
-  LanguageModel,
-  ModelMessage,
-  WebSearchModel,
-  WebSearchModelRequest,
+import {
+  type LanguageModel,
+  type ModelMessage,
+  ModelProviderError,
+  type WebSearchModel,
+  type WebSearchModelRequest,
 } from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
@@ -83,8 +84,9 @@ const countingModel = new MockLanguageModel({
 })
 
 /**
- * A model whose connection resets, as the provider's fetch reports it: before it answers when asked
- * "Before.", else once it started streaming.
+ * A model whose call is interrupted once it started streaming: its provider says it is overloaded
+ * when asked "Overloaded.", else its connection resets, as the provider's fetch reports it, before
+ * it answers when asked "Before.".
  */
 const droppingModel = new MockLanguageModel({
   providerId: "test",
@@ -100,7 +102,13 @@ const droppingModel = new MockLanguageModel({
     return {
       events: (async function* () {
         yield { type: "stream-start" } as const
-        throw reset
+        if (asked?.type !== "text" || asked.text !== "Overloaded.") throw reset
+
+        const overloaded = new ModelProviderError("[test] Overloaded.", "test", "dropping-model", {
+          code: "overloaded_error",
+          reason: "interrupted",
+        })
+        yield { type: "error", error: overloaded } as const
       })(),
     }
   },
@@ -117,8 +125,9 @@ async function streamAll(
     tools: [],
     signal: new AbortController().signal,
   })
-  for await (const _event of stream.events) {
-    // Each event is read.
+  for await (const event of stream.events) {
+    // Each event is read, and an error event fails the call, as the model loop reads it.
+    if (event.type === "error") throw event.error
   }
 }
 
@@ -1071,9 +1080,10 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       session.close()
     })
 
-    // Guard proof: drop the ModelConnectionLost kind from encodeWireError; over HTTP the runner
-    // then reads the server's generic failure, and its model loop does not make the call again.
-    test("lose a call's connection as the provider's fetch does, before it answers or after", async () => {
+    // Guard proofs: drop the ModelConnectionLost or the interrupted ModelProviderError kind from
+    // encodeWireError, or send an error event on as any event in streamModelCall; over HTTP the
+    // runner then reads a failure its model loop does not make again.
+    test("fail an interrupted call as in process, before it answers or after", async () => {
       const { turn, open } = await seedConversation(claim)
       const session = await open(await turn("run-a", "m1"))
       const model = await session.models.language({ provider: "test", modelId: "dropping-model" })
@@ -1084,6 +1094,13 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         )
         expect(lostConnectionCode(lost)).toBe("ECONNRESET")
       }
+
+      const overloaded = await streamAll(model, [{ type: "text", text: "Overloaded." }]).catch(
+        (error: unknown) => error
+      )
+      expect(overloaded).toBeInstanceOf(ModelProviderError)
+      expect(overloaded).toMatchObject({ code: "overloaded_error", reason: "interrupted" })
+      expect(modelCallInterrupted(overloaded)).toBe(true)
       session.close()
     })
 
