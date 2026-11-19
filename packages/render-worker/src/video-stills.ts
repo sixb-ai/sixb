@@ -10,8 +10,6 @@ import {
   videoFrameCount,
   videoSceneFiles,
   videoSegmentIndex,
-  videoStillAtMs,
-  videoStillKey,
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactVideoStillsRequestedQueueJob } from "@sixb/core/queues"
 import type { RenderHost } from "./host"
@@ -51,10 +49,10 @@ export async function renderVideoStills(input: {
   const missing = await missingVideoStills(artifacts, version)
   if (missing.length === 0) return
 
-  // The scenes that miss a still, and those on screen with them, where they play.
+  // The scenes that hold a missing still, and those on screen with them, where they play.
   const read = await readVideoVersion(host.blobStorage, version.files)
   const { composition } = read
-  const wanted = new Set(missing.map((scene) => scene.id))
+  const wanted = new Set(missing.map((still) => still.scene))
   const kept = composition.scenes
     .filter((scene) =>
       composition.scenes.some((other) => wanted.has(other.id) && playTogether(scene, other))
@@ -102,7 +100,9 @@ export async function renderVideoStills(input: {
         executionId: job.id,
       })
 
-      const at = missing.map((scene) => String(videoStillAtMs(scene) / 1000))
+      // HyperFrames snapshots an instant once: a poster may fall on a scene's middle.
+      const instants = [...new Set(missing.map((still) => still.atMs))]
+      const at = instants.map((ms) => String(ms / 1000))
       const { report, stderr } = await runVideoScript(
         sandbox,
         "stills",
@@ -119,19 +119,19 @@ export async function renderVideoStills(input: {
 
       const reason = cannotRender(report)
       if (reason) {
-        for (const scene of missing) await keep(videoStillKey(scene), { failure: reason })
+        for (const still of missing) await keep(still.key, { failure: reason })
         return
       }
       const stills = Array.isArray(report?.stills) ? report.stills : []
-      if (stills.length !== missing.length) {
+      if (stills.length !== instants.length) {
         // Thrown, the job tries again.
         throw new Error(
           `[SixbRenderWorker] Snapshotting '${artifactId}' version ${number} stopped: ${String(report?.failed ?? (stderr || "the script reported nothing")).slice(0, 500)}`
         )
       }
 
-      for (const [index, scene] of missing.entries()) {
-        const still: unknown = stills[index]
+      for (const asked of missing) {
+        const still: unknown = stills[instants.indexOf(asked.atMs)]
         if (!isMade(still)) continue
         const file = await storeSandboxFile(
           host.blobStorage,
@@ -139,12 +139,12 @@ export async function renderVideoStills(input: {
           {
             path: still.path,
             bytes: still.bytes,
-            fileName: `${scene.id}.jpg`,
+            fileName: `${asked.scene}-${asked.atMs}.jpg`,
             mediaType: "image/jpeg",
           },
           { signal }
         )
-        await keep(videoStillKey(scene), { file })
+        await keep(asked.key, { file })
       }
     }
   )
@@ -169,10 +169,10 @@ export async function failVideoStills(input: {
   })
   if (!version) return
 
-  for (const scene of await missingVideoStills(artifacts, version)) {
+  for (const still of await missingVideoStills(artifacts, version)) {
     await artifacts.putVideoRender({
       projectId: input.host.id,
-      key: videoStillKey(scene),
+      key: still.key,
       failure: "It could not be snapshotted.",
       createdAt: new Date(),
     })

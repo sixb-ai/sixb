@@ -10,7 +10,13 @@ import {
   videoExportPlan,
 } from "../src/artifacts/video/export"
 import { videoSegmentIndex, videoSegmentRender } from "../src/artifacts/video/project"
-import { VIDEO_STILLS_JOB, videoStillKey, videoStillsJobId } from "../src/artifacts/video/stills"
+import {
+  VIDEO_STILLS_JOB,
+  videoPoster,
+  videoStillKey,
+  videoStills,
+  videoStillsJobId,
+} from "../src/artifacts/video/stills"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { inferFileMediaType } from "../src/blob-storage/internal"
 import { createTestSixb } from "../src/testing"
@@ -416,5 +422,41 @@ describe("a video's stills", () => {
     const copy = await publish(LAUNCH, "Copy")
     setSystemTime(new Date(Date.now() + 2 * VIDEO_STILLS_JOB.settleMs))
     expect(stillsOf(await claimable(), copy.version.artifactId)).toEqual([])
+  })
+
+  // Reproduce by leaving the poster out of videoStills: it is never snapshotted.
+  test("include the poster at the instant the root names, else the first scene's", async () => {
+    const { publish, withLogo } = setup()
+    const { LAUNCH } = await withLogo()
+    const posed = (seconds?: string) =>
+      seconds === undefined
+        ? LAUNCH
+        : {
+            ...LAUNCH,
+            "index.html": (LAUNCH["index.html"] ?? "").replace(
+              'data-duration="7"',
+              `data-duration="7" data-poster="${seconds}"`
+            ),
+          }
+    const outlineOf = async (seconds?: string) =>
+      (await publish(posed(seconds))).version.outline as VideoOutline
+
+    const plain = await outlineOf()
+    expect(videoStills(plain).map(({ scene, atMs }) => [scene, atMs])).toEqual([
+      ["intro", 1000],
+      ["demo", 3500],
+      ["outro", 5750],
+    ])
+    expect(videoPoster(plain)?.key).toBe(
+      videoStillKey(plain.scenes[0] as VideoOutline["scenes"][0])
+    )
+
+    // 5 seconds in, the outro has started over the demo: its segment holds the instant.
+    const posted = await outlineOf("5")
+    const poster = videoPoster(posted)
+    expect(poster).toMatchObject({ scene: "outro", atMs: 5000 })
+    expect(videoStills(posted).slice(0, 3)).toEqual(videoStills(plain))
+    expect(videoStills(posted).at(3)).toEqual(poster)
+    expect(videoPoster(await outlineOf("6"))?.key).not.toBe(poster?.key)
   })
 })

@@ -246,6 +246,24 @@ describe("a video's MP4 over the API", () => {
     expect(await served.text()).toBe("jpeg")
     expect((await still(alice, "nowhere")).status).toBe(404)
 
+    // The poster, without data-poster, is the first scene's still.
+    const poster = () =>
+      fixture.app.fetch(
+        new Request(url(`/api/artifacts/${artifactId}/versions/1/poster`), {
+          headers: alice.headers,
+        })
+      )
+    expect((await poster()).status).toBe(404)
+    const intro = version.outline.scenes[0]
+    if (!intro) throw new Error("Expected the intro.")
+    await fixture.storage.artifacts?.putVideoRender({
+      projectId: PROJECT_ID,
+      key: videoStillKey(intro),
+      file: (await fixture.put("intro.jpg", "intro", "image/jpeg")).file,
+      createdAt: new Date(),
+    })
+    expect(await (await poster()).text()).toBe("intro")
+
     // Bob, who reads nothing of Alice's, is refused.
     const bob = await session(fixture.storage, "bob")
     expect((await still(bob)).status).toBe(403)

@@ -101,8 +101,9 @@ for. It is joined from segments kept under their own keys, shared by every expor
 
 `artifact.video.stills.requested`: the stills of a version's scenes, asked for when it is
 published, 15 seconds after the last write that asks. One sandbox snapshots each scene missing one
-at its middle, with `hyperframes snapshot`, from a project that holds those scenes and the ones on
-screen with them, as JPEGs at most 1,280 pixels wide. After three attempts, the scenes keep none.
+at its middle, and the poster at the instant the root's `data-poster` names, with
+`hyperframes snapshot`, from a project that holds those scenes and the ones on screen with them, as
+JPEGs at most 1,280 pixels wide. After three attempts, the scenes keep none.
 
 How many renders run at once is the worker's concurrency, two by default
 (`workerConcurrency.render`), for each worker process. The queue contract has no per-project group
