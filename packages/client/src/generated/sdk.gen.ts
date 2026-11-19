@@ -109,6 +109,9 @@ import type {
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
+  ExportArtifactVideoData,
+  ExportArtifactVideoErrors,
+  ExportArtifactVideoResponses,
   FacetObjectsData,
   FacetObjectsErrors,
   FacetObjectsResponses,
@@ -220,6 +223,12 @@ import type {
   GetArtifactVersionData,
   GetArtifactVersionErrors,
   GetArtifactVersionResponses,
+  GetArtifactVideoData,
+  GetArtifactVideoErrors,
+  GetArtifactVideoResponses,
+  GetArtifactVideoStillData,
+  GetArtifactVideoStillErrors,
+  GetArtifactVideoStillResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -4484,6 +4493,69 @@ export const printArtifactPdf = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/pdf",
+    ...options,
+  })
+
+/**
+ * Get a video's MP4
+ *
+ * The version rendered to MP4, H.264 and AAC, its index first, as a download named after the title it rendered with, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.
+ */
+export const getArtifactVideo = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactVideoData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactVideoResponses, GetArtifactVideoErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/video",
+    ...options,
+  })
+
+/**
+ * Render a video to MP4
+ *
+ * Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.
+ */
+export const exportArtifactVideo = <ThrowOnError extends boolean = false>(
+  options: Options<ExportArtifactVideoData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ExportArtifactVideoResponses,
+    ExportArtifactVideoErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/video",
+    ...options,
+  })
+
+/**
+ * Get the still of a video's scene
+ *
+ * A JPEG of the scene at its middle, at most 1280 pixels wide, which a player shows for its chapter; the first scene's is the video's poster. It shows what the scene plays from other artifacts as the version's publisher reads it, so a shared link's guest gets none of a scene that plays any. A frozen version's still never changes, and is cached as such. 404 still_not_found until it is snapshotted, a few seconds after the video is published, or when it never will be.
+ */
+export const getArtifactVideoStill = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactVideoStillData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactVideoStillResponses,
+    GetArtifactVideoStillErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/scenes/{scene}/still",
     ...options,
   })
 
