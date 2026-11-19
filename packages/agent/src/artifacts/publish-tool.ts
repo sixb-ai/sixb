@@ -98,7 +98,6 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   description: [
     "Publish a file or directory in the sandbox as an artifact: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish.",
     "Pass kind for a new artifact. Pass id to update one of this conversation's, or one an object the user may edit holds: your files replace its current version's, which stays open, and its kind stays; versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first.",
-    "Pass attachments to add files of the conversation as they are stored, such as a user's recording, without downloading them.",
     "Returns the artifact's id, version and revision; a refusal says what to fix.",
   ].join("\n"),
   inputSchema: {
@@ -118,13 +117,13 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
       attachments: {
         type: "array",
         description:
-          "Files of this conversation the version holds as they are stored, by their key in $SIXB_ATTACHMENTS, such as a user's recording: never downloaded into the sandbox. Each goes at its path, beside the files of path.",
+          "This conversation's files to add as stored, by their key in $SIXB_ATTACHMENTS, such as a user's recording, without downloading them.",
         items: {
           type: "object",
           properties: {
             path: {
               type: "string",
-              description: "Its path in the artifact, such as media/talk.mov.",
+              description: "Such as media/talk.mov.",
             },
             key: { type: "string", description: "Its key in $SIXB_ATTACHMENTS." },
           },
