@@ -195,6 +195,12 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentErrors,
   GetArtifactFileContentResponses,
+  GetArtifactMediaContentData,
+  GetArtifactMediaContentErrors,
+  GetArtifactMediaContentResponses,
+  GetArtifactMediaData,
+  GetArtifactMediaErrors,
+  GetArtifactMediaResponses,
   GetArtifactPdfData,
   GetArtifactPdfErrors,
   GetArtifactPdfResponses,
@@ -343,6 +349,9 @@ import type {
   HeadArtifactFileContentData,
   HeadArtifactFileContentErrors,
   HeadArtifactFileContentResponses,
+  HeadArtifactMediaContentData,
+  HeadArtifactMediaContentErrors,
+  HeadArtifactMediaContentResponses,
   HeadObjectFileContentData,
   HeadObjectFileContentErrors,
   HeadObjectFileContentResponses,
@@ -4555,6 +4564,66 @@ export const headArtifactFileContent = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/content",
+    ...options,
+  })
+
+/**
+ * Get what is derived of a video or a sound
+ *
+ * What Sixb derives once from a video or a sound among the version's files: what it holds, a proxy that plays and scrubs in its place, a poster, a filmstrip, its peaks, its cuts, and its transcript. Each part is ready, with the URL of its file when it has one, pending, or unavailable or failed with why; retry=true derives each failed part again. A file published since it was last derived from is asked for: ask again after a few seconds. In a project without sandboxes, each part is unavailable. Whoever reads the artifact may ask. 400 invalid_artifact when the version holds no video or sound at path.
+ */
+export const getArtifactMedia = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactMediaData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactMediaResponses, GetArtifactMediaErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/media",
+    ...options,
+  })
+
+/**
+ * Get a part of what is derived of a video or a sound
+ *
+ * The file of one part, as its URL in GET .../media names it: served inline, with Range, and cached for good when asked for by that URL. 404 media_not_found until it is derived, and when it will not be.
+ */
+export const getArtifactMediaContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactMediaContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactMediaContentResponses,
+    GetArtifactMediaContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/media/content",
+    ...options,
+  })
+
+/**
+ * Head a part of what is derived of a video or a sound
+ */
+export const headArtifactMediaContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadArtifactMediaContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadArtifactMediaContentResponses,
+    HeadArtifactMediaContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/media/content",
     ...options,
   })
 

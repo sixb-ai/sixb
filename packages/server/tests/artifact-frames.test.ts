@@ -639,9 +639,15 @@ describe("a deck's images from other artifacts", () => {
   const SVG = "<svg xmlns='http://www.w3.org/2000/svg'/>"
 
   /** Publishes a deck that shows `markup` on its one slide. */
-  async function deckShowing(fixture: Fixture, as: Session, markup: string) {
+  async function deckShowing(
+    fixture: Fixture,
+    as: Session,
+    markup: string,
+    files: Awaited<ReturnType<Fixture["put"]>>[] = []
+  ) {
     const deck = await publish(fixture, as, "slides", [
       await fixture.put("index.html", `<section class="slide">${markup}</section>`, "text/html"),
+      ...files,
     ])
     const minted = await mint(fixture, as, deck.artifact.id)
     expect(minted.status).toBe(200)
@@ -840,6 +846,55 @@ describe("a deck's images from other artifacts", () => {
     expect(piece.headers.get("content-type")).toBe("video/mp4")
     expect(piece.headers.get("content-range")).toBe(`bytes 10-19/${clip.length}`)
     expect(await piece.text()).toBe("0123456789")
+  })
+
+  test("play a video from its proxy once one is derived, its own or lent", async () => {
+    // Reproduce by serving `file.file` alone in frameResponse: every frame plays the original.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = await fixture.put("clip.mov", "the original, 2 GB", "video/quicktime")
+    const media = await publish(fixture, alice, "file", [clip])
+    const id = media.artifact.id
+    const frame = await deckShowing(
+      fixture,
+      alice,
+      `<video src="artifact:${id}/clip.mov"></video>`,
+      [{ path: "own.mov", file: clip.file }]
+    )
+    const lent = `${frame}__sixb/ref/${id}@latest/clip.mov`
+    const played = async (path: string) => {
+      const response = await fixture.app.fetch(
+        new Request(url(path), { headers: { "sec-fetch-dest": "video" } })
+      )
+      return { type: response.headers.get("content-type"), body: await response.text() }
+    }
+    expect(await played(lent)).toEqual({ type: "video/quicktime", body: "the original, 2 GB" })
+
+    const proxy = await fixture.blobStorage.put({
+      body: new TextEncoder().encode("the proxy, 20 MB"),
+      fileName: "clip.proxy.mp4",
+      mediaType: "video/mp4",
+    })
+    const pending = { status: "pending" } as const
+    await artifactStorage(fixture.storage).putMedia({
+      projectId: PROJECT_ID,
+      digest: clip.file.digest,
+      parts: {
+        probe: pending,
+        proxy: { status: "ready", file: proxy },
+        poster: pending,
+        filmstrip: pending,
+        waveform: pending,
+        cuts: pending,
+        transcript: pending,
+      },
+      attempts: 1,
+      updatedAt: new Date(),
+    })
+
+    const fromProxy = { type: "video/mp4", body: "the proxy, 20 MB" }
+    expect(await played(lent)).toEqual(fromProxy)
+    expect(await played(`${frame}own.mov`)).toEqual(fromProxy)
   })
 
   test("mark a video unavailable when its clip is, whatever its poster", async () => {
