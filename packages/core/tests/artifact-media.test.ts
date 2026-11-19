@@ -224,6 +224,41 @@ describe("what is derived of a media", () => {
     ])
   })
 
+  // Reproduce by leaving borrowedRecordings out of requestPreviews in execution.ts: the film asks
+  // for nothing, and its frame plays the borrowed clip's original for good.
+  test("is asked for what a video plays from another artifact, if nothing asked for it yet", async () => {
+    const { sixb, put, claimable } = setup()
+    const clip = await put("clip.mp4", "clip", "video/mp4")
+    const footage = await sixb.artifacts.create({ kind: "file", title: "Footage", files: [clip] })
+    // Its job is lost before it derives anything, as for a clip published before media were.
+    await claimable()
+
+    await sixb.artifacts.create({
+      kind: "video",
+      title: "Launch film",
+      files: [
+        await put(
+          "index.html",
+          '<!doctype html><div data-composition-id="main" data-width="1920" data-height="1080"><div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="0" data-duration="3"></div></div>',
+          "text/html"
+        ),
+        await put(
+          "scenes/demo.html",
+          `<template><div data-composition-id="demo"><video src="artifact:${footage.artifact.id}/clip.mp4" muted></video></div></template>`,
+          "text/html"
+        ),
+      ],
+    })
+
+    expect(await claimable()).toEqual([
+      {
+        id: `art_media_${clip.file.digest.slice(7)}`,
+        type: "artifact.media.requested",
+        payload: { file: clip.file },
+      },
+    ])
+  })
+
   test("is not asked for in a project without sandboxes, nor for what is no media", async () => {
     const { sixb, put, claimable } = setup({ sandboxes: false })
     await sixb.artifacts.create({
