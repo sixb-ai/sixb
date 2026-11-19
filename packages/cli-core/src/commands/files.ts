@@ -69,7 +69,11 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
       route = `/api/${context}s/${idSegment(id)}/files/content`
     } else fail(`Unknown file download context '${context}'.`)
     const path = options["--path"]
-    if (!path) fail("files download requires --path <json-pointer>.")
+    if (!path) {
+      fail(
+        `files download requires --path <${context === "artifact" ? "file-path" : "json-pointer"}>.`
+      )
+    }
     if (!output) fail("files download requires --output <local-path>.")
     await api.download(route, output, { path })
     return writeJson({ downloaded: true, output })
