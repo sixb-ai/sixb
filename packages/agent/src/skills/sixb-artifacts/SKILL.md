@@ -54,7 +54,8 @@ go beside each picture.
    of it in place, use its address (`references.md`). A figure you cite from live data is the one
    you read, and what the artifact shows moves on as the objects change, even at a created version:
    date it with when you read it, in the user's time zone ("As of Oct 23, 10:42, three invoices
-   are overdue.").
+   are overdue."). Say only what you did: never that you tried, compared or heard something you
+   did not.
 
 ## Revise
 
