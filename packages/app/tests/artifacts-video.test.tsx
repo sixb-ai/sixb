@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, jest, mock, test } from "bun:test"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { type ReactNode, useLayoutEffect } from "react"
 import { versionSummary } from "../src/artifacts/card-details"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { frameLinkKey } from "../src/artifacts/frame"
@@ -24,14 +24,17 @@ import {
 } from "../src/artifacts/renderers/video/hyperframes"
 import { playerKeyAction, typesItself } from "../src/artifacts/renderers/video/keys"
 import { startOf, VideoRenderer } from "../src/artifacts/renderers/video/renderer"
+import { type ArtifactViewContext, ArtifactViewProvider } from "../src/artifacts/view-context"
 import { artifactVersion, textFiles } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
 
 const browser = installDom([
   "document",
   "navigator",
+  "location",
   "localStorage",
   "Node",
+  "NodeFilter",
   "Element",
   "HTMLElement",
   "HTMLIFrameElement",
@@ -39,6 +42,8 @@ const browser = installDom([
   "HTMLInputElement",
   "HTMLButtonElement",
   "Event",
+  "CustomEvent",
+  "FocusEvent",
   "KeyboardEvent",
   "MouseEvent",
   "PointerEvent",
@@ -51,6 +56,19 @@ const browser = installDom([
   "requestAnimationFrame",
   "cancelAnimationFrame",
 ])
+
+// Radix picks its layout effect when it loads, a no-op without a `document`, and its menus then
+// never mount. It is given React's own for this file, and its own back after.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof import("react").useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+afterAll(() => {
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
+})
 
 // A fake-timer test that times out never reaches its `finally`.
 afterEach(() => jest.useRealTimers())
@@ -262,10 +280,11 @@ function frameCache(): QueryClient {
 }
 
 /** The player rendered, its frame loaded, and a way to speak as the runtime in it. */
-async function openPlayer(part?: string) {
+async function openPlayer(part?: string, viewer?: ArtifactViewContext) {
+  const player = <VideoRenderer version={FILM} {...(part ? { part } : {})} />
   const view = render(
     <Wrap cache={frameCache()}>
-      <VideoRenderer version={FILM} {...(part ? { part } : {})} />
+      {viewer ? <ArtifactViewProvider value={viewer}>{player}</ArtifactViewProvider> : player}
     </Wrap>
   )
   const frame = view.container.querySelector("iframe")
@@ -365,6 +384,39 @@ describe("the player", () => {
 
     fireEvent.keyDown(document.activeElement as Element, { key: " " })
     expect(controls().at(-1)).toBe("play")
+  })
+
+  test("says on the picture that a link to the instant was copied", async () => {
+    // Reproduce by dropping the copied notice from player.tsx: the menu that said it has closed.
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    })
+    try {
+      const { view } = await openPlayer(undefined, {
+        access: "owner",
+        latestVersion: FILM.version,
+        revision: FILM.revision,
+      })
+      await act(async () => {
+        fireEvent.pointerDown(view.getByRole("button", { name: "Settings" }), {
+          button: 0,
+          ctrlKey: false,
+          pointerType: "mouse",
+        })
+      })
+      const item = await view.findByRole("menuitem", { name: "Copy link at 0:00" })
+      await act(async () => {
+        fireEvent.click(item)
+      })
+
+      expect(copied).toEqual([expect.stringContaining("part=t%3D0")])
+      expect(view.queryByRole("menu")).toBeNull()
+      expect(view.getByText("Link copied")).toBeTruthy()
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
   })
 
   test("drags the playhead through the frames, and lands where it is let go", async () => {

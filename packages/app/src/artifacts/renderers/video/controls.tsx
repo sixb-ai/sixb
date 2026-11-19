@@ -11,7 +11,6 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
-  Check,
   Link2,
   ListVideo,
   Maximize,
@@ -48,7 +47,6 @@ export function ControlBar({
   fullscreen,
   onFullscreen,
   onCopyLink,
-  copied,
   menuContainer,
 }: {
   readonly playback: Playback
@@ -73,7 +71,6 @@ export function ControlBar({
   readonly onFullscreen: () => void
   /** Copies a link to the instant shown; none where the reader has no link to share. */
   readonly onCopyLink: (() => void) | null
-  readonly copied: boolean
   /** Where its menu goes: the element shown fullscreen, while it is. */
   readonly menuContainer: HTMLElement | null
 }) {
@@ -202,8 +199,8 @@ export function ControlBar({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={onCopyLink}>
-                    {copied ? <Check aria-hidden="true" /> : <Link2 aria-hidden="true" />}
-                    {copied ? messages.linkCopied : messages.copyLink(formatClock(playback.time))}
+                    <Link2 aria-hidden="true" />
+                    {messages.copyLink(formatClock(playback.time))}
                   </DropdownMenuItem>
                 </>
               ) : null}
