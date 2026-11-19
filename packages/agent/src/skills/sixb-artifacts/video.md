@@ -224,8 +224,9 @@ outside the video, and limits passed, naming the scene. Then Sixb checks the pub
 sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
 its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings.
 HyperFrames finds text off the frame, text under 28 px (what a phone reads at 1080p), low
-contrast and a silent clip; the check measures a frame with nearly nothing on it, a scene under
-a second, an end card past 4.5 s and a teaser past 45 s. Each names its scene and when.
+contrast and a silent clip; the check measures a frame with nearly nothing on it, footage or an
+image never seen while it plays, a scene under a second, an end card past 4.5 s and a teaser past
+45 s. Each names its scene and when.
 
 A sandbox without the CDNs checks without them, and says so: its frames show no GSAP motion and
 fallback fonts, which the app and the export do load. Keep the scripts and fonts as they are.
@@ -235,8 +236,8 @@ that works. Never say it is ready without having looked.
 
 1. Open each contact sheet with `read`. For every frame, ask what a viewer sees on a phone: is the
    one thing to read readable, is the app's text in the footage readable too, is nothing cut off,
-   stacked, loading or empty, does the footage show what the words claim? Is the end card three
-   to four seconds? A frame that fails is fixed before anything else.
+   stacked, loading or empty, is the footage there, not black, and does it show what the words
+   claim? Is the end card three to four seconds? A frame that fails is fixed before anything else.
 2. Have it reviewed by someone who did not make it: `spawn_agent` a reviewer with the contact
    sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
    but not your intent or your plan, and ask what is weak, confusing, slow, unreadable on a phone
