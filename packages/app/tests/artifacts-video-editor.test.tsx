@@ -16,6 +16,7 @@ import { LiveVideo } from "../src/artifacts/live/video"
 import { importKind } from "../src/artifacts/renderers/video/editor/import"
 import {
   formatSeconds,
+  Inspector,
   parseSeconds,
   SecondsField,
   TextField,
@@ -62,6 +63,7 @@ installDom([
   "Element",
   "HTMLElement",
   "HTMLInputElement",
+  "HTMLFormElement",
   "HTMLButtonElement",
   "HTMLImageElement",
   "Event",
@@ -667,6 +669,46 @@ describe("what is derived of a recording", () => {
       processing: false,
       failed: "It could not be read as a video or a sound.",
     })
+  })
+
+  // Reproduce by dropping the alert from ClipInspector: a recording that cannot be read then looks
+  // like any other, its Length box blank and nothing saying why it plays nothing.
+  test("says when a recording cannot be read, in the inspector", async () => {
+    serve()
+    const state = new LiveVideo(createArtifactDocument("video", FILES)).getState()
+    const shown = state.composition
+    const footage = state.timelines.get("scenes/talk.html")?.clips[0]
+    if (!shown || !footage) throw new Error("No footage.")
+
+    const noop = () => {}
+    const view = render(
+      wrap(
+        <Inspector
+          composition={shown}
+          timelines={state.timelines}
+          scene={undefined}
+          clip={{ file: "scenes/talk.html", clip: { ...footage, src: "media/broken.mp4" } }}
+          splittable={false}
+          target={target}
+          actions={{
+            renameScene: noop,
+            sceneLength: noop,
+            duplicateScene: noop,
+            removeScene: noop,
+            clipTiming: noop,
+            clipSound: noop,
+            text: noop,
+            clipText: noop,
+            removeClip: noop,
+            splitClip: noop,
+          }}
+        />
+      )
+    )
+
+    const alert = await waitFor(() => view.getByRole("alert"))
+    expect(alert.textContent).toContain("This recording can’t be read")
+    expect(alert.textContent).toContain("It could not be read as a video or a sound.")
   })
 
   // Reproduce by polling while a recording has no filmstrip, as the editor did: a sound, which
