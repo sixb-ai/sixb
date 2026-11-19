@@ -354,6 +354,37 @@ describe("renders", () => {
     ).toBe(3)
   })
 
+  // Reproduce: drop the render worker's `unmetRequirement`. It starts, prints PDFs, and fails
+  // every job whose sandbox fetches a file, each only after its retries.
+  test("refuses to start without the API's origin, which its sandboxes fetch files from", () => {
+    const originalOrigin = process.env.SIXB_API_PUBLIC_ORIGIN
+    delete process.env.SIXB_API_PUBLIC_ORIGIN
+    try {
+      const failure = expectFailure(() =>
+        assertWorkerInputs({
+          agentApiRequired: false,
+          workerTypes: ["sync", "render"],
+          options: {},
+          autoSelected: true,
+        })
+      )
+
+      expect(failure.message).toContain("render requires --api-public-origin")
+      expect(failure.remediation).toContain("`sixb worker-group sync`")
+      expect(() =>
+        assertWorkerInputs({
+          agentApiRequired: false,
+          workerTypes: ["render"],
+          options: { agentApiBaseUrl: "http://localhost:3002" },
+          autoSelected: false,
+        })
+      ).not.toThrow()
+    } finally {
+      if (originalOrigin === undefined) delete process.env.SIXB_API_PUBLIC_ORIGIN
+      else process.env.SIXB_API_PUBLIC_ORIGIN = originalOrigin
+    }
+  })
+
   test("warns about a worker list that leaves the render worker out", () => {
     expect(omittedWorkerWarnings(host(true), ["agent"])).toEqual([
       expect.stringContaining("Documents print to PDF in a render worker"),

@@ -55,8 +55,9 @@ describe("sixb worker-group", () => {
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
-    // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
-    // needs an API origin. The refusal is right; running a schema change first was not.
+    // The fixture registers agents and sandboxes, so auto-selection picks the `agent` and `render`
+    // workers, which both need an API origin. The refusal is right; running a schema change first
+    // was not.
     const logPath = await tempLogPath()
 
     const result = await runInProcess(() => {
@@ -69,13 +70,14 @@ describe("sixb worker-group", () => {
     // One line: the panel wraps at the terminal width and draws a border.
     const output = result.output.replace(/[\u2500-\u257f\s]+/g, " ")
     expect(output).toContain("agent requires --api-public-origin")
+    expect(output).toContain("render requires --api-public-origin")
     // Agent construction used to throw from inside the `map()` that builds every worker, so the
-    // operator saw one line about agents and never learned sync, pipeline, projection and render
-    // were never attempted. The three facts: what blocked, what it cost, and the way out — the
-    // last as a remediation in its own section of the panel.
-    expect(output).toContain("4 that were ready (sync, pipeline, projection, render)")
+    // operator saw one line about agents and never learned sync, pipeline and projection were
+    // never attempted. The three facts: what blocked, what it cost, and the way out — the last as
+    // a remediation in its own section of the panel.
+    expect(output).toContain("3 that were ready (sync, pipeline, projection)")
     expect(output).toContain("Try this")
-    expect(output).toContain("sixb worker-group sync pipeline projection render")
+    expect(output).toContain("sixb worker-group sync pipeline projection")
     const logEntries = await readLogEntries(logPath)
     expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
