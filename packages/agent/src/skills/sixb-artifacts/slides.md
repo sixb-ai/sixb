@@ -103,7 +103,7 @@ redrawing or retyping them: it is the same chart the sheet draws, and it cannot 
   in the `chart` layout it takes the slide's height. `title` names it where it is not drawn yet,
   such as in the slide thumbnails.
 - `<img src="artifact:…/figures/map.png">` shows an image file of another artifact, laid out like
-  any image.
+  any image. `<video controls src="artifact:…/walkthrough.mp4">` and `<audio>` play its clips.
 - `<a href="artifact:…">the Q3 numbers</a>` opens the artifact beside the conversation.
 - A deck reads the project's objects live with `sixb.query`, as a page does (`page.md`); for a
   chart a live sheet already draws, embed the sheet's chart instead.

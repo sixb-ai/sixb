@@ -147,6 +147,36 @@ describe("agent tool files", () => {
     expect(sandboxResolutions).toBe(0)
   })
 
+  // Reproduce by comparing the declared type with the sniffed one exactly: a recording declared
+  // `audio/webm` is refused, since its signature reads as `video/webm`.
+  test("keeps a declared sound or video type its container's signature cannot tell", async () => {
+    const files = createAgentToolFiles({
+      toolName: "record_call",
+      toolCallId: "call-4",
+      signal: new AbortController().signal,
+      blobStorage: new InMemoryBlobStorage(),
+      resolveSandbox: async () => ({
+        sandbox: new ToolFileSandbox(),
+        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      }),
+    })
+    const webm = Uint8Array.from(Buffer.from("1a45dfa39f4282847765626d", "hex"))
+
+    const recording = await files.put({
+      body: webm,
+      fileName: "call.webm",
+      mediaType: "audio/webm",
+    })
+    expect(recording.fileRef.mediaType).toBe("audio/webm")
+
+    const disguised = await files
+      .put({ body: PNG_BYTES, fileName: "call.mp3", mediaType: "audio/mpeg" })
+      .catch((error) => error)
+    expect(String(disguised)).toContain(
+      "file bytes are image/png, not the declared media type audio/mpeg"
+    )
+  })
+
   test("atomically enforces one run budget across parallel tool calls", async () => {
     const stored = new InMemoryBlobStorage()
     const uploadStarted = Promise.withResolvers<void>()

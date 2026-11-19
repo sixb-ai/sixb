@@ -2,7 +2,16 @@
 import { isSixbApiError } from "@sixb/client"
 import type { ViewerFileRef } from "./file-source"
 
-export type FileView = "image" | "pdf" | "markdown" | "csv" | "tsv" | "text" | "download"
+export type FileView =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "markdown"
+  | "csv"
+  | "tsv"
+  | "text"
+  | "download"
 
 /** Text files are read whole; larger ones offer the download instead. */
 export const MAX_TEXT_PREVIEW_BYTES = 5 * 1024 * 1024
@@ -16,7 +25,9 @@ const TEXT_TYPES = new Set([
   "application/xml",
   "application/yaml",
   "text/css",
+  "text/vtt",
   "text/xml",
+  "application/x-subrip",
 ])
 
 export function fileView(fileRef: Pick<ViewerFileRef, "mediaType" | "fileName">): FileView {
@@ -38,6 +49,9 @@ export function fileLoadError(error: unknown): FileLoadError {
 
 function viewFromMediaType(mediaType: string): FileView {
   if (IMAGE_TYPES.has(mediaType)) return "image"
+  // The browser decides what it plays; a format it cannot says so, with the download.
+  if (mediaType.startsWith("video/")) return "video"
+  if (mediaType.startsWith("audio/")) return "audio"
   if (mediaType === "application/pdf") return "pdf"
   if (mediaType === "text/markdown") return "markdown"
   if (mediaType === "text/csv") return "csv"
@@ -48,10 +62,12 @@ function viewFromMediaType(mediaType: string): FileView {
 
 function viewFromFileName(name: string): FileView {
   if (/\.(png|jpe?g|webp|gif|svg)$/.test(name)) return "image"
+  if (/\.(mp4|m4v|mov|webm|ogv|mkv)$/.test(name)) return "video"
+  if (/\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba)$/.test(name)) return "audio"
   if (name.endsWith(".pdf")) return "pdf"
   if (/\.(md|markdown)$/.test(name)) return "markdown"
   if (name.endsWith(".csv")) return "csv"
   if (name.endsWith(".tsv")) return "tsv"
-  if (/\.(txt|json|jsonl|xml|ya?ml|css|log)$/.test(name)) return "text"
+  if (/\.(txt|json|jsonl|xml|ya?ml|css|log|vtt|srt)$/.test(name)) return "text"
   return "download"
 }
