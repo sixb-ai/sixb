@@ -12,9 +12,10 @@ import { CliError, EXIT_API, fail } from "./output"
 
 /**
  * The API's simple-upload ceiling (`DEFAULT_SIMPLE_FILE_UPLOAD_BYTES` in `@sixb/core`): a larger
- * file is uploaded staged. The CLI imports no Sixb package, so it restates the API's contract.
+ * file is uploaded staged. The CLI imports no Sixb package, so it restates the API's contract, and
+ * `tests/upload.test.ts` holds the two together.
  */
-const SIMPLE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+export const SIMPLE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 const READ_CHUNK_BYTES = 1024 * 1024
 
 /** How far an upload is: the file read for its digest, then its bytes sent. */
