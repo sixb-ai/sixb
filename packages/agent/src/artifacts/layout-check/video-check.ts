@@ -5,12 +5,11 @@ import { FRAME_CDN_ALLOWLIST, rewriteFrameReferences } from "@sixb/core/internal
 import type { ArtifactFrameTarget } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
-import type { LayoutCheck, LayoutWarning } from "./layout-check"
+import { CHECKS_DIRECTORY, type LayoutCheck, type LayoutWarning } from "./layout-check"
 import videoScript from "./video.cjs" with { type: "text" }
 
-/** Where the script is, and each check's files, in the run's context directory. */
+/** Where the script is, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
-const CHECKS = "checks"
 /**
  * HyperFrames' Chromium start, a check of the whole video, and a frame of each scene's start,
  * middle and end, footage decoded for each: a minute and a half for a teaser, more with footage.
@@ -126,7 +125,7 @@ export async function checkVideo(input: {
   const { sandbox } = input.handle
   const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
   const library = contextPath(input.handle, LIBRARY)
-  const output = contextPath(input.handle, CHECKS, input.name)
+  const output = contextPath(input.handle, CHECKS_DIRECTORY, input.name)
 
   const frames = videoInstants(input.outline)
   const decoder = new TextDecoder()
@@ -210,7 +209,7 @@ export async function checkVideo(input: {
     return { status: "skipped", reason: "the check failed in the sandbox" }
   }
 
-  const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
+  const checks = posix.join(input.handle.contextDirectory, CHECKS_DIRECTORY, input.name)
   const named = (path: string) => posix.join(checks, posix.relative(output, path))
   const shot = new Map((report.frames ?? []).map((frame) => [Math.round(frame.time * 1000), frame]))
   const taken = frames.flatMap((frame) => {
