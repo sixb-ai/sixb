@@ -328,6 +328,31 @@ describe("what the render worker derives of a media", () => {
     })
   })
 
+  // Reproduce by keeping a segment's text and bounds alone in the audio runtime's
+  // transcriptSegments: the transcript no longer says who spoke.
+  test("keeps the segments of a model that times only phrases, with who said each", async () => {
+    const segments = [
+      { text: "Welcome to Sixb.", startMs: 300, endMs: 1400, speaker: "speaker_0" },
+      { text: "Glad to be here.", startMs: 1800, endMs: 2900, speaker: "speaker_1" },
+    ]
+    const { derive, kept, read } = await setup({
+      transcription: transcriber(async () => ({
+        output: { text: "Welcome to Sixb. Glad to be here.", segments },
+      })),
+    })
+
+    await derive()
+
+    const transcript = (await kept())?.parts.transcript
+    if (transcript?.status !== "ready") throw new Error("Expected the transcript.")
+
+    // No words: a consumer cutting on word bounds falls back on the segments.
+    expect(JSON.parse(await read(transcript.file))).toEqual({
+      text: "Welcome to Sixb. Glad to be here.",
+      segments,
+    })
+  })
+
   // Reproduce by asking for the sound without a model in derive(): the sandbox extracts and the
   // worker reads back a sound nothing will transcribe.
   test("has no transcript in a project without a transcription model", async () => {

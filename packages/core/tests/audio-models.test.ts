@@ -344,10 +344,11 @@ describe("audio transcription", () => {
   })
 
   // Removal proof: return `described` without segments or language; neither reaches the caller.
-  test("returns the segments a provider timed, and the language it heard", async () => {
+  // Push a segment without its speaker; who said "Goodbye." is lost.
+  test("returns the segments a provider timed, who said each, and the language", async () => {
     const segments = [
       { text: "Hello there.", startMs: 0, endMs: 900 },
-      { text: "Goodbye.", startMs: 1200, endMs: 1800 },
+      { text: "Goodbye.", startMs: 1200, endMs: 1800, speaker: "speaker_1" },
     ]
     const { sixb, audio } = await setup(
       createTranscriber(async () => ({
@@ -363,17 +364,20 @@ describe("audio transcription", () => {
   })
 
   // Removal proof: pass `output.segments` through unchecked; the caller seeks to a segment's end
-  // before its start.
+  // before its start, and reads a speaker with no name.
   test("refuses segments it cannot place", async () => {
-    const { sixb, audio } = await setup(
-      createTranscriber(async () => ({
-        output: { text: "Hello", segments: [{ text: "Hello", startMs: 900, endMs: 100 }] },
-      }))
-    )
+    for (const segment of [
+      { text: "Hello", startMs: 900, endMs: 100 },
+      { text: "Hello", startMs: 0, endMs: 900, speaker: "" },
+    ]) {
+      const { sixb, audio } = await setup(
+        createTranscriber(async () => ({ output: { text: "Hello", segments: [segment] } }))
+      )
 
-    const error = await sixb.models.audio.transcribe({ audio }).catch((thrown) => thrown)
+      const error = await sixb.models.audio.transcribe({ audio }).catch((thrown) => thrown)
 
-    expect(error).toMatchObject({ code: "invalid_transcription_response" })
+      expect(error).toMatchObject({ code: "invalid_transcription_response" })
+    }
   })
 
   // Removal proof: pass `output.words` through unchecked; the caller seeks to a negative second.

@@ -4794,6 +4794,7 @@ export type TranscribeAudioResponses = {
       text: string
       startMs: number
       endMs: number
+      speaker?: string
     }>
     language?: string
   }
