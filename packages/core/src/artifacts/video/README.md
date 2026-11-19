@@ -170,9 +170,10 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
   bit for bit (measured on 0.9.68). A video with no sound gets silence, so every MP4 has a track.
   No package export reaches the plan: `video.cjs` finds the module of the CLI's `dist` that
   exports `planV2` and the request helpers beside it. That holds only because every key pins
-  `VIDEO_ENGINE`, which a sandbox must run. When the module is gone, or its manifest moved, the
-  sound fails at once, kept with what changed, and `video-export.e2e.ts` fails by name on an
-  image that upgrades HyperFrames.
+  `VIDEO_ENGINE`, which a sandbox must run: it names `HYPERFRAMES_VERSION`, which a unit test holds
+  to the agent image's release. When the module is gone, or its manifest moved, the sound fails at
+  once, kept with what changed, and `video-export.e2e.ts`, run against the agent image, fails by
+  name on an image that upgrades HyperFrames.
 - **Waiting** is a job, not a worker: the export looks again a few seconds later in a job it asks
   for in its own place, asking for nothing then. Each segment it asked for makes it look at once,
   once kept or failed, carrying the export's payload; the later look is a backstop, for an export

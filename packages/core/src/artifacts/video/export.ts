@@ -7,6 +7,7 @@ import type {
   ArtifactVideoRenderRecord,
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
+import { HYPERFRAMES_VERSION } from "../frames/hyperframes"
 import type { VideoOutline } from "../outline"
 import { scenesOnScreen, videoFrameCount, videoSegmentFrames } from "./project"
 
@@ -17,10 +18,11 @@ import { scenesOnScreen, videoFrameCount, videoSegmentFrames } from "./project"
 // encoding them again. See README.md beside this file.
 
 /**
- * What renders a video: the agent image's HyperFrames. Every key names it, so a sandbox that runs
- * another refuses to render, rather than keep what it rendered under a key it does not match.
+ * What renders a video: the agent image's HyperFrames, the release the app plays. Every key names
+ * it, so a sandbox that runs another refuses to render, rather than keep what it rendered under a
+ * key it does not match.
  */
-export const VIDEO_ENGINE = "hyperframes@0.9.68"
+export const VIDEO_ENGINE = `hyperframes@${HYPERFRAMES_VERSION}`
 
 /**
  * How every segment is encoded, so segments join without being encoded again: H.264 at one
