@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { renderInstanceHelp } from "@sixb/cli-core"
 import { ARTIFACT_LIMITS, quoteArtifactComment } from "@sixb/core/artifacts"
 import { VIDEO_FRAME_RATES } from "../../core/src/artifacts/video/composition"
-import { SANDBOX_ATTACHMENT_LIMITS } from "../src/attachments"
+import { PUBLISH_ARTIFACT_TOOL_SPEC } from "../src/artifacts/publish-tool"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 
 // What the video guide teaches the Agent, held to what the app sends it, to what publishing
@@ -52,11 +52,14 @@ describe("the video guide", () => {
     )
   })
 
-  test("says which of the user's clips the sandbox does not hold", () => {
-    const megabytes = SANDBOX_ATTACHMENT_LIMITS.fileMaxBytes / 1024 ** 2
-    expect(oneLine(videoGuide())).toContain(
-      `An attachment over ${megabytes} MB is not in the sandbox: download it straight into the folder`
-    )
+  // Guard proof: rename `key` in video.md's attachments example; publish_artifact's schema then
+  // takes no such field, and refuses what the Agent copies from the guide.
+  test("adds the user's clips to a video as publish_artifact takes them", () => {
+    const example = /`attachments: (\[[^`]*\])`/.exec(oneLine(videoGuide()))?.[1]
+    const [attachment] = JSON.parse(example ?? "[]") as Record<string, unknown>[]
+    const { items } = PUBLISH_ARTIFACT_TOOL_SPEC.inputSchema.properties.attachments
+
+    expect(Object.keys(attachment ?? {}).sort()).toEqual([...items.required].sort())
   })
 
   // Guard proof: drop -nostdin from one of video.md's FFmpeg commands; FFmpeg in the sandbox then
@@ -73,7 +76,7 @@ describe("the video guide", () => {
 
     expect(guide).toContain("sixb artifacts comments resolve <artifact-id> <comment-id>")
     expect(help).toContain("sixb artifacts comments resolve|reply")
-    expect(guide).toContain("sixb artifacts media <id> --path media/talk.mp4 --part proxy")
+    expect(guide).toContain("sixb artifacts media <id> --path media/talk.mov --part proxy")
     expect(help).toContain("sixb artifacts media <artifact-id> --path <file-path>")
     expect(guide).toContain("sixb artifacts export <id> --output")
     expect(help).toContain("sixb artifacts export <artifact-id> --output")
