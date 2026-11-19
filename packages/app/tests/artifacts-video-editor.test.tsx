@@ -39,6 +39,8 @@ import {
   zoomAround,
 } from "../src/artifacts/renderers/video/editor/model"
 import { RenameField, SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
+import { laidClips } from "../src/artifacts/renderers/video/editor/selection"
+import { Timeline } from "../src/artifacts/renderers/video/editor/timeline"
 import {
   fillers,
   findWords,
@@ -676,5 +678,93 @@ describe("what is derived of a recording", () => {
     expect(pollAgainIn(read("media/talk.mp4"))).toBe(4000)
     expect(pollAgainIn(read("media/voice.m4a"))).toBe(false)
     expect(pollAgainIn(read("media/broken.mp4"))).toBe(false)
+  })
+})
+
+describe("the timeline", () => {
+  const video = () => {
+    const state = new LiveVideo(createArtifactDocument("video", FILES)).getState()
+    const shown = state.composition
+    if (!shown) throw new Error("No composition.")
+    return { state, composition: shown, talk: shown.scenes[1] }
+  }
+
+  function timeline(props: Partial<Parameters<typeof Timeline>[0]> & { readonly timeMs: number }) {
+    const { state, composition, talk } = video()
+    return wrap(
+      <Timeline
+        composition={composition}
+        clips={laidClips(state, composition, talk)}
+        open={talk}
+        selection={null}
+        marks={{}}
+        snapping
+        agentScenes={new Set()}
+        people={new Map()}
+        timelines={state.timelines}
+        target={{ artifactId: "art_video", version: 1, files: [] }}
+        uploads={[]}
+        toolbar={() => null}
+        dropTarget={false}
+        formatLength={(ms) => `${ms / 1000} s`}
+        edits={{
+          seek: () => {},
+          select: () => {},
+          open: () => {},
+          moveClip: () => {},
+          trimClip: () => {},
+          sceneLength: () => {},
+          scene: {
+            select: () => {},
+            move: () => {},
+            duplicate: () => {},
+            remove: () => {},
+            rename: () => {},
+          },
+        }}
+        {...props}
+      />
+    )
+  }
+
+  // Reproduce by giving the follow-the-playhead effect no dependency list, as it had: any render,
+  // such as a selection, scrolls the timeline back to the paused playhead.
+  test("stays where the reader scrolled it until the playhead moves", () => {
+    const view = render(timeline({ timeMs: 0 }))
+    const scroller = view.container.querySelector<HTMLElement>("[data-video-timeline]")
+    if (!scroller) throw new Error("No timeline.")
+
+    scroller.scrollLeft = 600
+    view.rerender(timeline({ timeMs: 0, selection: { type: "scene", scene: "talk" } }))
+    expect(scroller.scrollLeft).toBe(600)
+
+    view.rerender(timeline({ timeMs: 0, marks: { in: 1000 } }))
+    expect(scroller.scrollLeft).toBe(600)
+
+    // Moved, the playhead is brought back in sight.
+    view.rerender(timeline({ timeMs: 1000, marks: { in: 1000 } }))
+    expect(scroller.scrollLeft).not.toBe(600)
+  })
+
+  // Reproduce by finding the dragged clip by identity, as the timeline did: a change that lands
+  // mid-drag lays every clip out anew, and the block snaps back to where it was.
+  test("keeps a clip where it is dragged when a change lands mid-drag", () => {
+    const view = render(timeline({ timeMs: 0 }))
+    const block = () => {
+      const found = view.container.querySelector<HTMLElement>('[data-timeline-clip="clip"]')
+      if (!found) throw new Error("No footage on the timeline.")
+      return found
+    }
+    const before = block().style.left
+
+    fireEvent.pointerDown(block(), { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(block(), { clientX: 160, pointerId: 1 })
+    const dragged = block().style.left
+    expect(dragged).not.toBe(before)
+
+    // Someone else's edit: every clip laid out again, as new objects.
+    view.rerender(timeline({ timeMs: 0, marks: { in: 9000 } }))
+    expect(block().style.left).toBe(dragged)
+    expect(block().className).toContain("shadow-lg")
   })
 })

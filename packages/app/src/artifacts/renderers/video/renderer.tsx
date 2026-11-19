@@ -32,7 +32,12 @@ export function VideoRenderer({
   if (editing && live && liveState.synced && !liveState.left && liveState.access === "edit") {
     return (
       <Suspense fallback={<ViewerLoading label={messages.viewer.loading} />}>
-        <VideoEditor version={version} outline={outline} live={live} />
+        <VideoEditor
+          version={version}
+          outline={outline}
+          live={live}
+          start={startOf(version, outline, part)}
+        />
       </Suspense>
     )
   }
