@@ -40,6 +40,12 @@ const left = () => DEADLINE_MS - (Date.now() - started)
 
 /** What `hyperframes check` may take at most: half the time left, and never under its floor. */
 const CHECK_BUDGET_MS = { min: 30_000, max: 90_000 }
+/** How long past its budget `hyperframes check` is given to report what it found. */
+const CHECK_GRACE_MS = 20_000
+/** The time the snapshot keeps for itself, whatever the fetches and the check take. */
+const SNAPSHOT_RESERVE_MS = 45_000
+/** The time a fetch is not worth starting with. */
+const FETCH_MIN_MS = 5_000
 
 const project = path.join(out, "project")
 const read = (name) => JSON.parse(fs.readFileSync(path.join(out, name), "utf8"))
@@ -132,20 +138,30 @@ async function main() {
   // The recordings the version keeps in the API: a proxy plays as its original does.
   const missing = []
   const sixb = path.join(process.env.SIXB_BIN_DIR ?? "", "sixb")
+  // They leave the check and the snapshot their time: one that would not is left out.
   for (const { path: file, args } of read("fetches.json")) {
+    const ms = Math.min(60_000, left() - SNAPSHOT_RESERVE_MS - CHECK_BUDGET_MS.min - CHECK_GRACE_MS)
+    if (ms < FETCH_MIN_MS) {
+      missing.push({ path: file, why: "the check had no time left to fetch it" })
+      continue
+    }
+
     const target = path.join(project, file)
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    const fetched = await run(sixb, [...args, "--output", target], Math.min(60_000, left() / 2))
+    const fetched = await run(sixb, [...args, "--output", target], ms)
     if (fetched.code !== 0) missing.push({ path: file, why: tail(fetched.stderr) || "it did not arrive" })
   }
 
   const findings = []
   let stopped
-  const budget = Math.max(CHECK_BUDGET_MS.min, Math.min(CHECK_BUDGET_MS.max, left() / 2))
+  const budget = Math.min(
+    Math.max(CHECK_BUDGET_MS.min, Math.min(CHECK_BUDGET_MS.max, left() / 2)),
+    left() - SNAPSHOT_RESERVE_MS - CHECK_GRACE_MS
+  )
   const checked = await run(
     "hyperframes",
-    ["check", "--json", `--budget=${Math.floor(budget / 1000)}s`, project],
-    budget + 20_000
+    ["check", "--json", `--budget=${Math.max(1, Math.floor(budget / 1000))}s`, project],
+    budget + CHECK_GRACE_MS
   )
   const check = json(checked.stdout)
   if (check) {

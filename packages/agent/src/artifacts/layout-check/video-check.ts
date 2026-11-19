@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { VideoOutline } from "@sixb/core/artifacts"
-import { rewriteFrameReferences } from "@sixb/core/internal/artifacts/frames"
+import { FRAME_CDN_ALLOWLIST, rewriteFrameReferences } from "@sixb/core/internal/artifacts/frames"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import type { LayoutCheck, LayoutWarning } from "./layout-check"
@@ -19,6 +19,11 @@ const CHECK_TIMEOUT_MS = 240_000
 const MAX_FRAMES = 24
 /** The most a check reports; the contact sheet shows the rest. */
 const MAX_WARNINGS = 12
+/**
+ * The frames on each contact sheet, as `hyperframes snapshot` pages them: each sheet numbers its
+ * own from 1.
+ */
+export const VIDEO_SHEET_FRAMES = 9
 /**
  * What HyperFrames reports that a Sixb video is built to do: scenes that follow one another each
  * leave the root's timeline before it ends.
@@ -67,6 +72,8 @@ interface VideoFinding {
   readonly time?: number
   readonly sourceFile?: string
   readonly file?: string
+  /** What a request that failed asked for. */
+  readonly url?: string
 }
 
 /**
@@ -249,8 +256,13 @@ export function videoWarnings(
   findings: readonly VideoFinding[],
   outline: VideoOutline
 ): LayoutWarning[] {
+  // A sandbox without the CDNs fails every request to them, which the app and the export make.
+  const offline = findings.filter(unreachable)
   const reported = findings
-    .filter((finding) => finding.severity !== "info" && !EXPECTED.has(finding.code))
+    .filter(
+      (finding) =>
+        !unreachable(finding) && finding.severity !== "info" && !EXPECTED.has(finding.code)
+    )
     .sort(
       (a, b) =>
         Number(b.severity === "error") - Number(a.severity === "error") ||
@@ -284,7 +296,30 @@ export function videoWarnings(
       message: `${more} more finding${more === 1 ? "" : "s"}; run hyperframes check on the video to see every one.`,
     })
   }
+
+  // First: it explains the script errors that follow it.
+  if (offline.length > 0) {
+    const hosts = [...new Set(offline.map((finding) => new URL(finding.url ?? "").hostname))]
+    const files = offline.length === 1 ? "the file" : `the ${offline.length} files`
+    warnings.unshift({
+      code: "video_cdn_unreachable",
+      message: `This sandbox cannot reach ${hosts.join(", ")}, so the check ran without ${files} the video loads from there: its frames show no motion a library drives and fallback fonts, and a script error that follows is this sandbox's. The app and the export load them: keep them as they are.`,
+    })
+  }
   return warnings
+}
+
+/** A request to a CDN a frame may load from that failed for want of a network, not a file. */
+function unreachable(finding: VideoFinding): boolean {
+  const { code, url, message } = finding
+  return (
+    code === "request_failed" &&
+    url !== undefined &&
+    FRAME_CDN_ALLOWLIST.some((origin) => url.startsWith(`${origin}/`)) &&
+    /net::ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CONNECTION_|ADDRESS_UNREACHABLE|NETWORK_|TIMED_OUT|PROXY_|TUNNEL_)/.test(
+      message
+    )
+  )
 }
 
 /** `3.3 s`, as HyperFrames labels its frames. */
