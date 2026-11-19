@@ -1,13 +1,19 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import type { Server } from "node:http"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const { serve } = createRequire(import.meta.url)("../src/shared.cjs") as {
+// The script as a render's sandbox runs it: a copy, required from where it was written. Required
+// from `src`, it would be the text module the worker bundles once any test imported the worker's
+// sandbox helpers, which import it as text, in the same process.
+const scripts = mkdtempSync(join(tmpdir(), "sixb-render-scripts-"))
+copyFileSync(join(import.meta.dir, "../src/shared.cjs"), join(scripts, "shared.cjs"))
+const { serve } = createRequire(join(scripts, "shared.cjs"))("./shared.cjs") as {
   readonly serve: (root: string) => Promise<Server>
 }
+afterAll(() => rmSync(scripts, { recursive: true, force: true }))
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
