@@ -15,8 +15,8 @@ import { SheetTable } from "./sheet/sheet"
 
 /**
  * One file as its type allows: images, video, sound, PDFs, Markdown, tables, and plain text in
- * place, anything else as a card to download it. File artifacts, message attachments, and files a tool returned
- * all open here.
+ * place, anything else as a card to download it. File artifacts, message attachments, and files a
+ * tool returned all open here.
  */
 export function FileRenderer({ source }: { readonly source: FileSource }) {
   const view = fileView(source.fileRef)

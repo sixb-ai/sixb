@@ -83,13 +83,17 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
  * A video's first frame, under a play mark, for a card: the browser reads just enough of the file
  * to draw it. A file it cannot read, or one that holds sound alone, shows `fallback` instead.
  */
-export function VideoPoster({
-  source,
-  fallback,
-}: {
+export function VideoPoster(props: PosterProps) {
+  // Another file starts over: whether it has a frame to show is its own.
+  return <Poster key={props.source.id} {...props} />
+}
+
+interface PosterProps {
   readonly source: FileSource
   readonly fallback: ReactNode
-}) {
+}
+
+function Poster({ source, fallback }: PosterProps) {
   const [state, setState] = useState<"loading" | "ready" | "fallback">("loading")
   if (state === "fallback") return fallback
   return (
@@ -100,7 +104,6 @@ export function VideoPoster({
       )}
     >
       <video
-        key={source.id}
         src={firstFrameUrl(source)}
         muted
         playsInline
@@ -233,7 +236,8 @@ function Audio({ source, name }: MediaProps) {
               element.currentTime = value
               setTime(value)
             }}
-            className="[&_[data-slot=slider-range]]:bg-foreground/80 [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:border-foreground/30 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-foreground/15"
+            // A taller reach than the thin track, for a finger.
+            className="-my-2 py-2 [&_[data-slot=slider-range]]:bg-foreground/80 [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:border-foreground/30 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-foreground/15"
           />
           <span className="w-9 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
             {known ? clock(duration) : "–:––"}

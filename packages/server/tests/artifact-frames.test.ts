@@ -837,6 +837,33 @@ describe("a deck's images from other artifacts", () => {
     expect(piece.headers.get("content-range")).toBe(`bytes 10-19/${clip.length}`)
     expect(await piece.text()).toBe("0123456789")
   })
+
+  test("mark a video unavailable when its clip is, whatever its poster", async () => {
+    // Reproduce by marking each attribute as it is rewritten in rewriteFrameReferences: the
+    // poster, rewritten after the clip, marks the video available, and it plays nothing.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const posters = await publish(fixture, alice, "file", [
+      await fixture.put("poster.svg", SVG, "image/svg+xml"),
+    ])
+    const clips = await publish(fixture, alice, "file", [
+      await fixture.put("clip.mp4", "clip", "video/mp4"),
+    ])
+    const deck = await publish(fixture, alice, "slides", [
+      await fixture.put(
+        "index.html",
+        `<section class="slide"><video src="artifact:${clips.artifact.id}/clip.mp4" poster="artifact:${posters.artifact.id}/poster.svg"></video></section>`,
+        "text/html"
+      ),
+    ])
+    await remove(fixture, alice, clips.artifact.id)
+    const frame = (await (await mint(fixture, alice, deck.artifact.id)).json()) as { path: string }
+
+    const html = await (await fixture.app.fetch(new Request(url(`${frame.path}index.html`)))).text()
+    expect(html).toContain(
+      `<video poster="__sixb/ref/${posters.artifact.id}@latest/poster.svg" data-sixb-ref="unavailable"></video>`
+    )
+  })
 })
 
 describe("injecting the kit and the runtime", () => {

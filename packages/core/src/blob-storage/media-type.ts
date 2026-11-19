@@ -174,11 +174,15 @@ function mpegAudioMediaType(bytes: Uint8Array): string | undefined {
     return (second & 0xf0) === 0xf0 && ((third >> 2) & 0b1111) < 13 ? "audio/aac" : undefined
   }
 
-  // MPEG audio: a version, a bitrate, and a sampling rate that are not the reserved values.
+  // MP3: layer III, and a version, a bitrate, and a sampling rate that are not the reserved values.
+  // Layers I and II are left to the name: `FF FE`, the byte order mark that opens UTF-16 text,
+  // reads as a layer I header.
   const version = (second >> 3) & 0b11
   const bitrate = third >> 4
   const sampleRate = (third >> 2) & 0b11
-  if (version === 0b01 || bitrate === 0b1111 || sampleRate === 0b11) return undefined
+  if (layer !== 0b01 || version === 0b01 || bitrate === 0b1111 || sampleRate === 0b11) {
+    return undefined
+  }
   return "audio/mpeg"
 }
 

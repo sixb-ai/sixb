@@ -710,13 +710,15 @@ function FileEmbed({
       />
     )
   }
-  const view = source ? fileView(source.fileRef) : "download"
-  // A sound shows its file's name: the caption is under it already.
+  if (!source) return <CardEmbed version={version} address={address} />
+
+  const view = fileView(source.fileRef)
   const name = path.split("/").at(-1) ?? path
-  if (source && view === "video") {
+  if (view === "video") {
     return <VideoPlayer source={source} name={caption || name} layout={fill ? "fill" : "inline"} />
   }
-  if (source && view === "audio") return <AudioPlayer source={source} name={name} />
+  // The sound player prints its name: the file's, since the caption is under it already.
+  if (view === "audio") return <AudioPlayer source={source} name={name} />
   return <CardEmbed version={version} address={address} />
 }
 
