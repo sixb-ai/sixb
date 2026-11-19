@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { probeSmolvm } from "../src/preflight"
 import { SmolvmSandbox } from "../src/smolvm-sandbox"
@@ -51,6 +52,30 @@ guard("SmolvmSandbox (real bare VM)", () => {
     const result = await sandbox.runCommand("sh", ["-lc", "cat .sixb/agent/context/run.json"])
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain('"ok":true')
+  }, 180_000)
+
+  // The fake smolvm hands the script its input with or without `--interactive`: only a real guest
+  // proves smolvm forwards it. Regression check: drop `interactive` from writeFiles; the guest
+  // script then reads no input and the write fails.
+  test("writes a large file and many files in one call", async () => {
+    const large = Uint8Array.from({ length: 2 * 1024 * 1024 }, (_, index) => (index * 7919) % 256)
+    const many = Array.from({ length: 200 }, (_, index) => ({
+      path: `many/${index}.txt`,
+      contents: `${index}\n`,
+    }))
+    await sandbox.writeFiles([{ path: "large.bin", contents: large, mode: 0o640 }, ...many])
+
+    const result = await sandbox.runCommand("sh", [
+      "-c",
+      "sha256sum large.bin; stat -c %a large.bin; ls many | wc -l",
+    ])
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.split(/\s+/).filter(Boolean)).toEqual([
+      createHash("sha256").update(large).digest("hex"),
+      "large.bin",
+      "640",
+      "200",
+    ])
   }, 180_000)
 
   test("runs in workingDirectory and injects env vars", async () => {

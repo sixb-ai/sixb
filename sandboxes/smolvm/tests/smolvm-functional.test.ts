@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, te
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { SandboxFactory } from "@sixb/core"
+import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { SmolvmSandboxFactory } from "../src/smolvm-sandbox-factory"
 
 /**
@@ -45,7 +47,7 @@ case "$2" in
       esac
     done
     shift                        # drop --
-    cd "$workdir" || exit 1
+    cd -P "$workdir" || exit 1   # physical, like smolvm's chdir: the contract compares pwd
     PATH=${JSON.stringify(join(binDir, "stubs"))}:"$PATH" exec "$@"
     ;;
   *) exit 0 ;;
@@ -203,4 +205,18 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
       await sandbox.destroy()
     }
   })
+})
+
+// The shared contract through the same fake. Its sandboxes take no working directory, so each one
+// gets the test's guest directory, as above.
+runSandboxesContractSuite("SmolvmSandbox (faithful guest emulation)", {
+  createFactory: () => {
+    const factory = new SmolvmSandboxFactory({ bin, image: null })
+    return Object.assign(Object.create(factory) as SandboxFactory, {
+      create: (options: Parameters<SandboxFactory["create"]>[0]) =>
+        factory.create({ workingDirectory: guest, ...options }),
+    })
+  },
+  // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
+  shortTimeoutMs: 50,
 })

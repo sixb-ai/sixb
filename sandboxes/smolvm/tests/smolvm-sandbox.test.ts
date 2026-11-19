@@ -130,7 +130,9 @@ describe("SmolvmSandbox lifecycle", () => {
   })
 
   // Guard proof: run writeFiles' script as root again; its exec is not under setpriv. As root, a
-  // link a command planted in the working directory would lead the write anywhere.
+  // link a command planted in the working directory would lead the write anywhere. Dropping
+  // `--interactive` fails it too: the script reads the files from its input, which smolvm then
+  // never forwards.
   test("writes files as the command user, like the commands", async () => {
     const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
     try {
@@ -139,7 +141,7 @@ describe("SmolvmSandbox lifecycle", () => {
       const calls = await readCalls()
       const write = calls.find((call) => call.endsWith("sh -c set -e")) ?? ""
       expect(write).toStartWith(
-        "machine exec --name run-1 --workdir / -- setpriv --reuid=65534 --regid=65534"
+        "machine exec --name run-1 --workdir / --interactive -- setpriv --reuid=65534 --regid=65534"
       )
       expect(calls.some((call) => call.includes("chown") && call.includes("notes.txt"))).toBe(false)
     } finally {

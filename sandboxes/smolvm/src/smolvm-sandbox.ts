@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { dirname, posix } from "node:path"
+import { posix } from "node:path"
 import {
   type CommandResult,
   type RunCommandOptions,
@@ -254,22 +254,28 @@ export class SmolvmSandbox implements Sandbox {
     if (files.length === 0) {
       return
     }
-    // The guest filesystem is isolated from the host, so materialize files by executing an in-guest
-    // script that base64-decodes each payload into place. Run from "/" (always present) because a
-    // target directory may not exist yet; the script mkdir -p's each one. That is why relative paths
-    // are resolved against workingDirectory here rather than by the guest shell.
+    // The guest filesystem is isolated from the host, so files are materialized by an in-guest
+    // script that reads them from its input. Never from its arguments: Linux caps one at 128 KiB,
+    // less than the `sixb` a run installs. Run from "/" (always present) because a target directory
+    // may not exist yet; the script creates each one. That is why relative paths are resolved
+    // against workingDirectory here rather than by the guest shell.
     // As the command user, like the commands: a link a command planted can't lead a write, with
     // root's rights, anywhere the command couldn't write itself.
-    const [command = "sh", ...args] = unprivilegedGuestArgv("sh", [
-      "-c",
-      buildWriteFilesScript(
-        files.map((file) => ({ ...file, path: posix.resolve(this.workingDirectory, file.path) }))
-      ),
-    ])
+    const [command = "sh", ...args] = unprivilegedGuestArgv("sh", ["-c", WRITE_FILES_SCRIPT])
     const result = await exec({
-      argv: buildExecArgv(this.cli, { id: this.id, cwd: "/", command, args, env: {} }),
+      argv: buildExecArgv(this.cli, {
+        id: this.id,
+        cwd: "/",
+        command,
+        args,
+        env: {},
+        interactive: true,
+      }),
       cwd: process.cwd(),
       env: hostEnv(),
+      stdin: buildWriteFilesInput(
+        files.map((file) => ({ ...file, path: posix.resolve(this.workingDirectory, file.path) }))
+      ),
     })
     if (result.exitCode !== 0) {
       throw new SandboxError(
@@ -332,22 +338,53 @@ function isLoopbackOrigin(origin: string): boolean {
 }
 
 /**
- * Build a POSIX `sh` script that materializes each file in-guest: create its parent directory, then
- * base64-decode the payload into place (base64 keeps binary/quoting safe), honoring an optional
- * mode. `set -e` aborts on the first failure so a partial write surfaces a non-zero exit.
+ * A POSIX `sh` script that materializes the files {@link buildWriteFilesInput} streams to it:
+ * create each file's parent directory, copy its bytes into place, then apply its mode. Lengths,
+ * not delimiters, frame each path and payload, so any byte survives. `dd` copies exact counts:
+ * `fullblock` keeps a short read from the pipe from counting as a whole block, and it copies 64 KiB
+ * at a time rather than holding a whole file. `set -e` aborts on the first failure, and an input
+ * that ends before its `end` line fails rather than leave a truncated file behind.
  */
-export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
-  const lines = ["set -e"]
+export const WRITE_FILES_SCRIPT = `set -e
+take() {
+  blocks=$(($1 / 65536))
+  rest=$(($1 % 65536))
+  if [ "$blocks" -gt 0 ]; then dd bs=65536 count="$blocks" iflag=fullblock status=none; fi
+  if [ "$rest" -gt 0 ]; then dd bs="$rest" count=1 iflag=fullblock status=none; fi
+}
+while read -r path_bytes size mode; do
+  if [ "$path_bytes" = end ]; then
+    exit 0
+  fi
+  path=$(take "$path_bytes"; echo .)
+  path=\${path%.}
+  directory=\${path%/*}/
+  if [ ! -d "$directory" ]; then
+    mkdir -p "$directory"
+  fi
+  take "$size" > "$path"
+  if [ "$mode" != - ]; then
+    chmod "$mode" "$path"
+  fi
+done
+echo "the files' input ended early" >&2
+exit 1`
+
+/**
+ * The input of {@link WRITE_FILES_SCRIPT}. For each file, a line with the byte lengths of its path
+ * and contents and its octal mode (`-` when unset), then the path, then the contents. An `end`
+ * line closes it.
+ */
+export function buildWriteFilesInput(files: readonly SandboxFileRecord[]): Blob {
+  const parts: BlobPart[] = []
   for (const file of files) {
-    const encoded = Buffer.from(file.contents).toString("base64")
-    const quotedPath = shellQuote(file.path)
-    lines.push(`mkdir -p ${shellQuote(dirname(file.path))}`)
-    lines.push(`printf %s ${shellQuote(encoded)} | base64 -d > ${quotedPath}`)
-    if (file.mode !== undefined) {
-      lines.push(`chmod ${file.mode.toString(8)} ${quotedPath}`)
-    }
+    const path = new Blob([file.path])
+    const contents = new Blob([Buffer.from(file.contents)])
+    const mode = file.mode === undefined ? "-" : file.mode.toString(8)
+    parts.push(`${path.size} ${contents.size} ${mode}\n`, path, contents)
   }
-  return lines.join("\n")
+  parts.push("end\n")
+  return new Blob(parts)
 }
 
 /** Install the credentials in the guest and start its forwarder, as root. */
@@ -399,11 +436,6 @@ function rootExec(
     cwd: process.cwd(),
     env: { ...hostEnv(), ...(secret === undefined ? {} : { [GUEST_CREDENTIALS_ENV]: secret }) },
   })
-}
-
-/** Single-quote a value for safe interpolation into a POSIX shell script. */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`
 }
 
 function hostEnv(): Record<string, string> {
