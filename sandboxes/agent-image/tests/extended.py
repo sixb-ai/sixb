@@ -21,6 +21,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 
 from python_environment import check_python_environment
+from video import check_video
 
 
 def command(*args):
@@ -137,4 +138,6 @@ main().catch(error => {console.error(error);process.exitCode=1})
     assert yaml.safe_load("total: 2450")["total"] == 2450
     assert ElementTree.fromstring("<total>2450</total>").text == "2450"
     checks += ["pytest", "ruff", "yaml-xml"]
+
+    checks += check_video(root)
     return {"checks": checks, "browserVersion": browser_version}
