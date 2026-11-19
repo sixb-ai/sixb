@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto"
 import type { Queue, RenderQueueJob } from "../../queues"
 import type { ArtifactStorage, ArtifactVersionRecord } from "../../storage/artifacts/types"
-import type { VideoOutline, VideoOutlineScene } from "../outline"
+import type { VideoOutline } from "../outline"
 import { resolveVideoMedia, VIDEO_ENGINE } from "./export"
+import { videoSegmentFrames } from "./project"
 
-// Each scene of a video gets a still: a picture of its middle, which the player shows for its
-// chapter. It is kept under the scene's render key, so a version that keeps a scene as it was keeps
+// Each scene of a video gets a still: a picture of the middle of its segment, which the player
+// shows for its chapter. It is kept under the scene's render key, so a version that keeps a scene as it was keeps
 // its still. The video's poster is the still at the instant its root's `data-poster` names, or the
 // first scene's. Like a canvas's previews, stills are asked for when a version is published, once
 // the video rests.
@@ -28,9 +29,9 @@ const STILL_FORMAT = "sixb-video-still/1"
 const POSTER_FORMAT = "sixb-video-poster/1"
 
 /**
- * A picture of a video at one instant, kept under its key: a scene's middle, or the instant its
- * root's `data-poster` names. `scene` is the scene whose segment holds the instant, which every
- * scene on screen then overlaps, so the project that snapshots it keeps those.
+ * A picture of a video at one instant, kept under its key: the middle of a scene's segment, or the
+ * instant its root's `data-poster` names. `scene` is the scene whose segment holds the instant,
+ * which every scene on screen then overlaps, so the project that snapshots it keeps those.
  */
 export interface VideoStill {
   readonly key: string
@@ -39,29 +40,30 @@ export interface VideoStill {
 }
 
 /**
- * Where a scene's still is kept: what the scene shows and what snapshots it. What an `artifact:`
- * address it plays resolves to is not in it: a still shows it as the version's publisher read it,
- * and a later change to that artifact keeps the still until the scene changes.
+ * Each scene's still: the middle of its segment, what its chapter plays until the next scene
+ * starts, kept under what the scene's segment shows and where in it the instant falls. What an
+ * `artifact:` address it plays resolves to is not in its key: a still shows it as the version's
+ * publisher read it, and a later change to that artifact keeps the still until the scene changes.
  */
-export function videoStillKey(scene: Pick<VideoOutlineScene, "renderKey">): string {
-  return hash([STILL_FORMAT, VIDEO_ENGINE, scene.renderKey])
-}
+export function videoSceneStills(outline: VideoOutline): VideoStill[] {
+  const segments = videoSegmentFrames(outline)
+  return outline.scenes.flatMap((scene) => {
+    const segment = segments.get(scene.id)
+    if (!segment) return []
 
-/** The moment of the video a scene's still shows: the middle of the scene. */
-export function videoStillAtMs(scene: Pick<VideoOutlineScene, "startMs" | "durationMs">): number {
-  return scene.startMs + Math.floor(scene.durationMs / 2)
+    const middle = (segment.startFrame + segment.endFrame) / 2
+    const atMs = Math.floor((middle * 1000) / outline.fps)
+    const key = hash([STILL_FORMAT, VIDEO_ENGINE, scene.renderKey, atMs - scene.startMs])
+    return [{ key, atMs, scene: scene.id }]
+  })
 }
 
 /**
- * A video's stills: each scene's middle, then, when its root names one, its poster's instant,
- * kept under what the scene that holds that instant shows and where in it the instant falls.
+ * A video's stills: each scene's, then, when its root names one, its poster's instant, kept under
+ * what the scene that holds that instant shows and where in it the instant falls.
  */
 export function videoStills(outline: VideoOutline): VideoStill[] {
-  const scenes = outline.scenes.map((scene) => ({
-    key: videoStillKey(scene),
-    atMs: videoStillAtMs(scene),
-    scene: scene.id,
-  }))
+  const scenes = videoSceneStills(outline)
   const poster = posterStill(outline)
   return poster ? [...scenes, poster] : scenes
 }

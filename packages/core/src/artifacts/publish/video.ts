@@ -6,7 +6,7 @@ import {
   type VideoScene,
   type VideoSourceSpan,
 } from "../video/composition"
-import { playTogether } from "../video/project"
+import { scenesOnScreen, videoSegmentFrames } from "../video/project"
 import { frameKitDigest } from "./previews"
 
 // A video renders scene by scene: each scene is a segment of the export, kept apart from the
@@ -27,19 +27,20 @@ const HOST_PLACE = "<!-- scene -->"
  * - the frame's kit and runtime;
  * - `index.html` without its scene hosts, the root's own length, and the sounds it plays: the
  *   frame's size, the root's styles, and what it shows itself;
- * - the scene's host, and those of the scenes on screen with it, as one fades into the next: each
- *   with what it writes, its length, and its start from the scene's, in the order `index.html`
- *   lists them, which stacks them;
+ * - the scene's host, and those of the scenes on screen during its segment, from the frame it
+ *   starts on up to the one the next scene starts on, as one fades into it: each with what it
+ *   writes, its length, and its start from the scene's, in the order `index.html` lists them,
+ *   which stacks them. A scene that fades in after the segment shows none of its frames;
  * - its start in the video, only when the root plays or animates something of its own
  *   (`rootTimeline`): only then does what the scene shows depend on when it plays. A scene's own
  *   CSS animations and GSAP timeline run from its start, wherever it plays (measured: README);
  * - every other file of the version, with what it holds, but the other scenes' HTML, the videos
- *   neither the root, the scene, nor a scene on screen with it plays, and every sound.
+ *   neither the root nor a scene on screen during the segment plays, and every sound.
  *
  * A segment is pictures alone: the export mixes the whole video's sound once, apart, so a sound is
  * in no key, and a soundtrack changed or moved renders no scene again.
  *
- * So trimming a scene renders it again, and the scenes it overlaps, but not the others unless the
+ * So trimming a scene renders it again, and the scene it fades into, but not the others unless the
  * root has a timeline of its own. Images, stylesheets, fonts, scripts, and nested compositions are
  * in every key, whatever loads them; only a recording a scene loads by script alone is missed.
  *
@@ -87,11 +88,13 @@ export function sceneRenderKeys(input: {
     return cut(index.slice(element.start, element.end), times)
   }
 
+  const segments = videoSegmentFrames(composition)
   return new Map(
     scenes.map((scene) => {
-      const beside = scenes
-        .filter((other) => playTogether(scene, other))
-        .sort((a, b) => a.host.element.start - b.host.element.start)
+      const segment = segments.get(scene.id)
+      const beside = (segment ? scenesOnScreen(composition, segment) : [scene]).sort(
+        (a, b) => a.host.element.start - b.host.element.start
+      )
 
       const loaded = videoSceneFiles({
         files,

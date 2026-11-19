@@ -17,24 +17,80 @@ export interface VideoSegmentRender {
   readonly to: number
 }
 
+/** A video's length, rate and scenes, as its segments are cut from them. */
+export interface VideoTimeline<TScene extends VideoTimedScene = VideoTimedScene> {
+  readonly fps: number
+  readonly durationMs: number
+  /** In the order they start. */
+  readonly scenes: readonly TScene[]
+}
+
+export type VideoTimedScene = Pick<VideoScene, "id" | "startMs" | "durationMs">
+
+/** The frames of a scene's segment, which `scene` renders: from `startFrame` up to `endFrame`. */
+export interface VideoSegmentFrames {
+  readonly scene: string
+  readonly startFrame: number
+  readonly endFrame: number
+}
+
 /**
- * How the segment of `scene` from `startFrame` up to `endFrame` renders. Every scene on screen
- * during it is on screen with `scene`, so the project keeps those alone. It is moved earlier by as
- * many whole frames as no kept scene starts before, so a scene keeps its place between frames, up
- * to the segment's start: then HyperFrames renders it from frame 0. A scene still on screen from
- * before the segment, or a root that moves on its own, keeps it from there: HyperFrames then
- * renders a range of the project, from `from`.
+ * Each scene's segment, by its id: from the frame it starts on, the first from frame 0, up to the
+ * one the next scene starts on, or the video's last. Scenes that start on one frame share the
+ * segment of the first, which renders it; a scene that starts past the end has none.
+ */
+export function videoSegmentFrames(video: VideoTimeline): ReadonlyMap<string, VideoSegmentFrames> {
+  const { fps, scenes } = video
+  const frames = videoFrameCount(video.durationMs, fps)
+  const starts = scenes.map((scene, index) =>
+    index === 0 ? 0 : Math.min(frameAtOrBefore(scene.startMs, fps), frames)
+  )
+
+  const segments = new Map<string, VideoSegmentFrames>()
+  for (const [index, scene] of scenes.entries()) {
+    const startFrame = starts[index] ?? 0
+    const first = scenes[starts.indexOf(startFrame)] ?? scene
+    const endFrame = starts.find((start, later) => later > index && start > startFrame) ?? frames
+    if (endFrame > startFrame) segments.set(scene.id, { scene: first.id, startFrame, endFrame })
+  }
+  return segments
+}
+
+/**
+ * The scenes on screen during the frames from `startFrame` up to `endFrame`, for a moment at
+ * least, in the order they start: what a segment shows, and so what its key holds.
+ */
+export function scenesOnScreen<TScene extends VideoTimedScene>(
+  video: VideoTimeline<TScene>,
+  frames: Pick<VideoSegmentFrames, "startFrame" | "endFrame">
+): TScene[] {
+  const from = (frames.startFrame * 1000) / video.fps
+  const to = (frames.endFrame * 1000) / video.fps
+  return video.scenes.filter(
+    (scene) => scene.startMs < to && from < scene.startMs + scene.durationMs
+  )
+}
+
+/**
+ * How the segment of `scene` from `startFrame` up to `endFrame` renders. The project keeps the
+ * scenes on screen during it alone. It is moved earlier by as many whole frames as no kept scene
+ * starts before, so a scene keeps its place between frames, up to the segment's start: then
+ * HyperFrames renders it from frame 0. A scene still on screen from before the segment, as one
+ * fades into the next, or a root that moves on its own, keeps it from there: HyperFrames then
+ * renders a range of the project, from `from`, in short chunks one after the other, about twice
+ * slower.
  */
 export function videoSegmentRender(
-  composition: Pick<VideoComposition, "fps" | "scenes">,
-  segment: { readonly scene: string; readonly startFrame: number; readonly endFrame: number },
+  composition: Pick<VideoComposition, "fps" | "durationMs" | "scenes">,
+  segment: VideoSegmentFrames,
   rootMoves: boolean
 ): VideoSegmentRender {
   const { fps } = composition
-  const scene = composition.scenes.find((each) => each.id === segment.scene)
-  if (!scene) throw new Error(`[Sixb] The video has no scene '${segment.scene}' to render.`)
+  if (!composition.scenes.some((each) => each.id === segment.scene)) {
+    throw new Error(`[Sixb] The video has no scene '${segment.scene}' to render.`)
+  }
 
-  const kept = composition.scenes.filter((other) => playTogether(scene, other))
+  const kept = scenesOnScreen(composition, segment)
   const earliest = Math.min(...kept.map((each) => frameAtOrBefore(each.startMs, fps)))
   const shiftFrames = rootMoves ? 0 : Math.min(segment.startFrame, earliest)
 

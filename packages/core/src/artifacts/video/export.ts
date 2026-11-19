@@ -8,7 +8,7 @@ import type {
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
 import type { VideoOutline } from "../outline"
-import { frameAtOrBefore, playTogether, videoFrameCount } from "./project"
+import { scenesOnScreen, videoFrameCount, videoSegmentFrames } from "./project"
 
 // A video version exports to one MP4 made of segments kept apart from it, each under a key that
 // hashes what it is made of: each scene's frames, from its start until the next scene starts,
@@ -74,6 +74,8 @@ export type VideoSegment =
   | {
       readonly kind: "scene"
       readonly scene: string
+      /** The scene's name, as the player shows it, which is in no key. */
+      readonly label?: string
       readonly startFrame: number
       readonly endFrame: number
     }
@@ -103,8 +105,8 @@ const SOUND_FORMAT = "sixb-video-sound/1"
  * scene starts on; a scene that starts with another renders within the other's segment.
  *
  * A segment's key holds its scene's render key, where it starts and how many frames it has from
- * there, the engine and the settings, and what the `artifact:` addresses played by the scenes on
- * screen with it resolve to. The sound's holds every file and what every address resolves to. The
+ * there, the engine and the settings, and what the `artifact:` addresses played by the root and
+ * the scenes on screen during it resolve to. The sound's holds every file and what every address resolves to. The
  * export's holds its segments' keys.
  */
 export function videoExportPlan(source: VideoExportSource): VideoExportPlan {
@@ -112,18 +114,15 @@ export function videoExportPlan(source: VideoExportSource): VideoExportPlan {
   const { fps } = outline
   const frames = videoFrameCount(outline.durationMs, fps)
 
-  const starts = outline.scenes.map((scene, index) =>
-    index === 0 ? 0 : Math.min(frameAtOrBefore(scene.startMs, fps), frames)
-  )
-  const scenes = outline.scenes.flatMap((scene, index) => {
-    const startFrame = starts[index] ?? 0
+  const cuts = videoSegmentFrames(outline)
+  const scenes = outline.scenes.flatMap((scene) => {
     // Scenes that start on one frame render in the segment of the first.
-    if (starts.indexOf(startFrame) !== index) return []
-    const endFrame = starts.find((start, later) => later > index && start > startFrame) ?? frames
-    if (endFrame <= startFrame) return []
+    const cut = cuts.get(scene.id)
+    if (cut?.scene !== scene.id) return []
+    const { startFrame, endFrame } = cut
 
-    // Every scene on screen during the segment is on screen with this one.
-    const beside = outline.scenes.filter((other) => playTogether(scene, other))
+    // The scene's render key holds the scenes on screen during its segment, and so does this.
+    const beside = scenesOnScreen(outline, cut)
     const key = hash([
       SEGMENT_FORMAT,
       VIDEO_ENGINE,
@@ -133,7 +132,8 @@ export function videoExportPlan(source: VideoExportSource): VideoExportPlan {
       endFrame - startFrame,
       resolved(source, ["", ...beside.map((each) => each.id)]),
     ])
-    return [{ kind: "scene" as const, scene: scene.id, startFrame, endFrame, key }]
+    const label = scene.label ? { label: scene.label } : {}
+    return [{ kind: "scene" as const, scene: scene.id, ...label, startFrame, endFrame, key }]
   })
 
   const sound = {

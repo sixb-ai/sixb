@@ -90,14 +90,16 @@ so a change stays one small text edit, in the live document and in the Agent's d
 
 - the frame kit;
 - `index.html` without its scene hosts, the root's `data-duration` and `data-poster`, and its
-  `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself.
-  A soundtrack trimmed with the video spares the scenes before the cut;
-- the scene's host and those of the scenes on screen with it, as one fades into the next, with
-  their times resolved and their order in `index.html`, which stacks them;
+  `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself;
+- the scene's host and those of the scenes on screen during its segment, from the frame it starts
+  on up to the one the next scene starts on, as one fades into it, with their times resolved and
+  their order in `index.html`, which stacks them. A scene that fades in after the segment ends
+  shows in none of its frames, and is not in its key;
 - the scene's start in the video, only when the root shows something that moves of its own: a
   timed element, a video, a script that may build a timeline, or CSS that moves;
-- every other file, but three kinds: the other scenes' HTML, the videos neither the root, the
-  scene, nor a scene beside it plays, the heavy files a version mostly changes, and every sound.
+- every other file, but three kinds: the other scenes' HTML, the videos neither the root nor a
+  scene on screen during the segment plays, the heavy files a version mostly changes, and every
+  sound.
 
 A segment is pictures alone. The export mixes the whole video's sound once, apart, so a soundtrack
 changed, trimmed or moved renders no scene again (see Export below).
@@ -114,7 +116,7 @@ moved by a 2 s CSS animation, then by a GSAP timeline, placed at 0 s and at 2 s,
 rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are identical, all 60
 distinct. The control, the same box animated in the root, differs on all 60 frames.
 
-So trimming a scene re-renders it and the scenes it overlaps, and those after it only when the
+So trimming a scene re-renders it and the scene it fades into, and those after it only when the
 root moves on its own. An image, a stylesheet, a font, a script, or a nested composition
 is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
 video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
@@ -133,26 +135,27 @@ each is made of (`export.ts`), in `ArtifactStorage`'s video renders, which no ar
 
 | Segment | Its key holds |
 | --- | --- |
-| A scene's frames, from the frame it starts on up to the one the next scene starts on (the first from frame 0), silent | the scene's render key, where it starts from the scene's start and how many frames, the engine (`VIDEO_ENGINE`), the encoder settings, and what the `artifact:` addresses played by the root and the scenes on screen with it resolve to |
+| A scene's frames, from the frame it starts on up to the one the next scene starts on (the first from frame 0), silent | the scene's render key, where it starts from the scene's start and how many frames, the engine (`VIDEO_ENGINE`), the encoder settings, and what the `artifact:` addresses played by the root and the scenes on screen during it resolve to |
 | The whole video's sound | every file, the frame rate and count, the engine, and what every address resolves to |
 | The MP4 | its segments' keys, in order |
 
-So a version that changes one scene renders that scene's segment again, and the scenes it overlaps,
-and mixes the sound again, which takes seconds; a copy shares every segment. Scenes that start on
-one frame render in the first one's segment. Every scene on screen during a segment overlaps its
-scene, so the segment's scene key covers all it shows.
+So a version that changes one scene renders that scene's segment again, and the segment of the
+scene it fades into, and mixes the sound again, which takes seconds; a copy shares every segment.
+Scenes that start on one frame render in the first one's segment, and its scene's key covers every
+scene on screen during it (`scenesOnScreen`).
 
 ```text
 sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
   → artifact.video.export.requested   one job per export, carrying the version as it was asked for
       asks for each missing segment, then for itself again, VIDEO_EXPORT_JOB.recheckMs later
   → artifact.video.segment.requested  one job per segment key, shared by exports
-      a scene: `index.html` keeping the scenes on screen with it (project.ts), in a sandbox
+      a scene: `index.html` keeping the scenes on screen during it (project.ts), in a sandbox
+      once kept, asks the export that asked for it to look again at once
       the sound: HyperFrames' own mix, through its distributed plan, which captures no frame
   → the export, once every segment is kept: joined without encoding again, the sound muxed
 ```
 
-- **A scene's project.** `videoSegmentRender` keeps the scenes on screen with the segment's scene
+- **A scene's project.** `videoSegmentRender` keeps the scenes on screen during the segment
   and moves them earlier by as many whole frames as none of them starts before, up to the
   segment's start, so each keeps its place between frames. When nothing starts before the segment
   and the root does not move, the segment starts at frame 0 of its project, and HyperFrames renders
@@ -171,15 +174,19 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
   sound fails at once, kept with what changed, and `video-export.e2e.ts` fails by name on an
   image that upgrades HyperFrames.
 - **Waiting** is a job, not a worker: the export looks again a few seconds later in a job it asks
-  for in its own place, asking for nothing then. A segment job always keeps its file or why not,
+  for in its own place, asking for nothing then. Each segment it asked for makes it look at once,
+  once kept or failed, carrying the export's payload; the later look is a backstop, for an export
+  whose segment another asked for first. A segment job always keeps its file or why not,
   so asking again for a segment never strands an export; a retry forgets the failures and asks
   anew with `replace`.
 - **Failures.** A segment that fails after `VIDEO_SEGMENT_JOB.attempts` fails the export, naming
-  the scene. A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why
+  the scene by its label, else its id. An export asked for by a Sixb whose keys differ from the
+  worker's, as while a deploy rolls out, tries again until its attempts are spent, then keeps why. A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why
   at once: rendering there would keep frames under a key that does not name what made them.
-- **Stills** (`stills.ts`): each scene's middle, snapshotted with `hyperframes snapshot` when a
-  version is published, once it rests, and kept under the scene's key. The first scene's is the
-  video's poster: HyperFrames has no notion of one.
+- **Stills** (`stills.ts`): the middle of each scene's segment, what its chapter plays until the
+  next scene starts, snapshotted with `hyperframes snapshot` when a version is published, once it
+  rests, and kept under the scene's key. The poster is the instant the root's `data-poster` names,
+  else the first scene's still.
 
 ### What to ask HyperFrames for
 
