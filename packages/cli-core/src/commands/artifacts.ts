@@ -7,7 +7,8 @@ import { idSegment, readText } from "./shared"
 // An artifact's comments, as the people reading it leave them: read them as threads, resolve the
 // ones whose change is made, and reply to one to say why it is not. The Agent's run reaches them
 // as the person it answers, through the conversation that shares the artifact. A video's MP4,
-// rendered when asked, and downloaded once it is.
+// rendered when asked, and downloaded once it is. What is derived of a video or a sound it holds:
+// read, and each part's file downloaded.
 
 const STATUSES = ["open", "resolved", "all"] as const
 
@@ -25,6 +26,7 @@ export async function artifacts(api: ApiClient, args: readonly string[]): Promis
   const [group, sub, ...rest] = args
   if (!group || isHelp(group)) return writeText(GROUP_HELP.artifacts)
   if (group === "export") return exportVideo(api, args.slice(1))
+  if (group === "media") return media(api, args.slice(1))
   if (group !== "comments") fail(`Unknown artifacts command '${group}'.`)
   if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP.artifacts)
 
@@ -162,6 +164,75 @@ function exportProgress() {
       if (shown) process.stderr.write("\r\x1b[2K")
     },
   }
+}
+
+/** The parts of a media that are files, each downloaded with --part. */
+const MEDIA_FILES = ["proxy", "poster", "filmstrip", "waveform", "transcript"] as const
+
+interface MediaPart {
+  readonly status: "ready" | "pending" | "unavailable" | "failed"
+  readonly reason?: string
+  readonly url?: string
+}
+
+/**
+ * What is derived of a video or a sound a version holds, as JSON; with --part, that part's file,
+ * downloaded once it is ready.
+ */
+async function media(api: ApiClient, args: readonly string[]): Promise<void> {
+  if (requestsHelp(args)) return writeText(GROUP_HELP.artifacts)
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--path": "string",
+      "--version": "string",
+      "--part": "string",
+      "--output": "string",
+      "--retry": "boolean",
+    },
+    "artifacts media",
+    1
+  )
+
+  const path = options["--path"]?.trim()
+  if (!path) fail("artifacts media requires --path <file-path>, the video or sound in the version.")
+  const version = options["--version"]?.trim() || "latest"
+  if (!/^(latest|[1-9]\d*)$/.test(version)) {
+    fail('artifacts media --version is a version number, or "latest".')
+  }
+
+  const part = options["--part"] && enumValue("--part", options["--part"], MEDIA_FILES)
+  const output = options["--output"]
+  if (part && !output) fail("artifacts media --part requires --output <local-path>.")
+
+  const route = `/api/artifacts/${idSegment(positionals[0]?.trim())}/versions/${version}/media`
+  const derived = (await api.get(route, {
+    path,
+    ...(options["--retry"] === true ? { retry: "true" } : {}),
+  })) as { readonly parts?: Readonly<Record<string, MediaPart>> }
+  if (!part || !output) return writeJson(derived)
+
+  const wanted = derived.parts?.[part]
+  if (wanted?.status === "pending") {
+    fail(
+      `The ${part} of ${path} is still being made.`,
+      "media_pending",
+      "Ask again in a few seconds."
+    )
+  }
+  if (wanted?.status !== "ready" || !wanted.url) {
+    fail(
+      `${path} has no ${part}: ${wanted?.reason ?? "it was not derived"}`,
+      "media_unavailable",
+      wanted?.status === "failed"
+        ? "Run the command again with --retry to derive it anew."
+        : undefined
+    )
+  }
+
+  const url = new URL(wanted.url, "http://sixb.invalid")
+  await api.download(url.pathname, output, Object.fromEntries(url.searchParams))
+  return writeJson({ downloaded: true, part, output })
 }
 
 function commentsOf(page: unknown): Comment[] {
