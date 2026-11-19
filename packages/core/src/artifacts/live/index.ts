@@ -14,6 +14,7 @@ export {
 export {
   cutRange,
   duplicateScene,
+  findVideoTarget,
   insertClip,
   moveClip,
   moveScene,
@@ -33,6 +34,8 @@ export {
   type VideoImportKind,
   type VideoRange,
   type VideoSources,
+  type VideoTarget,
+  videoTarget,
 } from "../video/edit"
 export type {
   VideoClip,

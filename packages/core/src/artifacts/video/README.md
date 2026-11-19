@@ -221,6 +221,10 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   anything with `data-start` and every `<video>` and `<audio>`, with their timing as written and the
   span of each attribute. A clip is named by its `id`, else by its place among the file's clips
   (`#2`). Its track follows from what it is: picture, text, or sound.
+- **Targets** (`videoTarget`): how the editor names an element in an operation. One without an id
+  carries its tag, words and file with its place: someone else's edit in between may shift the
+  place, and the operation then takes the one element still alike, or refuses when none or several
+  are. It never edits another element than the one the reader chose.
 - **Texts**: the elements holding words alone, timed or not, which an editor types over.
 - **Operations** take the files as they are and return an edit or a refusal: a scene's length,
   label, place, copy and removal; a clip's timing, trim, move, split, removal, sound and words; an
