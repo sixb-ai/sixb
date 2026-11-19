@@ -198,6 +198,9 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
   [paused children](#paused-children)). Run teardown never destroys it; only a subagent that ended
   does, through `beforeFinalize({ discard: true })`.
 
+A conversation's workspace, persistent or the user's folder, is lent to its children
+(`RunSandbox.lend`, see [children in the workspace](#children-in-the-workspace)).
+
 A `RunSandbox` also names the run's **context directory** (`$SIXB_CONTEXT_DIR`), where the run's
 files go: skills, ontology docs, memory, attachments, artifacts, tool files, saved tool outputs,
 children's files and the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
@@ -269,15 +272,19 @@ heavier investigations that can run in parallel, never a lookup or a quick gener
 Each child:
 
 - inherits and independently revalidates the parent's durable authority, and its approval mode;
-- receives all project tools plus an isolated, blank sandbox, kept while it pauses on a provider
-  that resumes sandboxes, and scoped Sixb API access;
+- receives all project tools, scoped Sixb API access, and its parent's workspace when the parent
+  has one to lend (see [children in the workspace](#children-in-the-workspace)), else an isolated,
+  blank sandbox, kept while it pauses on a provider that resumes sandboxes;
+- with `readOnly`, gets no `edit` and no `write`, in its tools and in the specs its estimates
+  count, for this run and every continuation (`SubagentRunSpec.readOnly`); its `bash` still runs;
 - knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
   time zone and locale, and the memory, which it reads and the API refuses to let it save;
 - gets the conversation prompt's data rules, never its rules for talking to the user;
 - publishes artifacts into its conversation (`conversationThreadId`) as its own run, so a retry of
   the parent removes them with the parent's own;
-- gets the files its parent passed in `spawn_agent`'s `files`, at their paths in the parent's
-  sandbox, listed in its task and in `$SIXB_ATTACHMENTS`, and returns what it writes to `out/`;
+- in a sandbox of its own, gets the files its parent passed in `spawn_agent`'s `files`, at their
+  paths in the parent's sandbox, listed in its task and in `$SIXB_ATTACHMENTS`, and returns what it
+  writes to `out/`;
 - works in a thread of its own, its run's `threadId`, beside a durable run, usage records and
   stream (see [Child threads](#child-threads));
 - stops with its parent: when the parent finishes or is cancelled, or its runner stops. Once its
@@ -296,6 +303,45 @@ parent never starves a child. Child agents cannot delegate again or start workfl
 The delegation guide lists each model from its configured definition, never its provider catalog,
 so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
 are not guessed.
+
+## Children in the workspace
+
+A turn whose run sandbox has `lend` (a conversation's persistent workspace, or the folder on a
+computer) runs the children it starts there, which their spec records (`inParentWorkspace`): the
+coordinator hands the runner the workspace through `ChildParent.workspace` for each run it lends
+it, and `ChildRunner` opens the child's environment from it instead of `openSandbox`. The child
+works on the parent's files, dependencies and Git state; its prompt describes the parent's
+workspace, with the repository's instruction files, and its rules say it changes the files there.
+
+- **What stays its own.** Its run, session, model loop, background commands, read-before-edit
+  ledger and context directory: by its thread, so each of its runs names the same paths,
+  `.sixb/agent/threads/<threadId>` in a persistent workspace, which the checkout already excludes
+  and each opening of the workspace clears, or its thread's files directory on a computer. A run
+  of such a thread that continues in a sandbox of its own keeps that directory there
+  (`threadContextDirectory`), so the paths its history names, saved outputs included, hold.
+- **One session, the parent's token, the child's run.** In the cloud the child runs in the
+  parent's session, through its guard: the parent's ownership governs each of its commands, and
+  the parent's save waits for them. The session's credentials stay as the parent opened them, so
+  the child's commands call the API with the parent's token; the sandbox CLI names their run in
+  `x-sixb-run` (`AGENT_RUN_HEADER`, from `SIXB_RUN_ID`). The server admits a request naming one of
+  the token's run's own children still at work as that child, exactly as the child's own token
+  would be (its approvals, its actions, its memory refused), and refuses any other run it names.
+  On a computer the child gets a `LocalSandbox` of its own on the same folder, with the turn's
+  token, named the same way.
+- **Not a security boundary.** A child shares its parent's machine and acts for the same user: the
+  header only narrows the token to one of its run's children, so what the API refuses a child
+  stays refused for the calls it makes, but a command could still deliberately leave it out.
+- **No files either way.** `spawn_agent` refuses `files`, and the child stores no `out/`: what it
+  changed is in the workspace. Its answer lists the files it changed.
+- **Continuations keep the kind of sandbox the child started with.** A child spawned with a
+  sandbox of its own keeps one, even under a turn that lends. A child that worked in the parent's
+  workspace goes on there while the turn lends and the conversation did not move since it paused,
+  and is told when the workspace was recreated after its pause (`resetAt`); otherwise it continues
+  in a blank sandbox of its own, and its trigger says its earlier changes are not there.
+- **Teardown order.** The turn's `beforeFinalize` stops its children still at work and waits for
+  them to record their end before it saves the workspace (`stopChildren`), whether it answers,
+  pauses, fails or is cancelled. A turn whose execution was lost touches nothing: the run's current
+  owner decides. A child paused on an approval or a question already ended its run.
 
 ## Paused children
 

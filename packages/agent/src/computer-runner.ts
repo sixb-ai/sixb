@@ -30,7 +30,10 @@ import type { AgentRunSettings } from "./types"
 
 /** Opens the sandbox a computer's run works in. */
 export type OpenComputerSandbox = (input: {
-  /** The user's folder, for a turn; absent for a child, which works in a folder of its own. */
+  /**
+   * The user's folder, for a turn and for each child it starts there; absent for a sandbox of
+   * its own.
+   */
   readonly workingDirectory?: string
   /** Where the run's own files go, outside the folder: its commands may write there too. */
   readonly runFiles: string
@@ -166,15 +169,18 @@ export class ComputerRunner {
             this.sandbox({
               runId: run.id,
               threadId: run.threadId,
-              executionToken: session.executionToken,
-              projectId: run.projectId,
+              runToken: runTokenFor({
+                projectId: run.projectId,
+                runId: run.id,
+                executionToken: session.executionToken,
+              }),
               folder: this.options.folder,
             }),
-          startChild: (child, family, networkPolicy) =>
+          startChild: (child, family, from) =>
             children.start(child, {
               signal: turnSignal,
               family,
-              ...(networkPolicy ? { networkPolicy } : {}),
+              ...from,
               leaseExpiresAt: lease,
               holdLease: async (childSession) => {
                 held.add(childSession)
@@ -187,6 +193,7 @@ export class ComputerRunner {
                 return () => held.delete(childSession)
               },
             }),
+          stopChildren: (runId) => children.stopChildrenOf(runId),
           onDetachedTeardown: (teardown) => this.track(teardown),
           reportFailure: (error) => this.options.onFailure?.(error),
         },
@@ -317,12 +324,17 @@ export class ComputerRunner {
           if (stop.aborted) return null
         }
       },
+      // A turn always lends its children its folder: this opens one of their own only for a child
+      // whose turn lent none.
       openSandbox: ({ session }) =>
         this.sandbox({
           runId: session.run.id,
           threadId: session.run.threadId,
-          executionToken: session.executionToken,
-          projectId: session.run.projectId,
+          runToken: runTokenFor({
+            projectId: session.run.projectId,
+            runId: session.run.id,
+            executionToken: session.executionToken,
+          }),
         }),
       onDetachedTeardown: (teardown) => this.track(teardown),
       reportFailure: (error) => this.options.onFailure?.(error),
@@ -331,93 +343,136 @@ export class ComputerRunner {
 
   /**
    * A run's sandbox: the user's folder for a turn, which the prompt describes, or a blank folder
-   * of its own for a child. Its own files go in its thread's directory, outside the folder: the
-   * prompt names them, so each run of the thread names the same paths.
+   * of its own. Its own files go in its thread's directory, outside the folder: the prompt names
+   * them, so each run of the thread names the same paths.
    */
   private sandbox(input: {
     readonly runId: string
     readonly threadId: string
-    readonly executionToken: string
-    readonly projectId: string
+    readonly runToken: string
     readonly folder?: string
   }): OpenRunSandbox {
-    const { apiUrl } = this.options
-    const credential = runApiCredential(apiUrl, runTokenFor(input))
     return async ({ signal }) => {
       // Real paths: the OS sandbox compares them, and the agent names files by them.
       await mkdir(this.options.runFilesRoot, { recursive: true })
-      const runDirectory = join(await realpath(this.options.runFilesRoot), threadDirectory(input))
-      // Named as a cloud sandbox names them, so a path reads as the run's files wherever it ran.
-      const runFiles = join(runDirectory, SANDBOX_CONTEXT_DIRECTORY)
+      const runFilesRoot = await realpath(this.options.runFilesRoot)
       const folder = input.folder === undefined ? undefined : await realpath(input.folder)
-      let held: (() => Promise<void>) | undefined
 
-      // A turn's background commands are its thread's, and so are their files, which every run
-      // of the thread keeps; a child's end with it.
-      const background = folder === undefined ? undefined : this.threadBackground(input.threadId)
-      const kept = () =>
-        background?.hasCommands ? join(runFiles, BACKGROUND_DIRECTORY) : undefined
-
-      const sandbox: RunSandbox = {
-        waitBeforeModel: folder !== undefined,
-        contextDirectory: runFiles,
-        // The person's own machine: its pages leave from there, and its dev servers are readable.
-        webNetwork: "computer",
-        ...(background ? { background } : {}),
-        acquire: async () => {
-          const giveBack = await holdRunFiles({
-            directory: runDirectory,
-            runId: input.runId,
-            signal,
-          })
-          held = giveBack
-          try {
-            // What a sixb killed, or that crashed, left running is stopped before its files go.
-            if (background && folder !== undefined) {
-              await this.stopCommandsLeftRunning({
-                runFiles,
-                background,
-                folder,
-                credential,
-                signal,
-              })
-            }
-
-            // Each run starts empty, as with a directory of its own: nothing an earlier run, or
-            // one that crashed, left there, but its thread's background commands.
-            await emptyDirectory(runDirectory, kept())
-            await mkdir(runFiles, { recursive: true })
-            return {
-              sandbox: await this.options.openSandbox({
-                ...(folder === undefined ? {} : { workingDirectory: folder }),
-                runFiles,
-                credential,
-                signal,
-              }),
-              ...(folder === undefined
-                ? {}
-                : { promptContext: { workingDirectory: folder, retention: "computer" as const } }),
-            }
-          } catch (error) {
-            await giveBack()
-            throw error
-          }
-        },
-        release: async ({ sandbox }) => {
-          try {
-            // A background command runs in the call that started it: its sandbox is torn down
-            // once the last one it runs ended.
-            const running = background?.endOf(sandbox)
-            if (running) this.track(running.then(() => sandbox.destroy()))
-            else await sandbox.destroy()
-
-            await emptyDirectory(runDirectory, kept())
-          } finally {
-            await held?.()
-          }
-        },
+      return {
+        sandbox: this.runSandbox({
+          ...input,
+          runFilesRoot,
+          ...(folder === undefined ? {} : { folder }),
+          signal,
+        }),
       }
-      return { sandbox }
+    }
+  }
+
+  /**
+   * The sandbox a run works in, from real paths. A turn lends its folder to each child it starts:
+   * the child gets a sandbox of its own there, with the turn's token and its own files directory,
+   * and its background commands end with it.
+   */
+  private runSandbox(input: {
+    readonly runId: string
+    readonly threadId: string
+    readonly runToken: string
+    readonly runFilesRoot: string
+    readonly folder?: string
+    readonly signal: AbortSignal
+    /** A child's, in the folder its turn lent it. */
+    readonly lent?: boolean
+  }): RunSandbox {
+    const { apiUrl } = this.options
+    const { folder, signal } = input
+    const credential = runApiCredential(apiUrl, input.runToken)
+    const runDirectory = join(input.runFilesRoot, threadDirectory(input))
+    // Named as a cloud sandbox names them, so a path reads as the run's files wherever it ran.
+    const runFiles = join(runDirectory, SANDBOX_CONTEXT_DIRECTORY)
+    let held: (() => Promise<void>) | undefined
+
+    // A turn's background commands are its thread's, and so are their files, which every run of
+    // the thread keeps; a child's end with it.
+    const background =
+      folder === undefined || input.lent ? undefined : this.threadBackground(input.threadId)
+    const kept = () => (background?.hasCommands ? join(runFiles, BACKGROUND_DIRECTORY) : undefined)
+
+    return {
+      waitBeforeModel: folder !== undefined,
+      contextDirectory: runFiles,
+      // The person's own machine: its pages leave from there, and its dev servers are readable.
+      webNetwork: "computer",
+      ...(background ? { background } : {}),
+      ...(input.lent ? { lent: true } : {}),
+      ...(folder !== undefined && !input.lent
+        ? {
+            lend: (child) =>
+              this.runSandbox({
+                runId: child.runId,
+                threadId: child.threadId,
+                // As in a cloud workspace: the parent's token, which the child's commands narrow
+                // to its own run (`SIXB_RUN_ID`).
+                runToken: input.runToken,
+                runFilesRoot: input.runFilesRoot,
+                folder,
+                signal: child.signal,
+                lent: true,
+              }),
+          }
+        : {}),
+      acquire: async () => {
+        const giveBack = await holdRunFiles({
+          directory: runDirectory,
+          runId: input.runId,
+          signal,
+        })
+        held = giveBack
+        try {
+          // What a sixb killed, or that crashed, left running is stopped before its files go.
+          if (background && folder !== undefined) {
+            await this.stopCommandsLeftRunning({
+              runFiles,
+              background,
+              folder,
+              credential,
+              signal,
+            })
+          }
+
+          // Each run starts empty, as with a directory of its own: nothing an earlier run, or
+          // one that crashed, left there, but its thread's background commands.
+          await emptyDirectory(runDirectory, kept())
+          await mkdir(runFiles, { recursive: true })
+          return {
+            sandbox: await this.options.openSandbox({
+              ...(folder === undefined ? {} : { workingDirectory: folder }),
+              runFiles,
+              credential,
+              signal,
+            }),
+            ...(folder === undefined
+              ? {}
+              : { promptContext: { workingDirectory: folder, retention: "computer" as const } }),
+          }
+        } catch (error) {
+          await giveBack()
+          throw error
+        }
+      },
+      release: async ({ sandbox }) => {
+        try {
+          // A background command runs in the call that started it: its sandbox is torn down
+          // once the last one it runs ended.
+          const running = background?.endOf(sandbox)
+          if (running) this.track(running.then(() => sandbox.destroy()))
+          else await sandbox.destroy()
+
+          await emptyDirectory(runDirectory, kept())
+        } finally {
+          await held?.()
+        }
+      },
     }
   }
 

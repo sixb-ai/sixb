@@ -28,6 +28,7 @@ import {
   type OpenRunSandbox,
 } from "./run-environment"
 import { agentRunFailureDetails, recordFate } from "./run-fate"
+import { type RunSandbox, threadContextDirectory, withContextDirectory } from "./run-sandbox"
 import { runSubagent, type SubagentWork } from "./run-subagent"
 import { SubagentInbox } from "./subagent-inbox"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
@@ -50,7 +51,10 @@ export interface ChildRunnerHost {
     run: SubagentRunRecord,
     claim: { readonly leaseExpiresAt: string; readonly stop: AbortSignal }
   ): Promise<AgentRunSession<SubagentRunRecord> | null>
-  /** The sandbox the child works in, opened when it first needs one. */
+  /**
+   * The sandbox the child works in, opened when it first needs one: for a child whose parent
+   * lends it no workspace.
+   */
   openSandbox(child: {
     readonly session: AgentRunSession<SubagentRunRecord>
     readonly context: AgentExecutionContext
@@ -77,6 +81,11 @@ export interface ChildParent {
   readonly family: FamilyMailbox
   /** The network the turn's `web_fetch` follows, which the child's follows too. */
   readonly networkPolicy?: SandboxNetworkPolicy
+  /**
+   * The turn's workspace, which it lends its children (`RunSandbox.lend`): each runs its tools
+   * there instead of in a sandbox of its own. Absent when the turn has none to lend.
+   */
+  readonly workspace?: NonNullable<RunSandbox["lend"]>
 }
 
 interface RunningChild {
@@ -87,9 +96,10 @@ interface RunningChild {
 }
 
 /**
- * Runs the children of a runner's turns. A child holds its own run, session, token and sandbox,
- * but no lease of its own: its parent's renewals renew it, and a runner that stops takes its
- * children with it. A child left running once its parent ended is ended when its lease lapses.
+ * Runs the children of a runner's turns. A child holds its own run, session and token, and works in
+ * its parent's workspace when the turn lends it one, else in a sandbox of its own. It holds no
+ * lease of its own: its parent's renewals renew it, and a runner that stops takes its children
+ * with it. A child left running once its parent ended is ended when its lease lapses.
  */
 export class ChildRunner {
   /** Children running here, by run id: a child already running is never started twice. */
@@ -207,7 +217,12 @@ export class ChildRunner {
       const inbox = new SubagentInbox(parent.family.child(run.id), run)
       const childEnvironment = await createSubagentEnvironment({
         session,
-        openSandbox: this.host.openSandbox({ session, context, execution, thread }),
+        openSandbox: parent.workspace
+          ? this.lentSandbox(session, parent.workspace)
+          : this.ownSandbox(
+              session,
+              this.host.openSandbox({ session, context, execution, thread })
+            ),
         context,
         plan,
         run,
@@ -280,6 +295,38 @@ export class ChildRunner {
       await session.close()
       runtime?.dispose()
       await environment?.dispose()
+    }
+  }
+
+  /** The parent's workspace, lent to the child. */
+  private lentSandbox(
+    session: AgentRunSession<SubagentRunRecord>,
+    lend: NonNullable<RunSandbox["lend"]>
+  ): OpenRunSandbox {
+    const { run } = session
+
+    return async ({ signal }) => ({
+      sandbox: lend({ runId: run.id, threadId: run.threadId, signal }),
+    })
+  }
+
+  /**
+   * A sandbox of the child's own. A thread that worked in its parent's workspace keeps its run
+   * files where its earlier runs had them, so the paths its history names hold.
+   */
+  private ownSandbox(
+    session: AgentRunSession<SubagentRunRecord>,
+    open: OpenRunSandbox
+  ): OpenRunSandbox {
+    const { run } = session
+    if (!run.spec.inParentWorkspace) return open
+
+    return async (lifecycle) => {
+      const opened = await open(lifecycle)
+      return {
+        ...opened,
+        sandbox: withContextDirectory(opened.sandbox, threadContextDirectory(run.threadId)),
+      }
     }
   }
 

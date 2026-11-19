@@ -269,7 +269,8 @@ async function settleSubagent(
  * Keep the child's outcome: its answer, what it wrote under `out/`, and what it did as its thread's
  * next message. A paused child keeps its files too, for the run that continues it; `wait`
  * hands over only a finished child's, as an unfinished one's would pass for complete. Its `out/`
- * is stored even when its workspace is kept: a continuation that finds it lost gets it back.
+ * is stored even when its workspace is kept: a continuation that finds it lost gets it back. A
+ * child in its parent's workspace stores none: what it changed is there already.
  */
 async function finishSubagent(input: {
   readonly context: AgentTurnContext
@@ -286,11 +287,13 @@ async function finishSubagent(input: {
   readonly text?: string
 }): Promise<SubagentRunRecord> {
   const { context, run } = input
-  const outputs = await storeChildOutputs({
-    files: input.runFiles,
-    handed: run.spec.files ?? [],
-    signal: input.abortSignal,
-  })
+  const outputs: Awaited<ReturnType<typeof storeChildOutputs>> = input.runFiles.inParentWorkspace
+    ? { files: [] }
+    : await storeChildOutputs({
+        files: input.runFiles,
+        handed: run.spec.files ?? [],
+        signal: input.abortSignal,
+      })
   input.runtime.assertCanContinue()
 
   // Before the terminal write, and after out/ was read: a paused child's workspace is kept for

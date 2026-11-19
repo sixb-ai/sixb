@@ -148,6 +148,8 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
   readonly bytesPerToken?: number
   /** The network its sandbox declared, which `web_fetch` follows: its children's too. */
   readonly networkPolicy?: SandboxNetworkPolicy
+  /** Its workspace, which its children work in (`RunSandbox.lend`), when it has one to lend. */
+  readonly lendWorkspace?: NonNullable<RunSandbox["lend"]>
 }
 
 /**
@@ -200,6 +202,11 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly frameworkTools?: readonly ModelTool[]
   /** Its children, which `wait` and `stop` reach beside its background commands. */
   readonly children?: WaitableChildren
+  /**
+   * Stop its children still running, and wait for them to record it: called before a workspace
+   * it lends them is saved, so none of them works in it meanwhile.
+   */
+  readonly stopChildren?: () => Promise<void>
 }
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -431,6 +438,7 @@ export async function createConversationAgentEnvironment(
       ontologyDocs,
       frameworkTools: input.frameworkTools,
       ...(input.children ? { children: input.children } : {}),
+      ...(sandbox.lend && input.stopChildren ? { beforeSave: input.stopChildren } : {}),
       ...(memory ? { memory } : {}),
       ...(conversation === undefined ? {} : { conversation }),
       onDetachedTeardown: input.onDetachedTeardown,
@@ -458,6 +466,7 @@ export async function createConversationAgentEnvironment(
       ...(compactInTurn ? { compactInTurn } : {}),
       ...(prepared?.bytesPerToken === undefined ? {} : { bytesPerToken: prepared.bytesPerToken }),
       ...(sandbox.networkPolicy ? { networkPolicy: sandbox.networkPolicy } : {}),
+      ...(sandbox.lend ? { lendWorkspace: sandbox.lend.bind(sandbox) } : {}),
     }
   } catch (error) {
     // Preparation can fail before the worker receives this environment. Preserve here, before
@@ -474,13 +483,15 @@ export async function createConversationAgentEnvironment(
 }
 
 /**
- * Build an isolated environment for one headless child Agent. It knows the project as its parent
- * does (ontology docs, memory to read), holds the files its parent handed over at their paths, and
- * publishes into its conversation, as its own run.
+ * Build the environment of one headless child Agent. It knows the project as its parent does
+ * (ontology docs, memory to read), and publishes into its conversation, as its own run.
  *
- * On a provider that resumes sandboxes, its thread keeps its workspace while it pauses: the run
- * that continues it finds every file where it was. Elsewhere, or once those files were lost, it
- * starts blank, with the handed files and what the paused run left in `out/` given back.
+ * A child whose parent lends it its workspace works there, on the parent's files: it is handed
+ * none and hands none back. Otherwise it works in a sandbox of its own, which holds the files its
+ * parent handed over at their paths. On a provider that resumes sandboxes, its thread keeps that
+ * workspace while it pauses: the run that continues it finds every file where it was. Elsewhere,
+ * or once those files were lost, it starts blank, with the handed files and what the paused run
+ * left in `out/` given back.
  */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
@@ -546,8 +557,15 @@ async function startSubagentEnvironment(
   const { context, plan, run, conversation, sandbox, resumed, preflight } = input
   const signal = input.signal ?? NEVER_ABORTED_SIGNAL
   const networkPolicy = input.parentNetworkPolicy ?? sandbox.networkPolicy
-  // Still listed, as handed over, but never copied over what the child made of them.
-  const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
+  const readOnly = run.spec.readOnly === true
+
+  // Still listed, as handed over, but never copied over what the child made of them. A child in
+  // its parent's workspace has the parent's files already.
+  const files = sandbox.lent
+    ? []
+    : resumed
+      ? (run.spec.files ?? [])
+      : subagentSandboxFiles(run, input.history.paused)
   const inlineImages = modelSupportsInlineImages(plan.model)
   const [memory, handedContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
@@ -625,6 +643,7 @@ async function startSubagentEnvironment(
       publishes: publishing !== undefined,
       web: plan.web,
       networkPolicy,
+      readOnly,
     }),
     ...(input.frameworkTools ?? []),
   ]
@@ -641,6 +660,7 @@ async function startSubagentEnvironment(
         context,
         plan,
         ontologyDocs: plan.ontologyDocs,
+        readOnly,
         ...(workspace ? { workspace } : {}),
         ...(memory ? { memory } : {}),
       }),
@@ -662,6 +682,7 @@ async function startSubagentEnvironment(
       context,
       plan,
       ontologyDocs: plan.ontologyDocs,
+      readOnly,
       ...(memory ? { memory } : {}),
     }),
     tools: contextEstimateTools(tools),
@@ -697,6 +718,7 @@ async function startSubagentEnvironment(
     mode: "subagent",
     sandbox,
     ...(networkPolicy ? { networkPolicy } : {}),
+    readOnly,
     acquire: input.acquire,
     sandboxSignal: input.signal,
     failureSignal: input.failureSignal,
@@ -849,6 +871,10 @@ interface AgentEnvironmentSetup
   readonly frameworkTools?: readonly ModelTool[]
   /** The Agent's children, which `wait` and `stop` reach beside its background commands. */
   readonly children?: WaitableChildren
+  /** Runs before the workspace is saved, as the run ends: its children leave the one it lends. */
+  readonly beforeSave?: () => Promise<void>
+  /** A child that must leave the files as they are: no `edit` and no `write`. */
+  readonly readOnly?: boolean
   /**
    * A conversation, or a child of one, publishes artifacts into its conversation, through its
    * session, and edits them from their installed copies; other runs return text.
@@ -952,8 +978,11 @@ async function startAgentEnvironment(
   // One per run: `edit` and `write` change only files this run read, as it read them.
   const fileReads = new FileReadLedger()
   appendBuiltInTool(tools, createReadTool(resolveSandbox, fileReads, fileViewer))
-  appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
-  appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
+  // As agentModelToolSpecs advertises them.
+  if (!input.readOnly) {
+    appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
+    appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
+  }
   appendBuiltInTool(tools, createGlobTool(resolveSandbox))
   appendBuiltInTool(tools, createGrepTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
@@ -1046,6 +1075,7 @@ async function startAgentEnvironment(
       sandbox,
       context,
       plan,
+      ...(input.readOnly ? { readOnly: true } : {}),
       ...(input.ontologyDocs ? { ontologyDocs: input.ontologyDocs } : {}),
       ...(workspace ? { workspace } : {}),
       ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
@@ -1057,8 +1087,9 @@ async function startAgentEnvironment(
     throw error
   }
 
-  // A workspace saved as the run ends keeps no command of it running.
+  // A workspace saved as the run ends keeps no command of it running, its children's included.
   const beforeFinalize = async (options?: BeforeFinalizeOptions) => {
+    await input.beforeSave?.()
     await stopBackground()
     await sandbox.beforeFinalize?.(options)
   }
@@ -1070,6 +1101,10 @@ async function startAgentEnvironment(
     sandbox: resolveSandbox,
     blobStorage: context.blobStorage,
     budget: fileBudget,
+    ...(sandbox.lend
+      ? { lendsWorkspace: true, workspaceResetAt: async () => (await ready).resetAt }
+      : {}),
+    ...(sandbox.lent ? { inParentWorkspace: true } : {}),
     async installTurnArtifacts(signal) {
       if (!artifacts) return []
 
@@ -1087,7 +1122,7 @@ async function startAgentEnvironment(
     runFiles,
     turnContext: {
       environmentFailureSignal: input.failureSignal,
-      ...(sandbox.beforeFinalize ? { beforeFinalize } : {}),
+      ...(sandbox.beforeFinalize || input.beforeSave ? { beforeFinalize } : {}),
       id: context.id,
       ...(context.authorPrincipal === undefined
         ? {}
@@ -1133,6 +1168,8 @@ function measureEnvironmentSystemPrompt(input: {
   readonly workspace?: Pick<AcquiredRunSandbox, "promptContext" | "resetAt">
   readonly conversation?: string
   readonly memory?: ConversationMemory
+  /** A child with no `edit` and no `write`. */
+  readonly readOnly?: boolean
 }): AgentSystemPromptSize {
   const { mode, plan, workspace } = input
   const { requester } = input.context
@@ -1148,6 +1185,9 @@ function measureEnvironmentSystemPrompt(input: {
       : {}),
     sandboxResetAt: workspace?.resetAt,
     workspace: workspace?.promptContext,
+    ...(mode === "conversation" && input.sandbox.lend ? { lendsWorkspace: true } : {}),
+    ...(mode === "subagent" && input.sandbox.lent ? { inParentWorkspace: true } : {}),
+    ...(input.readOnly ? { readOnly: true } : {}),
     facts: requester === undefined ? {} : { requester },
     ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
     ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),

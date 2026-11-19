@@ -64,8 +64,36 @@ const WORKFLOW_TASK_RULES = [
   "Finish with a concise final answer containing everything the next workflow node needs.",
 ].join("\n")
 
-/** A child answers its parent Agent, never the user: it gets the data rules, not the chat's. */
-const SUBAGENT_RULES = [
+/**
+ * A child answers its parent Agent, never the user: it gets the data rules, not the chat's. One in
+ * a sandbox of its own trades files with its parent; one in its parent's workspace changes them
+ * there.
+ */
+function subagentRules(options: {
+  readonly inParentWorkspace?: boolean
+  readonly readOnly?: boolean
+}): string {
+  return [
+    ...SUBAGENT_RULES_BEFORE_FILES,
+    ...(options.inParentWorkspace
+      ? [
+          "You work in your parent's workspace, on the same files: your parent sees each change you make, and so may the other agents it started. Change only what your task asks for, and list in your result each file you changed.",
+        ]
+      : [
+          `The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most ${CHILD_FILE_LIMITS}; past that, none does.`,
+        ]),
+    ...(options.readOnly
+      ? [
+          options.inParentWorkspace
+            ? "Your task leaves the files as they are: you have no edit or write tool, and your commands must not change files either."
+            : "Your task leaves the files you were handed as they are: you have no edit or write tool, and your commands change none of them. Write your results to out/ with your commands.",
+        ]
+      : []),
+    ...SUBAGENT_RULES_AFTER_FILES,
+  ].join("\n")
+}
+
+const SUBAGENT_RULES_BEFORE_FILES = [
   SIXB_RULE_PRECEDENCE,
   "You are a headless child agent working for the parent Agent.",
   "Complete the delegated task autonomously. Never spawn another agent or start a workflow.",
@@ -74,11 +102,13 @@ const SUBAGENT_RULES = [
   "When a command answers `awaiting_approval`, stop: don't retry it or work around it. You continue once the user decides, with a <sixb_approval> block per call saying how it ended.",
   "Your parent may message you while you work: each message comes as a <sixb_parent_message> block after your latest step. It is your parent's instruction for this task: follow it over your task where they conflict, and make your result account for it. When one comes after your answer, your parent has not received that answer: write your complete result again.",
   "When your parent cannot answer before its turn ends, you stop on your question, and continue later with its answer as a <sixb_parent_answer> block.",
-  `The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most ${CHILD_FILE_LIMITS}; past that, none does.`,
+]
+
+const SUBAGENT_RULES_AFTER_FILES = [
   "If required information or authority is missing, state the limitation clearly instead of inventing it.",
   REPORT_CHECKS_RULE,
   "Finish with a concise result containing everything the parent Agent needs, including each change you made to the project's data.",
-].join("\n")
+]
 
 const WORKFLOW_OUTPUT_FINALIZER_RULES = [
   SIXB_RULE_PRECEDENCE,
@@ -116,6 +146,12 @@ export interface RenderAgentSystemPromptInput {
   /** The model the run calls, which the prompt names; omitted, it names none. */
   readonly runningModel?: RunningModel
   readonly memory?: AgentMemoryPromptContext
+  /** A conversation whose children work in its workspace, which the workspace section says. */
+  readonly lendsWorkspace?: boolean
+  /** A child that works in its parent's workspace instead of a sandbox of its own. */
+  readonly inParentWorkspace?: boolean
+  /** A child with no `edit` and no `write`. */
+  readonly readOnly?: boolean
 }
 
 /** What the prompt reads of the run's model: its identity, and its name when it has one. */
@@ -224,7 +260,8 @@ function renderAgentSystemPromptSections(
     input.skills,
     input.ontologyIndex,
     input.sandboxModels,
-    input.runningModel
+    input.runningModel,
+    input.inParentWorkspace === true
   )
   const memory = input.memory && renderMemory(input.memory, input.mode, input.contextDirectory)
   const system = (text: string | undefined): PromptSection[] =>
@@ -252,7 +289,13 @@ function renderAgentSystemPromptSections(
     ),
     promptSectionParts(
       "workspace",
-      system(input.workspace && renderWorkspaceContext(input.workspace))
+      system(
+        input.workspace &&
+          renderWorkspaceContext(
+            input.workspace,
+            input.mode === "conversation" && input.lendsWorkspace
+          )
+      )
     ),
     promptSectionParts(
       "workspace_instructions",
@@ -265,7 +308,10 @@ function renderAgentSystemPromptSections(
         input.mode === "conversation"
           ? conversationRules(input.contextDirectory)
           : input.mode === "subagent"
-            ? SUBAGENT_RULES
+            ? subagentRules({
+                ...(input.inParentWorkspace ? { inParentWorkspace: true } : {}),
+                ...(input.readOnly ? { readOnly: true } : {}),
+              })
             : WORKFLOW_TASK_RULES
       )
     ),
@@ -353,7 +399,8 @@ function renderRuntimeContext(
   skills: readonly AgentSkillDefinition[],
   ontologyIndex: readonly OntologyDocsIndexEntry[] = [],
   sandboxModels: readonly SandboxModel[] = [],
-  runningModel?: RunningModel
+  runningModel?: RunningModel,
+  inParentWorkspace = false
 ): { readonly base: string[]; readonly skills: string[]; readonly ontology: string[] } {
   const skillCatalog =
     skills.length === 0
@@ -395,7 +442,7 @@ function renderRuntimeContext(
           "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies.",
           mode === "conversation"
             ? "Deliver a report, table of data, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. To show a published chart or range in a reply, write ![caption](address), copying from $SIXB_ARTIFACTS its pinned address when it lists one, for a version the user created, and its address otherwise, or the address a child agent reported. Never describe a deliverable that was not published as ready."
-            : "Return your result as text. Publish with publish_artifact only when the task asks for a deliverable, after reading the sixb-artifacts skill: it lands in the parent's conversation. Name each one you wrote in your result by its address, artifact:<id>. Files outside out/ are lost when the task ends.",
+            : `Return your result as text. Publish with publish_artifact only when the task asks for a deliverable, after reading the sixb-artifacts skill: it lands in the parent's conversation. Name each one you wrote in your result by its address, artifact:<id>.${inParentWorkspace ? "" : " Files outside out/ are lost when the task ends."}`,
         ]
       : [
           "Workflow input files, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",
@@ -865,13 +912,24 @@ function promptSection(tag: string, body: string | undefined): string {
   return `<${tag}>\n${body.trim()}\n</${tag}>`
 }
 
-function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string {
+/**
+ * The workspace the run works in. A conversation that lends it to its children is told they work
+ * there too: the conversation rules, shared with chats that have no workspace, say how files go
+ * to a child with a sandbox of its own.
+ */
+function renderWorkspaceContext(
+  workspace: AgentWorkspacePromptContext,
+  lendsWorkspace = false
+): string {
+  const children = lendsWorkspace ? [CHILDREN_IN_WORKSPACE_RULE] : []
+
   if (workspace.retention === "computer") {
     return [
       `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
       "This is the user's own folder, on their computer. Your commands run there as the user, with their tools and network: what you change is real and stays, with no copy to fall back on.",
       "Work as a careful engineer in someone else's project: look before you change, keep changes to what the task needs, follow the conventions you find, and ask before deleting, moving or overwriting what you did not create in this conversation.",
       "Do not commit or push unless the user asks.",
+      ...children,
     ].join("\n")
   }
   return [
@@ -880,8 +938,12 @@ function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string 
       ? "Files persist between runs in this conversation, subject to workspace retention."
       : "This workspace is discarded when the task ends.",
     ...(workspace.source ? renderWorkspaceSource(workspace.source, workspace.retention) : []),
+    ...children,
   ].join("\n")
 }
+
+const CHILDREN_IN_WORKSPACE_RULE =
+  "The agents you start with spawn_agent work in this workspace, on these same files, and see what you changed: name the paths they need in their task instead of passing files, and what they change is here once they finish, with no out/. Give each child that writes files of its own to change, and pass readOnly to one that reviews or investigates."
 
 function renderWorkspaceSource(
   source: NonNullable<AgentWorkspacePromptContext["source"]>,

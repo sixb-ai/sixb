@@ -35,8 +35,9 @@ export interface WorkerChildrenDeps {
 }
 
 /**
- * The worker's children: claimed in process, each in a sandbox from the project's factory, or its
- * thread's workspace when the factory keeps them.
+ * The worker's children: claimed in process, each in its turn's workspace when the turn lends it
+ * one, else in a sandbox from the project's factory, or its thread's workspace when the factory
+ * keeps them.
  */
 export function workerChildren(deps: WorkerChildrenDeps): ChildRunner {
   return new ChildRunner({

@@ -264,11 +264,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
                 ? {}
                 : { definition: this.host.sandboxDefinition }),
             })(lifecycle),
-          startChild: (child, family, networkPolicy) =>
+          startChild: (child, family, turn) =>
             this.requireChildren().start(child, {
               signal,
               family,
-              ...(networkPolicy ? { networkPolicy } : {}),
+              ...turn,
               leaseExpiresAt: () => delivery.leaseExpiresAt,
               // The turn's delivery holds the child's lease too: its renewals renew both. One that
               // landed while the child was claimed is recorded now.
@@ -283,6 +283,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
                 return release
               },
             }),
+          stopChildren: (runId) => this.requireChildren().stopChildrenOf(runId),
           onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
           reportFailure: (error, failedRun, failure) =>
             this.reportFailure(error, failedRun, job.attempt, failure),

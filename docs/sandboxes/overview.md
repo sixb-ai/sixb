@@ -231,6 +231,8 @@ runs, so a resumed sandbox cannot receive a late operation from the failed run. 
 deletes the previous environment: its files remain subject to provider retention. Workflows remain
 ephemeral.
 
-On a provider that keeps files, such as Vercel, a [sub-agent](../models/overview.md#it-delegates)
-keeps its sandbox while it pauses, and Sixb deletes it once the sub-agent ends. The sandbox of a
-paused sub-agent that never continues is left to provider retention.
+A conversation's [sub-agents](../models/overview.md#it-delegates) work in its sandbox, on the same
+files. A sub-agent of a conversation without one gets a blank sandbox of its own: on a provider that
+keeps files, such as Vercel, it keeps that sandbox while it pauses, and Sixb deletes it once the
+sub-agent ends. The sandbox of a paused sub-agent that never continues is left to provider
+retention.

@@ -3,8 +3,10 @@ import {
   type AcquiredRunSandbox,
   AgentEnvironmentSaveError,
   type BeforeFinalizeOptions,
+  type LentRunSandboxChild,
   type RunSandbox,
   SANDBOX_CONTEXT_DIRECTORY,
+  threadContextDirectory,
   waitForAbort,
 } from "@sixb/agent"
 import type {
@@ -25,7 +27,7 @@ import type {
   ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import { bounded, sandboxError } from "./sandbox-operation"
+import { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
 import type { AgentRunnerContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles, WorkspaceRunFilesConflictError } from "./workspace-files"
@@ -56,8 +58,8 @@ export interface PersistentRunSandbox extends RunSandbox {
 /**
  * A thread's workspace, kept across its runs: created by the first run, resumed by each later one,
  * and saved before every run's terminal write. A conversation's is prepared from the resolved
- * recipe and never destroyed. A sub-agent's is blank, kept while it pauses, and destroyed by a run
- * that ends without pausing.
+ * recipe and never destroyed; its turn lends it to the children it starts. A sub-agent's is blank,
+ * kept while it pauses, and destroyed by a run that ends without pausing.
  *
  * Resolve current authority before taking any provider action; never trust guest metadata.
  */
@@ -285,8 +287,9 @@ class PersistentSandboxSession {
   }
 
   private runSandbox(session: Sandbox): PersistentRunSandbox {
+    const guarded = this.guard(session)
     const acquired: AcquiredRunSandbox = {
-      sandbox: this.guard(session),
+      sandbox: guarded,
       env: this.access.sessionOptions.env ?? {},
       // A sub-agent's prompt describes no workspace, as for its ephemeral sandbox: it finds its
       // files where it left them, and is told only when they were lost.
@@ -295,12 +298,20 @@ class PersistentSandboxSession {
         : { promptContext: this.access.promptContext(session, "persistent") }),
       resetAt: this.resetAt,
     }
+    // A conversation's turn lends its workspace to the children it starts; a sub-agent's lends
+    // nothing.
+    const lend =
+      this.input.thread.kind === "subagent"
+        ? undefined
+        : (child: LentRunSandboxChild) => this.lentSandbox(acquired, child)
+
     // No release: the thread keeps its sandbox. beforeFinalize saves or quarantines it, or destroys
     // a sub-agent's that ended; a lost execution leaves it to the run's current owner.
     return {
       waitBeforeModel: true,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       ...(this.recipe.network ? { networkPolicy: this.recipe.network } : {}),
+      ...(lend ? { lend } : {}),
       resumed: this.resumed,
       acquire: async () => acquired,
       beforeFinalize: (options?: BeforeFinalizeOptions) => {
@@ -314,6 +325,64 @@ class PersistentSandboxSession {
         }
         return this.saving
       },
+    }
+  }
+
+  /**
+   * The workspace as a child sees it: this run's session, through its guard, so this run's
+   * ownership governs each of the child's commands and its save waits for them; its working
+   * directory and the files its prompt describes; and the child's own context directory. The
+   * session keeps its credentials as they are: the child's commands call the API with this run's
+   * token and say which run they are (the sandbox CLI sends `SIXB_RUN_ID`), which the server
+   * narrows to that child. Nothing of the workspace ends with the child but its own files.
+   */
+  private lentSandbox(acquired: AcquiredRunSandbox, child: LentRunSandboxChild): RunSandbox {
+    // Under the run files a checkout excludes (see prepareWorkspaceRunFiles), the same for each
+    // run of its thread: a continuation writes its saved outputs back where its history names them.
+    const contextDirectory = threadContextDirectory(child.threadId)
+    let leaving: Promise<void> | undefined
+
+    return {
+      waitBeforeModel: true,
+      contextDirectory,
+      lent: true,
+      ...(this.recipe.network ? { networkPolicy: this.recipe.network } : {}),
+      acquire: async () => {
+        if (leaving) throw sandboxError("is being saved.")
+
+        return {
+          sandbox: acquired.sandbox,
+          ...(acquired.env === undefined ? {} : { env: acquired.env }),
+          ...(acquired.promptContext ? { promptContext: acquired.promptContext } : {}),
+        }
+      },
+      beforeFinalize: () => {
+        leaving ??= this.removeRunFiles(acquired.sandbox, child.runId, contextDirectory)
+        return leaving
+      },
+    }
+  }
+
+  /**
+   * Remove a lent child's files as it ends, paused or not: each opening of the workspace clears
+   * every run's files anyway, and a continuation provisions its own again. Best effort: its
+   * outcome stands.
+   */
+  private async removeRunFiles(
+    sandbox: Sandbox,
+    runId: string,
+    contextDirectory: string
+  ): Promise<void> {
+    try {
+      await sandbox.runCommand("bash", ["-c", 'rm -rf -- "$SIXB_RUN_FILES"'], {
+        env: { SIXB_RUN_FILES: contextDirectory },
+        timeout: SANDBOX_OPERATION_TIMEOUT_MS,
+      })
+    } catch (error) {
+      console.error(
+        `[SixbAgentWorker] Could not remove the files of run '${runId}' from the workspace of thread '${this.input.thread.id}'.`,
+        error
+      )
     }
   }
 

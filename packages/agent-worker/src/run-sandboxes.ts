@@ -41,7 +41,10 @@ export function conversationSandbox(input: {
   })
 }
 
-/** A child's: its thread's workspace when the factory keeps workspaces, else a blank sandbox. */
+/**
+ * A child's own, when its turn lends it no workspace: its thread's workspace when the factory keeps
+ * workspaces, else a blank sandbox.
+ */
 export function childSandbox(input: {
   readonly context: AgentRunnerContext
   readonly session: AgentRunSession

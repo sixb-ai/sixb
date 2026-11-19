@@ -6,6 +6,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ### Highlights
 
+- A sub-agent works in its conversation's workspace, a repository checkout or a folder on your
+  computer: it sees the same files, so it can run the tests or review the diff.
+  `spawn_agent({ readOnly: true })` starts a reviewer with no edit or write tool.
 - Auto picks a message's model with the message before it in view, and the tier that one ran on:
   "Go ahead" after a plan for a large change stays on the plan's tier instead of reading like a
   thank-you. Each tier's model description now steers the choice too, so a project can say what it
@@ -13,6 +16,8 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ### Upgrade notes
 
+- A storage provider of your own stores a sub-agent's `spec.readOnly` and `spec.inParentWorkspace`,
+  each `true` or absent.
 - The agent no longer has a tone of its own: Sixb stopped telling it to speak "not like a
   developer", to keep its work silent and to answer briefly. To keep that tone, add it to your
   `SIXB.md`, as a new project's [does](packages/create-sixb/template/SIXB.md). It now always says

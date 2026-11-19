@@ -38,8 +38,13 @@ export {
   createWorkflowAgentNodeEnvironment,
 } from "./run-environment"
 export { agentRunFailureDetails, recordFate } from "./run-fate"
-export type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
-export { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
+export type {
+  AcquiredRunSandbox,
+  BeforeFinalizeOptions,
+  LentRunSandboxChild,
+  RunSandbox,
+} from "./run-sandbox"
+export { SANDBOX_CONTEXT_DIRECTORY, threadContextDirectory } from "./run-sandbox"
 export type { SubagentWork } from "./run-subagent"
 export { runSubagent } from "./run-subagent"
 export type { WorkflowAgentFailurePhase } from "./run-workflow-agent-node"

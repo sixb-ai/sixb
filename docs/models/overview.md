@@ -241,11 +241,15 @@ when a second opinion needs one.
 - **It knows the project, not the conversation.** It gets `SIXB.md`, the ontology reference files,
   the user's time zone and language, and the memory, which it reads but never saves to. It sees only
   the task the agent writes, and answers the agent, not the user.
-- **Files go both ways.** The agent hands it files from its own sandbox, such as an attachment,
-  and the sub-agent finds them at the same paths. What the sub-agent writes to `out/` comes back
-  to the agent when it finishes, up to 50 files of 25 MB, 100 MB in all, and stays in the
-  conversation's files, shown in the agent's work. Past those limits only its answer comes back,
-  with why; a sub-agent that fails or is stopped returns none.
+- **In a conversation with a workspace, it works there**: a repository checkout or a folder on
+  [your computer](../cli/overview.md#work-with-the-agent). It sees the same files, can run the
+  tests or review the diff, and what it changes is there for the agent at once.
+- **A reviewer can be read-only.** Started with `readOnly`, a sub-agent gets no edit or write tool.
+- **Elsewhere, files go both ways.** The agent hands it files from its own sandbox, such as an
+  attachment, and the sub-agent finds them at the same paths. What the sub-agent writes to `out/`
+  comes back to the agent when it finishes, up to 50 files of 25 MB, 100 MB in all, and stays in
+  the conversation's files, shown in the agent's work. Past those limits only its answer comes
+  back, with why; a sub-agent that fails or is stopped returns none.
 - **What it publishes lands in the conversation**, like the agent's own
   [artifacts](../artifacts/overview.md), and the agent can revise it in the same turn.
 - **Its work is a thread you can open**: its task, then what it did, read by whoever reads the
@@ -268,7 +272,8 @@ when a second opinion needs one.
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
 - **A paused sub-agent keeps its whole sandbox** on a provider that keeps files, such as Vercel.
-  Elsewhere it gets back the files it was handed and its `out/`, and is told the rest is gone.
+  Elsewhere it gets back the files it was handed and its `out/`, and is told the rest is gone. One
+  that works in the conversation's workspace continues there.
 - **In the chat, a reply's sub-agents are one line under the work that started them**: their
   avatars and a sentence that names them by how they stand ("Terms and Disputes are working ·
   History finished"), or counts them when there are many. The line opens them beside the

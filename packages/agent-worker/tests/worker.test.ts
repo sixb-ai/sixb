@@ -1549,6 +1549,82 @@ class FolderReadingSandbox extends RecordingSandbox {
   }
 }
 
+/**
+ * A conversation's workspace on a provider that keeps them, as its runs and its children see it:
+ * `cat <path>` reads a file, `write <path> <text>` writes one, and each change to the session's
+ * credentials, as each stop, is logged.
+ */
+class SharedWorkspaceSandbox extends RecordingSandbox {
+  /** Each list the session's credentials were replaced with, in order. */
+  readonly credentials: (readonly SandboxRequestCredential[])[] = []
+
+  constructor(
+    id: string,
+    private readonly events: string[] = []
+  ) {
+    super(id)
+  }
+
+  async setRequestCredentials(credentials: readonly SandboxRequestCredential[]): Promise<void> {
+    this.credentials.push(credentials)
+    this.events.push("credentials")
+  }
+
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    const script = args.at(-1) ?? ""
+    const [verb, path = "", ...text] = script.split(" ")
+    if (command !== "bash" || (verb !== "cat" && verb !== "write")) {
+      return super.runCommand(command, args, options)
+    }
+
+    this.commands.push({ command, args, options })
+    if (verb === "write") {
+      this.writeWorkingFile(path, `${text.join(" ")}\n`)
+      return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 }
+    }
+    const bytes = this.files.get(join(this.workingDirectory, path))
+    return bytes
+      ? { exitCode: 0, stdout: new TextDecoder().decode(bytes), stderr: "", durationMs: 1 }
+      : { exitCode: 1, stdout: "", stderr: `${path}: No such file`, durationMs: 1 }
+  }
+
+  override async stop(): Promise<void> {
+    this.events.push("saved")
+    await super.stop()
+  }
+}
+
+/** A provider that keeps each conversation's workspace, by name. */
+function sharedWorkspaces(events: string[] = []) {
+  const workspaces = new Map<string, SharedWorkspaceSandbox>()
+  const factory: SandboxFactory = {
+    supportsRequestCredentials: true,
+    async create(options) {
+      const sandbox = new SharedWorkspaceSandbox(`workspace-${workspaces.size + 1}`, events)
+      workspaces.set(options?.persistence?.name ?? sandbox.id, sandbox)
+      return sandbox
+    },
+    async resume(name) {
+      const sandbox = workspaces.get(name)
+      if (!sandbox) throw new SandboxStateUnavailableError("gone")
+      return sandbox
+    },
+  }
+  return { factory, workspaces }
+}
+
+/** What a tool answered, as the model's next request carries it. */
+function toolResultText(request: LanguageModelRequest | undefined, toolCallId: string): string {
+  const part = request?.messages
+    .flatMap((message) => (message.role === "tool" ? message.content : []))
+    .find((content) => content.toolCallId === toolCallId)
+  return JSON.stringify(part?.output ?? null)
+}
+
 function readsInstructions(command: string, args: readonly string[]): boolean {
   return command === "bash" && (args.at(-1) ?? "").includes("sixb-read-workspace-instructions")
 }
@@ -4916,8 +4992,8 @@ describe("AgentWorker", () => {
   })
 
   // Regression proof: drop `networkPolicy` from the RunSandbox persistentRunSandbox returns; the
-  // parent's fetch then reads the page. Drop `parentNetworkPolicy` from ChildRunner's
-  // createSubagentEnvironment call; the child's blank workspace then reads it.
+  // parent's fetch then reads the page. Drop it from lentSandbox and `parentNetworkPolicy` from
+  // ChildRunner's createSubagentEnvironment call; the child, in the turn's workspace, reads it.
   test("fetches pages only from a restricted workspace's origins, in its children too", async () => {
     let served = 0
     const server = Bun.serve({
@@ -4978,7 +5054,7 @@ describe("AgentWorker", () => {
       },
     })
 
-    // A provider that keeps workspaces: the child's is its own, from a blank recipe.
+    // A provider that keeps workspaces: the child works in the turn's.
     const workspaces = new Map<string, Sandbox>()
     const sandboxes: SandboxFactory = {
       supportsRequestCredentials: true,
@@ -5044,6 +5120,197 @@ describe("AgentWorker", () => {
       await server.stop(true)
       lookup.mockRestore()
       fetched.mockRestore()
+    }
+  })
+
+  // A conversation's workspace is its children's too: a child works on its files, names its own
+  // run to the API through the session as it is, keeps its own run files, and leaves no out/.
+  // Removal proof: drop `lend` from the RunSandbox persistentRunSandbox returns; the child gets a
+  // workspace of its own, which holds no plan.md, and spawn_agent takes files.
+  test("a conversation's child works in its workspace, as its own run, with its own files", async () => {
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "child-model",
+      stream: async (request) => {
+        childCalls.push(request)
+        switch (childCalls.length) {
+          case 1:
+            return toolCallStream("child_read", "bash", { command: "cat plan.md" })
+          case 2:
+            return toolCallStream("child_env", "bash", { command: "print-sixb-env" })
+          case 3:
+            return toolCallStream("child_write", "bash", { command: "write review.md Looks good." })
+          default:
+            return answerStream("Reviewed plan.md; wrote review.md.")
+        }
+      },
+    })
+    const child = {
+      key: "review",
+      task: "Review plan.md.",
+      model: { provider: "gateway", modelId: "child-model" },
+    }
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        parentCalls.push(request)
+        switch (parentCalls.length) {
+          case 1:
+            return toolCallStream("plan", "bash", { command: "write plan.md Ship on Friday." })
+          case 2:
+            return toolCallStream("handed", "spawn_agent", { ...child, files: ["plan.md"] })
+          case 3:
+            return toolCallStream("spawn", "spawn_agent", child)
+          case 4:
+            return toolCallStream("wait", "wait", { ids: [childRunId] })
+          case 5:
+            return toolCallStream("review", "bash", { command: "cat review.md" })
+          case 6:
+            return toolCallStream("parent_env", "bash", { command: "print-sixb-env" })
+          default:
+            return answerStream("Reviewed.")
+        }
+      },
+    })
+    const { factory, workspaces } = sharedWorkspaces()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), factory, {
+      models: { language: [parentModel, childModel] },
+      sandboxConfig: { params: {}, resolve: () => ({}) },
+    })
+    const storage = agentStorageOf(sixb)
+    const thread = await createTestSixb(sixb).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(sixb, { threadId: thread.id, text: "Plan and review." })
+    childRunId = createSubagentRunId(requested.run.id, "review")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent run terminal"
+      )
+      expect(parent.status).toBe("succeeded")
+
+      // One workspace: the child read the parent's file, and the parent the child's.
+      const [workspace] = [...workspaces.values()]
+      expect(workspaces.size).toBe(1)
+      expect(toolResultText(childCalls[1], "child_read")).toContain("Ship on Friday.")
+      expect(toolResultText(parentCalls[5], "review")).toContain("Looks good.")
+      expect(toolResultText(parentCalls[2], "handed")).toContain(
+        "spawn_agent takes no files here: the child works in your workspace"
+      )
+
+      // Its commands are its own run's, at the API the session reaches, and its run files are its
+      // own; the session's credentials stay as the turn opened them.
+      const base = "http://localhost:3002"
+      const childThreadId = createSubagentThreadId(requested.run.id, "review")
+      const childEnv = toolResultText(childCalls[2], "child_env")
+      expect(childEnv).toContain(`base=${base}\\n`)
+      expect(childEnv).toContain(`run=${childRunId}\\n`)
+      expect(childEnv).toContain(
+        `context=${workspace?.workingDirectory}/.sixb/agent/threads/${childThreadId}/context/run.json`
+      )
+      const parentEnv = toolResultText(parentCalls[6], "parent_env")
+      expect(parentEnv).toContain(`run=${requested.run.id}\\n`)
+      expect(parentEnv).toContain(`context=${workspace?.workingDirectory}/.sixb/agent/context/`)
+      expect(workspace?.credentials).toEqual([])
+
+      // It hands back nothing: what it changed is in the workspace.
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "succeeded",
+        result: { text: "Reviewed plan.md; wrote review.md." },
+      })
+      const finished = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      expect(finished?.kind === "subagent" && finished.result?.files).toBeFalsy()
+
+      // The parent is told its children work there; the child that it works in its parent's.
+      const systemOf = (request: LanguageModelRequest | undefined) =>
+        JSON.stringify(request?.messages.find((message) => message.role === "system")?.content)
+      expect(systemOf(parentCalls[0])).toContain("The agents you start with spawn_agent work in")
+      expect(systemOf(childCalls[0])).toContain("You work in your parent's workspace")
+      expect(systemOf(childCalls[0])).toContain(
+        `Working directory: \\"${workspace?.workingDirectory}\\"`
+      )
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  // A turn that ends with a child still at work stops it before its workspace is saved: no child
+  // works in a workspace being saved.
+  // Removal proof: drop `beforeSave` from the conversation's startAgentEnvironment; the workspace
+  // is saved first, and the child stops after.
+  test("stops a child still at work before the conversation's workspace is saved", async () => {
+    const events: string[] = []
+    let childRunId = ""
+    let childStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      childStarted = resolve
+    })
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "child-model",
+      stream: async (request) => {
+        request.signal?.addEventListener("abort", () => events.push("child stopped"), {
+          once: true,
+        })
+        childStarted()
+        return untilAborted(request)
+      },
+    })
+    const parentCalls: LanguageModelRequest[] = []
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        parentCalls.push(request)
+        if (parentCalls.length === 1) {
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "slow",
+            task: "Take your time.",
+            model: { provider: "gateway", modelId: "child-model" },
+          })
+        }
+        // It answers without waiting, once the child is at work.
+        await started
+        return answerStream("Started.")
+      },
+    })
+    const { factory } = sharedWorkspaces(events)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), factory, {
+      models: { language: [parentModel, childModel] },
+      sandboxConfig: { params: {}, resolve: () => ({}) },
+    })
+    const storage = agentStorageOf(sixb)
+    const thread = await createTestSixb(sixb).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(sixb, { threadId: thread.id, text: "Start it." })
+    childRunId = createSubagentRunId(requested.run.id, "slow")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent run terminal"
+      )
+
+      expect(parent.status).toBe("succeeded")
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "cancelled",
+      })
+      // The child stopped before the save.
+      expect(events).toEqual(["child stopped", "saved"])
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -15455,6 +15722,7 @@ describe("agent tools act as the requester", () => {
           startChild: () => {
             throw new Error("This turn spawns no child.")
           },
+          stopChildren: async () => {},
           onDetachedTeardown: () => {},
         },
       })
@@ -15487,22 +15755,26 @@ describe("agent tools act as the requester", () => {
   })
 
   // The computer runner holds no project: it claims its owner's turn over HTTP, works in their
-  // folder, and runs the turn's child beside it over HTTP too.
+  // folder, and runs the turn's child beside it over HTTP too, in the same folder.
   // Removal proof: start no child from the computer runner's startChild; the child is never
-  // claimed, and stays queued.
-  test("a computer runs its owner's turn in their folder, and the turn's child beside it", async () => {
+  // claimed, and stays queued. Drop `lend` from the computer's runSandbox; the child opens a
+  // sandbox without the folder.
+  test("a computer runs its owner's turn in their folder, and the turn's child beside it there", async () => {
     let childRunId = ""
+    let childSystem: unknown
     const childModel = new WorkerTestModel({
       providerId: "gateway",
       modelId: "child-model",
-      stream: async () =>
-        stream([
+      stream: async (request) => {
+        childSystem = request.messages.find((message) => message.role === "system")?.content
+        return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "child-answer" },
           { type: "text-delta", id: "child-answer", delta: "The delegated fact is 42." },
           { type: "text-end", id: "child-answer" },
           finish("stop"),
-        ]),
+        ])
+      },
     })
     const parentModel = delegatingParentModel({
       childRunId: () => childRunId,
@@ -15549,14 +15821,15 @@ describe("agent tools act as the requester", () => {
       expect(
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
-      // The turn in the user's folder, the child in one of its own; each thread's files
-      // elsewhere, named as a cloud sandbox names them, and gone once its run ended.
+      // The turn and its child in the user's folder, each in a sandbox of its own; each thread's
+      // files elsewhere, named as a cloud sandbox names them, and gone once its run ended.
       expect(opened).toEqual([
         {
           workingDirectory: folder,
           runFiles: join(runFilesRoot, request.run.threadId, ".sixb", "agent"),
         },
         {
+          workingDirectory: folder,
           runFiles: join(
             runFilesRoot,
             createSubagentThreadId(request.run.id, "research"),
@@ -15566,6 +15839,10 @@ describe("agent tools act as the requester", () => {
         },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
+      // Its prompt describes the folder, and says the parent sees what it changes there.
+      expect(childSystem).toContain(`Working directory: ${JSON.stringify(folder)}`)
+      expect(childSystem).toContain("You work in your parent's workspace, on the same files")
+      expect(childSystem).not.toContain("out/")
     } finally {
       jest.useRealTimers()
       rmSync(folder, { recursive: true, force: true })
