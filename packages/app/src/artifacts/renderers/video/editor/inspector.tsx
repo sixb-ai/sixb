@@ -338,6 +338,8 @@ export function SecondsField({
   const shown = ms === undefined ? "" : formatSeconds(ms)
   const [text, setText] = useState(shown)
   useEffect(() => setText(shown), [shown])
+  // Escape leaves the field as it was: the blur it causes still holds the typed text.
+  const cancelled = useRef(false)
 
   const commit = (value: number | null) => {
     if (value === null || !Number.isFinite(value)) {
@@ -367,6 +369,7 @@ export function SecondsField({
               commit(parseSeconds(text))
               event.currentTarget.blur()
             } else if (event.key === "Escape") {
+              cancelled.current = true
               setText(shown)
               event.currentTarget.blur()
             } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -376,7 +379,10 @@ export function SecondsField({
             }
             event.stopPropagation()
           }}
-          onBlur={() => commit(parseSeconds(text))}
+          onBlur={() => {
+            if (cancelled.current) cancelled.current = false
+            else commit(parseSeconds(text))
+          }}
           className="h-full min-w-0 flex-1 bg-transparent px-2 text-right text-[13px] tabular-nums outline-none"
         />
         <span className="text-[13px] text-muted-foreground">{messages.seconds}</span>
