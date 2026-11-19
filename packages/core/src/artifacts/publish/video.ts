@@ -13,7 +13,7 @@ const RENDER_KEY_FORMAT = "sixb-video-scene/1"
  * file it could load, with what each holds. That is `index.html`, where its place, its length and
  * the frame's size are written, the files the root and the scene play, and the files no scene
  * plays, such as stylesheets and fonts, but not the other scenes' own: their HTML, and the files
- * only they play.
+ * only they play, unless they play while it does.
  *
  * The key names no artifact: two artifacts that hold the same scene, such as a copy, share its
  * segment. A segment is the scene's frames and nothing else, rendered by the worker from these
@@ -23,7 +23,7 @@ const RENDER_KEY_FORMAT = "sixb-video-scene/1"
 export function sceneRenderKey(input: {
   readonly scene: { readonly id: string; readonly src: string }
   readonly files: readonly ArtifactFile[]
-  /** The files only other scenes load: their HTML, and what they alone play. */
+  /** The files only scenes it never plays beside load: their HTML, and what they alone play. */
   readonly others: ReadonlySet<string>
 }): string {
   const { scene, files, others } = input
