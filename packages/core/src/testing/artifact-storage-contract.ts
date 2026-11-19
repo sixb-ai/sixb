@@ -1982,6 +1982,104 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps what is derived of a media by digest, each part as it was put", async () => {
+      await withStorage(async (artifacts) => {
+        const clip = fileRef("a", "video/mp4").digest
+        const song = fileRef("b", "audio/mpeg").digest
+        const derived = {
+          projectId,
+          digest: clip,
+          parts: {
+            probe: {
+              status: "ready" as const,
+              durationMs: 12_480,
+              container: "mov,mp4,m4a,3gp,3g2,mj2",
+              bitRate: 2_400_000,
+              faststart: false,
+              video: { codec: "hevc", width: 1080, height: 1920, rotation: 90, fps: 29.97 },
+              audio: { codec: "aac", sampleRate: 48_000, channels: 2 },
+            },
+            proxy: { status: "ready" as const, file: fileRef("1", "video/mp4") },
+            poster: { status: "ready" as const, file: fileRef("2", "image/jpeg"), atMs: 1_000 },
+            filmstrip: {
+              status: "ready" as const,
+              file: fileRef("3", "image/jpeg"),
+              intervalMs: 1_000,
+              count: 13,
+              columns: 10,
+              width: 50,
+              height: 90,
+            },
+            waveform: { status: "failed" as const, reason: "FFmpeg stopped." },
+            cuts: { status: "ready" as const, atMs: [4_200, 9_960] },
+            transcript: { status: "pending" as const },
+          },
+          attempts: 1,
+          updatedAt: t0,
+        }
+        const sound = {
+          ...derived,
+          digest: song,
+          parts: {
+            ...derived.parts,
+            poster: { status: "unavailable" as const, reason: "It has no picture." },
+            transcript: {
+              status: "ready" as const,
+              file: fileRef("4", "application/json"),
+              language: "en",
+            },
+          },
+        }
+        expect(await artifacts.listMedia({ projectId, digests: [clip] })).toEqual([])
+
+        await artifacts.putMedia(derived)
+        await artifacts.putMedia(sound)
+        expect(await artifacts.listMedia({ projectId, digests: [song, clip, clip] })).toEqual([
+          derived,
+          sound,
+        ])
+        expect(await artifacts.listMedia({ projectId: otherProjectId, digests: [clip] })).toEqual(
+          []
+        )
+        expect(await artifacts.listMedia({ projectId, digests: [] })).toEqual([])
+
+        // The worker's next attempt replaces what the last kept.
+        const transcribed = {
+          ...derived,
+          parts: { ...derived.parts, transcript: sound.parts.transcript },
+          attempts: 2,
+          updatedAt: at(1),
+        }
+        await artifacts.putMedia(transcribed)
+        expect(await artifacts.listMedia({ projectId, digests: [clip] })).toEqual([transcribed])
+      })
+    })
+
+    test("keeps what is derived of a media when an artifact that held it is deleted", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const digest = fileRef("a", "video/mp4").digest
+        await artifacts.putMedia({
+          projectId,
+          digest,
+          parts: {
+            probe: { status: "failed", reason: "It is not a media file." },
+            proxy: { status: "pending" },
+            poster: { status: "pending" },
+            filmstrip: { status: "pending" },
+            waveform: { status: "pending" },
+            cuts: { status: "pending" },
+            transcript: { status: "unavailable", reason: "No transcription model." },
+          },
+          attempts: 3,
+          updatedAt: t0,
+        })
+
+        expect(await artifacts.delete({ projectId, id: "art_report" })).toBe(true)
+        expect(await artifacts.listMedia({ projectId, digests: [digest] })).toHaveLength(1)
+      })
+    })
+
     test("keeps a board's pictures when an artifact that showed it is deleted", async () => {
       await withStorage(async (artifacts) => {
         // Another version, of this artifact or a copy, may show the same board.
@@ -2047,6 +2145,21 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
               value: "450",
               updatedAt: at(1),
             })
+            await tx.artifacts.putMedia({
+              projectId,
+              digest: fileRef("a", "video/mp4").digest,
+              parts: {
+                probe: { status: "pending" },
+                proxy: { status: "pending" },
+                poster: { status: "pending" },
+                filmstrip: { status: "pending" },
+                waveform: { status: "pending" },
+                cuts: { status: "pending" },
+                transcript: { status: "pending" },
+              },
+              attempts: 1,
+              updatedAt: at(1),
+            })
             expect((await tx.artifacts.get({ projectId, id: "art_report" }))?.revision).toBe(3)
             throw rollback
           })
@@ -2061,6 +2174,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         // To see this fail, leave board previews out of `InMemoryArtifactStorage.restore`.
         expect(
           await artifacts.listBoardPreviews({ projectId, renderKeys: ["a".repeat(64)] })
+        ).toEqual([])
+        // To see this fail, leave media out of `InMemoryArtifactStorage.restore`.
+        expect(
+          await artifacts.listMedia({ projectId, digests: [fileRef("a", "video/mp4").digest] })
         ).toEqual([])
         // To see this fail, leave state out of `InMemoryArtifactStorage.restore`.
         expect(
