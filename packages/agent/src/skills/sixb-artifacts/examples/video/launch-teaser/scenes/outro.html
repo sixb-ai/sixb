@@ -20,8 +20,8 @@
       const outro = gsap.timeline({ paused: true })
       const scene = '[data-composition-id="outro"]'
 
-      // The ending lands and holds: mark, name, then the one thing to do, still for the last 3 s.
-      outro.from(`${scene} .mark`, { scale: 0.8, opacity: 0, duration: 0.6, ease: "back.out(1.6)" }, 0.2)
+      // The ending lands and holds: mark, name, then the one thing to do, still for its last 2.5 s.
+      outro.from(`${scene} .mark`, { scale: 0.9, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.2)
       outro.from(`${scene} .display`, { y: 32, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.45)
       outro.from(`${scene} .outro-line`, { y: 20, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.9)
 
