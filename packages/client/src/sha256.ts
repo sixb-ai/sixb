@@ -148,12 +148,18 @@ function toHex(bytes: Uint8Array): string {
  */
 export async function computeStreamingBlobDigest(
   file: Blob,
-  chunkBytes = 8 * 1024 * 1024
+  options: {
+    readonly chunkBytes?: number
+    /** Called after each chunk with how many bytes are hashed so far. */
+    readonly onBytes?: (hashedBytes: number) => void
+  } = {}
 ): Promise<`sha256:${string}`> {
+  const chunkBytes = options.chunkBytes ?? 8 * 1024 * 1024
   const hasher = new Sha256()
   for (let offset = 0; offset < file.size; offset += chunkBytes) {
     const slice = file.slice(offset, Math.min(file.size, offset + chunkBytes))
     hasher.update(new Uint8Array(await slice.arrayBuffer()))
+    options.onBytes?.(Math.min(file.size, offset + chunkBytes))
   }
   return `sha256:${toHex(hasher.digest())}`
 }

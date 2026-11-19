@@ -15,7 +15,9 @@ describe("computeStreamingBlobDigest", () => {
         bytes[i] = (i * 31 + 7) % 256
       }
       const expected = computeBlobDigest(bytes)
-      expect(await computeStreamingBlobDigest(new Blob([bytes]), 100)).toBe(expected)
+      expect(await computeStreamingBlobDigest(new Blob([bytes]), { chunkBytes: 100 })).toBe(
+        expected
+      )
     }
   })
 })
