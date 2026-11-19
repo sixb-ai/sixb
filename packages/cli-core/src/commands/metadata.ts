@@ -334,7 +334,8 @@ kind's default answers. \`list\` shows each model's kind, default, description a
 adds the sizes, voices and other options a request can use. Prices are in USD.
 
 \`text\` also takes a tier (light, standard or heavy) for --model, and reads a long prompt from
---file: a path, or - for standard input.
+--file: a path, or - for standard input. \`transcribe\` prints the text, and its words and segments,
+each timed in milliseconds, when the model times them.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
