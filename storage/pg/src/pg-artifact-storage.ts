@@ -9,6 +9,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactMediaRow,
   parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
@@ -23,6 +24,7 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactMediaRecord,
   ArtifactPdfKeyInput,
   ArtifactPdfRecord,
   ArtifactRecord,
@@ -47,6 +49,7 @@ import type {
   GetArtifactRestorePointInput,
   GetArtifactVersionInput,
   ListArtifactBoardPreviewsInput,
+  ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -123,6 +126,10 @@ const BOARD_PREVIEW_COLUMNS = `
 const PDF_COLUMNS = `
   project_id AS "projectId", render_key AS "renderKey", file, pages, failure,
   created_at AS "createdAt"
+`
+
+const MEDIA_COLUMNS = `
+  project_id AS "projectId", digest, parts, attempts, updated_at AS "updatedAt"
 `
 
 export class PgArtifactStorage implements ArtifactStorage {
@@ -762,6 +769,30 @@ export class PgArtifactStorage implements ArtifactStorage {
       DELETE FROM artifact_pdfs
       WHERE project_id = ${input.projectId} AND render_key = ${input.renderKey}
         AND failure IS NOT NULL
+    `
+  }
+
+  async listMedia(input: ListArtifactMediaInput): Promise<ArtifactMediaRecord[]> {
+    if (input.digests.length === 0) return []
+
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(MEDIA_COLUMNS)} FROM artifact_media
+      WHERE project_id = ${input.projectId}
+        AND digest = ANY(${[...new Set(input.digests)]}::text[])
+      ORDER BY digest COLLATE "C"
+    `
+    return rows.map(parseArtifactMediaRow)
+  }
+
+  async putMedia(input: ArtifactMediaRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO artifact_media (project_id, digest, parts, attempts, updated_at)
+      VALUES (
+        ${input.projectId}, ${input.digest}, ${JSON.stringify(input.parts)}::text::jsonb,
+        ${input.attempts}, ${input.updatedAt}
+      )
+      ON CONFLICT (project_id, digest) DO UPDATE SET
+        parts = excluded.parts, attempts = excluded.attempts, updated_at = excluded.updated_at
     `
   }
 

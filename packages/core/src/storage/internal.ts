@@ -41,6 +41,8 @@ export {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactMediaProbe,
+  parseArtifactMediaRow,
   parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,

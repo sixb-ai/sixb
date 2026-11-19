@@ -10,6 +10,7 @@ import {
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
+  parseArtifactMediaRow,
   parseArtifactPdfRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
@@ -24,6 +25,7 @@ import type {
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
+  ArtifactMediaRecord,
   ArtifactPdfKeyInput,
   ArtifactPdfRecord,
   ArtifactRecord,
@@ -48,6 +50,7 @@ import type {
   GetArtifactRestorePointInput,
   GetArtifactVersionInput,
   ListArtifactBoardPreviewsInput,
+  ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -114,6 +117,7 @@ const BOARD_PREVIEW_COLUMNS =
 
 const PDF_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, file, pages, failure, created_at AS createdAt"
+const MEDIA_COLUMNS = "project_id AS projectId, digest, parts, attempts, updated_at AS updatedAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -773,6 +777,34 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         "DELETE FROM artifact_pdfs WHERE project_id = ? AND render_key = ? AND failure IS NOT NULL"
       )
       .run(input.projectId, input.renderKey)
+  }
+
+  async listMedia(input: ListArtifactMediaInput): Promise<ArtifactMediaRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT ${MEDIA_COLUMNS} FROM artifact_media
+         WHERE project_id = ? AND digest IN (SELECT value FROM json_each(?))
+         ORDER BY digest`
+      )
+      .all(input.projectId, JSON.stringify(input.digests)) as Row[]
+    return rows.map(parseArtifactMediaRow)
+  }
+
+  async putMedia(input: ArtifactMediaRecord): Promise<void> {
+    this.db
+      .query(
+        `INSERT INTO artifact_media (project_id, digest, parts, attempts, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, digest) DO UPDATE SET
+           parts = excluded.parts, attempts = excluded.attempts, updated_at = excluded.updated_at`
+      )
+      .run(
+        input.projectId,
+        input.digest,
+        JSON.stringify(input.parts),
+        input.attempts,
+        input.updatedAt.toISOString()
+      )
   }
 
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {

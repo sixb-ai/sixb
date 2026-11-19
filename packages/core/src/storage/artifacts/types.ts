@@ -442,6 +442,101 @@ export interface ArtifactPdfKeyInput {
 }
 
 /**
+ * What Sixb derives once from a video or a sound, kept under the digest of its bytes: every file
+ * that holds them, in any version of any artifact, shares it. Each part is ready, still to come,
+ * or says why it will not come, so a poster can be ready while the proxy failed.
+ */
+export interface ArtifactMediaRecord {
+  readonly projectId: string
+  /** The digest of the original's bytes, as its `FileRef` names it. */
+  readonly digest: string
+  readonly parts: ArtifactMediaParts
+  /** How many times the render worker has tried to derive them. */
+  readonly attempts: number
+  readonly updatedAt: Date
+}
+
+export interface ArtifactMediaParts {
+  /** What the file holds. */
+  readonly probe: ArtifactMediaPart<ArtifactMediaProbe>
+  /**
+   * What plays in its place: for a video, H.264 with its shorter side at most 720 pixels and a
+   * keyframe every half second, so it scrubs; for a sound, AAC, only when browsers cannot play
+   * the original.
+   */
+  readonly proxy: ArtifactMediaPart<{ readonly file: FileRef }>
+  /** A JPEG of a representative moment, not a black first frame. */
+  readonly poster: ArtifactMediaPart<{ readonly file: FileRef; readonly atMs: number }>
+  readonly filmstrip: ArtifactMediaPart<ArtifactMediaFilmstrip>
+  /** The sound's peaks, as JSON: `{ peaksPerSecond, peaks }`, each from 0 to 100. */
+  readonly waveform: ArtifactMediaPart<{ readonly file: FileRef }>
+  /** Where the picture cuts to another shot. */
+  readonly cuts: ArtifactMediaPart<{ readonly atMs: readonly number[] }>
+  /**
+   * What is said, as JSON: `{ text, language?, words?, segments? }`, timed in milliseconds as the
+   * project's transcription model timed it.
+   */
+  readonly transcript: ArtifactMediaPart<{
+    readonly file: FileRef
+    readonly language?: string
+  }>
+}
+
+export type ArtifactMediaPartName = keyof ArtifactMediaParts
+
+/**
+ * One part of what is derived from a media. `unavailable` will not come and is no error: it does
+ * not apply, as a sound's poster, or the project has nothing to make it with.
+ */
+export type ArtifactMediaPart<T extends object> =
+  | { readonly status: "pending" }
+  | ({ readonly status: "ready" } & T)
+  | { readonly status: "unavailable" | "failed"; readonly reason: string }
+
+/** What a media file holds: its streams are absent when it has none. */
+export interface ArtifactMediaProbe {
+  readonly durationMs: number
+  /** Its container, as FFmpeg names it, such as `mov,mp4,m4a,3gp,3g2,mj2`. */
+  readonly container: string
+  readonly bitRate?: number
+  /**
+   * For an MP4 or a MOV: whether its index comes before its data, so it plays before it has
+   * arrived whole.
+   */
+  readonly faststart?: boolean
+  readonly video?: {
+    readonly codec: string
+    /** As it shows, once turned by `rotation`. */
+    readonly width: number
+    readonly height: number
+    /** Degrees clockwise the picture is turned to show, as the file says. */
+    readonly rotation: number
+    readonly fps?: number
+  }
+  readonly audio?: {
+    readonly codec: string
+    readonly sampleRate?: number
+    readonly channels?: number
+  }
+}
+
+/** Thumbnails of a video at a regular interval, in rows of one JPEG, the first at 0. */
+export interface ArtifactMediaFilmstrip {
+  readonly file: FileRef
+  readonly intervalMs: number
+  readonly count: number
+  readonly columns: number
+  /** One thumbnail's size in pixels. */
+  readonly width: number
+  readonly height: number
+}
+
+export interface ListArtifactMediaInput {
+  readonly projectId: string
+  readonly digests: readonly string[]
+}
+
+/**
  * What a comment is about: a canvas's board, an element of it by its address, as
  * `boardElements` writes one, an instant of a video and the scene it plays, or the artifact
  * itself, at the revision the author saw.
@@ -623,6 +718,13 @@ export interface ArtifactStorage {
   putPdf(input: ArtifactPdfRecord): Promise<void>
   /** Forgets why the PDF under a render key could not be printed. A PDF kept there stays. */
   clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void>
+  /** What is derived of the media under these digests, by digest; one without any is left out. */
+  listMedia(input: ListArtifactMediaInput): Promise<ArtifactMediaRecord[]>
+  /**
+   * Keeps what is derived of a media under its digest, in place of what was kept there. Deleting
+   * an artifact keeps it: other files may hold the same bytes.
+   */
+  putMedia(input: ArtifactMediaRecord): Promise<void>
   /**
    * Adds a comment, or a reply to one. Throws `artifact_not_found`; `comment_not_found` when
    * `parentId` names no comment of the artifact, or a reply; and `artifact_comments_full` past

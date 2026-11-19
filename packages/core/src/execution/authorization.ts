@@ -20,7 +20,7 @@ import type {
   CompiledSelectedObjectReadScope,
   SelectedObjectReadScope,
 } from "../storage/objects/types"
-import { kernelOperationFromId, kernelOperationId } from "./kernel-operation"
+import { isKernelOperationType, kernelOperationFromId, kernelOperationId } from "./kernel-operation"
 import { assertScriptPath } from "./script"
 import {
   type AuthorizablePrincipal,
@@ -829,7 +829,7 @@ function snapshotTrustedPrimitive(primitive: TrustedPrimitiveRef): TrustedPrimit
 }
 
 function snapshotKernelOperation(operation: KernelOperation): KernelOperation {
-  if (operation.type !== "ontology.recover" && operation.type !== "ontology.indexVectors") {
+  if (!isKernelOperationType(operation.type)) {
     throw new Error(
       `[Sixb] Unknown kernel operation '${String((operation as { type?: unknown }).type)}'.`
     )

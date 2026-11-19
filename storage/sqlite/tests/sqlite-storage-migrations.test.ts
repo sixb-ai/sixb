@@ -227,6 +227,7 @@ const shippedMigrationIds = [
   "105-agent-thread-reads",
   "106-sync-run-connections",
   "107-video-artifacts",
+  "108-artifact-media",
 ]
 
 afterEach(async () => {
