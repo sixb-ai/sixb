@@ -459,13 +459,19 @@ exact email, ignoring case, and finds suspended members too. Each member is
   sixb artifacts comments list <artifact-id> [--status open|resolved|all]
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
+  sixb artifacts export <artifact-id> [--version <n|latest>] [--retry] [--output <path.mp4>]
 
 \`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
 address and label on a canvas; at, in milliseconds, and scene on a video; revision), its body,
 authorName and its replies. A message quoting comments
 names each one's id as \`comment <id>\`. Resolve a comment once the change it asks for is made;
 reply to one to say why it is not. Reading takes access to the artifact; resolving, the right to
-change it or being the comment's author.`,
+change it or being the comment's author.
+
+\`export\` asks for a video's MP4 and prints {"status"}: ready, rendering with {"progress"} (its
+segments ready of all of them), or failed with its reason; --retry renders what failed anew.
+With --output it waits while the video renders, then downloads the MP4 there. Each scene renders
+once and is kept, so a version that changes one scene renders only that one again.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
@@ -709,6 +715,8 @@ async function artifacts(api, args) {
   const [group, sub, ...rest] = args;
   if (!group || isHelp(group))
     return writeText(GROUP_HELP.artifacts);
+  if (group === "export")
+    return exportVideo(api, args.slice(1));
   if (group !== "comments")
     fail(`Unknown artifacts command '${group}'.`);
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -742,6 +750,58 @@ async function artifacts(api, args) {
     }));
   }
   fail(`Unknown artifacts comments command '${sub}'.`);
+}
+var EXPORT_POLL_MS = 3000;
+var EXPORT_WAIT_MS = 60 * 60000;
+async function exportVideo(api, args) {
+  if (requestsHelp(args))
+    return writeText(GROUP_HELP.artifacts);
+  const { positionals, options } = parseCommandArgs(args, { "--version": "string", "--retry": "boolean", "--output": "string" }, "artifacts export", 1);
+  const version = options["--version"]?.trim() || "latest";
+  if (!/^(latest|[1-9]\d*)$/.test(version)) {
+    fail('artifacts export --version is a version number, or "latest".');
+  }
+  const path = `/api/artifacts/${idSegment(positionals[0]?.trim())}/versions/${version}/video`;
+  const ask = async (retry) => await api.post(`${path}${retry ? "?retry=true" : ""}`, {});
+  let asked = await ask(options["--retry"] === true);
+  const output = options["--output"];
+  if (!output)
+    return writeJson(asked);
+  const progress = process.stderr.isTTY ? exportProgress() : undefined;
+  const deadline = Date.now() + EXPORT_WAIT_MS;
+  try {
+    while (asked.status === "rendering") {
+      progress?.show(asked);
+      if (Date.now() > deadline) {
+        fail("The video is still rendering. Run the command again to keep waiting.", "timeout");
+      }
+      await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
+      asked = await ask(false);
+    }
+  } finally {
+    progress?.clear();
+  }
+  if (asked.status === "failed") {
+    fail(`The video could not be rendered: ${asked.reason ?? "no reason given"}`, "video_failed", "Run the command again with --retry to render what failed anew.");
+  }
+  await api.download(path, output);
+  return writeJson({ ...asked, downloaded: true, output });
+}
+function exportProgress() {
+  let shown = "";
+  return {
+    show({ progress }) {
+      const line = progress?.assembling ? "Joining the scenes…" : `Rendering… ${progress?.ready ?? 0} of ${progress?.total ?? 0} segments`;
+      if (line === shown)
+        return;
+      shown = line;
+      process.stderr.write(`\r\x1B[2K${line}`);
+    },
+    clear() {
+      if (shown)
+        process.stderr.write("\r\x1B[2K");
+    }
+  };
 }
 function commentsOf(page) {
   const comments = typeof page === "object" && page !== null && "comments" in page ? page.comments : [];
