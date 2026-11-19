@@ -843,7 +843,7 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
 
     test("maps the remaining high-level commands to their gateway routes", async () => {
       const api = startTestApi((request) => {
-        if (request.url.pathname.endsWith("/files/content")) {
+        if (request.url.pathname.endsWith("/content")) {
           return new Response("downloaded bytes")
         }
         if (request.method === "GET" && request.url.pathname === "/api/actions") {
@@ -942,6 +942,17 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
             "2026-01-02T00:00:00Z",
           ],
           ["workflow-runs", "get", "workflow/run-1"],
+          [
+            "files",
+            "download",
+            "artifact",
+            "art_1",
+            "2",
+            "--path",
+            "media/intro.mp4",
+            "--output",
+            downloadPath,
+          ],
         ] as const
 
         for (const args of commands) {
@@ -973,7 +984,9 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
           "/api/workflows/customer%2Freview/runs",
           "/api/workflow-runs",
           "/api/workflow-runs/workflow%2Frun-1",
+          "/api/artifacts/art_1/versions/2/content",
         ])
+        expect(api.requests.at(-1)?.url.searchParams.get("path")).toBe("media/intro.mp4")
         expect(api.requests[0]?.url.searchParams.get("objectTypeId")).toBe("Customer")
         expect(api.requests[0]?.url.searchParams.get("limit")).toBe("20")
         expect(api.requests[0]?.url.searchParams.get("orderBy")).toBe("updatedAt")

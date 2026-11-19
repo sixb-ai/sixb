@@ -260,6 +260,7 @@ List options:
   sixb files upload <local-path> [--logical-path <path>] [--media-type <type>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
   sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download artifact <artifact-id> <version> --path <file-path> --output <local-path>
   sixb files download url <content-url> --output <local-path>
 
 \`upload\` prints the file's reference as JSON. A file past 25 MB, up to 2 GB, is sent in stages

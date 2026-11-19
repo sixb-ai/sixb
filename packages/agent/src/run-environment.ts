@@ -1116,7 +1116,7 @@ async function startAgentEnvironment(
         installed: await artifacts.installed,
         artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
-        sandbox: (await ready).sandbox,
+        handle: await ready,
         signal,
       })
     },

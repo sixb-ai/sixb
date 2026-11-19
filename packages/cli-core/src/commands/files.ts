@@ -57,6 +57,12 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
       const type = positionals[1] ?? ""
       const id = positionals[2] ?? ""
       route = `/api/objects/${idSegment(type)}/${idSegment(id)}/files/content`
+    } else if (context === "artifact") {
+      requireExact(positionals, 3, "files download artifact requires an artifact id and a version.")
+      const id = positionals[1] ?? ""
+      const version = positionals[2] ?? ""
+      if (!/^[1-9]\d*$/.test(version)) fail(`'${version}' is not a version number.`)
+      route = `/api/artifacts/${idSegment(id)}/versions/${version}/content`
     } else if (context === "action-run" || context === "workflow-run") {
       requireExact(positionals, 2, `files download ${context} requires exactly one run id.`)
       const id = positionals[1] ?? ""
