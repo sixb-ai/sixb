@@ -140,8 +140,8 @@ export interface AiModelCallOperationRecord {
   readonly modelKind: import("../../models/definitions").ModelKind
   readonly providerId: string
   readonly modelId: string
-  /** The provider's handle on the running call, opaque to Sixb. */
-  readonly operation: ReadonlyJsonValue
+  /** The provider's handle on the running call, opaque to Sixb; absent until it accepted the call. */
+  readonly operation?: ReadonlyJsonValue
   /** The request facts that price the call once it ends, owned by the model kind's runtime. */
   readonly request: ReadonlyJsonObject
   /** Whether admission reserved budget that recording the call must reconcile. */
@@ -157,9 +157,18 @@ export interface AiModelCallOperationRecord {
 
 export type CreateAiModelCallOperationInput = Omit<
   AiModelCallOperationRecord,
-  "status" | "error" | "result" | "createdAt" | "settledAt"
+  "operation" | "status" | "error" | "result" | "createdAt" | "settledAt"
 > & {
   readonly createdAt?: Date
+}
+
+export interface StartAiModelCallOperationInput {
+  readonly projectId: string
+  readonly callId: string
+  /** The provider's handle on the running call. */
+  readonly operation: ReadonlyJsonValue
+  /** The request facts as the provider accepted the call, in place of those kept at creation. */
+  readonly request: ReadonlyJsonObject
 }
 
 export interface SettleAiModelCallOperationInput {
@@ -204,10 +213,21 @@ export interface AiUsageStorage {
 
   getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null>
 
-  /** Keep a running call's provider handle, once per project and call ID. */
+  /**
+   * Keep a call before the provider starts it, once per project and call ID, so a call the
+   * provider bills always has a record to settle.
+   */
   createModelCallOperation(
     input: CreateAiModelCallOperationInput
   ): Promise<AiModelCallOperationRecord>
+
+  /**
+   * Keep the provider's handle once it accepted the call. Only a pending call without one takes
+   * it; returns the record as it now stands, or null when no such call exists.
+   */
+  startModelCallOperation(
+    input: StartAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null>
 
   getModelCallOperation(input: GetAiModelCallFilesInput): Promise<AiModelCallOperationRecord | null>
 

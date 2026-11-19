@@ -13,6 +13,7 @@ import { prepareModelInputFile, readModelInputFile } from "../input-file"
 import type { ModelMoney } from "../pricing"
 import { assertVideoModel } from "./catalog"
 import {
+  abandonVideoOperation,
   checkVideoOperation,
   isWarnings,
   resolveVideoModel,
@@ -21,7 +22,6 @@ import {
   storedVideoRequest,
   storedVideoResult,
 } from "./check"
-import { VideoModelResponseError } from "./errors"
 import type {
   VideoGenerateInput,
   VideoGeneration,
@@ -55,7 +55,6 @@ interface PreparedRequest {
   readonly referenceImages: readonly PreparedImage[]
 }
 
-/** What the operation record keeps to price the call once it ends. */
 export interface VideoRuntimeDependencies {
   readonly blobs: BlobStorage | undefined
   /** Whether the caller sees what an execution's model calls produced. */
@@ -137,8 +136,34 @@ export function createVideoRuntime(
       }),
     })
 
+    // Kept, with its check queued, before the provider has it: a job the provider bills always
+    // has a record, and a check that settles it if this process stops.
+    const initial: StoredVideoRequest = {
+      n: request.n,
+      ...optional("durationSeconds", request.durationSeconds),
+      warnings: [],
+    }
+    let record: AiModelCallOperationRecord
+    try {
+      record = await operations.createModelCallOperation({
+        projectId,
+        callId,
+        executionId: accounting.executionId,
+        attempt: accounting.attempt,
+        modelKind: "video",
+        providerId: model.providerId,
+        modelId: model.modelId,
+        request: initial as unknown as ReadonlyJsonObject,
+        reserved: accounting.hasReservation(callId),
+      })
+    } catch (error) {
+      await accounting.markCallUnknown(callId)
+      throw error
+    }
+
     let started: VideoModelStart
     try {
+      await scheduleVideoCheck(runtime.queues.agents, record)
       signal.throwIfAborted()
       started = await model.start({
         callId,
@@ -153,55 +178,40 @@ export function createVideoRuntime(
         signal,
       })
       if (!isStart(started)) {
-        throw new VideoModelResponseError(
+        throw new ModelProviderError(
           "[SixbModels] Invalid video start response.",
           model.providerId,
           model.modelId,
-          {}
+          { code: "invalid_video_response", retryable: false }
         )
       }
     } catch (error) {
-      // Whether the provider began a billable job is unknown, so its budget stays reserved.
-      await accounting.markCallUnknown(callId)
+      // A start that failed may still have reached the provider: its budget becomes unknown.
+      await abandonVideoOperation(operations, record, accounting, "The video could not be started.")
       throw error
     }
 
     // The job runs now, whatever happens to this request: its handle must be kept.
     const stored: StoredVideoRequest = {
-      n: request.n,
-      ...optional("durationSeconds", request.durationSeconds),
+      ...initial,
       ...optional("dimensions", started.pricingDimensions),
       warnings: [...(started.warnings ?? [])],
     }
-    let record: AiModelCallOperationRecord
     try {
-      record = await operations.createModelCallOperation({
+      const kept = await operations.startModelCallOperation({
         projectId,
         callId,
-        executionId: accounting.executionId,
-        attempt: accounting.attempt,
-        modelKind: "video",
-        providerId: model.providerId,
-        modelId: model.modelId,
         operation: started.operation,
         request: stored as unknown as ReadonlyJsonObject,
-        reserved: accounting.hasReservation(callId),
       })
+      if (!kept) throw new Error(`[SixbModels] Video generation '${callId}' disappeared.`)
+      record = kept
     } catch (error) {
+      // The queued check settles it at the ceiling, its budget unknown.
       await accounting.markCallUnknown(callId)
       throw new Error(
         `[SixbModels] Video generation '${callId}' started, but Sixb could not keep track of it.`,
         { cause: error }
-      )
-    }
-
-    // Settled from the queue if no one asks again: nothing holds its budget forever.
-    try {
-      await scheduleVideoCheck(runtime.queues.agents, record)
-    } catch (error) {
-      console.error(
-        `[SixbModels] Could not schedule a check of video generation '${callId}'; it settles when it is next read.`,
-        error
       )
     }
 
@@ -389,15 +399,19 @@ function selectModel(
   catalog: ModelCatalog | undefined,
   requested: VideoModel | undefined
 ): VideoModel {
-  // A model the caller passes runs as given, listed or not; the catalog supplies the default.
-  const selected = requested ?? catalog?.video?.default.model
-  if (!selected) {
+  const videos = catalog?.video
+  if (!videos) throw new Error("[SixbModels] Configure models.video in createSixb().")
+  if (!requested) return videos.default.model
+
+  // A later check, in any process, finds the job's model in the catalog.
+  const ref = { provider: requested.providerId, modelId: requested.modelId }
+  if (!videos.getByRef(ref)) {
     throw new Error(
-      "[SixbModels] Configure models.video in createSixb() or supply a model to generate()."
+      `[SixbModels] Video model '${ref.provider}/${ref.modelId}' is not in models.video: list it in createSixb() to generate with it.`
     )
   }
 
-  return selected
+  return requested
 }
 
 function assertRequestSupport(model: VideoModel, request: PreparedRequest): void {
@@ -508,6 +522,7 @@ function isStart(value: unknown): value is VideoModelStart {
     start !== null &&
     typeof start === "object" &&
     start.operation !== undefined &&
+    start.operation !== null &&
     (start.warnings === undefined || isWarnings(start.warnings))
   )
 }

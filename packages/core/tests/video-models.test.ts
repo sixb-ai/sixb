@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, setSystemTime, test } from "bun:test"
+import { afterEach, describe, expect, jest, mock, setSystemTime, spyOn, test } from "bun:test"
 import { SixbHost } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
@@ -11,6 +11,7 @@ import {
 } from "../src/models"
 import { runScheduledVideoCheck, VIDEO_GENERATION_CEILING_MS } from "../src/models/video/check"
 import { setApiPublicOrigin } from "../src/runtime/public-origin"
+import { InMemoryAiUsageStorage } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const MP4 = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])
@@ -115,6 +116,7 @@ async function untilTimer(): Promise<void> {
 afterEach(() => {
   jest.useRealTimers()
   setSystemTime()
+  mock.restore()
 })
 
 /** The scheduled check the agent worker would run next, claimed once it is due. */
@@ -327,10 +329,13 @@ describe("video generation", () => {
     })
   })
 
-  // Removal proof: drop markCallUnknown from start()'s catch; the reservation reads as released.
-  test("a start the provider refuses keeps its budget unknown and stores nothing", async () => {
+  // Removal proof: drop abandonVideoOperation from start()'s catch; the reservation reads as
+  // still held and the generation stays pending.
+  test("a start the provider refuses is failed, its budget unknown", async () => {
+    let callId = ""
     const { model } = createVideoModel([], {
-      async start() {
+      async start(request) {
+        callId = request.callId
         throw new Error("upstream down")
       },
       costEstimator: {
@@ -343,8 +348,62 @@ describe("video generation", () => {
 
     await expect(sixb.models.video.start({ prompt: "a fox" })).rejects.toThrow("upstream down")
 
+    expect(await sixb.models.video.get(callId)).toMatchObject({
+      status: "failed",
+      error: "The video could not be started.",
+    })
     const [status] = await storage.aiLimits.listPolicyStatuses({ projectId: "videos" })
-    expect(status!.consumption.unknown).toMatchObject({ amount: { amountNanos: "500000000" } })
+    expect(status!.consumption).toMatchObject({
+      reserved: { amount: { amountNanos: "0" } },
+      unknown: { amount: { amountNanos: "500000000" } },
+    })
+  })
+
+  // Removal proof: queue the check after model.start() in start(), catching its failure; the
+  // provider starts a job nothing will check on.
+  test("a start whose check cannot be queued fails before the provider sees it", async () => {
+    const { model, calls } = createVideoModel()
+    const deps = await setup(model)
+    spyOn(deps.queues.agents, "enqueue").mockRejectedValueOnce(new Error("queue down"))
+
+    await expect(deps.sixb.models.video.start({ prompt: "a fox" })).rejects.toThrow("queue down")
+    expect(calls.starts).toHaveLength(0)
+  })
+
+  // Removal proof: drop the check of a missing handle in checkVideoOperation; the provider is
+  // asked about an operation it never handed out.
+  test("a job whose handle was lost settles at the ceiling, its budget unknown", async () => {
+    const { model, calls } = createVideoModel([{ status: "pending" }], {
+      costEstimator: {
+        estimateReservation: () => ({ currency: "USD", amountNanos: "800000000" }),
+        estimate: () => ({ status: "unpriceable", reason: "missing-rate-card" }),
+      },
+    })
+    const deps = await setup(model)
+    await createCostLimit(deps.storage)
+    const startedAt = new Date("2026-11-18T10:00:00.000Z")
+    setSystemTime(startedAt)
+    // Storage hands out a proxy of its AI usage store, so the store's own method is replaced.
+    spyOn(InMemoryAiUsageStorage.prototype, "startModelCallOperation").mockRejectedValueOnce(
+      new Error("storage down")
+    )
+
+    const lost = await deps.sixb.models.video.start({ prompt: "a fox" }).catch((error) => error)
+    expect(lost).toMatchObject({ message: expect.stringContaining("could not keep track") })
+    const callId = calls.starts[0]!.callId
+    const check = () =>
+      runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+
+    setSystemTime(new Date(startedAt.getTime() + 60_000))
+    await check()
+    expect(calls.checks).toBe(0)
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "pending" })
+
+    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
+    await check()
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "failed" })
+    const [status] = await deps.storage.aiLimits.listPolicyStatuses({ projectId: "videos" })
+    expect(status!.consumption.unknown).toMatchObject({ amount: { amountNanos: "800000000" } })
   })
 
   test("rejects requests the model cannot serve before starting a job", async () => {
@@ -403,21 +462,30 @@ describe("video generation", () => {
     })
   })
 
-  test("a generation whose model left the catalog cannot be checked", async () => {
-    const { sixb, storage } = await setup()
-    const unlisted = createVideoModel([{ status: "pending" }], {}, { modelId: "unlisted" }).model
-    const { callId } = await sixb.models.video.start({
-      prompt: "a fox",
-      model: { ...unlisted, modelId: "unlisted" },
-    })
+  // Removal proof: return the requested model as given from selectModel(); the unlisted model
+  // starts a job no later check can find.
+  test("only a listed model starts, since later checks find it in the catalog", async () => {
+    const { model } = createVideoModel([{ status: "pending" }])
+    const deps = await setup(model)
+    const unlisted = createVideoModel([], { modelId: "unlisted" }, { modelId: "unlisted" })
 
-    expect(
-      await storage.aiUsage.getModelCallOperation({ projectId: "videos", callId })
-    ).toMatchObject({
-      modelId: "unlisted",
-      status: "pending",
+    const refused = await deps.sixb.models.video
+      .start({ prompt: "a fox", model: unlisted.model })
+      .catch((error) => error)
+    expect(refused).toMatchObject({ message: expect.stringContaining("not in models.video") })
+    expect(unlisted.calls.starts).toHaveLength(0)
+
+    // A model removed from the catalog since is reported, not guessed.
+    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox" })
+    const other = createVideoModel([], { modelId: "other" }, { modelId: "other" }).model
+    const check = runScheduledVideoCheck(
+      restartedHost(deps, other),
+      callId,
+      AbortSignal.timeout(5_000)
+    )
+    expect(await check.catch((error) => error)).toMatchObject({
+      message: expect.stringContaining("no longer configured"),
     })
-    await expect(sixb.models.video.get(callId)).rejects.toThrow("no longer configured")
   })
 
   test("validates catalog shape", () => {
@@ -507,24 +575,34 @@ describe("video generation", () => {
     })
   })
 
+  // Removal proof: validate the status after checkVideoOperation's try; an invalid reply is
+  // retried forever instead of settling.
   test("past the ceiling, a job Sixb can no longer ask about fails too", async () => {
-    const { model } = createVideoModel([], {
-      async status() {
-        throw new Error("Gateway unreachable")
-      },
-    })
-    const deps = await setup(model)
-    const startedAt = new Date("2026-11-18T10:00:00.000Z")
-    setSystemTime(startedAt)
-    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox" })
-    const check = () =>
-      runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+    for (const [status, message] of [
+      [
+        async () => {
+          throw new Error("Gateway unreachable")
+        },
+        "Gateway unreachable",
+      ],
+      [async () => ({ status: "running" }) as never, "Invalid video status response"],
+    ] as const) {
+      const { model } = createVideoModel([], { status })
+      const deps = await setup(model)
+      const startedAt = new Date("2026-11-18T10:00:00.000Z")
+      setSystemTime(startedAt)
+      const { callId } = await deps.sixb.models.video.start({ prompt: "a fox" })
+      const check = () =>
+        runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
 
-    // Before it, the worker retries the job.
-    expect(await check().catch((error) => error)).toMatchObject({ message: "Gateway unreachable" })
+      // Before it, the worker retries the job.
+      expect(await check().catch((error) => error)).toMatchObject({
+        message: expect.stringContaining(message),
+      })
 
-    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
-    await check()
-    expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "failed" })
+      setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
+      await check()
+      expect(await deps.sixb.models.video.get(callId)).toMatchObject({ status: "failed" })
+    }
   })
 })

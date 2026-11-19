@@ -148,6 +148,7 @@ export interface VideoGenerateInput {
   readonly lastFrame?: FileRef
   /** Images of the characters, objects or style the clip should show. */
   readonly referenceImages?: readonly FileRef[]
+  /** One of `models.video`, which later checks find it in. Defaults to the first. */
   readonly model?: VideoModel
   readonly signal?: AbortSignal
 }

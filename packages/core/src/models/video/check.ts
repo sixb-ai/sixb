@@ -5,13 +5,13 @@ import type { SixbHostContext } from "../../runtime/types"
 import type { AiModelCallOperationRecord, AiUsageStorage } from "../../storage"
 import type { ExecutionRecord } from "../../storage/executions"
 import type { ModelCatalog } from "../catalog"
+import { ModelProviderError } from "../errors"
 import type { ModelCallEndEvent, ModelUsage } from "../events"
 import type { AiModelCallRecorder } from "../execution/model-call-recorder"
 import { createExecutionRecorder } from "../execution/session"
 import { estimateModelCall, type ModelCallCost } from "../pricing"
 import type { ModelPricingDimensions } from "../rate-card"
 import { assertVideoModel } from "./catalog"
-import { VideoModelResponseError } from "./errors"
 import type { VideoData, VideoModel, VideoModelResponseMetadata, VideoModelStatus } from "./types"
 
 /**
@@ -64,25 +64,29 @@ export async function checkVideoOperation(
 ): Promise<AiModelCallOperationRecord> {
   const pastCeiling = Date.now() - record.createdAt.getTime() >= VIDEO_GENERATION_CEILING_MS
 
+  // Its start is under way, or the process starting it stopped before keeping the handle.
+  const operation = record.operation
+  if (operation === undefined) return pastCeiling ? expire(context, record) : record
+
   let model: VideoModel
   let status: VideoModelStatus
   try {
     model = await resolveVideoModel(options.binding ?? catalogModel(context.catalog, record))
-    status = await model.status({ operation: record.operation, signal: options.signal })
+    status = await model.status({ operation, signal: options.signal })
+    if (!isStatus(status)) {
+      throw new ModelProviderError(
+        "[SixbModels] Invalid video status response.",
+        model.providerId,
+        model.modelId,
+        { code: "invalid_video_response", retryable: false }
+      )
+    }
   } catch (error) {
     if (pastCeiling) return expire(context, record)
     throw error
   }
 
-  if (status?.status === "pending") return pastCeiling ? expire(context, record) : record
-  if (status?.status !== "completed" && status?.status !== "failed") {
-    throw new VideoModelResponseError(
-      "[SixbModels] Invalid video status response.",
-      model.providerId,
-      model.modelId,
-      {}
-    )
-  }
+  if (status.status === "pending") return pastCeiling ? expire(context, record) : record
 
   const accounting = await originAccounting(context, record)
   const stored = storedVideoRequest(record)
@@ -213,28 +217,39 @@ async function originAccounting(
   return accounting
 }
 
-/**
- * Give up on a generation past the ceiling. Whether the provider billed it is unknown, so its
- * reservation becomes unknown, as for a language call that never finished: recording it as free
- * could under-count a job the provider charged for.
- */
+/** Give up on a generation past the ceiling. */
 async function expire(
   context: VideoCheckContext,
   record: AiModelCallOperationRecord
 ): Promise<AiModelCallOperationRecord> {
-  const accounting = await originAccounting(context, record)
+  const minutes = VIDEO_GENERATION_CEILING_MS / 60_000
+  return abandonVideoOperation(
+    context.storage.aiUsage,
+    record,
+    await originAccounting(context, record),
+    `The provider did not finish the video within ${minutes} minutes.`
+  )
+}
+
+/**
+ * Settle a generation whose end Sixb cannot learn as failed. Whether the provider billed it is
+ * unknown, so its reservation becomes unknown, as for a language call that never finished:
+ * recording it as free could under-count a job the provider charged for.
+ */
+export async function abandonVideoOperation(
+  storage: AiUsageStorage,
+  record: AiModelCallOperationRecord,
+  accounting: AiModelCallRecorder,
+  error: string
+): Promise<AiModelCallOperationRecord> {
   await accounting.markCallUnknown(record.callId)
 
-  const minutes = VIDEO_GENERATION_CEILING_MS / 60_000
   const result: StoredVideoResult = {
     usage: {},
     cost: { status: "unpriceable", reason: "missing-usage" },
     warnings: storedVideoRequest(record).warnings,
   }
-  return settleRecord(context, record, {
-    error: `The provider did not finish the video within ${minutes} minutes.`,
-    result,
-  })
+  return settleRecord(storage, record, { error, result })
 }
 
 async function settle(
@@ -245,7 +260,7 @@ async function settle(
   error?: string
 ): Promise<AiModelCallOperationRecord> {
   const { raw: _, ...usage } = event.usage
-  return settleRecord(context, record, {
+  return settleRecord(context.storage.aiUsage, record, {
     ...(error === undefined ? {} : { error }),
     result: { usage, cost: event.cost, warnings },
   })
@@ -253,12 +268,12 @@ async function settle(
 
 /** Two checks may see the job end at once; both answer with the first one's outcome. */
 async function settleRecord(
-  context: VideoCheckContext,
+  storage: AiUsageStorage,
   record: AiModelCallOperationRecord,
   outcome: { readonly error?: string; readonly result: StoredVideoResult }
 ): Promise<AiModelCallOperationRecord> {
-  const settled = await context.storage.aiUsage.settleModelCallOperation({
-    projectId: context.projectId,
+  const settled = await storage.settleModelCallOperation({
+    projectId: record.projectId,
     callId: record.callId,
     status: outcome.error === undefined ? "completed" : "failed",
     ...(outcome.error === undefined ? {} : { error: outcome.error }),
@@ -343,6 +358,11 @@ function catalogModel(
   }
 
   return entry.model
+}
+
+function isStatus(value: unknown): value is VideoModelStatus {
+  const status = (value as Partial<VideoModelStatus> | null)?.status
+  return status === "pending" || status === "completed" || status === "failed"
 }
 
 function describeFailure(error: unknown): string {
