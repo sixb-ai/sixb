@@ -46,6 +46,7 @@ import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactFrameTarget, ArtifactRecord } from "@sixb/core/storage"
 import { agentToolErrorText } from "../model-adapters"
 import {
+  digestSandboxFile,
   listSandboxFiles,
   readSandboxFile,
   resolveSandboxPath,
@@ -74,7 +75,7 @@ const CREATE_TOOL = "publish_artifact"
 const OPEN_TOOL = "open_artifact"
 type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
-/** A file of up to 2 GB, uploaded from the sandbox through the API. */
+/** A file of up to 2 GB, uploaded from the sandbox through the API, or hashed there. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
 
 // One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
@@ -254,10 +255,13 @@ async function publish(
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
-      // A large file is uploaded by the sandbox itself. It is never one the layout check reads:
-      // an entry, a board or a theme is at most 2 MB.
+      // A large file is uploaded by the sandbox itself, unless the version it updates holds it
+      // already. It is never one the layout check reads: an entry, a board or a theme is at most
+      // 2 MB.
       if (!source.bytes && source.sizeBytes > SANDBOX_INLINE_BYTES) {
-        const file = await uploadSource(input, handle, kind, source, reservation, signal)
+        const file =
+          (await storedAlready(handle, source, base?.files, signal)) ??
+          (await uploadSource(input, handle, kind, source, reservation, signal))
         files.push({ path: source.path, file })
         contents.push({
           path: source.path,
@@ -501,6 +505,30 @@ async function publish(
               : { skipped: check.reason },
         }),
   }
+}
+
+/**
+ * The stored file a large source is, when the version an update starts from holds the same bytes
+ * at its path: hashed in the sandbox, it is never uploaded again. A recording downloaded into a
+ * video's folder once costs nothing on its later publishes.
+ */
+async function storedAlready(
+  handle: AgentSandboxHandle,
+  source: PublishSource,
+  base: readonly ArtifactFile[] | undefined,
+  signal: AbortSignal
+): Promise<FileRef | undefined> {
+  const stored = base?.find((file) => file.path === source.path)?.file
+  if (!stored || stored.sizeBytes !== source.sizeBytes) return undefined
+
+  const { sizeBytes, digest } = await digestSandboxFile(handle, {
+    path: source.absolutePath,
+    signal,
+    timeoutMs: SANDBOX_UPLOAD_TIMEOUT_MS,
+  }).catch((error: unknown) => {
+    throw toPublishError(error, CREATE_TOOL, source.path)
+  })
+  return sizeBytes === stored.sizeBytes && digest === stored.digest ? stored : undefined
 }
 
 /**
