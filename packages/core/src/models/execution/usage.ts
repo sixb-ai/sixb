@@ -28,5 +28,6 @@ export function aiModelCallUsageFromModel(usage: ModelUsage): AiModelCallUsageIn
       : { audioOutputTokens: usage.audioOutputTokens }),
     ...(usage.outputImages === undefined ? {} : { outputImages: usage.outputImages }),
     ...(usage.inputCharacters === undefined ? {} : { inputCharacters: usage.inputCharacters }),
+    ...(usage.outputVideoMs === undefined ? {} : { outputVideoMs: usage.outputVideoMs }),
   }
 }

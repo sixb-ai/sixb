@@ -2245,6 +2245,9 @@ function withAiUsageRecordInterceptor(
     summarizeExecutions: (input) => usage.summarizeExecutions(input),
     recordModelCallFiles: (input) => usage.recordModelCallFiles(input),
     getModelCallFiles: (input) => usage.getModelCallFiles(input),
+    createModelCallOperation: (input) => usage.createModelCallOperation(input),
+    getModelCallOperation: (input) => usage.getModelCallOperation(input),
+    settleModelCallOperation: (input) => usage.settleModelCallOperation(input),
   })
   return {
     ...storage,

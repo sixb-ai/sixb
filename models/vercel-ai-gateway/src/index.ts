@@ -11,4 +11,5 @@ export {
 } from "./provider"
 export type { VercelGatewaySpeechOptions } from "./speech"
 export type { VercelGatewayTranscriptionOptions } from "./transcription"
+export type { VercelGatewayVideoOptions } from "./video"
 export type { VercelGatewayWebSearchEngine, VercelGatewayWebSearchOptions } from "./web-search"

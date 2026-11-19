@@ -18,6 +18,7 @@ import {
   ModelCatalogUnavailableError,
   type SpeechModel,
   type TranscriptionModel,
+  type VideoModel,
 } from "@sixb/core/models"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -152,6 +153,7 @@ describe("GET /api/models", () => {
         },
       ],
       image: [],
+      video: [],
       audio: { speech: [], transcription: [] },
       capabilities: { run: true },
     })
@@ -212,6 +214,7 @@ describe("GET /api/models", () => {
     expect(await response.json()).toEqual({
       language: [],
       image: [],
+      video: [],
       audio: { speech: [], transcription: [] },
       capabilities: { run: true },
     })
@@ -272,10 +275,39 @@ describe("GET /api/models", () => {
         throw new Error("Route tests do not run inference.")
       },
     }
+    const veo: VideoModel = {
+      providerId: "gateway",
+      modelId: "google/veo-3.1-fast",
+      definition: {
+        kind: "video",
+        providerId: "gateway",
+        modelId: "google/veo-3.1-fast",
+        aspectRatios: ["16:9", "9:16"],
+        durations: [4, 6, 8],
+        audio: true,
+        inputImages: { maxCount: 3, maxBytes: 20_971_520 },
+      },
+      rateCard: {
+        currency: "USD",
+        videoOutputSeconds: {
+          variants: [
+            { resolution: "720p", audio: "silent", price: "0.1" },
+            { resolution: "720p", audio: "audio", price: "0.15" },
+          ],
+        },
+      },
+      async start() {
+        throw new Error("Route tests do not run inference.")
+      },
+      async status() {
+        throw new Error("Route tests do not run inference.")
+      },
+    }
     const warning = spyOn(console, "warn").mockImplementation(() => {})
     try {
       const response = await createApp({
         image: [flux],
+        video: [veo],
         audio: { speech: [voice], transcription: [transcriber] },
       }).fetch(new Request("http://localhost/api/models"))
       expect(response.status).toBe(200)
@@ -292,6 +324,27 @@ describe("GET /api/models", () => {
             rateCard: {
               currency: "USD",
               images: { variants: [{ size: "768x768", price: "0.008" }] },
+            },
+          },
+        ],
+        video: [
+          {
+            provider: "gateway",
+            modelId: "google/veo-3.1-fast",
+            isDefault: true,
+            name: "google/veo-3.1-fast",
+            aspectRatios: ["16:9", "9:16"],
+            durations: [4, 6, 8],
+            audio: true,
+            inputImages: { maxCount: 3, maxBytes: 20_971_520 },
+            rateCard: {
+              currency: "USD",
+              videoOutputSeconds: {
+                variants: [
+                  { resolution: "720p", audio: "silent", price: "0.1" },
+                  { resolution: "720p", audio: "audio", price: "0.15" },
+                ],
+              },
             },
           },
         ],

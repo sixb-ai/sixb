@@ -1,4 +1,10 @@
-import type { AudioData, LanguageModelCatalog, LanguageModelTier, SixbHostView } from "@sixb/core"
+import type {
+  AudioData,
+  LanguageModelCatalog,
+  LanguageModelTier,
+  SixbHostView,
+  VideoGeneration,
+} from "@sixb/core"
 import type { FileRef } from "@sixb/core/blob-storage/server"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 import {
@@ -23,12 +29,15 @@ import {
   TextGenerationSchema,
   TranscriptionBodySchema,
   TranscriptionSchema,
+  VideoGenerationBodySchema,
+  VideoGenerationParamsSchema,
+  VideoGenerationSchema,
 } from "../schemas/models"
 import { handleRouteError } from "../utils/http"
 import { readRequestBodyWithLimit } from "../utils/request-body"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
 
-type ModelKind = "language" | "image" | "speech" | "transcription"
+type ModelKind = "language" | "image" | "video" | "speech" | "transcription"
 
 interface ModelRef {
   readonly provider: string
@@ -93,6 +102,25 @@ function result(
       ...(cost.status === "unpriceable" ? { reason: cost.reason } : {}),
     },
   }
+}
+
+/** A generation as the API returns it; its usage and cost once it ended. */
+function videoGeneration(generation: VideoGeneration) {
+  return VideoGenerationSchema.parse({
+    callId: generation.callId,
+    model: { provider: generation.model.providerId, modelId: generation.model.modelId },
+    status: generation.status,
+    files: generation.files,
+    warnings: generation.warnings,
+    ...(generation.error === undefined ? {} : { error: generation.error }),
+    ...(generation.usage === undefined || generation.cost === undefined
+      ? {}
+      : result(
+          { provider: generation.model.providerId, modelId: generation.model.modelId },
+          { callId: generation.callId, usage: generation.usage, cost: generation.cost }
+        )),
+    createdAt: generation.createdAt.toISOString(),
+  })
 }
 
 function generationError(error: unknown, set: { status?: number | string }) {
@@ -226,6 +254,67 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
         body: ImageGenerationBodySchema,
         response: { 200: FileGenerationSchema, ...responses },
         detail: detail("generateImages", "Generate images with an image model"),
+      }
+    )
+    .post(
+      "/api/models/video/generations",
+      async (context) => {
+        const { body, set } = context
+        try {
+          const sixb = requireRequestSixb(context)
+          const { model: ref, firstFrame, lastFrame, referenceImages, ...options } = body
+          const entry = selectBinding(catalog()?.video, "video", ref)
+          // The job outlives this request: closing the connection must not abandon it.
+          const generation = await sixb.models.video.start({
+            ...options,
+            ...(firstFrame === undefined ? {} : { firstFrame: firstFrame as FileRef }),
+            ...(lastFrame === undefined ? {} : { lastFrame: lastFrame as FileRef }),
+            ...(referenceImages === undefined
+              ? {}
+              : { referenceImages: referenceImages as readonly FileRef[] }),
+            model: entry.model,
+          })
+          set.status = 202
+          return videoGeneration(generation)
+        } catch (error) {
+          return generationError(error, set)
+        }
+      },
+      {
+        body: VideoGenerationBodySchema,
+        response: { 202: VideoGenerationSchema, ...responses },
+        detail: detail(
+          "startVideoGeneration",
+          "Start generating videos with a video model; poll the generation until it ends"
+        ),
+      }
+    )
+    .get(
+      "/api/models/video/generations/:callId",
+      async (context) => {
+        const { params, set } = context
+        try {
+          const generation = await requireRequestSixb(context).models.video.get(params.callId)
+          if (!generation) {
+            set.status = 404
+            return { error: "Video generation not found" }
+          }
+          return videoGeneration(generation)
+        } catch (error) {
+          return generationError(error, set)
+        }
+      },
+      {
+        params: VideoGenerationParamsSchema,
+        response: {
+          200: VideoGenerationSchema,
+          404: ErrorResponseSchema,
+          502: ErrorResponseSchema,
+        },
+        detail: detail(
+          "getVideoGeneration",
+          "Get a video generation, checking with the provider while it runs"
+        ),
       }
     )
     .post(

@@ -316,13 +316,18 @@ and transcript. --retry derives each failed part anew. --part proxy|poster|films
 transcript downloads that part's file once it is ready: a proxy is a 720p H.264 copy to look at
 footage with, never to publish in the original's place.`,
   models: `Usage:
-  sixb models list [--kind language|image|speech|transcription]
+  sixb models list [--kind language|image|video|speech|transcription]
   sixb models get <model> [--kind <kind>]
   sixb models text "<prompt>"|--file <path|-> [--model <tier|model>] [--instructions <text>]
                    [--max-output-tokens <n>] [--reasoning <level>]
   sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
                     [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
                     [--seed <n>] [--image <file>]...
+  sixb models video "<prompt>" --output <path> [--model <model>] [--duration <seconds>]
+                    [--resolution <WxH>] [--aspect-ratio <ratio>] [--audio|--no-audio]
+                    [--first-frame <file>] [--last-frame <file>] [--reference <file>]...
+                    [--n <n>] [--seed <n>] [--no-wait]
+  sixb models video --call <call-id> --output <path> [--no-wait]
   sixb models speech "<text>" --output <path> [--model <model>] [--voice <voice>]
                      [--format mp3|wav|ogg|aac|flac] [--instructions <text>]
                      [--speed <n>] [--language <code>]
@@ -340,7 +345,12 @@ each timed in milliseconds, when the model times them.
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
 reference image; repeat it for several. \`calls files\` lists a past call's files, or downloads
-them again.`,
+them again.
+
+\`video\` takes minutes: it starts the video, waits for it and downloads it. The video keeps
+generating if the command stops; \`--call <call-id>\` picks it up again, and \`--no-wait\` prints
+where it stands and returns. --first-frame and --last-frame are the images the clip starts from
+and ends on; --reference shows a character, object or style, and repeats.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>

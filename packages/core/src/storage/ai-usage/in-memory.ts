@@ -4,18 +4,23 @@ import {
   assertAiUsageExecutionId,
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
+  normalizeAiModelCallSettlement,
 } from "./record"
 import type {
   AiModelCallFilesRecord,
+  AiModelCallOperationRecord,
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageStorage,
+  CreateAiModelCallOperationInput,
   GetAiModelCallFilesInput,
   GetLatestAiModelCallForExecutionInput,
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
+  SettleAiModelCallOperationInput,
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./types"
@@ -33,6 +38,7 @@ export interface InMemoryAiUsageStorageSnapshot {
   readonly recordKeysByIdempotencyKey: Map<string, string>
   readonly groupRows: Map<string, InMemoryAiUsageGroupRow>
   readonly callFiles: Map<string, AiModelCallFilesRecord>
+  readonly operations: Map<string, AiModelCallOperationRecord>
 }
 
 /** In-memory model-call ledger used by development runtimes and storage contract tests. */
@@ -41,6 +47,7 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
   private readonly recordKeysByIdempotencyKey = new Map<string, string>()
   private readonly groupRows = new Map<string, InMemoryAiUsageGroupRow>()
   private readonly callFiles = new Map<string, AiModelCallFilesRecord>()
+  private readonly operations = new Map<string, AiModelCallOperationRecord>()
 
   constructor(private readonly executions: Pick<ExecutionStorage, "getById">) {}
 
@@ -155,12 +162,57 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     return record ? structuredClone(record) : null
   }
 
+  async createModelCallOperation(
+    input: CreateAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord> {
+    const record = normalizeAiModelCallOperation(input)
+    const key = modelCallRecordKey(record.projectId, record.callId)
+    if (this.operations.has(key)) {
+      throw new AiUsageStorageError(
+        "duplicate_id",
+        `[Sixb] AI model call '${record.callId}' already has an operation.`
+      )
+    }
+
+    await this.assertExecutionExists(record.projectId, record.executionId)
+    this.operations.set(key, structuredClone(record))
+    return structuredClone(record)
+  }
+
+  async getModelCallOperation(
+    input: GetAiModelCallFilesInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const record = this.operations.get(modelCallRecordKey(input.projectId, input.callId))
+    return record ? structuredClone(record) : null
+  }
+
+  async settleModelCallOperation(
+    input: SettleAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const settlement = normalizeAiModelCallSettlement(input)
+    const key = modelCallRecordKey(settlement.projectId, settlement.callId)
+    const existing = this.operations.get(key)
+    if (!existing) return null
+    if (existing.status !== "pending") return structuredClone(existing)
+
+    const settled: AiModelCallOperationRecord = {
+      ...existing,
+      status: settlement.status,
+      ...(settlement.error === undefined ? {} : { error: settlement.error }),
+      result: settlement.result,
+      settledAt: settlement.settledAt,
+    }
+    this.operations.set(key, structuredClone(settled))
+    return structuredClone(settled)
+  }
+
   snapshot(): InMemoryAiUsageStorageSnapshot {
     return structuredClone({
       records: this.records,
       recordKeysByIdempotencyKey: this.recordKeysByIdempotencyKey,
       groupRows: this.groupRows,
       callFiles: this.callFiles,
+      operations: this.operations,
     })
   }
 
@@ -169,6 +221,7 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     replaceMap(this.recordKeysByIdempotencyKey, snapshot.recordKeysByIdempotencyKey)
     replaceMap(this.groupRows, snapshot.groupRows)
     replaceMap(this.callFiles, snapshot.callFiles)
+    replaceMap(this.operations, snapshot.operations)
   }
 
   /** @internal Immutable accounting source used by in-memory AI limit enforcement. */

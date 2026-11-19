@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../blob-storage/types"
 import {
+  type AiModelCallOperationRecord,
   type AiUsageStorage,
   AiUsageStorageError,
   type RecordAiModelCallInput,
@@ -119,7 +120,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
     })
     // Removal proof: omit a media count from a row codec, or 'speech' from a storage migration's
     // model_kind check; the round trip or the write fails.
-    test("persists generated-media usage and the speech kind", async () => {
+    test("persists generated-media usage and the speech and video kinds", async () => {
       await withStorage(async (storage) => {
         const latest = () =>
           storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
@@ -159,6 +160,22 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           imageOutputTokens: 1120,
           outputImages: 1,
           reportingStatus: "complete",
+        })
+
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_video",
+            callId: "call_video",
+            responseId: "response_video",
+            modelKind: "video",
+            usage: { outputVideoMs: 4000 },
+            occurredAt: at("2026-06-23T10:02:00.000Z"),
+          })
+        )
+        expect((await latest())?.modelKind).toBe("video")
+        expect((await latest())?.usage).toEqual({
+          outputVideoMs: 4000,
+          reportingStatus: "partial",
         })
       })
     })
@@ -703,6 +720,104 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           expect(invalid).toBeInstanceOf(TypeError)
         }
         expect(await storage.getModelCallFiles({ projectId, callId: "call_image" })).toBeNull()
+      })
+    })
+
+    test("keeps a running call's operation until its first settlement", async () => {
+      await withStorage(async (storage) => {
+        const input = {
+          projectId,
+          callId: "call_video",
+          executionId: agentExecutionId,
+          attempt: 1,
+          modelKind: "video" as const,
+          providerId: "vercel-ai-gateway",
+          modelId: "google/veo-3.1-fast-generate-001",
+          operation: { gatewayJobId: "job_1", nested: [1, "two", null] },
+          request: { durationSeconds: 4, dimensions: { resolution: "720p" } },
+          reserved: true,
+          createdAt: at("2026-06-23T10:00:00.000Z"),
+        }
+        const pending: AiModelCallOperationRecord = { ...input, status: "pending" }
+        expect(await storage.createModelCallOperation(input)).toEqual(pending)
+        expect(await storage.getModelCallOperation({ projectId, callId: "call_video" })).toEqual(
+          pending
+        )
+
+        const duplicate = await storage.createModelCallOperation(input).catch((error) => error)
+        expect(duplicate).toMatchObject({ code: "duplicate_id" })
+
+        const result = { usage: { outputVideoMs: 0 }, cost: { status: "reported" } }
+        const failed: AiModelCallOperationRecord = {
+          ...pending,
+          status: "failed",
+          error: "The provider refused the prompt.",
+          result,
+          settledAt: at("2026-06-23T10:01:00.000Z"),
+        }
+        expect(
+          await storage.settleModelCallOperation({
+            projectId,
+            callId: "call_video",
+            status: "failed",
+            error: "The provider refused the prompt.",
+            result,
+            settledAt: at("2026-06-23T10:01:00.000Z"),
+          })
+        ).toEqual(failed)
+
+        // A second poller that saw it complete keeps the first outcome.
+        expect(
+          await storage.settleModelCallOperation({
+            projectId,
+            callId: "call_video",
+            status: "completed",
+            result: {},
+            settledAt: at("2026-06-23T10:02:00.000Z"),
+          })
+        ).toEqual(failed)
+        expect(await storage.getModelCallOperation({ projectId, callId: "call_video" })).toEqual(
+          failed
+        )
+
+        expect(
+          await storage.settleModelCallOperation({
+            projectId,
+            callId: "call_other",
+            status: "failed",
+            result: {},
+          })
+        ).toBeNull()
+        expect(
+          await storage.getModelCallOperation({ projectId: "other-project", callId: "call_video" })
+        ).toBeNull()
+      })
+    })
+
+    test("refuses an operation without a known execution or a JSON request", async () => {
+      await withStorage(async (storage) => {
+        const input = {
+          projectId,
+          callId: "call_video",
+          executionId: agentExecutionId,
+          attempt: 1,
+          modelKind: "video" as const,
+          providerId: "vercel-ai-gateway",
+          modelId: "google/veo-3.1-fast-generate-001",
+          operation: "op_1",
+          request: {},
+          reserved: false,
+        }
+        const missing = await storage
+          .createModelCallOperation({ ...input, executionId: "exec_missing" })
+          .catch((error) => error)
+        expect(missing).toMatchObject({ code: "missing_execution" })
+
+        const invalid = await storage
+          .createModelCallOperation({ ...input, request: [] as never })
+          .catch((error) => error)
+        expect(invalid).toBeInstanceOf(TypeError)
+        expect(await storage.getModelCallOperation({ projectId, callId: "call_video" })).toBeNull()
       })
     })
   })

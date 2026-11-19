@@ -247,6 +247,7 @@ export const en = {
       "audio.input.milliseconds": "Audio input",
       "images.output": "Images",
       "characters.input": "Characters",
+      "video.output.milliseconds": "Video output",
     },
     saved: (saved: string, tokens: string, full: string) =>
       `Caching saved ${saved} on this call. The ${tokens} cached tokens would have cost ${full} at the full input price.`,
@@ -537,6 +538,7 @@ export const fr: Translation<AiUsageMessages> = {
       "audio.input.milliseconds": "Entrée audio",
       "images.output": "Images",
       "characters.input": "Caractères",
+      "video.output.milliseconds": "Sortie vidéo",
     },
     saved: (saved, tokens, full) =>
       `Le cache a économisé ${saved} sur cet appel. Les ${tokens} jetons en cache auraient coûté ${full} au prix plein.`,

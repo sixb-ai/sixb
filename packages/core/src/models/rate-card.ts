@@ -17,6 +17,10 @@ export interface ModelPricingDimensions {
   readonly quality?: string
   readonly style?: string
   readonly voiceTier?: string
+  /** A video's resolution tier, such as `720p` or `4k`. */
+  readonly resolution?: string
+  /** Whether a video comes with sound: `audio` or `silent`. */
+  readonly audio?: string
 }
 
 export interface ModelPriceVariant extends ModelPricingDimensions {
@@ -53,9 +57,11 @@ export interface ModelRateCard {
   readonly characters?: ModelVariantPrice
   /** Per second of input audio, as transcription bills. */
   readonly audioInputSeconds?: ModelVariantPrice
+  /** Per second of generated video. */
+  readonly videoOutputSeconds?: ModelVariantPrice
 }
 
-const PRICING_DIMENSIONS = ["size", "quality", "style", "voiceTier"] as const
+const PRICING_DIMENSIONS = ["size", "quality", "style", "voiceTier", "resolution", "audio"] as const
 
 const TOKEN_DETAIL_FIELDS = [
   "cacheReadInput",
@@ -84,9 +90,12 @@ export function defineModelRateCard(rateCard: ModelRateCard): ModelRateCard {
     !tokens &&
     rateCard.images === undefined &&
     rateCard.characters === undefined &&
-    rateCard.audioInputSeconds === undefined
+    rateCard.audioInputSeconds === undefined &&
+    rateCard.videoOutputSeconds === undefined
   ) {
-    throw new TypeError("[Sixb] Model rate cards must price tokens, images, characters or audio.")
+    throw new TypeError(
+      "[Sixb] Model rate cards must price tokens, images, characters, audio or video."
+    )
   }
   if (rateCard.images !== undefined && rateCard.imageOutput !== undefined) {
     throw new TypeError(
@@ -122,6 +131,9 @@ export function defineModelRateCard(rateCard: ModelRateCard): ModelRateCard {
     ...(rateCard.audioInputSeconds === undefined
       ? {}
       : { audioInputSeconds: variantPrice(rateCard.audioInputSeconds, "audioInputSeconds") }),
+    ...(rateCard.videoOutputSeconds === undefined
+      ? {}
+      : { videoOutputSeconds: variantPrice(rateCard.videoOutputSeconds, "videoOutputSeconds") }),
   })
 }
 

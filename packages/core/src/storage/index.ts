@@ -10,7 +10,7 @@ export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { MergeChange } from "../datasets/changes"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
-export type { ReadonlyJsonObject } from "../json"
+export type { ReadonlyJsonObject, ReadonlyJsonValue } from "../json"
 export { stableJsonStringify } from "../json"
 export type { DatasetRow } from "../lake-storage/types"
 export type {
@@ -294,6 +294,8 @@ export type {
 export { AiLimitStorageError, aiLimitCalendarMonth, InMemoryAiLimitStorage } from "./ai-limits"
 export type {
   AiModelCallFilesRecord,
+  AiModelCallOperationRecord,
+  AiModelCallOperationStatus,
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
@@ -301,6 +303,7 @@ export type {
   AiUsageReportingStatus,
   AiUsageStorage,
   AiUsageStorageErrorCode,
+  CreateAiModelCallOperationInput,
   GetAiModelCallFilesInput,
   GetLatestAiModelCallForExecutionInput,
   InMemoryAiUsageGroupRow,
@@ -308,6 +311,7 @@ export type {
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
+  SettleAiModelCallOperationInput,
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./ai-usage"

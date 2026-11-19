@@ -56,6 +56,7 @@ const fieldCounts = (calls: number) => ({
   audioOutputTokens: 0,
   outputImages: 0,
   inputCharacters: 0,
+  outputVideoMs: 0,
   reasoningOutputTokens: 0,
 })
 

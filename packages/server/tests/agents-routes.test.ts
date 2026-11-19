@@ -1463,6 +1463,9 @@ describe("agent routes", () => {
         },
         recordModelCallFiles: (input) => aiUsage.recordModelCallFiles(input),
         getModelCallFiles: (input) => aiUsage.getModelCallFiles(input),
+        createModelCallOperation: (input) => aiUsage.createModelCallOperation(input),
+        getModelCallOperation: (input) => aiUsage.getModelCallOperation(input),
+        settleModelCallOperation: (input) => aiUsage.settleModelCallOperation(input),
       } satisfies AiUsageStorage,
     })
     const response = await app.fetch(

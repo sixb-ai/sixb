@@ -30,7 +30,9 @@ export {
   assertAiUsageExecutionId,
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
+  normalizeAiModelCallSettlement,
 } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -14,6 +14,7 @@ let routes: Record<string, (request: Request) => Response | Promise<Response>> =
 const directories: string[] = []
 
 afterEach(async () => {
+  jest.useRealTimers()
   server?.stop(true)
   server = undefined
   received = []
@@ -222,6 +223,16 @@ describe("models", () => {
     expect(describePrice({ audioInputSeconds: "0.0001" })).toBe("$0.0001 per second of audio")
     expect(
       describePrice({
+        videoOutputSeconds: {
+          variants: [
+            { resolution: "720p", audio: "silent", price: "0.1" },
+            { resolution: "720p", audio: "audio", price: "0.15" },
+          ],
+        },
+      })
+    ).toBe("per second of video: $0.1 at 720p silent, $0.15 at 720p audio")
+    expect(
+      describePrice({
         input: { default: "1", tiers: [{ price: "1" }, { price: "2.5" }] },
         output: "4",
       })
@@ -232,9 +243,9 @@ describe("models", () => {
   })
 
   test("reject an unknown kind before asking the API", async () => {
-    const error = await run(["list", "--kind", "video"]).catch((caught: unknown) => caught)
+    const error = await run(["list", "--kind", "embedding"]).catch((caught: unknown) => caught)
     expect((error as CliError).body.message).toBe(
-      "Unknown model kind 'video'. Use one of: language, image, speech, transcription."
+      "Unknown model kind 'embedding'. Use one of: language, image, video, speech, transcription."
     )
   })
 })
@@ -242,6 +253,7 @@ describe("models", () => {
 const PNG = new Uint8Array([137, 80, 78, 71])
 const JPEG = new Uint8Array([255, 216, 255])
 const AUDIO = new TextEncoder().encode("ID3")
+const MP4 = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])
 const call = (extra: Record<string, unknown>) => ({
   callId: "call_1",
   model: { provider: "vercel-ai-gateway", modelId: "bfl/flux-3-image-klein" },
@@ -335,6 +347,98 @@ describe("models generation", () => {
         { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
         { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
       ],
+    })
+  })
+
+  // Removal proof: return after the start in generateVideos; the pending job is never checked.
+  test("video starts a job, waits for it to end and downloads the clip", async () => {
+    jest.useFakeTimers()
+    const directory = await temporary()
+    const frame = join(directory, "start.png")
+    await Bun.write(frame, PNG)
+    const video = (status: string, extra: Record<string, unknown> = {}) =>
+      call({ model: { provider: "vercel-ai-gateway", modelId: "google/veo" }, status, ...extra })
+    routes["POST /api/models/video/generations"] = () =>
+      Response.json(video("pending", { files: [], cost: undefined }), { status: 202 })
+    const statuses = [video("pending"), video("completed", { files: [{ mediaType: "video/mp4" }] })]
+    routes["GET /api/models/video/generations/call_1"] = () => Response.json(statuses.shift())
+    serveFiles([MP4])
+    const progress = spyOn(process.stderr, "write").mockImplementation(() => true)
+
+    const output = join(directory, "fox.mp4")
+    const running = run([
+      "video",
+      "a fox",
+      "--output",
+      output,
+      "--duration",
+      "4",
+      "--resolution",
+      "1280x720",
+      "--no-audio",
+      "--first-frame",
+      frame,
+    ])
+    // Each check waits on a timer; the API answers through real sockets in between.
+    for (const _ of [1, 2]) {
+      for (let turn = 0; turn < 1_000 && jest.getTimerCount() === 0; turn++) {
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+      jest.advanceTimersByTime(5_000)
+    }
+    const result = await running
+    const said = progress.mock.calls.map(([chunk]) => String(chunk))
+    progress.mockRestore()
+
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "google/veo",
+      files: [output],
+      cost: "$0.008",
+    })
+    expect(new Uint8Array(await readFile(output))).toEqual(MP4)
+    expect(
+      received.find((request) => request.path === "/api/models/video/generations")?.body
+    ).toEqual({
+      prompt: "a fox",
+      duration: 4,
+      resolution: "1280x720",
+      audio: false,
+      firstFrame: { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+    })
+    expect(said[0]).toContain("sixb models video --call call_1 --output <path>")
+  })
+
+  test("video follows a started call, or says where it stands without waiting", async () => {
+    const statuses = [
+      call({ status: "pending", files: [] }),
+      call({ status: "completed", files: [{ mediaType: "video/mp4" }] }),
+      call({ status: "failed", files: [], error: "The prompt was refused." }),
+    ]
+    routes["GET /api/models/video/generations/call_1"] = () => Response.json(statuses.shift())
+    serveFiles([MP4])
+    const directory = await temporary()
+
+    expect(await run(["video", "--call", "call_1", "--no-wait"])).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      status: "pending",
+    })
+    expect(await run(["video", "--call", "call_1", "--output", `${directory}/`])).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [join(directory, "call_1.mp4")],
+      cost: "$0.008",
+    })
+    const failed = await run(["video", "--call", "call_1", "--output", `${directory}/`]).catch(
+      (error: CliError) => error
+    )
+    expect(failed).toMatchObject({
+      exitCode: 3,
+      body: {
+        code: "generation_failed",
+        message: "Video generation call_1 failed: The prompt was refused.",
+      },
     })
   })
 
@@ -479,6 +583,15 @@ describe("models generation", () => {
     )
     expect(await failure(["image", "a fox", "--output", "x.png", "--image", notes])).toBe(
       `'${notes}' is not an image file. Use .png, .jpg, .jpeg, .webp, .gif.`
+    )
+    expect(await failure(["video", "a fox"])).toBe(
+      "models video requires --output <path>: a file, or a directory ending in /."
+    )
+    expect(await failure(["video", "a fox", "--call", "call_1", "--no-wait"])).toBe(
+      'models video takes a "<prompt>" to start a video, or --call <call-id> to follow one.'
+    )
+    expect(await failure(["video", "a fox", "--no-wait", "--resolution", "720p"])).toBe(
+      "--resolution must be a frame size, such as 1280x720."
     )
     expect(await failure(["speech", "Hi.", "--output", "x.mp3", "--format", "midi"])).toBe(
       "--format must be mp3, wav, ogg, aac, or flac."

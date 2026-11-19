@@ -290,6 +290,7 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       usage.audio_output_tokens,
       usage.output_images,
       usage.input_characters,
+      usage.output_video_ms,
       usage.reporting_status,
       CASE
         WHEN direct_agent.kind = 'conversation' THEN 'agent'
@@ -395,11 +396,13 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     CAST(COUNT(audio_output_tokens) AS TEXT) AS audio_output_tokens_count,
     CAST(COUNT(output_images) AS TEXT) AS output_images_count,
     CAST(COUNT(input_characters) AS TEXT) AS input_characters_count,
+    CAST(COUNT(output_video_ms) AS TEXT) AS output_video_ms_count,
     CAST(SUM(audio_duration_ms) AS TEXT) AS audio_duration_ms_sum,
     CAST(SUM(image_output_tokens) AS TEXT) AS image_output_tokens_sum,
     CAST(SUM(audio_output_tokens) AS TEXT) AS audio_output_tokens_sum,
     CAST(SUM(output_images) AS TEXT) AS output_images_sum,
     CAST(SUM(input_characters) AS TEXT) AS input_characters_sum,
+    CAST(SUM(output_video_ms) AS TEXT) AS output_video_ms_sum,
     CAST(SUM(CASE WHEN valuation_status = 'rated' THEN 1 ELSE 0 END) AS TEXT)
       AS rated_call_count,
     CAST(SUM(CASE WHEN valuation_status = 'unpriceable' THEN 1 ELSE 0 END) AS TEXT)
@@ -470,6 +473,7 @@ interface UsageRow {
   readonly audio_output_tokens: number | null
   readonly output_images: number | null
   readonly input_characters: number | null
+  readonly output_video_ms: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
   readonly provider_ids: string | null
@@ -529,11 +533,13 @@ interface AggregateRow {
   readonly audio_output_tokens_count: string
   readonly output_images_count: string
   readonly input_characters_count: string
+  readonly output_video_ms_count: string
   readonly audio_duration_ms_sum: string | null
   readonly image_output_tokens_sum: string | null
   readonly audio_output_tokens_sum: string | null
   readonly output_images_sum: string | null
   readonly input_characters_sum: string | null
+  readonly output_video_ms_sum: string | null
   readonly rated_call_count: string
   readonly unpriceable_call_count: string
   readonly unvalued_call_count: string
@@ -612,6 +618,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
       audioOutputTokens: meterFragment(row.audio_output_tokens_count, row.audio_output_tokens_sum),
       outputImages: meterFragment(row.output_images_count, row.output_images_sum),
       inputCharacters: meterFragment(row.input_characters_count, row.input_characters_sum),
+      outputVideoMs: meterFragment(row.output_video_ms_count, row.output_video_ms_sum),
     },
     costs: {
       ...(row.amount_currency === null ||
@@ -719,6 +726,7 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
       ...(row.audio_output_tokens === null ? {} : { audioOutputTokens: row.audio_output_tokens }),
       ...(row.output_images === null ? {} : { outputImages: row.output_images }),
       ...(row.input_characters === null ? {} : { inputCharacters: row.input_characters }),
+      ...(row.output_video_ms === null ? {} : { outputVideoMs: row.output_video_ms }),
       reportingStatus: row.reporting_status,
     },
     ...(row.raw_usage === null

@@ -1480,6 +1480,11 @@
                 "minimum": 0,
                 "description": "Input characters, counted by the provider's own billing rule."
               },
+              "outputVideoMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+              },
               "reportingStatus": {
                 "type": "string",
                 "enum": ["complete", "partial", "unavailable"]
@@ -1739,6 +1744,11 @@
                 "type": "integer",
                 "minimum": 0,
                 "description": "Input characters, counted by the provider's own billing rule."
+              },
+              "outputVideoMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
               },
               "reportingStatus": {
                 "type": "string",
@@ -6719,6 +6729,11 @@
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
                             },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -6786,6 +6801,10 @@
                                 "inputCharacters": {
                                   "type": "integer",
                                   "minimum": 0
+                                },
+                                "outputVideoMs": {
+                                  "type": "integer",
+                                  "minimum": 0
                                 }
                               },
                               "required": [
@@ -6800,7 +6819,8 @@
                                 "imageOutputTokens",
                                 "audioOutputTokens",
                                 "outputImages",
-                                "inputCharacters"
+                                "inputCharacters",
+                                "outputVideoMs"
                               ],
                               "additionalProperties": false
                             }
@@ -6923,6 +6943,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -6990,6 +7015,10 @@
                                   "inputCharacters": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -7004,7 +7033,8 @@
                                   "imageOutputTokens",
                                   "audioOutputTokens",
                                   "outputImages",
-                                  "inputCharacters"
+                                  "inputCharacters",
+                                  "outputVideoMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -7154,6 +7184,11 @@
                                       "minimum": 0,
                                       "description": "Input characters, counted by the provider's own billing rule."
                                     },
+                                    "outputVideoMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                                    },
                                     "reportingStatus": {
                                       "type": "string",
                                       "enum": ["complete", "partial", "unavailable"]
@@ -7221,6 +7256,10 @@
                                         "inputCharacters": {
                                           "type": "integer",
                                           "minimum": 0
+                                        },
+                                        "outputVideoMs": {
+                                          "type": "integer",
+                                          "minimum": 0
                                         }
                                       },
                                       "required": [
@@ -7235,7 +7274,8 @@
                                         "imageOutputTokens",
                                         "audioOutputTokens",
                                         "outputImages",
-                                        "inputCharacters"
+                                        "inputCharacters",
+                                        "outputVideoMs"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -7380,6 +7420,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -7447,6 +7492,10 @@
                                   "inputCharacters": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -7461,7 +7510,8 @@
                                   "imageOutputTokens",
                                   "audioOutputTokens",
                                   "outputImages",
-                                  "inputCharacters"
+                                  "inputCharacters",
+                                  "outputVideoMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -7598,6 +7648,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -7665,6 +7720,10 @@
                                   "inputCharacters": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -7679,7 +7738,8 @@
                                   "imageOutputTokens",
                                   "audioOutputTokens",
                                   "outputImages",
-                                  "inputCharacters"
+                                  "inputCharacters",
+                                  "outputVideoMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -7826,6 +7886,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -7893,6 +7958,10 @@
                                   "inputCharacters": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -7907,7 +7976,8 @@
                                   "imageOutputTokens",
                                   "audioOutputTokens",
                                   "outputImages",
-                                  "inputCharacters"
+                                  "inputCharacters",
+                                  "outputVideoMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -8048,6 +8118,11 @@
                                     "minimum": 0,
                                     "description": "Input characters, counted by the provider's own billing rule."
                                   },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -8115,6 +8190,10 @@
                                       "inputCharacters": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "outputVideoMs": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -8129,7 +8208,8 @@
                                       "imageOutputTokens",
                                       "audioOutputTokens",
                                       "outputImages",
-                                      "inputCharacters"
+                                      "inputCharacters",
+                                      "outputVideoMs"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -8260,6 +8340,11 @@
                                     "minimum": 0,
                                     "description": "Input characters, counted by the provider's own billing rule."
                                   },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -8327,6 +8412,10 @@
                                       "inputCharacters": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "outputVideoMs": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -8341,7 +8430,8 @@
                                       "imageOutputTokens",
                                       "audioOutputTokens",
                                       "outputImages",
-                                      "inputCharacters"
+                                      "inputCharacters",
+                                      "outputVideoMs"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -8485,6 +8575,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -8552,6 +8647,10 @@
                                   "inputCharacters": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -8566,7 +8665,8 @@
                                   "imageOutputTokens",
                                   "audioOutputTokens",
                                   "outputImages",
-                                  "inputCharacters"
+                                  "inputCharacters",
+                                  "outputVideoMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -8989,6 +9089,11 @@
                                     "minimum": 0,
                                     "description": "Input characters, counted by the provider's own billing rule."
                                   },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -9194,7 +9299,8 @@
                                                     "tokens.output.audio",
                                                     "audio.input.milliseconds",
                                                     "images.output",
-                                                    "characters.input"
+                                                    "characters.input",
+                                                    "video.output.milliseconds"
                                                   ]
                                                 },
                                                 "quantity": {
@@ -9262,7 +9368,8 @@
                                                 "tokens.output.audio",
                                                 "audio.input.milliseconds",
                                                 "images.output",
-                                                "characters.input"
+                                                "characters.input",
+                                                "video.output.milliseconds"
                                               ]
                                             }
                                           }
@@ -9388,7 +9495,8 @@
                                             "tokens.output.audio",
                                             "audio.input.milliseconds",
                                             "images.output",
-                                            "characters.input"
+                                            "characters.input",
+                                            "video.output.milliseconds"
                                           ]
                                         },
                                         "quantity": {
@@ -9490,7 +9598,8 @@
                                                     "tokens.output.audio",
                                                     "audio.input.milliseconds",
                                                     "images.output",
-                                                    "characters.input"
+                                                    "characters.input",
+                                                    "video.output.milliseconds"
                                                   ]
                                                 },
                                                 "quantity": {
@@ -9558,7 +9667,8 @@
                                                 "tokens.output.audio",
                                                 "audio.input.milliseconds",
                                                 "images.output",
-                                                "characters.input"
+                                                "characters.input",
+                                                "video.output.milliseconds"
                                               ]
                                             }
                                           }
@@ -9676,7 +9786,8 @@
                                         "tokens.output.audio",
                                         "audio.input.milliseconds",
                                         "images.output",
-                                        "characters.input"
+                                        "characters.input",
+                                        "video.output.milliseconds"
                                       ]
                                     }
                                   },
@@ -12046,6 +12157,10 @@
                             "type": "integer",
                             "minimum": 0
                           },
+                          "outputVideoMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
                           "costs": {
                             "type": "object",
                             "properties": {
@@ -12248,6 +12363,10 @@
                                   "minimum": 0
                                 },
                                 "audioDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "outputVideoMs": {
                                   "type": "integer",
                                   "minimum": 0
                                 },
@@ -13093,6 +13212,10 @@
                         "audioDurationMs": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0
                         }
                       },
                       "additionalProperties": false
@@ -13597,6 +13720,10 @@
                         "audioDurationMs": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0
                         }
                       },
                       "additionalProperties": false
@@ -13763,6 +13890,948 @@
                     }
                   },
                   "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/video/generations": {
+      "post": {
+        "summary": "Start generating videos with a video model; poll the generation until it ends",
+        "tags": ["Models"],
+        "operationId": "startVideoGeneration",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "duration": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "In seconds."
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "pattern": "^[1-9]\\d*x[1-9]\\d*$",
+                    "description": "A frame size, such as 1280x720."
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "audio": {
+                    "type": "boolean"
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "firstFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "lastFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "referenceImages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "duration": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "In seconds."
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "pattern": "^[1-9]\\d*x[1-9]\\d*$",
+                    "description": "A frame size, such as 1280x720."
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "audio": {
+                    "type": "boolean"
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "firstFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "lastFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "referenceImages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "duration": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "In seconds."
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "pattern": "^[1-9]\\d*x[1-9]\\d*$",
+                    "description": "A frame size, such as 1280x720."
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "audio": {
+                    "type": "boolean"
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "firstFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "lastFrame": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  },
+                  "referenceImages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "completed", "failed"]
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "mediaType": {
+                            "type": "string"
+                          },
+                          "logicalPath": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["blobId", "digest", "sizeBytes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["callId", "model", "status", "files", "warnings", "createdAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/video/generations/{callId}": {
+      "get": {
+        "summary": "Get a video generation, checking with the provider while it runs",
+        "tags": ["Models"],
+        "operationId": "getVideoGeneration",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "completed", "failed"]
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "mediaType": {
+                            "type": "string"
+                          },
+                          "logicalPath": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["blobId", "digest", "sizeBytes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["callId", "model", "status", "files", "warnings", "createdAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
                   "additionalProperties": false
                 }
               }
@@ -14027,6 +15096,10 @@
                           "minimum": 0
                         },
                         "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputVideoMs": {
                           "type": "integer",
                           "minimum": 0
                         }
@@ -14386,6 +15459,10 @@
                           "minimum": 0
                         },
                         "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputVideoMs": {
                           "type": "integer",
                           "minimum": 0
                         }
@@ -26953,6 +28030,11 @@
                                     "minimum": 0,
                                     "description": "Input characters, counted by the provider's own billing rule."
                                   },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -27205,6 +28287,11 @@
                           "type": "integer",
                           "minimum": 0,
                           "description": "Input characters, counted by the provider's own billing rule."
+                        },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
                         },
                         "reportingStatus": {
                           "type": "string",
@@ -28783,6 +29870,11 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "description": "Input characters, counted by the provider's own billing rule."
+                                  },
+                                  "outputVideoMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
                                   },
                                   "reportingStatus": {
                                     "type": "string",
@@ -43693,6 +44785,11 @@
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
                             },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -48708,6 +49805,11 @@
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
                             },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -50308,6 +51410,11 @@
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
                             },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -50815,6 +51922,11 @@
                               "type": "integer",
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
+                            },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
                             },
                             "reportingStatus": {
                               "type": "string",
@@ -51621,6 +52733,11 @@
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
                               },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -52073,6 +53190,11 @@
                           "minimum": 0,
                           "description": "Input characters, counted by the provider's own billing rule."
                         },
+                        "outputVideoMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                        },
                         "reportingStatus": {
                           "type": "string",
                           "enum": ["complete", "partial", "unavailable"]
@@ -52524,6 +53646,11 @@
                               "type": "integer",
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
+                            },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
                             },
                             "reportingStatus": {
                               "type": "string",
@@ -57092,6 +58219,11 @@
                               "minimum": 0,
                               "description": "Input characters, counted by the provider's own billing rule."
                             },
+                            "outputVideoMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -59950,6 +61082,11 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Input characters, counted by the provider's own billing rule."
+                              },
+                              "outputVideoMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Milliseconds of video the call returned, every clip together, as the provider bills them."
                               },
                               "reportingStatus": {
                                 "type": "string",
@@ -75457,6 +76594,12 @@
                                             "voiceTier": {
                                               "type": "string"
                                             },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
                                             "price": {
                                               "type": "string",
                                               "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -75500,6 +76643,12 @@
                                               "type": "string"
                                             },
                                             "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
                                               "type": "string"
                                             },
                                             "price": {
@@ -75547,6 +76696,63 @@
                                             "voiceTier": {
                                               "type": "string"
                                             },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "videoOutputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
                                             "price": {
                                               "type": "string",
                                               "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -75565,7 +76771,7 @@
                             },
                             "required": ["currency"],
                             "additionalProperties": false,
-                            "description": "USD. Token and character prices are per million; images per image; audio per second."
+                            "description": "USD. Token and character prices are per million; images per image; audio and video per second."
                           }
                         },
                         "required": [
@@ -75984,6 +77190,12 @@
                                             "voiceTier": {
                                               "type": "string"
                                             },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
                                             "price": {
                                               "type": "string",
                                               "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -76027,6 +77239,12 @@
                                               "type": "string"
                                             },
                                             "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
                                               "type": "string"
                                             },
                                             "price": {
@@ -76074,6 +77292,63 @@
                                             "voiceTier": {
                                               "type": "string"
                                             },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "videoOutputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
                                             "price": {
                                               "type": "string",
                                               "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -76092,7 +77367,7 @@
                             },
                             "required": ["currency"],
                             "additionalProperties": false,
-                            "description": "USD. Token and character prices are per million; images per image; audio per second."
+                            "description": "USD. Token and character prices are per million; images per image; audio and video per second."
                           },
                           "maxImagesPerCall": {
                             "type": "integer",
@@ -76151,6 +77426,648 @@
                             "required": ["maxCount", "maxBytes"],
                             "additionalProperties": false,
                             "description": "Reference images the model takes for edits; absent when it takes none."
+                          }
+                        },
+                        "required": ["provider", "modelId", "isDefault", "name"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "video": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "via": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "rateCard": {
+                            "type": "object",
+                            "properties": {
+                              "currency": {
+                                "type": "string",
+                                "enum": ["USD"]
+                              },
+                              "input": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "output": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheReadInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput5m": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput1h": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "imageOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "images": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "characters": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioInputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "videoOutputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "resolution": {
+                                              "type": "string"
+                                            },
+                                            "audio": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["currency"],
+                            "additionalProperties": false,
+                            "description": "USD. Token and character prices are per million; images per image; audio and video per second."
+                          },
+                          "maxVideosPerCall": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0
+                          },
+                          "resolutions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "aspectRatios": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "durations": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            },
+                            "description": "Lengths in seconds."
+                          },
+                          "audio": {
+                            "type": "boolean",
+                            "description": "Whether the model can make sound with the picture."
+                          },
+                          "inputImages": {
+                            "type": "object",
+                            "properties": {
+                              "maxCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "maxBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "mediaTypes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": ["maxCount", "maxBytes"],
+                            "additionalProperties": false,
+                            "description": "Images a clip starts from, ends on or takes after; absent when it takes none."
                           }
                         },
                         "required": ["provider", "modelId", "isDefault", "name"],
@@ -76561,6 +78478,12 @@
                                                 "voiceTier": {
                                                   "type": "string"
                                                 },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
                                                 "price": {
                                                   "type": "string",
                                                   "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -76604,6 +78527,12 @@
                                                   "type": "string"
                                                 },
                                                 "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
                                                   "type": "string"
                                                 },
                                                 "price": {
@@ -76651,6 +78580,63 @@
                                                 "voiceTier": {
                                                   "type": "string"
                                                 },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "videoOutputSeconds": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
                                                 "price": {
                                                   "type": "string",
                                                   "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -76669,7 +78655,7 @@
                                 },
                                 "required": ["currency"],
                                 "additionalProperties": false,
-                                "description": "USD. Token and character prices are per million; images per image; audio per second."
+                                "description": "USD. Token and character prices are per million; images per image; audio and video per second."
                               },
                               "defaultVoice": {
                                 "type": "string",
@@ -77103,6 +79089,12 @@
                                                 "voiceTier": {
                                                   "type": "string"
                                                 },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
                                                 "price": {
                                                   "type": "string",
                                                   "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -77146,6 +79138,12 @@
                                                   "type": "string"
                                                 },
                                                 "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
                                                   "type": "string"
                                                 },
                                                 "price": {
@@ -77193,6 +79191,63 @@
                                                 "voiceTier": {
                                                   "type": "string"
                                                 },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "videoOutputSeconds": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "resolution": {
+                                                  "type": "string"
+                                                },
+                                                "audio": {
+                                                  "type": "string"
+                                                },
                                                 "price": {
                                                   "type": "string",
                                                   "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
@@ -77211,7 +79266,7 @@
                                 },
                                 "required": ["currency"],
                                 "additionalProperties": false,
-                                "description": "USD. Token and character prices are per million; images per image; audio per second."
+                                "description": "USD. Token and character prices are per million; images per image; audio and video per second."
                               },
                               "maxInputBytes": {
                                 "type": "integer",
@@ -77251,7 +79306,7 @@
                       "additionalProperties": false
                     }
                   },
-                  "required": ["language", "image", "audio", "capabilities"],
+                  "required": ["language", "image", "video", "audio", "capabilities"],
                   "additionalProperties": false
                 }
               }

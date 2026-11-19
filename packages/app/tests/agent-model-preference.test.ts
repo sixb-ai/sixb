@@ -27,6 +27,7 @@ test("restores the selected model with every supported saved reasoning level", (
   queryClient.setQueryData(listModelsOptions().queryKey, {
     language: [{ ...model, modelId: "default-model", isDefault: true }, model],
     image: [],
+    video: [],
     audio: { speech: [], transcription: [] },
     capabilities: { run: false },
   })
@@ -119,6 +120,7 @@ test("with tiers, a thread without its own choice is Auto, not the browser's cho
     queryClient.setQueryData(listModelsOptions().queryKey, {
       language: [...language],
       image: [],
+      video: [],
       audio: { speech: [], transcription: [] },
       capabilities: { run: false },
     })

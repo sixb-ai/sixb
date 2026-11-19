@@ -485,13 +485,18 @@ and transcript. --retry derives each failed part anew. --part proxy|poster|films
 transcript downloads that part's file once it is ready: a proxy is a 720p H.264 copy to look at
 footage with, never to publish in the original's place.`,
   models: `Usage:
-  sixb models list [--kind language|image|speech|transcription]
+  sixb models list [--kind language|image|video|speech|transcription]
   sixb models get <model> [--kind <kind>]
   sixb models text "<prompt>"|--file <path|-> [--model <tier|model>] [--instructions <text>]
                    [--max-output-tokens <n>] [--reasoning <level>]
   sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
                     [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
                     [--seed <n>] [--image <file>]...
+  sixb models video "<prompt>" --output <path> [--model <model>] [--duration <seconds>]
+                    [--resolution <WxH>] [--aspect-ratio <ratio>] [--audio|--no-audio]
+                    [--first-frame <file>] [--last-frame <file>] [--reference <file>]...
+                    [--n <n>] [--seed <n>] [--no-wait]
+  sixb models video --call <call-id> --output <path> [--no-wait]
   sixb models speech "<text>" --output <path> [--model <model>] [--voice <voice>]
                      [--format mp3|wav|ogg|aac|flac] [--instructions <text>]
                      [--speed <n>] [--language <code>]
@@ -509,7 +514,12 @@ each timed in milliseconds, when the model times them.
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
 reference image; repeat it for several. \`calls files\` lists a past call's files, or downloads
-them again.`,
+them again.
+
+\`video\` takes minutes: it starts the video, waits for it and downloads it. The video keeps
+generating if the command stops; \`--call <call-id>\` picks it up again, and \`--no-wait\` prints
+where it stands and returns. --first-frame and --last-frame are the images the clip starts from
+and ends on; --reference shows a character, object or style, and repeats.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
@@ -1178,7 +1188,7 @@ function parseContentUrl(value) {
 // src/commands/models.ts
 import { access, mkdir, stat as stat2 } from "node:fs/promises";
 import { dirname, extname, join, parse } from "node:path";
-var MODEL_KINDS = ["language", "image", "speech", "transcription"];
+var MODEL_KINDS = ["language", "image", "video", "speech", "transcription"];
 async function models(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -1217,6 +1227,8 @@ async function models(api, args) {
     return generateText(api, rest);
   if (sub === "image")
     return generateImages(api, rest);
+  if (sub === "video")
+    return generateVideos(api, rest);
   if (sub === "speech")
     return generateSpeech(api, rest);
   if (sub === "transcribe")
@@ -1225,6 +1237,8 @@ async function models(api, args) {
     return calls(api, rest);
   fail(`Unknown models command '${sub}'.`);
 }
+var VIDEO_POLL_MS = 5000;
+var VIDEO_PROGRESS_MS = 60000;
 var SPEECH_FORMATS = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -1246,7 +1260,8 @@ var MEDIA_TYPES = {
   ".flac": "audio/flac",
   ".opus": "audio/opus",
   ".m4a": "audio/mp4",
-  ".webm": "audio/webm"
+  ".webm": "audio/webm",
+  ".mp4": "video/mp4"
 };
 var EXTENSIONS = Object.fromEntries(Object.entries(MEDIA_TYPES).filter(([extension]) => extension !== ".jpeg").map(([extension, mediaType]) => [mediaType, extension]));
 async function generateText(api, args) {
@@ -1306,6 +1321,108 @@ async function generateImages(api, args) {
     ...images.length > 0 ? { images } : {}
   });
   writeJson(await savedResult(api, result, output));
+}
+async function generateVideos(api, args) {
+  const { positionals, options } = parseCommandArgs(args, {
+    "--output": "string",
+    "--call": "string",
+    "--no-wait": "boolean",
+    "--model": "string",
+    "--n": "string",
+    "--duration": "string",
+    "--resolution": "string",
+    "--aspect-ratio": "string",
+    "--audio": "boolean",
+    "--no-audio": "boolean",
+    "--seed": "string",
+    "--first-frame": "string",
+    "--last-frame": "string",
+    "--reference": "strings"
+  }, "models video", [0, 1]);
+  const wait = options["--no-wait"] !== true;
+  const output = wait ? requireOutput(options["--output"], "models video") : options["--output"];
+  const callId = options["--call"];
+  if (callId === undefined === (positionals[0] === undefined)) {
+    fail('models video takes a "<prompt>" to start a video, or --call <call-id> to follow one.');
+  }
+  let generation;
+  if (callId !== undefined) {
+    generation = await videoGeneration(api, callId);
+  } else {
+    const seed = options["--seed"];
+    if (seed !== undefined && !/^-?[0-9]+$/.test(seed))
+      fail("--seed must be an integer.");
+    if (options["--audio"] && options["--no-audio"])
+      fail("Use --audio or --no-audio, not both.");
+    const resolution = options["--resolution"];
+    if (resolution !== undefined && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(resolution)) {
+      fail("--resolution must be a frame size, such as 1280x720.");
+    }
+    const model = await modelRef(api, options["--model"], "video");
+    const firstFrame = options["--first-frame"];
+    const lastFrame = options["--last-frame"];
+    const references = [];
+    for (const path of options["--reference"] ?? []) {
+      references.push(await uploadInput(api, path, "image"));
+    }
+    generation = await api.post("/api/models/video/generations", {
+      ...model,
+      prompt: positionals[0],
+      ...options["--n"] === undefined ? {} : { n: integerInRange("--n", options["--n"], 1, 8) },
+      ...options["--duration"] === undefined ? {} : { duration: integerInRange("--duration", options["--duration"], 1, 600) },
+      ...optional("resolution", resolution),
+      ...optional("aspectRatio", options["--aspect-ratio"]),
+      ...options["--audio"] ? { audio: true } : {},
+      ...options["--no-audio"] ? { audio: false } : {},
+      ...seed === undefined ? {} : { seed: Number(seed) },
+      ...firstFrame === undefined ? {} : { firstFrame: await uploadInput(api, firstFrame, "image") },
+      ...lastFrame === undefined ? {} : { lastFrame: await uploadInput(api, lastFrame, "image") },
+      ...references.length > 0 ? { referenceImages: references } : {}
+    });
+  }
+  if (wait)
+    generation = await waitForVideo(api, generation);
+  if (generation.status === "failed") {
+    const reason = generation.error ?? "the provider gave no reason";
+    throw new CliError({
+      code: "generation_failed",
+      message: `Video generation ${generation.callId} failed: ${reason}`
+    }, EXIT_API);
+  }
+  if (generation.status === "pending" || output === undefined) {
+    return writeJson({
+      callId: generation.callId,
+      model: generation.model.modelId,
+      status: generation.status,
+      ...generation.status === "pending" ? {} : { files: generation.files },
+      ...generation.warnings?.length ? { warnings: generation.warnings } : {},
+      ...generation.status === "pending" ? {} : { cost: describeCost(generation.cost) }
+    });
+  }
+  writeJson(await savedResult(api, generation, output));
+}
+async function videoGeneration(api, callId) {
+  return await api.get(`/api/models/video/generations/${idSegment(callId)}`);
+}
+async function waitForVideo(api, started) {
+  const startedAt = Date.now();
+  let said = startedAt;
+  let generation = started;
+  if (generation.status === "pending") {
+    process.stderr.write(`Generating video ${generation.callId}. If this command stops, follow it with: sixb models video --call ${generation.callId} --output <path>
+`);
+  }
+  while (generation.status === "pending") {
+    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_MS));
+    generation = await videoGeneration(api, generation.callId);
+    if (generation.status === "pending" && Date.now() - said >= VIDEO_PROGRESS_MS) {
+      said = Date.now();
+      const minutes = Math.round((said - startedAt) / VIDEO_PROGRESS_MS);
+      process.stderr.write(`Still generating ${generation.callId}, ${minutes} min so far.
+`);
+    }
+  }
+  return generation;
 }
 async function generateSpeech(api, args) {
   const { positionals, options } = parseCommandArgs(args, {
@@ -1455,6 +1572,7 @@ function catalogEntries(catalog) {
   return [
     ...catalog.language.map((entry) => ({ kind: "language", entry })),
     ...catalog.image.map((entry) => ({ kind: "image", entry })),
+    ...(catalog.video ?? []).map((entry) => ({ kind: "video", entry })),
     ...catalog.audio.speech.map((entry) => ({ kind: "speech", entry })),
     ...catalog.audio.transcription.map((entry) => ({ kind: "transcription", entry }))
   ];
@@ -1485,6 +1603,7 @@ function describePrice(card) {
     variantPrice(card.images, "per image", "at"),
     variantPrice(card.characters, "per 1M characters", "for"),
     variantPrice(card.audioInputSeconds, "per second of audio", "for"),
+    variantPrice(card.videoOutputSeconds, "per second of video", "at"),
     card.input !== undefined && card.output !== undefined ? `${dollars(tokenPrice(card.input))} input · ${dollars(tokenPrice(card.output))} output per 1M tokens` : undefined,
     card.audioOutput === undefined ? undefined : `${dollars(tokenPrice(card.audioOutput))} per 1M audio tokens`
   ].filter((part) => part !== undefined);

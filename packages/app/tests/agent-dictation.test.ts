@@ -29,6 +29,7 @@ function catalog(options: { run: boolean; transcribers: number }): ListModelsRes
   return {
     language: [],
     image: [],
+    video: [],
     audio: { speech: [], transcription: Array(options.transcribers).fill(transcriber) },
     capabilities: { run: options.run },
   }

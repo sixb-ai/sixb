@@ -10,6 +10,7 @@ export type AiBillableMeter =
   | "audio.input.milliseconds"
   | "characters.input"
   | "images.output"
+  | "video.output.milliseconds"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"
@@ -308,6 +309,7 @@ export interface AiModelCallGroupSummary {
   readonly outputImages?: number
   readonly inputCharacters?: number
   readonly audioDurationMs?: number
+  readonly outputVideoMs?: number
   readonly costs: AiCostSummary
 }
 

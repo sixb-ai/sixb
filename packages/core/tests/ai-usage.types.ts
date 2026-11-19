@@ -59,6 +59,15 @@ const provider = {
   async getModelCallFiles() {
     return null
   },
+  async createModelCallOperation(input) {
+    return { ...input, status: "pending", createdAt: new Date("2026-06-23T10:00:01.000Z") }
+  },
+  async getModelCallOperation() {
+    return null
+  },
+  async settleModelCallOperation() {
+    return null
+  },
 } satisfies AiUsageStorage
 
 declare const agentRun: AgentRunRecord

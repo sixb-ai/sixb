@@ -150,6 +150,20 @@ export class AiModelCallRecorder {
     }
   }
 
+  /** Whether admitting this call reserved budget that recording it must reconcile. */
+  hasReservation(callId: string): boolean {
+    return this.reservations.has(callId)
+  }
+
+  /**
+   * Take over a call an earlier request of this execution attempt admitted, such as a video the
+   * provider kept rendering after that request ended, so that recording its end reconciles the
+   * budget it reserved.
+   */
+  resumeCall(callId: string, reserved: boolean): void {
+    if (reserved) this.reservations.add(callId)
+  }
+
   /** Keep an unresolved reservation when an attempted call's billable outcome is unknown. */
   async markCallUnknown(callId: string): Promise<void> {
     if (!this.reservations.has(callId)) return
