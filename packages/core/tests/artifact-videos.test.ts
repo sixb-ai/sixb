@@ -523,7 +523,7 @@ describe("publishing a video", () => {
 
   // Removal proof: let sceneRenderKeys hash all of index.html instead of `root`, and trimming the
   // demo renders the intro again; let it always leave out the scene's start, and the outro of the
-  // video with music keeps its key.
+  // video with music keeps its key; let it always hold it, and the silent outro changes its key.
   test("renders a trimmed scene again, and the scenes after it when the root plays music", async () => {
     const { publish } = setup()
     const keys = async (root: string) =>

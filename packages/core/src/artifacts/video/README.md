@@ -38,9 +38,13 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
   it matches `[A-Za-z0-9_.:-]+`; else `<name> + n` or `<name> - n`, the number trailing. So
   `intro-2` names a scene, and `intro - 2` is two seconds before `intro` ends.
 - **Names.** HyperFrames finds what `data-start` names by element `id` first, then by
-  `data-composition-id`. A scene's id is its `data-composition-id`; a host's `id`, when written,
-  must be the same, and no other element may take a scene's id, so both lookups find the scene.
-  Ids start with a letter, so none reads as a number.
+  `data-composition-id`, and so does `resolveStarts`. A host's own `id` may differ, as
+  HyperFrames' templates write `id="intro-layer" data-composition-id="intro"`, so a start may name
+  the scene either way. A name that could read two ways is refused: two hosts of one `id`, a
+  host's `id` that is another scene's id, or another element taking either name. Ids start with a
+  letter, so none reads as a number.
+- **A scene's identity** is its `data-composition-id` alone, never its host's `id`: the outline,
+  `artifact:…#<scene>` addresses, and comments name it by that.
 - **Lengths.** HyperFrames' timeline reads a scene's length from its host alone, and a host
   without `data-duration` is 0 seconds long there, whatever its file says. Every host needs one.
 - **Refused where HyperFrames would guess.** It clamps a negative start to 0 and plays a cycle of
@@ -51,6 +55,10 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 - **Template content** is not in the page until HyperFrames puts it there, so roots, hosts and ids
   are looked for outside templates; the files a template plays still count.
 - `data-label` is HyperFrames' own name for a scene (its runtime's scene list reads it).
+- **Nested compositions.** A scene's composition may host others by `data-composition-src`,
+  loaded from the project's root as `index.html`'s scenes are (HyperFrames' lint reports one
+  missing there). Publishing reads each, all the way down: its file must exist and hold a
+  `<template>`, none may nest itself, and what it plays is the scene's.
 
 ## Where it is stricter
 
@@ -65,19 +73,33 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 
 ## Source positions
 
-Each host keeps the span of its start tag and of every attribute it writes, and each file reference
+Each host, and the root, keeps the span of its whole element, of its start tag, and of every
+attribute it writes, and each file reference
 the span of its attribute, as offsets into the text it was read from. An editor patches a
 `data-start`, a `data-duration`, or a `src` in place with them, so a change stays one small text
 edit, in the live document and in the Agent's diffs.
 
 ## Render keys
 
-`publish/video.ts` names each scene by `sceneRenderKey`: its id and file, the frame kit, and the
-digests of every file it could load. That is `index.html` (its place, its length, the frame), what
-the root and the scene play, and the files no scene plays, such as stylesheets and fonts; not the
-other scenes' HTML, nor what only they play, unless they are on screen with it, as when one fades
-into the next. Changing one scene re-renders that scene and those it overlaps; changing
-`index.html`, a shared stylesheet, or the soundtrack re-renders them all.
+`publish/video.ts` names each scene by `sceneRenderKeys`, a hash of what its frames are made of:
+
+- the frame kit;
+- `index.html` without its scene hosts and the root's `data-duration`: the frame, the root's
+  styles, and what it shows itself;
+- the scene's host and those of the scenes on screen with it, as one fades into the next, with
+  their times resolved and their order in `index.html`, which stacks them;
+- the scene's start in the video, only when `rootTimeline` says the root plays or animates
+  something of its own: a timed element, a recording, a script, a CSS animation or transition, or
+  a linked stylesheet, which is not read;
+- every other file, but two kinds: the other scenes' HTML, and the videos and sounds neither the
+  root, the scene, nor a scene beside it plays, the heavy files a version mostly changes.
+
+So trimming a scene re-renders it and the scenes it overlaps, and those after it only when the
+root has a timeline of its own. An image, a stylesheet, a font, a script, or a nested composition
+is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
+video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
+the scene's segment. So a recording a script plays is named in HTML too, by a `<video>` or an
+`<audio>` it drives, as the Agent's guide asks.
 
 The key names no artifact: a segment is the scene's frames, rendered from these files alone, so a
 copy shares it. An `artifact:` file a scene plays is in its HTML as an address, which follows its
