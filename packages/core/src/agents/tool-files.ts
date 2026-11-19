@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { posix } from "node:path"
 import { ARTIFACT_LIMITS } from "../artifacts/limits"
-import { sniffFileMediaType } from "../blob-storage/media-type"
+import { sniffFileMediaType, unaliasMediaType } from "../blob-storage/media-type"
 import type { BlobBody, FileRef } from "../blob-storage/types"
 import { isFileRef } from "../blob-storage/validation"
 import { AgentToolPublicError } from "./errors"
@@ -185,7 +185,7 @@ function normalizeMediaType(value: string | undefined, toolName: string): string
   ) {
     throw toolFileError(toolName, "mediaType must be a valid type/subtype value")
   }
-  return normalized === "image/jpg" ? "image/jpeg" : normalized
+  return unaliasMediaType(normalized)
 }
 
 function validatedMediaType(

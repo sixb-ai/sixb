@@ -57,12 +57,19 @@ describe("file content helpers", () => {
     const blobStorage = new InMemoryBlobStorage()
     const stored = await blobStorage.put({ body: new TextEncoder().encode("media bytes") })
 
-    for (const mediaType of ["video/mp4", "Video/WebM", "audio/mpeg", "audio/wav"]) {
+    for (const [mediaType, served] of [
+      ["video/mp4", "video/mp4"],
+      ["Video/WebM", "video/webm"],
+      ["audio/mpeg", "audio/mpeg"],
+      ["audio/wav", "audio/wav"],
+      // What macOS names an M4A file: under its own name, a browser downloads it.
+      ["audio/x-m4a", "audio/mp4"],
+    ]) {
       const response = await createFileContentResponse({
         blobStorage,
         fileRef: { ...stored, fileName: "clip", mediaType },
       })
-      expect(response?.headers.get("content-type"), mediaType).toBe(mediaType.toLowerCase())
+      expect(response?.headers.get("content-type"), mediaType).toBe(served)
       expect(response?.headers.get("content-disposition"), mediaType).toStartWith("inline;")
       expect(response?.headers.get("content-security-policy"), mediaType).toBe(
         "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'"

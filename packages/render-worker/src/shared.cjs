@@ -27,15 +27,19 @@ const TYPES = {
   ".m4v": "video/mp4",
   ".mov": "video/quicktime",
   ".webm": "video/webm",
+  ".mkv": "video/x-matroska",
   ".ogv": "video/ogg",
   ".mp3": "audio/mpeg",
   ".m4a": "audio/mp4",
   ".aac": "audio/aac",
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
   ".opus": "audio/ogg",
+  ".weba": "audio/webm",
   ".flac": "audio/flac",
   ".vtt": "text/vtt; charset=utf-8",
+  ".srt": "application/x-subrip; charset=utf-8",
 }
 
 /** What a frame's `sixb.query` reads, which a render serves with the status its answer says. */

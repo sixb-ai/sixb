@@ -536,8 +536,9 @@ previous and next, an overview of every slide, and present, where the slide fill
   range, a section, or a slide of another deck, drawn by the app over the slide at the size the
   deck gives the box, as documents show it. `<img src="artifact:…/figure.png">` shows an image
   file of another artifact, and `<video>`, `<audio>`, and `<source>` play its video and sound
-  files the same way, a `<video>`'s `poster` too. Each shows only what its reader can open;
-  anything else is an empty box. Thumbnails and the overview show each box empty, with its `title`.
+  files the same way, a `<video>`'s `poster` and a `<track>`'s captions too. Each shows only what
+  its reader can open; anything else is an empty box. Thumbnails and the overview show each box
+  empty, with its `title`.
 - `?part=4` opens a deck at slide 4, and `![…](artifact:…#4)` shows that slide in a document.
 - When the Agent publishes a deck, it lays the deck out in its sandbox's headless browser and
   gets a warning for each slide with content past its edge or over the footer, overlapping or cut
