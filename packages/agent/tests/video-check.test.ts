@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import type { VideoOutline } from "@sixb/core/artifacts"
 import {
   craftWarnings,
+  hiddenMediaWarnings,
+  type MediaSight,
   videoInstants,
   videoWarnings,
 } from "../src/artifacts/layout-check/video-check"
@@ -202,5 +204,64 @@ describe("a video's check", () => {
     expect(craftWarnings(outline([3_000, 4_000]), [{ atMs: 0, scene: "s1", ink: 0.03 }])).toEqual(
       []
     )
+  })
+
+  // Guard proof: return [] from hiddenMediaWarnings; the footage of a scene whose fade-in never
+  // ran then stays black on every frame of the film, and the check passes it.
+  test("names footage that never shows while it plays, by scene, file and instant", () => {
+    const film = outline([4_000, 4_000])
+    const phone = (scene: string, hidden?: MediaSight["hidden"]): MediaSight => ({
+      scene,
+      index: 0,
+      tag: "video",
+      file: "media/phone.mp4",
+      start: 0,
+      duration: 4,
+      ...(hidden ? { hidden } : {}),
+    })
+
+    const warnings = hiddenMediaWarnings(film, [
+      { time: 0.4, sights: [phone("s1", "opacity")] },
+      { time: 2, sights: [phone("s1", "opacity")] },
+      { time: 3.75, sights: [phone("s1", "opacity")] },
+      // A fade-in: not yet there 0.4 s in, there by the middle.
+      { time: 4.4, sights: [phone("s2", "opacity")] },
+      { time: 6, sights: [phone("s2")] },
+      { time: 7.75, sights: [phone("s2")] },
+    ])
+
+    expect(warnings).toEqual([
+      {
+        code: "video_media_hidden",
+        part: "s1",
+        message:
+          "At 0.4 s, 2 s and 3.75 s, in scene 's1': the <video> media/phone.mp4 never shows while it plays: its opacity, or a parent's, is 0. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.",
+      },
+    ])
+  })
+
+  // Guard proof: judge each medium at every instant of its scene (drop the window test in
+  // hiddenMediaWarnings); the clip that plays from 1.5 s to 2.5 s, which HyperFrames hides
+  // outside them, then reads as never shown.
+  test("judges a clip only while it plays, and not at all when no instant falls in it", () => {
+    const film = outline([4_000])
+    const clip = (hidden?: MediaSight["hidden"]): MediaSight => ({
+      scene: "s1",
+      index: 1,
+      tag: "img",
+      file: "media/shot.png",
+      start: 1.5,
+      duration: 1,
+      ...(hidden ? { hidden } : {}),
+    })
+    const late = { ...clip("display"), index: 2, start: 3.8, duration: 0.2 }
+
+    expect(
+      hiddenMediaWarnings(film, [
+        { time: 0.4, sights: [clip("display"), late] },
+        { time: 2, sights: [clip(), late] },
+        { time: 3.75, sights: [clip("display"), late] },
+      ])
+    ).toEqual([])
   })
 })
