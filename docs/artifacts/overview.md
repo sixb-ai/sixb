@@ -835,6 +835,39 @@ agent image renders with (0.9.68):
 
 The Agent revises a video someone made, and does not start one.
 
+### Export a video
+
+A video downloads as an MP4, H.264 and AAC, rendered in the project's sandboxes:
+
+```ts
+const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", progress }, then:
+// { status: "ready", file: FileRef, durationMs: 20000, sizeBytes: 31457280 }
+```
+
+- The first ask renders it: ask again every few seconds until it is `ready`. `progress` says how
+  many of its segments are done, one per scene and one for the sound, then that they are being
+  joined. Over HTTP, `POST /api/artifacts/{id}/versions/{version}/video` answers the same, and
+  `GET` on the same path downloads it. From a terminal:
+  `sixb artifacts export <id> --output film.mp4`.
+- Each scene renders on its own and is kept: a version that changes one scene renders that scene
+  again, and the scenes it overlaps, and reuses the others. The sound is mixed once for the whole
+  video, so music that runs across a cut plays on unbroken.
+- How long it takes depends on what the scenes show. 20 seconds of 1080p footage under blurred
+  halos, glass cards and moving particles, in four scenes, take about 22 seconds with each scene
+  in its own 4-vCPU sandbox, and 87 seconds one scene after the other; editing one scene then
+  takes about 21 seconds. A scene of titles takes a few seconds more than it lasts.
+- Blur and `backdrop-filter` cost the most: Chromium draws them without a GPU.
+- The [`render` worker](../cli/overview.md) renders it in sandboxes whose image has HyperFrames and
+  FFmpeg, as the Sixb agent image has them, with at least 4 GB of memory for its fast capture.
+  Each worker renders two segments at once; more workers render more.
+- When it could not be rendered, asking answers `{ status: "failed", reason }`, which names the
+  scene, until you ask with `{ retry: true }` (`?retry=true`), which renders what failed again.
+- A project without a [sandbox provider](../sandboxes/overview.md) renders nothing: asking fails
+  with `video_unavailable`.
+- Each scene also gets a still, a picture of its middle, a few seconds after the video is
+  published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The first scene's
+  is the video's poster.
+
 ## Declare a query
 
 A sheet, a page, a deck, a canvas, or a designed document can hold queries over your objects
