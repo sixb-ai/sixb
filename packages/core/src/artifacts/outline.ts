@@ -105,6 +105,8 @@ export interface VideoOutline {
   readonly height: number
   readonly fps: number
   readonly durationMs: number
+  /** The instant that shows it before it plays, its root's `data-poster`, when it writes one. */
+  readonly posterMs?: number
   /** Its scenes, the chapters a reader skips between, in the order they start. */
   readonly scenes: readonly VideoOutlineScene[]
 }
