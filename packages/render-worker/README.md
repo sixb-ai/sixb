@@ -144,5 +144,6 @@ when the sandbox's network is already set. Both would have to change for that.
 Renders need a sandbox image with Node.js and Playwright's Chromium, as the Sixb agent image has
 (`/opt/sixb/js/node_modules/playwright`), FFmpeg and ffprobe on its path for media, and the
 HyperFrames CLI of `VIDEO_ENGINE` for videos. `video-export.e2e.ts` runs in the agent image. A local
-sandbox finds Playwright where `SIXB_PLAYWRIGHT` points, and FFmpeg on the host's path, as
-`media.e2e.ts` does.
+sandbox finds Playwright where `SIXB_PLAYWRIGHT` points, and FFmpeg and HyperFrames on the host's
+path, as `media.e2e.ts` does. Chrome runs without a sandbox of its own in every render, as
+Playwright launches it: a local sandbox on macOS is a seatbelt, which does not nest Chrome's.
