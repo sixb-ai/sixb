@@ -40,6 +40,13 @@ export const AGENT_API_ROUTES: readonly AgentApiRoute[] = SIXB_API_ROUTES.filter
   effect: route.agentEffect ?? "read",
 }))
 
+/**
+ * The run a run-token request is from, which the sandbox CLI sends from `SIXB_RUN_ID`: one of the
+ * token's run's own children when the child works in its parent's workspace, under its parent's
+ * token. The server narrows the token's authority to that child; it never widens it.
+ */
+export const AGENT_RUN_HEADER = "x-sixb-run"
+
 export function createAgentRunToken(input: AgentRunTokenInput): string {
   return signToken(RUN_TOKEN, input)
 }

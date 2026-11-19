@@ -307,6 +307,7 @@ export { decodeWireValue, encodeWireError, encodeWireValue } from "./run-session
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
+  AGENT_RUN_HEADER,
   agentRunTokenRunId,
   createAgentRunnerToken,
   createAgentRunToken,

@@ -6,6 +6,8 @@ export interface SandboxInstanceCliMode {
   /** The sandbox's credentialed address for the API: the run's token is added on the way out. */
   readonly baseUrl: string
   readonly runContextPath: string
+  /** The run the commands are: its parent's token may speak for a child, which this names. */
+  readonly runId?: string
 }
 
 export interface LocalInstanceCliMode {
@@ -31,6 +33,7 @@ export function createInstanceApiClient(mode: InstanceCliMode): ApiClient {
   return new ApiClient({
     baseUrl: mode.baseUrl,
     ...(mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {}),
+    ...(mode.kind === "sandbox" && mode.runId ? { runId: mode.runId } : {}),
     missingBaseUrlMessage:
       mode.kind === "sandbox"
         ? "SIXB_API_BASE_URL is not set."

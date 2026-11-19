@@ -730,6 +730,110 @@ describe("run tokens", () => {
     ).toBe(0)
   })
 
+  describe("a parent's token naming one of its children", () => {
+    /** The child runtime, with what its parent's commands send: the parent's token. */
+    async function childOfParent() {
+      const runtime = await createRunTokenRuntime({ executionKind: "subagent" })
+      const parent = await runtime.storage.agents.runs.getById({
+        projectId: PROJECT_ID,
+        id: "parent-run-1",
+      })
+      if (!parent?.execution) throw new Error("Expected the running parent.")
+      const parentToken = createAgentRunToken({
+        projectId: PROJECT_ID,
+        runId: parent.id,
+        executionToken: parent.execution.token,
+      })
+      const as = (token: string, run: string) => ({
+        authorization: `Bearer ${token}`,
+        "x-sixb-run": run,
+      })
+      return { ...runtime, parent, parentToken, as }
+    }
+
+    function saveMemory(app: AgentApi, apiBaseUrl: string, headers: Record<string, string>) {
+      return app.fetch(
+        new Request(`${apiBaseUrl}/api/agent-memory/user/revisions`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({
+            baseRevision: 0,
+            message: "Remember invoices are reported excluding VAT",
+            changes: [{ path: "MEMORY.md", contents: "# Memory\n" }],
+          }),
+        })
+      )
+    }
+
+    // A child in its parent's workspace calls with its parent's token and names itself.
+    // Removal proof: ignore the header in resolveRunTokenRequest; the save lands, as the parent's,
+    // and the action is the parent's.
+    test("acts as the child: its memory saves refused, its actions its own", async () => {
+      const { app, apiBaseUrl, runId, agentExecutionId, parentToken, as, storage } =
+        await childOfParent()
+
+      const read = await app.fetch(
+        new Request(`${apiBaseUrl}/api/agent-memory/user`, { headers: as(parentToken, runId) })
+      )
+      expect(read.status).toBe(200)
+
+      const saved = await saveMemory(app, apiBaseUrl, as(parentToken, runId))
+      expect(saved.status).toBe(403)
+      await expect(saved.json()).resolves.toEqual({
+        error: "Child agents cannot save Agent memory.",
+      })
+
+      const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl, as(parentToken, runId))
+      await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+        source: { type: "execution", executionId: agentExecutionId },
+      })
+    })
+
+    // Removal proof: accept any run the header names in childActingFor; each request is admitted
+    // as that run.
+    test("refuses a run that is not one of its children still at work", async () => {
+      const { app, apiBaseUrl, runId, runToken, parent, parentToken, as, storage, executionToken } =
+        await childOfParent()
+      const refused = (run: string) =>
+        `The run token cannot act as run '${run}': only as a sub-agent of its own run still at work.`
+
+      // Not a run at all, and its own parent, which is no child of the child.
+      for (const [token, run] of [
+        [parentToken, "agt_run_elsewhere"],
+        [runToken, parent.id],
+      ] as const) {
+        const response = await app.fetch(
+          new Request(`${apiBaseUrl}/api/agent-memory/user`, { headers: as(token, run) })
+        )
+        expect(response.status).toBe(403)
+        await expect(response.json()).resolves.toEqual({ error: refused(run) })
+      }
+
+      // A child that ended.
+      await storage.agents.runs.finish({
+        projectId: PROJECT_ID,
+        id: runId,
+        executionToken,
+        status: "succeeded",
+        result: { text: "Inspected." },
+      })
+      const ended = await app.fetch(
+        new Request(`${apiBaseUrl}/api/agent-memory/user`, { headers: as(parentToken, runId) })
+      )
+      expect(ended.status).toBe(403)
+      await expect(ended.json()).resolves.toEqual({ error: refused(runId) })
+    })
+
+    // Removal proof: drop the `!== runId` check in resolveRunState; a request naming its own run
+    // looks for a child of itself, and the parent's own save is refused.
+    test("changes nothing when it names the token's own run", async () => {
+      const { app, apiBaseUrl, parent, parentToken, as } = await childOfParent()
+
+      const saved = await saveMemory(app, apiBaseUrl, as(parentToken, parent.id))
+      expect(saved.status).toBe(201)
+    })
+  })
+
   test("gives workflow agent nodes no memory", async () => {
     // Reproduce by dropping the Agent memory check in resolveRunTokenRequest: the node's
     // service account then reaches the project's memory through can.run(agent).

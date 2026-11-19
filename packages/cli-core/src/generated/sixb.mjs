@@ -2182,11 +2182,13 @@ import { basename, dirname as dirname2, join as join2 } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 var UNIX_BASE_URL_PREFIX = "unix:";
+var RUN_HEADER = "x-sixb-run";
 
 class ApiClient {
   baseUrl;
   socketPath;
   authorization;
+  runId;
   missingBaseUrlMessage;
   unavailableMessage;
   unavailableHint;
@@ -2195,6 +2197,7 @@ class ApiClient {
     this.socketPath = baseUrl.startsWith(UNIX_BASE_URL_PREFIX) ? baseUrl.slice(UNIX_BASE_URL_PREFIX.length) : undefined;
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
     this.authorization = options.authorization;
+    this.runId = options.runId || undefined;
     this.missingBaseUrlMessage = options.missingBaseUrlMessage;
     this.unavailableMessage = options.unavailableMessage;
     this.unavailableHint = options.unavailableHint;
@@ -2259,6 +2262,8 @@ class ApiClient {
       const headers = new Headers(init.headers);
       if (this.authorization)
         headers.set("authorization", this.authorization);
+      if (this.runId)
+        headers.set(RUN_HEADER, this.runId);
       response = await send(url, { ...init, headers }, this.socketPath);
     } catch (error) {
       if (init.signal?.aborted)
@@ -2368,6 +2373,7 @@ function createInstanceApiClient(mode) {
   return new ApiClient({
     baseUrl: mode.baseUrl,
     ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
+    ...mode.kind === "sandbox" && mode.runId ? { runId: mode.runId } : {},
     missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
     unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
     unavailableHint: mode.kind === "sandbox" ? "Run 'sixb status' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
@@ -2721,7 +2727,8 @@ function sandboxMode() {
   return {
     kind: "sandbox",
     baseUrl: process.env.SIXB_API_BASE_URL ?? "",
-    runContextPath: process.env.SIXB_RUN_CONTEXT ?? ""
+    runContextPath: process.env.SIXB_RUN_CONTEXT ?? "",
+    ...process.env.SIXB_RUN_ID ? { runId: process.env.SIXB_RUN_ID } : {}
   };
 }
 try {

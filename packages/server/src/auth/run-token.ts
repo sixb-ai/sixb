@@ -1,5 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import {
+  AGENT_RUN_HEADER,
   type AgentRunExecutionScope,
   AgentRunScopeError,
   agentRunTokenRunId,
@@ -25,6 +26,12 @@ import type { AgentRunRequestExecution, RequestAuthState } from "./scope"
 // own execution, restored from server-side records: what it starts is a child of the run and keeps
 // the run's requester, whatever the request's headers say. What a run may do there depends on its
 // kind, and on its conversation's approval mode, as decided below.
+//
+// A child that works in its parent's workspace runs its commands in its parent's session, which
+// adds its parent's token; they name the child in `AGENT_RUN_HEADER`. That header only narrows the
+// token's authority to one of its run's own children still at work, which the request is then
+// admitted as, exactly as with the child's own token. The token stays the authority: parent and
+// child share a machine and act for the same user, so the header is no boundary between them.
 
 /** What a run-token request is allowed as, or the answer that refuses or holds it. */
 export type RunTokenDecision =
@@ -63,7 +70,11 @@ export async function resolveRunTokenRequest(input: {
     return deny(403, `A run token cannot call ${method} ${path}.`)
   }
 
-  const resolved = await resolveRunState(host, input.token)
+  const resolved = await resolveRunState(
+    host,
+    input.token,
+    request.headers.get(AGENT_RUN_HEADER) ?? undefined
+  )
   if (resolved.kind === "deny") return resolved
   const { state, run } = resolved
 
@@ -150,7 +161,9 @@ async function runPolicyRefusal(
 
 async function resolveRunState(
   host: SixbHostView,
-  token: string
+  token: string,
+  /** The run the request names itself as, when not the token's: one of its children. */
+  actingRunId: string | undefined
 ): Promise<
   | { readonly kind: "deny"; readonly response: Response }
   | {
@@ -175,22 +188,35 @@ async function resolveRunState(
     runId && !storedAgentRun
       ? await workflowRuns?.agentNodes.getByNodeRunId({ projectId: host.id, nodeRunId: runId })
       : undefined
-  const runState = toRunState(storedAgentRun ?? null, workflowRun ?? null)
+  const tokenState = toRunState(storedAgentRun ?? null, workflowRun ?? null)
   if (
     !runId ||
-    !runState ||
-    runState.run.status !== "running" ||
-    ("cancelRequestedAt" in runState.run && runState.run.cancelRequestedAt) ||
-    !runState.run.execution ||
-    runState.run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
+    !tokenState ||
+    tokenState.run.status !== "running" ||
+    ("cancelRequestedAt" in tokenState.run && tokenState.run.cancelRequestedAt) ||
+    !tokenState.run.execution ||
+    tokenState.run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentRunToken({
       projectId: host.id,
       runId,
-      executionToken: runState.run.execution.token,
+      executionToken: tokenState.run.execution.token,
       token,
     })
   ) {
     return deny(403, "The run token is not valid: its run has ended, moved or been stopped.")
+  }
+
+  // The request acts as the run it names, when that is one of the token's run's children.
+  let runState = tokenState
+  if (actingRunId !== undefined && actingRunId !== runId) {
+    const child = await childActingFor(host, tokenState, actingRunId)
+    if (!child) {
+      return deny(
+        403,
+        `The run token cannot act as run '${actingRunId}': only as a sub-agent of its own run still at work.`
+      )
+    }
+    runState = child
   }
 
   let scope: AgentRunExecutionScope
@@ -269,6 +295,30 @@ function toRunState(
     authority: "managed",
     actorId: workflowRun.actorId,
   }
+}
+
+/**
+ * One of the token's run's own children still at work, as a request naming it is admitted: a child
+ * of a conversation turn, running under its own execution.
+ */
+async function childActingFor(
+  host: SixbHostView,
+  parent: RunState,
+  childRunId: string
+): Promise<RunState | null> {
+  if (!parent.agentRun) return null
+
+  const child = await host.storage.agents?.runs.getById({ projectId: host.id, id: childRunId })
+  if (
+    child?.kind !== "subagent" ||
+    child.parentRunId !== parent.runId ||
+    child.status !== "running" ||
+    child.cancelRequestedAt ||
+    !child.execution
+  ) {
+    return null
+  }
+  return toRunState(child, null)
 }
 
 function scopeErrorResponse(
