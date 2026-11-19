@@ -83,6 +83,11 @@ export type FrameRequest =
    * script, which takes the `MessagePort` the request transfers and edits the body in place.
    */
   | FrameRequestOf<"editor", { readonly code: string }>
+  /**
+   * A video's frame finds the words shown at a point of its picture, `x` and `y` as fractions of
+   * its width and height, and says which with `video.picked`: the editor types over them in place.
+   */
+  | FrameRequestOf<"video.pick", { readonly x: number; readonly y: number }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -156,6 +161,12 @@ export type FrameEvent =
       { readonly address: string; readonly base: string; readonly text: string }
     >
   /**
+   * The words a video's frame found where `video.pick` asked, or none: an element holding words
+   * alone, in the composition `scene` names, the `occurrence`th of its tag that says the same in
+   * it, where it shows, in fractions of the picture.
+   */
+  | FrameEventOf<"video.picked", { readonly target: FrameVideoText | null }>
+  /**
    * The reader zoomed over a canvas's board, opened or running on the canvas, which the app zooms
    * instead of the browser: a pinch or the wheel with ⌘ or Ctrl, `factor` times around `at`, in
    * the frame's pixels; or ⌘ or Ctrl with +, − or 0, a `step`. Only a frame handed a port with
@@ -217,6 +228,19 @@ export type FrameEditTarget =
 export interface FramePoint {
   readonly x: number
   readonly y: number
+}
+
+/** Words a video shows, as its frame found them under the reader's pointer. */
+export interface FrameVideoText {
+  /** The `data-composition-id` of the composition they are in: a scene's, or the root's. */
+  readonly scene: string
+  readonly tag: string
+  /** Its words, spaces collapsed, a line break a space. */
+  readonly text: string
+  /** How many elements of its tag saying the same come before it in its composition. */
+  readonly occurrence: number
+  /** Where it shows, in fractions of the picture's width and height. */
+  readonly rect: FrameRect
 }
 
 export interface FrameRect {
@@ -431,6 +455,11 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
       const target = parseEditTarget(params.target)
       return target ? event(data.event, { target, ...point }) : null
     }
+    case "video.picked": {
+      if (params.target === null) return event("video.picked", { target: null })
+      const target = parseVideoText(params.target)
+      return target ? event("video.picked", { target }) : null
+    }
     case "edit.text":
       return isEditAddress(params.address) &&
         typeof params.text === "string" &&
@@ -505,6 +534,26 @@ function parsePoint(value: unknown): FramePoint | null | undefined {
   if (value === undefined) return undefined
   if (!isRecord(value) || !Number.isFinite(value.x) || !Number.isFinite(value.y)) return null
   return { x: Number(value.x), y: Number(value.y) }
+}
+
+function parseVideoText(value: unknown): FrameVideoText | null {
+  if (!isRecord(value) || !isRecord(value.rect)) return null
+  const { scene, tag, text, occurrence } = value
+  if (typeof scene !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(scene)) return null
+  if (typeof tag !== "string" || !/^[a-z][a-z0-9]{0,15}$/.test(tag)) return null
+  if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || !isCount(occurrence)) {
+    return null
+  }
+
+  const { x, y, width, height } = value.rect
+  if (![x, y, width, height].every(Number.isFinite)) return null
+  return {
+    scene,
+    tag,
+    text,
+    occurrence,
+    rect: { x: Number(x), y: Number(y), width: Number(width), height: Number(height) },
+  }
 }
 
 function parseEditTarget(value: unknown): FrameEditTarget | null {
