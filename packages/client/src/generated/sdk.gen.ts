@@ -328,6 +328,9 @@ import type {
   GetUserData,
   GetUserErrors,
   GetUserResponses,
+  GetVideoGenerationData,
+  GetVideoGenerationErrors,
+  GetVideoGenerationResponses,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionErrors,
   GetWorkflowAgentNodeExecutionResponses,
@@ -653,6 +656,9 @@ import type {
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunErrors,
   StartConnectorConnectionRunResponses,
+  StartVideoGenerationData,
+  StartVideoGenerationErrors,
+  StartVideoGenerationResponses,
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandErrors,
   StopAgentBackgroundCommandResponses,
@@ -1514,6 +1520,49 @@ export const generateImages = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Start generating videos with a video model; poll the generation until it ends
+ */
+export const startVideoGeneration = <ThrowOnError extends boolean = false>(
+  options: Options<StartVideoGenerationData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    StartVideoGenerationResponses,
+    StartVideoGenerationErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/video/generations",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get a video generation, checking with the provider while it runs
+ */
+export const getVideoGeneration = <ThrowOnError extends boolean = false>(
+  options: Options<GetVideoGenerationData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetVideoGenerationResponses,
+    GetVideoGenerationErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/video/generations/{callId}",
+    ...options,
   })
 
 /**

@@ -41,6 +41,8 @@ const CLI_API_ROUTES = [
   "GET /api/models",
   "POST /api/models/language/generations",
   "POST /api/models/image/generations",
+  "POST /api/models/video/generations",
+  "GET /api/models/video/generations/:callId",
   "POST /api/models/audio/speech",
   "POST /api/models/audio/transcriptions",
   "GET /api/ai/model-calls/:callId/files",

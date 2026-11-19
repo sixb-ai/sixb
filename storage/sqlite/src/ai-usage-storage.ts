@@ -3,23 +3,28 @@ import {
   assertAiUsageExecutionId,
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
+  normalizeAiModelCallSettlement,
 } from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
-import type { ReadonlyJsonObject } from "@sixb/core/storage"
+import type { ReadonlyJsonObject, ReadonlyJsonValue } from "@sixb/core/storage"
 import {
   type AiModelCallFilesRecord,
+  type AiModelCallOperationRecord,
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
+  type CreateAiModelCallOperationInput,
   type GetAiModelCallFilesInput,
   type GetLatestAiModelCallForExecutionInput,
   type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
+  type SettleAiModelCallOperationInput,
   type SummarizeAiUsageExecutionInput,
   type SummarizeAiUsageExecutionsInput,
 } from "@sixb/core/storage"
@@ -148,8 +153,109 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
     return this.findCallFiles(input.projectId, input.callId)
   }
 
+  async createModelCallOperation(
+    input: CreateAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord> {
+    const record = normalizeAiModelCallOperation(input)
+    return runImmediateTransaction(this.connection.db, () => {
+      this.assertExecutionExists(record.projectId, record.executionId)
+      try {
+        this.connection.db
+          .query(
+            `
+              INSERT INTO ai_model_call_operations (
+                project_id, call_id, execution_id, attempt, model_kind, provider_id, model_id,
+                operation, request, reserved, status, created_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `
+          )
+          .run(
+            record.projectId,
+            record.callId,
+            record.executionId,
+            record.attempt,
+            record.modelKind,
+            record.providerId,
+            record.modelId,
+            JSON.stringify(record.operation),
+            JSON.stringify(record.request),
+            record.reserved ? 1 : 0,
+            record.status,
+            record.createdAt.toISOString()
+          )
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) throw error
+        throw new AiUsageStorageError(
+          "duplicate_id",
+          `[SixbSqlite] AI model call '${record.callId}' already has an operation.`
+        )
+      }
+      return record
+    })
+  }
+
+  async getModelCallOperation(
+    input: GetAiModelCallFilesInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    return this.findOperation(input.projectId, input.callId)
+  }
+
+  async settleModelCallOperation(
+    input: SettleAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const settlement = normalizeAiModelCallSettlement(input)
+
+    // Only a pending call settles; whoever comes second reads the first outcome back.
+    return runImmediateTransaction(this.connection.db, () => {
+      this.connection.db
+        .query(
+          `
+            UPDATE ai_model_call_operations
+            SET status = ?, error = ?, result = ?, settled_at = ?
+            WHERE project_id = ? AND call_id = ? AND status = 'pending'
+          `
+        )
+        .run(
+          settlement.status,
+          settlement.error ?? null,
+          JSON.stringify(settlement.result),
+          settlement.settledAt.toISOString(),
+          settlement.projectId,
+          settlement.callId
+        )
+      return this.findOperation(settlement.projectId, settlement.callId)
+    })
+  }
+
   close(): void {
     closeSqliteStoreConnection(this.connection)
+  }
+
+  private findOperation(projectId: string, callId: string): AiModelCallOperationRecord | null {
+    const row = this.connection.db
+      .query("SELECT * FROM ai_model_call_operations WHERE project_id = ? AND call_id = ?")
+      .get(projectId, callId) as OperationRow | null
+    if (!row) return null
+
+    return {
+      projectId: row.project_id,
+      callId: row.call_id,
+      executionId: row.execution_id,
+      attempt: row.attempt,
+      modelKind: row.model_kind,
+      providerId: row.provider_id,
+      modelId: row.model_id,
+      operation: JSON.parse(row.operation) as ReadonlyJsonValue,
+      request: JSON.parse(row.request) as ReadonlyJsonObject,
+      reserved: row.reserved === 1,
+      status: row.status,
+      ...(row.error === null ? {} : { error: row.error }),
+      ...(row.result === null ? {} : { result: JSON.parse(row.result) as ReadonlyJsonObject }),
+      createdAt: new Date(row.created_at),
+      ...(row.settled_at === null ? {} : { settledAt: new Date(row.settled_at) }),
+    }
   }
 
   private findCallFiles(projectId: string, callId: string): AiModelCallFilesRecord | null {
@@ -197,12 +303,13 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             audio_output_tokens,
             output_images,
             input_characters,
+            output_video_ms,
             reporting_status,
             raw_usage,
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
@@ -232,6 +339,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.usage.audioOutputTokens ?? null,
         record.usage.outputImages ?? null,
         record.usage.inputCharacters ?? null,
+        record.usage.outputVideoMs ?? null,
         record.usage.reportingStatus,
         record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage),
         record.occurredAt.toISOString(),
@@ -346,6 +454,24 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   }
 }
 
+interface OperationRow {
+  readonly project_id: string
+  readonly call_id: string
+  readonly execution_id: string
+  readonly attempt: number
+  readonly model_kind: AiModelCallOperationRecord["modelKind"]
+  readonly provider_id: string
+  readonly model_id: string
+  readonly operation: string
+  readonly request: string
+  readonly reserved: number
+  readonly status: AiModelCallOperationRecord["status"]
+  readonly error: string | null
+  readonly result: string | null
+  readonly created_at: string
+  readonly settled_at: string | null
+}
+
 interface CallFilesRow {
   readonly project_id: string
   readonly call_id: string
@@ -380,6 +506,7 @@ interface AiUsageRow {
   readonly audio_output_tokens: number | null
   readonly output_images: number | null
   readonly input_characters: number | null
+  readonly output_video_ms: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
   readonly occurred_at: string
@@ -426,6 +553,7 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
     ...(row.audio_output_tokens === null ? {} : { audioOutputTokens: row.audio_output_tokens }),
     ...(row.output_images === null ? {} : { outputImages: row.output_images }),
     ...(row.input_characters === null ? {} : { inputCharacters: row.input_characters }),
+    ...(row.output_video_ms === null ? {} : { outputVideoMs: row.output_video_ms }),
   }
 }
 

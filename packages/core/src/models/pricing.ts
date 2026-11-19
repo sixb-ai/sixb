@@ -58,6 +58,7 @@ export type ModelCostMeter =
   | "audio.input.milliseconds"
   | "characters.input"
   | "images.output"
+  | "video.output.milliseconds"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"
@@ -116,11 +117,18 @@ export function estimateModelReservation(input: {
   readonly outputTokens?: number
   readonly outputImages?: number
   readonly inputCharacters?: number
+  readonly outputVideoMs?: number
   readonly dimensions?: ModelPricingDimensions
   readonly rateCard?: ModelRateCard
 }): ModelMoney | undefined {
   if (!input.rateCard) return undefined
-  const counts = [input.inputTokens, input.outputTokens, input.outputImages, input.inputCharacters]
+  const counts = [
+    input.inputTokens,
+    input.outputTokens,
+    input.outputImages,
+    input.inputCharacters,
+    input.outputVideoMs,
+  ]
   if (!counts.every((n) => n === undefined || (Number.isSafeInteger(n) && n >= 0))) {
     throw new TypeError("[Sixb] Model reservation estimates must be nonnegative safe integers.")
   }
@@ -154,6 +162,12 @@ export function estimateModelReservation(input: {
   if (card.images !== undefined) {
     if (input.outputImages === undefined) return undefined
     total += BigInt(input.outputImages) * reservationPrice(card.images, input.dimensions)
+  }
+  if (card.videoOutputSeconds !== undefined) {
+    if (input.outputVideoMs === undefined) return undefined
+    // A per-second price, charged per millisecond.
+    const perSecond = reservationPrice(card.videoOutputSeconds, input.dimensions)
+    total += charge(input.outputVideoMs, perSecond * 1_000n)
   }
   // Nothing measures an audio file's duration before it is sent.
   if (card.audioInputSeconds !== undefined) return undefined
@@ -246,6 +260,9 @@ function rateUnits(
       ...((usage.inputCharacters ?? 0) > 0 && rateCard.characters === undefined
         ? (["characters.input"] as const)
         : []),
+      ...((usage.outputVideoMs ?? 0) > 0 && rateCard.videoOutputSeconds === undefined
+        ? (["video.output.milliseconds"] as const)
+        : []),
     ]
     if (unpriced.length > 0) {
       return { status: "unpriceable", reason: "missing-rate-card", missingMeters: unpriced }
@@ -261,6 +278,7 @@ function rateUnits(
     ["images.output", usage.outputImages, rateCard.images, 15],
     ["characters.input", usage.inputCharacters, rateCard.characters, 9],
     ["audio.input.milliseconds", usage.audioDurationMs, rateCard.audioInputSeconds, 12],
+    ["video.output.milliseconds", usage.outputVideoMs, rateCard.videoOutputSeconds, 12],
   ] as const) {
     if (price === undefined) continue
     if (quantity === undefined) {

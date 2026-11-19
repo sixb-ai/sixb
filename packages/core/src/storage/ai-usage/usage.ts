@@ -14,6 +14,7 @@ export const AI_USAGE_FIELDS = [
   "audioOutputTokens",
   "outputImages",
   "inputCharacters",
+  "outputVideoMs",
 ] as const
 const USAGE_FIELDS = AI_USAGE_FIELDS
 
@@ -62,6 +63,7 @@ export function normalizeAiModelCallUsage(input: AiModelCallUsageInput): AiModel
       : { audioOutputTokens: input.audioOutputTokens }),
     ...(input.outputImages === undefined ? {} : { outputImages: input.outputImages }),
     ...(input.inputCharacters === undefined ? {} : { inputCharacters: input.inputCharacters }),
+    ...(input.outputVideoMs === undefined ? {} : { outputVideoMs: input.outputVideoMs }),
     reportingStatus,
   }
 }

@@ -7,9 +7,12 @@ import { isModelReasoning } from "../../models/language-model"
 import { AiUsageStorageError } from "./errors"
 import type {
   AiModelCallFilesRecord,
+  AiModelCallOperationRecord,
   AiModelCallUsageRecord,
+  CreateAiModelCallOperationInput,
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
+  SettleAiModelCallOperationInput,
 } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
@@ -101,6 +104,70 @@ function cloneRequestedReasoning(
     throw new TypeError("[Sixb] AI usage requestedReasoning is invalid.")
   }
   return typeof reasoning === "string" ? reasoning : { budgetTokens: reasoning.budgetTokens }
+}
+
+/** Validate and defensively snapshot a running call's provider handle. */
+export function normalizeAiModelCallOperation(
+  input: CreateAiModelCallOperationInput
+): AiModelCallOperationRecord {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  assertAiUsageExecutionId(input.executionId)
+  assertPositiveSafeInteger(input.attempt, "attempt")
+  if (!MODEL_KINDS.includes(input.modelKind)) {
+    throw new TypeError("[Sixb] AI model kind is invalid.")
+  }
+  assertNonBlank(input.providerId, "providerId")
+  assertNonBlank(input.modelId, "modelId")
+
+  assertJsonValue(input.operation, "AI model-call operation")
+  if (!isPlainRecord(input.request)) {
+    throw new TypeError("[Sixb] AI model-call operation request must be a JSON object.")
+  }
+  assertJsonValue(input.request, "AI model-call operation request")
+  if (typeof input.reserved !== "boolean") {
+    throw new TypeError("[Sixb] AI model-call operation reserved must be a boolean.")
+  }
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    executionId: input.executionId,
+    attempt: input.attempt,
+    modelKind: input.modelKind,
+    providerId: input.providerId,
+    modelId: input.modelId,
+    operation: structuredClone(input.operation),
+    request: structuredClone(input.request),
+    reserved: input.reserved,
+    status: "pending",
+    createdAt: cloneValidDate(input.createdAt ?? new Date(), "createdAt"),
+  }
+}
+
+/** Validate how a running call ended. */
+export function normalizeAiModelCallSettlement(
+  input: SettleAiModelCallOperationInput
+): Required<Omit<SettleAiModelCallOperationInput, "error">> & { readonly error?: string } {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  if (input.status !== "completed" && input.status !== "failed") {
+    throw new TypeError("[Sixb] AI model-call operation status must be 'completed' or 'failed'.")
+  }
+  if (input.error !== undefined) assertNonBlank(input.error, "operation error")
+  if (!isPlainRecord(input.result)) {
+    throw new TypeError("[Sixb] AI model-call operation result must be a JSON object.")
+  }
+  assertJsonValue(input.result, "AI model-call operation result")
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    status: input.status,
+    ...(input.error === undefined ? {} : { error: input.error }),
+    result: structuredClone(input.result),
+    settledAt: cloneValidDate(input.settledAt ?? new Date(), "settledAt"),
+  }
 }
 
 /** Validate a durable execution reference at storage and query boundaries. */

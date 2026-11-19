@@ -33,6 +33,8 @@ const VariantPriceSchema = z.union([
         quality: z.string().optional(),
         style: z.string().optional(),
         voiceTier: z.string().optional(),
+        resolution: z.string().optional(),
+        audio: z.string().optional(),
         price: DecimalSchema,
       })
     ),
@@ -54,8 +56,11 @@ export const ModelRateCardSchema = z
     images: VariantPriceSchema.optional(),
     characters: VariantPriceSchema.optional(),
     audioInputSeconds: VariantPriceSchema.optional(),
+    videoOutputSeconds: VariantPriceSchema.optional(),
   })
-  .describe("USD. Token and character prices are per million; images per image; audio per second.")
+  .describe(
+    "USD. Token and character prices are per million; images per image; audio and video per second."
+  )
 
 export const LanguageModelSchema = LanguageModelRefSchema.extend({
   /**
@@ -113,6 +118,22 @@ export const ImageModelSchema = CatalogEntrySchema.extend({
     .describe("Reference images the model takes for edits; absent when it takes none."),
 })
 
+export const VideoModelSchema = CatalogEntrySchema.extend({
+  maxVideosPerCall: z.number().int().positive().optional(),
+  resolutions: ListSchema,
+  aspectRatios: ListSchema,
+  durations: z.array(z.number().int().positive()).optional().describe("Lengths in seconds."),
+  audio: z.boolean().optional().describe("Whether the model can make sound with the picture."),
+  inputImages: z
+    .object({
+      maxCount: z.number().int().positive(),
+      maxBytes: z.number().int().positive(),
+      mediaTypes: ListSchema,
+    })
+    .optional()
+    .describe("Images a clip starts from, ends on or takes after; absent when it takes none."),
+})
+
 export const SpeechModelSchema = CatalogEntrySchema.extend({
   defaultVoice: z.string().min(1).optional(),
   voices: ListSchema,
@@ -134,6 +155,7 @@ export const ModelCatalogSchema = z.object({
    */
   languageRouting: z.boolean().optional(),
   image: z.array(ImageModelSchema),
+  video: z.array(VideoModelSchema),
   audio: z.object({
     speech: z.array(SpeechModelSchema),
     transcription: z.array(TranscriptionModelSchema),
@@ -174,6 +196,7 @@ const ModelUsageSchema = z.object({
   outputImages: z.number().int().nonnegative().optional(),
   inputCharacters: z.number().int().nonnegative().optional(),
   audioDurationMs: z.number().int().nonnegative().optional(),
+  outputVideoMs: z.number().int().nonnegative().optional(),
 })
 
 /** What the call cost: reported by the provider, rated from the binding's card, or unknown. */
@@ -219,6 +242,44 @@ export const ImageGenerationBodySchema = GenerationBodyBase.extend({
   seed: z.number().int().optional(),
   /** Reference images uploaded through /api/files. */
   images: z.array(FileRefSchema).optional(),
+})
+
+export const VideoGenerationBodySchema = GenerationBodyBase.extend({
+  prompt: z.string().trim().min(1),
+  n: z.number().int().positive().optional(),
+  duration: z.number().int().positive().optional().describe("In seconds."),
+  resolution: z
+    .string()
+    .regex(/^[1-9]\d*x[1-9]\d*$/)
+    .optional()
+    .describe("A frame size, such as 1280x720."),
+  aspectRatio: z.string().min(1).optional(),
+  audio: z.boolean().optional(),
+  seed: z.number().int().optional(),
+  /** Images uploaded through /api/files. */
+  firstFrame: FileRefSchema.optional(),
+  lastFrame: FileRefSchema.optional(),
+  referenceImages: z.array(FileRefSchema).optional(),
+})
+
+export const VideoGenerationParamsSchema = z.object({
+  callId: z.string().min(1),
+})
+
+/** A video generation, as far as it got: poll it until its status is no longer `pending`. */
+export const VideoGenerationSchema = z.object({
+  callId: z.string(),
+  model: LanguageModelRefSchema,
+  status: z.enum(["pending", "completed", "failed"]),
+  /** Empty until the generation completes. */
+  files: z.array(FileRefSchema),
+  warnings: z.array(z.string()),
+  /** What the provider said went wrong, once the generation failed. */
+  error: z.string().optional(),
+  /** Present once the generation ended. */
+  usage: ModelUsageSchema.optional(),
+  cost: ModelCallCostSchema.optional(),
+  createdAt: z.string(),
 })
 
 export const SpeechGenerationBodySchema = GenerationBodyBase.extend({

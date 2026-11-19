@@ -21,8 +21,9 @@ export const MODEL_KINDS = [
 export type ModelKind = (typeof MODEL_KINDS)[number]
 
 /**
- * @internal Kinds billed per audio second, search, image or character, whose providers mostly
- * report no tokens. Token limits skip them, and a missing token count from one is not a gap.
+ * @internal Kinds billed per audio second, search, image, character or second of video, whose
+ * providers mostly report no tokens. Token limits skip them, and a missing token count from one
+ * is not a gap.
  */
 export const TOKENLESS_MODEL_KINDS: readonly ModelKind[] = [
   "transcription",
@@ -30,6 +31,7 @@ export const TOKENLESS_MODEL_KINDS: readonly ModelKind[] = [
   "web-search",
   "image",
   "speech",
+  "video",
 ]
 
 /** Common catalog identity shared by every present and future model runtime. */

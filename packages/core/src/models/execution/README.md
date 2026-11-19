@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision, reranking, web search, image and speech calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking, web search, image, video and speech calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -78,7 +78,7 @@ and ranking validation. A complete permutation with finite scores is required; t
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
 Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
-neither admit nor count reranking, web search, transcription, image or speech calls (`aiLimitMeterApplies` in
+neither admit nor count reranking, web search, transcription, image, video or speech calls (`aiLimitMeterApplies` in
 the limit storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
 costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
 remains the existing accounting-only replay.
@@ -144,3 +144,35 @@ Characters and voice tiers are provider rules, so the binding owns both: `estima
 receives the text and voice and counts characters itself, providers report `inputCharacters` in
 usage, and `pricingDimensions` in the reply names the tier the provider billed, which selects the
 rate-card variant.
+
+## Video flow
+
+A video takes minutes, longer than any request, so `../video/runtime.ts` splits the call across
+requests:
+
+```text
+start(): admit the call, reserve its budget → provider start(callId) → keep the operation
+get():   provider status(operation) → pending: answer as is
+                                    → ended: record it as the attempt that admitted it,
+                                      store the videos, settle the operation
+```
+
+`start` admits the call like an image, then asks the provider to start a job and keeps the handle
+it returns in `aiUsage.createModelCallOperation`, with the execution attempt that admitted it,
+whether that reserved budget, and the price variant the provider bills the job at. The call ID is
+the provider's idempotency key, so a retried start never bills a second job. A start that fails
+keeps its reservation unknown, as a language call does.
+
+Any later `get`, from the same request or another process, looks at the job once. The look that
+sees it end records the call through `accountingFor` the starting execution and `resumeCall`, so the
+ledger row and the reservation it reconciles are that attempt's, then writes the videos to blob
+storage, records them against the call ID, and settles the operation with its usage and cost.
+Settling is first-wins: two looks that see the end at once record the same ledger identity, keep
+the first files, and both answer with the first settlement. A look that fails to ask, such as a
+network error, leaves the job pending. `generate` is `start`, then `get` every five seconds.
+
+Usage is `outputVideoMs`: what the provider reports, else the requested length times the clips
+returned, which is what providers bill. The job's price variant, such as `{ resolution: "720p",
+audio: "audio" }`, comes from the binding at start, since the binding knows how its catalog names
+tiers. A generation nobody looks at stays pending, its budget reserved, until someone does.
+
