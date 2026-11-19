@@ -233,11 +233,7 @@ function excerpt(thread: CommentThread): string {
  * Where a new comment goes, as its card says it: at its instant, and its scene when there are
  * more. `at` words the instant.
  */
-function draftPlace(
-  outline: VideoOutline,
-  ms: number,
-  at: (time: string) => string
-): string {
+function draftPlace(outline: VideoOutline, ms: number, at: (time: string) => string): string {
   const time = at(formatClock(ms / 1000))
   const scene = outline.scenes.length > 1 ? chapterAt(outline, ms / 1000) : undefined
   return scene ? `${time} · ${chapterName(scene)}` : time
