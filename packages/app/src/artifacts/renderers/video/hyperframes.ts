@@ -118,10 +118,26 @@ export function readReport(data: unknown): HyperframesReport | null {
       }
     }
     case "diagnostic":
-      return data.code === "runtime_media_load_failed" ? { type: "media-failed" } : null
+      return mediaFailed(data) ? { type: "media-failed" } : null
     default:
       return null
   }
+}
+
+/** The elements whose failing asset is a recording: a video, a sound, or a source of one. */
+const RECORDINGS = new Set(["video", "audio", "source"])
+
+/**
+ * Whether a diagnostic says a recording could not load. The runtime says it in two ways: its media
+ * layer's `runtime_media_load_failed`, and, for a file the browser cannot read at all, the asset
+ * watch's `runtime_asset_load_failed` naming the element, which it also sends for an image.
+ */
+function mediaFailed(data: Record<string, unknown>): boolean {
+  if (data.code === "runtime_media_load_failed") return true
+  if (data.code !== "runtime_asset_load_failed" || !isRecord(data.details)) return false
+
+  const { tagName } = data.details
+  return typeof tagName === "string" && RECORDINGS.has(tagName.toLowerCase())
 }
 
 /**

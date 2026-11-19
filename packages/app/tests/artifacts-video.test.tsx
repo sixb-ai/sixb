@@ -125,6 +125,24 @@ describe("the HyperFrames adapter", () => {
     expect(readReport({ ...RUNTIME, type: "state", currentTime: "soon" })).toBeNull()
   })
 
+  // Reproduce by reading only `runtime_media_load_failed` in `mediaFailed` (hyperframes.ts): a
+  // recording the browser cannot read at all is reported the other way, and plays black.
+  test("reads a recording that could not load, however the runtime says it", () => {
+    const failed = (tagName: string) =>
+      readReport({
+        ...RUNTIME,
+        type: "diagnostic",
+        code: "runtime_asset_load_failed",
+        details: { tagName, assetUrl: "media/clip.mp4" },
+      })
+    expect(failed("video")).toEqual({ type: "media-failed" })
+    expect(failed("AUDIO")).toEqual({ type: "media-failed" })
+    expect(failed("source")).toEqual({ type: "media-failed" })
+
+    // An image the frame could not load is not a recording.
+    expect(failed("img")).toBeNull()
+  })
+
   // Guard proof: return true from `supported` in hyperframes.ts; the first two read as reports.
   test("refuses a runtime of another version, or one that cannot seek by seconds", () => {
     expect(readReport({ ...RUNTIME, protocolVersion: 2, type: "ready" })).toEqual({
@@ -462,6 +480,19 @@ describe("the player", () => {
     const { screen, view } = await openPlayer()
     fireEvent.keyDown(screen, { key: "l" })
     expect(view.container.querySelector("[data-video-big-play]")).toBeNull()
+  })
+
+  test("says on the picture when a recording it plays could not load", async () => {
+    const { view, runtime } = await openPlayer()
+    expect(view.queryByText("A clip in this video couldn’t load")).toBeNull()
+
+    await runtime({
+      ...RUNTIME,
+      type: "diagnostic",
+      code: "runtime_asset_load_failed",
+      details: { tagName: "video", assetUrl: "media/clip.mp4" },
+    })
+    expect(view.getByText("A clip in this video couldn’t load")).toBeTruthy()
   })
 
   test("says a runtime of another version cannot play the video", async () => {
