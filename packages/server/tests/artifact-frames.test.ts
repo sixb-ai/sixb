@@ -592,6 +592,32 @@ describe("a deck's frame", () => {
   })
 })
 
+/** Keeps a ready proxy of the recording with `digest`, and returns the name a frame plays it by. */
+async function readyProxy(fixture: Fixture, digest: string, body: string): Promise<string> {
+  const proxy = await fixture.blobStorage.put({
+    body: new TextEncoder().encode(body),
+    fileName: "clip.proxy.mp4",
+    mediaType: "video/mp4",
+  })
+  const pending = { status: "pending" } as const
+  await artifactStorage(fixture.storage).putMedia({
+    projectId: PROJECT_ID,
+    digest,
+    parts: {
+      probe: pending,
+      proxy: { status: "ready", file: proxy },
+      poster: pending,
+      filmstrip: pending,
+      waveform: pending,
+      cuts: pending,
+      transcript: pending,
+    },
+    attempts: 1,
+    updatedAt: new Date(),
+  })
+  return proxy.digest.replace(/^sha256:/, "").slice(0, 16)
+}
+
 describe("a video's frame", () => {
   const SCENE = `<template>
   <div data-composition-id="intro" data-width="1280" data-height="720"><h1>Hello</h1></div>
@@ -664,28 +690,7 @@ describe("a video's frame", () => {
     // Until it is ready, every recording plays its original.
     expect(await (await read("scenes/intro.html")).text()).toBe(scene)
 
-    const proxy = await fixture.blobStorage.put({
-      body: new TextEncoder().encode("the proxy, 20 MB"),
-      fileName: "clip.proxy.mp4",
-      mediaType: "video/mp4",
-    })
-    const pending = { status: "pending" } as const
-    await artifactStorage(fixture.storage).putMedia({
-      projectId: PROJECT_ID,
-      digest: clip.file.digest,
-      parts: {
-        probe: pending,
-        proxy: { status: "ready", file: proxy },
-        poster: pending,
-        filmstrip: pending,
-        waveform: pending,
-        cuts: pending,
-        transcript: pending,
-      },
-      attempts: 1,
-      updatedAt: new Date(),
-    })
-    const name = proxy.digest.replace(/^sha256:/, "").slice(0, 16)
+    const name = await readyProxy(fixture, clip.file.digest, "the proxy, 20 MB")
 
     // The path stays as written: HyperFrames resolves it from the scene's folder as before.
     expect(await (await read("scenes/intro.html")).text()).toContain(
@@ -701,6 +706,70 @@ describe("a video's frame", () => {
     // The original's address keeps serving the original, and a name that is not the proxy's none.
     expect(await (await read("media/clip.mov")).text()).toBe("the original, 2 GB")
     expect((await read("media/clip.mov?sixb-proxy=0000000000000000")).status).toBe(404)
+  })
+
+  // Reproduce by leaving the frame's targets out of videoRecordings, or serving a lent file's
+  // proxy only for the video's own files in frameResponse: the scene keeps playing the borrowed
+  // 4K original, and the proxy's address answers 404. Drop the target check from the lent branch,
+  // and a reader issued no target for the footage gets its proxy all the same.
+  test("plays a recording another artifact lends it through its proxy, while its reader may read it", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = await fixture.put("clip.mov", "the original, 4K", "video/quicktime")
+    const footage = await publish(fixture, alice, "file", [clip])
+    const id = footage.artifact.id
+    const scene = SCENE.replace(
+      "<h1>Hello</h1>",
+      `<video src="artifact:${id}/clip.mov" muted></video>`
+    )
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put("index.html", INDEX, "text/html"),
+      await fixture.put("scenes/intro.html", scene, "text/html"),
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    const { path } = (await minted.json()) as { path: string }
+    const read = async (frame: string, file: string) =>
+      fixture.app.fetch(
+        new Request(url(`${frame}${file}`), { headers: { "sec-fetch-dest": "video" } })
+      )
+    const lent = `__sixb/ref/${id}@latest/clip.mov`
+
+    // Until its proxy is ready, the borrowed recording plays its original.
+    expect(await (await read(path, "scenes/intro.html")).text()).toContain(
+      `<video src="../${lent}" muted data-sixb-ref="">`
+    )
+    expect(await (await read(path, lent)).text()).toBe("the original, 4K")
+
+    const name = await readyProxy(fixture, clip.file.digest, "the proxy, 720p")
+    expect(await (await read(path, "scenes/intro.html")).text()).toContain(
+      `<video src="../${lent}?sixb-proxy=${name}" muted data-sixb-ref="">`
+    )
+    const played = await read(path, `${lent}?sixb-proxy=${name}`)
+    expect(played.headers.get("content-type")).toBe("video/mp4")
+    expect(await played.text()).toBe("the proxy, 720p")
+    expect(await (await read(path, lent)).text()).toBe("the original, 4K")
+    expect((await read(path, `${lent}?sixb-proxy=0000000000000000`)).status).toBe(404)
+
+    // A reader who may read the film but not the footage is issued no target for it: their frame
+    // serves neither the original nor its proxy, and names neither.
+    const artifacts = artifactStorage(fixture.storage)
+    const version = await artifacts.getVersion({
+      projectId: PROJECT_ID,
+      artifactId: film.artifact.id,
+      version: 1,
+    })
+    if (!version) throw new Error("Expected the film's version.")
+    const unlent = await createArtifactFrame({
+      projectId: PROJECT_ID,
+      storage: artifacts,
+      version,
+      read: async () => null,
+    })
+    const html = await (await read(unlent.path, "scenes/intro.html")).text()
+    expect(html).toContain('<video muted data-sixb-ref="unavailable">')
+    expect(html).not.toContain("sixb-proxy")
+    expect((await read(unlent.path, lent)).status).toBe(404)
+    expect((await read(unlent.path, `${lent}?sixb-proxy=${name}`)).status).toBe(404)
   })
 
   test("lets the runtime load from the frame alone, and play its version's media", async () => {

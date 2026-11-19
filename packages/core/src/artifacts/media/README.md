@@ -8,7 +8,7 @@ deleting one keeps them.
 ```text
 publish (create, update, restore, the Agent's publish)
   → requestArtifactMedia: one artifact.media.requested job per digest with nothing kept,
-    refreshArtifactMedia for one kept
+    refreshArtifactMedia for one kept; a video's own media and those it plays from other artifacts
 render worker (packages/render-worker/src/media.ts)
   → putMedia: the attempt, counted before it starts
   → sandbox: fetch the original by download URL, derive.cjs probes it
@@ -57,6 +57,12 @@ each recording a video's HTML file plays, its scenes' included. The second reads
 the frame's request (`server/src/routes/artifact-frames.ts`). The original's address always serves
 the original, so a page that loaded it keeps the bytes it loaded, and a page opened once the proxy
 is ready plays the proxy. A name that is not the ready proxy's is a 404, never other bytes.
+
+A recording a video plays from another artifact (`artifact:<id>/clip.mov`) plays its proxy the
+same way, at the path the frame lends it under (`__sixb/ref/…`), and only where its original is
+served: the reader's frame was issued a target for it. Publishing the video asks for what is
+derived of it, as its author reads it, in case the version holding it predates media or its job
+was lost. Media are a project's, so the project pays, as for its own.
 
 ## Who pays for the transcript
 
