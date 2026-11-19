@@ -2,6 +2,9 @@ import {
   BOARD_PREVIEW_JOB,
   DOCUMENT_PDF_JOB,
   MEDIA_JOB,
+  VIDEO_EXPORT_JOB,
+  VIDEO_SEGMENT_JOB,
+  VIDEO_STILLS_JOB,
 } from "@sixb/core/internal/artifacts/publish"
 import { QueueWorker, type QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, Queues, RenderQueueJob } from "@sixb/core/queues"
@@ -10,6 +13,9 @@ import { failDocumentPdf, printDocumentPdf } from "./document-pdf"
 import type { RenderHost } from "./host"
 import { deriveArtifactMedia, failArtifactMedia, mediaAttempts } from "./media"
 import type { RenderDownloadHost } from "./sandbox"
+import { assembleVideoExport, failVideoExport } from "./video-export"
+import { failVideoSegment, renderVideoSegment, segmentName } from "./video-segment"
+import { failVideoStills, renderVideoStills } from "./video-stills"
 
 const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
 
@@ -29,8 +35,9 @@ export interface RenderWorkerOptions {
 
 /**
  * Consumes the `renders` queue: what the framework renders in a blank sandbox of the project, a
- * designed document's PDF, the pictures of a canvas's boards, and what is derived of a video or a
- * sound, so a render never waits behind an agent's run or takes its slot.
+ * designed document's PDF, the pictures of a canvas's boards, what is derived of a video or a
+ * sound, and a video's stills and MP4, so a render never waits behind an agent's run or takes its
+ * slot.
  */
 export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_CODES> {
   private readonly host: RenderWorkerHost
@@ -57,6 +64,15 @@ export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_COD
         return
       case "artifact.media.requested":
         await deriveArtifactMedia({ host: this.host, job, signal })
+        return
+      case "artifact.video.export.requested":
+        await assembleVideoExport({ host: this.host, job, signal })
+        return
+      case "artifact.video.segment.requested":
+        await renderVideoSegment({ host: this.host, job, signal })
+        return
+      case "artifact.video.stills.requested":
+        await renderVideoStills({ host: this.host, job, signal })
         return
     }
   }
@@ -88,7 +104,40 @@ export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_COD
       return { kind: "fail" }
     }
 
+    // A video's segment, or its export: after a few attempts, whoever waits for its MP4 hears
+    // which part could not be made, until they ask again.
+    if (job.type === "artifact.video.segment.requested") {
+      console.error(`[SixbRenderWorker] Could not render ${segmentName(job)}.`, error)
+      if (job.attempt < VIDEO_SEGMENT_JOB.attempts) return retry(VIDEO_SEGMENT_JOB.backoffMs)
+      await failVideoSegment({ host: this.host, job }).catch((failure: unknown) => {
+        console.error(
+          `[SixbRenderWorker] Could not keep why ${segmentName(job)} did not render.`,
+          failure
+        )
+      })
+      return { kind: "fail" }
+    }
+
     const name = `'${job.payload.artifactId}' version ${job.payload.version}`
+
+    if (job.type === "artifact.video.export.requested") {
+      console.error(`[SixbRenderWorker] Could not assemble the MP4 of ${name}.`, error)
+      if (job.attempt < VIDEO_EXPORT_JOB.attempts) return retry(VIDEO_EXPORT_JOB.backoffMs)
+      await failVideoExport({ host: this.host, job }).catch((failure: unknown) => {
+        console.error(`[SixbRenderWorker] Could not keep why ${name} was not assembled.`, failure)
+      })
+      return { kind: "fail" }
+    }
+
+    // Stills are derived: after a few attempts, the scenes show without them.
+    if (job.type === "artifact.video.stills.requested") {
+      console.error(`[SixbRenderWorker] Could not snapshot the scenes of ${name}.`, error)
+      if (job.attempt < VIDEO_STILLS_JOB.attempts) return retry(VIDEO_STILLS_JOB.backoffMs)
+      await failVideoStills({ host: this.host, job }).catch((failure: unknown) => {
+        console.error(`[SixbRenderWorker] Could not keep why ${name} was not snapshotted.`, failure)
+      })
+      return { kind: "fail" }
+    }
 
     // Pictures are derived: after a few attempts, the boards keep their outlines.
     if (job.type === "artifact.previews.requested") {
