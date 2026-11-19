@@ -1,6 +1,6 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, a deck, a video, or a file they asked for, as an artifact, and revise it by publishing it again with its id. Read it before you start making one, since each kind has its own format and tools; for a video, such as a reel or a short cut from clips the user gives, before you touch any footage.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, a deck, a video, or a file they asked for, as an artifact, and revise it by publishing it again with its id. Read it before you start making one, since each kind has its own format and tools; for a reel from the user's clips, before touching them.
 ---
 
 # Artifacts
