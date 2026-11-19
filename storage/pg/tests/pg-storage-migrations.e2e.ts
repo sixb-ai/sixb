@@ -148,6 +148,7 @@ const SHIPPED_MIGRATIONS = [
   "107-agent-inbox-edits",
   "108-agent-thread-reads",
   "109-sync-run-connections",
+  "110-video-artifacts",
 ]
 
 const steps = postgresStorageMigrations.steps

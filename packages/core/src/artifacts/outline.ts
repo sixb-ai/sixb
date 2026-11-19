@@ -11,6 +11,7 @@ export type ArtifactOutline =
   | SlidesOutline
   | PageOutline
   | CanvasOutline
+  | VideoOutline
   | FileOutline
 
 export interface DocumentOutline {
@@ -96,6 +97,31 @@ export type CanvasOutlineItem =
       readonly renderKey?: string
     }
   | { readonly id: string; readonly type: "section"; readonly title?: string }
+
+export interface VideoOutline {
+  readonly kind: "video"
+  /** The frame's size in pixels, and how many frames a second it plays. */
+  readonly width: number
+  readonly height: number
+  readonly fps: number
+  readonly durationMs: number
+  /** Its scenes, the chapters a reader skips between, in the order they start. */
+  readonly scenes: readonly VideoOutlineScene[]
+}
+
+export interface VideoOutlineScene {
+  /** What `#part` names in an address to the scene. */
+  readonly id: string
+  /** Its host's `data-label`. */
+  readonly label?: string
+  readonly startMs: number
+  readonly durationMs: number
+  /**
+   * What the scene renders to, as a hash of everything it shows: a version that keeps a scene as
+   * it was keeps its key, and so its rendered segment.
+   */
+  readonly renderKey: string
+}
 
 export interface FileOutline {
   readonly kind: "file"

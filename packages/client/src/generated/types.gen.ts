@@ -21032,7 +21032,7 @@ export type ListArtifactsData = {
     /**
      * Only artifacts of this kind
      */
-    kind?: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+    kind?: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
     limit?: string
     offset?: string
   }
@@ -21102,7 +21102,7 @@ export type ListArtifactsResponses = {
     artifacts: Array<{
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -21128,7 +21128,7 @@ export type ListArtifactsResponse = ListArtifactsResponses[keyof ListArtifactsRe
 
 export type CreateArtifactData = {
   body: {
-    kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+    kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
     title: string
     /**
      * Files stored with POST /api/files, at their paths in the artifact
@@ -21291,7 +21291,7 @@ export type CreateArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -21422,6 +21422,41 @@ export type CreateArtifactResponses = {
              * The modes each board has a preview in: both, or the one its theme.json pins
              */
             themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "video"
+            /**
+             * The frame's width, in pixels
+             */
+            width: number
+            /**
+             * The frame's height, in pixels
+             */
+            height: number
+            /**
+             * Frames a second
+             */
+            fps: number
+            durationMs: number
+            /**
+             * Its scenes, in the order they start
+             */
+            scenes: Array<{
+              /**
+               * What #<id> names in an address to the scene
+               */
+              id: string
+              /**
+               * Its host's data-label
+               */
+              label?: string
+              startMs: number
+              durationMs: number
+              /**
+               * What the scene renders to: a scene kept as it was keeps its key
+               */
+              renderKey: string
+            }>
           }
         | {
             kind: "file"
@@ -21684,7 +21719,7 @@ export type GetArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -22388,7 +22423,7 @@ export type SetArtifactStateResponse = SetArtifactStateResponses[keyof SetArtifa
 
 export type UpdateArtifactData = {
   body: {
-    kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+    kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
     title: string
     /**
      * Files stored with POST /api/files, at their paths in the artifact
@@ -22557,7 +22592,7 @@ export type UpdateArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -22688,6 +22723,41 @@ export type UpdateArtifactResponses = {
              * The modes each board has a preview in: both, or the one its theme.json pins
              */
             themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "video"
+            /**
+             * The frame's width, in pixels
+             */
+            width: number
+            /**
+             * The frame's height, in pixels
+             */
+            height: number
+            /**
+             * Frames a second
+             */
+            fps: number
+            durationMs: number
+            /**
+             * Its scenes, in the order they start
+             */
+            scenes: Array<{
+              /**
+               * What #<id> names in an address to the scene
+               */
+              id: string
+              /**
+               * Its host's data-label
+               */
+              label?: string
+              startMs: number
+              durationMs: number
+              /**
+               * What the scene renders to: a scene kept as it was keeps its key
+               */
+              renderKey: string
+            }>
           }
         | {
             kind: "file"
@@ -22906,7 +22976,7 @@ export type FreezeArtifactVersionResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -23037,6 +23107,41 @@ export type FreezeArtifactVersionResponses = {
              * The modes each board has a preview in: both, or the one its theme.json pins
              */
             themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "video"
+            /**
+             * The frame's width, in pixels
+             */
+            width: number
+            /**
+             * The frame's height, in pixels
+             */
+            height: number
+            /**
+             * Frames a second
+             */
+            fps: number
+            durationMs: number
+            /**
+             * Its scenes, in the order they start
+             */
+            scenes: Array<{
+              /**
+               * What #<id> names in an address to the scene
+               */
+              id: string
+              /**
+               * Its host's data-label
+               */
+              label?: string
+              startMs: number
+              durationMs: number
+              /**
+               * What the scene renders to: a scene kept as it was keeps its key
+               */
+              renderKey: string
+            }>
           }
         | {
             kind: "file"
@@ -23216,7 +23321,15 @@ export type ListArtifactCommentsResponses = {
          */
         label?: string
         /**
-         * Where on the board its pin is, as fractions of the board's width and height from its top left
+         * The video's instant it is about, in milliseconds from its start
+         */
+        at?: number
+        /**
+         * The id of the video's scene it is about
+         */
+        scene?: string
+        /**
+         * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
          */
         point?: {
           x: number
@@ -23275,7 +23388,7 @@ export type AddArtifactCommentData = {
      */
     body: string
     /**
-     * What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to.
+     * What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to.
      */
     anchor?: {
       /**
@@ -23291,7 +23404,15 @@ export type AddArtifactCommentData = {
        */
       label?: string
       /**
-       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       * The video's instant it is about, in milliseconds from its start
+       */
+      at?: number
+      /**
+       * The id of the video's scene it is about
+       */
+      scene?: string
+      /**
+       * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
        */
       point?: {
         x: number
@@ -23469,7 +23590,15 @@ export type AddArtifactCommentResponses = {
        */
       label?: string
       /**
-       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       * The video's instant it is about, in milliseconds from its start
+       */
+      at?: number
+      /**
+       * The id of the video's scene it is about
+       */
+      scene?: string
+      /**
+       * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
        */
       point?: {
         x: number
@@ -23666,7 +23795,15 @@ export type ResolveArtifactCommentResponses = {
        */
       label?: string
       /**
-       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       * The video's instant it is about, in milliseconds from its start
+       */
+      at?: number
+      /**
+       * The id of the video's scene it is about
+       */
+      scene?: string
+      /**
+       * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
        */
       point?: {
         x: number
@@ -24211,6 +24348,41 @@ export type GetArtifactRestorePointResponses = {
           themes?: Array<"light" | "dark">
         }
       | {
+          kind: "video"
+          /**
+           * The frame's width, in pixels
+           */
+          width: number
+          /**
+           * The frame's height, in pixels
+           */
+          height: number
+          /**
+           * Frames a second
+           */
+          fps: number
+          durationMs: number
+          /**
+           * Its scenes, in the order they start
+           */
+          scenes: Array<{
+            /**
+             * What #<id> names in an address to the scene
+             */
+            id: string
+            /**
+             * Its host's data-label
+             */
+            label?: string
+            startMs: number
+            durationMs: number
+            /**
+             * What the scene renders to: a scene kept as it was keeps its key
+             */
+            renderKey: string
+          }>
+        }
+      | {
           kind: "file"
           mediaType: string
         }
@@ -24438,7 +24610,7 @@ export type RestoreArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "video" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -24569,6 +24741,41 @@ export type RestoreArtifactResponses = {
              * The modes each board has a preview in: both, or the one its theme.json pins
              */
             themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "video"
+            /**
+             * The frame's width, in pixels
+             */
+            width: number
+            /**
+             * The frame's height, in pixels
+             */
+            height: number
+            /**
+             * Frames a second
+             */
+            fps: number
+            durationMs: number
+            /**
+             * Its scenes, in the order they start
+             */
+            scenes: Array<{
+              /**
+               * What #<id> names in an address to the scene
+               */
+              id: string
+              /**
+               * Its host's data-label
+               */
+              label?: string
+              startMs: number
+              durationMs: number
+              /**
+               * What the scene renders to: a scene kept as it was keeps its key
+               */
+              renderKey: string
+            }>
           }
         | {
             kind: "file"
@@ -24977,6 +25184,41 @@ export type GetArtifactVersionResponses = {
            * The modes each board has a preview in: both, or the one its theme.json pins
            */
           themes?: Array<"light" | "dark">
+        }
+      | {
+          kind: "video"
+          /**
+           * The frame's width, in pixels
+           */
+          width: number
+          /**
+           * The frame's height, in pixels
+           */
+          height: number
+          /**
+           * Frames a second
+           */
+          fps: number
+          durationMs: number
+          /**
+           * Its scenes, in the order they start
+           */
+          scenes: Array<{
+            /**
+             * What #<id> names in an address to the scene
+             */
+            id: string
+            /**
+             * Its host's data-label
+             */
+            label?: string
+            startMs: number
+            durationMs: number
+            /**
+             * What the scene renders to: a scene kept as it was keeps its key
+             */
+            renderKey: string
+          }>
         }
       | {
           kind: "file"

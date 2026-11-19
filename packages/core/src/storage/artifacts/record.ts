@@ -7,6 +7,7 @@ import { isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentAnchor,
   ArtifactCommentAuthor,
   ArtifactCommentRecord,
   ArtifactDocument,
@@ -340,6 +341,22 @@ export const artifactStorageErrors = {
     ),
 }
 
+/**
+ * A comment's anchor as storage writes it: only what it names, field by field, so a caller's other
+ * keys never reach the column, and every provider keeps the same anchor.
+ */
+export function storedCommentAnchor(anchor: ArtifactCommentAnchor): ArtifactCommentAnchor {
+  return {
+    ...(anchor.board === undefined ? {} : { board: anchor.board }),
+    ...(anchor.element === undefined ? {} : { element: anchor.element }),
+    ...(anchor.label === undefined ? {} : { label: anchor.label }),
+    ...(anchor.at === undefined ? {} : { at: anchor.at }),
+    ...(anchor.scene === undefined ? {} : { scene: anchor.scene }),
+    ...(anchor.point === undefined ? {} : { point: { x: anchor.point.x, y: anchor.point.y } }),
+    revision: anchor.revision,
+  }
+}
+
 export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
   const id = text(row.id, "id", "artifact comment")
   const where = `artifact comment '${id}'`
@@ -350,10 +367,13 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
   if (!isObject(anchor) || !Number.isSafeInteger(anchor.revision) || Number(anchor.revision) < 1) {
     throw corrupt(where, "anchor names no revision")
   }
-  for (const key of ["board", "element", "label"] as const) {
+  for (const key of ["board", "element", "label", "scene"] as const) {
     if (anchor[key] !== undefined && typeof anchor[key] !== "string") {
       throw corrupt(where, `anchor's ${key} is not text`)
     }
+  }
+  if (anchor.at !== undefined && !Number.isSafeInteger(anchor.at)) {
+    throw corrupt(where, "anchor's at is not a whole number of milliseconds")
   }
   const { point } = anchor
   if (
@@ -371,6 +391,8 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
       ...(typeof anchor.board === "string" ? { board: anchor.board } : {}),
       ...(typeof anchor.element === "string" ? { element: anchor.element } : {}),
       ...(typeof anchor.label === "string" ? { label: anchor.label } : {}),
+      ...(typeof anchor.at === "number" ? { at: anchor.at } : {}),
+      ...(typeof anchor.scene === "string" ? { scene: anchor.scene } : {}),
       ...(isObject(point) ? { point: { x: Number(point.x), y: Number(point.y) } } : {}),
       revision: Number(anchor.revision),
     },

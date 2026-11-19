@@ -13,6 +13,7 @@ Each artifact has a page in your app where its owner reads it.
 | `slides`   | A deck: `index.html` with one `<section class="slide">` per slide       |
 | `page`     | A web page: `index.html` and its scripts, styles, images, and data      |
 | `canvas`   | An endless board of boards, sections, notes, shapes, and arrows         |
+| `video`    | Timed HTML scenes over the footage, sound, and images they play         |
 | `file`     | One file, shown or played as its type allows, or offered for download   |
 
 ## Publish an artifact
@@ -40,8 +41,9 @@ const { artifact } = await sixb.artifacts.create({
 ```
 
 A version holds at most 500 files: 25 MiB each and 250 MiB in all, except a `file` artifact,
-whose one file may reach 2 GiB, such as a recording. Every file counts at its full size, also one
-an earlier version holds already.
+whose one file may reach 2 GiB, such as a recording, and a `video`, whose files may reach 2 GiB
+each and 8 GiB in all. Every file counts at its full size, also one an earlier version holds
+already.
 
 `sixb.artifacts.update(artifact.id, input)` replaces the current version's content. An update
 checks the whole version first: a document's images must be files in that version or another
@@ -240,7 +242,8 @@ into it, as when the reader picks what to comment on.
 ## Comment on an artifact
 
 Whoever reads an artifact reads its comments and adds their own. A comment on a canvas can be about
-a board, or an element of one. Its author, or anyone who may change the artifact, resolves or
+a board, or an element of one; a comment on a video, about an instant (`at`, in milliseconds), its
+scene, and a `point` on the frame. Its author, or anyone who may change the artifact, resolves or
 deletes it. Replies go one level deep. A copy of the artifact, such as a forked conversation's,
 keeps no comments.
 
@@ -737,6 +740,49 @@ preview when it changed, and the viewer shows the new one as soon as it is ready
   serves one to whoever reads the version, and reading or publishing a version says which boards'
   previews are `ready`, `pending`, or `none`.
 
+## Write a video
+
+A video is a [HyperFrames](https://hyperframes.heygen.com) project. Its `index.html`,
+the root composition, hosts one scene per `<template>` file, and each scene is HTML and CSS over
+the footage, sound, and images it plays.
+
+```text
+index.html          the root composition: the frame's size, and a host per scene
+scenes/<id>.html    a scene: one <template> holding its composition
+media/<name>        the footage, sound, and images the scenes play
+```
+
+```html
+<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30">
+  <div data-composition-id="intro" data-composition-src="scenes/intro.html"
+       data-start="0" data-duration="4" data-label="Opening"></div>
+  <div data-composition-id="demo" data-composition-src="scenes/demo.html"
+       data-start="intro" data-duration="12"></div>
+</div>
+```
+
+```html
+<!-- scenes/demo.html -->
+<template>
+  <div data-composition-id="demo" data-width="1920" data-height="1080">
+    <video src="media/demo.mp4" muted playsinline></video>
+  </div>
+</template>
+```
+
+- A scene's `data-start` is a number of seconds, another scene's id, to start when that one ends,
+  or `intro + 0.5` and `intro - 0.5`, to start that much later or sooner. `data-duration` is its
+  length, and `data-label` its name as a chapter.
+- A scene file's composition has its host's id. Every file a scene plays is one of the version's,
+  or another artifact's file by its address.
+- `artifact:…#demo` opens the video at a scene, and `artifact:…#t=12.5` at an instant.
+- A video holds at most 200 scenes and plays at most 10 minutes. Its frame is at most 3,840 pixels
+  a side, in even numbers, at 24, 25, 30, 50, or 60 frames a second, 30 by default. Each HTML file
+  is at most 1 MiB, and a version holds at most 50 video and sound files.
+
+The app lists a video's scenes as chapters, each at its time. The Agent revises a video someone
+made, and does not start one.
+
 ## Declare a query
 
 A sheet, a page, a deck, a canvas, or a designed document can hold queries over your objects
@@ -815,6 +861,8 @@ artifact:<id>[@<version>][/<file>][#<part>]
 | `artifact:art_k3m9q2x7tp#Regions!A1:D5`       | A range of a sheet; row 1 is its header row |
 | `artifact:art_k3m9q2x7tp#chart=revenue`       | A chart in a workbook                       |
 | `artifact:art_k3m9q2x7tp#methodology`         | A document's section, by its heading's slug |
+| `artifact:art_k3m9q2x7tp#demo`                | A video's scene                             |
+| `artifact:art_k3m9q2x7tp#t=12.5`              | An instant of a video, in seconds           |
 
 In Markdown, an image alone in its paragraph shows the target in place, with the image's alt text
 as its caption; a link opens it:

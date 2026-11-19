@@ -23,3 +23,16 @@ export function decodeHtmlEntities(value: string): string {
       : match
   })
 }
+
+/**
+ * Where HTML shows or plays a file: each element and the attribute that names the file. A file of
+ * another artifact is an `artifact:` address in one of them, which a frame serves as its own.
+ */
+export const HTML_FILE_ATTRIBUTES = [
+  { element: "img", attribute: "src" },
+  { element: "video", attribute: "src" },
+  { element: "video", attribute: "poster" },
+  { element: "audio", attribute: "src" },
+  { element: "source", attribute: "src" },
+  { element: "track", attribute: "src" },
+] as const

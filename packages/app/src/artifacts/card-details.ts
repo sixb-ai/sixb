@@ -1,10 +1,12 @@
 import { formatFileSize } from "./file-size"
 import type { ArtifactMessages } from "./messages"
+import { formatClock } from "./playback"
 import type { ArtifactVersion } from "./queries"
 
 /**
  * What a card says about a version beside its title, from what publishing read: a workbook's
- * sheets and charts, a document's sections, a deck's slides, or a file's format and size.
+ * sheets and charts, a document's sections, a deck's slides, a video's length and scenes, or a
+ * file's format and size.
  */
 export function versionSummary(
   version: ArtifactVersion,
@@ -40,6 +42,12 @@ export function versionSummary(
       if (boards > 0) details.push(messages.card.boards(boards))
       break
     }
+    case "video":
+      details.push(
+        formatClock(outline.durationMs / 1000),
+        messages.card.scenes(outline.scenes.length)
+      )
+      break
     case "file": {
       // A file reads as its format, which says more than "File".
       const file = version.files.find((candidate) => candidate.path === version.entry)

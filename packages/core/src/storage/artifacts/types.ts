@@ -443,16 +443,21 @@ export interface ArtifactPdfKeyInput {
 
 /**
  * What a comment is about: a canvas's board, an element of it by its address, as
- * `boardElements` writes one, or the artifact itself, at the revision the author saw.
+ * `boardElements` writes one, an instant of a video and the scene it plays, or the artifact
+ * itself, at the revision the author saw.
  */
 export interface ArtifactCommentAnchor {
   readonly board?: string
   readonly element?: string
   /** The element's first words, which name it once it is gone. */
   readonly label?: string
+  /** A video's instant, in milliseconds from its start. */
+  readonly at?: number
+  /** The id of the video's scene it is about. */
+  readonly scene?: string
   /**
-   * Where on the board its pin is, as fractions of the board's width and height from its top left:
-   * where its author clicked.
+   * Where its pin is, as fractions of the width and height from the top left: where its author
+   * clicked, on the board, or on the video's frame at its instant.
    */
   readonly point?: { readonly x: number; readonly y: number }
   readonly revision: number

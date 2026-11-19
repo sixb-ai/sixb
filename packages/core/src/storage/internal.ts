@@ -47,6 +47,7 @@ export {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  storedCommentAnchor,
   turnUndoable,
 } from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"

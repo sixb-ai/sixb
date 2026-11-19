@@ -79,6 +79,7 @@ import { PageRenderer } from "./renderers/page"
 import { useWorkbookDownloads } from "./renderers/sheet/downloads"
 import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
+import { VideoRenderer } from "./renderers/video/renderer"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 import { VersionMenu } from "./version-menu"
 import { ArtifactViewProvider } from "./view-context"
@@ -611,6 +612,8 @@ function ArtifactBody({
       return <PageRenderer version={version} />
     case "canvas":
       return <CanvasRenderer version={version} {...(part ? { part } : {})} />
+    case "video":
+      return <VideoRenderer version={version} {...(part ? { part } : {})} />
     case "file": {
       const source = versionFileSource(version, version.entry)
       return source ? (
@@ -1146,9 +1149,9 @@ function DeleteDialog({
 }
 
 /**
- * A document or a file downloads as its entry. A deck's or a page's entry is only its markup, no
- * file the reader wants on its own without the files beside it, and neither is a designed
- * document's: it downloads as its PDF alone.
+ * A document or a file downloads as its entry. A deck's, a page's or a video's entry is only its
+ * markup, no file the reader wants on its own without the files beside it, and neither is a
+ * designed document's: it downloads as its PDF alone.
  */
 function EntryDownloadMenu({
   version,
@@ -1160,7 +1163,7 @@ function EntryDownloadMenu({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const source =
-    kind === "slides" || kind === "page" || kind === "canvas"
+    kind === "slides" || kind === "page" || kind === "canvas" || kind === "video"
       ? null
       : versionFileSource(version, version.entry)
   if (!source) return null

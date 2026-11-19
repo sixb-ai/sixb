@@ -16,6 +16,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  storedCommentAnchor,
   turnUndoable,
 } from "@sixb/core/internal/storage"
 import type {
@@ -810,15 +811,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         throw artifactStorageErrors.guestCommentsFull(input.artifactId)
       }
 
-      const anchor = {
-        ...(input.anchor.board === undefined ? {} : { board: input.anchor.board }),
-        ...(input.anchor.element === undefined ? {} : { element: input.anchor.element }),
-        ...(input.anchor.label === undefined ? {} : { label: input.anchor.label }),
-        ...(input.anchor.point === undefined
-          ? {}
-          : { point: { x: input.anchor.point.x, y: input.anchor.point.y } }),
-        revision: input.anchor.revision,
-      }
+      const anchor = storedCommentAnchor(input.anchor)
       const guest = input.author.type === "guest" ? input.author : undefined
       const row = this.db
         .query(

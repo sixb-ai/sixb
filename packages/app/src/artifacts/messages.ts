@@ -17,6 +17,7 @@ export const en = {
     slides: "Slides",
     page: "Page",
     canvas: "Canvas",
+    video: "Video",
     file: "File",
   },
   viewer: {
@@ -235,7 +236,8 @@ export const en = {
   },
   gallery: {
     title: "Artifacts",
-    description: "Documents, sheets, slides, pages, canvases, and files published in this project.",
+    description:
+      "Documents, sheets, slides, pages, canvases, videos, and files published in this project.",
     filter: "Filter by kind",
     all: "All",
     kinds: {
@@ -244,6 +246,7 @@ export const en = {
       slides: "Slides",
       page: "Pages",
       canvas: "Canvases",
+      video: "Videos",
       file: "Files",
     },
     count: (count: number, kind?: ArtifactKind) => {
@@ -254,6 +257,7 @@ export const en = {
         slides: ["deck", "decks"],
         page: ["page", "pages"],
         canvas: ["canvas", "canvases"],
+        video: ["video", "videos"],
         file: ["file", "files"],
       }[kind ?? "all"]
       return `${number(count)} ${count === 1 ? one : many}`
@@ -262,7 +266,7 @@ export const en = {
     emptyDescription:
       "Ask the agent for a report, a spreadsheet, or a deck. What it publishes appears here.",
     emptyKind: (kind: ArtifactKind) =>
-      `No ${{ document: "documents", sheet: "sheets", slides: "decks", page: "pages", canvas: "canvases", file: "files" }[kind]} yet`,
+      `No ${{ document: "documents", sheet: "sheets", slides: "decks", page: "pages", canvas: "canvases", video: "videos", file: "files" }[kind]} yet`,
     showAll: "Show all",
     loadFailed: "Artifacts could not be loaded.",
     retry: "Try again",
@@ -461,6 +465,13 @@ export const en = {
       },
     },
   },
+  video: {
+    screen: (title: string) => `Video ${title}`,
+    soon: "Playback is coming soon",
+    soonDetail: "This video will play here. Its scenes are below.",
+    scenes: "Scenes",
+    seconds: (seconds: number) => `${seconds.toLocaleString("en", { maximumFractionDigits: 1 })} s`,
+  },
   slides: {
     deck: (title: string) => `Slides: ${title}`,
     previous: "Previous slide",
@@ -481,6 +492,7 @@ export const en = {
     sections: (count: number) => (count === 1 ? "1 section" : `${number(count)} sections`),
     slides: (count: number) => (count === 1 ? "1 slide" : `${number(count)} slides`),
     boards: (count: number) => (count === 1 ? "1 board" : `${number(count)} boards`),
+    scenes: (count: number) => (count === 1 ? "1 scene" : `${number(count)} scenes`),
     items: (count: number) => (count === 1 ? "1 item" : `${number(count)} items`),
     /** What a version changed, read from its structure against the version before it. */
     added: (name: string) => `Added ${name}`,
@@ -754,6 +766,7 @@ export const fr: Translation<ArtifactMessages> = {
     slides: "Diapositives",
     page: "Page",
     canvas: "Canevas",
+    video: "Vidéo",
     file: "Fichier",
   },
   viewer: {
@@ -965,7 +978,7 @@ export const fr: Translation<ArtifactMessages> = {
   gallery: {
     title: "Artefacts",
     description:
-      "Documents, feuilles, diapositives, pages, canevas et fichiers publiés dans ce projet.",
+      "Documents, feuilles, diapositives, pages, canevas, vidéos et fichiers publiés dans ce projet.",
     filter: "Filtrer par type",
     all: "Tous",
     kinds: {
@@ -974,6 +987,7 @@ export const fr: Translation<ArtifactMessages> = {
       slides: "Diapositives",
       page: "Pages",
       canvas: "Canevas",
+      video: "Vidéos",
       file: "Fichiers",
     },
     count: (count, kind) => {
@@ -984,6 +998,7 @@ export const fr: Translation<ArtifactMessages> = {
         slides: ["présentation", "présentations"],
         page: ["page", "pages"],
         canvas: ["canevas", "canevas"],
+        video: ["vidéo", "vidéos"],
         file: ["fichier", "fichiers"],
       }[kind ?? "all"]
       return `${numberFr(count)} ${count <= 1 ? one : many}`
@@ -992,7 +1007,7 @@ export const fr: Translation<ArtifactMessages> = {
     emptyDescription:
       "Demandez à l’agent un rapport, un tableur ou une présentation : ce qu’il publie apparaît ici.",
     emptyKind: (kind) =>
-      `Aucun${kind === "sheet" || kind === "slides" || kind === "page" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", page: "page", canvas: "canevas", file: "fichier" }[kind]} pour l’instant`,
+      `Aucun${kind === "sheet" || kind === "slides" || kind === "page" || kind === "video" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", page: "page", canvas: "canevas", video: "vidéo", file: "fichier" }[kind]} pour l’instant`,
     showAll: "Tout afficher",
     loadFailed: "Impossible de charger les artefacts.",
     retry: "Réessayer",
@@ -1196,6 +1211,13 @@ export const fr: Translation<ArtifactMessages> = {
       },
     },
   },
+  video: {
+    screen: (title) => `Vidéo ${title}`,
+    soon: "Bientôt lisible ici",
+    soonDetail: "Cette vidéo sera lue ici. Ses scènes sont ci-dessous.",
+    scenes: "Scènes",
+    seconds: (seconds) => `${seconds.toLocaleString("fr", { maximumFractionDigits: 1 })} s`,
+  },
   slides: {
     deck: (title) => `Diapositives : ${title}`,
     previous: "Diapositive précédente",
@@ -1216,6 +1238,7 @@ export const fr: Translation<ArtifactMessages> = {
     sections: (count) => (count === 1 ? "1 section" : `${numberFr(count)} sections`),
     slides: (count) => (count === 1 ? "1 diapositive" : `${numberFr(count)} diapositives`),
     boards: (count) => (count === 1 ? "1 planche" : `${numberFr(count)} planches`),
+    scenes: (count) => (count === 1 ? "1 scène" : `${numberFr(count)} scènes`),
     items: (count) => (count === 1 ? "1 élément" : `${numberFr(count)} éléments`),
     added: (name) => `« ${name} » ajouté`,
     removed: (name) => `« ${name} » supprimé`,

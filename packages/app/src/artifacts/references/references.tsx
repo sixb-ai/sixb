@@ -32,6 +32,7 @@ import { fileView } from "../file-view"
 import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
+import { formatClock } from "../playback"
 import {
   type ArtifactVersion,
   artifactVersionOptions,
@@ -417,6 +418,8 @@ function EmbedBody({
     case "board":
       return <BoardEmbed version={version} id={part.id} address={address} fill={fill} />
     case "region":
+    case "scene":
+    case "time":
       return <CardEmbed version={version} address={address} />
   }
 }
@@ -967,6 +970,10 @@ function partLabel(part: ResolvedArtifactPart, version: ArtifactVersion): string
         outline.kind === "canvas" ? outline.items.find((entry) => entry.id === part.id) : undefined
       return item?.title ?? part.id
     }
+    case "scene":
+      return `${formatClock(part.startMs / 1000)} · ${part.label ?? part.id}`
+    case "time":
+      return formatClock(part.ms / 1000)
     case "artifact":
       return undefined
   }
