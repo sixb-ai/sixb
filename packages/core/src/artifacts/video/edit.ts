@@ -14,6 +14,7 @@ import {
   type VideoClip,
   type VideoElementSource,
   type VideoFileTimeline,
+  type VideoText,
 } from "./timeline"
 
 // What an editor does to a video, as the smallest changes to the text of its files: a scene made
@@ -61,6 +62,34 @@ export const MIN_CLIP_MS = 100
 
 /** Within this, two instants are one: under a frame at 60 fps. */
 const SAME_MS = 15
+
+/**
+ * How an edit names an element of a file: its ref, or its ref with what the editor read there.
+ * An element without an id is named by its place, which someone else's edit may shift between
+ * the reader's choice and the edit: with what it held, the edit still finds it, or refuses.
+ * {@link videoTarget} makes one.
+ */
+export type VideoTarget =
+  | string
+  | {
+      readonly ref: string
+      readonly tag: string
+      /** Its words, as a text or a caption holds them. */
+      readonly words?: string
+      /** The file it plays or shows. */
+      readonly src?: string
+    }
+
+/** The target that names a clip or a text as the editor reads it now. */
+export function videoTarget(element: VideoClip | VideoText): VideoTarget {
+  if ("id" in element && element.id) return element.ref
+  return {
+    ref: element.ref,
+    tag: element.tag,
+    ...(element.text === undefined ? {} : { words: element.text }),
+    ...("src" in element && element.src ? { src: element.src } : {}),
+  }
+}
 
 /** The clips an editor can import. */
 export type VideoImportKind = "video" | "audio" | "image"
@@ -250,7 +279,7 @@ export function removeScene(sources: VideoSources, scene: string): VideoEditResu
 export function setClipTiming(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   timing: {
     readonly startMs?: number
     readonly durationMs?: number
@@ -288,7 +317,7 @@ export function setClipTiming(
 export function trimClip(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   edge: "start" | "end",
   toMs: number,
   options: { readonly ripple?: boolean; readonly endMs?: number } = {}
@@ -302,7 +331,8 @@ export function trimClip(
       if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
 
       setAttributes(work, file, found.source, { "data-duration": seconds(length) })
-      if (options.ripple) ripple(work, file, end, found.startMs + length - end, new Set([clip]))
+      if (options.ripple)
+        ripple(work, file, end, found.startMs + length - end, new Set([found.ref]))
       return
     }
 
@@ -320,7 +350,7 @@ export function trimClip(
       "data-duration": seconds(end - found.startMs - moved),
       ...(playsFile(found) ? { "data-media-start": seconds(found.mediaStartMs + moved) } : {}),
     })
-    if (options.ripple) ripple(work, file, end, -moved, new Set([clip]))
+    if (options.ripple) ripple(work, file, end, -moved, new Set([found.ref]))
   })
 }
 
@@ -328,7 +358,7 @@ export function trimClip(
 export function moveClip(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   startMs: number
 ): VideoEditResult {
   return setClipTiming(sources, file, clip, { startMs: Math.max(0, Math.round(startMs)) })
@@ -338,13 +368,13 @@ export function moveClip(
 export function setClipSound(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   sound: { readonly volume?: number; readonly fadeInMs?: number; readonly fadeOutMs?: number }
 ): VideoEditResult {
   return run(sources, (work) => {
     const found = clipOf(work, file, clip)
     if (found.kind !== "video" && found.kind !== "audio") {
-      throw new EditError(`'${clip}' plays no sound.`)
+      throw new EditError(`'${found.ref}' plays no sound.`)
     }
 
     const { volume, fadeInMs, fadeOutMs } = sound
@@ -374,12 +404,12 @@ export function setClipSound(
 export function setVideoText(
   sources: VideoSources,
   file: string,
-  ref: string,
+  ref: VideoTarget,
   text: string
 ): VideoEditResult {
   return run(sources, (work) => {
-    const found = timelineOf(work, file).texts.find((each) => each.ref === ref)
-    if (!found?.source.content) throw new EditError(`${file} shows no text '${ref}'.`)
+    const found = resolveTarget(timelineOf(work, file).texts, ref, file, "text")
+    if (!found.source.content) throw new EditError(`${file} shows no text '${found.ref}'.`)
 
     const words = text.trim()
     if (words === "") throw new EditError("A text says something: remove it instead.")
@@ -400,7 +430,7 @@ export function setVideoText(
 export function splitClip(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   atMs: number,
   options: { readonly endMs?: number } = {}
 ): VideoEditResult & { readonly clip?: string } {
@@ -437,7 +467,7 @@ export function splitClip(
 export function removeClip(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   options: { readonly ripple?: boolean; readonly endMs?: number } = {}
 ): VideoEditResult {
   return run(sources, (work) => {
@@ -463,13 +493,13 @@ export function removeClip(
 export function keepClipRanges(
   sources: VideoSources,
   file: string,
-  clip: string,
+  clip: VideoTarget,
   ranges: readonly VideoRange[],
   options: { readonly endMs?: number } = {}
 ): VideoEditResult {
   return run(sources, (work) => {
     const found = clipOf(work, file, clip)
-    if (!playsFile(found)) throw new EditError(`'${clip}' plays no recording.`)
+    if (!playsFile(found)) throw new EditError(`'${found.ref}' plays no recording.`)
 
     const from = found.mediaStartMs
     const to = from + clipEnd(found, options.endMs) - found.startMs
@@ -1029,10 +1059,66 @@ function timelineOf(work: Working, file: string): VideoFileTimeline {
   return timeline
 }
 
-function clipOf(work: Working, file: string, ref: string): VideoClip {
-  const found = timelineOf(work, file).clips.find((clip) => clip.ref === ref)
-  if (!found) throw new EditError(`${file} plays no clip '${ref}'.`)
-  return found
+function clipOf(work: Working, file: string, target: VideoTarget): VideoClip {
+  return resolveTarget(timelineOf(work, file).clips, target, file, "clip")
+}
+
+/** The element a target names in a file, or why none is: see {@link findVideoTarget}. */
+function resolveTarget<T extends { readonly ref: string; readonly tag: string }>(
+  items: readonly T[],
+  target: VideoTarget,
+  file: string,
+  what: "clip" | "text"
+): T {
+  const found = findVideoTarget(items, target)
+  if (!Array.isArray(found)) return found as T
+
+  const ref = typeof target === "string" ? target : target.ref
+  if (typeof target === "string" || isIdRef(ref)) {
+    throw new EditError(`${file} has no ${what} '${ref}'.`)
+  }
+  throw new EditError(
+    found.length === 0
+      ? `The ${what} you chose in ${file} changed or was removed meanwhile: choose it again.`
+      : `${file} now has ${found.length} ${what}s like the one you chose: choose it again.`
+  )
+}
+
+/**
+ * The element a target names among a file's clips or texts, as the file is now: the one at its
+ * place when it is still what the editor saw there, else the one element that is, wherever it
+ * moved. Otherwise the elements alike, none or several: an edit refuses rather than land on
+ * another element than the one the reader chose, and a selection lets go.
+ */
+export function findVideoTarget<T extends { readonly ref: string; readonly tag: string }>(
+  items: readonly T[],
+  target: VideoTarget
+): T | readonly T[] {
+  const ref = typeof target === "string" ? target : target.ref
+  const placed = items.find((item) => item.ref === ref)
+  if (typeof target === "string" || isIdRef(ref)) return placed ?? []
+
+  if (placed && matches(placed, target)) return placed
+  const alike = items.filter((item) => !isIdRef(item.ref) && matches(item, target))
+  const [only] = alike
+  return only && alike.length === 1 ? only : alike
+}
+
+/** Whether an element is still what the editor saw: its tag, words and file. */
+function matches(
+  item: { readonly tag: string; readonly text?: string; readonly src?: string },
+  target: Exclude<VideoTarget, string>
+): boolean {
+  return (
+    item.tag === target.tag &&
+    (target.words === undefined || item.text === target.words) &&
+    (target.src === undefined || item.src === target.src)
+  )
+}
+
+/** Whether a ref is an element's own id, which no edit around it changes. */
+function isIdRef(ref: string): boolean {
+  return !/^#\d+$|^[a-z][\w-]*:\d+$/.test(ref)
 }
 
 function playsFile(clip: VideoClip): boolean {
