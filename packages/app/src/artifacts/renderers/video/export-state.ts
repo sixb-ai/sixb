@@ -6,7 +6,8 @@ import type { ArtifactVersion } from "../../queries"
 // A video's MP4, as its header shows it. The server renders it scene by scene when someone asks,
 // and keeps it: the header reads where it stands without asking, asks when the reader exports it,
 // and watches it render until it is ready to download. A version the reader has not exported, of
-// which the version before it was, offers that one's MP4 as out of date.
+// which the version before it was, offers that one's MP4 as out of date. The open version changes
+// under its number at each write: what the header knows of it is the revision's it read.
 
 /** How often a rendering export is asked about. */
 const WATCH_MS = 2_000
@@ -49,20 +50,31 @@ export function videoExportView(
   return { state: "rendering", ready, total, assembling }
 }
 
-/** Where the query cache keeps a version's MP4 answer. */
-export function videoExportQueryKey(artifactId: string, version: number): readonly unknown[] {
-  return ["artifact-video-export", artifactId, version]
+/**
+ * Where the query cache keeps a version's MP4 answer: by its revision too, as the open version's
+ * content changes under its number. A version before it is frozen, and its number names it.
+ */
+export function videoExportQueryKey(
+  artifactId: string,
+  version: number,
+  revision?: number
+): readonly unknown[] {
+  return ["artifact-video-export", artifactId, version, revision ?? "frozen"]
 }
 
 /**
  * A version's MP4: where it stands, watched while it renders, and `start` to ask for it, again
  * when it failed. `earlier` is the version before it, read only while this one is idle.
  */
-export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "version">) {
+export function useVideoExport(
+  version: Pick<ArtifactVersion, "artifactId" | "version" | "revision">
+) {
   const cache = useQueryClient()
-  // Which version the reader exported: the header stays as another version opens in it.
+  // Which version the reader exported, as it read: the header stays as another version opens in
+  // it, or as a write changes this one.
   const [exported, setExported] = useState<string | null>(null)
-  const asked = exported === `${version.artifactId}@${version.version}`
+  const marker = `${version.artifactId}@${version.version}#${version.revision}`
+  const asked = exported === marker
   const read = (number: number, render: boolean) => async () =>
     (
       await exportArtifactVideo({
@@ -73,7 +85,7 @@ export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "ve
     ).data
 
   const current = useQuery({
-    queryKey: videoExportQueryKey(version.artifactId, version.version),
+    queryKey: videoExportQueryKey(version.artifactId, version.version, version.revision),
     // Asked here, a look also asks again, which changes nothing unless its job was lost.
     queryFn: read(version.version, asked),
     refetchInterval: (query) =>
@@ -90,8 +102,7 @@ export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "ve
   })
 
   const start = useCallback(async () => {
-    const exporting = `${version.artifactId}@${version.version}`
-    setExported(exporting)
+    setExported(marker)
     const failed = current.data?.status === "failed"
     const answer = await exportArtifactVideo({
       path: { artifactId: version.artifactId, version: String(version.version) },
@@ -99,11 +110,14 @@ export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "ve
       throwOnError: true,
     }).catch((error: unknown) => {
       // Not asked after all: the header offers to export it again.
-      setExported((current) => (current === exporting ? null : current))
+      setExported((current) => (current === marker ? null : current))
       throw error
     })
-    cache.setQueryData(videoExportQueryKey(version.artifactId, version.version), answer.data)
-  }, [cache, current.data?.status, version.artifactId, version.version])
+    cache.setQueryData(
+      videoExportQueryKey(version.artifactId, version.version, version.revision),
+      answer.data
+    )
+  }, [cache, current.data?.status, marker, version.artifactId, version.version, version.revision])
 
   const view = videoExportView(
     current.data,

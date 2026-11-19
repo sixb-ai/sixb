@@ -4,7 +4,7 @@ import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
-import { type ReactNode, useLayoutEffect } from "react"
+import { type ReactNode, useLayoutEffect, useState } from "react"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { ChaptersPanel } from "../src/artifacts/renderers/video/chapters"
 import { VideoExportMenu } from "../src/artifacts/renderers/video/export"
@@ -102,7 +102,8 @@ function serve(answers: (version: string, query: URLSearchParams) => unknown) {
 }
 
 function Wrap({ children }: { readonly children: ReactNode }) {
-  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // One cache for the test, as the app keeps: rendering again keeps what it read.
+  const [cache] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }))
   return (
     <QueryClientProvider client={cache}>
       <LocaleProvider>
@@ -220,6 +221,72 @@ describe("a video's MP4 in its header", () => {
     await waitFor(() =>
       expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
     )
+  })
+
+  // Reproduce by leaving the revision out of videoExportQueryKey: the header keeps offering the
+  // MP4 of what the version held before, which the server no longer has.
+  test("reads a version's MP4 anew once a write changes it", async () => {
+    let revision = 1
+    const asked = serve(() =>
+      revision === 1 ? { status: "ready", durationMs: 7000, sizeBytes: 12_400_000 } : rendering(2)
+    )
+    const view = render(
+      <Wrap>
+        <VideoExportMenu version={FILM} />
+      </Wrap>
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='ready']")).not.toBeNull()
+    )
+
+    revision = 2
+    view.rerender(
+      <Wrap>
+        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+      </Wrap>
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='idle']")).not.toBeNull()
+    )
+    expect(asked.filter((each) => each.includes("/versions/3/"))).toHaveLength(2)
+    // Idle, it reads the version before it, as any version not exported does.
+    await waitFor(() => expect(asked.at(-1)).toContain("/versions/2/video?render=false"))
+  })
+
+  // Reproduce by leaving the revision out of useVideoExport's `exported`: a write to the version
+  // being rendered asks to render what it holds now, unasked, and shows it rendering.
+  test("an export asked for before a write is not asked for what the write made", async () => {
+    let started = false
+    const asked = serve(() => rendering(started ? 1 : 0))
+    const view = render(
+      <Wrap>
+        <VideoExportMenu version={FILM} />
+      </Wrap>
+    )
+    const trigger = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='idle']")
+      if (!found) throw new Error("Not read yet.")
+      return found
+    })
+    await open(trigger)
+    const [exportItem] = await view.findAllByRole("menuitem")
+    started = true
+    await act(async () => {
+      if (exportItem) fireEvent.click(exportItem)
+    })
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
+    )
+
+    view.rerender(
+      <Wrap>
+        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+      </Wrap>
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='idle']")).not.toBeNull()
+    )
+    expect(asked.at(-1)).toBe("POST /api/artifacts/art_v1de0f17m0/versions/3/video?render=false")
   })
 
   // Reproduce by leaving `earlier` out of useVideoExport: a new version hides the MP4 there was.
