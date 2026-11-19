@@ -86,4 +86,4 @@ export {
   parseArtifactQueryAnswers,
 } from "./query-answers"
 export { readVideoVersion, type VideoVersionRead } from "./validate/video"
-export { videoSceneFiles } from "./video"
+export { videoSceneFiles, videoSoundProject } from "./video"

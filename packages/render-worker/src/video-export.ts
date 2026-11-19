@@ -14,6 +14,7 @@ import {
   videoSegmentIndex,
   videoSegmentJobId,
   videoSegmentRender,
+  videoSoundProject,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
   ArtifactVideoExportRequestedQueueJob,
@@ -25,6 +26,7 @@ import type { RenderHost } from "./host"
 import {
   downloadIntoSandbox,
   inRenderSandbox,
+  readBlob,
   renderApiOrigin,
   storeSandboxFile,
   titleFileName,
@@ -228,7 +230,7 @@ async function askForSegments(
   const done = new Set(kept.map((record) => record.key))
   const missing = plan.segments.filter((segment) => !done.has(segment.key))
 
-  // The composition is read only when a scene is missing: the sound renders from every file.
+  // The composition is read only when a scene is missing: the sound reads its pages alone.
   const read = missing.some((segment) => segment.kind === "scene")
     ? await readVideoVersion(host.blobStorage, payload.files)
     : null
@@ -256,7 +258,7 @@ async function askForSegments(
     const project =
       segment.kind === "scene" && read
         ? await sceneProject(host, read, payload, segment)
-        : { files: payload.files, media: payload.media }
+        : await soundProject(host, payload)
     jobs.push({
       id: videoSegmentJobId(key),
       ...(payload.retry ? { replace: true } : {}),
@@ -335,6 +337,40 @@ async function sceneProject(
     media: payload.media.filter((each) => played.has(each.address)),
     frames: { from: render.from, to: render.to },
   }
+}
+
+/**
+ * What the sound mixes from: the version's pages, each muted video's sources cut and stored for the
+ * sound's job, and every other file but the videos nothing heard plays, which it never fetches.
+ */
+async function soundProject(
+  host: VideoExportHost,
+  payload: ArtifactVideoExportRequestedQueueJob["payload"]
+): Promise<{ readonly files: readonly ArtifactFile[]; readonly media: readonly VideoMediaFile[] }> {
+  const html = payload.files.filter((entry) => /\.html?$/i.test(entry.path))
+  const read = async (entry: ArtifactFile) =>
+    new TextDecoder().decode(await readBlob(host.blobStorage, entry.file.blobId))
+  const pages = new Map(
+    await Promise.all(html.map(async (entry) => [entry.path, await read(entry)] as const))
+  )
+
+  const sound = videoSoundProject({ files: payload.files, pages, media: payload.media })
+  const files = await Promise.all(
+    sound.files.map(async (entry) => {
+      const text = sound.pages.get(entry.path)
+      if (text === undefined) return entry
+
+      const body = new TextEncoder().encode(text)
+      const file = await host.blobStorage.put({
+        body,
+        expectedSizeBytes: body.byteLength,
+        fileName: posix.basename(entry.path),
+        mediaType: "text/html",
+      })
+      return { ...entry, file }
+    })
+  )
+  return { files, media: sound.media }
 }
 
 /** How logs name an export: its artifact and version. */

@@ -98,7 +98,9 @@ for. It is joined from segments kept under their own keys, shared by every expor
   the project instead, which HyperFrames captures in short chunks one after the other: about twice
   slower, with a keyframe every half second.
 - The sound is mixed once for the whole video: HyperFrames' distributed plan, which captures no
-  frame, mixes it exactly as its render does.
+  frame, mixes it exactly as its render does. Its project fetches no footage that is never heard:
+  each muted video, or one with `data-has-audio="false"`, loses its sources there, as the plan
+  would look for their files. Every other video is fetched: HyperFrames refuses one without sound.
 - Each segment's time grows with its frames and their pixels: five minutes, then twenty seconds a
   second of 1080p.
 - A sandbox without HyperFrames, FFmpeg or Node.js, or with another HyperFrames than the one every

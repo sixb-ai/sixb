@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto"
 import type { ArtifactFile } from "../../storage/artifacts/types"
+import { isArtifactAddress } from "../address"
 import {
   VIDEO_ENTRY,
   type VideoComposition,
   type VideoScene,
   type VideoSourceSpan,
+  videoFilePath,
+  videoPageMedia,
 } from "../video/composition"
+import type { VideoMediaFile } from "../video/export"
 import { scenesOnScreen, videoSegmentFrames } from "../video/project"
 import { frameKitDigest } from "./previews"
 
@@ -153,6 +157,55 @@ function withSpaceBefore(text: string, span: VideoSourceSpan): VideoSourceSpan {
   let start = span.start
   while (start > 0 && /\s/.test(text[start - 1] ?? "")) start--
   return { start, end: span.end }
+}
+
+/**
+ * What the whole video's sound is mixed from: its pages, each muted video's sources cut, and every
+ * other file but the videos nothing heard plays. HyperFrames mixes no muted video, yet looks for
+ * the file of every video it is left: the cut spares the sound footage it never hears. HyperFrames
+ * refuses an unmuted video without sound, a scene's render too, so every unmuted one is fetched.
+ *
+ * `pages` holds each HTML file's text, by its path; the result, those it changed. Of what `media`
+ * lends, an `artifact:` video is left out the same way.
+ */
+export function videoSoundProject(input: {
+  readonly files: readonly ArtifactFile[]
+  readonly pages: ReadonlyMap<string, string>
+  readonly media: readonly VideoMediaFile[]
+}): {
+  readonly files: ArtifactFile[]
+  readonly pages: ReadonlyMap<string, string>
+  readonly media: VideoMediaFile[]
+} {
+  const paths = new Set(input.files.map((entry) => entry.path))
+  const exists = (path: string) => paths.has(path)
+
+  // What an element that may be heard plays: a path of the version, or an address.
+  const heard = new Set<string>()
+  const pages = new Map<string, string>()
+  for (const [path, html] of input.pages) {
+    const media = videoPageMedia(path, html)
+
+    for (const { value, muted } of media) {
+      if (muted) continue
+
+      const written = value.trim()
+      const played = isArtifactAddress(written) ? written : videoFilePath(path, written, exists)
+      if (played) heard.add(played)
+    }
+
+    const cuts = media.filter((each) => each.muted).map((each) => ({ ...each.at, with: "" }))
+    if (cuts.length > 0) pages.set(path, cut(html, cuts))
+  }
+
+  const isVideo = (file: { readonly mediaType?: string }) =>
+    (file.mediaType ?? "").startsWith("video/")
+
+  return {
+    files: input.files.filter(({ path, file }) => !isVideo(file) || heard.has(path)),
+    pages,
+    media: input.media.filter(({ address, file }) => !file || !isVideo(file) || heard.has(address)),
+  }
 }
 
 /** The text with each span replaced by its `with`; the spans do not overlap. */
