@@ -1,13 +1,16 @@
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../../address"
+import type { FRAME_CDN_ALLOWLIST } from "../../frames/assets"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { VideoOutline } from "../../outline"
 import {
   composeVideo,
+  cssMoves,
   missingScene,
   parseVideoRoot,
   parseVideoScene,
   VIDEO_ENTRY,
+  type VideoComposition,
   type VideoMediaReference,
   type VideoSceneFile,
   videoFilePath,
@@ -124,7 +127,16 @@ export async function validateVideo(
     if (file) loads.set(scene.id, await load(scene.src, file, scene.id, []))
   }
 
-  const keys = sceneRenderKeys({ index: indexText, composition, files, rootLoads, loads })
+  const rootTimeline =
+    composition.rootTimeline || (await linksMove(composition, byPath, read, exists))
+  const keys = sceneRenderKeys({
+    index: indexText,
+    composition,
+    files,
+    rootLoads,
+    rootTimeline,
+    loads,
+  })
   return {
     entry: VIDEO_ENTRY,
     outline: {
@@ -143,6 +155,46 @@ export async function validateVideo(
     },
     references,
   }
+}
+
+/** The stylesheet hosts of `FRAME_CDN_ALLOWLIST` that serve fonts, whose CSS never moves. */
+const FONT_HOSTS: readonly (typeof FRAME_CDN_ALLOWLIST)[number][] = [
+  "https://fonts.googleapis.com",
+  "https://fonts.gstatic.com",
+]
+
+/**
+ * Whether what `index.html` links makes its root move as time passes: a stylesheet of the version
+ * whose CSS animates, one from elsewhere than a font host, which cannot be read, or a script of the
+ * version that registers a timeline. A library, a script that registers none, only loads. A file
+ * too large to read counts.
+ */
+async function linksMove(
+  composition: VideoComposition,
+  byPath: ReadonlyMap<string, ArtifactFile>,
+  read: (file: ArtifactFile) => Promise<string>,
+  exists: (path: string) => boolean
+): Promise<boolean> {
+  const fileOf = (value: string) => {
+    const path = videoFilePath(VIDEO_ENTRY, value, exists)
+    return path === undefined ? undefined : byPath.get(path)
+  }
+  const readable = (file: ArtifactFile) => file.file.sizeBytes <= ARTIFACT_LIMITS.maxSceneBytes
+
+  for (const { value } of composition.links.stylesheets) {
+    const file = fileOf(value)
+    if (!file) {
+      if (!FONT_HOSTS.some((origin) => value.trim().startsWith(`${origin}/`))) return true
+      continue
+    }
+    if (!readable(file) || cssMoves(await read(file))) return true
+  }
+
+  for (const { value } of composition.links.scripts) {
+    const file = fileOf(value)
+    if (file && (!readable(file) || /__timelines/.test(await read(file)))) return true
+  }
+  return false
 }
 
 /**

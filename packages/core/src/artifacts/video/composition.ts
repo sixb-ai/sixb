@@ -91,11 +91,18 @@ export interface VideoComposition {
   /** The root composition's element. */
   readonly root: VideoSceneHost
   /**
-   * Whether `index.html` plays or animates anything beside its scenes, as it runs: a timed element,
-   * a video or a sound, a script, a CSS animation or transition, or a stylesheet it links, which may
-   * hold one. What a scene shows then depends on when it plays.
+   * Whether `index.html` plays or animates anything beside its scenes, as its own text says: a
+   * timed element, a video or a sound, an inline script, which may build a timeline, or a CSS
+   * animation or transition. What a scene shows then depends on when it plays. A script loaded by
+   * its `src` only loads a library; it and the stylesheets the root links are in `links`, for
+   * whoever reads the version's files.
    */
   readonly rootTimeline: boolean
+  /** The scripts and stylesheets `index.html` loads beside its scenes, by `src` and `href`. */
+  readonly links: {
+    readonly scripts: readonly VideoMediaReference[]
+    readonly stylesheets: readonly VideoMediaReference[]
+  }
 }
 
 /**
@@ -286,6 +293,7 @@ function readRoot(html: string): VideoRoot {
     media: mediaOf(document.childNodes),
     root: hostSource(root),
     rootTimeline: playsOnItsOwn(document.childNodes, root, hosts),
+    links: rootLinks(document.childNodes, hosts),
   }
 }
 
@@ -338,27 +346,51 @@ function ownTimeline(root: Element, hosts: readonly Element[]): Element | undefi
   return elements(root.childNodes).find((element) => !hosted.has(element) && isTimed(element))
 }
 
-/** CSS that moves on its own as time passes. */
-const CSS_MOTION = /@keyframes|\banimation\b|\btransition\b/i
+/** Whether CSS moves on its own as time passes: an animation or a transition. */
+export function cssMoves(css: string): boolean {
+  return /@keyframes|\banimation\b|\btransition\b/i.test(css)
+}
 
 /**
  * Whether `index.html` plays or animates anything beside its scenes, anywhere in it: what
- * `VideoComposition.rootTimeline` says. A stylesheet it links is not read here, so it counts.
+ * `VideoComposition.rootTimeline` says.
  */
 function playsOnItsOwn(nodes: readonly Node[], root: Element, hosts: readonly Element[]): boolean {
   const hosted = hostedBy(hosts)
   return elements(nodes).some((element) => {
     if (hosted.has(element) || element === root) return false
 
-    const rel = attribute(element, "rel") ?? ""
+    const inline = element.tagName === "script" && !has(element, "src")
     return (
       isTimed(element) ||
-      element.tagName === "script" ||
-      (element.tagName === "link" && /\bstylesheet\b/i.test(rel)) ||
-      (element.tagName === "style" && CSS_MOTION.test(textOf(element))) ||
-      CSS_MOTION.test(attribute(element, "style") ?? "")
+      (inline && textOf(element).trim() !== "") ||
+      (element.tagName === "style" && cssMoves(textOf(element))) ||
+      cssMoves(attribute(element, "style") ?? "")
     )
   })
+}
+
+/** The scripts and stylesheets `index.html` loads beside its scenes. */
+function rootLinks(nodes: readonly Node[], hosts: readonly Element[]): VideoComposition["links"] {
+  const hosted = hostedBy(hosts)
+  const linked = (tag: string, name: string, matches: (element: Element) => boolean) =>
+    elements(nodes).flatMap((element) => {
+      const value = attribute(element, name)
+      const at = element.sourceCodeLocation?.attrs?.[name]
+      if (element.tagName !== tag || hosted.has(element) || !matches(element) || !value || !at) {
+        return []
+      }
+      return [
+        { element: tag, attribute: name, value, at: { start: at.startOffset, end: at.endOffset } },
+      ]
+    })
+
+  return {
+    scripts: linked("script", "src", () => true),
+    stylesheets: linked("link", "href", (element) =>
+      /\bstylesheet\b/i.test(attribute(element, "rel") ?? "")
+    ),
+  }
 }
 
 /** An element on a timeline: one with `data-start`, or a video or a sound. */
