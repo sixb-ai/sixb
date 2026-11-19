@@ -1,7 +1,15 @@
 import type { VideoOutline, VideoOutlineScene } from "@sixb/core/artifacts"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ListVideo, MessageSquare, MessageSquarePlus, Play, RotateCcw, VolumeX } from "lucide-react"
+import {
+  ListVideo,
+  MessageSquare,
+  MessageSquarePlus,
+  Play,
+  RotateCcw,
+  TriangleAlert,
+  VolumeX,
+} from "lucide-react"
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -386,6 +394,16 @@ export function VideoPlayer({
             playback.play()
           }}
         />
+      ) : null}
+
+      {playback.mediaFailed && !broken ? (
+        <p
+          role="status"
+          className="pointer-events-none absolute top-3 right-3 z-20 m-0 flex h-8 items-center gap-1.5 rounded-full bg-black/60 px-3 text-xs font-medium text-white/90 ring-1 ring-white/15 backdrop-blur-md [&_svg]:size-3.5"
+        >
+          <TriangleAlert aria-hidden="true" />
+          {messages.mediaFailed}
+        </p>
       ) : null}
 
       {playback.soundBlocked && !playback.muted ? (
