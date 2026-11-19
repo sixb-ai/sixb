@@ -220,7 +220,7 @@ The picture plays the latest save; the timeline under it changes as you edit.
 
 | In a video | |
 | --- | --- |
-| Scenes | The timeline's first track, each scene with its picture: drag to reorder, or ⌥← ⌥→; double-click to rename; its menu, or a right click, duplicates, moves or deletes. Chained scenes follow; two that overlap show their crossfade between them |
+| Scenes | The timeline's first track, each scene with its picture: drag to reorder, or ⌥← ⌥→; double-click to rename; its menu, or a right click, duplicates, moves or deletes. Chained scenes follow, with the voice-over and the poster in them; two that overlap show their crossfade between them |
 | Timeline | The open scene's clips on picture, text and sound tracks, over the video's soundtrack. Drag to move, drag an edge to trim; edges snap to the playhead, the marks, every edge and the footage's cuts (Shift: free). A clip longer than its recording is hatched from where the file ends |
 | Magnetic | On by default: trimming or deleting a clip closes the gap, and the scene's end follows |
 | Keys | Space or K, J and L (1 s), ← → (a frame, a second with Shift), ↑ ↓ (edit points), I and O (marks), S (split at the playhead), ⌫ (delete, or cut between the marks), ⌘D (duplicate the scene), ⌘Z ⇧⌘Z |
@@ -231,9 +231,9 @@ The picture plays the latest save; the timeline under it changes as you edit.
 | Offline | Your edits are kept, and saved when you reconnect; the header says so |
 | Phone | Reorder scenes, change their length, retype their words and delete clips |
 
-Each edit changes the fewest attributes and words it can in `index.html` or a scene's file, and is refused
-when it would leave something that is not a video. Motion a scene's script writes keeps its own
-times.
+Each edit changes the fewest attributes and words it can in `index.html` or a scene's file, and is
+refused when it would leave something that is not a video. Motion a scene's script writes keeps its
+own times.
 
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.
