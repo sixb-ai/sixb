@@ -129,8 +129,17 @@ export function encodeWireError(error: unknown): WireError {
     return { kind: "AbortError", message: error.message }
   }
 
-  // An interrupted model call crosses as one: the runner's model loop then makes it again, as it
-  // would in process.
+  // Anything else stays on the server: the runner learns only that the operation failed.
+  console.error("[Sixb] A run session operation failed.", error)
+  return { kind: "Error", message: "[Sixb] The run session operation failed on the server." }
+}
+
+/**
+ * A model call's failure as it crosses. An interrupted call crosses as one, so the runner's model
+ * loop makes it again as it would in process. Only the call's own failures are read this way: any
+ * other operation that loses a connection, to storage say, fails as {@link encodeWireError} says.
+ */
+export function encodeModelCallError(error: unknown): WireError {
   if (error instanceof ModelProviderError && error.reason === "interrupted") {
     return {
       kind: "ModelProviderError",
@@ -140,6 +149,7 @@ export function encodeWireError(error: unknown): WireError {
       details: { providerId: error.providerId, modelId: error.modelId },
     }
   }
+
   const lostConnection = lostConnectionCode(error)
   if (lostConnection !== undefined) {
     return {
@@ -149,9 +159,7 @@ export function encodeWireError(error: unknown): WireError {
     }
   }
 
-  // Anything else stays on the server: the runner learns only that the operation failed.
-  console.error("[Sixb] A run session operation failed.", error)
-  return { kind: "Error", message: "[Sixb] The run session operation failed on the server." }
+  return encodeWireError(error)
 }
 
 /** The HTTP status an error answers with. */
