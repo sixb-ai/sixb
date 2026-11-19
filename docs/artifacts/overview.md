@@ -841,7 +841,7 @@ footage and sound you give it, and what your models make:
   the cuts and a proxy, and an update keeps every recording its scenes still play.
 - Each publish is checked with HyperFrames on the files the export renders, and the Agent looks
   at a contact sheet of every scene's start, middle and end before it says the video is ready. A
-  sandbox that cannot reach the font and script CDNs checks without them, and says so.
+  sandbox whose network leaves out the font and script CDNs checks without them, and says so.
 - It acts on comments left at an instant, then resolves or answers them.
 
 ### Export a video

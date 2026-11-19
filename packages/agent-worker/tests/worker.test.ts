@@ -204,6 +204,7 @@ import type {
 import { workflowStepTools } from "../src/workflow-node-execution"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
+import { FRAME_CDN_TARGETS } from "../src/workspace-network"
 import { expectReplayedPrefix, withJsonbKeyOrder } from "./replay-bytes"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -4779,7 +4780,11 @@ describe("AgentWorker", () => {
     expect(created?.network).toEqual(
       mode === "all"
         ? { mode: "all" }
-        : { mode: "restricted", allow: mode === "restricted" ? [registry, ...required] : required }
+        : {
+            mode: "restricted",
+            allow:
+              mode === "restricted" ? [registry, ...required] : [...required, ...FRAME_CDN_TARGETS],
+          }
     )
 
     // Every request reaches the provider, at creation and on renewal.
@@ -7449,7 +7454,10 @@ describe("AgentWorker", () => {
           environment: {},
           network: {
             mode: "restricted",
-            allow: [{ name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin }],
+            allow: [
+              { name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin },
+              ...FRAME_CDN_TARGETS,
+            ],
           },
           requestCredentials: [
             expect.objectContaining({ origin: new URL(TEST_AGENT_API_BASE_URL).origin }),
@@ -7505,6 +7513,7 @@ describe("AgentWorker", () => {
           allow: [
             { name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin },
             { name: "workspace-repository", origin: "https://example.com" },
+            ...FRAME_CDN_TARGETS,
           ],
         },
         environment: { source: { type: "git", url: STEP_REPOSITORY }, setup: ["bun install"] },
@@ -12956,7 +12965,7 @@ describe("AgentWorker", () => {
       expect(createOptions?.environment).toEqual({})
       expect(createOptions?.network).toMatchObject({
         mode: "restricted",
-        allow: [{ name: "sixb-api" }],
+        allow: [{ name: "sixb-api" }, ...FRAME_CDN_TARGETS],
       })
       if (createOptions?.network?.mode !== "restricted") {
         throw new Error("Expected restricted sandbox network.")
@@ -13997,7 +14006,7 @@ describe("AgentWorker", () => {
       const createOptions = sandboxes.createOptions[0]
       expect(createOptions?.network).toMatchObject({
         mode: "restricted",
-        allow: [{ name: "sixb-api" }],
+        allow: [{ name: "sixb-api" }, ...FRAME_CDN_TARGETS],
       })
       if (createOptions?.network?.mode !== "restricted") {
         throw new Error("Expected restricted sandbox network.")

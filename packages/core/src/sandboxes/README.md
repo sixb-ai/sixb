@@ -38,8 +38,9 @@ Factories define environments; threads retain immutable parameters; runs provide
 - Confirmed missing/expired state allows one replacement attempt under the current execution fence.
   A durable reset timestamp informs subsequent model calls; conversation history is preserved.
 - Sixb always adds the API, source and auth request origins to a run's network: an omitted policy
-  allows only those, a restricted one lists what the project adds. `none` fails before
-  provisioning. Guest-readable `env` is not a Git credential channel.
+  allows those and the frame CDNs (`FRAME_CDN_ALLOWLIST`, as render sandboxes reach), a
+  restricted one lists what the project adds, CDNs included only when it lists them. `none` fails
+  before provisioning. Guest-readable `env` is not a Git credential channel.
 - Request origins are read from the first grant, so renewals must keep to the same origins: a
   provider rejects a credential for an origin the network does not allow.
 

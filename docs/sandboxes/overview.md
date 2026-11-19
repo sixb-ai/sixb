@@ -95,8 +95,12 @@ checkout on every run, destroyed when the run ends. See
 
 For bound conversations and steps with their own `sandbox`, Sixb always allows what the agent
 needs: the Sixb API, the source origin and the origins `auth` issues credentials for. Omitting
-`network` allows only those. A `restricted` policy lists what the project adds, such as the
-package registry `setup` installs from; `all` allows everything. `none` is rejected: the agent
+`network` allows those and the CDNs an artifact may load its scripts and fonts from
+(`cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `unpkg.com`, `fonts.googleapis.com`,
+`fonts.gstatic.com`), so the agent checks a deck or a video as the app shows it; a sandbox without
+a recipe gets the same. A `restricted` policy lists what the project adds, such as the package
+registry `setup` installs from, and leaves the CDNs out unless it lists them; `all` allows
+everything. `none` is rejected: the agent
 cannot reach the Sixb API. Guest-readable `env` is not a safe place for credentials.
 
 The agent's [`web_fetch`](../models/overview.md#read-web-pages) follows the declared `network`

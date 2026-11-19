@@ -11,6 +11,7 @@ import type {
 import type { AgentRunnerContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles } from "./workspace-files"
+import { workspaceNetwork } from "./workspace-network"
 
 /** A blank sandbox without a workspace, a workspace prepared from a recipe with one. */
 type EphemeralRunSandboxInput = BlankRunSandboxInput | WorkspaceRunSandboxInput
@@ -59,8 +60,9 @@ interface EphemeralWorkspaceInput {
 /**
  * A sandbox created for one run and destroyed when the run releases it.
  *
- * Without a workspace it is blank: no source or setup, and only the Sixb API on the network. The
- * prompt describes nothing about it, so it boots concurrently with the first model call.
+ * Without a workspace it is blank: no source or setup, and the Sixb API and the frame CDNs on the
+ * network. The prompt describes nothing about it, so it boots concurrently with the first model
+ * call.
  *
  * With one it is a workspace prepared from its recipe, which the prompt describes.
  */
@@ -76,7 +78,7 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
     acquire: async () => ({
       sandbox: await context.sandboxes.create({
         environment: {},
-        network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
+        network: workspaceNetwork(undefined, apiOrigin),
         requestCredentials: [input.apiCredential],
         ...(signal ? { signal } : {}),
       }),

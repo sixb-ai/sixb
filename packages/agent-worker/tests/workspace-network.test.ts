@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import { workspaceNetwork } from "../src/workspace-network"
+import { FRAME_CDN_TARGETS, workspaceNetwork } from "../src/workspace-network"
 
 const api = "https://api.example.com"
 const repository = "https://github.com"
@@ -16,15 +16,38 @@ const baseline = {
 
 describe("workspace network", () => {
   test("derives minimal access when the policy is omitted", () => {
-    expect(workspaceNetwork(undefined, api, repository)).toEqual(baseline)
+    expect(workspaceNetwork(undefined, api, repository)).toEqual({
+      mode: "restricted",
+      allow: [...baseline.allow, ...FRAME_CDN_TARGETS],
+    })
     expect(workspaceNetwork(undefined, api)).toEqual({
       mode: "restricted",
-      allow: [baseline.allow[0]],
+      allow: [baseline.allow[0], ...FRAME_CDN_TARGETS],
     })
     expect(workspaceNetwork(undefined, api, api)).toEqual({
       mode: "restricted",
-      allow: [baseline.allow[0]],
+      allow: [baseline.allow[0], ...FRAME_CDN_TARGETS],
     })
+  })
+
+  // Guard proof: leave FRAME_CDN_TARGETS out of the omitted policy (workspace-network.ts); the
+  // run's sandbox then checks a video without GSAP and its fonts, which the app and export load.
+  test("reaches the frame CDNs by default, as render sandboxes do, unless a policy leaves them out", () => {
+    const origins = (policy: SandboxNetworkPolicy) =>
+      policy.mode === "restricted" ? policy.allow.map((target) => target.origin) : []
+
+    expect(origins(workspaceNetwork(undefined, api))).toEqual([
+      api,
+      "https://cdn.jsdelivr.net",
+      "https://cdnjs.cloudflare.com",
+      "https://unpkg.com",
+      "https://fonts.googleapis.com",
+      "https://fonts.gstatic.com",
+    ])
+    expect(origins(workspaceNetwork({ mode: "restricted", allow: [registry] }, api))).toEqual([
+      registry.origin,
+      api,
+    ])
   })
 
   test("adds what Sixb needs to a restricted policy", () => {
@@ -50,7 +73,11 @@ describe("workspace network", () => {
     ).toEqual({ mode: "restricted", allow: [github, baseline.allow[0]] })
     expect(workspaceNetwork(undefined, api, repository, [credential, credential, api])).toEqual({
       mode: "restricted",
-      allow: [...baseline.allow, { name: "workspace-auth", origin: credential }],
+      allow: [
+        ...baseline.allow,
+        { name: "workspace-auth", origin: credential },
+        ...FRAME_CDN_TARGETS,
+      ],
     })
   })
 
