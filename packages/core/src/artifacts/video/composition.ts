@@ -45,6 +45,11 @@ export interface VideoMediaReference {
   readonly value: string
   /** The attribute, name and value, where its file writes it. */
   readonly at: VideoSourceSpan
+  /**
+   * The file of a video that is never heard, its `src` or one of its `<source>`s': it writes
+   * `muted`, or a `data-has-audio` other than "true", as HyperFrames reads them.
+   */
+  readonly muted?: true
 }
 
 /**
@@ -710,6 +715,16 @@ function readSeconds(element: Element, name: string, what: string): number {
   return ms
 }
 
+/**
+ * Every file a page of a video plays and shows, inside its templates too, in source order:
+ * `index.html`, a scene file, or a composition one nests, whether it reads as one or not.
+ */
+export function videoPageMedia(path: string, html: string): VideoMediaReference[] {
+  const options = { sourceCodeLocationInfo: true }
+  const page = path === VIDEO_ENTRY ? parse(html, options) : parseFragment(html, options)
+  return mediaOf(page.childNodes)
+}
+
 /** Every file reference among the nodes, inside templates too, in source order. */
 function mediaOf(nodes: readonly Node[]): VideoMediaReference[] {
   return elements(nodes, { templates: true }).flatMap((element) =>
@@ -718,16 +733,31 @@ function mediaOf(nodes: readonly Node[]): VideoMediaReference[] {
       const value = attribute(element, name)
       const at = element.sourceCodeLocation?.attrs?.[name]
       if (value === undefined || !at) return []
+
+      const video = tag === "source" ? element.parentNode : element
+      const muted = name === "src" && video && "tagName" in video && neverHeard(video)
       return [
         {
           element: tag,
           attribute: name,
           value,
           at: { start: at.startOffset, end: at.endOffset },
+          ...(muted ? { muted: true as const } : {}),
         },
       ]
     })
   )
+}
+
+/**
+ * Whether an element is a video HyperFrames never mixes into the sound: one that writes `muted`,
+ * or `data-has-audio` other than "true", as its `isAudibleVideoElement` reads them.
+ */
+function neverHeard(element: Element): boolean {
+  if (element.tagName !== "video") return false
+
+  const declared = attribute(element, "data-has-audio")
+  return has(element, "muted") || (declared !== undefined && declared !== "true")
 }
 
 function hostSource(host: Element): VideoSceneHost {
