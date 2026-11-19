@@ -119,6 +119,39 @@ function hyperframesCache() {
   }
 }
 
+/** The grey copy a frame's ink is measured on: small enough to read in a moment, text still sharp. */
+const INK = { width: 192, height: 108, step: 24 }
+
+/**
+ * How much a frame shows: the share of its neighbouring pixels, on a small grey copy, that differ
+ * by more than a step, which text, a product and footage make and a bare ground or a gradient do
+ * not. Undefined when FFmpeg cannot read it.
+ */
+async function inkOf(frame) {
+  const { width, height, step } = INK
+  const copy = `${frame}.grey`
+  const scale = `scale=${width}:${height},format=gray`
+  const grey = await run(
+    "ffmpeg",
+    ["-v", "error", "-y", "-i", frame, "-vf", scale, "-f", "rawvideo", copy],
+    10_000
+  )
+  const pixels = grey.code === 0 && fs.existsSync(copy) ? fs.readFileSync(copy) : undefined
+  fs.rmSync(copy, { force: true })
+  if (pixels?.length !== width * height) return undefined
+
+  let edges = 0
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const at = pixels[y * width + x]
+      const right = pixels[y * width + x + 1]
+      const below = pixels[(y + 1) * width + x]
+      if (Math.abs(at - right) > step || Math.abs(at - below) > step) edges++
+    }
+  }
+  return edges / ((width - 1) * (height - 1))
+}
+
 /** The last words a failed command wrote, for the report. */
 const tail = (text) => text.trim().split("\n").slice(-3).join(" ").slice(0, 300)
 
@@ -195,11 +228,18 @@ async function main() {
       : `hyperframes snapshot took no frame: ${tail(snapshot.stderr) || "it gave no reason"}`
   }
 
+  // How much each frame shows, while there is time: a frame left unmeasured is not judged.
+  const measured = []
+  for (const frame of snapped?.frames ?? []) {
+    const ink = left() > 5_000 ? await inkOf(frame.path) : undefined
+    measured.push({ path: frame.path, time: frame.time, ...(ink === undefined ? {} : { ink }) })
+  }
+
   report({
     layout: "video",
     findings,
     sheets: snapped?.contactSheets ?? [],
-    frames: (snapped?.frames ?? []).map((frame) => ({ path: frame.path, time: frame.time })),
+    frames: measured,
     missing,
     ...(stopped ? { stopped } : {}),
   })

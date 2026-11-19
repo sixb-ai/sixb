@@ -20,9 +20,10 @@
       const outro = gsap.timeline({ paused: true })
       const scene = '[data-composition-id="outro"]'
 
-      // The ending lands and holds: mark, name, then the one thing to do, still for its last 2.5 s.
-      outro.from(`${scene} .mark`, { scale: 0.9, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.2)
-      outro.from(`${scene} .display`, { y: 32, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.45)
+      // The ending lands and holds: the name is there from the cut, the mark settles above it,
+      // then the one thing to do, still for its last 2.5 s.
+      outro.from(`${scene} .display`, { y: 32, duration: 0.7, ease: "power3.out" }, 0)
+      outro.from(`${scene} .mark`, { y: 16, opacity: 0, duration: 0.5, ease: "power3.out" }, 0.1)
       outro.from(`${scene} .outro-line`, { y: 20, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.9)
 
       window.__timelines = window.__timelines || {}
