@@ -6678,8 +6678,10 @@ describe("AgentWorker", () => {
     // prepareAgentConversationContext, with no aim under the limit; each compaction then keeps
     // half the limit as it is, and the turns after it compact again one after another.
     const requests: LanguageModelRequest[] = []
+    // The window sits just above what every request carries (the system prompt, the built-in
+    // tools' schemas and one turn), so a compaction has history to drop.
     const model = measuredConversationModel({
-      contextWindow: 21_000,
+      contextWindow: 21_500,
       maxOutputTokens: 2_048,
       answer: `Answered. ${"a".repeat(300)}`,
       // Each summary repeats the last one and adds to it, as a chained summary grew.
@@ -6712,7 +6714,7 @@ describe("AgentWorker", () => {
         compacted.push(names.includes("agent.compaction.completed"))
       }
 
-      // A 18,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
+      // A 19,452-token limit: compaction leaves at most 60 % of it, room for the next turn and
       // more, so no turn compacts right after the one that did.
       expect(compacted.filter(Boolean)).toHaveLength(2)
       expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)
@@ -6723,7 +6725,7 @@ describe("AgentWorker", () => {
       })
       expect(checkpoints).toHaveLength(compacted.filter(Boolean).length)
       for (const checkpoint of checkpoints) {
-        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(18_952 * 0.6))
+        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(19_452 * 0.6))
         // Written anew within its allowance of 1,024 tokens, never grown from the last.
         expect(new TextEncoder().encode(checkpoint.summary).byteLength).toBeLessThanOrEqual(3_072)
       }
