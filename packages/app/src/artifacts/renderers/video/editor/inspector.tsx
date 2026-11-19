@@ -385,6 +385,12 @@ export function SecondsField({
   )
 }
 
+/** What a reader typed in a {@link TextField}, over the words it showed then. */
+interface Draft {
+  readonly text: string
+  readonly from: string
+}
+
 /** Words, typed over and committed with Enter, or by leaving; Shift and Enter breaks a line. */
 export function TextField({
   label,
@@ -402,31 +408,38 @@ export function TextField({
   readonly onCommit: (value: string) => void
 }) {
   const id = useId()
-  const [text, setText] = useState(value)
-  const field = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null)
-  useEffect(() => {
-    if (document.activeElement !== field.current) setText(value)
-  }, [value])
+
+  // What the reader typed, and the words they typed over. Until they type, the field shows the
+  // words as they are now, someone else's change included; leaving it writes only what they
+  // changed, never words it showed before over another's. Held in a ref too, for the blur that
+  // Escape or Enter starts before the field renders again.
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const typed = useRef<Draft | null>(null)
+  const change = (next: Draft | null) => {
+    typed.current = next
+    setDraft(next)
+  }
+  const text = draft?.text ?? value
 
   const commit = () => {
-    if (text.trim() === value.trim()) return
-    if (multiline && text.trim() === "") {
-      setText(value)
-      return
-    }
-    onCommit(text)
+    const made = typed.current
+    change(null)
+    if (!made || made.text.trim() === made.from.trim()) return
+    if (multiline && made.text.trim() === "") return
+    onCommit(made.text)
   }
 
   const shared = {
     id,
     value: text,
     placeholder,
-    onChange: (event: { currentTarget: { value: string } }) => setText(event.currentTarget.value),
+    onChange: (event: { currentTarget: { value: string } }) =>
+      change({ text: event.currentTarget.value, from: typed.current?.from ?? value }),
     onBlur: commit,
     onKeyDown: (event: React.KeyboardEvent) => {
       event.stopPropagation()
       if (event.key === "Escape") {
-        setText(value)
+        change(null)
         ;(event.currentTarget as HTMLElement).blur()
       }
       if (event.key === "Enter" && !event.shiftKey) {
@@ -448,13 +461,12 @@ export function TextField({
       </label>
       {multiline ? (
         <textarea
-          ref={field as React.RefObject<HTMLTextAreaElement | null>}
           rows={Math.min(4, Math.max(1, Math.ceil(text.length / 32)))}
           {...shared}
           className={cn(shared.className, "resize-none leading-snug")}
         />
       ) : (
-        <input ref={field as React.RefObject<HTMLInputElement | null>} {...shared} />
+        <input {...shared} />
       )}
     </div>
   )
