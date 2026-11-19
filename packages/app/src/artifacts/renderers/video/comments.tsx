@@ -15,6 +15,9 @@ import { chapterAt, chapterName } from "./chapters"
 /** How long after its instant a comment's pin stays on the frame as the video plays on. */
 const PIN_SECONDS = 1.5
 
+/** How much of a comment its mark on the track shows. */
+const EXCERPT_LENGTH = 48
+
 /**
  * A pin on the video, whatever the app's theme: white with a dark edge, the open one in the
  * selection blue the frames' editing uses, so each stands out on any picture.
@@ -86,7 +89,7 @@ export function useVideoCommenting({
       threads.flatMap((thread) => {
         const at = thread.comment.anchor.at
         if (at === undefined || !listed(thread, filter)) return []
-        return [{ thread, seconds: at / 1000, label: pinLabel(thread) }]
+        return [{ thread, seconds: at / 1000, label: pinLabel(thread), excerpt: excerpt(thread) }]
       }),
     [threads, filter, pinLabel]
   )
@@ -218,6 +221,12 @@ export function VideoCommentPins({
       ) : null}
     </div>
   )
+}
+
+/** A comment's first words, on one line. */
+function excerpt(thread: CommentThread): string {
+  const words = thread.comment.body.replace(/\s+/g, " ").trim()
+  return words.length > EXCERPT_LENGTH ? `${words.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…` : words
 }
 
 /** Where a new comment goes, as its card says it: its instant, and its scene when there are more. */
