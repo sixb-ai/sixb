@@ -64,6 +64,41 @@ export function liftRequestBodyCap(request: Request): void {
 }
 
 /**
+ * A request body as it streams in, failing once it passes `limitBytes`: for a route that hands the
+ * bytes on, such as to blob storage, without holding them. Like {@link readRequestBodyWithLimit},
+ * its limit replaces the server's cap, so the route must authenticate the caller first.
+ */
+export function streamRequestBodyWithLimit(
+  request: Request,
+  limitBytes: number,
+  tooLargeMessage?: string
+): ReadableStream<Uint8Array> {
+  liftRequestBodyCap(request)
+
+  const contentLength = request.headers.get("content-length")
+  if (contentLength !== null) {
+    const declared = Number(contentLength)
+    if (Number.isSafeInteger(declared) && declared > limitBytes) {
+      throw new RequestBodyTooLargeError(limitBytes, tooLargeMessage)
+    }
+  }
+
+  let total = 0
+  return (request.body ?? new Blob([]).stream()).pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        total += chunk.byteLength
+        if (total > limitBytes) {
+          controller.error(new RequestBodyTooLargeError(limitBytes, tooLargeMessage))
+          return
+        }
+        controller.enqueue(chunk)
+      },
+    })
+  )
+}
+
+/**
  * Reads a request body fully into memory, failing once it passes `limitBytes`. That limit
  * replaces the server's default cap for this request, so a route reading more than the default
  * must authenticate the caller first. The `content-length` header, when present, only provides an

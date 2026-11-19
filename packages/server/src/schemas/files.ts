@@ -1,3 +1,4 @@
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
 import { z } from "zod"
 
@@ -20,9 +21,15 @@ export const CreateFileUploadBodySchema = z.object({
       message: 'Expected a single media type, such as "application/pdf"',
     })
     .optional(),
-  sizeBytes: z.number().int().nonnegative().optional(),
+  sizeBytes: z.number().int().nonnegative().max(MAX_FILE_UPLOAD_BYTES).optional(),
   digest: BlobDigestSchema.optional(),
   logicalPath: z.string().optional(),
+  strategy: z
+    .literal("server")
+    .optional()
+    .describe(
+      "Send the content through the API even when blob storage takes direct uploads: for a caller that reaches only the API, such as a sandbox"
+    ),
 })
 
 export const FileUploadIdParamsSchema = z.object({

@@ -11,6 +11,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import {
   type AbortBlobUploadInput,
   type BlobUploadSession,
@@ -475,7 +476,65 @@ describe("file routes", () => {
     expect(await contentResponse.json()).toEqual({
       error: `File upload digest mismatch: expected ${expectedDigest}, received ${actualDigest}.`,
     })
-    expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).toBeNull()
+    // The content streamed to blob storage before its digest was known, so its blob is kept, as
+    // a simple upload's is: the session never takes it as its file.
+    expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).not.toBeNull()
+    const completed = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
+    )
+    expect(completed.status).toBe(400)
+    expect(await completed.json()).toEqual({ error: "Upload content has not been received." })
+  })
+
+  // To check, read the content whole with `readRequestBodyWithLimit` again: the route answers 413
+  // past the simple-upload ceiling.
+  test("streams staged server content past the simple-upload ceiling, within its declared size", async () => {
+    const { app, blobStorage } = createFilesApi()
+    const sizeBytes = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 3 * 1024 * 1024
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", { sizeBytes }))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const content = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: chunkedBody(sizeBytes),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+    expect(content.status).toBe(200)
+
+    const completed = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
+    )
+    const fileRef = (await completed.json()) as FileRef
+    expect(fileRef.sizeBytes).toBe(sizeBytes)
+    expect((await blobStorage.stat(fileRef.blobId))?.sizeBytes).toBe(sizeBytes)
+  })
+
+  test("refuses staged server content past the size it declared", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", { sizeBytes: 5 }))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: chunkedBody(6),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({ error: "Request body exceeds the 5 byte limit." })
+  })
+
+  test("refuses a staged upload declared larger than one upload may hold", async () => {
+    const { app } = createFilesApi()
+    const response = await app.fetch(
+      jsonRequest("/api/files/uploads", { sizeBytes: MAX_FILE_UPLOAD_BYTES + 1 })
+    )
+    expect(response.status).toBe(422)
   })
 
   test("returns the cached fileRef when completion is retried", async () => {

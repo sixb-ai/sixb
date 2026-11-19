@@ -2856,6 +2856,7 @@ export const createFileUpload = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/files/uploads",
     ...options,
@@ -2876,6 +2877,7 @@ export const uploadFileContent = <ThrowOnError extends boolean = false>(
       bodySerializer: null,
       security: [
         { name: "x-sixb-csrf", type: "apiKey" },
+        { scheme: "bearer", type: "http" },
         { scheme: "bearer", type: "http" },
       ],
       url: "/api/files/uploads/{uploadId}/content",
@@ -2901,6 +2903,7 @@ export const signFileUploadPart = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/files/uploads/{uploadId}/parts/{partNumber}",
     ...options,
@@ -2920,6 +2923,7 @@ export const completeFileUpload = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/files/uploads/{uploadId}/complete",
     ...options,
@@ -2938,6 +2942,7 @@ export const abortFileUpload = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<AbortFileUploadResponses, AbortFileUploadErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/files/uploads/{uploadId}/abort",
