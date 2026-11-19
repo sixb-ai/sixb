@@ -6,7 +6,8 @@ import { idSegment, readText } from "./shared"
 
 // An artifact's comments, as the people reading it leave them: read them as threads, resolve the
 // ones whose change is made, and reply to one to say why it is not. The Agent's run reaches them
-// as the person it answers, through the conversation that shares the artifact.
+// as the person it answers, through the conversation that shares the artifact. A video's MP4,
+// rendered when asked, and downloaded once it is.
 
 const STATUSES = ["open", "resolved", "all"] as const
 
@@ -23,6 +24,7 @@ interface Comment {
 export async function artifacts(api: ApiClient, args: readonly string[]): Promise<void> {
   const [group, sub, ...rest] = args
   if (!group || isHelp(group)) return writeText(GROUP_HELP.artifacts)
+  if (group === "export") return exportVideo(api, args.slice(1))
   if (group !== "comments") fail(`Unknown artifacts command '${group}'.`)
   if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP.artifacts)
 
@@ -79,6 +81,87 @@ export async function artifacts(api: ApiClient, args: readonly string[]): Promis
   }
 
   fail(`Unknown artifacts comments command '${sub}'.`)
+}
+
+/** How often an export that renders is asked about, and how long it is waited for at most. */
+const EXPORT_POLL_MS = 3_000
+const EXPORT_WAIT_MS = 60 * 60_000
+
+interface VideoExport {
+  readonly status: "ready" | "rendering" | "failed"
+  readonly reason?: string
+  readonly progress?: {
+    readonly ready: number
+    readonly total: number
+    readonly assembling: boolean
+  }
+}
+
+/**
+ * A video's MP4: asked for, and its status printed; with --output, waited for while it renders,
+ * then downloaded there.
+ */
+async function exportVideo(api: ApiClient, args: readonly string[]): Promise<void> {
+  if (requestsHelp(args)) return writeText(GROUP_HELP.artifacts)
+  const { positionals, options } = parseCommandArgs(
+    args,
+    { "--version": "string", "--retry": "boolean", "--output": "string" },
+    "artifacts export",
+    1
+  )
+  const version = options["--version"]?.trim() || "latest"
+  if (!/^(latest|[1-9]\d*)$/.test(version)) {
+    fail('artifacts export --version is a version number, or "latest".')
+  }
+  const path = `/api/artifacts/${idSegment(positionals[0]?.trim())}/versions/${version}/video`
+  const ask = async (retry: boolean) =>
+    (await api.post(`${path}${retry ? "?retry=true" : ""}`, {})) as VideoExport
+
+  let asked = await ask(options["--retry"] === true)
+  const output = options["--output"]
+  if (!output) return writeJson(asked)
+
+  const progress = process.stderr.isTTY ? exportProgress() : undefined
+  const deadline = Date.now() + EXPORT_WAIT_MS
+  try {
+    while (asked.status === "rendering") {
+      progress?.show(asked)
+      if (Date.now() > deadline) {
+        fail("The video is still rendering. Run the command again to keep waiting.", "timeout")
+      }
+      await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS))
+      asked = await ask(false)
+    }
+  } finally {
+    progress?.clear()
+  }
+  if (asked.status === "failed") {
+    fail(
+      `The video could not be rendered: ${asked.reason ?? "no reason given"}`,
+      "video_failed",
+      "Run the command again with --retry to render what failed anew."
+    )
+  }
+
+  await api.download(path, output)
+  return writeJson({ ...asked, downloaded: true, output })
+}
+
+function exportProgress() {
+  let shown = ""
+  return {
+    show({ progress }: VideoExport) {
+      const line = progress?.assembling
+        ? "Joining the scenes…"
+        : `Rendering… ${progress?.ready ?? 0} of ${progress?.total ?? 0} segments`
+      if (line === shown) return
+      shown = line
+      process.stderr.write(`\r\x1b[2K${line}`)
+    },
+    clear() {
+      if (shown) process.stderr.write("\r\x1b[2K")
+    },
+  }
 }
 
 function commentsOf(page: unknown): Comment[] {

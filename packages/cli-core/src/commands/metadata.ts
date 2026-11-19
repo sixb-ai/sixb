@@ -290,13 +290,19 @@ exact email, ignoring case, and finds suspended members too. Each member is
   sixb artifacts comments list <artifact-id> [--status open|resolved|all]
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
+  sixb artifacts export <artifact-id> [--version <n|latest>] [--retry] [--output <path.mp4>]
 
 \`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
 address and label on a canvas; at, in milliseconds, and scene on a video; revision), its body,
 authorName and its replies. A message quoting comments
 names each one's id as \`comment <id>\`. Resolve a comment once the change it asks for is made;
 reply to one to say why it is not. Reading takes access to the artifact; resolving, the right to
-change it or being the comment's author.`,
+change it or being the comment's author.
+
+\`export\` asks for a video's MP4 and prints {"status"}: ready, rendering with {"progress"} (its
+segments ready of all of them), or failed with its reason; --retry renders what failed anew.
+With --output it waits while the video renders, then downloads the MP4 there. Each scene renders
+once and is kept, so a version that changes one scene renders only that one again.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
