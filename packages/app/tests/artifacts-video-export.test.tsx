@@ -1,14 +1,20 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
 import { client } from "@sixb/client"
-import { TooltipProvider } from "@sixb/ui/components"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  TooltipProvider,
+} from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { type ReactNode, useLayoutEffect, useState } from "react"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
+import type { ArtifactVersion } from "../src/artifacts/queries"
 import { ChaptersPanel } from "../src/artifacts/renderers/video/chapters"
-import { VideoExportMenu } from "../src/artifacts/renderers/video/export"
-import { videoExportView } from "../src/artifacts/renderers/video/export-state"
+import { VideoExportEntries, VideoExportMenu } from "../src/artifacts/renderers/video/export"
+import { useVideoExport, videoExportView } from "../src/artifacts/renderers/video/export-state"
 import { artifactVersion, textFiles } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
 
@@ -114,6 +120,24 @@ function Wrap({ children }: { readonly children: ReactNode }) {
   )
 }
 
+/** The header's MP4 button, reading its export as the header does. */
+function ExportButton({ version }: { readonly version: ArtifactVersion }) {
+  return <VideoExportMenu version={version} exported={useVideoExport(version)} />
+}
+
+/** The MP4 folded into More, as a phone's header has it. */
+function FoldedMore({ version }: { readonly version: ArtifactVersion }) {
+  const exported = useVideoExport(version)
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger data-testid="more">More</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <VideoExportEntries version={version} exported={exported} keepOpen />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const open = async (trigger: Element) => {
   await act(async () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" })
@@ -143,7 +167,7 @@ describe("a video's MP4 in its header", () => {
     serve(() => ({ status: "ready", durationMs: 7000, sizeBytes: 12_400_000 }))
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const link = await waitFor(() => {
@@ -166,7 +190,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -205,7 +229,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -235,7 +259,7 @@ describe("a video's MP4 in its header", () => {
     })
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -275,7 +299,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -301,7 +325,7 @@ describe("a video's MP4 in its header", () => {
     // A write makes another video: the header offers to export it.
     view.rerender(
       <Wrap>
-        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+        <ExportButton version={{ ...FILM, revision: 2 }} />
       </Wrap>
     )
     await waitFor(() =>
@@ -321,7 +345,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -347,7 +371,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     await waitFor(() =>
@@ -357,7 +381,7 @@ describe("a video's MP4 in its header", () => {
     revision = 2
     view.rerender(
       <Wrap>
-        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+        <ExportButton version={{ ...FILM, revision: 2 }} />
       </Wrap>
     )
     await waitFor(() =>
@@ -375,7 +399,7 @@ describe("a video's MP4 in its header", () => {
     const asked = serve(() => rendering(started ? 1 : 0))
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -395,7 +419,7 @@ describe("a video's MP4 in its header", () => {
 
     view.rerender(
       <Wrap>
-        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+        <ExportButton version={{ ...FILM, revision: 2 }} />
       </Wrap>
     )
     await waitFor(() =>
@@ -411,7 +435,7 @@ describe("a video's MP4 in its header", () => {
     )
     const view = render(
       <Wrap>
-        <VideoExportMenu version={FILM} />
+        <ExportButton version={FILM} />
       </Wrap>
     )
     const trigger = await waitFor(() => {
@@ -428,6 +452,44 @@ describe("a video's MP4 in its header", () => {
     const earlier = view.getByText("Download version 2").closest("a")
     expect(earlier?.getAttribute("href")).toEndWith("/versions/2/video")
     expect(view.getByText("Earlier version · out of date")).not.toBeNull()
+  })
+
+  // Reproduce by dropping keepOpen's preventDefault in VideoExportEntries: More closes on Export,
+  // and a phone's reader sees nothing render, More's button showing no more than its ring.
+  test("folded into More, exporting keeps the menu open on how far it has rendered", async () => {
+    let started = false
+    serve((_version, query) =>
+      query.get("render") === "false" && !started ? rendering(0) : rendering(started ? 1 : 0)
+    )
+    const view = render(
+      <Wrap>
+        <FoldedMore version={FILM} />
+      </Wrap>
+    )
+    await open(view.getByTestId("more"))
+    started = true
+    await act(async () => {
+      fireEvent.click(await view.findByText("Export MP4"))
+    })
+    await view.findByRole("progressbar")
+    await view.findByText("Rendering · 1 of 3 parts")
+  })
+
+  // Reproduce by leaving a ready answer to VideoExportEntries' other entries: More then names the
+  // MP4 with no way to download it.
+  test("folded into More, a rendered MP4 is one entry that downloads it", async () => {
+    serve(() => ({ status: "ready", durationMs: 7000, sizeBytes: 12_400_000 }))
+    const view = render(
+      <Wrap>
+        <FoldedMore version={FILM} />
+      </Wrap>
+    )
+    await open(view.getByTestId("more"))
+    const entry = await view.findByRole("menuitem")
+    expect(entry.textContent).toContain("Download MP4")
+    expect(entry.textContent).toContain("0:07 · 12 MB")
+    expect(entry.getAttribute("href")).toEndWith("/versions/3/video")
+    expect(entry.getAttribute("download")).toBe("Launch film.mp4")
   })
 })
 

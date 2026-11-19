@@ -12,6 +12,7 @@ import type { ArtifactFile } from "../../core/src/storage/artifacts/types"
 import { ArtifactPage } from "../src/artifacts/artifact-page"
 import { fileView } from "../src/artifacts/file-view"
 import { rehypeArtifactDocument } from "../src/artifacts/renderers/document-tree"
+import { videoExportQueryKey } from "../src/artifacts/renderers/video/export-state"
 import {
   artifactLink,
   artifactTargetFromSearch,
@@ -193,6 +194,10 @@ describe("the viewer", () => {
     readonly target?: ViewerTarget
     /** The version to seed; the artifact's latest is 2. */
     readonly version?: number
+    readonly outline?: GetArtifactVersionResponse["outline"]
+    readonly exportable?: boolean
+    /** Seeds what else the viewer reads. */
+    readonly seed?: (cache: QueryClient) => void
   }): string {
     const cache = new QueryClient({
       defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
@@ -228,7 +233,8 @@ describe("the viewer", () => {
       entry: input.entry,
       files: input.files,
       outline:
-        input.kind === "document"
+        input.outline ??
+        (input.kind === "document"
           ? {
               kind: "document",
               headings: [
@@ -239,7 +245,8 @@ describe("the viewer", () => {
             }
           : input.kind === "sheet"
             ? { kind: "sheet", sheets: [], charts: [] }
-            : { kind: "file", mediaType: input.files[0]?.file.mediaType ?? "" },
+            : { kind: "file", mediaType: input.files[0]?.file.mediaType ?? "" }),
+      ...(input.exportable ? { exportable: true } : {}),
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-02T12:00:00.000Z",
@@ -248,6 +255,7 @@ describe("the viewer", () => {
       frozen: true,
     }
     seedVersion(cache, version, input.texts)
+    input.seed?.(cache)
     return renderToStaticMarkup(
       <Wrap cache={cache}>
         <Viewer
@@ -362,6 +370,37 @@ describe("the viewer", () => {
     expect(html).toContain("This sheet is too large to show here")
     expect(html).not.toContain("This sheet could not be read.")
     expect(html).toMatch(/download="Visits.csv"[^>]*>.*Download Visits as CSV/)
+  })
+
+  test("folds a video's MP4 into More on a phone's header, and keeps it beside More on a wider one", () => {
+    // Reproduce by rendering VideoExportMenu bare in the header again: on a phone it keeps its
+    // place beside More, and the title keeps about eleven characters.
+    const html = render({
+      kind: "video",
+      entry: "index.html",
+      files: [{ path: "index.html", file: fileRef("index", 40, "text/html") }],
+      texts: { "index.html": "<div></div>" },
+      outline: {
+        kind: "video",
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        durationMs: 7000,
+        scenes: [{ id: "intro", label: "Opening", startMs: 0, durationMs: 7000, renderKey: "a" }],
+      },
+      exportable: true,
+      seed: (cache) =>
+        cache.setQueryData(videoExportQueryKey(ARTIFACT_ID, 2, 2), {
+          status: "ready",
+          durationMs: 7000,
+          sizeBytes: 12_400_000,
+        }),
+    })
+
+    // The header's MP4 shows from the header's medium width up, where More shows its own.
+    expect(html).toMatch(/<span class="hidden @md:contents"><a [^>]*data-video-export="ready"/)
+    const more = [...html.matchAll(/<span class="([^"]+)"><button [^>]*aria-label="More"/g)]
+    expect(more.map((match) => match[1])).toEqual(["contents @md:hidden", "hidden @md:contents"])
   })
 })
 

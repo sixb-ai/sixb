@@ -79,7 +79,8 @@ import { PageRenderer } from "./renderers/page"
 import { useWorkbookDownloads } from "./renderers/sheet/downloads"
 import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
-import { VideoExportMenu } from "./renderers/video/export"
+import { VideoExportEntries, VideoExportMark, VideoExportMenu } from "./renderers/video/export"
+import { useVideoExport } from "./renderers/video/export-state"
 import { VideoRenderer } from "./renderers/video/renderer"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 import { VersionMenu } from "./version-menu"
@@ -783,15 +784,14 @@ function ArtifactHeader({
       ) : null}
       {artifact.kind === "sheet" ? (
         <SheetDownloadMenu version={version} />
-      ) : artifact.kind === "video" ? (
-        // A video downloads as its MP4, in a project that renders it.
-        version.exportable ? (
-          <VideoExportMenu version={version} />
-        ) : null
-      ) : (
+      ) : artifact.kind === "video" ? null : (
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
-      <ArtifactMenu detail={detail} chrome={chrome} />
+      {artifact.kind === "video" && version.exportable ? (
+        <VideoExportActions detail={detail} chrome={chrome} version={version} />
+      ) : (
+        <ArtifactMenu detail={detail} chrome={chrome} />
+      )}
       {chrome.withoutPageLink || guest ? null : (
         <CopyLinkButton
           link={() => artifactLink(target, artifact.latestVersion, location.origin)}
@@ -933,16 +933,60 @@ function SheetDownloadMenu({ version }: { readonly version: ArtifactVersion }) {
 }
 
 /**
+ * A video downloads as its MP4, in a project that renders it: beside More, and in it on a phone's
+ * header, where the title needs the room. Both read the one export, so asking in either shows in
+ * the other.
+ */
+function VideoExportActions({
+  detail,
+  chrome,
+  version,
+}: {
+  readonly detail: ArtifactDetail
+  readonly chrome: ViewerChrome
+  readonly version: ArtifactVersion
+}) {
+  const exported = useVideoExport(version)
+  const { view } = exported
+
+  return (
+    <>
+      <span className="hidden @md:contents">
+        <VideoExportMenu version={version} exported={exported} />
+      </span>
+      <ArtifactMenu
+        detail={detail}
+        chrome={chrome}
+        folded={
+          view.state === "loading" ? null : (
+            <VideoExportEntries version={version} exported={exported} keepOpen />
+          )
+        }
+        foldedMark={view.state === "rendering" ? <VideoExportMark view={view} /> : null}
+      />
+    </>
+  )
+}
+
+/**
  * The header's More: *Reset page data* once a page keeps something for the reader, and *Delete*
  * for the artifact's owner. An observer keeps nothing in a page and deletes nothing, so it has
  * neither. A reset that fails says so beside the button; a delete, in its confirmation.
+ *
+ * A phone's header folds into it, first, actions a wider one shows beside it: `folded`, with
+ * `foldedMark` on its button while one of them is at work. Both menus are in the header, and its
+ * width shows one, as it shows the rest of what gives way.
  */
 function ArtifactMenu({
   detail,
   chrome,
+  folded = null,
+  foldedMark = null,
 }: {
   readonly detail: ArtifactDetail
   readonly chrome: ViewerChrome
+  readonly folded?: ReactNode
+  readonly foldedMark?: ReactNode
 }) {
   const { viewer: messages, page } = useArtifactMessages()
   const queries = useQueryClient()
@@ -954,7 +998,8 @@ function ArtifactMenu({
   const resettable =
     artifact.kind === "page" && access !== "read" && (count > 0 || reset === "working")
   const deletable = access === "owner"
-  if (!resettable && !deletable) return null
+  const own = resettable || deletable
+  if (!own && !folded) return null
 
   const resetData = async () => {
     setReset("working")
@@ -967,6 +1012,52 @@ function ArtifactMenu({
     }
   }
 
+  const menu = (narrow: boolean) => (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger
+        aria-label={messages.more}
+        title={messages.more}
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground [&_svg]:size-[17px] [&_svg]:stroke-[1.75]"
+      >
+        {reset === "working" ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : narrow && foldedMark ? (
+          foldedMark
+        ) : (
+          <MoreHorizontal aria-hidden="true" />
+        )}
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1.5">
+        {narrow ? folded : null}
+
+        {narrow && own ? <DropdownMenuSeparator className="my-1" /> : null}
+
+        {resettable ? (
+          <MenuAction
+            icon={RotateCcw}
+            title={page.reset}
+            detail={page.resetDetail(count)}
+            disabled={reset === "working"}
+            onSelect={() => void resetData()}
+          />
+        ) : null}
+
+        {resettable && deletable ? <DropdownMenuSeparator className="my-1" /> : null}
+
+        {deletable ? (
+          <MenuAction
+            icon={Trash2}
+            title={messages.delete}
+            detail={messages.deleteDetail}
+            destructive
+            onSelect={() => setDeleting(true)}
+          />
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
   return (
     <span className="flex shrink-0 items-center gap-2">
       {reset === "failed" ? (
@@ -975,43 +1066,14 @@ function ArtifactMenu({
         </span>
       ) : null}
 
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger
-          aria-label={messages.more}
-          title={messages.more}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground [&_svg]:size-[17px] [&_svg]:stroke-[1.75]"
-        >
-          {reset === "working" ? (
-            <LoaderCircle className="animate-spin" aria-hidden="true" />
-          ) : (
-            <MoreHorizontal aria-hidden="true" />
-          )}
-        </DropdownMenuTrigger>
-
-        <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1.5">
-          {resettable ? (
-            <MenuAction
-              icon={RotateCcw}
-              title={page.reset}
-              detail={page.resetDetail(count)}
-              disabled={reset === "working"}
-              onSelect={() => void resetData()}
-            />
-          ) : null}
-
-          {resettable && deletable ? <DropdownMenuSeparator className="my-1" /> : null}
-
-          {deletable ? (
-            <MenuAction
-              icon={Trash2}
-              title={messages.delete}
-              detail={messages.deleteDetail}
-              destructive
-              onSelect={() => setDeleting(true)}
-            />
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {folded ? (
+        <>
+          <span className="contents @md:hidden">{menu(true)}</span>
+          {own ? <span className="hidden @md:contents">{menu(false)}</span> : null}
+        </>
+      ) : (
+        menu(false)
+      )}
 
       {deletable ? (
         <DeleteDialog
