@@ -40,6 +40,9 @@ const SHARED_SESSION_ROUTES = SIXB_API_ROUTES.filter((route) => route.sharedSess
  */
 const SHARED_SESSION_SOCKETS: readonly string[] = [ARTIFACT_LIVE_ROUTE, "/ws/events"]
 
+/** What tags load: a file, a board's picture, a video's still, its poster, and its MP4. */
+const LOADED_BY_TAGS = ["/content", "/preview", "/still", "/poster", "/video"]
+
 /**
  * Where the grant may be named in the query: what `<img>`, `<video>` and download links load, and
  * the sockets, none of which can send a header.
@@ -48,7 +51,7 @@ const SHARED_QUERY_SELECTOR_ROUTES = [
   ...SHARED_SESSION_ROUTES.filter(
     (route) =>
       (route.method === "GET" || route.method === "HEAD") &&
-      (route.path.endsWith("/content") || route.path.endsWith("/preview"))
+      LOADED_BY_TAGS.some((suffix) => route.path.endsWith(suffix))
   ),
   ...SHARED_SESSION_SOCKETS.map((path) => ({ method: "GET", path })),
 ]
