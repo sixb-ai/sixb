@@ -1,5 +1,6 @@
 import { ArtifactRequestError } from "../artifacts/errors"
 import { createSixbError, isSixbError } from "../errors/internal"
+import { ModelProviderError } from "../models/errors"
 import { ModelUsageRecordingError } from "../models/execution/errors"
 import { AgentStorageError } from "../storage/agents/errors"
 import { AgentToolPublicError, AgentToolResultValidationError } from "./errors"
@@ -128,8 +129,17 @@ export function encodeWireError(error: unknown): WireError {
     return { kind: "AbortError", message: error.message }
   }
 
-  // A call whose provider connection dropped crosses as one: the runner's model loop then makes it
-  // again, as it would in process.
+  // An interrupted model call crosses as one: the runner's model loop then makes it again, as it
+  // would in process.
+  if (error instanceof ModelProviderError && error.reason === "interrupted") {
+    return {
+      kind: "ModelProviderError",
+      message: error.message,
+      reason: error.reason,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      details: { providerId: error.providerId, modelId: error.modelId },
+    }
+  }
   const lostConnection = lostConnectionCode(error)
   if (lostConnection !== undefined) {
     return {
@@ -148,7 +158,7 @@ export function encodeWireError(error: unknown): WireError {
 export function wireErrorStatus(error: WireError): number {
   if (error.kind === "AgentExecutionLostError") return 409
   if (error.kind === "AbortError") return 499
-  if (error.kind === "ModelConnectionLost") return 502
+  if (error.kind === "ModelConnectionLost" || error.kind === "ModelProviderError") return 502
   if (error.kind === "Error" || error.kind === "AgentFinalizationError") return 500
   return 400
 }
@@ -200,6 +210,16 @@ export function decodeWireError(error: WireError): Error {
     case "ModelConnectionLost":
       // As fetch throws it in process.
       return Object.assign(new TypeError(error.message), { code: error.code })
+    case "ModelProviderError": {
+      const { providerId = "", modelId = "" } = (error.details ?? {}) as {
+        readonly providerId?: string
+        readonly modelId?: string
+      }
+      return new ModelProviderError(error.message, providerId, modelId, {
+        ...(error.code === undefined ? {} : { code: error.code }),
+        reason: "interrupted",
+      })
+    }
     default:
       return new Error(error.message)
   }

@@ -6,6 +6,7 @@ import {
   type ModelUsage,
 } from "@sixb/core/models"
 import { contextWindowRejection } from "../context-window"
+import { STREAM_CLOSED_EARLY, streamInterruption } from "../interruption"
 import { integer, object } from "../json"
 import { decodeServerSentEvents } from "../sse"
 
@@ -34,7 +35,12 @@ export async function* chatEvents(
       `${options.errorPrefix} ${message}`,
       options.providerId,
       options.modelId,
-      { requestId: options.requestId, code, ...contextWindowRejection({ code, message }) }
+      {
+        requestId: options.requestId,
+        code,
+        ...contextWindowRejection({ code, message }),
+        ...streamInterruption({ code }),
+      }
     )
   const tools = new Map<number, Tool>()
   const annotations: JsonObject[] = []
@@ -240,7 +246,12 @@ export async function* chatEvents(
       }
     }
   }
-  throw error("Chat stream ended without [DONE].")
+  throw new ModelProviderError(
+    `${options.errorPrefix} Chat stream ended without [DONE].`,
+    options.providerId,
+    options.modelId,
+    { requestId: options.requestId, ...STREAM_CLOSED_EARLY }
+  )
 }
 
 function completeObject(input: string): boolean {

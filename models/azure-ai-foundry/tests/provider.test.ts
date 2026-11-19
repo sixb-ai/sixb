@@ -571,6 +571,47 @@ test("retains Azure's top-level streamed error code and message", async () => {
   })
 })
 
+// Reproduce: drop the code RequestDiagnostics.failure keeps; a reset connection then reaches the
+// model loop as a bare error, and the run fails instead of making the call again.
+test("keeps a lost connection's code, before the response and while it streams", async () => {
+  const reset = (secret: string) =>
+    Object.assign(new TypeError(`ECONNRESET: closed (key ${secret})`), { code: "ECONNRESET" })
+  const before = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    fetch: async () => {
+      throw reset("key")
+    },
+  })("deployment")
+  const during = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    fetch: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: "response.created", response: { id: "r" } })}\n\n`
+              )
+            )
+            controller.error(new TypeError("ECONNRESET: closed", { cause: reset("key") }))
+          },
+        })
+      ),
+  })("deployment")
+
+  const lostBefore = await before.stream(request()).catch((error: unknown) => error)
+  const lostDuring = await collect((await during.stream(request())).events).catch(
+    (error: unknown) => error
+  )
+
+  for (const lost of [lostBefore, lostDuring]) {
+    expect(lost).toMatchObject({ code: "ECONNRESET" })
+    expect(String((lost as Error).message)).not.toContain("key)")
+  }
+})
+
 test.each([
   "store",
   "background",
