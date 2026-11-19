@@ -292,10 +292,13 @@ export function RenameField({
     field.current?.select()
   }, [])
 
+  // The name it opened on: left as it was, it writes nothing, even when someone else renamed the
+  // scene meanwhile.
+  const from = useRef(name)
   const finish = (label: string | null) => {
     if (done.current) return
     done.current = true
-    onDone(label === name ? null : label)
+    onDone(label === from.current ? null : label)
   }
 
   return (

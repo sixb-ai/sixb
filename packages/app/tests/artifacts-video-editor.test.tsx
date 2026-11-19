@@ -13,7 +13,11 @@ import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
 import { LiveVideo } from "../src/artifacts/live/video"
 import { importKind } from "../src/artifacts/renderers/video/editor/import"
-import { formatSeconds, parseSeconds } from "../src/artifacts/renderers/video/editor/inspector"
+import {
+  formatSeconds,
+  parseSeconds,
+  TextField,
+} from "../src/artifacts/renderers/video/editor/inspector"
 import {
   editPoints,
   layClips,
@@ -25,7 +29,7 @@ import {
   trackRows,
   zoomAround,
 } from "../src/artifacts/renderers/video/editor/model"
-import { SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
+import { RenameField, SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
 import {
   fillers,
   findWords,
@@ -385,6 +389,16 @@ describe("fields and files", () => {
   })
 })
 
+/**
+ * Types into a field as React reads it here: it loaded before the window, so it watches the keys
+ * a change comes with, as for a browser without `input` events.
+ */
+function typeIn(field: HTMLElement, value: string) {
+  fireEvent.focusIn(field)
+  fireEvent.input(field, { target: { value } })
+  fireEvent.keyUp(field, { key: value.at(-1) ?? "a" })
+}
+
 function wrap(children: ReactNode) {
   return (
     <QueryClientProvider client={new QueryClient()}>
@@ -444,5 +458,44 @@ describe("the editor's pieces", () => {
     fireEvent.change(field, { target: { value: "In their words" } })
     fireEvent.keyDown(field, { key: "Enter" })
     expect(renamed).toEqual(["talk: In their words"])
+  })
+
+  // Guard proof: compare the field's words with the current `value` on leaving, as before, in
+  // TextField (inspector.tsx), or with the current `name` in RenameField (scenes.tsx). Left
+  // untouched, each then writes the words it opened on over the other's change.
+  test("a field left untouched writes nothing back over someone else's change", () => {
+    const written: string[] = []
+    const field = (value: string) =>
+      wrap(<TextField label="Name" value={value} onCommit={(text) => written.push(text)} />)
+
+    const view = render(field("Interview"))
+    const input = view.getByRole("textbox", { name: "Name" }) as HTMLInputElement
+    fireEvent.focus(input)
+
+    // The Agent renames the scene while the reader's field has focus: it shows the new name, and
+    // leaving it writes nothing.
+    view.rerender(field("In their words"))
+    expect(input.value).toBe("In their words")
+    fireEvent.blur(input)
+    expect(written).toEqual([])
+
+    // What the reader types is theirs, whatever changed meanwhile; Escape drops it.
+    typeIn(input, "Their story")
+    view.rerender(field("Voices"))
+    fireEvent.blur(input)
+    expect(written).toEqual(["Their story"])
+
+    typeIn(input, "Dropped")
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(written).toEqual(["Their story"])
+    expect(input.value).toBe("Voices")
+
+    const renamed: (string | null)[] = []
+    const rename = (name: string) =>
+      wrap(<RenameField name={name} placeholder="talk" onDone={(label) => renamed.push(label)} />)
+    const renaming = render(rename("Interview"))
+    renaming.rerender(rename("In their words"))
+    fireEvent.blur(renaming.getAllByRole("textbox", { name: "Name" }).at(-1) as HTMLElement)
+    expect(renamed).toEqual([null])
   })
 })
