@@ -1684,6 +1684,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const video = await requireRequestSixb(context).artifacts.video(artifactId, {
             version: versionParam(context.params.version),
             retry: context.query.retry === "true",
+            render: context.query.render !== "false",
           })
           if (!video) return await refusal(context, artifactId, context.set)
           if (video.status !== "ready") return video
@@ -1706,7 +1707,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Render a video to MP4",
           description:
-            "Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.",
+            "Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again; render=false reads where it stands without asking. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "exportArtifactVideo",
           security: accessTokenSecurityRequirement("exportArtifactVideo"),

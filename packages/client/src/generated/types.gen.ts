@@ -25612,6 +25612,10 @@ export type ExportArtifactVideoData = {
      * true asks again for an MP4 that could not be rendered, instead of hearing why
      */
     retry?: "true" | "false"
+    /**
+     * false reads where the MP4 stands without asking for it
+     */
+    render?: "true" | "false"
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/video"
 }
