@@ -5,7 +5,7 @@
 
 import type { FileRef } from "./types"
 
-export { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "./constants"
+export { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES, MAX_FILE_UPLOAD_BYTES } from "./constants"
 export { blobDigestHex, blobIdFromDigest } from "./derive"
 export type { BlobDigest, BlobInfo, FileRef } from "./types"
 export { isBlobDigest, isFileRef } from "./validation"

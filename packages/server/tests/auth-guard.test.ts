@@ -17,6 +17,7 @@ import {
   type RoleDefinition,
   SixbHost,
 } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { AuthStorageError } from "@sixb/core/storage"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
@@ -1221,7 +1222,7 @@ describe("request body limits", () => {
         [
           "POST /api/files HTTP/1.1",
           `Host: 127.0.0.1:${port}`,
-          `Content-Length: ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1}`,
+          `Content-Length: ${MAX_FILE_UPLOAD_BYTES + 1}`,
           "",
           "",
         ].join("\r\n")

@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { SandboxRequestCredential, SandboxRequestMethod } from "@sixb/core"
 import { SandboxError } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 
 /** Where a sandbox's forwarder listens, and the root every forwarder of this user shares. */
 export interface ForwarderPaths {
@@ -56,7 +57,13 @@ export class CredentialForwarder implements ForwarderPaths {
     let forwarding = this.targets.get(key)
     if (!forwarding) {
       const socket = join(this.directory, `${this.targets.size}.sock`)
-      const server = Bun.serve({ unix: socket, fetch: (request) => this.forward(request, key) })
+      const server = Bun.serve({
+        unix: socket,
+        // The API bounds each body itself: the forwarder passes the largest it takes, a staged
+        // upload's, where Bun's own default would refuse one past 128 MB.
+        maxRequestBodySize: MAX_FILE_UPLOAD_BYTES,
+        fetch: (request) => this.forward(request, key),
+      })
       forwarding = { socket, server }
       this.targets.set(key, forwarding)
     }
