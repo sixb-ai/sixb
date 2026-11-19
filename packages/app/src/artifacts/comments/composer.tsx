@@ -243,10 +243,14 @@ const GUEST_NAME_INPUT_LENGTH = 80
 /** The card a new comment is written in, by its pin: what it is about, then its words. */
 export function DraftCard({
   anchor,
+  heading,
   onSubmit,
   onCancel,
 }: {
+  /** What it is about, as "On …" says it: a slide, a part. */
   readonly anchor?: string
+  /** What it is about, said whole, where "On …" does not read right: a video's "At 0:25". */
+  readonly heading?: string
   readonly onSubmit: (body: string) => Promise<void>
   readonly onCancel: () => void
 }) {
@@ -260,7 +264,7 @@ export function DraftCard({
     >
       <div className="flex h-7 items-center gap-1 pr-0.5 pl-2">
         <p className="m-0 min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {anchor ? messages.about(anchor) : messages.newPin}
+          {heading ?? (anchor ? messages.about(anchor) : messages.newPin)}
         </p>
         <button
           type="button"
