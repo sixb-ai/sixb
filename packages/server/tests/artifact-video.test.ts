@@ -146,6 +146,11 @@ describe("a video's MP4 over the API", () => {
       expect(response.status).toBe(200)
       return response.json()
     }
+    // Read without asking, then asked.
+    const read = await fixture.app.fetch(
+      new Request(url(`${path}?render=false`), { method: "POST", headers: alice.mutationHeaders })
+    )
+    expect(await read.json()).toMatchObject({ status: "rendering" })
     expect(await ask()).toEqual({
       status: "rendering",
       progress: { ready: 0, total: 3, assembling: false },

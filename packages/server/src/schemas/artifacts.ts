@@ -274,6 +274,10 @@ export const ArtifactVideoExportQuerySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .describe("true asks again for an MP4 that could not be rendered, instead of hearing why"),
+  render: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("false reads where the MP4 stands without asking for it"),
 })
 
 /** The parts of a media served as files, by the media content route. */
