@@ -17,6 +17,7 @@ import {
   readSandboxFiles,
   runScript,
   scriptFiles,
+  titleFileName,
 } from "./sandbox"
 
 // A designed document's PDF, which someone asked for: the worker opens a blank sandbox of the
@@ -180,18 +181,8 @@ async function print(input: {
     body: bytes,
     expectedSizeBytes: bytes.byteLength,
     // The name it downloads as: its title, without what a file name may not hold.
-    fileName: `${pdfName(version.title)}.pdf`,
+    fileName: `${titleFileName(version.title, "Document")}.pdf`,
     mediaType: "application/pdf",
   })
   return { file, pages }
-}
-
-/** A title as a file name: what one may not hold, and each run of spaces, one space. */
-function pdfName(title: string): string {
-  const name = [...title]
-    .map((char) => (char < " " || '\\/:*?"<>|'.includes(char) ? " " : char))
-    .join("")
-    .replace(/\s+/g, " ")
-    .trim()
-  return name || "Document"
 }

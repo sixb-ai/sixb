@@ -1,0 +1,296 @@
+import { posix } from "node:path"
+import type { ArtifactFile, Queues } from "@sixb/core"
+import {
+  readVideoVersion,
+  VIDEO_EXPORT_JOB,
+  type VideoExportPlan,
+  type VideoMediaFile,
+  type VideoVersionRead,
+  videoExportJobId,
+  videoExportKeys,
+  videoExportPlan,
+  videoExportStatus,
+  videoSceneFiles,
+  videoSegmentIndex,
+  videoSegmentJobId,
+  videoSegmentRender,
+} from "@sixb/core/internal/artifacts/publish"
+import type {
+  ArtifactVideoExportRequestedQueueJob,
+  ArtifactVideoSegmentRequestedQueueJob,
+  NewQueueJob,
+} from "@sixb/core/queues"
+import type { ArtifactVideoRenderRecord } from "@sixb/core/storage"
+import type { RenderHost } from "./host"
+import {
+  downloadIntoSandbox,
+  inRenderSandbox,
+  renderApiOrigin,
+  storeSandboxFile,
+  titleFileName,
+} from "./sandbox"
+import { runVideoScript, type VideoHost } from "./video-project"
+
+// A video version's MP4, which someone asked for. Its job looks at what is kept under its
+// segments' keys: it asks for each segment still missing, in a job of its own, and looks again a
+// few seconds later, in a job it asks for in its own place, rather than waiting in a worker. Once
+// every segment is rendered, it opens a blank sandbox of the project that reaches the API, fetches
+// them there, joins them without encoding them again, with the sound, and keeps the MP4 under the
+// export's key. A segment that failed fails the export, saying which.
+
+/** What assembling an export reads, opens, keeps, and asks for. */
+export type VideoExportHost = VideoHost & { readonly queues: Pick<Queues, "renders"> }
+
+/** Where the segments are fetched to in the sandbox, and the MP4 written. */
+const PARTS = "export"
+const MP4 = "export.mp4"
+/** Of the time left once the segments are fetched: the rest stores the MP4. */
+const JOIN_SHARE = 0.5
+
+/**
+ * Assembles an export once its segments are rendered, asking for those still missing until then.
+ * Repeating it assembles nothing more: what an earlier delivery kept is found.
+ */
+export async function assembleVideoExport(input: {
+  readonly host: VideoExportHost
+  readonly job: ArtifactVideoExportRequestedQueueJob
+  readonly signal: AbortSignal
+}): Promise<void> {
+  const { host, job } = input
+  const artifacts = host.storage.artifacts
+  if (!artifacts) return
+
+  const { payload } = job
+  const plan = videoExportPlan(payload)
+  if (plan.key !== payload.key) {
+    console.warn(
+      `[SixbRenderWorker] The export of ${exportName(job)} was asked for by another version of Sixb; ask for it again.`
+    )
+    return
+  }
+
+  const kept = await artifacts.listVideoRenders({ projectId: host.id, keys: videoExportKeys(plan) })
+  const status = videoExportStatus(plan, kept)
+  const fail = (failure: string) =>
+    artifacts.putVideoRender({ projectId: host.id, key: plan.key, failure, createdAt: new Date() })
+
+  if (status.status === "ready") return
+  if (status.status === "failed") {
+    // A segment's failure is the export's, until someone asks again.
+    if (!kept.some((record) => record.key === plan.key)) await fail(status.reason)
+    return
+  }
+  if (!host.sandboxes) {
+    await fail("This project has no sandboxes to render videos in.")
+    return
+  }
+
+  if (!status.progress.assembling) {
+    if (Date.now() - Date.parse(payload.askedAt) > VIDEO_EXPORT_JOB.waitMs) {
+      await fail("It took too long to render. Try again.")
+      return
+    }
+    if (!payload.waiting) await askForSegments(host, job, plan, kept)
+    await lookAgain(host, job, plan)
+    return
+  }
+
+  const segments = plan.segments.map((segment) => {
+    const record = kept.find((each) => each.key === segment.key)
+    if (!record || "failure" in record)
+      throw new Error(`[SixbRenderWorker] Segment '${segment.key}' is gone.`)
+    return { kind: segment.kind, file: record.file }
+  })
+
+  const file = await inRenderSandbox(
+    { sandboxes: host.sandboxes },
+    `assembled ${exportName(job)}`,
+    { timeoutMs: VIDEO_EXPORT_JOB.timeoutMs, signal: input.signal, reach: [renderApiOrigin(host)] },
+    async (sandbox, left, signal) => {
+      const at = (index: number, kind: string) =>
+        posix.resolve(
+          sandbox.workingDirectory,
+          PARTS,
+          kind === "sound" ? "sound.m4a" : `${String(index).padStart(4, "0")}.mp4`
+        )
+      const placed = segments.map((segment, index) => ({
+        path: at(index, segment.kind),
+        file: segment.file,
+      }))
+      await downloadIntoSandbox(host, sandbox, placed, {
+        timeoutMs: left(),
+        signal,
+        executionId: job.id,
+      })
+
+      const mp4 = posix.resolve(sandbox.workingDirectory, MP4)
+      const sound = placed.find((_, index) => segments[index]?.kind === "sound")?.path ?? ""
+      const pictures = placed.filter((_, index) => segments[index]?.kind === "scene")
+      const { report, stderr } = await runVideoScript(
+        sandbox,
+        "assemble",
+        [
+          mp4,
+          Math.floor(left() * JOIN_SHARE),
+          plan.frames,
+          sound,
+          ...pictures.map((each) => each.path),
+        ],
+        { timeoutMs: left(), signal }
+      )
+      if (report?.status !== "ready" || typeof report.bytes !== "number") {
+        // Thrown, the job tries again.
+        throw new Error(
+          `[SixbRenderWorker] Assembling ${exportName(job)} stopped: ${String(report?.failed ?? report?.skipped ?? (stderr || "the script reported nothing")).slice(0, 500)}`
+        )
+      }
+
+      return storeSandboxFile(
+        host.blobStorage,
+        sandbox,
+        {
+          path: mp4,
+          bytes: report.bytes,
+          fileName: `${titleFileName(payload.title, "Video")}.mp4`,
+          mediaType: "video/mp4",
+        },
+        { signal }
+      )
+    }
+  )
+  await artifacts.putVideoRender({ projectId: host.id, key: plan.key, file, createdAt: new Date() })
+}
+
+/**
+ * Keeps why an export could not be assembled, once the worker gives up on it: whoever waits for it
+ * hears so, until they ask again.
+ */
+export async function failVideoExport(input: {
+  readonly host: Pick<RenderHost, "id" | "storage">
+  readonly job: ArtifactVideoExportRequestedQueueJob
+}): Promise<void> {
+  await input.host.storage.artifacts?.putVideoRender({
+    projectId: input.host.id,
+    key: input.job.payload.key,
+    failure: "It could not be put together. Try again in a moment.",
+    createdAt: new Date(),
+  })
+}
+
+/**
+ * Asks for each segment still missing. A segment job keeps what it rendered or why it could not,
+ * so one asked for before is either waiting, running, or kept: asking again changes nothing,
+ * unless this is a retry, which asks anew for one whose failure was forgotten.
+ */
+async function askForSegments(
+  host: VideoExportHost,
+  job: ArtifactVideoExportRequestedQueueJob,
+  plan: VideoExportPlan,
+  kept: readonly ArtifactVideoRenderRecord[]
+): Promise<void> {
+  const { payload } = job
+  const done = new Set(kept.map((record) => record.key))
+  const missing = plan.segments.filter((segment) => !done.has(segment.key))
+
+  // The composition is read only when a scene is missing: the sound renders from every file.
+  const read = missing.some((segment) => segment.kind === "scene")
+    ? await readVideoVersion(host.blobStorage, payload.files)
+    : null
+  const video = {
+    width: payload.outline.width,
+    height: payload.outline.height,
+    fps: payload.outline.fps,
+    durationMs: payload.outline.durationMs,
+  }
+
+  const jobs: NewQueueJob<ArtifactVideoSegmentRequestedQueueJob>[] = []
+  for (const { key, ...segment } of missing) {
+    const common = { artifactId: payload.artifactId, version: payload.version, key, segment, video }
+    const project =
+      segment.kind === "scene" && read
+        ? await sceneProject(host, read, payload, segment)
+        : { files: payload.files, media: payload.media }
+    jobs.push({
+      id: videoSegmentJobId(key),
+      ...(payload.retry ? { replace: true } : {}),
+      type: "artifact.video.segment.requested",
+      payload: { ...common, ...project },
+    })
+  }
+
+  await host.queues.renders.enqueue({ projectId: host.id, jobs })
+}
+
+/**
+ * Asks for this export again, `VIDEO_EXPORT_JOB.recheckMs` from now, in its own place, which it
+ * holds: the id waits as the new job once this one is settled. It only looks whether the segments
+ * are rendered.
+ */
+async function lookAgain(
+  host: VideoExportHost,
+  job: ArtifactVideoExportRequestedQueueJob,
+  plan: VideoExportPlan
+): Promise<void> {
+  const { retry: _retry, ...payload } = job.payload
+  await host.queues.renders.enqueue({
+    projectId: host.id,
+    jobs: [
+      {
+        id: videoExportJobId(plan.key),
+        replace: true,
+        type: "artifact.video.export.requested",
+        payload: { ...payload, waiting: true },
+        availableAt: new Date(Date.now() + VIDEO_EXPORT_JOB.recheckMs).toISOString(),
+      },
+    ],
+  })
+}
+
+/**
+ * What a scene's segment renders from: `index.html` keeping the scenes on screen with it, stored
+ * for the segment's job, and the files their frames are made of, with their sounds, which
+ * HyperFrames loads; what the root and those scenes play from other artifacts.
+ */
+async function sceneProject(
+  host: VideoExportHost,
+  read: VideoVersionRead,
+  payload: ArtifactVideoExportRequestedQueueJob["payload"],
+  segment: { readonly scene: string; readonly startFrame: number; readonly endFrame: number }
+): Promise<{
+  readonly files: readonly ArtifactFile[]
+  readonly media: readonly VideoMediaFile[]
+  readonly frames: { readonly from: number; readonly to: number }
+}> {
+  const render = videoSegmentRender(read.composition, segment, read.rootTimeline)
+  const text = new TextEncoder().encode(videoSegmentIndex(read.index, read.composition, render))
+  const index = await host.blobStorage.put({
+    body: text,
+    expectedSizeBytes: text.byteLength,
+    fileName: "index.html",
+    mediaType: "text/html",
+  })
+
+  const files = videoSceneFiles({
+    files: payload.files,
+    composition: read.composition,
+    rootLoads: read.rootLoads,
+    loads: read.loads,
+    scenes: render.scenes,
+    sounds: true,
+  }).map((entry) => (entry.path === "index.html" ? { ...entry, file: index } : entry))
+
+  const at = new Set(["", ...render.scenes])
+  const played = new Set(
+    payload.references.filter((each) => at.has(each.at)).map((each) => each.address)
+  )
+  return {
+    files,
+    media: payload.media.filter((each) => played.has(each.address)),
+    frames: { from: render.from, to: render.to },
+  }
+}
+
+/** How logs name an export: its artifact and version. */
+function exportName(job: ArtifactVideoExportRequestedQueueJob): string {
+  return `'${job.payload.artifactId}' version ${job.payload.version}`
+}
