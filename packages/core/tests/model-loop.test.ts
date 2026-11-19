@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
+import { MODEL_CALL_RETRY } from "../src/agents/model-call-retry"
 import { runModelLoop } from "../src/agents/model-loop"
 import type {
   LanguageModelRequest,
@@ -10,7 +11,12 @@ import type {
   ModelUiChunk,
   ProviderData,
 } from "../src/models"
-import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
+import {
+  ModelProviderError,
+  ModelStreamError,
+  rateModelCall,
+  StructuredOutputError,
+} from "../src/models"
 import { ModelUsageRecordingError } from "../src/models/execution/errors"
 import { MODEL_CALL_IDLE_MS, reportModelCalls } from "../src/models/language-call"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
@@ -1809,5 +1815,283 @@ describe("a rejected model call", () => {
     })
 
     expect(result).toMatchObject({ status: "aborted" })
+  })
+})
+
+describe("a model call that loses its connection", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+    jest.restoreAllMocks()
+  })
+
+  /** What Bun's fetch throws when the provider's connection resets. */
+  function connectionReset(): TypeError {
+    return Object.assign(new TypeError("ECONNRESET: The socket connection was closed."), {
+      code: "ECONNRESET",
+    })
+  }
+
+  function answer(text: string): LanguageModelStreamEvent[] {
+    return [
+      { type: "stream-start" },
+      { type: "text-start", id: "answer" },
+      { type: "text-delta", id: "answer", delta: text },
+      { type: "text-end", id: "answer" },
+      finish(),
+    ]
+  }
+
+  /** A stream that hands on `events`, then loses its connection. */
+  function lostAfter(events: readonly LanguageModelStreamEvent[]) {
+    return {
+      events: (async function* () {
+        yield* events
+        throw connectionReset()
+      })(),
+    }
+  }
+
+  /**
+   * Fake timers, and each pause the loop makes before it asks a lost call again, as the warning it
+   * logs announces it.
+   */
+  function pauses() {
+    jest.useFakeTimers()
+    const announced = [Promise.withResolvers<void>()]
+    spyOn(console, "warn").mockImplementation(() => {
+      announced.at(-1)!.resolve()
+      announced.push(Promise.withResolvers<void>())
+    })
+
+    return {
+      /** Settles once the loop announces its pause number `pause`, counted from 0. */
+      announced: (pause: number) => announced[pause]!.promise,
+
+      /** Settles with the loop's end, waiting out each pause it makes on the way. */
+      async outlast<T>(running: Promise<T>): Promise<T> {
+        for (let pause = 0; ; pause += 1) {
+          const paused = await Promise.race([
+            announced[pause]!.promise.then(() => true),
+            running.then(() => false),
+          ])
+          if (!paused) return running
+          jest.advanceTimersByTime(MODEL_CALL_RETRY.maxMs)
+        }
+      },
+    }
+  }
+
+  // Reproduce: drop the connectionLost retry in runModelLoop; the reset then fails the loop.
+  test.each([
+    ["Bun's reset", connectionReset()],
+    [
+      "Node's closed socket",
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+      }),
+    ],
+  ])("asks again, as a new call, a call that lost its connection before it answered (%s)", async (_, lost) => {
+    const time = pauses()
+    const callIds: string[] = []
+    const model = new MockLanguageModel({
+      stream: async ({ callId }) => {
+        callIds.push(callId)
+        if (callIds.length === 1) throw lost
+        return streamFromArray(answer("Done."))
+      },
+    })
+    const chunks: ModelUiChunk[] = []
+    let generated = 0
+
+    const result = await time.outlast(
+      runModelLoop({
+        model,
+        messages: [],
+        signal: new AbortController().signal,
+        onEvent: (chunk) => {
+          chunks.push(chunk)
+        },
+        generateCallId: () => `call-${++generated}`,
+      })
+    )
+
+    expect(result).toMatchObject({ status: "completed", output: "Done." })
+    expect(callIds).toEqual(["call-1", "call-2"])
+    // Nothing streamed, so the reader has nothing to drop.
+    expect(chunks.some((chunk) => chunk.type === "start-step" && chunk.retry)).toBe(false)
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[SixbModels\] Model call 'call-1' lost its connection/),
+      lost
+    )
+  })
+
+  // Reproduce: leave out the start-step retry chunk on a lost connection in runModelLoop; the
+  // reader then keeps the lost call's text above the answer.
+  test("drops what a call streamed before its connection dropped, and runs its tools once", async () => {
+    const time = pauses()
+    let calls = 0
+    let executed = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        const check: LanguageModelStreamEvent[] = [
+          { type: "stream-start" },
+          { type: "text-start", id: "intro" },
+          { type: "text-delta", id: "intro", delta: `Checking (${calls}).` },
+          { type: "text-end", id: "intro" },
+          {
+            type: "tool-call",
+            toolCallId: `echo-${calls}`,
+            toolName: "echo",
+            input: '{"value":"a"}',
+          },
+        ]
+        if (calls === 1) return lostAfter(check)
+        if (calls === 2) return streamFromArray([...check, finish("tool-calls")])
+        return streamFromArray(answer("Done."))
+      },
+    })
+    const chunks: ModelUiChunk[] = []
+    const recorded: ModelCallEndEvent[] = []
+
+    const result = await time.outlast(
+      runModelLoop({
+        model: reportModelCalls(model, (event) => {
+          recorded.push(event)
+        }),
+        messages: [],
+        tools: [
+          {
+            ...echo,
+            execute: async (input: { value: string }) => {
+              executed += 1
+              return { echoed: input.value }
+            },
+          },
+        ],
+        signal: new AbortController().signal,
+        onEvent: (chunk) => {
+          chunks.push(chunk)
+        },
+      })
+    )
+
+    expect(result).toMatchObject({ status: "completed", output: "Done." })
+    expect(executed).toBe(1)
+    expect(result.steps[0]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool-call", toolCallId: "echo-2" })
+    )
+
+    // The reader is told to drop the lost call's text before the new call streams.
+    const retry = chunks.findIndex((chunk) => chunk.type === "start-step" && chunk.retry)
+    const deltas = chunks.flatMap((chunk) => (chunk.type === "text-delta" ? [chunk.delta] : []))
+    expect(retry).toBeGreaterThan(
+      chunks.findIndex((chunk) => chunk.type === "text-delta" && chunk.delta === "Checking (1).")
+    )
+    expect(deltas).toEqual(["Checking (1).", "Checking (2).", "Done."])
+
+    // The lost call is recorded with its usage unknown, never free; the others with theirs.
+    expect(recorded.map((call) => call.usage)).toEqual([{}, USAGE, USAGE])
+    expect(recorded[0]?.cost).toEqual({ status: "unpriceable", reason: "missing-usage" })
+  })
+
+  // Reproduce: drop the MODEL_CALL_RETRY.retries bound in runModelLoop; the sixth call then
+  // answers, and the loop completes.
+  test("fails with the last lost connection once its retries are spent", async () => {
+    const time = pauses()
+    let calls = 0
+    const lost = connectionReset()
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        if (calls <= MODEL_CALL_RETRY.retries + 1) throw lost
+        return streamFromArray(answer("Too late."))
+      },
+    })
+
+    const error = await time.outlast(
+      runModelLoop({ model, messages: [], signal: new AbortController().signal }).catch(
+        (error: unknown) => error
+      )
+    )
+
+    expect(error).toBe(lost)
+    expect(calls).toBe(MODEL_CALL_RETRY.retries + 1)
+  })
+
+  // Reproduce: let lostConnectionCode name any error; the binding's own refusal, which it
+  // already retried, is then asked again.
+  test("does not ask again a call the provider refused", async () => {
+    const time = pauses()
+    let calls = 0
+    const refused = new ModelProviderError("[test] Service unavailable.", "mock", "mock-model", {
+      status: 503,
+      retryable: true,
+    })
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        throw refused
+      },
+    })
+
+    const error = await time.outlast(
+      runModelLoop({ model, messages: [], signal: new AbortController().signal }).catch(
+        (error: unknown) => error
+      )
+    )
+
+    expect(error).toBe(refused)
+    expect(calls).toBe(1)
+  })
+
+  // Reproduce: drop the readerFailed check in callModel; the reader's own reset is then taken
+  // for the provider's, and the call is made again.
+  test("does not ask again a call whose reader lost its own connection", async () => {
+    const time = pauses()
+    let calls = 0
+    const lost = connectionReset()
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return streamFromArray(answer("Done."))
+      },
+    })
+
+    const error = await time.outlast(
+      runModelLoop({
+        model,
+        messages: [],
+        signal: new AbortController().signal,
+        onEvent: (chunk) => {
+          if (chunk.type === "text-delta") throw lost
+        },
+      }).catch((error: unknown) => error)
+    )
+
+    expect(error).toBe(lost)
+    expect(calls).toBe(1)
+  })
+
+  // Reproduce: drop the signal check after the pause in runModelLoop; a stopped loop then makes
+  // one more call.
+  test("stops during its pause when the loop is stopped, without another call", async () => {
+    const time = pauses()
+    const cancel = new AbortController()
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        if (calls === 1) throw connectionReset()
+        return streamFromArray(answer("Done."))
+      },
+    })
+
+    const result = runModelLoop({ model, messages: [], signal: cancel.signal })
+    await time.announced(0)
+    cancel.abort()
+
+    expect(await result).toEqual({ status: "aborted", steps: [], partialContent: [] })
+    expect(calls).toBe(1)
   })
 })

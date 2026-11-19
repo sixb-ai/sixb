@@ -34,6 +34,8 @@ import type {
 } from "../models/messages"
 import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
+import { waitUnlessAborted } from "../shared/backoff"
+import { lostConnectionCode, MODEL_CALL_RETRY, modelCallRetryDelay } from "./model-call-retry"
 import { coerceToolInput } from "./tool-input-coercion"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -158,8 +160,10 @@ interface ParsedToolCall {
 /**
  * Run a provider-neutral, streaming model/tool loop.
  *
- * One step is exactly one provider call. Lifecycle and stream callbacks are awaited so the caller
- * controls backpressure and can fail closed before another billable call starts.
+ * One step is one provider call, made again as a new call when its connection drops (see
+ * {@link MODEL_CALL_RETRY}) or `recoverStep` asks it again. Lifecycle and stream callbacks are
+ * awaited so the caller controls backpressure and can fail closed before another billable call
+ * starts.
  * Completed steps and partial content contain validated JSON payloads and normalized provider
  * metadata. Trace adapters may project these results directly; storage owns write validation.
  */
@@ -215,7 +219,9 @@ export async function runModelLoop(
     let callId: string
     let cost: ModelCallCost
     let completed: CompletedResponse
-    for (let attempt = 0; ; attempt += 1) {
+    let recoveryAsked = false
+    let retries = 0
+    for (;;) {
       callId = generateCallId()
       if (!callId || callIds.has(callId)) {
         throw new ModelStreamError(`[SixbModels] Model call IDs must be nonempty and unique.`)
@@ -234,6 +240,24 @@ export async function runModelLoop(
       cost = call.cost
       if (call.aborted) {
         return { status: "aborted", steps, partialContent: accumulator.partialContent() }
+      }
+
+      // A call whose connection dropped, before it answered or while it streamed, is made again
+      // as a new call, admitted and recorded on its own: the lost one may have been billed, so it
+      // stays recorded with its usage unknown. Nothing it streamed was acted on, and its reader
+      // drops it.
+      if (call.failure?.connectionLost && retries < MODEL_CALL_RETRY.retries) {
+        const delayMs = modelCallRetryDelay(retries)
+        retries += 1
+        console.warn(
+          `[SixbModels] Model call '${callId}' lost its connection to the provider; asking again in ${delayMs} ms.`,
+          call.failure.error
+        )
+        if (accumulator.streamed) await input.onEvent?.({ type: "start-step", retry: true })
+
+        await waitUnlessAborted(delayMs, input.signal)
+        if (input.signal.aborted) return { status: "aborted", steps, partialContent: [] }
+        continue
       }
 
       // A stream that failed after its finish is still read whole first: a malformed one fails
@@ -256,7 +280,8 @@ export async function runModelLoop(
               ),
             }
           : undefined)
-      if (failure && attempt === 0 && input.recoverStep) {
+      if (failure && !recoveryAsked && input.recoverStep) {
+        recoveryAsked = true
         let recovered: PrepareModelStepResult | undefined
         try {
           recovered = await input.recoverStep({
@@ -432,7 +457,7 @@ export async function runModelLoop(
 /**
  * One provider call of a step, streamed into its accumulator. A cancel, or an abort error, leaves
  * what arrived partial; any other error is the call's failure, whether it came before the
- * stream's finish or after it.
+ * stream's finish or after it, and says whether the call lost its connection to the provider.
  */
 async function callModel(
   input: RunModelLoopInput<unknown>,
@@ -447,7 +472,7 @@ async function callModel(
 ): Promise<{
   readonly cost: ModelCallCost
   readonly aborted: boolean
-  readonly failure?: { readonly error: unknown }
+  readonly failure?: { readonly error: unknown; readonly connectionLost: boolean }
 }> {
   const { accumulator } = call
   const maxOutputTokens =
@@ -456,7 +481,7 @@ async function callModel(
       : Math.min(call.maxOutputTokens, input.maxOutputTokens ?? Number.POSITIVE_INFINITY)
   let accepted = false
   let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
-  let failure: { readonly error: unknown } | undefined
+  let failure: { readonly error: unknown; readonly connectionLost: boolean } | undefined
   let cancelled = false
   try {
     const stream = await input.model.stream({
@@ -488,8 +513,12 @@ async function callModel(
   } catch (error) {
     // A call that could not be recorded fails the run, even one that was being cancelled.
     if (error instanceof ModelUsageRecordingError) throw error
-    if (input.signal.aborted || isAbortError(error)) cancelled = true
-    else failure = { error }
+    if (input.signal.aborted || isAbortError(error)) {
+      cancelled = true
+    } else {
+      const connectionLost = !accumulator.readerFailed && lostConnectionCode(error) !== undefined
+      failure = { error, connectionLost }
+    }
   } finally {
     // The step's cost, as the model records the call: the model is what records it (see
     // AiModelCallRecorder.wrapModel), never the loop that reads it.
@@ -777,6 +806,8 @@ class StreamAccumulator {
   private contextWindowExceeded = false
   /** Whether the call handed its reader anything. */
   streamed = false
+  /** Whether its reader failed: that failure is the reader's own, never the provider's. */
+  readerFailed = false
   /** Who served the call, what it used and what the provider charged. */
   readonly meter = new LanguageModelCallMeter()
   private projectionError: Error | undefined
@@ -785,7 +816,12 @@ class StreamAccumulator {
 
   private async onEvent(chunk: ModelUiChunk): Promise<void> {
     this.streamed = true
-    await this.reader?.(chunk)
+    try {
+      await this.reader?.(chunk)
+    } catch (error) {
+      this.readerFailed = true
+      throw error
+    }
   }
 
   isFinished(): boolean {

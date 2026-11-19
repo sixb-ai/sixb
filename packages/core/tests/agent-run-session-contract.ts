@@ -21,6 +21,7 @@ import {
   type StreamSink,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
+import { lostConnectionCode } from "../src/agents/model-call-retry"
 import type { UserPrincipal } from "../src/auth"
 import { emptyGrantIndex } from "../src/authorization/types"
 import type {
@@ -78,6 +79,30 @@ const countingModel = new MockLanguageModel({
       { type: "stream-start" },
       { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 3 } },
     ])
+  },
+})
+
+/**
+ * A model whose connection resets, as the provider's fetch reports it: before it answers when asked
+ * "Before.", else once it started streaming.
+ */
+const droppingModel = new MockLanguageModel({
+  providerId: "test",
+  modelId: "dropping-model",
+  stream: async (request) => {
+    const reset = Object.assign(new TypeError("ECONNRESET: The socket connection was closed."), {
+      code: "ECONNRESET",
+    })
+    const [message] = request.messages
+    const asked = message?.role === "user" ? message.content[0] : undefined
+    if (asked?.type === "text" && asked.text === "Before.") throw reset
+
+    return {
+      events: (async function* () {
+        yield { type: "stream-start" } as const
+        throw reset
+      })(),
+    }
   },
 })
 
@@ -139,7 +164,10 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    models: { language: [answeringModel, countingModel], webSearch: [searchingModel] },
+    models: {
+      language: [answeringModel, countingModel, droppingModel],
+      webSearch: [searchingModel],
+    },
     tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
@@ -1040,6 +1068,22 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         executionId: session.run.executionId,
       })
       expect(latest).toMatchObject({ modelKind: "web-search", requestedModelId: "test-search" })
+      session.close()
+    })
+
+    // Guard proof: drop the ModelConnectionLost kind from encodeWireError; over HTTP the runner
+    // then reads the server's generic failure, and its model loop does not make the call again.
+    test("lose a call's connection as the provider's fetch does, before it answers or after", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const model = await session.models.language({ provider: "test", modelId: "dropping-model" })
+
+      for (const text of ["Before.", "After."]) {
+        const lost = await streamAll(model, [{ type: "text", text }]).catch(
+          (error: unknown) => error
+        )
+        expect(lostConnectionCode(lost)).toBe("ECONNRESET")
+      }
       session.close()
     })
 
