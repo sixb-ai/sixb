@@ -20,9 +20,9 @@ import {
 // longer is one `data-duration` written again, a clip split is one attribute and one element
 // added. Each operation changes a working copy of the files step by step, reading them again
 // between steps, checks that the result is still a video or refuses it, and returns what changed
-// as the live layer's diff finds it: each changed run of lines narrowed to its characters. So two
-// people editing at once change different characters, which the live document merges, and the
-// Agent's next diff reads as an edit, not a rewrite. Browser-safe, as `composition.ts`. See
+// as the live layer's diff finds it: each changed run of lines narrowed to its attributes and
+// words. So two people editing at once change different text, which the live document merges, and
+// the Agent's next diff reads as an edit, not a rewrite. Browser-safe, as `composition.ts`. See
 // README.md.
 
 /**
@@ -127,14 +127,16 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
       work.replace(VIDEO_ENTRY, at, at, text)
     }
 
-    // Each scene whose predecessor changed starts after its new one.
+    // Each scene whose predecessor changed starts after its new one, and so, from there on, does
+    // each that starts at a number of seconds: its predecessor's place changed.
     const was = new Map(before.scenes.map((each, index) => [each.id, before.scenes[index - 1]?.id]))
+    const changed = order.findIndex((each, index) => was.get(each.id) !== order[index - 1]?.id)
     order.forEach((each, index) => {
       const after = order[index - 1]
-      if (was.get(each.id) === after?.id) return
+      const kept = was.get(each.id) === after?.id
+      if (kept && (index < changed || each.start.type === "after")) return
 
-      const offset = each.start.type === "after" ? each.start.offset : 0
-      const start = after ? chainedStart(after.id, offset) : "0"
+      const start = after ? chainedStart(after.id, gapBefore(before.scenes, each)) : "0"
       setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, { "data-start": start })
     })
   })
@@ -179,14 +181,24 @@ export function duplicateScene(
     const indent = index.slice(block.start, original.host.element.start)
     work.replace(VIDEO_ENTRY, block.end, block.end, `${indent}${host}${lineEnd(index, block)}`)
 
-    // What followed the original follows the copy.
-    for (const each of before.scenes) {
-      if (each.id === scene || !startsAfter(each.start, original)) continue
-      const offset = each.start.type === "after" ? each.start.offset : 0
-      setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
-        "data-start": chainedStart(id, offset),
-      })
-    }
+    // What followed the original follows the copy; a scene after it at a number of seconds
+    // starts as much later as the copy lasts.
+    const place = before.scenes.findIndex((each) => each.id === scene)
+    const length = before.scenes[place]?.durationMs ?? 0
+    before.scenes.forEach((each, index) => {
+      if (index <= place) return
+
+      if (startsAfter(each.start, original)) {
+        const offset = each.start.type === "after" ? each.start.offset : 0
+        setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
+          "data-start": chainedStart(id, offset),
+        })
+      } else if (each.start.type === "at") {
+        setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
+          "data-start": seconds(each.startMs + length),
+        })
+      }
+    })
   })
   return "edit" in result && copy ? { ...result, scene: copy } : result
 }
@@ -294,11 +306,11 @@ export function trimClip(
       return
     }
 
-    // How far its start moves into its file, or back out of it.
-    const moved = Math.max(
-      Math.round(toMs) - found.startMs,
-      playsFile(found) ? -found.mediaStartMs : -found.startMs
-    )
+    // How far its start moves into its file, or back out of it: never before its file's start,
+    // nor, unless it ripples and keeps its place, before its composition's.
+    const floors = [playsFile(found) ? -found.mediaStartMs : -found.startMs]
+    if (!options.ripple) floors.push(-found.startMs)
+    const moved = Math.max(Math.round(toMs) - found.startMs, ...floors)
     if (end - (found.startMs + moved) < MIN_CLIP_MS) {
       throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
     }
@@ -411,6 +423,9 @@ export function splitClip(
     ])
     second = parts.refs[1]
     replaceClip(work, file, found, parts.html)
+
+    // What followed the clip's end follows the second part's, where that end now is.
+    if (found.id && second) followInstead(work, file, found.id, second)
   })
   return "edit" in result && second ? { ...result, clip: second } : result
 }
@@ -429,7 +444,11 @@ export function removeClip(
     const found = clipOf(work, file, clip)
     const end = clipEnd(found, options.endMs)
 
-    const block = lineBlock(work.text(file), found.source.element)
+    // What followed it keeps its time: its name will name nothing.
+    if (found.id) freezeFollowers(work, file, (each) => each.id === found.id)
+
+    const removed = clipOf(work, file, clip)
+    const block = lineBlock(work.text(file), removed.source.element)
     work.replace(file, block.start, block.end, "")
     if (options.ripple) rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }])
   })
@@ -607,7 +626,7 @@ export function applyVideoEdit(sources: VideoSources, edit: VideoEdit): Map<stri
 }
 
 /** A text with its changes applied, from the last, so each index names its place. */
-export function applyTextChanges(text: string, changes: readonly VideoTextChange[]): string {
+function applyTextChanges(text: string, changes: readonly VideoTextChange[]): string {
   let result = text
   for (const change of [...changes].sort((a, b) => b.index - a.index)) {
     result =
@@ -688,8 +707,8 @@ class Working {
 
 /**
  * The changes from `before` to `after`: the live layer's line diff, and within a run of lines
- * changed one for one, each line narrowed to the characters that changed in it, so two values
- * written again on one line are two changes. A run that adds or removes lines, such as a host
+ * changed one for one, each line narrowed to the attributes and words that changed in it, so two
+ * values written again on one line are two changes. A run that adds or removes lines, such as a host
  * moved or a clip split, stays whole: its lines are what changed.
  */
 function textChanges(before: string, after: string): VideoTextChange[] {
@@ -717,7 +736,7 @@ function textChanges(before: string, after: string): VideoTextChange[] {
         at += line.length
         return
       }
-      // Word by word: a value written again is one change, never a few of its letters.
+      // Token by token: an attribute written again is one change, never a few of its letters.
       const from = tokens(line)
       const to = tokens(next)
       const fromAt = offsets(from)
@@ -736,9 +755,16 @@ function textChanges(before: string, after: string): VideoTextChange[] {
   })
 }
 
-/** A line's words, spaces, and each mark between them, which together write it again. */
+/**
+ * A line's words, spaces, and each mark between them, which together write it again. An attribute
+ * is one token with the space before it: two people writing its value at once then leave it twice,
+ * `data-duration="8" data-duration="12"`, which reads as the first, rather than `"812"`.
+ */
 function tokens(line: string): string[] {
-  return line.match(/\s+|[A-Za-z0-9_.:+-]+|[^\sA-Za-z0-9_.:+-]/g) ?? []
+  return (
+    line.match(/\s+[^\s"'<>/=]+=(?:"[^"]*"|'[^']*')|\s+|[A-Za-z0-9_.:+-]+|[^\sA-Za-z0-9_.:+-]/g) ??
+    []
+  )
 }
 
 /** Where each token starts, and the end past the last. */
@@ -862,6 +888,18 @@ function lengthenScene(work: Working, scene: string, ms: number): void {
 /** Whether a scene's start names `scene`, by its id or its host's own. */
 function startsAfter(start: VideoStart, scene: { readonly id: string; readonly hostId?: string }) {
   return start.type === "after" && (start.scene === scene.id || start.scene === scene.hostId)
+}
+
+/**
+ * How long after the scene before it a scene starts, in seconds, sooner when negative: its own
+ * offset when it names that scene, else the gap it leaves after it.
+ */
+function gapBefore(scenes: VideoRoot["scenes"], scene: VideoRoot["scenes"][number]): number {
+  if (scene.start.type === "after") return scene.start.offset
+
+  const previous = scenes[scenes.findIndex((each) => each.id === scene.id) - 1]
+  if (!previous) return 0
+  return (scene.startMs - previous.startMs - previous.durationMs) / 1000
 }
 
 /** `data-start` for a scene that starts when `after` ends, `offset` seconds later or sooner. */
@@ -1053,6 +1091,15 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoRange[]): 
   const map = (t: number) =>
     t - spans.reduce((sum, span) => sum + Math.max(0, Math.min(t, span.endMs) - span.startMs), 0)
 
+  // A clip that follows one the cut moves, shortens or takes keeps the time it starts at, which
+  // the cut then moves as any other's: its name may name a part, or nothing, once it is cut.
+  const from = spans[0]?.startMs ?? Number.POSITIVE_INFINITY
+  freezeFollowers(
+    work,
+    file,
+    (each) => each.durationMs === undefined || each.startMs + each.durationMs > from
+  )
+
   const taken = takenNames(work)
   const plan = new Map<string, ClipChange>()
   for (const clip of timelineOf(work, file).clips) {
@@ -1126,6 +1173,50 @@ function numericStart(work: Working, file: string, clip: VideoClip): boolean {
   const at = clip.source.attributes["data-start"]
   if (!at) return true
   return Number.isFinite(Number(attributeValue(work.text(file), at) ?? Number.NaN))
+}
+
+/** The clip a written start follows, by its name, and what comes after: `v` and ` + 0.5`. */
+function followed(written: string): { readonly name: string; readonly offset: string } | undefined {
+  if (written.trim() === "" || Number.isFinite(Number(written))) return undefined
+  const match = /^\s*(.*?)(\s*[+-]\s*(?:\d*\.)?\d+)?\s*$/.exec(written)
+  return match?.[1] ? { name: match[1], offset: match[2] ?? "" } : undefined
+}
+
+/**
+ * Writes the start of each clip that follows one `moves` picks as the seconds it starts at now:
+ * once what it follows is moved, split or gone, it starts where it did. One at a time, each read
+ * again, as each write moves what comes after it in the file.
+ */
+function freezeFollowers(work: Working, file: string, moves: (clip: VideoClip) => boolean): void {
+  for (;;) {
+    const clips = timelineOf(work, file).clips
+    const moving = new Set(clips.flatMap((clip) => (clip.id && moves(clip) ? [clip.id] : [])))
+    const follower = clips.find((clip) => {
+      const at = clip.source.attributes["data-start"]
+      const name = at ? followed(attributeValue(work.text(file), at) ?? "")?.name : undefined
+      return name !== undefined && moving.has(name)
+    })
+    if (!follower) return
+
+    setAttributes(work, file, follower.source, { "data-start": seconds(follower.startMs) })
+  }
+}
+
+/** Points each clip that follows `name` to `instead`, with its own offset. */
+function followInstead(work: Working, file: string, name: string, instead: string): void {
+  for (;;) {
+    const follower = timelineOf(work, file).clips.find((clip) => {
+      const at = clip.source.attributes["data-start"]
+      return at && followed(attributeValue(work.text(file), at) ?? "")?.name === name
+    })
+    const at = follower?.source.attributes["data-start"]
+    if (!follower || !at) return
+
+    const written = followed(attributeValue(work.text(file), at) ?? "")
+    setAttributes(work, file, follower.source, {
+      "data-start": `${instead}${written?.offset ?? ""}`,
+    })
+  }
 }
 
 /** What becomes of a clip: attributes set, removed, or written again as other HTML. */
@@ -1254,6 +1345,12 @@ function setAttributes(
   const added: string[] = []
 
   for (const [name, value] of Object.entries(values)) {
+    // Two people writing one value at once leave it twice: the first counts, as in a browser,
+    // and the next write keeps it alone.
+    for (const copy of laterCopies(text, source, name)) {
+      steps.push({ at: copy.start, run: () => work.replace(file, copy.start, copy.end, "") })
+    }
+
     const at = source.attributes[name]
     if (!at) {
       if (value !== null) added.push(` ${name}="${escapeAttribute(value)}"`)
@@ -1289,6 +1386,26 @@ function setAttributes(
   }
 
   for (const step of steps.sort((a, b) => b.at - a.at)) step.run()
+}
+
+/** Each copy of an attribute its start tag writes after the first, with the space before it. */
+function laterCopies(text: string, source: VideoElementSource, name: string): VideoSourceSpan[] {
+  const first = source.attributes[name]
+  if (!first) return []
+
+  const copies: VideoSourceSpan[] = []
+  const pattern = /\s+([^\s"'>/=]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/y
+  let at = first.end
+  for (;;) {
+    pattern.lastIndex = at
+    const match = pattern.exec(text)
+    if (!match?.[1] || match.index + match[0].length > source.tag.end) break
+    if (match[1].toLowerCase() === name) {
+      copies.push({ start: match.index, end: match.index + match[0].length })
+    }
+    at = match.index + match[0].length
+  }
+  return copies
 }
 
 /** An element's HTML, written alone, with attributes set as {@link setAttributes} sets them. */

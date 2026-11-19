@@ -126,6 +126,14 @@ function size(result: VideoEditResult): number {
   )
 }
 
+/** Each change of an edit, its text inserted, in file order. */
+function inserted(result: VideoEditResult): string[] {
+  if ("error" in result) throw new Error(result.error)
+  return result.edit.flatMap((file) =>
+    "changes" in file ? file.changes.map((change) => change.insert) : []
+  )
+}
+
 const demoClips = (files: ReadonlyMap<string, string | null>) =>
   readSceneTimeline(files.get("scenes/demo.html") as string)?.clips ?? []
 
@@ -186,8 +194,12 @@ describe("editing scenes", () => {
     expect(composition(files).durationMs).toBe(17_000)
     expect(readRootTimeline(files.get("index.html") as string)?.clips[0]?.durationMs).toBe(17_000)
 
-    // Three numbers written again: the scene's, the video's, the soundtrack's.
-    expect(size(result)).toBeLessThan(12)
+    // Three attributes written again: the scene's length, the video's, the soundtrack's.
+    expect(inserted(result)).toEqual([
+      ' data-duration="17"',
+      ' data-duration="17"',
+      ' data-duration="10"',
+    ])
   })
 
   // Guard proof: write the root's data-duration, then its data-poster, in two steps in fitRoot:
@@ -285,6 +297,43 @@ describe("editing scenes", () => {
   })
 })
 
+describe("scenes at a number of seconds", () => {
+  /** The teaser with every scene placed by seconds, one after the other. */
+  const placed = new Map(SOURCES)
+  placed.set(
+    "index.html",
+    INDEX.replace('data-start="hook - 0.5"', 'data-start="2.5"').replace(
+      'data-start="demo"',
+      'data-start="10.5"'
+    )
+  )
+
+  // Guard proof: in moveScene, return early for every scene whose predecessor is the same; the
+  // outro keeps its 10.5 s and a gap opens where the hook was.
+  test("moving one moves the scenes after it, each keeping its gap", () => {
+    const files = applied(moveScene(placed, "hook", 2), placed)
+    expect(times(files)).toEqual([
+      ["demo", 0, 8000],
+      ["outro", 8000, 4500],
+      ["hook", 12_500, 3000],
+    ])
+    expect(composition(files).durationMs).toBe(15_500)
+  })
+
+  // Guard proof: drop the branch for scenes at a number of seconds in duplicateScene; the copy
+  // then plays over the demo, and the video keeps its length.
+  test("a copy pushes the scenes after it by its length, each keeping its overlap", () => {
+    const files = applied(duplicateScene(placed, "hook"), placed)
+    expect(times(files)).toEqual([
+      ["hook", 0, 3000],
+      ["hook-2", 3000, 3000],
+      ["demo", 5500, 8000],
+      ["outro", 13_500, 4500],
+    ])
+    expect(composition(files).durationMs).toBe(18_000)
+  })
+})
+
 describe("editing clips", () => {
   test("trimming a clip's end with ripple pulls in what follows and the scene's end", () => {
     const result = trimClip(SOURCES, "scenes/demo.html", "talk", "end", 4000, { ripple: true })
@@ -316,9 +365,17 @@ describe("editing clips", () => {
     expect(times(kept)[1]).toEqual(["demo", 2500, 8000])
   })
 
-  test("a clip's start never goes before its file's", () => {
-    const files = applied(trimClip(SOURCES, "scenes/demo.html", "talk", "start", -5000))
-    expect(demoClips(files)[0]).toMatchObject({ startMs: 0, mediaStartMs: 0, durationMs: 7000 })
+  // Guard proof: bound `moved` by the file's start alone in trimClip; the clip at 0 is written
+  // to start at -2 s, which the reader clamps, and its footage plays 2 s late.
+  test("a clip's start never goes before its file's, nor before its composition's", () => {
+    const pulled = applied(
+      trimClip(SOURCES, "scenes/demo.html", "talk", "start", -5000, { ripple: true })
+    )
+    expect(demoClips(pulled)[0]).toMatchObject({ startMs: 0, mediaStartMs: 0, durationMs: 7000 })
+
+    const held = applied(trimClip(SOURCES, "scenes/demo.html", "talk", "start", -5000))
+    expect(demoClips(held)[0]).toMatchObject({ startMs: 0, mediaStartMs: 2000, durationMs: 5000 })
+    expect(held.get("scenes/demo.html")).not.toContain('data-start="-')
   })
 
   test("splitting a clip makes a copy that plays on from where the first stops", () => {
@@ -372,7 +429,7 @@ describe("editing clips", () => {
       fadeInMs: 500,
       fadeOutMs: 2000,
     })
-    expect(size(sound)).toBeLessThan(30)
+    expect(inserted(sound)).toEqual([' data-volume="0.2"', ' data-fade-in="0.5"'])
   })
 
   test("a fade of 0 is no fade", () => {
@@ -493,14 +550,66 @@ describe("cutting by the transcript", () => {
   })
 })
 
+describe("a clip that follows another", () => {
+  /** The demo with its first caption shown when the talk ends, a second later. */
+  const chained = new Map(SOURCES)
+  chained.set(
+    "scenes/demo.html",
+    DEMO.replace(
+      '<p class="caption" data-start="2.5" data-duration="2">in two taps</p>',
+      '<p id="after" class="caption" data-start="talk + 1" data-duration="1">in two taps</p>'
+    )
+  )
+  const after = (files: ReadonlyMap<string, string | null>) =>
+    demoClips(files).find((clip) => clip.ref === "after")
+
+  test("reads where the clip it follows ends", () => {
+    expect(after(chained)?.startMs).toBe(6000)
+  })
+
+  // Guard proof: drop the followInstead call in splitClip; the caption then follows the first
+  // part and shows at 3 s.
+  test("follows the last part of a split", () => {
+    const files = applied(splitClip(chained, "scenes/demo.html", "talk", 2000), chained)
+    expect(after(files)?.startMs).toBe(6000)
+    expect(files.get("scenes/demo.html")).toContain('data-start="talk-2 + 1"')
+  })
+
+  // Guard proof: drop the freezeFollowers call in removeClip; the caption then follows nothing
+  // and shows at 0 s.
+  test("keeps its time when the clip goes, and a ripple moves it as any other", () => {
+    const left = applied(removeClip(chained, "scenes/demo.html", "talk"), chained)
+    expect(after(left)?.startMs).toBe(6000)
+
+    const closed = applied(
+      removeClip(chained, "scenes/demo.html", "talk", { ripple: true }),
+      chained
+    )
+    expect(after(closed)?.startMs).toBe(1000)
+  })
+
+  // Guard proof: drop the freezeFollowers call in rippleRemove; the caption then follows the
+  // first part of the cut talk and shows at 2 s.
+  test("moves back by what a cut takes before it", () => {
+    const files = applied(
+      cutRange(chained, "scenes/demo.html", { startMs: 1000, endMs: 2000 }),
+      chained
+    )
+    expect(after(files)?.startMs).toBe(5000)
+  })
+})
+
 describe("minimal changes", () => {
-  test("a length is one number written again, in place", () => {
+  test("a length is its attribute written again, in place", () => {
     const result = setClipTiming(SOURCES, "scenes/demo.html", "screen", { durationMs: 2500 })
     if ("error" in result) throw new Error(result.error)
+    const written = ' data-duration="3"'
     expect(result.edit).toEqual([
       {
         path: "scenes/demo.html",
-        changes: [{ index: DEMO.indexOf('data-duration="3"') + 15, remove: 1, insert: "2.5" }],
+        changes: [
+          { index: DEMO.indexOf(written), remove: written.length, insert: ' data-duration="2.5"' },
+        ],
       },
     ])
   })
@@ -579,6 +688,34 @@ describe("editing live", () => {
     expect(composition(files).scenes[1]?.label).toBe("Two taps")
     expect(files.get("scenes/hook.html")).toContain("One screen for every job")
     expect(composition(files).durationMs).toBe(13_000)
+  })
+
+  // Guard proof: drop the attribute alternative from `tokens` in edit.ts; each peer then writes
+  // only the digits, and the merged scene lasts "69" seconds. Drop the `laterCopies` loop in
+  // setAttributes, and the next write leaves both copies.
+  test("two people writing one value at once leave one of theirs, never a mix", () => {
+    const one = createArtifactDocument("video", live(SOURCES))
+    const two = new Y.Doc()
+    Y.applyUpdate(two, Y.encodeStateAsUpdate(one))
+
+    editDocument(one, setSceneLength(sourcesOf(one), "demo", 6000))
+    editDocument(two, setSceneLength(sourcesOf(two), "demo", 9000))
+    Y.applyUpdate(one, Y.encodeStateAsUpdate(two))
+    Y.applyUpdate(two, Y.encodeStateAsUpdate(one))
+
+    const files = sourcesOf(one)
+    expect(sourcesOf(two)).toEqual(files)
+    expect([6000, 9000]).toContain(times(files)[1]?.[2] as number)
+
+    // The next write keeps the value alone.
+    const next = applied(setSceneLength(files, "demo", 7000), files)
+    expect(times(next)[1]).toEqual(["demo", 2500, 7000])
+    expect(
+      next
+        .get("index.html")
+        ?.match(/id="demo"[^>]*/)?.[0]
+        .match(/data-duration/g)
+    ).toHaveLength(1)
   })
 
   test("two people's edits to two scenes merge, and each is a step of its own", () => {
