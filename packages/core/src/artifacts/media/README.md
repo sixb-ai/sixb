@@ -26,7 +26,8 @@ readers
   lost with its queue is asked for again by the next publish or read, since nothing is kept until
   a job keeps it.
 - A job derives only the parts still `pending` in what is kept, so an attempt cut short between its
-  two writes transcribes without deriving the proxy again.
+  two writes transcribes without deriving the proxy again. It keeps only the parts it made, over
+  what is kept by then: a part a retry made pending while it ran stays so for the job behind it.
 - A part that fails is kept `failed` with a reason a reader can hear; FFmpeg's own words go to the
   logs. `unavailable` is no failure: a sound has no poster, a project has no transcription model,
   a sandbox has no FFmpeg, or the media is longer than `MAX_MEDIA_DURATION_MS`.
