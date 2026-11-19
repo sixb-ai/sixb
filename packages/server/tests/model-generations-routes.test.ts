@@ -21,6 +21,7 @@ import {
   type TranscriptionModel,
 } from "@sixb/core/models"
 import { Elysia } from "elysia"
+import { registerFileRoutes } from "../src/routes/files"
 import { registerModelCallRoutes } from "../src/routes/model-calls"
 import { registerModelGenerationRoutes } from "../src/routes/model-generations"
 import { registerModelRoutes } from "../src/routes/models"
@@ -29,6 +30,7 @@ import { limitRequestBody } from "../src/utils/request-body"
 const projectId = "model-generations"
 const PNG = new Uint8Array([137, 80, 78, 71, 1])
 const MP3 = new Uint8Array([255, 243, 196, 196, 1])
+const M4A = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 77, 52, 65, 32])
 
 const writer: LanguageModel = {
   providerId: "test",
@@ -150,7 +152,7 @@ async function setup(
       return { status: response.status, response }
     }
   }
-  return { blobStorage, granted: as("granted", true), plain: as("plain", false) }
+  return { host, blobStorage, granted: as("granted", true), plain: as("plain", false) }
 }
 
 describe("model generation routes", () => {
@@ -218,6 +220,35 @@ describe("model generation routes", () => {
     const transcript = await granted("/api/models/audio/transcriptions", { audio })
 
     expect(await transcript.response.json()).toMatchObject({ text: "Hello there.", words })
+  })
+
+  // Removal proof: drop AUDIO_ALIASES from the model input's media type; the model is handed
+  // `audio/x-m4a`, the type Bun gives the part from its file name, which the Gateway refuses.
+  test("an .m4a uploaded as the CLI uploads it reaches the model as audio/mp4", async () => {
+    let mediaType: string | undefined
+    const { host, granted } = await setup({
+      transcription: [
+        {
+          ...transcriber,
+          transcribe: async (request) => {
+            mediaType = request.mediaType
+            return { output: { text: "Hello there." } }
+          },
+        },
+      ],
+    })
+    const form = new FormData()
+    form.append("file", new Blob([M4A], { type: "audio/mp4" }), "talk.m4a")
+    const upload = await registerFileRoutes(new Elysia(), host).handle(
+      new Request("http://localhost/api/files", { method: "POST", body: form })
+    )
+
+    const transcript = await granted("/api/models/audio/transcriptions", {
+      audio: await upload.json(),
+    })
+
+    expect(transcript.status).toBe(200)
+    expect(mediaType).toBe("audio/mp4")
   })
 
   // Removal proof: remove assertModelAccess from the image runtime; the plain user generates.
