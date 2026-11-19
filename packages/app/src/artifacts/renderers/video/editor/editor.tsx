@@ -77,9 +77,16 @@ import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
 import { editPoints, type LaidClip, nextEditPoint, sceneAt } from "./model"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
-import { type EditorSelection, laidClips, openEnd, selectedClip, selectedScene } from "./selection"
+import {
+  type EditorSelection,
+  heardRecordings,
+  laidClips,
+  openEnd,
+  selectedClip,
+  selectedScene,
+} from "./selection"
 import { Timeline, type ZoomControls } from "./timeline"
-import { TranscriptPanel } from "./transcript-panel"
+import { TranscriptTab } from "./transcript-panel"
 
 // Editing a video: its picture and the selection's settings at the top, and the timeline at the
 // foot, its scenes along its first track. Every edit is a change to the live document, everyone's at once, and
@@ -597,12 +604,19 @@ export default function VideoEditor({
     )
   }
 
-  const talking =
-    clip && (clip.kind === "video" || clip.kind === "audio") && clip.src
-      ? clip.src
-      : clips.find(
-          (laid) => laid.file !== VIDEO_ENTRY && laid.clip.kind === "video" && !laid.clip.silent
-        )?.clip.src
+  // What the Transcript tab reads: the recordings heard in the open scene, and the selected clip's.
+  const heard = heardRecordings(clips, open, timeMs)
+  const selectedRecording =
+    clip &&
+    selection?.type === "clip" &&
+    (clip.kind === "video" || clip.kind === "audio") &&
+    clip.src
+      ? {
+          src: clip.src,
+          file: selection.file,
+          clips: clips.filter((laid) => laid.file === selection.file && laid.clip.src === clip.src),
+        }
+      : undefined
   const splittable =
     !!clip &&
     selection?.type === "clip" &&
@@ -684,28 +698,25 @@ export default function VideoEditor({
                 target={target}
                 actions={inspectorActions}
               />
-            ) : talking && open ? (
+            ) : (
               <div data-transcript="" className="flex min-h-0 flex-1 flex-col">
-                <TranscriptPanel
+                <TranscriptTab
                   target={target}
-                  src={talking}
-                  clips={clips.filter(
-                    (laid) => laid.clip.src === talking && laid.file === open.src
-                  )}
+                  scene={open?.id}
+                  recordings={heard}
+                  selected={selectedRecording}
                   timeMs={timeMs}
                   onSeek={(ms) => seek(ms)}
-                  onRemove={(ranges) => {
-                    const endMs = endOf(open.src)
+                  onRemove={(recording, ranges) => {
+                    const endMs = endOf(recording.file)
                     edit((sources) =>
-                      removeMediaRanges(sources, open.src, talking, ranges, {
+                      removeMediaRanges(sources, recording.file, recording.src, ranges, {
                         ...(endMs === undefined ? {} : { endMs }),
                       })
                     )
                   }}
                 />
               </div>
-            ) : (
-              <p className="m-0 p-4 text-[13px] text-muted-foreground">{messages.selectSpeech}</p>
             )}
           </div>
         </aside>
