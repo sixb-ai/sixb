@@ -33,6 +33,11 @@ export interface ArtifactFrameHandle {
     params: Extract<FrameRequest, { method: Method }>["params"],
     transfer?: Transferable[]
   ): Promise<void>
+  /**
+   * The frame's window, for a protocol of what it plays: a video's HyperFrames runtime, which the
+   * app drives in messages of its own. Null until the frame loads.
+   */
+  window(): Window | null
 }
 
 /** A frame link lasts an hour; one is reused while it has most of that left. */
@@ -77,8 +82,10 @@ export function ArtifactFrame({
   start,
   decorative = false,
   editable = false,
+  sound = false,
   fallback,
   failure,
+  onFailure,
   overlay,
 }: {
   readonly version: ArtifactVersion
@@ -94,6 +101,11 @@ export function ArtifactFrame({
    * and types into them once asked to with `edit`.
    */
   readonly editable?: boolean
+  /**
+   * A video, which plays its sound when the reader starts it in the app: the frame may play media
+   * with sound once the app's page has the reader's gesture, as Chrome asks of a frame.
+   */
+  readonly sound?: boolean
   readonly onEvent?: (event: FrameEvent) => void
   readonly className?: string
   /** What shows where the frame will be while it loads, and under it as it fades in. */
@@ -104,6 +116,8 @@ export function ArtifactFrame({
    * viewport.
    */
   readonly failure?: ReactNode
+  /** Told once the frame cannot open, as `failure` shows: for a caller that says it its own way. */
+  readonly onFailure?: () => void
   /**
    * What the app draws over the frame, in the frame's own pixels, once the frame shows: another
    * artifact a deck embeds. Clicks reach the frame except where the overlay draws.
@@ -123,7 +137,7 @@ export function ArtifactFrame({
   const [shown, setShown] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState<string | null>(null)
   const [loaded, setLoaded] = useState<string | null>(null)
-  const reportsFailure = failure !== undefined
+  const reportsFailure = failure !== undefined || onFailure !== undefined
   const queries = useQueryClient()
   // What the frame shows when it calls: a pinned version runs that version's queries.
   const shows = useRef(version)
@@ -168,7 +182,11 @@ export function ArtifactFrame({
       target.postMessage({ protocol: FRAME_PROTOCOL, id, method, params }, "*", transfer)
     })
   }, [])
-  useImperativeHandle(handle, () => ({ send }), [send])
+  useImperativeHandle(
+    handle,
+    () => ({ send, window: () => iframe.current?.contentWindow ?? null }),
+    [send]
+  )
 
   // A frame that loads again, or goes, answers nothing it was asked before.
   // biome-ignore lint/correctness/useExhaustiveDependencies: each new source is a new frame.
@@ -329,11 +347,18 @@ export function ArtifactFrame({
   // A link that fails for a later mount leaves a frame that has one as it is.
   const failed =
     reportsFailure && (source === undefined ? frame.isError : timedOut === source && !isReady)
+  const onFailureRef = useRef(onFailure)
+  onFailureRef.current = onFailure
+  useEffect(() => {
+    if (failed) onFailureRef.current?.()
+  }, [failed])
 
   // The frame is transparent: once it shows, nothing stays beneath it to show through where its
   // page bounces past an end.
   const beneath = failed ? (
-    <div className="absolute inset-0 flex">{failure}</div>
+    failure === undefined ? null : (
+      <div className="absolute inset-0 flex">{failure}</div>
+    )
   ) : shown === source ? null : (
     fallback
   )
@@ -355,7 +380,7 @@ export function ArtifactFrame({
           )}
           sandbox="allow-scripts allow-modals"
           referrerPolicy="no-referrer"
-          allow="fullscreen"
+          allow={sound ? "autoplay; fullscreen" : "fullscreen"}
           {...(decorative
             ? { tabIndex: -1, "aria-hidden": true, style: { pointerEvents: "none" } }
             : {})}

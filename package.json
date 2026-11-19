@@ -45,6 +45,7 @@
     "generate:sandbox-cli": "bun --filter @sixb/cli-core generate:sandbox-cli",
     "generate:search-script": "bun --filter @sixb/agent generate:search-script",
     "generate:frame-editor": "bun --filter @sixb/app generate:frame-editor",
+    "generate:hyperframes-runtime": "bun --filter @sixb/core generate:hyperframes-runtime",
     "docs:dev": "bun --filter @sixb/docs dev",
     "docs:build": "bun --filter @sixb/docs build",
     "docs:typecheck": "bun --filter @sixb/docs typecheck",

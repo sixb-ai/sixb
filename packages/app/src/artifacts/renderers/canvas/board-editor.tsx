@@ -28,6 +28,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { CommentPin, cardPlace, DraftCard } from "../../comments/composer"
 import { formatFileSize } from "../../file-size"
 import { ArtifactFrame } from "../../frame"
 import { useLiveStoredFiles } from "../../live/boards"
@@ -38,14 +39,7 @@ import { type ArtifactVersion, versionFileSource } from "../../queries"
 import { useFrameEditing, useLiveFrame } from "../live-frame"
 import { type CanvasImage, ImagePanel, type StyleChange, StylePanel } from "./board-properties"
 import { boardAttribute, boardInlineStyle, boardReferencePath } from "./board-source"
-import {
-  CommentPin,
-  cardPlace,
-  DraftCard,
-  type DraftPlace,
-  type PinPlace,
-  pinPoint,
-} from "./comment-pins"
+import { type DraftPlace, type PinPlace, pinPoint } from "./comment-pins"
 import type { PageSize } from "./page-size"
 
 // A board opened over the canvas, as its page runs in its frame, and what the reader does on it:
@@ -122,6 +116,7 @@ export function BoardStage({
   readonly onZoom?: (zoom: FrameZoom) => void
 }) {
   const messages = useArtifactMessages().canvas
+  const newPin = useArtifactMessages().comments.newPin
   const frame = useLiveFrame({ version, file: board.file, live })
   const editing = mode === "edit" && canvas !== null
   const [selected, setSelected] = useState<FrameEditTarget | null>(null)
@@ -290,7 +285,7 @@ export function BoardStage({
             className="absolute"
             style={{ left: draft.point.x * size.w * scale, top: draft.point.y * size.h * scale }}
           >
-            <CommentPin label={messages.comments.newPin} active resolved={false} draft />
+            <CommentPin label={newPin} active resolved={false} draft />
             <div
               className={cn("absolute", draftAbove(draft) ? "bottom-9" : null)}
               style={{

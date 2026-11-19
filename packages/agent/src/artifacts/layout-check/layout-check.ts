@@ -116,7 +116,7 @@ export async function checkLayout(
     readonly timeoutMs?: number
   } & (
     | {
-        readonly layout: FrameLayout
+        readonly layout: Exclude<FrameLayout, "video">
         readonly entry: Uint8Array
         /** A designed document's paper, which its runtime cuts it into pages by. */
         readonly paper?: DocumentPaper

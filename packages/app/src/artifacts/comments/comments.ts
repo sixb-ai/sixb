@@ -9,12 +9,12 @@ import {
 import { listArtifactCommentsOptions, listArtifactCommentsQueryKey } from "@sixb/client/hooks"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
-import { useCurrentUser } from "../../../session"
-import { useSharedGuest } from "../../../shared-session"
-import { useArtifactMessages } from "../../messages"
+import { useCurrentUser } from "../../session"
+import { useSharedGuest } from "../../shared-session"
+import { useArtifactMessages } from "../messages"
 
-// The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one by the
-// `artifact.commented` events the viewer follows, and changed in place by the reader's own
+// The comments on an artifact: read once, kept in step as anyone adds, resolves or deletes one by
+// the `artifact.commented` events the viewer follows, and changed in place by the reader's own
 // actions, so the panel answers at once.
 
 export type ArtifactComment = ListArtifactCommentsResponse["comments"][number]
@@ -24,7 +24,7 @@ export type ArtifactCommentAnchor = ArtifactComment["anchor"]
 export interface CommentThread {
   readonly comment: ArtifactComment
   readonly replies: readonly ArtifactComment[]
-  /** Its place among the canvas's threads, from 1, as its pin shows it. */
+  /** Its place among the artifact's threads, from 1, as its pin shows it. */
   readonly number: number
 }
 
@@ -208,7 +208,7 @@ export function useCommentAuthors(): (
   const user = useCurrentUser()
   const guest = useSharedGuest()
   const all = useArtifactMessages()
-  const messages = all.canvas.comments
+  const messages = all.comments
   const unnamed = guest ? all.live.teamMember : null
 
   return ({ author, authorName, origin }) => {
