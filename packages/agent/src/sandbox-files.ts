@@ -224,6 +224,59 @@ export async function uploadSandboxFile(
 }
 
 /**
+ * Past this, a file moves between the worker and the sandbox through the API, by the sandbox's own
+ * `sixb`, never through a command's output or `writeFiles`: either holds it whole in the worker's
+ * memory, and a command's output, as base64, must fit what its provider keeps. Below it, a direct
+ * read or write is quicker than an upload's or a download's few requests.
+ */
+export const SANDBOX_INLINE_BYTES = 8 * 1024 * 1024
+
+/**
+ * Puts files of artifact versions in the sandbox, each fetched by the run's own `sixb` from the
+ * API as the run's requester reads it: the bytes never pass through the worker. A file that does
+ * not arrive at its size fails them all.
+ */
+export async function downloadArtifactFiles(
+  handle: AgentSandboxHandle,
+  files: readonly {
+    readonly artifactId: string
+    readonly version: number
+    /** The file's path in the version. */
+    readonly path: string
+    readonly sizeBytes: number
+    /** Absolute, in the sandbox. */
+    readonly to: string
+  }[],
+  options: SandboxCommandOptions
+): Promise<void> {
+  if (files.length === 0) return
+
+  const result = await handle.sandbox.runCommand(
+    "bash",
+    [
+      "-c",
+      DOWNLOAD_ARTIFACT_FILES_SCRIPT,
+      "download",
+      ...files.flatMap((file) => [
+        file.artifactId,
+        String(file.version),
+        file.path,
+        file.to,
+        String(file.sizeBytes),
+      ]),
+    ],
+    { env: { ...(handle.env ?? {}) }, timeout: options.timeoutMs, signal: options.signal }
+  )
+  options.signal.throwIfAborted()
+  if (result.exitCode !== 0 || result.timedOut) {
+    throw new SandboxFileError(
+      "failed",
+      `artifact files could not be fetched (${cliErrorMessage(result.stderr) ?? `exit ${result.exitCode}`})`
+    )
+  }
+}
+
+/**
  * Runs a script that starts with {@link CHECKED_FILE_PRELUDE} on `input.path`, answering for the
  * prelude's own refusals.
  */
@@ -501,6 +554,16 @@ head -c "$max_bytes" "$resolved" | base64 | tr -d '\\n'`
 const STAT_SANDBOX_FILE_SCRIPT = `# sixb-stat-sandbox-file
 ${CHECKED_FILE_PRELUDE}
 printf '%s\\n' "$size"`
+
+// Fetches each \`<artifact> <version> <path> <to> <bytes>\` with the run's own \`sixb\`, which writes
+// it whole or not at all, and refuses one that is not as large as its version says.
+const DOWNLOAD_ARTIFACT_FILES_SCRIPT = `set -eu
+while [ "$#" -gt 0 ]; do
+  mkdir -p -- "$(dirname -- "$4")"
+  "\${SIXB_BIN_DIR:?}/sixb" files download artifact "$1" "$2" --path "$3" --output "$4" >/dev/null
+  [ "$(wc -c < "$4" | tr -d ' ')" = "$5" ] || { echo "$4 did not arrive whole" >&2; exit 1; }
+  shift 5
+done`
 
 // The run's own \`sixb\`, not whichever one PATH finds first: a project's may shadow it. Its own
 // exit codes would read as the prelude's, so a failure exits 5, its error on stderr.
