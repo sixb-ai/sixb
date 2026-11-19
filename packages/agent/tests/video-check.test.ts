@@ -98,6 +98,40 @@ describe("a video's check", () => {
     ])
   })
 
+  // Guard proof: report the CDN requests as any finding (drop `unreachable` in videoWarnings);
+  // the Agent is then told its fonts and GSAP fail to load, and changes a video that works.
+  test("tells a sandbox without the CDNs from a video that fails to load them", () => {
+    const failed = (url: string) => ({
+      code: "request_failed",
+      severity: "error" as const,
+      message: `Failed to load ${url.split("/").at(-1)}: net::ERR_INTERNET_DISCONNECTED`,
+      url,
+      time: 0,
+    })
+    const warnings = videoWarnings(
+      [
+        failed("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600&display=block"),
+        failed("https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"),
+        {
+          code: "request_failed",
+          severity: "error",
+          message: "Failed to load logo.svg: net::ERR_FILE_NOT_FOUND",
+          url: "file:///work/media/logo.svg",
+          time: 0,
+        },
+      ],
+      outline([4_000])
+    )
+
+    expect(warnings.map((warning) => warning.code)).toEqual([
+      "video_cdn_unreachable",
+      "video_request_failed",
+    ])
+    expect(warnings[0]?.message).toStartWith(
+      "This sandbox cannot reach fonts.googleapis.com, cdn.jsdelivr.net, so the check ran without the 2 files"
+    )
+  })
+
   test("names how many more it found past the first twelve", () => {
     const findings = Array.from({ length: 15 }, (_, index) => ({
       code: "canvas_overflow",
