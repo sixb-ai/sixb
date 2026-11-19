@@ -26,15 +26,20 @@ function outline(lengths: readonly number[]): VideoOutline {
 }
 
 describe("a video's check", () => {
+  // Guard proof: sample a scene's start at 15% of its length again; the 1.4 s scene is then
+  // snapshotted 0.21 s in, while its caption still fades in, and reads as unreadable.
   test("snapshots the first frame, then each scene once what comes in has come in, at its middle, and before it cuts", () => {
-    expect(videoInstants(outline([4_000, 1_000]))).toEqual([
+    expect(videoInstants(outline([4_000, 1_400, 900]))).toEqual([
       { atMs: 0, scene: "s1" },
       { atMs: 400, scene: "s1" },
       { atMs: 2_000, scene: "s1" },
       { atMs: 3_750, scene: "s1" },
-      { atMs: 4_150, scene: "s2" },
-      { atMs: 4_500, scene: "s2" },
-      { atMs: 4_900, scene: "s2" },
+      { atMs: 4_400, scene: "s2" },
+      { atMs: 4_700, scene: "s2" },
+      { atMs: 5_260, scene: "s2" },
+      { atMs: 5_700, scene: "s3" },
+      { atMs: 5_850, scene: "s3" },
+      { atMs: 6_210, scene: "s3" },
     ])
   })
 

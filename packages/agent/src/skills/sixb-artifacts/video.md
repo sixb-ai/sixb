@@ -204,7 +204,7 @@ work/footage/talk.mp4`. Never publish a proxy in its original's place.
 Publishing refuses a scene whose file or host is missing, a start it cannot resolve, a file from
 outside the video, and limits passed, naming the scene. Then Sixb checks the published video in the
 sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
-its first frame and each scene's start, middle and end, and its warnings. HyperFrames finds text
+its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings. HyperFrames finds text
 off the frame, text under 28 px (what a phone reads at 1080p), low contrast and a silent clip;
 the check measures a frame with nearly nothing on it, a scene under a second, an end card past
 4.5 s and a teaser past 45 s. Each names its scene and when: fix each, unless the user asked for

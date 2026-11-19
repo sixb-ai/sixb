@@ -17,6 +17,8 @@ const LIBRARY = "lib/layout-check"
 const CHECK_TIMEOUT_MS = 240_000
 /** The most frames a check snapshots, whatever the video's length: its contact sheet stays legible. */
 const MAX_FRAMES = 24
+/** How far into a scene what it brings in has arrived: the guide eases it in over 0.4 to 0.8 s. */
+const ARRIVED_MS = 400
 /** The most a check reports of HyperFrames' findings; the contact sheet shows the rest. */
 const MAX_WARNINGS = 12
 
@@ -252,6 +254,10 @@ export async function checkVideo(input: {
  * what comes in has come in, its middle, and its end, before it cuts away. Past `MAX_FRAMES`, each
  * scene's middle, and past that, frames spread evenly over the video, so a long one takes as long
  * to check as a teaser.
+ *
+ * A scene's start is sampled `ARRIVED_MS` in, as the guide brings things in, whatever its length:
+ * sooner, a caption that fades in is caught half seen and reads as unreadable. Only a scene too
+ * short for it is sampled a third of the way in, before its middle.
  */
 export function videoInstants(outline: VideoOutline): Omit<VideoFrame, "path">[] {
   const first = { atMs: 0, scene: sceneAt(outline, 0) }
@@ -271,7 +277,7 @@ function sceneInstants(outline: VideoOutline, most: number): Omit<VideoFrame, "p
     return scenes.flatMap((scene) => {
       const end = scene.startMs + scene.durationMs
       return [
-        scene.startMs + Math.min(400, scene.durationMs * 0.15),
+        scene.startMs + Math.min(ARRIVED_MS, scene.durationMs / 3),
         scene.startMs + scene.durationMs / 2,
         end - Math.min(250, scene.durationMs * 0.1),
       ].map((atMs) => ({ atMs: Math.round(atMs), scene: scene.id }))
