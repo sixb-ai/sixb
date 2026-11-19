@@ -464,7 +464,9 @@ export function VideoPlayer({
       {/* Only the bar itself takes the pointer: the shade above it leaves the frame's clicks. */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-0 z-20 rounded-b-[inherit] bg-gradient-to-t from-black/75 via-black/35 to-transparent pt-16 transition-opacity duration-300 motion-reduce:transition-none",
+          // A short, dense shade: the bar reads on a light frame, and leaves the rest of it be.
+          "pointer-events-none absolute inset-x-0 bottom-0 z-20 rounded-b-[inherit] bg-gradient-to-t from-black/80 via-black/50 via-45% to-transparent transition-opacity duration-300 motion-reduce:transition-none",
+          compact && !filling ? "pt-5" : "pt-10",
           controls.shown && !broken && !commenting.draft
             ? "opacity-100 *:pointer-events-auto"
             : "opacity-0"
@@ -763,25 +765,33 @@ function Failure({
 }
 
 /**
- * Whether the controls show: always while the video is paused, and while it plays until the
- * pointer rests a moment, unless it is over the controls or the focus is in them.
+ * Whether the controls show: while the video plays, until the pointer rests a moment; while it is
+ * paused, until the pointer leaves it or a finger hides them, so a paused frame reads whole. Either
+ * way they stay while the pointer is over them or the focus is in them.
  */
 function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boolean) {
   const [active, setActive] = useState(true)
   const [held, setHeld] = useState(false)
   const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const moving = useRef(playing)
+  moving.current = playing
 
   const wake = useCallback(() => {
     setActive(true)
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => setActive(false), CONTROLS_IDLE_MS)
+    if (moving.current) timer.current = setTimeout(() => setActive(false), CONTROLS_IDLE_MS)
   }, [])
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  // Once it plays, they go after a moment unless the reader moves.
+  // Once it plays, they go after a moment unless the reader moves; paused, they come back.
   useEffect(() => {
-    if (playing) wake()
+    if (playing) {
+      wake()
+      return
+    }
+    clearTimeout(timer.current)
+    setActive(true)
   }, [playing, wake])
 
   // A key moves focus into them, and keeps them.
@@ -801,7 +811,7 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
   }, [screen])
 
   return {
-    shown: !playing || active || held || focused,
+    shown: active || held || focused,
     wake,
     toggle: () => {
       if (active) {
@@ -815,7 +825,9 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
       if (event.pointerType === "mouse") wake()
     },
     onPointerLeave: (event: ReactPointerEvent) => {
-      if (event.pointerType === "mouse" && playing) setActive(false)
+      if (event.pointerType !== "mouse") return
+      clearTimeout(timer.current)
+      setActive(false)
     },
     hold: () => setHeld(true),
     release: () => setHeld(false),

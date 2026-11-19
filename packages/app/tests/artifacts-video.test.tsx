@@ -6,15 +6,12 @@ import { act, cleanup, fireEvent, render, within } from "@testing-library/react"
 import { type ReactNode, useLayoutEffect } from "react"
 import { versionSummary } from "../src/artifacts/card-details"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
-import { frameLinkKey } from "../src/artifacts/frame"
-import { en, fr } from "../src/artifacts/messages"
 import { CommentModeHint } from "../src/artifacts/comments/commenting"
 import type { CommentThread } from "../src/artifacts/comments/comments"
+import { frameLinkKey } from "../src/artifacts/frame"
+import { en, fr } from "../src/artifacts/messages"
 import { chapterAt } from "../src/artifacts/renderers/video/chapters"
-import {
-  type VideoCommenting,
-  VideoCommentPins,
-} from "../src/artifacts/renderers/video/comments"
+import { type VideoCommenting, VideoCommentPins } from "../src/artifacts/renderers/video/comments"
 import {
   controlMessage,
   HYPERFRAMES_PROTOCOL_VERSION,
@@ -548,6 +545,19 @@ describe("the player", () => {
 
     await runtime({ ...RUNTIME, type: "state", currentTime: 7, isPlaying: false, ended: true })
     expect(bigPlay()?.getAttribute("aria-label")).toBe("Play again")
+  })
+
+  test("leaves a paused frame whole once the pointer leaves it, and shows its controls again on it", async () => {
+    // Reproduce by showing the controls whenever the video is paused in `useControlsShown`: they
+    // stay over the frame's own captions.
+    const { screen } = await openPlayer()
+    expect(screen.hasAttribute("data-controls")).toBe(true)
+
+    fireEvent.pointerLeave(screen, { pointerType: "mouse" })
+    expect(screen.hasAttribute("data-controls")).toBe(false)
+
+    fireEvent.pointerMove(screen, { pointerType: "mouse" })
+    expect(screen.hasAttribute("data-controls")).toBe(true)
   })
 
   test("leaves the picture clean once the reader moved the playhead, before any play", async () => {
