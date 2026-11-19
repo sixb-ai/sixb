@@ -11,11 +11,13 @@ import {
 import { readVideoComposition, type VideoComposition } from "../src/artifacts/video/composition"
 import {
   applyVideoEdit,
+  cutRange,
   duplicateScene,
   insertClip,
   keepClipRanges,
   moveScene,
   removeClip,
+  removeMediaRanges,
   removeScene,
   setClipSound,
   setClipTiming,
@@ -170,6 +172,8 @@ describe("reading a composition's clips", () => {
 })
 
 describe("editing scenes", () => {
+  // Guard proof: leave the root's data-duration as written while an operation moves scenes
+  // (openRoot in edit.ts). A longer scene then ends past it, and every step after reads no video.
   test("a scene made longer moves what follows, and the video's length and soundtrack follow", () => {
     const result = setSceneLength(SOURCES, "demo", 10_000)
     const files = applied(result)
@@ -186,6 +190,8 @@ describe("editing scenes", () => {
     expect(size(result)).toBeLessThan(12)
   })
 
+  // Guard proof: write the root's data-duration, then its data-poster, in two steps in fitRoot:
+  // between them the poster lies past the end, and the edit is refused.
   test("a shorter video keeps its poster within it", () => {
     const files = applied(setSceneLength(SOURCES, "demo", 1000))
     const shown = composition(files)
@@ -217,6 +223,17 @@ describe("editing scenes", () => {
     const index = files.get("index.html") as string
     expect(index.indexOf('id="outro"')).toBeLessThan(index.indexOf('id="hook"'))
     expect(composition(files).durationMs).toBe(15_000)
+  })
+
+  // Guard proof: read the moved host's new place after removing it from index.html, in
+  // moveScene. The outro, which starts after the demo, then names no scene, and this is refused.
+  test("a scene others follow moves first, and they follow the scene now before them", () => {
+    const files = applied(moveScene(SOURCES, "demo", 0))
+    expect(times(files)).toEqual([
+      ["demo", 0, 8000],
+      ["hook", 8000, 3000],
+      ["outro", 11_000, 4500],
+    ])
   })
 
   test("moving a scene to its place changes nothing", () => {
@@ -434,6 +451,42 @@ describe("cutting by the transcript", () => {
     expect(demoClips(files).filter((clip) => clip.caption)).toHaveLength(1)
   })
 
+  test("a range cut through a scene splits the recordings it crosses, and closes the gap", () => {
+    // 1–2 s of the demo: talk is split around it, the first caption loses its middle.
+    const files = applied(cutRange(SOURCES, "scenes/demo.html", { startMs: 1000, endMs: 2000 }))
+
+    expect(
+      demoClips(files).map((clip) => [clip.ref, clip.startMs, clip.durationMs, clip.mediaStartMs])
+    ).toEqual([
+      ["talk", 0, 1000, 2000],
+      ["talk-2", 1000, 3000, 4000],
+      ["screen", 4000, 3000, 0],
+      ["#3", 500, 500, 0],
+      ["#4", 1500, 2000, 0],
+    ])
+    expect(times(files)[1]).toEqual(["demo", 2500, 7000])
+  })
+
+  test("a recording's stretch is cut wherever a clip plays it", () => {
+    const split = applied(splitClip(SOURCES, "scenes/demo.html", "talk", 2000))
+    // talk plays 2–4 s of its file, talk-2 4–7 s: cut 3.5–4.5 s, half in each.
+    const files = applied(
+      removeMediaRanges(split, "scenes/demo.html", "media/talk.mp4", [
+        { startMs: 3500, endMs: 4500 },
+      ]),
+      split
+    )
+    expect(
+      demoClips(files)
+        .slice(0, 3)
+        .map((clip) => [clip.ref, clip.startMs, clip.durationMs, clip.mediaStartMs])
+    ).toEqual([
+      ["talk", 0, 1500, 2000],
+      ["talk-2", 1500, 2500, 4500],
+      ["screen", 4000, 3000, 0],
+    ])
+  })
+
   test("keeping nothing is refused", () => {
     const result = keepClipRanges(SOURCES, "scenes/demo.html", "talk", [])
     expect("error" in result && result.error).toContain("remove it instead")
@@ -450,6 +503,20 @@ describe("minimal changes", () => {
         changes: [{ index: DEMO.indexOf('data-duration="3"') + 15, remove: 1, insert: "2.5" }],
       },
     ])
+  })
+
+  test("a scene moved moves its host's line whole, and rewrites only the starts that change", () => {
+    const result = moveScene(SOURCES, "outro", 0)
+    if ("error" in result) throw new Error(result.error)
+    const [index] = result.edit
+    const changes = index && "changes" in index ? index.changes : []
+    const outroLine = INDEX.split("\n").find((line) => line.includes('id="outro"')) ?? ""
+
+    // The outro's line comes first, with the hook's start, "0", now "outro"; its old line goes.
+    expect(changes).toHaveLength(2)
+    expect(changes[0]?.insert).toContain('data-composition-src="scenes/outro.html"')
+    expect(changes[0]?.insert.endsWith('data-start="outro')).toBe(true)
+    expect(changes[1]).toMatchObject({ remove: outroLine.length + 1, insert: "" })
   })
 
   test("an edit undone by its inverse leaves the files as they were", () => {

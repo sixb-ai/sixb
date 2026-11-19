@@ -1,5 +1,5 @@
 import { ARTIFACT_LIMITS } from "../limits"
-import { diffSequences, diffText } from "../live/diff"
+import { diffSequences, diffText, textLines } from "../live/diff"
 import {
   parseVideoRoot,
   readVideoComposition,
@@ -112,20 +112,19 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
     order.splice(target, 0, moved)
 
     // The host moves beside its new neighbour: after the scene it follows, or before the first.
+    // Both places are read before either changes: without its host, a scene chained to the moved
+    // one names no scene.
     const neighbour = target > 0 ? order[target - 1] : order[1]
     if (neighbour) {
-      const block = lineBlock(work.text(VIDEO_ENTRY), hostOf(work, moved.id).host.element)
-      const text = work.text(VIDEO_ENTRY).slice(block.start, block.end)
-      work.replace(VIDEO_ENTRY, block.start, block.end, "")
+      const index = work.text(VIDEO_ENTRY)
+      const block = lineBlock(index, hostOf(work, moved.id).host.element)
+      const beside = lineBlock(index, hostOf(work, neighbour.id).host.element)
+      const text = index.slice(block.start, block.end)
 
-      const next = hostOf(work, neighbour.id)
-      const at = lineBlock(work.text(VIDEO_ENTRY), next.host.element)
-      work.replace(
-        VIDEO_ENTRY,
-        target > 0 ? at.end : at.start,
-        target > 0 ? at.end : at.start,
-        text
-      )
+      let at = target > 0 ? beside.end : beside.start
+      if (at > block.start) at -= block.end - block.start
+      work.replace(VIDEO_ENTRY, block.start, block.end, "")
+      work.replace(VIDEO_ENTRY, at, at, text)
     }
 
     // Each scene whose predecessor changed starts after its new one.
@@ -432,8 +431,7 @@ export function removeClip(
 
     const block = lineBlock(work.text(file), found.source.element)
     work.replace(file, block.start, block.end, "")
-    if (options.ripple)
-      rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }], new Set())
+    if (options.ripple) rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }])
   })
 }
 
@@ -479,23 +477,66 @@ export function keepClipRanges(
     }
     if (cut.length === 0) return
 
-    let startMs = found.startMs
-    const parts = clipParts(
-      work,
-      file,
-      found,
-      kept.map((range) => {
-        const part = {
-          startMs,
-          mediaStartMs: range.startMs,
-          durationMs: range.endMs - range.startMs,
+    rippleRemove(work, file, cut)
+  })
+}
+
+/**
+ * Cuts stretches of a recording, in milliseconds into its file, wherever the composition plays
+ * them: each clip of `src` loses what it played of them, as {@link keepClipRanges} cuts one
+ * clip, and what followed moves back. A transcript's words cut out are such stretches.
+ */
+export function removeMediaRanges(
+  sources: VideoSources,
+  file: string,
+  src: string,
+  ranges: readonly VideoRange[],
+  options: { readonly endMs?: number } = {}
+): VideoEditResult {
+  return run(sources, (work) => {
+    const removed = mergeRanges(ranges)
+    const cut: VideoRange[] = []
+    for (const clip of timelineOf(work, file).clips) {
+      if (clip.src !== src || !playsFile(clip)) continue
+
+      const from = clip.mediaStartMs
+      const to = from + clipEnd(clip, options.endMs) - clip.startMs
+      for (const range of removed) {
+        const startMs = Math.max(from, range.startMs)
+        const endMs = Math.min(to, range.endMs)
+        if (endMs > startMs) {
+          cut.push({ startMs: clip.startMs + startMs - from, endMs: clip.startMs + endMs - from })
         }
-        startMs += part.durationMs
-        return part
-      })
+      }
+    }
+    if (cut.length === 0) return
+
+    const left = timelineOf(work, file).clips.some(
+      (clip) =>
+        clip.src === src &&
+        subtractRanges(
+          { startMs: clip.startMs, endMs: clipEnd(clip, options.endMs) },
+          mergeRanges(cut)
+        ).some((piece) => piece.endMs - piece.startMs >= MIN_CLIP_MS)
     )
-    replaceClip(work, file, found, parts.html)
-    rippleRemove(work, file, cut, new Set(parts.refs))
+    if (!left) throw new EditError("Nothing of the recording would be left: remove it instead.")
+    rippleRemove(work, file, cut)
+  })
+}
+
+/**
+ * Takes a stretch out of a composition, in milliseconds from its start, as a magnetic timeline
+ * deletes a range: every clip loses what played then, a recording cut through is split around it,
+ * and what followed moves back, the scene's end included.
+ */
+export function cutRange(sources: VideoSources, file: string, range: VideoRange): VideoEditResult {
+  return run(sources, (work) => {
+    const startMs = Math.max(0, Math.round(range.startMs))
+    const endMs = Math.round(range.endMs)
+    if (endMs - startMs < MIN_CLIP_MS) {
+      throw new EditError(`A cut lasts at least ${MIN_CLIP_MS} ms.`)
+    }
+    rippleRemove(work, file, [{ startMs, endMs }])
   })
 }
 
@@ -646,18 +687,80 @@ class Working {
 }
 
 /**
- * The changes from `before` to `after`: the live layer's line diff, each changed run then narrowed
- * to the characters that changed in it, so two values written again on one line are two changes.
+ * The changes from `before` to `after`: the live layer's line diff, and within a run of lines
+ * changed one for one, each line narrowed to the characters that changed in it, so two values
+ * written again on one line are two changes. A run that adds or removes lines, such as a host
+ * moved or a clip split, stays whole: its lines are what changed.
  */
 function textChanges(before: string, after: string): VideoTextChange[] {
-  return diffText(before, after).flatMap(({ start, end, insert }) => {
-    const removed = before.slice(start, end).split("")
-    return diffSequences(removed, insert.split("")).map((hunk) => ({
-      index: start + hunk.aStart,
-      remove: hunk.aEnd - hunk.aStart,
-      insert: insert.slice(hunk.bStart, hunk.bEnd),
-    }))
+  return diffText(before, after).flatMap((edit) => {
+    // The diff narrows each run to its characters: the lines around them are read whole.
+    const start = before.lastIndexOf("\n", edit.start - 1) + 1
+    const lineEnd = before.indexOf("\n", edit.end)
+    const end = lineEnd < 0 ? before.length : lineEnd
+    const insert = before.slice(start, edit.start) + edit.insert + before.slice(edit.end, end)
+
+    const removed = textLines(before.slice(start, end))
+    const added = textLines(insert)
+    if (removed.length !== added.length || removed.length === 0) {
+      return [{ index: edit.start, remove: edit.end - edit.start, insert: edit.insert }]
+    }
+
+    const changes: VideoTextChange[] = []
+    let at = start
+    removed.forEach((line, index) => {
+      const next = added[index] ?? ""
+      // Two lines that share little are two elements, one in the other's place: the line goes
+      // whole, rather than one element's characters becoming another's.
+      if (!alike(line, next)) {
+        changes.push({ index: at, remove: line.length, insert: next })
+        at += line.length
+        return
+      }
+      // Word by word: a value written again is one change, never a few of its letters.
+      const from = tokens(line)
+      const to = tokens(next)
+      const fromAt = offsets(from)
+      const toAt = offsets(to)
+      for (const hunk of diffSequences(from, to)) {
+        const index = fromAt[hunk.aStart] ?? 0
+        changes.push({
+          index: at + index,
+          remove: (fromAt[hunk.aEnd] ?? line.length) - index,
+          insert: next.slice(toAt[hunk.bStart] ?? 0, toAt[hunk.bEnd] ?? next.length),
+        })
+      }
+      at += line.length
+    })
+    return changes
   })
+}
+
+/** A line's words, spaces, and each mark between them, which together write it again. */
+function tokens(line: string): string[] {
+  return line.match(/\s+|[A-Za-z0-9_.:+-]+|[^\sA-Za-z0-9_.:+-]/g) ?? []
+}
+
+/** Where each token starts, and the end past the last. */
+function offsets(parts: readonly string[]): number[] {
+  const at = [0]
+  for (const part of parts) at.push((at.at(-1) ?? 0) + part.length)
+  return at
+}
+
+/** Whether two lines are one written again: what they start and end alike is most of them. */
+function alike(left: string, right: string): boolean {
+  let head = 0
+  while (head < left.length && head < right.length && left[head] === right[head]) head += 1
+  let tail = 0
+  while (
+    tail < left.length - head &&
+    tail < right.length - head &&
+    left[left.length - 1 - tail] === right[right.length - 1 - tail]
+  ) {
+    tail += 1
+  }
+  return (head + tail) * 2 >= Math.max(left.length, right.length)
 }
 
 /** Runs an operation on a working copy, and checks that what it leaves is still a video. */
@@ -940,23 +1043,20 @@ function ripple(
 }
 
 /**
- * Takes stretches out of a composition's timeline: each clip but those `except` names moves back
- * by what was cut before it, is shortened by what was cut of it, starts as far into its file as
- * its head was cut, and is removed when nothing of it is left. The scene ends as much sooner.
+ * Takes stretches out of a composition's timeline: each clip moves back by what was cut before it
+ * and loses what was cut of it. A recording cut through is split around the cut, each part
+ * playing on from where its file was cut; another clip is only shortened, and one with nothing
+ * left is removed. The scene ends as much sooner.
  */
-function rippleRemove(
-  work: Working,
-  file: string,
-  cut: readonly VideoRange[],
-  except: ReadonlySet<string>
-): void {
+function rippleRemove(work: Working, file: string, cut: readonly VideoRange[]): void {
   const spans = mergeRanges(cut)
   const map = (t: number) =>
     t - spans.reduce((sum, span) => sum + Math.max(0, Math.min(t, span.endMs) - span.startMs), 0)
 
-  const plan = new Map<string, Readonly<Record<string, string | null>> | "remove">()
+  const taken = takenNames(work)
+  const plan = new Map<string, ClipChange>()
   for (const clip of timelineOf(work, file).clips) {
-    if (except.has(clip.ref) || !numericStart(work, file, clip)) continue
+    if (!numericStart(work, file, clip)) continue
 
     const start = map(clip.startMs)
     if (clip.durationMs === undefined) {
@@ -964,15 +1064,36 @@ function rippleRemove(
       continue
     }
 
-    const length = map(clip.startMs + clip.durationMs) - start
-    if (length < MIN_CLIP_MS) {
+    // What is left of it, in the timeline before the cut.
+    const kept = subtractRanges(
+      { startMs: clip.startMs, endMs: clip.startMs + clip.durationMs },
+      spans
+    ).filter((piece) => piece.endMs - piece.startMs >= MIN_CLIP_MS)
+    const first = kept[0]
+    if (!first) {
       plan.set(clip.ref, "remove")
       continue
     }
 
-    const head = spans.find((span) => span.startMs <= clip.startMs && clip.startMs < span.endMs)
-    const into = head ? head.endMs - clip.startMs : 0
+    if (playsFile(clip) && kept.length > 1) {
+      const parts = clipParts(
+        work,
+        file,
+        clip,
+        kept.map((piece) => ({
+          startMs: map(piece.startMs),
+          mediaStartMs: clip.mediaStartMs + piece.startMs - clip.startMs,
+          durationMs: piece.endMs - piece.startMs,
+        })),
+        taken
+      )
+      plan.set(clip.ref, { html: parts.html })
+      continue
+    }
+
+    const length = map(clip.startMs + clip.durationMs) - start
     if (start === clip.startMs && length === clip.durationMs) continue
+    const into = first.startMs - clip.startMs
     plan.set(clip.ref, {
       "data-start": seconds(start),
       "data-duration": seconds(length),
@@ -987,6 +1108,19 @@ function rippleRemove(
   if (scene) lengthenScene(work, scene.id, Math.max(MIN_CLIP_MS, map(scene.durationMs)))
 }
 
+/** A range without the spans, sorted and apart: what is left of it, in pieces. */
+function subtractRanges(range: VideoRange, spans: readonly VideoRange[]): VideoRange[] {
+  const pieces: VideoRange[] = []
+  let cursor = range.startMs
+  for (const span of spans) {
+    if (span.endMs <= cursor || span.startMs >= range.endMs) continue
+    if (span.startMs > cursor) pieces.push({ startMs: cursor, endMs: span.startMs })
+    cursor = Math.max(cursor, span.endMs)
+  }
+  if (cursor < range.endMs) pieces.push({ startMs: cursor, endMs: range.endMs })
+  return pieces
+}
+
 /** Whether a clip's start is written as seconds, which a ripple moves; a named one follows its clip. */
 function numericStart(work: Working, file: string, clip: VideoClip): boolean {
   const at = clip.source.attributes["data-start"]
@@ -994,12 +1128,11 @@ function numericStart(work: Working, file: string, clip: VideoClip): boolean {
   return Number.isFinite(Number(attributeValue(work.text(file), at) ?? Number.NaN))
 }
 
-/** Sets attributes on, or removes, clips of one file, read once, from the last to the first. */
-function rewriteClips(
-  work: Working,
-  file: string,
-  plan: ReadonlyMap<string, Readonly<Record<string, string | null>> | "remove">
-): void {
+/** What becomes of a clip: attributes set, removed, or written again as other HTML. */
+type ClipChange = Readonly<Record<string, string | null>> | "remove" | { readonly html: string }
+
+/** Changes clips of one file, read once, from the last to the first. */
+function rewriteClips(work: Working, file: string, plan: ReadonlyMap<string, ClipChange>): void {
   if (plan.size === 0) return
 
   const clips = timelineOf(work, file)
@@ -1010,8 +1143,10 @@ function rewriteClips(
     if (change === "remove") {
       const block = lineBlock(work.text(file), clip.source.element)
       work.replace(file, block.start, block.end, "")
+    } else if (change && "html" in change && typeof change.html === "string") {
+      work.replace(file, clip.source.element.start, clip.source.element.end, change.html)
     } else if (change) {
-      setAttributes(work, file, clip.source, change)
+      setAttributes(work, file, clip.source, change as Readonly<Record<string, string | null>>)
     }
   }
 }
@@ -1028,12 +1163,12 @@ function clipParts(
     readonly startMs: number
     readonly mediaStartMs: number
     readonly durationMs: number
-  }[]
+  }[],
+  taken: Set<string> = takenNames(work)
 ): { readonly html: string; readonly refs: readonly string[] } {
   const text = work.text(file)
   const element = text.slice(clip.source.element.start, clip.source.element.end)
   const indent = lineIndent(text, clip.source.element.start)
-  const taken = takenNames(work)
   const base = clip.id ?? slug(clip.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
 
   const refs: string[] = []

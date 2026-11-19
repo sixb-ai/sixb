@@ -12,6 +12,7 @@ export {
   type VideoScene,
 } from "../video/composition"
 export {
+  cutRange,
   duplicateScene,
   insertClip,
   keepClipRanges,
@@ -20,6 +21,7 @@ export {
   moveScene,
   readVideoFileTimeline,
   removeClip,
+  removeMediaRanges,
   removeScene,
   setClipSound,
   setClipTiming,
