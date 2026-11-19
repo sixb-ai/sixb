@@ -32,6 +32,8 @@ import {
   DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
+  VIDEO_ENTRY,
+  videoFilesPlayed,
 } from "@sixb/core/internal/artifacts/publish"
 import {
   inferFileMediaType,
@@ -58,6 +60,7 @@ import {
   type LayoutCheck,
   type LayoutWarning,
 } from "./layout-check/layout-check"
+import { checkVideo, type VideoCheckFile } from "./layout-check/video-check"
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
@@ -71,13 +74,9 @@ type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** A file of up to 2 GB, uploaded from the sandbox through the API. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
-/**
- * The kinds the Agent can create today; each lands with its validator, renderer, and skill. A
- * video waits for its guide: until then the Agent revises one someone else made, by its id, but
- * does not start one.
- */
-type PublishableKind = Exclude<ArtifactKind, "video">
-const PUBLISHABLE_KINDS = ARTIFACT_KINDS.filter((kind): kind is PublishableKind => kind !== "video")
+/** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
+const PUBLISHABLE_KINDS = ARTIFACT_KINDS
+type PublishableKind = ArtifactKind
 
 // One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
 // kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
@@ -296,6 +295,14 @@ async function publish(
       files.push({ path: source.path, file: fileRef })
       contents.push({ path: source.path, bytes })
     }
+
+    // A video's copy leaves its recordings in the API: an update keeps those its scenes still play.
+    if ("artifactId" in request.target) {
+      for (const kept of keptRecordings(installed.remoteOf(request.target.artifactId), contents)) {
+        files.push(kept)
+        contents.push({ path: kept.path, file: kept.file })
+      }
+    }
     signal.throwIfAborted()
 
     published = await input.artifacts.publish({
@@ -416,7 +423,15 @@ async function publish(
         : null
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
-  if (
+  if (outline.kind === "video" && checked) {
+    try {
+      check = await checkPublishedVideo(input, { handle, published, checked, sources, signal })
+    } catch (error) {
+      if (signal.aborted) throw error
+      console.warn("[SixbAgent] The video check failed:", error)
+      check = { status: "skipped", reason: "the check failed in the sandbox" }
+    }
+  } else if (
     checked &&
     checkDirectory &&
     pages &&
@@ -474,6 +489,15 @@ async function publish(
                   screenshots: [...check.screenshots],
                   ...(check.pages ? { pages: check.pages } : {}),
                   ...(check.overview ? { overview: check.overview } : {}),
+                  ...(check.frames
+                    ? {
+                        frames: check.frames.map(({ path, atMs, scene }) => ({
+                          path,
+                          atMs,
+                          scene,
+                        })),
+                      }
+                    : {}),
                 }
               : { skipped: check.reason },
         }),
@@ -546,6 +570,148 @@ async function mergedFiles(
       error
     )
     return undefined
+  }
+}
+
+/**
+ * The recordings an update from a video's copy keeps: those the copy left in the API, which its
+ * folder does not hold, that its scenes still play. One they no longer play is left out, as a
+ * video holds only what it plays.
+ */
+function keptRecordings(
+  remote: readonly ArtifactFile[],
+  written: readonly PublishedArtifactFile[]
+): ArtifactFile[] {
+  if (remote.length === 0) return []
+
+  const own = new Set(written.map((file) => file.path))
+  const held = new Set([...own, ...remote.map((file) => file.path)])
+  const decoder = new TextDecoder()
+  const html = new Map(
+    written.flatMap((file) =>
+      "bytes" in file && /\.html?$/i.test(file.path)
+        ? [[file.path, decoder.decode(file.bytes)] as const]
+        : []
+    )
+  )
+  const index = html.get(VIDEO_ENTRY)
+  if (index === undefined) return []
+
+  const played = videoFilesPlayed(
+    index,
+    (path) => html.get(path),
+    (path) => held.has(path)
+  )
+  return remote.filter((file) => !own.has(file.path) && played.has(file.path))
+}
+
+/** The most a sound the check fetches whole weighs, when it has no proxy: a podcast's length. */
+const CHECKED_SOUND_BYTES = 64 * 1024 * 1024
+
+/**
+ * Checks a published video with HyperFrames on the files its export renders: its HTML as a frame
+ * serves it, every other file where the Agent published it, and each recording it keeps in the
+ * API fetched in, its proxy, or a sound whole when browsers play it as it is.
+ */
+async function checkPublishedVideo(
+  input: PublishToolsInput,
+  {
+    handle,
+    published,
+    checked,
+    sources,
+    signal,
+  }: {
+    readonly handle: AgentSandboxHandle
+    readonly published: PublishedArtifact
+    readonly checked: readonly PublishedArtifactFile[]
+    readonly sources: readonly PublishSource[]
+    readonly signal: AbortSignal
+  }
+): Promise<LayoutCheck> {
+  const { artifact, version } = published
+  if (version.outline.kind !== "video") throw new Error("[SixbAgent] Only a video is checked so.")
+
+  const where = new Map(sources.map((source) => [source.path, source.absolutePath]))
+  const files: VideoCheckFile[] = []
+  for (const file of checked) {
+    const { path } = file
+    if ("bytes" in file && /\.html?$/i.test(path)) {
+      files.push({ path, html: file.bytes })
+      continue
+    }
+    if ("sandboxPath" in file) {
+      files.push({ path, at: file.sandboxPath })
+      continue
+    }
+    const at = where.get(path)
+    if (at && !("file" in file)) {
+      files.push({ path, at })
+      continue
+    }
+    if ("file" in file) files.push(await remoteRecording(input, published, file, signal))
+  }
+
+  return checkVideo({
+    handle,
+    files,
+    outline: version.outline,
+    name: `${artifact.id}-r${version.revision}`,
+    signal,
+  })
+}
+
+/** How the check fetches a recording the version keeps in the API: its proxy, or a sound whole. */
+async function remoteRecording(
+  input: PublishToolsInput,
+  { artifact, version }: PublishedArtifact,
+  { path, file }: { readonly path: string; readonly file: FileRef },
+  signal: AbortSignal
+): Promise<VideoCheckFile> {
+  const media = await input.artifacts.media(artifact.id, {
+    version: version.version,
+    path,
+    derive: false,
+  })
+  signal.throwIfAborted()
+
+  const proxy = media?.parts.proxy
+  if (proxy?.status === "ready") {
+    return {
+      path,
+      fetch: [
+        "artifacts",
+        "media",
+        artifact.id,
+        "--version",
+        String(version.version),
+        "--path",
+        path,
+        "--part",
+        "proxy",
+      ],
+    }
+  }
+  if (file.mediaType?.startsWith("audio/") && file.sizeBytes <= CHECKED_SOUND_BYTES) {
+    return {
+      path,
+      fetch: [
+        "files",
+        "download",
+        "artifact",
+        artifact.id,
+        String(version.version),
+        "--path",
+        path,
+      ],
+    }
+  }
+  return {
+    path,
+    missing:
+      proxy === undefined || proxy.status === "pending"
+        ? "its proxy is still being made"
+        : `it has no proxy: ${proxy.reason}`,
   }
 }
 
@@ -925,7 +1091,11 @@ function publishSummary(output: JsonValue): string {
   if (typeof check === "object" && check !== null && !Array.isArray(check)) {
     const screenshots = Array.isArray(check.screenshots) ? check.screenshots.map(String) : []
     const kind = output.kind
-    if (typeof check.skipped === "string") {
+    if (typeof check.skipped === "string" && kind === "video") {
+      lines.push(
+        `The video check did not run: ${check.skipped}. Check it yourself before you reply: run hyperframes check and hyperframes snapshot on its folder, and look at the contact sheet (video.md, Check).`
+      )
+    } else if (typeof check.skipped === "string") {
       lines.push(
         `The layout check did not run: ${check.skipped}. ${
           kind === "page"
@@ -936,6 +1106,12 @@ function publishSummary(output: JsonValue): string {
                 ? "Read document.html and its stylesheets closely: what fits the paper, and where each page breaks."
                 : "Read index.html slide by slide."
         }`
+      )
+    } else if (kind === "video") {
+      lines.push(
+        screenshots.length > 0
+          ? videoShots(screenshots, Array.isArray(check.frames) ? check.frames : [])
+          : "The video check took no frames. Look at it yourself before you reply: run hyperframes snapshot on its folder, with a timeoutMs of a few minutes, and read the contact sheet (video.md, Check)."
       )
     } else if (screenshots.length > 0) {
       const directory = posix.dirname(screenshots[0] ?? "")
@@ -1046,6 +1222,33 @@ function toPublishError(error: unknown, tool: ArtifactToolName, path?: string): 
 function publishError(tool: ArtifactToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
   return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
+}
+
+/**
+ * Where a video's contact sheet is, and which scene each of its frames shows: `1–3 intro, 4–6
+ * demo`, as the sheet numbers them.
+ */
+function videoShots(sheets: readonly string[], frames: readonly JsonValue[]): string {
+  const scenes: { scene: string; first: number; last: number }[] = []
+  frames.forEach((frame, index) => {
+    const scene =
+      typeof frame === "object" && frame !== null && !Array.isArray(frame)
+        ? String(frame.scene)
+        : ""
+    const run = scenes.at(-1)
+    if (run?.scene === scene) run.last = index + 1
+    else scenes.push({ scene, first: index + 1, last: index + 1 })
+  })
+  const legend = scenes
+    .map(({ scene, first, last }) => `${first === last ? first : `${first}–${last}`} ${scene}`)
+    .join(", ")
+
+  const directory = posix.dirname(sheets[0] ?? "")
+  const sheet =
+    sheets.length === 1
+      ? `Its contact sheet is ${sheets[0]}`
+      : `Its contact sheets are ${sheets.join(", ")}`
+  return `Video check: HyperFrames checked the files its export renders. ${sheet}: ${frames.length} frames, numbered by scene (${legend}), each also a PNG at full size in ${directory}/. Open the contact sheet with read and look at every frame as a viewer would, fix what the warnings name and what you see, and update the artifact.`
 }
 
 /**

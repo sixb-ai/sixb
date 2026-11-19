@@ -19,7 +19,10 @@ render worker (packages/render-worker/src/media.ts)
   → putMedia: the transcript
 readers
   → sixb.artifacts.media(): read through the artifact, as the caller reads it
-  → GET …/versions/:v/media and …/media/content: each part's file, with Range
+  → GET …/versions/:v/media and …/media/content: each part's file, with Range; a run's
+    `sixb artifacts media` reads them
+  → the Agent's sandbox: a video's copy lists each part of its recordings, and holds their
+    transcripts and cuts (packages/agent/src/artifacts/materialize.ts)
 ```
 
 ## Invariants

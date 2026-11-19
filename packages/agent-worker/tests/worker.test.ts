@@ -11168,6 +11168,7 @@ describe("AgentWorker", () => {
         manifestPath: ".sixb/agent/context/artifacts.json",
         maxBytes: 1_000_000,
         blobStorage: sixb.blobStorage,
+        artifacts: { media: async () => null },
       },
       [],
       new Map(),
