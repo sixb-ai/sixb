@@ -325,7 +325,9 @@ Sixb hands out when it can, inline otherwise.
 The catalog's `video_capabilities` set the definition: aspect ratios, lengths, sound, the number
 of clips per job and the input images a model takes. The binding accepts a `description`,
 `providerOptions`, `timeoutMs` for each start and status request (default 60,000),
-`maxVideoBytes` (default 512 MiB) and `inputImages`. Proxies without the `/v1` layout set the
+`maxVideoBytes` (default 512 MiB) and `inputImages`. A clip downloads under its own bound:
+`timeoutMs` until it starts, then a second per MiB of its announced length, or of
+`maxVideoBytes`. Proxies without the `/v1` layout set the
 full `videoUrl`, which `/start` and `/status` follow.
 
 Pricing is the catalog's `video_duration_pricing`, per second by resolution tier and sound. A

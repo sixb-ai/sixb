@@ -723,8 +723,8 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       })
     })
 
-    // Removal proof: drop `operation IS NULL` from a provider's start update; the second start
-    // replaces the first handle.
+    // Removal proof: drop `operation IS NULL` from a provider's start update, or `result IS NULL`
+    // from its result update; the second call replaces the first value.
     test("keeps a running call's operation until its first settlement", async () => {
       await withStorage(async (storage) => {
         const input = {
@@ -766,7 +766,18 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         )
         expect(await storage.startModelCallOperation({ ...start, callId: "call_other" })).toBeNull()
 
+        // Its result, kept once it is in the ledger, before its files are stored.
         const result = { usage: { outputVideoMs: 0 }, cost: { status: "reported" } }
+        const recorded: AiModelCallOperationRecord = { ...pending, result }
+        const keep = { projectId, callId: "call_video", result }
+        expect(await storage.recordModelCallOperationResult(keep)).toEqual(recorded)
+        expect(
+          await storage.recordModelCallOperationResult({ ...keep, result: { other: true } })
+        ).toEqual(recorded)
+        expect(
+          await storage.recordModelCallOperationResult({ ...keep, callId: "call_other" })
+        ).toBeNull()
+
         const failed: AiModelCallOperationRecord = {
           ...pending,
           status: "failed",

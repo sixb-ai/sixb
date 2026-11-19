@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import { InMemoryBlobStorage, InMemoryStorage, SixbHost } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core/broker"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
@@ -181,6 +181,64 @@ test("a status check downloads hosted results without the Gateway's credentials"
     },
     reportedCost: { money: { amountNanos: "400000000" } },
   })
+})
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/** A hosted clip announced as `megabytes` long, whose bytes arrive `afterMs` after the request. */
+function slowClip(megabytes: number, afterMs: number) {
+  return (signal: AbortSignal | null | undefined) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          const timer = setTimeout(() => {
+            controller.enqueue(MP4)
+            controller.close()
+          }, afterMs)
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer)
+            controller.error(signal.reason)
+          })
+        },
+      }),
+      { headers: { "content-length": String(megabytes * 1024 * 1024) } }
+    )
+}
+
+// Removal proof: drop deadline.extend() from videoData(); the 100 MiB clip times out at 60
+// seconds. Drop the deadline's timers instead; the stalled clip never times out.
+test("a large clip gets time for its size, past the status request's bound", async () => {
+  jest.useFakeTimers()
+  let clip = slowClip(100, 150_000)
+  const provider = createVercelGateway({
+    baseUrl: "https://gateway.test/prefix/v1",
+    apiKey: "key",
+    fetch: async (url, init) => {
+      if (String(url).endsWith("/models")) return Response.json(catalog)
+      if (String(url) === "https://cdn.test/fox.mp4") return clip(init?.signal)
+      return Response.json({
+        status: "completed",
+        videos: [{ type: "url", url: "https://cdn.test/fox.mp4", mediaType: "video/mp4" }],
+      })
+    },
+  })
+  const model = await provider.video("google/veo-3.1-fast-generate-001").resolve!()
+  const check = async () => {
+    const status = model.status({ operation: "op" }).catch((error) => error)
+    // 60 seconds to start, then one per MiB: 160 seconds for a 100 MiB clip.
+    for (let second = 0; second < 200; second++) {
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      jest.advanceTimersByTime(1_000)
+    }
+    return status
+  }
+
+  expect(await check()).toMatchObject({ status: "completed", output: { videos: [{ data: MP4 }] } })
+
+  clip = slowClip(100, 170_000)
+  expect(await check()).toMatchObject({ name: "TimeoutError" })
 })
 
 test("a status check reports a running, failed or cancelled job", async () => {

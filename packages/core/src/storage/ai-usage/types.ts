@@ -149,7 +149,10 @@ export interface AiModelCallOperationRecord {
   readonly status: AiModelCallOperationStatus
   /** Why the provider failed the call, when it did. */
   readonly error?: string
-  /** What the settled call reported, such as its usage and cost, owned by the kind's runtime. */
+  /**
+   * What the call reported, such as its usage and cost, owned by the kind's runtime. Kept while
+   * pending once the call is in the ledger, before its files are stored.
+   */
   readonly result?: ReadonlyJsonObject
   readonly createdAt: Date
   readonly settledAt?: Date
@@ -169,6 +172,12 @@ export interface StartAiModelCallOperationInput {
   readonly operation: ReadonlyJsonValue
   /** The request facts as the provider accepted the call, in place of those kept at creation. */
   readonly request: ReadonlyJsonObject
+}
+
+export interface RecordAiModelCallOperationResultInput {
+  readonly projectId: string
+  readonly callId: string
+  readonly result: ReadonlyJsonObject
 }
 
 export interface SettleAiModelCallOperationInput {
@@ -230,6 +239,15 @@ export interface AiUsageStorage {
   ): Promise<AiModelCallOperationRecord | null>
 
   getModelCallOperation(input: GetAiModelCallFilesInput): Promise<AiModelCallOperationRecord | null>
+
+  /**
+   * Keep what a pending call reported once it is in the ledger, before its files are stored, so a
+   * call settled without them still reports it. The first result wins; returns the record as it
+   * now stands, or null when no such call exists.
+   */
+  recordModelCallOperationResult(
+    input: RecordAiModelCallOperationResultInput
+  ): Promise<AiModelCallOperationRecord | null>
 
   /**
    * Record how a pending call ended. The first settlement wins: settling it again returns that

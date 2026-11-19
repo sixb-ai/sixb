@@ -68,6 +68,9 @@ const provider = {
   async startModelCallOperation() {
     return null
   },
+  async recordModelCallOperationResult() {
+    return null
+  },
   async settleModelCallOperation() {
     return null
   },

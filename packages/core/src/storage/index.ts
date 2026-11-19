@@ -310,6 +310,7 @@ export type {
   InMemoryAiUsageStorageSnapshot,
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
+  RecordAiModelCallOperationResultInput,
   RecordAiModelCallResult,
   SettleAiModelCallOperationInput,
   StartAiModelCallOperationInput,

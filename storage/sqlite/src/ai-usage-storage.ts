@@ -4,6 +4,7 @@ import {
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
   normalizeAiModelCallOperation,
+  normalizeAiModelCallOperationResult,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
   normalizeAiModelCallStart,
@@ -24,6 +25,7 @@ import {
   type GetLatestAiModelCallForExecutionInput,
   type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
+  type RecordAiModelCallOperationResultInput,
   type RecordAiModelCallResult,
   type SettleAiModelCallOperationInput,
   type StartAiModelCallOperationInput,
@@ -225,6 +227,26 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
           start.callId
         )
       return this.findOperation(start.projectId, start.callId)
+    })
+  }
+
+  async recordModelCallOperationResult(
+    input: RecordAiModelCallOperationResultInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const recorded = normalizeAiModelCallOperationResult(input)
+
+    // Only a pending call without a result takes one; any other reads back as it stands.
+    return runImmediateTransaction(this.connection.db, () => {
+      this.connection.db
+        .query(
+          `
+            UPDATE ai_model_call_operations
+            SET result = ?
+            WHERE project_id = ? AND call_id = ? AND status = 'pending' AND result IS NULL
+          `
+        )
+        .run(JSON.stringify(recorded.result), recorded.projectId, recorded.callId)
+      return this.findOperation(recorded.projectId, recorded.callId)
     })
   }
 
