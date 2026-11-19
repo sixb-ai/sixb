@@ -16,6 +16,7 @@ import { importKind } from "../src/artifacts/renderers/video/editor/import"
 import {
   formatSeconds,
   parseSeconds,
+  SecondsField,
   TextField,
 } from "../src/artifacts/renderers/video/editor/inspector"
 import {
@@ -498,4 +499,45 @@ describe("the editor's pieces", () => {
     fireEvent.blur(renaming.getAllByRole("textbox", { name: "Name" }).at(-1) as HTMLElement)
     expect(renamed).toEqual([null])
   })
+
+  // Reproduce by dropping the `cancelled` ref in TextField or SecondsField: the blur Escape causes
+  // still holds the typed text, and saves it.
+  test("Escape leaves a field as it was, and Enter keeps what was typed", () => {
+    const names: string[] = []
+    const lengths: number[] = []
+    const view = render(
+      wrap(
+        <>
+          <TextField label="Name" value="Intro" onCommit={(name) => names.push(name)} />
+          <SecondsField label="Length" ms={4000} min={100} onCommit={(ms) => lengths.push(ms)} />
+        </>
+      )
+    )
+    const name = view.getByRole("textbox", { name: "Name" }) as HTMLInputElement
+    const length = view.getByRole("textbox", { name: "Length" }) as HTMLInputElement
+
+    type(name, "Intro v2")
+    fireEvent.keyDown(name, { key: "Escape" })
+    type(length, "9")
+    fireEvent.keyDown(length, { key: "Escape" })
+    expect(names).toEqual([])
+    expect(lengths).toEqual([])
+    expect(name.value).toBe("Intro")
+    expect(length.value).toBe("4")
+
+    // The next edit is kept as usual.
+    type(name, "Opening")
+    fireEvent.keyDown(name, { key: "Enter" })
+    expect(names).toEqual(["Opening"])
+  })
 })
+
+/**
+ * Types into a field as React reads it here: it loaded before the window existed, so it follows a
+ * field's words from the key that changed them.
+ */
+function type(field: HTMLInputElement, value: string) {
+  field.focus()
+  fireEvent.input(field, { target: { value } })
+  fireEvent.keyUp(field, { key: value.at(-1) })
+}
