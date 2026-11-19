@@ -18,6 +18,7 @@ import {
 import {
   AGENT_RUN_STOPPED_HEADER,
   decodeWireValue,
+  encodeModelCallError,
   encodeWireError,
   encodeWireValue,
   parseAgentRunSessionPath,
@@ -446,7 +447,18 @@ async function streamModelCall(session: AgentRunSession, request: Request): Prom
     measures?: unknown
   }
   const model = await session.models.language(ref, { measures: measures !== false })
-  const opened = await model.stream({ ...call, signal: request.signal })
+
+  let opened: Awaited<ReturnType<typeof model.stream>>
+  try {
+    opened = await model.stream({ ...call, signal: request.signal })
+  } catch (error) {
+    // The call failed before it answered: it crosses as a call that fails while it streams does.
+    // No stream will close the session, so this does.
+    await session.close()
+    const wire = encodeModelCallError(error)
+    return json({ error: wire }, wireErrorStatus(wire))
+  }
+
   const encoder = new TextEncoder()
   const iterator = opened.events[Symbol.asyncIterator]()
   const body = new ReadableStream<Uint8Array>({
@@ -468,7 +480,7 @@ async function streamModelCall(session: AgentRunSession, request: Request): Prom
         controller.enqueue(encoder.encode(`${encodeWireValue({ event: next.value })}\n`))
       } catch (error) {
         controller.enqueue(
-          encoder.encode(`${encodeWireValue({ error: encodeWireError(error) })}\n`)
+          encoder.encode(`${encodeWireValue({ error: encodeModelCallError(error) })}\n`)
         )
         controller.close()
         await session.close()
