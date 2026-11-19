@@ -1818,7 +1818,7 @@ describe("a rejected model call", () => {
   })
 })
 
-describe("a model call that loses its connection", () => {
+describe("an interrupted model call", () => {
   afterEach(() => {
     jest.useRealTimers()
     jest.restoreAllMocks()
@@ -1920,7 +1920,7 @@ describe("a model call that loses its connection", () => {
     // Nothing streamed, so the reader has nothing to drop.
     expect(chunks.some((chunk) => chunk.type === "start-step" && chunk.retry)).toBe(false)
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^\[SixbModels\] Model call 'call-1' lost its connection/),
+      expect.stringMatching(/^\[SixbModels\] Model call 'call-1' was interrupted/),
       lost
     )
   })
@@ -1993,6 +1993,64 @@ describe("a model call that loses its connection", () => {
     // The lost call is recorded with its usage unknown, never free; the others with theirs.
     expect(recorded.map((call) => call.usage)).toEqual([{}, USAGE, USAGE])
     expect(recorded[0]?.cost).toEqual({ status: "unpriceable", reason: "missing-usage" })
+  })
+
+  // Reproduce: drop the `interrupted` reason from modelCallInterrupted; a provider that broke off
+  // its answer then fails the run.
+  test.each([
+    [
+      "an error event saying it is overloaded",
+      (events: readonly LanguageModelStreamEvent[]) =>
+        streamFromArray([
+          ...events,
+          {
+            type: "error",
+            error: new ModelProviderError("[test] Overloaded.", "mock", "mock-model", {
+              code: "overloaded_error",
+              reason: "interrupted",
+            }),
+          },
+        ]),
+    ],
+    [
+      "a stream closed before its end",
+      (events: readonly LanguageModelStreamEvent[]) => ({
+        events: (async function* () {
+          yield* events
+          throw new ModelProviderError("[test] Stream ended early.", "mock", "mock-model", {
+            reason: "interrupted",
+          })
+        })(),
+      }),
+    ],
+  ])("asks again a call its provider interrupted with %s, its text dropped", async (_, interrupt) => {
+    const time = pauses()
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return calls === 1
+          ? interrupt(answer("Half").slice(0, 3))
+          : streamFromArray(answer("Whole."))
+      },
+    })
+    const chunks: ModelUiChunk[] = []
+
+    const result = await time.outlast(
+      runModelLoop({
+        model,
+        messages: [],
+        signal: new AbortController().signal,
+        onEvent: (chunk) => {
+          chunks.push(chunk)
+        },
+      })
+    )
+
+    expect(result).toMatchObject({ status: "completed", output: "Whole." })
+    expect(calls).toBe(2)
+    const retry = chunks.findIndex((chunk) => chunk.type === "start-step" && chunk.retry)
+    expect(retry).toBeGreaterThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
   })
 
   // Reproduce: drop the MODEL_CALL_RETRY.retries bound in runModelLoop; the sixth call then

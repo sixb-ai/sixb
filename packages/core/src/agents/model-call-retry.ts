@@ -1,7 +1,8 @@
+import { ModelProviderError } from "../models/errors"
 import { type BackoffPolicy, backoffDelay } from "../shared/backoff"
 
 /**
- * How a step asks again a call whose connection to its provider dropped: at most `retries` more
+ * How a step asks again an interrupted call (see {@link modelCallInterrupted}): at most `retries` more
  * calls, each after a wait that doubles from `initialMs`, at most 15 seconds of waiting in all.
  */
 export const MODEL_CALL_RETRY: BackoffPolicy & { readonly retries: number } = {
@@ -38,6 +39,18 @@ const CONNECTION_LOST_CODES = new Set([
 export function lostConnectionCode(error: unknown): string | undefined {
   const code = errorCode(error) ?? (error instanceof TypeError ? errorCode(error.cause) : undefined)
   return code !== undefined && CONNECTION_LOST_CODES.has(code) ? code : undefined
+}
+
+/**
+ * Whether a model call broke off for a reason that has nothing to do with its request, so the same
+ * request may succeed when it is made again: its connection was lost, or its provider interrupted
+ * the response it had started (an error event saying it was overloaded, rate limited or failing,
+ * or a stream closed before its end, as the protocols mark them). A refusal before the response,
+ * which the binding already retried, is not one.
+ */
+export function modelCallInterrupted(error: unknown): boolean {
+  if (lostConnectionCode(error) !== undefined) return true
+  return error instanceof ModelProviderError && error.reason === "interrupted"
 }
 
 /**
