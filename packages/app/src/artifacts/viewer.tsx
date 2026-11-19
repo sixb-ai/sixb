@@ -172,18 +172,17 @@ function ArtifactView({
     (shown ? null : versionQuery.error)
   const edit = useArtifactEdit(target, detail, shown, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
-  // A canvas's latest version, and a document's, is held live: everyone's changes show as they
-  // make them, and editing it changes it for everyone at once. A Markdown document is typed into
-  // as it is shown, with no editing to start.
+  // A canvas's latest version, a document's and a video's, is held live: everyone's changes show
+  // as they make them, and editing it changes it for everyone at once. A Markdown document is
+  // typed into as it is shown, with no editing to start.
   const designed = !!shown && isDesignedDocument(shown)
   const markdown = detail?.artifact.kind === "document" && !!shown && !designed
+  const liveKind = detail ? liveKindOf(detail.artifact.kind) : null
   const liveView = useLiveView(
-    detail &&
-      versionNumber === detail.artifact.latestVersion &&
-      (detail.artifact.kind === "canvas" || detail.artifact.kind === "document")
+    detail && liveKind && versionNumber === detail.artifact.latestVersion
       ? target.artifactId
       : null,
-    detail?.artifact.kind === "document" ? "document" : "canvas"
+    liveKind ?? "canvas"
   )
 
   if (error || (artifactQuery.isSuccess && !detail)) {
@@ -1477,6 +1476,11 @@ function CopyLinkButton({ link }: { readonly link: () => string }) {
  * What starts editing from within the artifact: the header's Edit, live or as a draft, while the
  * reader may change it and is not editing it already.
  */
+/** How an artifact of a kind is edited live, if it is. */
+function liveKindOf(kind: ArtifactKindName): "canvas" | "document" | "video" | null {
+  return kind === "canvas" || kind === "document" || kind === "video" ? kind : null
+}
+
 function startEditing(edit: ArtifactEdit, liveView: LiveView | null): (() => void) | undefined {
   if (edit.editing || liveView?.editing) return undefined
   if (liveView && !liveView.state.left) return liveView.editable ? liveView.start : undefined
