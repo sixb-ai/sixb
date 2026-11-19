@@ -45,6 +45,23 @@ Each render's steps are bounded by the time its job has left, and its sandbox is
 waited for at most 30 seconds. What a render wrote in the sandbox comes back a piece at a time,
 at most 512 KiB of it to a command, as some providers keep at most 1 MiB of a command's output.
 
+## Large files
+
+A render whose files are large, such as a film's media, keeps them out of the worker's memory both
+ways (`src/sandbox.ts`):
+
+- In: `downloadIntoSandbox` issues a download URL for each file, valid for as long as the fetch
+  may take, and the sandbox fetches it with curl from the API's public origin; the URLs are
+  revoked once the fetch is over. The sandbox must be opened to that origin: pass
+  `renderApiOrigin(host)` as `reach` to `inRenderSandbox`. A worker of its own learns the origin
+  from `SIXB_API_PUBLIC_ORIGIN`.
+- Out: `storeSandboxFile` streams a file the render wrote into blob storage, read back a piece at a
+  time, a few pieces ahead.
+
+The sandbox does not upload its output itself. It holds no credential for the API, and a blob
+store's direct upload URLs are on an origin the contract does not name before the upload exists,
+when the sandbox's network is already set. Both would have to change for that.
+
 ## The sandbox's browser
 
 Renders need a sandbox image with Node.js and Playwright's Chromium, as the Sixb agent image has

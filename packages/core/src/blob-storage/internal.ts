@@ -1,4 +1,10 @@
-export { FILE_DOWNLOAD_ROUTE_PREFIX, resolveFileDownload } from "./download-urls"
+export {
+  createFileDownloadUrl,
+  FILE_DOWNLOAD_ROUTE_PREFIX,
+  type FileDownloadUrlContext,
+  resolveFileDownload,
+  revokeFileDownloadUrl,
+} from "./download-urls"
 export {
   jsonPointerSegment,
   openFileRef,
