@@ -21,6 +21,35 @@ export {
 export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {
+  VIDEO_ENGINE,
+  VIDEO_EXPORT_JOB,
+  VIDEO_SEGMENT_JOB,
+  VIDEO_SEGMENT_SETTINGS,
+  type VideoExportPlan,
+  type VideoMediaFile,
+  type VideoSegment,
+  videoExportJobId,
+  videoExportKeys,
+  videoExportPlan,
+  videoExportStatus,
+  videoSegmentJobId,
+  videoSegmentTimeoutMs,
+} from "../video/export"
+export {
+  frameAtOrBefore,
+  playTogether,
+  videoFrameCount,
+  videoSegmentIndex,
+  videoSegmentRender,
+} from "../video/project"
+export {
+  missingVideoStills,
+  VIDEO_STILL_WIDTH,
+  VIDEO_STILLS_JOB,
+  videoStillAtMs,
+  videoStillKey,
+} from "../video/stills"
+export {
   DOCUMENT_PDF_JOB,
   documentPdfKey,
   MAX_DOCUMENT_PDF_BYTES,
@@ -54,3 +83,5 @@ export {
   answerArtifactQueries,
   parseArtifactQueryAnswers,
 } from "./query-answers"
+export { readVideoVersion, type VideoVersionRead } from "./validate/video"
+export { videoSceneFiles } from "./video"

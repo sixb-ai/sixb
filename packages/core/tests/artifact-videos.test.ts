@@ -147,7 +147,8 @@ describe("a video's composition", () => {
     ])
   })
 
-  // Removal proof: let playsOnItsOwn return false, and only the plain root reads as still.
+  // Removal proof: let playsOnItsOwn return false, and only the plain root reads as still; let it
+  // count a sound, and the soundtrack reads as moving.
   test("says when the root plays or animates something of its own", () => {
     const timeline = (extra: string, root = 'data-width="1920" data-height="1080"') =>
       composed({
@@ -170,7 +171,15 @@ describe("a video's composition", () => {
     expect(timeline("<style>@keyframes grain { to { opacity: 0 } }</style>")).toBe(true)
     expect(timeline("<script>window.__timelines = {}</script>")).toBe(true)
     expect(timeline('<div style="transition: opacity 1s"></div>')).toBe(true)
-    expect(timeline(MUSIC, 'data-width="1920" data-height="1080" data-duration="2"')).toBe(true)
+    expect(
+      timeline(
+        '<video src="media/clip.mp4"></video>',
+        'data-width="1920" data-height="1080" data-duration="2"'
+      )
+    ).toBe(true)
+
+    // A soundtrack is heard, never seen: the export mixes it apart from the scenes' frames.
+    expect(timeline(MUSIC, 'data-width="1920" data-height="1080" data-duration="2"')).toBe(false)
   })
 
   test("plays at 30 frames a second, for as long as its scenes, or its root's own length", () => {
@@ -256,7 +265,7 @@ describe("a video's composition", () => {
     [
       "an fps HyperFrames' segments do not take",
       { "index.html": index([intro], 'data-width="1920" data-height="1080" data-fps="29.97"') },
-      'data-fps is 24, 25, 30, 50, 60 frames a second, or 30 without one; it is "29.97"',
+      'data-fps is 24, 25, 30, 60 frames a second, or 30 without one; it is "29.97"',
     ],
     [
       "a size HyperFrames reads otherwise",
@@ -266,7 +275,7 @@ describe("a video's composition", () => {
     [
       "an fps HyperFrames does not read",
       { "index.html": index([intro], 'data-width="1920" data-height="1080" data-fps="30.0"') },
-      'data-fps is 24, 25, 30, 50, 60 frames a second, or 30 without one; it is "30.0"',
+      'data-fps is 24, 25, 30, 60 frames a second, or 30 without one; it is "30.0"',
     ],
     ["no scene", { "index.html": index(["<h1>Hi</h1>"]) }, "its root composition hosts no scene"],
     // Removal proof: drop ownTimeline's check in videoLength, and HyperFrames plays these videos
@@ -544,7 +553,7 @@ describe("publishing a video", () => {
   })
 
   // Removal proof: let sceneRenderKeys keep every file (drop its filter's last line), and a clip
-  // only the demo plays renders every scene again.
+  // only the demo plays renders every scene again; let it keep sounds, and other music does.
   test("renders again only the scenes a version changes, and shares them with a copy", async () => {
     const { publish } = setup()
     const before = keysOf((await publish(LAUNCH)).version.outline)
@@ -564,10 +573,9 @@ describe("publishing a video", () => {
       demo: expect.not.stringMatching(before.demo ?? ""),
     })
 
-    // What the root plays, and any image or stylesheet, which a scene may load from its CSS or a
-    // script as well as from its HTML: every scene.
+    // Any image or stylesheet, which a scene may load from its CSS or a script as well as from its
+    // HTML: every scene.
     const everyScene: Record<string, string>[] = [
-      { "media/music.m4a": "other music" },
       { "media/logo.png": "another logo" },
       { "styles.css": "h1 { color: red; }" },
     ]
@@ -575,6 +583,9 @@ describe("publishing a video", () => {
       const keys = await after(changes)
       for (const id of ["intro", "demo", "outro"]) expect(keys[id]).not.toBe(before[id])
     }
+
+    // A sound is in no scene's frames: the export mixes the whole video's sound apart.
+    expect(await after({ "media/music.m4a": "other music" })).toEqual(before)
   })
 
   // Removal proof: drop `data-poster` from what sceneRenderKeys cuts from the root, and moving the
@@ -594,8 +605,9 @@ describe("publishing a video", () => {
 
   // Removal proof: let sceneRenderKeys hash all of index.html instead of `root`, and trimming the
   // demo renders the intro again; let it always leave out the scene's start, and the outro of the
-  // video with music keeps its key; let it always hold it, and the silent outro changes its key.
-  test("renders a trimmed scene again, and the scenes after it when the root plays music", async () => {
+  // video whose root moves keeps its key; let it always hold it, and the silent outro changes its
+  // key.
+  test("renders a trimmed scene again, and the scenes after it when the root moves", async () => {
     const { publish } = setup()
     const keys = async (root: string) =>
       keysOf((await publish({ ...LAUNCH, "index.html": root })).version.outline)
@@ -628,10 +640,19 @@ describe("publishing a video", () => {
       untrimmed
     )
 
-    // Over music, the outro now plays over another bar of it.
+    // Over music, too: a segment holds pictures alone.
     const scored = LAUNCH["index.html"] ?? ""
-    const before = await keys(scored)
+    const heard = await keys(scored)
     expect(await keys(trim(scored))).toEqual({
+      ...heard,
+      demo: expect.not.stringMatching(heard.demo ?? ""),
+    })
+
+    // Over a root that moves, the outro now plays over another moment of it.
+    const grain = "<style>@keyframes grain { to { opacity: 0.5 } }</style>"
+    const grained = silent.replace("<div data-composition-id", `${grain}\n<div data-composition-id`)
+    const before = await keys(grained)
+    expect(await keys(trim(grained))).toEqual({
       intro: before.intro,
       demo: expect.not.stringMatching(before.demo ?? ""),
       outro: expect.not.stringMatching(before.outro ?? ""),
@@ -649,14 +670,14 @@ describe("publishing a video", () => {
       keysOf((await publish({ ...LAUNCH, "index.html": root })).version.outline)
     const before = await keys(scored)
 
-    // Half a second cut from the demo: the music, which ran to the end, ends with the video.
+    // Half a second cut from the demo: the music, which ran to the end, ends with the video. Only
+    // the demo changes: the outro starts earlier, which no frame of its own shows.
     const trimmed = scored
       .replace('data-duration="3"', 'data-duration="2.5"')
       .replaceAll('data-duration="7"', 'data-duration="6.5"')
     expect(await keys(trimmed)).toEqual({
-      intro: before.intro,
+      ...before,
       demo: expect.not.stringMatching(before.demo ?? ""),
-      outro: expect.not.stringMatching(before.outro ?? ""),
     })
 
     // How loud it plays, and on a line of its own or not, shows in no frame.

@@ -819,7 +819,7 @@ media/<name>        the footage, sound, and images the scenes play
   be another artifact's, by its address.
 - `artifact:…#demo` opens the video at a scene, and `artifact:…#t=12.5` at an instant.
 - A video holds at most 200 scenes and plays at most 10 minutes. Its frame is at most 3,840 pixels
-  a side, in even numbers, at 24, 25, 30, 50, or 60 frames a second, 30 by default. Each HTML file
+  a side, in even numbers, at 24, 25, 30, or 60 frames a second, 30 by default. Each HTML file
   is at most 1 MiB, and a version holds at most 50 video and sound files.
 
 The app plays a video as HyperFrames does, in a sandboxed frame, with the runtime release the

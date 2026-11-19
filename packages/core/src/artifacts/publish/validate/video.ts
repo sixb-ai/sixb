@@ -34,6 +34,33 @@ export async function validateVideo(
   readonly outline: VideoOutline
   readonly references: readonly FoundReference[]
 }> {
+  const { outline, references } = await readVideoVersion(blobStorage, files)
+  return { entry: VIDEO_ENTRY, outline, references }
+}
+
+/** A video's files, read as publishing reads them: what renders each of its scenes. */
+export interface VideoVersionRead {
+  readonly outline: VideoOutline
+  readonly references: readonly FoundReference[]
+  /** `index.html`'s text, which the composition's spans point into. */
+  readonly index: string
+  readonly composition: VideoComposition
+  /** What the root plays itself. */
+  readonly rootLoads: ReadonlySet<string>
+  /** What each scene plays, by its id: its file, what it nests, and what they play. */
+  readonly loads: ReadonlyMap<string, ReadonlySet<string>>
+  /** Whether the root shows something that moves of its own, what it links read. */
+  readonly rootTimeline: boolean
+}
+
+/**
+ * Reads a video as {@link validateVideo} checks it, with what renders it: its composition and what
+ * each scene plays. Throws `invalid_artifact` for a version publishing would refuse.
+ */
+export async function readVideoVersion(
+  blobStorage: ArtifactBlobStorage,
+  files: readonly ArtifactFile[]
+): Promise<VideoVersionRead> {
   const byPath = new Map(files.map((file) => [file.path, file]))
   const index = byPath.get(VIDEO_ENTRY)
   if (!index) {
@@ -148,7 +175,11 @@ export async function validateVideo(
     loads,
   })
   return {
-    entry: VIDEO_ENTRY,
+    index: indexText,
+    composition,
+    rootLoads,
+    loads,
+    rootTimeline,
     outline: {
       kind: "video",
       width: composition.width,

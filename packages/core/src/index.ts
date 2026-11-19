@@ -1009,6 +1009,7 @@ export type {
   ArtifactStateRuntime,
   ArtifactStateValue,
   ArtifactsRuntime,
+  ArtifactVideoExport,
   ListArtifactsRuntimeInput,
   UpdateArtifactRuntimeInput,
 } from "./artifacts/execution"
