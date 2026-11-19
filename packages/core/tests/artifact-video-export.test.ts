@@ -14,7 +14,7 @@ import {
   missingVideoStills,
   VIDEO_STILLS_JOB,
   videoPoster,
-  videoStillKey,
+  videoSceneStills,
   videoStills,
   videoStillsJobId,
 } from "../src/artifacts/video/stills"
@@ -196,6 +196,28 @@ describe("a video's export plan", () => {
     expect(videoExportPlan(sourceOf((await publish(LAUNCH, "Copy")).version)).key).toBe(before.key)
   })
 
+  // Reproduce by keying a scene with every scene it ever plays with (sceneRenderKeys) rather than
+  // those on screen during its segment: the demo, which the outro fades in after, renders again.
+  test("keeps the segment of the scene an edited one fades in after", async () => {
+    const { publish, withLogo } = setup()
+    const { LAUNCH } = await withLogo()
+    const before = videoExportPlan(sourceOf((await publish(LAUNCH)).version))
+    const after = videoExportPlan(
+      sourceOf(
+        (await publish({ ...LAUNCH, "scenes/outro.html": scene("outro", "<h1>Thanks all</h1>") }))
+          .version
+      )
+    )
+
+    const changed = after.segments.filter(
+      (segment, index) => segment.key !== before.segments[index]?.key
+    )
+    expect(changed.map((segment) => (segment.kind === "scene" ? segment.scene : "sound"))).toEqual([
+      "outro",
+      "sound",
+    ])
+  })
+
   // Reproduce by leaving `resolved` out of a segment's key: the outro keeps its key over another
   // logo.
   test("renders again the scenes that play what an address resolves to, once it changes", async () => {
@@ -213,10 +235,10 @@ describe("a video's export plan", () => {
     const before = resolved(first)
     const after = resolved(other)
     const keys = (plan: typeof before) => plan.segments.map((segment) => segment.key)
-    // The outro plays the logo, and the demo is on screen with it.
+    // The outro plays the logo; the demo's segment ends as the outro fades in, and shows none of it.
     expect(keys(after).map((key, index) => key === keys(before)[index])).toEqual([
       true,
-      false,
+      true,
       false,
       false,
     ])
@@ -238,16 +260,15 @@ describe("a segment's project", () => {
       { scene: "demo", startFrame: 60, endFrame: 135 },
       false
     )
-    expect(render).toEqual({ scenes: ["demo", "outro"], shiftFrames: 60, from: 0, to: 75 })
+    expect(render).toEqual({ scenes: ["demo"], shiftFrames: 60, from: 0, to: 75 })
 
     const text = videoSegmentIndex(index(), composition(), render)
     expect(text).not.toContain('id="intro"')
     expect(text).toContain(
       'id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="0"'
     )
-    expect(text).toContain(
-      'id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="2.5"'
-    )
+    // The outro fades in as the segment ends: none of its frames are in it.
+    expect(text).not.toContain('id="outro"')
     expect(text).toContain('data-height="1080" data-duration="2.5"')
     // The soundtrack stays: HyperFrames loads it, and the segment drops what it mixes.
     expect(text).toContain(MUSIC)
@@ -261,7 +282,7 @@ describe("a segment's project", () => {
     ).toEqual({ scenes: ["demo", "outro"], shiftFrames: 60, from: 75, to: 150 })
     expect(
       videoSegmentRender(composition(), { scene: "demo", startFrame: 60, endFrame: 135 }, true)
-    ).toEqual({ scenes: ["demo", "outro"], shiftFrames: 0, from: 60, to: 135 })
+    ).toEqual({ scenes: ["demo"], shiftFrames: 0, from: 60, to: 135 })
   })
 })
 
@@ -410,11 +431,11 @@ describe("a video's stills", () => {
 
     // Reproduce by counting failures as kept in missingVideoStills: a still that once failed, in
     // a sandbox without HyperFrames say, is never asked for again.
-    const [first] = outline.scenes
+    const [first] = videoSceneStills(outline)
     if (!first) throw new Error("Expected a scene.")
     await storage().putVideoRender({
       projectId: "videos",
-      key: videoStillKey(first),
+      key: first.key,
       failure: "It could not be snapshotted.",
       createdAt: new Date(),
     })
@@ -426,10 +447,10 @@ describe("a video's stills", () => {
 
     const [jpeg] = await files({ "still.jpg": "jpeg" })
     if (!jpeg) throw new Error("Expected a file.")
-    for (const each of outline.scenes) {
+    for (const each of videoSceneStills(outline)) {
       await storage().putVideoRender({
         projectId: "videos",
-        key: videoStillKey(each),
+        key: each.key,
         file: jpeg.file,
         createdAt: new Date(),
       })
@@ -461,12 +482,11 @@ describe("a video's stills", () => {
     const plain = await outlineOf()
     expect(videoStills(plain).map(({ scene, atMs }) => [scene, atMs])).toEqual([
       ["intro", 1000],
-      ["demo", 3500],
+      // The middle of its segment, until the outro fades in over it.
+      ["demo", 3250],
       ["outro", 5750],
     ])
-    expect(videoPoster(plain)?.key).toBe(
-      videoStillKey(plain.scenes[0] as VideoOutline["scenes"][0])
-    )
+    expect(videoPoster(plain)?.key).toBe(videoSceneStills(plain)[0]?.key)
 
     // 5 seconds in, the outro has started over the demo: its segment holds the instant.
     const posted = await outlineOf("5")

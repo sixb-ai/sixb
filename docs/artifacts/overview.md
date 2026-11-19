@@ -857,6 +857,8 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
   in its own 4-vCPU sandbox, and 87 seconds one scene after the other; editing one scene then
   takes about 21 seconds. A scene of titles takes a few seconds more than it lasts.
 - Blur and `backdrop-filter` cost the most: Chromium draws them without a GPU.
+- A scene that fades in over the one before renders about twice slower than one that starts on a
+  cut, as it renders with the end of the scene before.
 - The [`render` worker](../cli/overview.md) renders it in sandboxes whose image has HyperFrames and
   FFmpeg, as the Sixb agent image has them, with at least 3 GB of memory for its fast capture.
   Each worker renders two segments at once; more workers render more.
@@ -864,7 +866,7 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
   scene, until you ask with `{ retry: true }` (`?retry=true`), which renders what failed again.
 - A project without a [sandbox provider](../sandboxes/overview.md) renders nothing: asking fails
   with `video_unavailable`.
-- Each scene also gets a still, a picture of its middle, a few seconds after the video is
+- Each scene also gets a still, a picture of its chapter's middle, a few seconds after the video is
   published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The video's poster,
   `GET …/versions/{version}/poster`, is the instant its root's `data-poster` names, or the first
   scene's still.
