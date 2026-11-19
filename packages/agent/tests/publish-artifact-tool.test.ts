@@ -1719,9 +1719,7 @@ describe("publish_artifact", () => {
     )
   })
 
-  // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;
-  // a model that fills every field, as strict mode has it, guesses a kind and is refused.
-  // Reproduce by raising SANDBOX_UPLOAD_BYTES past the recording: it is read through stdout, and
+  // Reproduce by raising SANDBOX_INLINE_BYTES past the recording: it is read through stdout, and
   // the API never sees an upload. Leave it in the copy that `replace` removes, and publishing again
   // from that copy finds nothing to copy back.
   test("uploads a large file from the sandbox with its own sixb, never through stdout", async () => {
@@ -1820,6 +1818,8 @@ describe("publish_artifact", () => {
     expect(existsSync(join(root, `.sixb/agent/artifacts/${artifact.id}`))).toBe(false)
   })
 
+  // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;
+  // a model that fills every field, as strict mode has it, guesses a kind and is refused.
   test("with an id, ignores a kind: the update keeps the artifact's", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const { artifactId } = (await publish({
