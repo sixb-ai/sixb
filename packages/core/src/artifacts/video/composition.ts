@@ -170,6 +170,51 @@ export function readVideoComposition(
   return composeVideo(root.root, files)
 }
 
+/**
+ * Every file of the version a project plays and shows, as its HTML names them: `index.html`, each
+ * scene, and each composition a scene nests, all the way down. `file` hands a file's text over, or
+ * undefined when it has none to read; `exists` says whether the version holds a path. Lenient
+ * where publishing refuses: a file that cannot be read names nothing, and publishing then says
+ * what is wrong with it.
+ */
+export function videoFilesPlayed(
+  index: string,
+  file: (path: string) => string | undefined,
+  exists: (path: string) => boolean
+): ReadonlySet<string> {
+  const played = new Set<string>()
+  const root = parseVideoRoot(index)
+  if ("error" in root) return played
+
+  const name = (from: string, references: readonly VideoMediaReference[]) => {
+    for (const { value } of references) {
+      const path = videoFilePath(from, value, exists)
+      if (path !== undefined) played.add(path)
+    }
+  }
+  name(VIDEO_ENTRY, root.root.media)
+
+  // A composition nested twice, or in itself, is read once.
+  const read = new Set<string>()
+  const visit = (path: string) => {
+    if (read.has(path)) return
+    read.add(path)
+
+    const html = file(path)
+    const scene = html === undefined ? undefined : parseVideoScene(html, path)
+    if (!scene || "error" in scene) return
+
+    name(path, scene.scene.media)
+    for (const { value } of scene.scene.compositions) {
+      const nested = videoFilePath(VIDEO_ENTRY, value, exists)
+      if (nested !== undefined) visit(nested)
+    }
+  }
+  for (const scene of root.root.scenes) visit(scene.src)
+
+  return played
+}
+
 /** Why a host's scene file is missing, for whoever reads the version's files themselves. */
 export function missingScene(id: string, src: string): string {
   return `${VIDEO_ENTRY}: scene '${id}' plays '${src}', which is not one of the video's files.`

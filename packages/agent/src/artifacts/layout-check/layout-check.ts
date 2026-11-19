@@ -15,6 +15,7 @@ import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
 import { canvasOverviewHtml, OVERVIEW_VIEWPORT } from "./overview"
+import type { VideoFrame } from "./video-check"
 
 /** The check's library and each check's files, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
@@ -32,12 +33,17 @@ export type LayoutCheck =
   | {
       readonly status: "checked"
       readonly warnings: readonly LayoutWarning[]
-      /** One per slide, a page's at each width, or a document's pages, as the agent names them. */
+      /**
+       * One per slide, a page's at each width, a document's pages, or a video's contact sheets, as
+       * the agent names them.
+       */
       readonly screenshots: readonly string[]
       /** How many pages a designed document with paper was cut into. */
       readonly pages?: number
       /** A canvas as it opens in the app, as the agent names it, when the check took it. */
       readonly overview?: string
+      /** A video's frames, each with when it shows and its scene, as its contact sheet holds them. */
+      readonly frames?: readonly VideoFrame[]
     }
   | { readonly status: "skipped"; readonly reason: string }
 
