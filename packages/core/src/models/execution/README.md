@@ -182,7 +182,8 @@ agent lane looks at the job with the same code (`../video/check.ts`) in the agen
 queues the next look, a quarter of the generation's age later, between one and five minutes. Since
 the handle lives in storage and the check in the queue, a process that stops between start and
 end loses nothing: whichever worker claims the check finishes it. A check that cannot ask is
-retried by the worker with backoff.
+retried by the worker with backoff, twenty times in a row at most: about seventy minutes, past the
+ceiling below, after which a check that still fails stops, and the next `get` settles it.
 
 A generation is checked with the catalog entry its model has in `models.video`, so `start` takes
 only a listed model. Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation
@@ -194,7 +195,8 @@ as for a language call that never finished, rather than recorded as free.
 A generation the ledger already records is different: the look that sees it end keeps its result
 on the operation (`recordModelCallOperationResult`) before storing the videos. If they cannot be
 stored by the ceiling, it settles as failed with that usage and cost, its budget reconciled, and
-the check stops.
+the check stops. One whose result could not be kept settles as failed too: the limits store
+refuses to mark its reconciled reservation unknown, and the ledger keeps what the provider billed.
 
 Usage is `outputVideoMs`: what the provider reports, else the requested length times the clips
 returned, which is what providers bill. The job's price variant, such as `{ resolution: "720p",

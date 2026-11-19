@@ -192,7 +192,7 @@ import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { workerChildren } from "../src/child-runner"
-import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
+import { MAX_AGENT_DELIVERY_ATTEMPTS, MAX_VIDEO_CHECK_ATTEMPTS } from "../src/delivery-policy"
 import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
 import { runnerContext } from "../src/execution-context"
 import { isTerminalRun } from "../src/run-fate"
@@ -18732,5 +18732,34 @@ describe("AgentWorker video generation checks", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  // Removal proof: drop the MAX_VIDEO_CHECK_ATTEMPTS bound from AgentWorker.onExecutionError; a
+  // check that fails on every look is retried forever.
+  test("gives up on a check that keeps failing past the generation's ceiling", async () => {
+    const worker = new InspectableAgentWorker(buildSixb(toolThenAnswerModel()), workerOptions())
+    const now = new Date().toISOString()
+    const check = (attempt: number): ClaimedQueueJob<AgentQueueJob> => ({
+      leaseId: "lease-1",
+      claimedAt: now,
+      leaseExpiresAt: now,
+      job: {
+        id: "agt_model_call_check_call_1",
+        projectId: PROJECT_ID,
+        createdAt: now,
+        availableAt: now,
+        attempt,
+        type: "agent.model-call.check.requested",
+        payload: { callId: "call_1" },
+      },
+    })
+    const unavailable = new Error("storage unavailable")
+
+    await expect(
+      worker.decideExecutionError(check(MAX_VIDEO_CHECK_ATTEMPTS - 1), unavailable)
+    ).resolves.toMatchObject({ kind: "retry", availableAt: expect.any(String) })
+    await expect(
+      worker.decideExecutionError(check(MAX_VIDEO_CHECK_ATTEMPTS), unavailable)
+    ).resolves.toEqual({ kind: "fail" })
   })
 })
