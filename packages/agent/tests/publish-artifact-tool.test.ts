@@ -38,6 +38,7 @@ import {
   storeLiveFiles,
   writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
+import { videoFilesPlayed } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
@@ -1907,6 +1908,20 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/page/collections-desk",
       "examples/canvas/onboarding-flow",
       "examples/canvas/retro",
+      "examples/video/launch-teaser",
+    ])
+    // A video's example leaves out its recordings: a stand-in for each one it plays.
+    const teaser = "examples/video/launch-teaser"
+    const held = new Set(examples.map((file) => file.path.slice(teaser.length + 1)))
+    const played = videoFilesPlayed(
+      read(`${teaser}/index.html`),
+      (path) => (held.has(path) ? read(`${teaser}/${path}`) : undefined),
+      (path) => held.has(path)
+    )
+    for (const path of played) if (!held.has(path)) write(`${teaser}/${path}`, "a recording")
+    expect([...played].filter((path) => !held.has(path)).sort()).toEqual([
+      "media/dispatch.mp4",
+      "media/music.m4a",
     ])
     // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
     const decks = examples.filter(
@@ -1917,7 +1932,13 @@ describe("the sixb-artifacts skill's examples", () => {
       expect(String(deck.contents)).not.toMatch(/<style|style="(?!--swatch:)/)
     }
     for (const directory of directories) {
-      const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page" | "canvas"
+      const kind = directory.split("/")[1] as
+        | "document"
+        | "sheet"
+        | "slides"
+        | "page"
+        | "canvas"
+        | "video"
       // A live sheet's query is run as the requester, who reads the invoices and their amounts.
       expect(
         await publish(

@@ -1,0 +1,32 @@
+<template>
+  <div data-composition-id="outro" data-width="1920" data-height="1080" class="scene">
+    <div class="outro-card">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="16" fill="#3ddc97"/>
+        <path d="M18 44V20h26v7H26v5h15v7H26v5z" fill="#0e1116"/>
+      </svg>
+      <h2 class="display">Fieldwise</h2>
+      <p class="outro-line">Book a demo at fieldwise.example</p>
+    </div>
+
+    <style>
+      .outro-card { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; }
+      .outro-card .mark { width: 120px; height: 120px; margin-bottom: 40px; }
+      .outro-card .display { font-size: 144px; }
+      .outro-line { margin: 32px 0 0; font-size: 48px; font-weight: 500; color: var(--muted); }
+    </style>
+
+    <script>
+      const outro = gsap.timeline({ paused: true })
+      const scene = '[data-composition-id="outro"]'
+
+      // The ending lands and holds: mark, name, then the one thing to do, still for the last 3 s.
+      outro.from(`${scene} .mark`, { scale: 0.8, opacity: 0, duration: 0.6, ease: "back.out(1.6)" }, 0.2)
+      outro.from(`${scene} .display`, { y: 32, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.45)
+      outro.from(`${scene} .outro-line`, { y: 20, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.9)
+
+      window.__timelines = window.__timelines || {}
+      window.__timelines["outro"] = outro
+    </script>
+  </div>
+</template>
