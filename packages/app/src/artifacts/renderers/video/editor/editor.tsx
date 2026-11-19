@@ -105,7 +105,11 @@ export default function VideoEditor({
   const state = useSyncExternalStore(video.subscribe, video.getState, video.getState)
   const liveState = useLiveArtifactState(live)
   const presence = useLivePresence(live)
-  const target: MediaTarget = { artifactId: version.artifactId, version: version.version }
+  const target: MediaTarget = {
+    artifactId: version.artifactId,
+    version: version.version,
+    files: version.files,
+  }
 
   const root = useRef<HTMLDivElement | null>(null)
   const { width } = useSize(root)
