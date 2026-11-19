@@ -36,10 +36,10 @@ export const HTML_FILE_ATTRIBUTES = [
 /**
  * Reads the `artifact:` addresses a web artifact's HTML uses, to resolve: links (`<a href>`),
  * files it shows or plays from other artifacts (`<img src>`, `<video src>` and its `poster`,
- * `<audio src>`, `<source src>`, `<track src>` for captions), and anything else it shows (`<sixb-embed src>`), a chart, a
- * range, a section, or a slide, which the app draws over the frame. `at` names where each sits,
- * such as a deck's slide, and `file` the HTML file it reads. The first thing that would not render
- * is the refusal.
+ * `<audio src>`, `<source src>`, `<track src>` for captions), and anything else it shows
+ * (`<sixb-embed src>`), a chart, a range, a section, or a slide, which the app draws over the
+ * frame. `at` names where each sits, such as a deck's slide, and `file` the HTML file it reads. The
+ * first thing that would not render is the refusal.
  */
 export function readHtmlReferences(
   rewriter: HTMLRewriter,
