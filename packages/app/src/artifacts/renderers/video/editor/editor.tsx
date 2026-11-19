@@ -20,6 +20,7 @@ import {
   type VideoEditResult,
   type VideoScene,
   type VideoSources,
+  videoTarget,
 } from "@sixb/core/artifacts/live"
 import {
   Button,
@@ -243,20 +244,20 @@ export default function VideoEditor({
   const splitAt = (file: string, target: VideoClip) => {
     let second: string | undefined
     const made = edit((sources) => {
-      const result = splitClip(sources, file, target.ref, timeMs - offsetOf(file), {
+      const result = splitClip(sources, file, videoTarget(target), timeMs - offsetOf(file), {
         ...(endOf(file) === undefined ? {} : { endMs: endOf(file) }),
       })
       second = "clip" in result ? result.clip : undefined
       return result
     })
-    if (made && second) setSelection({ type: "clip", file, ref: second })
+    if (made && second) setSelection({ type: "clip", file, target: second })
   }
 
   const removeSelected = (laid: { readonly file: string; readonly clip: VideoClip }) => {
     const endMs = endOf(laid.file)
     if (
       edit((sources) =>
-        removeClip(sources, laid.file, laid.clip.ref, {
+        removeClip(sources, laid.file, videoTarget(laid.clip), {
           ripple: magnetic,
           ...(endMs === undefined ? {} : { endMs }),
         })
@@ -272,15 +273,15 @@ export default function VideoEditor({
     duplicateScene: sceneActions.duplicate,
     removeScene: sceneActions.remove,
     clipTiming: (file, target, timing) =>
-      edit((sources) => setClipTiming(sources, file, target.ref, timing)),
+      edit((sources) => setClipTiming(sources, file, videoTarget(target), timing)),
     clipSound: (file, target, sound) =>
-      edit((sources) => setClipSound(sources, file, target.ref, sound)),
-    text: (file, ref, text) => edit((sources) => setVideoText(sources, file, ref, text)),
+      edit((sources) => setClipSound(sources, file, videoTarget(target), sound)),
+    text: (file, text, words) => edit((sources) => setVideoText(sources, file, text, words)),
     clipText: (file, target, text) => {
-      const ref = state.timelines
+      const words = state.timelines
         .get(file)
-        ?.texts.find((each) => each.source.element.start === target.source.element.start)?.ref
-      if (ref) edit((sources) => setVideoText(sources, file, ref, text))
+        ?.texts.find((each) => each.source.element.start === target.source.element.start)
+      if (words) edit((sources) => setVideoText(sources, file, videoTarget(words), text))
     },
     removeClip: (file, target) => removeSelected({ file, clip: target }),
     splitClip: (file, target) => splitAt(file, target),
@@ -364,7 +365,9 @@ export default function VideoEditor({
       (text) => text.tag === target.tag && text.text === target.text
     )
     const text = same[target.occurrence]
-    return text ? { file, ref: text.ref, text: text.text, rect: target.rect } : null
+    return text
+      ? { file, ref: text.ref, target: videoTarget(text), text: text.text, rect: target.rect }
+      : null
   }
 
   useEffect(() => {
@@ -575,7 +578,7 @@ export default function VideoEditor({
             removeClip: (file, target) =>
               edit((sources) =>
                 // On a phone, a clip goes and leaves its time: nothing else moves.
-                removeClip(sources, file, target.ref, {
+                removeClip(sources, file, videoTarget(target), {
                   ripple: false,
                   ...(endOf(file) === undefined ? {} : { endMs: endOf(file) }),
                 })
@@ -628,7 +631,7 @@ export default function VideoEditor({
                 target={inPlace}
                 onClose={() => setInPlace(null)}
                 onCommit={(text) =>
-                  edit((sources) => setVideoText(sources, inPlace.file, inPlace.ref, text))
+                  edit((sources) => setVideoText(sources, inPlace.file, inPlace.target, text))
                 }
               />
             ) : null}
@@ -724,15 +727,22 @@ export default function VideoEditor({
             open: (scene) => openScene(scene, false),
             moveClip: (laid, startMs) =>
               edit((sources) =>
-                moveClip(sources, laid.file, laid.clip.ref, startMs - offsetOf(laid.file))
+                moveClip(sources, laid.file, videoTarget(laid.clip), startMs - offsetOf(laid.file))
               ),
             trimClip: (laid, side, atMs) => {
               const endMs = endOf(laid.file)
               edit((sources) =>
-                trimClip(sources, laid.file, laid.clip.ref, side, atMs - offsetOf(laid.file), {
-                  ripple: magnetic,
-                  ...(endMs === undefined ? {} : { endMs }),
-                })
+                trimClip(
+                  sources,
+                  laid.file,
+                  videoTarget(laid.clip),
+                  side,
+                  atMs - offsetOf(laid.file),
+                  {
+                    ripple: magnetic,
+                    ...(endMs === undefined ? {} : { endMs }),
+                  }
+                )
               )
             },
             sceneLength: sceneActions.sceneLength,
