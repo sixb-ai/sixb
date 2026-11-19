@@ -112,6 +112,7 @@ import type {
   ModelRateCard,
   ModelTool,
   ModelUsage,
+  VideoModel,
   WebSearchModel,
   WebSearchModelRequest,
 } from "@sixb/core/models"
@@ -18662,4 +18663,72 @@ runRunRecoveryContractSuite("Agent", async () => {
     },
     dispose: () => first.stop(),
   }
+})
+
+describe("AgentWorker video generation checks", () => {
+  // Removal proof: drop the model-call check branch from AgentWorker.execute; the job never
+  // checks the generation, which stays pending.
+  test("settles a generation nobody reads again, in a process that did not start it", async () => {
+    let checks = 0
+    const video: VideoModel = {
+      providerId: "test",
+      modelId: "director",
+      definition: { kind: "video", providerId: "test", modelId: "director" },
+      start: async () => ({ operation: "job_1" }),
+      status: async () =>
+        checks++ === 0
+          ? { status: "pending" }
+          : {
+              status: "completed",
+              output: { videos: [{ data: new Uint8Array([0, 0, 0, 8]), mediaType: "video/mp4" }] },
+            },
+    }
+    const storage = new InMemoryStorage()
+    const blobStorage = new InMemoryBlobStorage()
+    const queues = new InMemoryQueues()
+    const host = () =>
+      new SixbHost({
+        id: PROJECT_ID,
+        ontology: [],
+        groups: [AGENT_RUNTIME_GROUP],
+        broker: new InMemoryBroker(),
+        storage,
+        lakeStorage: new InMemoryLakeStorage(),
+        blobStorage,
+        queues,
+        sandboxes: new RecordingSandboxFactory(),
+        models: { video: [video] },
+      })
+    jest.useFakeTimers()
+    const requester = bindRequestExecution(host(), {
+      request: new Request("http://localhost/videos"),
+      authorization: { type: "disabled" },
+    })
+    const { callId } = await requester.models.video.start({ prompt: "a fox", duration: 4 })
+
+    // The process that started it is gone; only storage and the queue carry on.
+    const worker = new AgentWorker(host(), workerOptions())
+    await worker.start()
+    try {
+      const settled = await underFakeTime(
+        async () => {
+          const record = await storage.aiUsage.getModelCallOperation({
+            projectId: PROJECT_ID,
+            callId,
+          })
+          return record?.status === "completed" ? record : null
+        },
+        "scheduled video check",
+        1_000
+      )
+
+      expect(settled.result).toMatchObject({ usage: { outputVideoMs: 4_000 } })
+      expect(checks).toBe(2)
+      expect(
+        await storage.aiUsage.getModelCallFiles({ projectId: PROJECT_ID, callId })
+      ).toMatchObject({ files: [{ mediaType: "video/mp4" }] })
+    } finally {
+      await worker.stop()
+    }
+  })
 })
