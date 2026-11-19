@@ -683,6 +683,27 @@ describe("publishing a video", () => {
     expect(version.references).toEqual([{ address, as: "embed", at: "intro", resolvedVersion: 1 }])
   })
 
+  // Removal proof: share one `loaded` map across scenes in validateVideo's `load`, and the outro's
+  // reference is never recorded.
+  test("resolves a file of another artifact at each scene that nests the composition playing it", async () => {
+    const { publish } = setup()
+    const library = await publish({ "index.html": "<main></main>", "intro.mp4": "clip" }, "page")
+    const address = `artifact:${library.artifact.id}/intro.mp4`
+    const lower =
+      '<div data-composition-id="lower" data-composition-src="compositions/lower.html"></div>'
+
+    const { version } = await publish({
+      ...LAUNCH,
+      "scenes/intro.html": scene("intro", lower),
+      "scenes/outro.html": scene("outro", lower),
+      "compositions/lower.html": `<template><div data-composition-id="lower" data-width="1920" data-height="1080"><video src="${address}" muted></video></div></template>`,
+    })
+    expect(version.references).toEqual([
+      { address, as: "embed", at: "intro", resolvedVersion: 1 },
+      { address, as: "embed", at: "outro", resolvedVersion: 1 },
+    ])
+  })
+
   test.each([
     ["no index.html", { "index.html": null }, "A video needs 'index.html', its root composition"],
     [
