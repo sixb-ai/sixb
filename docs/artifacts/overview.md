@@ -80,11 +80,11 @@ and to read, derived once for every file that holds the same bytes:
 | `filmstrip`  | Thumbnails at a regular interval, in one JPEG                              |
 | `waveform`   | The sound's peaks, 50 a second                                             |
 | `cuts`       | Where the picture cuts to another shot                                     |
-| `transcript` | Each word and when it is said, from the project's transcription model      |
+| `transcript` | What is said, timed by word or by sentence as the project's model times it |
 
 ```ts
 const media = await sixb.artifacts.media(artifactId, { path: "launch.mov" })
-media?.parts.poster // { status: "ready", file, atMs: 1520 }, or "pending" for a few seconds
+media?.parts.poster // { status: "ready", file, atMs: 1520 }, or "pending" while it is derived
 ```
 
 - The app shows the poster on cards and plays the proxy, and every frame serves a video's proxy in
