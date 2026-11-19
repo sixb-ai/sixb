@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react"
@@ -14,10 +15,12 @@ import type { FileSource } from "../file-source"
 import { useArtifactMessages } from "../messages"
 import { useNearScreen } from "../near-screen"
 import { formatClock, MEDIA_FRAME, revealDuration } from "../playback"
+import { usePeaks, Waveform } from "../waveform"
 import { ViewerNotice } from "./notice"
 
 // Video and sound files, played in place. Video keeps the browser's own controls, which already
-// know fullscreen, picture in picture, captions, and touch; sound gets a compact player of its own.
+// know fullscreen, picture in picture, captions, and touch; sound gets a compact player of its own,
+// its track drawn as its waveform once Sixb derived it.
 
 /**
  * Where a video sits: `stage` fills a viewer on a neutral surface, `inline` runs in a column of
@@ -214,6 +217,21 @@ function Audio({ source, name }: MediaProps) {
   const [duration, setDuration] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   const derived = useDerivedMedia(source)
+  const peaks = usePeaks(derived?.waveform)
+
+  // The track's width, which its waveform is drawn to.
+  const track = useRef<HTMLDivElement>(null)
+  const [trackWidth, setTrackWidth] = useState(0)
+  useLayoutEffect(() => {
+    const element = track.current
+    if (!element) return
+    const measure = () => setTrackWidth(element.clientWidth)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   // The position moves with each frame while it plays, not with the browser's few updates a second.
   useEffect(() => {
@@ -239,6 +257,9 @@ function Audio({ source, name }: MediaProps) {
 
   // How long it lasts, once the browser knows.
   const length = duration !== null && Number.isFinite(duration) && duration > 0 ? duration : null
+  // Its waveform, once its peaks and its length are known: played in full ink, to come in a tint.
+  const waved = derived?.waveform !== undefined && peaks && length !== null && trackWidth > 0
+  const played = length === null ? 0 : Math.min(time / length, 1)
   const seek = (to: number) => {
     const element = audio.current
     if (!element || length === null) return
@@ -283,19 +304,52 @@ function Audio({ source, name }: MediaProps) {
           <span className="w-9 shrink-0 text-[11px] text-muted-foreground tabular-nums">
             {formatClock(time)}
           </span>
-          <Slider
-            value={[length === null ? 0 : Math.min(time, length)]}
-            max={length ?? 1}
-            step={0.1}
-            disabled={length === null}
-            aria-label={messages.position}
-            onValueChange={([value]) => {
-              if (value !== undefined) seek(value)
-            }}
-            onKeyDown={seekByKey}
-            // A taller reach than the thin track, for a finger.
-            className="-my-2 py-2 [&_[data-slot=slider-range]]:bg-foreground/80 [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:border-foreground/30 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-foreground/15"
-          />
+          <div ref={track} className={cn("relative min-w-0 flex-1", waved && "h-7")}>
+            {waved && derived?.waveform && length !== null ? (
+              <>
+                <span aria-hidden="true" className="absolute inset-0 text-foreground/25">
+                  <Waveform
+                    url={derived.waveform}
+                    fromMs={0}
+                    width={trackWidth}
+                    zoom={trackWidth / length}
+                    compact={false}
+                  />
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-0 text-foreground/85"
+                  style={{ clipPath: `inset(0 ${(1 - played) * 100}% 0 0)` }}
+                >
+                  <Waveform
+                    url={derived.waveform}
+                    fromMs={0}
+                    width={trackWidth}
+                    zoom={trackWidth / length}
+                    compact={false}
+                  />
+                </span>
+              </>
+            ) : null}
+            <Slider
+              value={[length === null ? 0 : Math.min(time, length)]}
+              max={length ?? 1}
+              step={0.1}
+              disabled={length === null}
+              aria-label={messages.position}
+              onValueChange={([value]) => {
+                if (value !== undefined) seek(value)
+              }}
+              onKeyDown={seekByKey}
+              className={
+                waved
+                  ? // Over its waveform, the track is the peaks themselves, and the thumb a playhead.
+                    "absolute inset-0 h-full [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-thumb]]:h-7 [&_[data-slot=slider-thumb]]:w-[3px] [&_[data-slot=slider-thumb]]:rounded-full [&_[data-slot=slider-thumb]]:border-0 [&_[data-slot=slider-thumb]]:bg-foreground [&_[data-slot=slider-thumb]]:shadow-none [&_[data-slot=slider-track]]:h-full [&_[data-slot=slider-track]]:bg-transparent"
+                  : // A taller reach than the thin track, for a finger.
+                    "-my-2 py-2 [&_[data-slot=slider-range]]:bg-foreground/80 [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:border-foreground/30 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-foreground/15"
+              }
+            />
+          </div>
           <span className="w-9 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
             {length === null ? "–:––" : formatClock(length)}
           </span>
