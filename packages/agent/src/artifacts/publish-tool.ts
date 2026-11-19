@@ -60,7 +60,7 @@ import {
   type LayoutCheck,
   type LayoutWarning,
 } from "./layout-check/layout-check"
-import { checkVideo, type VideoCheckFile } from "./layout-check/video-check"
+import { checkVideo, VIDEO_SHEET_FRAMES, type VideoCheckFile } from "./layout-check/video-check"
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
@@ -74,9 +74,6 @@ type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** A file of up to 2 GB, uploaded from the sandbox through the API. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
-/** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
-const PUBLISHABLE_KINDS = ARTIFACT_KINDS
-type PublishableKind = ArtifactKind
 
 // One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
 // kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
@@ -106,7 +103,7 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
       title: TITLE_PROPERTY,
       kind: {
         type: "string",
-        enum: [...PUBLISHABLE_KINDS],
+        enum: [...ARTIFACT_KINDS],
         description: "A new artifact's kind. With an id it is ignored: an update keeps its kind.",
       },
       id: {
@@ -199,7 +196,7 @@ interface PublishRequest {
   readonly path: string
   readonly title: string
   /** A new artifact of this kind, or this artifact's latest version. */
-  readonly target: { readonly kind: PublishableKind } | { readonly artifactId: string }
+  readonly target: { readonly kind: ArtifactKind } | { readonly artifactId: string }
 }
 
 async function publish(
@@ -1140,8 +1137,8 @@ function publishSummary(output: JsonValue): string {
 function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id"])
   const kind = input.kind === undefined || input.kind === null ? undefined : input.kind
-  if (kind !== undefined && !PUBLISHABLE_KINDS.includes(kind as PublishableKind)) {
-    throw publishError(CREATE_TOOL, `kind must be one of ${PUBLISHABLE_KINDS.join(", ")}`)
+  if (kind !== undefined && !ARTIFACT_KINDS.includes(kind as ArtifactKind)) {
+    throw publishError(CREATE_TOOL, `kind must be one of ${ARTIFACT_KINDS.join(", ")}`)
   }
   if (input.id !== undefined && input.id !== null && typeof input.id !== "string") {
     throw publishError(CREATE_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
@@ -1166,7 +1163,7 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   // With an id, a kind is ignored: an update keeps the artifact's, and a model that sends every
   // field, as strict mode has it, fills one in.
   return noId
-    ? { path, title, target: { kind: kind as PublishableKind } }
+    ? { path, title, target: { kind: kind as ArtifactKind } }
     : { path, title, target: { artifactId: id } }
 }
 
@@ -1225,30 +1222,35 @@ function publishError(tool: ArtifactToolName, message: string): AgentToolPublicE
 }
 
 /**
- * Where a video's contact sheet is, and which scene each of its frames shows: `1–3 intro, 4–6
- * demo`, as the sheet numbers them.
+ * Where a video's contact sheets are, and which scene each of their frames shows: `1–3 intro,
+ * 4–6 demo`, as each sheet numbers its own frames from 1.
  */
 function videoShots(sheets: readonly string[], frames: readonly JsonValue[]): string {
-  const scenes: { scene: string; first: number; last: number }[] = []
-  frames.forEach((frame, index) => {
-    const scene =
-      typeof frame === "object" && frame !== null && !Array.isArray(frame)
-        ? String(frame.scene)
-        : ""
-    const run = scenes.at(-1)
-    if (run?.scene === scene) run.last = index + 1
-    else scenes.push({ scene, first: index + 1, last: index + 1 })
+  const scenes = frames.map((frame) =>
+    typeof frame === "object" && frame !== null && !Array.isArray(frame) ? String(frame.scene) : ""
+  )
+
+  const legends = sheets.map((sheet, page) => {
+    const shown = scenes.slice(page * VIDEO_SHEET_FRAMES, (page + 1) * VIDEO_SHEET_FRAMES)
+    const runs: { scene: string; first: number; last: number }[] = []
+    shown.forEach((scene, index) => {
+      const run = runs.at(-1)
+      if (run?.scene === scene) run.last = index + 1
+      else runs.push({ scene, first: index + 1, last: index + 1 })
+    })
+
+    const legend = runs
+      .map(({ scene, first, last }) => `${first === last ? first : `${first}–${last}`} ${scene}`)
+      .join(", ")
+    return `${sheet} (${legend})`
   })
-  const legend = scenes
-    .map(({ scene, first, last }) => `${first === last ? first : `${first}–${last}`} ${scene}`)
-    .join(", ")
 
   const directory = posix.dirname(sheets[0] ?? "")
-  const sheet =
+  const where =
     sheets.length === 1
-      ? `Its contact sheet is ${sheets[0]}`
-      : `Its contact sheets are ${sheets.join(", ")}`
-  return `Video check: HyperFrames checked the files its export renders. ${sheet}: ${frames.length} frames, numbered by scene (${legend}), each also a PNG at full size in ${directory}/. Open the contact sheet with read and look at every frame as a viewer would, fix what the warnings name and what you see, and update the artifact.`
+      ? `Its contact sheet is ${legends[0]}`
+      : `Its contact sheets are ${legends.join("; ")}`
+  return `Video check: HyperFrames checked the files its export renders. ${where}: ${frames.length} frames, numbered by scene on each sheet, each also a PNG at full size in ${directory}/. Open each contact sheet with read and look at every frame as a viewer would, fix what the warnings name and what you see, and update the artifact.`
 }
 
 /**

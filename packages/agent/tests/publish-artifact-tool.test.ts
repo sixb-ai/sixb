@@ -2598,9 +2598,45 @@ describe("a video", () => {
     )
     expect(text).not.toContain("The film has no sound")
     expect(text).toContain(
-      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg: 6 frames, numbered by scene (1–3 intro, 4–6 demo)`
+      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg (1–3 intro, 4–6 demo): 6 frames`
     )
     expect(text).not.toContain("slide")
+  })
+
+  // Guard proof: number the frames across sheets in videoShots (publish-tool.ts), as before; the
+  // second sheet's legend then names frames 10 to 12, which no sheet shows.
+  test("names the scenes of each contact sheet, as each numbers its frames from 1", async () => {
+    const ids = ["intro", "demo", "detail", "outro"]
+    write(
+      "film/index.html",
+      `<div data-composition-id="main" data-width="1280" data-height="720">${ids
+        .map(
+          (id, index) =>
+            `<div data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${index * 2}" data-duration="2"></div>`
+        )
+        .join("")}</div>`
+    )
+    for (const id of ids) write(`film/scenes/${id}.html`, scene(id, "<h1>A line</h1>"))
+
+    // HyperFrames pages its sheet by nine frames.
+    const paged: Check = (output) => {
+      const report = videoCheck(output)
+      writeFileSync(join(output, "frames", "contact-sheet-2.jpg"), "the second sheet")
+      const sheets = ["contact-sheet-1.jpg", "contact-sheet-2.jpg"]
+      return { ...report, sheets: sheets.map((sheet) => join(output, "frames", sheet)) }
+    }
+    const published = (await publish(
+      { path: "film", kind: "video", title: "Launch film" },
+      { check: paged }
+    )) as { artifactId: string }
+
+    const { create } = tools()
+    const summary = create.toModelOutput?.(published as unknown as JsonValue, context)
+    const text = summary && "value" in summary ? String(summary.value) : ""
+    const frames = `.sixb/agent/checks/${published.artifactId}-r1/frames`
+    expect(text).toContain(
+      `Its contact sheets are ${frames}/contact-sheet-1.jpg (1–3 intro, 4–6 demo, 7–9 detail); ${frames}/contact-sheet-2.jpg (1–3 outro): 12 frames`
+    )
   })
 
   // Guard proof: install a video's recordings as any other file (remotePaths in materialize.ts
