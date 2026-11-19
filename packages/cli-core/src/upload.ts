@@ -26,7 +26,7 @@ export interface UploadProgress {
 
 export interface UploadFileOptions {
   readonly logicalPath?: string
-  /** Without it, the API reads the type from the file's name. */
+  /** Without it, the API types the file by its leading bytes, else its name. */
   readonly mediaType?: string
   readonly onProgress?: (progress: UploadProgress) => void
 }

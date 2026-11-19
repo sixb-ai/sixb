@@ -203,11 +203,12 @@ export async function uploadSandboxFile(
   input: SandboxCommandOptions & {
     /** An absolute path, as `resolveSandboxPath` returns it. */
     readonly path: string
-    readonly mediaType: string
+    /** Without it, the API types the file by its leading bytes, else its name. */
+    readonly mediaType?: string
   }
 ): Promise<FileRef> {
   const result = await runCheckedFileScript(handle, UPLOAD_SANDBOX_FILE_SCRIPT, input, {
-    SIXB_UPLOAD_MEDIA_TYPE: input.mediaType,
+    ...(input.mediaType === undefined ? {} : { SIXB_UPLOAD_MEDIA_TYPE: input.mediaType }),
   })
   if (result.exitCode !== 0) {
     throw new SandboxFileError(
@@ -569,4 +570,9 @@ done`
 // exit codes would read as the prelude's, so a failure exits 5, its error on stderr.
 const UPLOAD_SANDBOX_FILE_SCRIPT = `# sixb-upload-sandbox-file
 ${CHECKED_FILE_PRELUDE}
-"\${SIXB_BIN_DIR:?}/sixb" files upload "$resolved" --media-type "\${SIXB_UPLOAD_MEDIA_TYPE:?}" || exit 5`
+sixb="\${SIXB_BIN_DIR:?}/sixb"
+if [ -n "\${SIXB_UPLOAD_MEDIA_TYPE:-}" ]; then
+  "$sixb" files upload "$resolved" --media-type "$SIXB_UPLOAD_MEDIA_TYPE" || exit 5
+else
+  "$sixb" files upload "$resolved" || exit 5
+fi`

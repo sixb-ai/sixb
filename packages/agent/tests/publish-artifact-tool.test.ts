@@ -39,6 +39,7 @@ import {
   writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
+import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import * as Y from "yjs"
@@ -387,7 +388,8 @@ async function installSandboxCli(apiBaseUrl: string): Promise<Record<string, str
 
 /**
  * The API as far as the sandbox's `sixb` reaches it: the simple upload, into the project's blobs,
- * and a file of an artifact's version, read from them.
+ * typed as the API types one sent without a type, and a file of an artifact's version, read from
+ * them.
  */
 function startSandboxApi() {
   const requests: string[] = []
@@ -419,9 +421,9 @@ function startSandboxApi() {
       if (!(file instanceof File)) {
         return Response.json({ error: "Unexpected request" }, { status: 404 })
       }
-      return Response.json(
-        await blobStorage.put({ body: file, fileName: file.name, mediaType: file.type })
-      )
+      const leading = new Uint8Array(await file.slice(0, 64).arrayBuffer())
+      const mediaType = file.type || inferFileMediaType(file.name, leading)
+      return Response.json(await blobStorage.put({ body: file, fileName: file.name, mediaType }))
     },
   })
   return {
@@ -1768,6 +1770,47 @@ describe("publish_artifact", () => {
       )
       expect(readFileSync(join(root, copy))).toEqual(Buffer.from(recording))
       expect(budget.reservedBytes).toBe(recording.byteLength)
+    } finally {
+      api.close()
+    }
+  })
+
+  // Reproduce by passing whatever type the name gives: the sandbox's sixb is told the recording is
+  // application/octet-stream, and the API never reads its bytes for a better one.
+  test("leaves a large file's type to the API when its name tells none", async () => {
+    const recording = new Uint8Array(9 * 1024 * 1024)
+    recording.set(new TextEncoder().encode("\0\0\0\x18ftypmp42"))
+    mkdirSync(join(root, "work"), { recursive: true })
+    writeFileSync(join(root, "work/recording"), recording)
+    const api = startSandboxApi()
+    try {
+      const env = await installSandboxCli(api.baseUrl)
+      // The run's sixb, noting what it is asked before it runs.
+      const noting = join(root, "noting-bin")
+      mkdirSync(noting)
+      writeFileSync(
+        join(noting, "sixb"),
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' "$@" > "${join(root, "sixb-args")}"`,
+          `exec "${env.SIXB_BIN_DIR}/sixb" "$@"`,
+          "",
+        ].join("\n"),
+        { mode: 0o755 }
+      )
+
+      const { artifactId } = (await publish(
+        { path: "work/recording", kind: "file", title: "Recording" },
+        { env: { ...env, SIXB_BIN_DIR: noting } }
+      )) as { artifactId: string }
+
+      expect(read("sixb-args").trim().split("\n")).toEqual([
+        "files",
+        "upload",
+        join(root, "work/recording"),
+      ])
+      const version = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+      expect(version?.files[0]?.file.mediaType).toBe("video/mp4")
     } finally {
       api.close()
     }

@@ -11,4 +11,9 @@ export {
   resolveFileRefAtPath,
   statFileRef,
 } from "./file-content"
-export { canonicalMediaType, inferFileMediaType, sniffFileMediaType } from "./media-type"
+export {
+  canonicalMediaType,
+  inferFileMediaType,
+  sniffFileMediaType,
+  UNTYPED_MEDIA_TYPE,
+} from "./media-type"

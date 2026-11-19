@@ -33,7 +33,11 @@ import {
   isArtifactId,
   type PublishedArtifact,
 } from "@sixb/core/internal/artifacts/publish"
-import { inferFileMediaType, statFileRef } from "@sixb/core/internal/blob-storage"
+import {
+  inferFileMediaType,
+  statFileRef,
+  UNTYPED_MEDIA_TYPE,
+} from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactRecord } from "@sixb/core/storage"
 import { agentToolErrorText } from "../model-adapters"
@@ -484,12 +488,15 @@ async function uploadSource(
   signal: AbortSignal
 ): Promise<FileRef> {
   const tool = CREATE_TOOL
+  // A name that says nothing of the type, such as a recording's without an extension, leaves it to
+  // the API, which reads the file's leading bytes.
+  const named = inferFileMediaType(posix.basename(source.path))
   const uploading = input.budget.reserveArtifact(kind, source.sizeBytes, tool)
   let file: FileRef
   try {
     file = await uploadSandboxFile(handle, {
       path: source.absolutePath,
-      mediaType: inferFileMediaType(posix.basename(source.path)),
+      ...(named === UNTYPED_MEDIA_TYPE ? {} : { mediaType: named }),
       signal,
       timeoutMs: SANDBOX_UPLOAD_TIMEOUT_MS,
     }).catch((error: unknown) => {
