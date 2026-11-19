@@ -233,9 +233,11 @@ How an operation works:
 3. The result is read as publishing reads a video (`readVideoComposition`); anything else is
    refused, with the reason.
 4. The edit is the difference from the files it started from: the live layer's line diff, each
-   line written again narrowed to the words that changed. Two people editing at once change
-   different characters, which Yjs merges, and the Agent's next diff reads as an edit. Its changes
-   are `BoardChange`s, applied to a `Y.Text` by `applyBoardEditToText`.
+   line written again narrowed to the attributes and words that changed. Two people changing
+   different values change different text, which Yjs merges, and the Agent's next diff reads as an
+   edit. Two writing one attribute at once leave it twice; the first counts, as in a browser, and
+   the next write keeps it alone. Its changes are `BoardChange`s, applied to a `Y.Text` by
+   `applyBoardEditToText`.
 
 What moves with what:
 
@@ -246,7 +248,9 @@ What moves with what:
   delete, a marked range, words of a transcript) takes stretches out of the scene: a recording cut
   through is split around them, each part playing on from where its file was cut; any other clip
   is shortened; a clip with nothing left goes; the scene ends as much sooner.
-- A clip whose `data-start` names another clip follows it, and a ripple does not move it.
+- A clip whose `data-start` names another clip follows it, and a ripple does not move it. Once
+  that clip is split, it follows the last part; once it is removed or cut, it starts at the time
+  it did, which the ripple then moves as any other's.
 - A copied scene's recordings take new ids, and every `#id` naming them in the file follows, as
   HyperFrames plays each recording by its id.
 

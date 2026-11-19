@@ -1472,15 +1472,15 @@ function CopyLinkButton({ link }: { readonly link: () => string }) {
   )
 }
 
-/**
- * What starts editing from within the artifact: the header's Edit, live or as a draft, while the
- * reader may change it and is not editing it already.
- */
 /** How an artifact of a kind is edited live, if it is. */
 function liveKindOf(kind: ArtifactKindName): "canvas" | "document" | "video" | null {
   return kind === "canvas" || kind === "document" || kind === "video" ? kind : null
 }
 
+/**
+ * What starts editing from within the artifact: the header's Edit, live or as a draft, while the
+ * reader may change it and is not editing it already.
+ */
 function startEditing(edit: ArtifactEdit, liveView: LiveView | null): (() => void) | undefined {
   if (edit.editing || liveView?.editing) return undefined
   if (liveView && !liveView.state.left) return liveView.editable ? liveView.start : undefined
