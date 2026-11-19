@@ -15,7 +15,7 @@ const WATCH_MS = 2_000
 export type VideoExportView =
   /** Not read yet. */
   | { readonly state: "loading" }
-  /** Nobody asked, or nothing is rendered yet; `earlier` is the version before it, exported. */
+  /** Not asked for here; `earlier` is the version before it, exported. */
   | { readonly state: "idle"; readonly earlier?: number }
   | {
       readonly state: "rendering"
@@ -27,8 +27,9 @@ export type VideoExportView =
   | { readonly state: "failed"; readonly reason: string }
 
 /**
- * What the header shows of an answer: the server answers `rendering` for an export nobody asked
- * for as well, so one not asked for here, with nothing rendered, is idle.
+ * What the header shows of an answer. The server answers `rendering` for an export nobody asked
+ * for as well, its parts rendered for another version counted, as an edit of one scene keeps the
+ * others: one not asked for here is idle. Exporting it joins one already rendering.
  */
 export function videoExportView(
   answer: ExportArtifactVideoResponse | undefined,
@@ -42,10 +43,9 @@ export function videoExportView(
   }
   if (answer.status === "failed") return { state: "failed", reason: answer.reason }
 
+  if (!asked) return earlier === undefined ? { state: "idle" } : { state: "idle", earlier }
+
   const { ready, total, assembling } = answer.progress
-  if (!asked && ready === 0 && !assembling) {
-    return earlier === undefined ? { state: "idle" } : { state: "idle", earlier }
-  }
   return { state: "rendering", ready, total, assembling }
 }
 
@@ -60,7 +60,9 @@ export function videoExportQueryKey(artifactId: string, version: number): readon
  */
 export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "version">) {
   const cache = useQueryClient()
-  const [asked, setAsked] = useState(false)
+  // Which version the reader exported: the header stays as another version opens in it.
+  const [exported, setExported] = useState<string | null>(null)
+  const asked = exported === `${version.artifactId}@${version.version}`
   const read = (number: number, render: boolean) => async () =>
     (
       await exportArtifactVideo({
@@ -74,20 +76,11 @@ export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "ve
     queryKey: videoExportQueryKey(version.artifactId, version.version),
     // Asked here, a look also asks again, which changes nothing unless its job was lost.
     queryFn: read(version.version, asked),
-    refetchInterval: (query) => {
-      const answer = query.state.data
-      const watching =
-        answer?.status === "rendering" &&
-        (asked || answer.progress.ready > 0 || answer.progress.assembling)
-      return watching ? WATCH_MS : false
-    },
+    refetchInterval: (query) =>
+      asked && query.state.data?.status === "rendering" ? WATCH_MS : false,
   })
 
-  const idle =
-    current.data?.status === "rendering" &&
-    current.data.progress.ready === 0 &&
-    !current.data.progress.assembling &&
-    !asked
+  const idle = current.data?.status === "rendering" && !asked
   const previous = version.version - 1
   const earlier = useQuery({
     queryKey: videoExportQueryKey(version.artifactId, previous),
@@ -97,16 +90,19 @@ export function useVideoExport(version: Pick<ArtifactVersion, "artifactId" | "ve
   })
 
   const start = useCallback(async () => {
-    setAsked(true)
+    const exporting = `${version.artifactId}@${version.version}`
+    setExported(exporting)
     const failed = current.data?.status === "failed"
-    const answer = (
-      await exportArtifactVideo({
-        path: { artifactId: version.artifactId, version: String(version.version) },
-        query: failed ? { retry: "true" } : {},
-        throwOnError: true,
-      })
-    ).data
-    cache.setQueryData(videoExportQueryKey(version.artifactId, version.version), answer)
+    const answer = await exportArtifactVideo({
+      path: { artifactId: version.artifactId, version: String(version.version) },
+      query: failed ? { retry: "true" } : {},
+      throwOnError: true,
+    }).catch((error: unknown) => {
+      // Not asked after all: the header offers to export it again.
+      setExported((current) => (current === exporting ? null : current))
+      throw error
+    })
+    cache.setQueryData(videoExportQueryKey(version.artifactId, version.version), answer.data)
   }, [cache, current.data?.status, version.artifactId, version.version])
 
   const view = videoExportView(

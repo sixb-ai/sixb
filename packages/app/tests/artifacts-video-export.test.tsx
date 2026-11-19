@@ -124,12 +124,16 @@ describe("a video's MP4 in its header", () => {
     expect(videoExportView(rendering(0) as never, false)).toEqual({ state: "idle" })
     expect(videoExportView(rendering(0) as never, false, 2)).toEqual({ state: "idle", earlier: 2 })
     expect(videoExportView(rendering(0) as never, true)).toMatchObject({ state: "rendering" })
-    // Parts rendered: someone asked, here or elsewhere.
-    expect(videoExportView(rendering(1) as never, false)).toMatchObject({
+    // Parts rendered for another version, as an edit of one scene keeps the others: still idle.
+    // Reproduce by reading parts rendered as someone asking: the header then shows a render nobody
+    // asked for, with no way to start it.
+    expect(videoExportView(rendering(1) as never, false)).toEqual({ state: "idle" })
+    expect(videoExportView(rendering(3, true) as never, false)).toEqual({ state: "idle" })
+    expect(videoExportView(rendering(1) as never, true)).toMatchObject({
       state: "rendering",
       ready: 1,
     })
-    expect(videoExportView(rendering(3, true) as never, false)).toMatchObject({ assembling: true })
+    expect(videoExportView(rendering(3, true) as never, true)).toMatchObject({ assembling: true })
   })
 
   // Reproduce by giving a ready export the menu too: downloading it takes a second click.
