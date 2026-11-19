@@ -6,6 +6,7 @@ import type { AgentRunFileStore } from "@sixb/core/internal/agents"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
+import { CHECKS_DIRECTORY } from "./artifacts/layout-check/layout-check"
 import { readBlob } from "./artifacts/materialize"
 import {
   CHILD_FILES_DIRECTORY,
@@ -34,8 +35,17 @@ import type { AgentRunFiles } from "./types"
 /** Where a child writes the files its parent gets back, relative to its working directory. */
 const CHILD_OUTPUT_DIRECTORY = "out"
 
-/** What a run installs in its context directory that holds files worth handing over. */
-const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", CHILD_FILES_DIRECTORY]
+/**
+ * What a run installs in its context directory that holds files worth handing over: among them
+ * the screenshots and contact sheets its publishes were checked with, which a reviewer looks at.
+ */
+const HANDED_RUN_DIRECTORIES = [
+  "attachments",
+  "artifacts",
+  "tool-files",
+  CHILD_FILES_DIRECTORY,
+  CHECKS_DIRECTORY,
+]
 const SANDBOX_TIMEOUT_MS = 30_000
 const { maxFiles, fileMaxBytes, totalMaxBytes } = SANDBOX_ATTACHMENT_LIMITS
 
@@ -443,7 +453,7 @@ function assertHandableRunFile(
   }
 
   throw handOffError(
-    `'${requested}': it is part of the run context Sixb installs under ${handle.contextDirectory}. Hand over files from your working directory, $SIXB_ATTACHMENT_DIR, $SIXB_ARTIFACTS_DIR or ${posix.join(handle.contextDirectory, CHILD_FILES_DIRECTORY)}`
+    `'${requested}': it is part of the run context Sixb installs under ${handle.contextDirectory}. Hand over files from your working directory, $SIXB_ATTACHMENT_DIR, $SIXB_ARTIFACTS_DIR, ${posix.join(handle.contextDirectory, CHILD_FILES_DIRECTORY)} or ${posix.join(handle.contextDirectory, CHECKS_DIRECTORY)}`
   )
 }
 

@@ -248,6 +248,18 @@ describe("listHandedSources", () => {
     )
     expect(refused).toMatchObject({ message: expect.stringContaining("part of the run context") })
   })
+
+  // Guard proof: drop CHECKS_DIRECTORY from child-files.ts's HANDED_RUN_DIRECTORIES; the sheet is
+  // refused as run context, and the video guide's reviewer never gets what the publish named.
+  test("hands over the contact sheets a publish was checked with, for a reviewer", async () => {
+    const sheet = `${SANDBOX_CONTEXT_DIRECTORY}/checks/art_k3m9q2x7tp-r2/frames/contact-sheet-1.jpg`
+    mkdirSync(join(root, sheet, ".."), { recursive: true })
+    writeFileSync(join(root, sheet), "sheet")
+
+    expect(await sources(SANDBOX_CONTEXT_DIRECTORY, [sheet])).toMatchObject([
+      { path: sheet, absolutePath: join(root, sheet) },
+    ])
+  })
 })
 
 function unused(): never {
