@@ -50,10 +50,11 @@ readers
 ## Proxies in frames
 
 Frames serve each file as its version holds it: a deck's or a page's clip plays its original,
-whatever is derived of it. A video's frame will play proxies, which `mediaProxyReference` and
-`requestedMediaProxy` (`media.ts`) are for. The first names a ready proxy as the file's path with
-`?sixb-proxy=<the proxy's digest>`, for the frame to rewrite its media references to; the second
-reads that name back on the frame's request. The original's address always serves the original,
+whatever is derived of it. A video's frame plays proxies, through `mediaProxyReference` and
+`requestedMediaProxy` (`media.ts`). The first names a ready proxy as the file's path with
+`?sixb-proxy=<the proxy's digest>`: `rewriteVideoProxies` (`frames/assets.ts`) adds that query to
+each recording a video's HTML file plays, its scenes' included. The second reads that name back on
+the frame's request (`server/src/routes/artifact-frames.ts`). The original's address always serves the original,
 so a page that loaded it keeps the bytes it loaded, and a page opened once the proxy is ready
 plays the proxy. A name that is not the ready proxy's is a 404, never other bytes.
 
