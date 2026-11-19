@@ -694,7 +694,8 @@ function BigPlay({
   readonly onClick: () => void
 }) {
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+    // A soft shade under the mark, so it reads on the frame's own words.
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[radial-gradient(circle_at_center,rgb(0_0_0/0.45),rgb(0_0_0/0.22)_30%,rgb(0_0_0/0.16))] motion-safe:animate-in motion-safe:fade-in-0">
       <button
         type="button"
         aria-label={label}
