@@ -69,6 +69,9 @@ export function videoExportQueryKey(
   return ["artifact-video-export", artifactId, version, revision ?? "frozen"]
 }
 
+/** A version's MP4 as the header has it: where it stands, and `start` to ask for it. */
+export type VideoExport = ReturnType<typeof useVideoExport>
+
 /**
  * A version's MP4: where it stands, watched while it renders, and `start` to ask for it, again
  * when it failed. `earlier` is the version before it, read only while this one is idle.
