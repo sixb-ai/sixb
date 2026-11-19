@@ -26,15 +26,15 @@ work/launch-teaser/
 ```html
 <!-- index.html, in <body>; <head> links the fonts, styles.css and GSAP for every scene -->
 <div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30"
-     data-duration="17" data-poster="13" data-no-timeline>
-  <audio id="music" src="media/music.m4a" data-start="0" data-duration="17"
+     data-duration="15" data-poster="13" data-no-timeline>
+  <audio id="music" src="media/music.m4a" data-start="0" data-duration="15"
          data-volume="0.5" data-fade-in="0.4" data-fade-out="2"></audio>
   <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html"
        data-start="0" data-duration="3" data-label="Every job, one screen"></div>
   <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html"
        data-start="hook - 0.4" data-duration="8.4" data-label="Dispatch in two taps"></div>
   <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html"
-       data-start="demo" data-duration="6" data-label="End card"></div>
+       data-start="demo" data-duration="4" data-label="End card"></div>
 </div>
 ```
 
@@ -119,9 +119,10 @@ motion designer would ship.
 - **Sound.** Music under a voice sits at about a fifth of its volume (`data-volume="0.2"`) and
   fades in and out; alone, half. Bring a voice to -16 LUFS with
   `hyperframes normalize-audio --target <id> --write`. Cut on the beat
-  (`hyperframes audio <file> --only beats`) or between sentences, never mid-word. Music comes from
-  the user or the project; one from the web only under a licence that allows it, such as CC0,
-  named in your reply.
+  (`hyperframes audio <file> --only beats`) or between sentences, never mid-word. A voice-over is
+  one `sixb models speech` call per line, each its own `<audio>`, so its caption shares its start
+  and length. Music comes from the user or the project's files: the sandbox cannot fetch any from
+  the web, so ask for a track when the video needs one.
 - **An ending that lands.** The logo or product, one line, one thing to do: an end card of three
   to four seconds in all, still for the last two. Never a frame with nothing on it, at a cut
   either: a scene's last frame still shows its subject.
@@ -173,9 +174,15 @@ recording of a video under `media`, with its length, its frame, and each part de
 
 1. Publish the recording in the video first, so it is transcribed; `pending` means a few seconds
    more: `sixb artifacts media <id> --path media/talk.mp4` says where it stands, and
-   `--part transcript --output work/talk.transcript.json` fetches it once it is ready. Some models
-   time sentences, not words: when `words` is missing or holds whole sentences, time them with
-   `hyperframes transcribe <audio> --model small.en --json`.
+   `--part transcript --output work/talk.transcript.json` fetches it once it is ready.
+   Some models time sentences, not words. When `words` is missing, look for a transcription
+   model that times them (`sixb models list --kind transcription`) and run
+   `sixb models transcribe <audio> --model <model>`: it prints `words` when the model times
+   them. When none does, cut between `segments`, and place a caption's line breaks on the
+   pauses `ffmpeg -i <audio> -af silencedetect=noise=-35dB:d=0.12 -f null -` finds. Then tell
+   the user that a model that times words, such as `elevenlabs/scribe-v2` first in the
+   project's `models.audio.transcription`, times every recording. `hyperframes transcribe`
+   needs whisper.cpp, which the sandbox does not have: don't install it.
 2. Read the words, and choose the cut in text: the sentences that carry it, in the order that
    tells it best. Start a clip on a word's `startMs` and end it on another's `endMs`, with 0.1 to
    0.2 s of air; a picture cut lands on a `cuts.json` instant.
@@ -195,7 +202,10 @@ Publishing refuses a scene whose file or host is missing, a start it cannot reso
 outside the video, and limits passed, naming the scene. Then Sixb checks the published video in the
 sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
 each scene's start, middle and end, and the warnings HyperFrames found: text off the frame or too
-small, low contrast, a silent clip, an empty first frame.
+small, low contrast, a silent clip, an empty first frame. A sandbox that cannot reach the CDNs
+checks without them, and the check says so: its frames then show no GSAP motion and fallback
+fonts, which the app and the export do load. Judge the layout and the words from them, and keep
+the scripts and fonts as they are.
 
 Agents believe they succeeded far more often than they did: a video that publishes is not a video
 that works. Never say it is ready without having looked.
@@ -204,8 +214,9 @@ that works. Never say it is ready without having looked.
    to read readable, is nothing cut off or stacked, does the footage show what the words claim?
 2. Have it reviewed by someone who did not make it: `spawn_agent` a reviewer with the contact
    sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
-   but not your intent or your plan, and ask what is weak, confusing, slow or broken. Fix what
-   it finds.
+   but not your intent or your plan, and ask what is weak, confusing, slow or broken. A review
+   needs eyes, not the strongest model: give it `model: "standard"`, unless that model cannot
+   read images. Fix what it finds.
 3. Fix what the warnings name and what you saw, update the artifact with its `id`, and look again.
    Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
    folder, take `timeoutMs` up to ten minutes, or run in the background. Where HyperFrames takes
@@ -272,6 +283,6 @@ In your message, say which comments you resolved and which you answered.
 
 ## Examples
 
-`examples/video/launch-teaser/` is a finished 17-second teaser: a hook that is on screen from its
+`examples/video/launch-teaser/` is a finished 15-second teaser: a hook that is on screen from its
 first frame, a recording of the product pushed in on the action with one callout, and an end card
 that holds. Its `media/` is not included: a Playwright recording and a music file.
