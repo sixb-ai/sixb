@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ImagePlus, Maximize2, Pause, Play } from "lucide-react"
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type FileSource, modelCallFileSource } from "../../artifacts/file-source"
+import { formatClock, MEDIA_FRAME } from "../../artifacts/playback"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
 import type { ModelMedia } from "./interpret"
@@ -11,8 +12,7 @@ import type { ModelMedia } from "./interpret"
 // What a `sixb models` call made, shown as the thing itself: the image, the voice clip, the
 // transcript. The model that made it stays out of the way; the request reads as a quiet caption.
 
-const FRAME =
-  "overflow-hidden rounded-[14px] ring-1 ring-black/[0.06] shadow-[0_1px_2px_rgb(0_0_0/0.05),0_10px_28px_-12px_rgb(0_0_0/0.22)] dark:ring-white/10 dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),0_10px_28px_-12px_rgb(0_0_0/0.7)]"
+const FRAME = `overflow-hidden rounded-[14px] ${MEDIA_FRAME}`
 
 export function ModelMediaView({
   media,
@@ -358,12 +358,6 @@ function useWaveform(source: FileSource | undefined): readonly number[] | null {
     return () => controller.abort()
   }, [source])
   return peaks
-}
-
-function formatClock(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00"
-  const whole = Math.round(seconds)
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`
 }
 
 function TranscriptResult({

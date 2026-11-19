@@ -13,7 +13,8 @@ const PARAMETER_PATTERN = new RegExp(PARAMETER, "g")
  * The canonical form of a single well-formed media type, or `null` for anything else.
  *
  * Type, subtype, and parameter names are case-insensitive, so they are lowercased; parameter
- * values keep their case. `"Text/Plain; Charset=UTF-8"` becomes `"text/plain;charset=UTF-8"`.
+ * values keep their case. `"Text/Plain; Charset=UTF-8"` becomes `"text/plain;charset=UTF-8"`. A
+ * common alias becomes the type browsers know: `audio/x-m4a` is `audio/mp4`.
  */
 export function canonicalMediaType(value: unknown): string | null {
   if (typeof value !== "string") return null
@@ -21,12 +22,38 @@ export function canonicalMediaType(value: unknown): string | null {
   if (!match) return null
 
   const [, type, subtype, parameters] = match
-  let canonical = `${type.toLowerCase()}/${subtype.toLowerCase()}`
+  let canonical = unaliasMediaType(`${type.toLowerCase()}/${subtype.toLowerCase()}`)
   for (const [, name, parameterValue] of parameters.matchAll(PARAMETER_PATTERN)) {
     canonical += `;${name.toLowerCase()}=${parameterValue}`
   }
   return canonical
 }
+
+/**
+ * A lowercased `type/subtype` under the name browsers know it by. Operating systems and older
+ * tools name some formats otherwise, and a browser opens a type it does not know as a download.
+ */
+export function unaliasMediaType(mediaType: string): string {
+  return MEDIA_TYPE_ALIASES.get(mediaType) ?? mediaType
+}
+
+const MEDIA_TYPE_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["audio/aacp", "audio/aac"],
+  ["audio/m4a", "audio/mp4"],
+  ["audio/mp3", "audio/mpeg"],
+  ["audio/mpeg3", "audio/mpeg"],
+  ["audio/vnd.wave", "audio/wav"],
+  ["audio/wave", "audio/wav"],
+  ["audio/x-aac", "audio/aac"],
+  ["audio/x-flac", "audio/flac"],
+  ["audio/x-m4a", "audio/mp4"],
+  ["audio/x-mp3", "audio/mpeg"],
+  ["audio/x-mpeg", "audio/mpeg"],
+  ["audio/x-mpeg-3", "audio/mpeg"],
+  ["audio/x-wav", "audio/wav"],
+  ["image/jpg", "image/jpeg"],
+  ["video/x-m4v", "video/mp4"],
+])
 
 /**
  * The media type a file's bytes declare by their leading signature, or `undefined` when they carry
@@ -61,10 +88,10 @@ export function inferFileMediaType(fileName: string, bytes?: Uint8Array): string
   const dot = fileName.lastIndexOf(".")
   const named = EXTENSION_MEDIA_TYPES[dot < 0 ? "" : fileName.slice(dot).toLowerCase()]
 
-  // A signature names the container; only the name can say that an MP4 or a WebM holds sound alone.
-  if (sniffed?.startsWith("video/") && named === `audio/${sniffed.slice("video/".length)}`) {
-    return named
-  }
+  // An MP4 or a WebM signature names the container, and only the name can say it holds sound
+  // alone. An Ogg one names the codec: Theora is video whatever the name says.
+  const sound = sniffed === undefined ? undefined : SOUND_OR_VIDEO_CONTAINERS.get(sniffed)
+  if (sound !== undefined && sound === named) return sound
   return sniffed ?? named ?? "application/octet-stream"
 }
 
@@ -131,6 +158,12 @@ const MP4_BRANDS: ReadonlyMap<string, string> = new Map([
   ["M4A ", "audio/mp4"],
   ["M4B ", "audio/mp4"],
   ["qt  ", "video/quicktime"],
+])
+
+/** The containers whose signature cannot tell video from sound alone, and their sound type. */
+const SOUND_OR_VIDEO_CONTAINERS: ReadonlyMap<string, string> = new Map([
+  ["video/mp4", "audio/mp4"],
+  ["video/webm", "audio/webm"],
 ])
 
 const MATROSKA_DOC_TYPES: ReadonlyMap<string, string> = new Map([
