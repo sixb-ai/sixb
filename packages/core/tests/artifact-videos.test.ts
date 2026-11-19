@@ -25,14 +25,22 @@ const host = (id: string, start: string, duration: string, extra = "") =>
 const index = (hosts: readonly string[], root = 'data-width="1920" data-height="1080"') =>
   `<!doctype html>\n<html><body>\n<div data-composition-id="main" ${root}>\n${hosts.join("\n")}\n</div>\n</body></html>\n`
 
-/** A launch film: a title, a demo over a clip, and an outro half a second after it, over music. */
+const MUSIC = '<audio id="music" src="media/music.m4a" data-start="0" data-duration="7"></audio>'
+
+/**
+ * A launch film: a title, a demo over a clip, and an outro half a second after it, over music the
+ * root plays, so the root says how long the video is.
+ */
 const LAUNCH: Readonly<Record<string, string>> = {
-  "index.html": index([
-    host("intro", "0", "2", ' data-label="Opening"'),
-    host("demo", "intro", "3"),
-    host("outro", "demo + 0.5", "1.5", ' data-label="Thanks"'),
-    '<audio id="music" src="media/music.m4a" data-start="0" data-duration="7"></audio>',
-  ]),
+  "index.html": index(
+    [
+      host("intro", "0", "2", ' data-label="Opening"'),
+      host("demo", "intro", "3"),
+      host("outro", "demo + 0.5", "1.5", ' data-label="Thanks"'),
+      MUSIC,
+    ],
+    'data-width="1920" data-height="1080" data-duration="7"'
+  ),
   "scenes/intro.html": scene("intro"),
   "scenes/demo.html": scene("demo", '<video src="media/clip.mp4" muted playsinline></video>'),
   "scenes/outro.html": scene("outro", '<img src="media/logo.png" alt="Logo">'),
@@ -123,17 +131,15 @@ describe("a video's composition", () => {
   })
 
   test("plays at 30 frames a second, for as long as its scenes, or its root's own length", () => {
-    expect(composed(LAUNCH)).toMatchObject({ fps: 30, durationMs: 7000 })
+    const root = LAUNCH["index.html"] ?? ""
+    const silent = root.replace(MUSIC, "").replace(' data-duration="7"', "")
+    expect(composed({ ...LAUNCH, "index.html": silent })).toMatchObject({
+      fps: 30,
+      durationMs: 7000,
+    })
 
-    const longer = {
-      ...LAUNCH,
-      "index.html":
-        LAUNCH["index.html"]?.replace(
-          'data-height="1080"',
-          'data-height="1080" data-duration="9"'
-        ) ?? "",
-    }
-    expect(composed(longer).durationMs).toBe(9000)
+    const longer = root.replace('data-duration="7">', 'data-duration="9">')
+    expect(composed({ ...LAUNCH, "index.html": longer }).durationMs).toBe(9000)
   })
 
   test("lists what each scene and the root play, where each is written", () => {
@@ -185,7 +191,29 @@ describe("a video's composition", () => {
       { "index.html": index([intro], 'data-width="1920" data-height="1080" data-fps="29.97"') },
       'data-fps is 24, 25, 30, 50, 60 frames a second, or 30 without one; it is "29.97"',
     ],
+    [
+      "a size HyperFrames reads otherwise",
+      { "index.html": index([intro], 'data-width="1e3" data-height="1080"') },
+      "even numbers up to 3840",
+    ],
+    [
+      "an fps HyperFrames does not read",
+      { "index.html": index([intro], 'data-width="1920" data-height="1080" data-fps="30.0"') },
+      'data-fps is 24, 25, 30, 50, 60 frames a second, or 30 without one; it is "30.0"',
+    ],
     ["no scene", { "index.html": index(["<h1>Hi</h1>"]) }, "its root composition hosts no scene"],
+    // Removal proof: drop ownTimeline's check in videoLength, and HyperFrames plays these videos
+    // for 2 seconds of music, or 10 of a caption, while the outline says 2.
+    [
+      "a soundtrack without the root's length",
+      withHosts([intro, '<audio src="media/music.m4a"></audio>']),
+      "<audio> plays on the root composition's own timeline",
+    ],
+    [
+      "a timed element without the root's length",
+      withHosts([intro, '<div><p id="caption" data-start="1" data-duration="9">Hi</p></div>']),
+      '<p id="caption"> plays on the root composition\'s own timeline',
+    ],
     [
       "a host inside another composition",
       withHosts([`<div data-composition-id="layer">${intro}</div>`]),
@@ -226,6 +254,11 @@ describe("a video's composition", () => {
       "no length",
       withHosts([intro.replace(' data-duration="2"', "")]),
       `scene 'intro''s data-duration is its length in seconds, such as 4 or 2.5; it is ""`,
+    ],
+    [
+      "a length shorter than a millisecond",
+      withHosts([host("intro", "0", "0.0001")]),
+      `scene 'intro''s data-duration is its length in seconds, such as 4 or 2.5; it is "0.0001"`,
     ],
     [
       "a start after no scene",
@@ -420,7 +453,7 @@ describe("publishing a video", () => {
     ])
 
     // What the root plays, a stylesheet any scene may load, or the timeline: every scene.
-    const retimed = LAUNCH["index.html"]?.replace('data-duration="3"', 'data-duration="4"') ?? ""
+    const retimed = LAUNCH["index.html"]?.replace('data-duration="3"', 'data-duration="2.5"') ?? ""
     const everyScene: Record<string, string>[] = [
       { "media/music.m4a": "other music" },
       { "styles.css": "h1 { color: red; }" },
@@ -430,6 +463,22 @@ describe("publishing a video", () => {
       const keys = await after(changes)
       for (const id of ["intro", "demo", "outro"]) expect(keys[id]).not.toBe(before[id])
     }
+
+    // An outro that fades in over the demo's last half second is in the demo's frames, and the
+    // demo in its. Removal proof: let `own` take the scene alone in validateVideo, and the demo
+    // keeps its key under a new logo.
+    const faded = (changes: Record<string, string> = {}) =>
+      after({
+        "index.html": LAUNCH["index.html"]?.replace("demo + 0.5", "demo - 0.5") ?? "",
+        ...changes,
+      })
+    const crossfade = await faded()
+    const logo = await faded({ "media/logo.png": "another logo" })
+    expect([logo.intro, logo.demo, logo.outro]).toEqual([
+      crossfade.intro,
+      expect.not.stringMatching(crossfade.demo ?? ""),
+      expect.not.stringMatching(crossfade.outro ?? ""),
+    ])
   })
 
   test("resolves the files of other artifacts its scenes play", async () => {

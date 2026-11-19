@@ -55,7 +55,11 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 ## Where it is stricter
 
 - Frames are at most 3,840 pixels a side, in even numbers, as H.264 encodes them, at 24, 25, 30,
-  50, or 60 fps: a frame rate every segment of an export cuts cleanly at.
+  50, or 60 fps: a frame rate every segment of an export cuts cleanly at. Both are written in
+  digits alone, which HyperFrames' `parseInt` reads as `Number()` does.
+- A root that plays something on its own timeline, a soundtrack or any element with `data-start`,
+  writes its own `data-duration`. Without one, HyperFrames plays until the last of them ends, and a
+  sound without `data-duration` lasts as long as its file: a length the HTML does not say.
 - A scene host sits in the root composition itself, never in another composition.
 - A scene file is one `<template>`, nothing beside it.
 
@@ -71,7 +75,8 @@ edit, in the live document and in the Agent's diffs.
 `publish/video.ts` names each scene by `sceneRenderKey`: its id and file, the frame kit, and the
 digests of every file it could load. That is `index.html` (its place, its length, the frame), what
 the root and the scene play, and the files no scene plays, such as stylesheets and fonts; not the
-other scenes' HTML, nor what only they play. Changing one scene re-renders that scene; changing
+other scenes' HTML, nor what only they play, unless they are on screen with it, as when one fades
+into the next. Changing one scene re-renders that scene and those it overlaps; changing
 `index.html`, a shared stylesheet, or the soundtrack re-renders them all.
 
 The key names no artifact: a segment is the scene's frames, rendered from these files alone, so a
