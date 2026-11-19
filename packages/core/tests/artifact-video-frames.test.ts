@@ -11,6 +11,7 @@ import { FRAME_PROTOCOL } from "../src/artifacts/frames/protocol"
 import { videoFrameRuntime } from "../src/artifacts/frames/video-runtime"
 import type { VideoOutline } from "../src/artifacts/outline"
 import { frameKitDigest } from "../src/artifacts/publish/previews"
+import { VIDEO_ENGINE } from "../src/artifacts/video/export"
 
 // A video plays in its frame with HyperFrames' runtime, the release the agent image renders with,
 // served beside a runtime of the frame's own for videos, which leaves the video's look alone.
@@ -30,6 +31,10 @@ describe("a video's frame", () => {
     expect(agentImageTools.dependencies.hyperframes).toBe(HYPERFRAMES_VERSION)
     expect(corePackage.devDependencies["@hyperframes/core"]).toBe(HYPERFRAMES_VERSION)
     expect(HYPERFRAMES_RUNTIME).toStartWith(`/*! HyperFrames runtime ${HYPERFRAMES_VERSION},`)
+
+    // Reproduce by bumping both pins with VIDEO_ENGINE a literal: every export and still would
+    // then fail, its sandboxes running another release than its keys name.
+    expect(VIDEO_ENGINE).toBe(`hyperframes@${agentImageTools.dependencies.hyperframes}`)
   })
 
   test("serves its entry with its runtimes and no kit", () => {
