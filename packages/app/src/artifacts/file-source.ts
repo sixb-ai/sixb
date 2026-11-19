@@ -210,6 +210,28 @@ export function documentPdfUrl(
   )
 }
 
+/** Where a video's version downloads as an MP4, once rendered. */
+export function videoExportUrl(version: { readonly artifactId: string; readonly version: number }) {
+  return contentUrl(`${videoVersionPath(version)}/video`, {})
+}
+
+/** A video's poster: the instant its root names, else its first scene's still. */
+export function videoPosterUrl(version: { readonly artifactId: string; readonly version: number }) {
+  return contentUrl(`${videoVersionPath(version)}/poster`, {})
+}
+
+/** A picture of the middle of a video's scene, for its chapter. */
+export function videoStillUrl(
+  version: { readonly artifactId: string; readonly version: number },
+  scene: string
+) {
+  return contentUrl(`${videoVersionPath(version)}/scenes/${encodeURIComponent(scene)}/still`, {})
+}
+
+function videoVersionPath(version: { readonly artifactId: string; readonly version: number }) {
+  return `/api/artifacts/${encodeURIComponent(version.artifactId)}/versions/${version.version}`
+}
+
 /** An address the API answered with, such as `/api/...?path=...`, as {@link contentUrl} makes. */
 export function apiFileUrl(address: string): string {
   const [routePath = "", search = ""] = address.split("?")

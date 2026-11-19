@@ -26,6 +26,7 @@ import { CommentModeHint } from "../../comments/commenting"
 import type { CommentThread } from "../../comments/comments"
 import { CommentsPanel } from "../../comments/panel"
 import { useCopyFeedback } from "../../copy-feedback"
+import { videoStillUrl } from "../../file-source"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import { useArtifactMessages } from "../../messages"
 import { formatClock, MEDIA_FRAME } from "../../playback"
@@ -579,6 +580,7 @@ export function VideoPlayer({
     chaptersOpen && many ? (
       <ChaptersPanel
         outline={outline}
+        still={(scene) => videoStillUrl(version, scene.id)}
         current={chapter?.id}
         onSeek={goToChapter}
         onClose={() => setChaptersOpen(false)}
