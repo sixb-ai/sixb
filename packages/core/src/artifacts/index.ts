@@ -87,6 +87,8 @@ export {
   ARTIFACT_HOLDERS_LIMIT,
   ARTIFACT_LIMITS,
   ARTIFACT_STATE_LIMITS,
+  type ArtifactSizeLimits,
+  artifactSizeLimits,
 } from "./limits"
 export {
   type LiveSheetColumn,

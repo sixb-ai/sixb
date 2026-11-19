@@ -1,6 +1,6 @@
 import { uploadFile } from "@sixb/client"
 import {
-  ARTIFACT_LIMITS,
+  artifactSizeLimits,
   type CanvasBoard,
   type FrameEditTarget,
   type FrameEvent,
@@ -604,10 +604,9 @@ function ImageTool({
 
   /** Uploads a picture and shows it; false, saying why, when it is not shown. */
   const upload = async (file: File): Promise<boolean> => {
-    if (file.size > ARTIFACT_LIMITS.maxFileBytes) {
-      setFailure(
-        messages.tooLarge(formatFileSize(ARTIFACT_LIMITS.maxFileBytes, locale, files.files))
-      )
+    const { maxFileBytes } = artifactSizeLimits("canvas")
+    if (file.size > maxFileBytes) {
+      setFailure(messages.tooLarge(formatFileSize(maxFileBytes, locale, files.files)))
       return false
     }
     setUploading(true)
