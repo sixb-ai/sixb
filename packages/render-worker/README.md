@@ -1,8 +1,8 @@
 # @sixb/render-worker
 
 Queue worker for what Sixb renders in a sandbox: the pictures of a canvas's boards, a designed
-document's PDF, what is derived of a video or a sound, and a video's stills and MP4. It consumes the `renders` queue, so a
-render never waits behind an agent's run or takes its slot.
+document's PDF, what is derived of a video or a sound, and a video's stills and MP4. It consumes
+the `renders` queue, so a render never waits behind an agent's run or takes its slot.
 
 You normally do not import it. `sixb worker render` and `sixb worker-group` construct it for you,
 and `sixb dev` starts it when the project has a sandbox provider.
