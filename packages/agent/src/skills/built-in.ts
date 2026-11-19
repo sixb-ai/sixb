@@ -93,6 +93,21 @@ import launchPlanDeck from "./sixb-artifacts/examples/slides/launch-plan/index.h
 import q3ReviewDeck from "./sixb-artifacts/examples/slides/q3-review/index.html" with {
   type: "text",
 }
+import launchTeaserIndex from "./sixb-artifacts/examples/video/launch-teaser/index.html" with {
+  type: "text",
+}
+import launchTeaserDemo from "./sixb-artifacts/examples/video/launch-teaser/scenes/demo.html" with {
+  type: "text",
+}
+import launchTeaserHook from "./sixb-artifacts/examples/video/launch-teaser/scenes/hook.html" with {
+  type: "text",
+}
+import launchTeaserOutro from "./sixb-artifacts/examples/video/launch-teaser/scenes/outro.html" with {
+  type: "text",
+}
+import launchTeaserStyles from "./sixb-artifacts/examples/video/launch-teaser/styles.css" with {
+  type: "text",
+}
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
 import pageGuide from "./sixb-artifacts/page.md" with { type: "text" }
 import queriesGuide from "./sixb-artifacts/queries.md" with { type: "text" }
@@ -100,6 +115,7 @@ import referencesGuide from "./sixb-artifacts/references.md" with { type: "text"
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
 import slidesGuide from "./sixb-artifacts/slides.md" with { type: "text" }
+import videoGuide from "./sixb-artifacts/video.md" with { type: "text" }
 import memorySkillMarkdown from "./sixb-memory/SKILL.md" with { type: "text" }
 
 /**
@@ -148,6 +164,12 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/canvas/onboarding-flow/boards/first-job.html": text(onboardingFirstJob),
     "examples/canvas/onboarding-flow/boards/shared.css": text(onboardingShared),
     "examples/canvas/retro/canvas.json": text(retroCanvas),
+    "video.md": videoGuide,
+    "examples/video/launch-teaser/index.html": text(launchTeaserIndex),
+    "examples/video/launch-teaser/styles.css": text(launchTeaserStyles),
+    "examples/video/launch-teaser/scenes/hook.html": text(launchTeaserHook),
+    "examples/video/launch-teaser/scenes/demo.html": text(launchTeaserDemo),
+    "examples/video/launch-teaser/scenes/outro.html": text(launchTeaserOutro),
   }),
 ])
 
