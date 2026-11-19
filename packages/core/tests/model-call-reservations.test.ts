@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
@@ -9,6 +9,7 @@ import {
 } from "@sixb/core/models"
 import { type AiLimitPolicyStatus, InMemoryStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
+import { MODEL_CALL_RETRY } from "../src/agents/model-call-retry"
 import { createAiModelCallLimitController } from "../src/models/execution/model-call-limits"
 import { AiModelCallRecorder } from "../src/models/execution/model-call-recorder"
 
@@ -142,6 +143,111 @@ describe("model runtime reservations", () => {
       accountingStatus: "unavailable",
       consumption: { actual: { amount: 0 }, reserved: { amount: 0 } },
     })
+    expect(status?.consumption.unknown.amount).toBeGreaterThan(4096)
+  })
+})
+
+describe("a model call that lost its connection, asked again", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+    jest.restoreAllMocks()
+  })
+
+  const reset = () =>
+    Object.assign(new TypeError("ECONNRESET: The socket connection was closed."), {
+      code: "ECONNRESET",
+    })
+
+  /** Run the loop with fake timers, waiting out the one pause it makes before it asks again. */
+  async function outlastPause<T>(run: () => Promise<T>): Promise<T> {
+    jest.useFakeTimers()
+    const paused = Promise.withResolvers<void>()
+    spyOn(console, "warn").mockImplementation(() => paused.resolve())
+
+    const result = run()
+    await paused.promise
+    jest.advanceTimersByTime(MODEL_CALL_RETRY.maxMs)
+    return result
+  }
+
+  async function tokenLimit(storage: InMemoryStorage) {
+    await storage.aiLimits.createPolicy({
+      id: "tokens",
+      projectId,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 1_000_000 },
+    })
+  }
+
+  // The retry is a new call: replayed inside the lost one (one call ID, one admission), the lost
+  // call, which may have been billed, would leave the ledger. Reproduce the check: drop the
+  // connectionLost retry in runModelLoop; the run then fails with the reset.
+  test("records the lost call with its usage unknown, and the call that answers with its own", async () => {
+    let opened = 0
+    const context = await setup(async function* () {
+      opened += 1
+      yield { type: "stream-start" }
+      if (opened === 1) throw reset()
+      yield { type: "finish", finishReason: "stop", usage: { inputTokens: 10, outputTokens: 5 } }
+    })
+
+    expect(await outlastPause(context.run)).toMatchObject({ status: "completed" })
+
+    expect(context.providerCalls()).toBe(2)
+    expect(
+      await context.storage.aiUsage.summarizeExecution({ projectId, executionId })
+    ).toMatchObject({
+      modelCallCount: 2,
+      // Never free: one call's usage is unknown, so the execution's is not complete.
+      usage: { reportingStatus: "partial" },
+    })
+    expect(
+      await context.storage.aiUsage.getLatestForExecution({ projectId, executionId })
+    ).toMatchObject({ callId: "call-2", usage: { inputTokens: 10, outputTokens: 5 } })
+  })
+
+  // A limit cannot count a call whose usage is unknown, so it refuses the next one, as it does
+  // whenever an accepted call fails mid-stream: asking again never gets around a limit.
+  test("is refused by a limit the lost call left unable to count", async () => {
+    let opened = 0
+    const context = await setup(async function* () {
+      opened += 1
+      yield { type: "stream-start" }
+      if (opened === 1) throw reset()
+      yield { type: "finish", finishReason: "stop", usage: { inputTokens: 10, outputTokens: 5 } }
+    })
+    await tokenLimit(context.storage)
+
+    const error = await outlastPause(() => context.run().catch((error: unknown) => error))
+
+    expect(error).toMatchObject({ code: "ai.usage_limit_unavailable" })
+    expect(context.providerCalls()).toBe(1)
+  })
+
+  test("keeps the reservation of a call lost before it answered, which records nothing", async () => {
+    let opened = 0
+    const context = await setup(() => {
+      opened += 1
+      if (opened === 1) throw reset()
+      return (async function* () {
+        yield { type: "stream-start" } as const
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          usage: { inputTokens: 10, outputTokens: 5 },
+        } as const
+      })()
+    })
+    await tokenLimit(context.storage)
+
+    expect(await outlastPause(context.run)).toMatchObject({ status: "completed" })
+
+    expect(context.providerCalls()).toBe(2)
+    expect(
+      await context.storage.aiUsage.summarizeExecution({ projectId, executionId })
+    ).toMatchObject({ modelCallCount: 1 })
+    const [status] = await context.storage.aiLimits.listPolicyStatuses({ projectId })
+    expect(status).toMatchObject({ consumption: { actual: { amount: 15 } } })
     expect(status?.consumption.unknown.amount).toBeGreaterThan(4096)
   })
 })

@@ -3,6 +3,7 @@ import { createSixbError, isSixbError } from "../errors/internal"
 import { ModelUsageRecordingError } from "../models/execution/errors"
 import { AgentStorageError } from "../storage/agents/errors"
 import { AgentToolPublicError, AgentToolResultValidationError } from "./errors"
+import { lostConnectionCode } from "./model-call-retry"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { AgentFinalizationError } from "./run-session"
 
@@ -126,6 +127,18 @@ export function encodeWireError(error: unknown): WireError {
   if (error instanceof Error && error.name === "AbortError") {
     return { kind: "AbortError", message: error.message }
   }
+
+  // A call whose provider connection dropped crosses as one: the runner's model loop then makes it
+  // again, as it would in process.
+  const lostConnection = lostConnectionCode(error)
+  if (lostConnection !== undefined) {
+    return {
+      kind: "ModelConnectionLost",
+      message: "[SixbModels] The connection to the model's provider was lost.",
+      code: lostConnection,
+    }
+  }
+
   // Anything else stays on the server: the runner learns only that the operation failed.
   console.error("[Sixb] A run session operation failed.", error)
   return { kind: "Error", message: "[Sixb] The run session operation failed on the server." }
@@ -135,6 +148,7 @@ export function encodeWireError(error: unknown): WireError {
 export function wireErrorStatus(error: WireError): number {
   if (error.kind === "AgentExecutionLostError") return 409
   if (error.kind === "AbortError") return 499
+  if (error.kind === "ModelConnectionLost") return 502
   if (error.kind === "Error" || error.kind === "AgentFinalizationError") return 500
   return 400
 }
@@ -183,6 +197,9 @@ export function decodeWireError(error: WireError): Error {
       )
     case "AbortError":
       return new DOMException(error.message, "AbortError")
+    case "ModelConnectionLost":
+      // As fetch throws it in process.
+      return Object.assign(new TypeError(error.message), { code: error.code })
     default:
       return new Error(error.message)
   }
