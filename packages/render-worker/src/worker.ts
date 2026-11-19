@@ -1,16 +1,24 @@
-import { BOARD_PREVIEW_JOB, DOCUMENT_PDF_JOB } from "@sixb/core/internal/artifacts/publish"
+import {
+  BOARD_PREVIEW_JOB,
+  DOCUMENT_PDF_JOB,
+  MEDIA_JOB,
+} from "@sixb/core/internal/artifacts/publish"
 import { QueueWorker, type QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, Queues, RenderQueueJob } from "@sixb/core/queues"
 import { renderBoardPreviews } from "./board-previews"
 import { failDocumentPdf, printDocumentPdf } from "./document-pdf"
 import type { RenderHost } from "./host"
+import { deriveArtifactMedia, failArtifactMedia } from "./media"
+import type { RenderDownloadHost } from "./sandbox"
 
 const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
 
 /** Two at a time: each render is a sandbox and a browser. */
 const DEFAULT_CONCURRENCY = 2
 
-export interface RenderWorkerHost extends RenderHost {
+export interface RenderWorkerHost extends RenderHost, RenderDownloadHost {
+  readonly storage: RenderHost["storage"] & RenderDownloadHost["storage"]
+  readonly blobStorage: RenderHost["blobStorage"] & RenderDownloadHost["blobStorage"]
   readonly queues: Pick<Queues, "renders">
 }
 
@@ -20,9 +28,9 @@ export interface RenderWorkerOptions {
 }
 
 /**
- * Consumes the `renders` queue: what the framework renders in a browser, in a blank sandbox of the
- * project, a designed document's PDF and the pictures of a canvas's boards, so a render never
- * waits behind an agent's run or takes its slot.
+ * Consumes the `renders` queue: what the framework renders in a blank sandbox of the project, a
+ * designed document's PDF, the pictures of a canvas's boards, and what is derived of a video or a
+ * sound, so a render never waits behind an agent's run or takes its slot.
  */
 export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_CODES> {
   private readonly host: RenderWorkerHost
@@ -47,6 +55,9 @@ export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_COD
       case "artifact.previews.requested":
         await renderBoardPreviews({ host: this.host, job, signal })
         return
+      case "artifact.media.requested":
+        await deriveArtifactMedia({ host: this.host, job, signal })
+        return
     }
   }
 
@@ -55,11 +66,27 @@ export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_COD
     error: unknown
   ): Promise<QueueWorkerFailureDecision<(typeof FAILURE_CODES)[number]>> {
     const { job } = claimed
-    const name = `'${job.payload.artifactId}' version ${job.payload.version}`
     const retry = (backoffMs: number) => ({
       kind: "retry" as const,
       availableAt: new Date(Date.now() + backoffMs).toISOString(),
     })
+
+    // What is derived of a media is too: after a few attempts, what is still pending failed, and
+    // the file plays as it is.
+    if (job.type === "artifact.media.requested") {
+      const { file } = job.payload
+      console.error(`[SixbRenderWorker] Could not derive '${file.fileName ?? file.digest}'.`, error)
+      if (job.attempt < MEDIA_JOB.attempts) return retry(MEDIA_JOB.backoffMs)
+      await failArtifactMedia({ host: this.host, job }).catch((failure: unknown) => {
+        console.error(
+          `[SixbRenderWorker] Could not keep why '${file.digest}' was not derived.`,
+          failure
+        )
+      })
+      return { kind: "fail" }
+    }
+
+    const name = `'${job.payload.artifactId}' version ${job.payload.version}`
 
     // Pictures are derived: after a few attempts, the boards keep their outlines.
     if (job.type === "artifact.previews.requested") {
