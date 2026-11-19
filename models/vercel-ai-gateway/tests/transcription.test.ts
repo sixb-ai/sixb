@@ -146,6 +146,36 @@ test("carries Azure's phrases as timed words, with the speaker of each phrase", 
   ])
 })
 
+// Removal proof: return only words and text; the caller hears neither segments nor language.
+test("carries the segments the Gateway timed, and the language it heard", async () => {
+  const model = createVercelGateway({
+    fetch: async () =>
+      Response.json({
+        ...payload,
+        text: "Hello there. Goodbye.",
+        language: "en",
+        segments: [
+          { text: "Hello there.", startSecond: 0, endSecond: 0.9 },
+          { text: "Goodbye.", startSecond: 1.2, endSecond: 1.8 },
+          // A segment Sixb cannot place costs only itself.
+          { text: "Backwards.", startSecond: 2, endSecond: 1 },
+          { startSecond: 2, endSecond: 3 },
+        ],
+      }),
+  }).transcription("test/transcribe")
+
+  const result = await model.transcribe({ audio, mediaType: "audio/wav" })
+
+  expect(result.output).toEqual({
+    text: "Hello there. Goodbye.",
+    language: "en",
+    segments: [
+      { text: "Hello there.", startMs: 0, endMs: 900 },
+      { text: "Goodbye.", startMs: 1200, endMs: 1800 },
+    ],
+  })
+})
+
 test("omits words when no provider timed them", async () => {
   const model = createVercelGateway({
     fetch: async () => Response.json({ ...payload, providerMetadata: { elevenlabs: {} } }),

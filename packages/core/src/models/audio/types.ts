@@ -32,6 +32,14 @@ export interface TranscriptionWord {
   readonly speaker?: string
 }
 
+/** A stretch of speech the provider timed, such as a sentence. */
+export interface TranscriptionSegment {
+  readonly text: string
+  /** Milliseconds from the start of the audio. */
+  readonly startMs: number
+  readonly endMs: number
+}
+
 export interface TranscriptionOutput {
   readonly text: string
   /**
@@ -40,6 +48,13 @@ export interface TranscriptionOutput {
    * every provider that neither diarizes nor times words does.
    */
   readonly words?: readonly TranscriptionWord[]
+  /**
+   * The stretches the provider timed, in spoken order: sentences for most, each word for some.
+   * Absent when it returns none.
+   */
+  readonly segments?: readonly TranscriptionSegment[]
+  /** The language the provider heard, as it names it, such as `en`. */
+  readonly language?: string
 }
 
 export interface TranscriptionModelResponseMetadata {
