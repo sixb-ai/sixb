@@ -478,10 +478,12 @@ export function VideoPlayer({
                 outline={outline}
                 time={playback.time}
                 duration={playback.duration}
-                marks={commenting.marked.map(({ thread, seconds, label }) => ({
+                playing={playback.playing}
+                marks={commenting.marked.map(({ thread, seconds, label, excerpt }) => ({
                   id: thread.comment.id,
                   seconds,
                   label,
+                  excerpt,
                   active: thread.comment.id === commenting.active,
                 }))}
                 onScrubStart={() => {
