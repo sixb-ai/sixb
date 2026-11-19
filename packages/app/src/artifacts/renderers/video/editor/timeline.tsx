@@ -246,16 +246,17 @@ export function Timeline({
     })
   }
 
-  // While it plays, the playhead stays in sight, a page at a time.
+  // As the playhead moves, playing or sought, it stays in sight, a page at a time. Nothing else
+  // scrolls the timeline: a click, an edit or someone else's change leaves it where the reader is.
   useEffect(() => {
     const element = scroller.current
-    if (!element || drag) return
-    const at = px(timeMs)
+    if (!element || dragRef.current) return
+    const at = (timeMs / 1000) * zoomRef.current
     const visible = element.clientWidth - LABELS_PX
     if (at < element.scrollLeft || at > element.scrollLeft + visible - 24) {
       element.scrollLeft = Math.max(0, at - visible * 0.1)
     }
-  })
+  }, [timeMs])
 
   // What edges snap to: the playhead, the marks, every edge, and the cuts of the dragged footage.
   const parts = useMediaParts(
@@ -264,6 +265,7 @@ export function Timeline({
   )
   const targets = useMemo(() => {
     const dragged = drag && (drag.type === "move" || drag.type === "trim") ? drag.clip : null
+    // The clip dragged, as the timeline lays it out now: a change that lands mid-drag lays it anew.
     const points = new Set<number>([0, timeMs])
     if (marks.in !== undefined) points.add(marks.in)
     if (marks.out !== undefined) points.add(marks.out)
@@ -272,7 +274,7 @@ export function Timeline({
       points.add(scene.startMs + scene.durationMs)
     }
     for (const clip of clips) {
-      if (clip === dragged) continue
+      if (dragged && sameClip(clip, dragged)) continue
       points.add(clip.startMs)
       if (!clip.open) points.add(clip.endMs)
     }
@@ -586,8 +588,8 @@ export function Timeline({
               {track.clips.map((laid) => {
                 const selected = chosen === laid.clip
                 const moving =
-                  drag?.type === "move" && drag.clip === laid && drag.moved ? drag : null
-                const trimming = drag?.type === "trim" && drag.clip === laid ? drag : null
+                  drag?.type === "move" && sameClip(drag.clip, laid) && drag.moved ? drag : null
+                const trimming = drag?.type === "trim" && sameClip(drag.clip, laid) ? drag : null
                 const start = moving
                   ? moving.startMs
                   : trimming?.edge === "start"
@@ -695,6 +697,11 @@ export function Timeline({
       </div>
     </section>
   )
+}
+
+/** Whether two laid clips are the same clip of the same file, laid out at different times. */
+function sameClip(a: LaidClip, b: LaidClip): boolean {
+  return a.file === b.file && a.clip.ref === b.clip.ref
 }
 
 export interface ZoomControls {

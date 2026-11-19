@@ -2,7 +2,7 @@ import { type FrameEvent, type VideoOutline, videoPosterMs } from "@sixb/core/ar
 import { Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { CloudOff, Play, RotateCcw } from "lucide-react"
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../../frame"
 import { useArtifactMessages } from "../../../messages"
 import type { ArtifactVersion } from "../../../queries"
@@ -23,9 +23,10 @@ const SETTLE_MAX_MS = 1_500
 
 /**
  * Plays the version in a frame the caller places with {@link PreviewScreen}: the playback is the
- * editor's, which its timeline and keys drive.
+ * editor's, which its timeline and keys drive. It opens at `start`, in seconds, when the address
+ * names an instant; at the video's poster otherwise.
  */
-export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
+export function usePreview(version: ArtifactVersion, outline: VideoOutline, start = 0) {
   const frame = useRef<ArtifactFrameHandle | null>(null)
   const window_ = useRef(() => frame.current?.window() ?? null).current
   const playback = usePlayback({
@@ -36,7 +37,7 @@ export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
   })
 
   // A frame loaded again, for a new save, shows where the reader was, paused.
-  const resumeAt = useRef(0)
+  const resumeAt = useRef(start)
   const reloading = useRef(false)
   // Where the reader is, until a new frame loads: its first reports are its own start, not theirs.
   if (playback.phase !== "ready") reloading.current = true
@@ -49,10 +50,26 @@ export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
     reloading.current = false
     const first = resumed.current === null
     resumed.current = version.revision
-    // The first load shows the video's poster, as the player opens on it; the playhead stays.
-    if (first) playback.cue(videoPosterMs(outline) / 1000)
+    // The first load shows the video's poster, as the player opens on it, unless the playhead is
+    // somewhere already: the picture then shows the instant it says.
+    if (first && resumeAt.current === 0) playback.cue(videoPosterMs(outline) / 1000)
     else playback.seek(Math.min(resumeAt.current, playback.duration))
   }, [playback.phase, playback.seek, playback.cue, playback.duration, version.revision, outline])
+
+  // While a frame loads, the playhead stays where the reader is: the frame's first reports are its
+  // own start, and a seek it was not listening for yet is made once it is.
+  const seek = useCallback(
+    (seconds: number, mode?: Parameters<typeof playback.seek>[1]) => {
+      if (reloading.current) resumeAt.current = Math.max(0, seconds)
+      playback.seek(seconds, mode)
+    },
+    [playback.seek]
+  )
+  const shownPlayback: Playback = {
+    ...playback,
+    seek,
+    ...(reloading.current ? { time: resumeAt.current } : {}),
+  }
 
   // The version the reader sees: the last one shown, until the new one has drawn the playhead.
   const [shown, setShown] = useState(version)
@@ -69,7 +86,7 @@ export function usePreview(version: ArtifactVersion, outline: VideoOutline) {
 
   /** The version still on screen while a newer one loads behind it, if one does. */
   const cover = shown.revision === version.revision ? null : shown
-  return { frame, playback, cover }
+  return { frame, playback: shownPlayback, cover }
 }
 
 export function PreviewScreen({
