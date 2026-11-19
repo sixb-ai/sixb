@@ -78,6 +78,9 @@ export function sniffFileMediaType(bytes: Uint8Array): string | undefined {
   return mpegAudioMediaType(bytes)
 }
 
+/** The type that says only "bytes": a file's when nothing tells more, or a client's default. */
+export const UNTYPED_MEDIA_TYPE = "application/octet-stream"
+
 /**
  * The media type of a file handed over without one: its bytes' signature when they have one, else
  * its extension, else `application/octet-stream`. Every place that classifies a sandbox or tool file
@@ -92,7 +95,7 @@ export function inferFileMediaType(fileName: string, bytes?: Uint8Array): string
   // alone. An Ogg one names the codec: Theora is video whatever the name says.
   const sound = sniffed === undefined ? undefined : SOUND_OR_VIDEO_CONTAINERS.get(sniffed)
   if (sound !== undefined && sound === named) return sound
-  return sniffed ?? named ?? "application/octet-stream"
+  return sniffed ?? named ?? UNTYPED_MEDIA_TYPE
 }
 
 const EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {

@@ -81,7 +81,7 @@ export class ApiClient {
     } as RequestInit)
   }
 
-  /** `mediaType` labels the part; without it, the server reads the type from the file name. */
+  /** `mediaType` labels the part; without it, the API types the file by its bytes or name. */
   async upload(
     path: string,
     source: string,

@@ -5,7 +5,11 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import { supportsDirectUpload, supportsRangeRead } from "@sixb/core/blob-storage/server"
-import { canonicalMediaType, inferFileMediaType } from "@sixb/core/internal/blob-storage"
+import {
+  canonicalMediaType,
+  inferFileMediaType,
+  UNTYPED_MEDIA_TYPE,
+} from "@sixb/core/internal/blob-storage"
 import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -66,11 +70,19 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             }
           }
 
+          // A part without a type, or typed as bytes only, as a client sends a file it did not
+          // type, is typed by its leading bytes, else its name, as a staged upload is.
+          const declared = declaredMediaType(file.type)
+          const mediaType =
+            declared ??
+            inferFileMediaType(
+              file.name,
+              new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer())
+            )
           const fileRef = await host.blobStorage.put({
             body: file,
             fileName: file.name || undefined,
-            // Bun derives the part's type from the file name; keep it only if it is well-formed.
-            mediaType: canonicalMediaType(file.type) ?? undefined,
+            mediaType,
             logicalPath: logicalPath ?? undefined,
           })
 
@@ -542,6 +554,12 @@ function checkedUploadContent(
 /** How many leading bytes tell a file's type by its signature. */
 const SNIFF_BYTES = 64
 
+/** The well-formed type an upload declared, unless it says only "bytes", which tells nothing. */
+function declaredMediaType(mediaType: string | undefined): string | undefined {
+  const canonical = canonicalMediaType(mediaType)
+  return canonical === null || canonical === UNTYPED_MEDIA_TYPE ? undefined : canonical
+}
+
 /**
  * The file with a media type: the one its upload declared, else the one its leading bytes or its
  * name tell, as a file the Agent or a tool stores is typed. Read from the stored blob, a few bytes.
@@ -550,7 +568,7 @@ async function withMediaType(
   blobStorage: SixbHostView["blobStorage"],
   fileRef: FileRef
 ): Promise<FileRef> {
-  if (fileRef.mediaType !== undefined) return fileRef
+  if (declaredMediaType(fileRef.mediaType) !== undefined) return fileRef
 
   const leading: Uint8Array[] = []
   if (fileRef.sizeBytes > 0) {

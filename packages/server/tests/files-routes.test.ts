@@ -204,6 +204,26 @@ describe("file routes", () => {
     expect(await new Response(stored).text()).toBe("hello file")
   })
 
+  // To check, store the part's type as it came: a file the client did not type, as the CLI sends
+  // one without --media-type, keeps no type at all.
+  test("types a file sent as bytes only by its leading bytes, else its name", async () => {
+    const { app } = createFilesApi()
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const upload = async (fileName: string, body: Uint8Array<ArrayBuffer>) => {
+      const form = new FormData()
+      form.set("file", new File([body], fileName, { type: "application/octet-stream" }))
+      return (await (await app.fetch(uploadRequest(form))).json()) as FileRef
+    }
+
+    expect(await upload("scan", png)).toMatchObject({ fileName: "scan", mediaType: "image/png" })
+    expect(await upload("notes.md", new TextEncoder().encode("# Notes"))).toMatchObject({
+      mediaType: "text/markdown",
+    })
+    expect(await upload("blob", new TextEncoder().encode("plain"))).toMatchObject({
+      mediaType: "application/octet-stream",
+    })
+  })
+
   test("rejects uploads without a file field", async () => {
     const { app } = createFilesApi()
     const form = new FormData()
@@ -518,8 +538,13 @@ describe("file routes", () => {
     const { app } = createFilesApi()
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
     const upload = async (fileName: string, body: Uint8Array<ArrayBuffer>) => {
+      // Declared as bytes only, as an untyped Blob is: that says nothing of the file.
       const created = await app.fetch(
-        jsonRequest("/api/files/uploads", { fileName, sizeBytes: body.byteLength })
+        jsonRequest("/api/files/uploads", {
+          fileName,
+          sizeBytes: body.byteLength,
+          ...(fileName === "scan" ? { mediaType: "application/octet-stream" } : {}),
+        })
       )
       const { uploadId } = (await created.json()) as { uploadId: string }
       await app.fetch(stagedContentRequest(uploadId, body))
