@@ -512,6 +512,30 @@ describe("file routes", () => {
     expect((await blobStorage.stat(fileRef.blobId))?.sizeBytes).toBe(sizeBytes)
   })
 
+  // To check, complete with the stored reference as it is: a staged upload without a media type
+  // keeps none, where a file the Agent stores is typed by its bytes and its name.
+  test("types a staged upload that declared no media type by its bytes, else its name", async () => {
+    const { app } = createFilesApi()
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const upload = async (fileName: string, body: Uint8Array<ArrayBuffer>) => {
+      const created = await app.fetch(
+        jsonRequest("/api/files/uploads", { fileName, sizeBytes: body.byteLength })
+      )
+      const { uploadId } = (await created.json()) as { uploadId: string }
+      await app.fetch(stagedContentRequest(uploadId, body))
+      const completed = await app.fetch(jsonRequest(`/api/files/uploads/${uploadId}/complete`, {}))
+      return (await completed.json()) as FileRef
+    }
+
+    expect(await upload("scan", png)).toMatchObject({ fileName: "scan", mediaType: "image/png" })
+    expect(await upload("notes.md", new TextEncoder().encode("# Notes"))).toMatchObject({
+      mediaType: "text/markdown",
+    })
+    expect(await upload("blob", new TextEncoder().encode("plain"))).toMatchObject({
+      mediaType: "application/octet-stream",
+    })
+  })
+
   test("refuses staged server content past the size it declared", async () => {
     const { app } = createFilesApi()
     const createResponse = await app.fetch(jsonRequest("/api/files/uploads", { sizeBytes: 5 }))
