@@ -1,5 +1,7 @@
 export type { ActivityCaptureRuntime } from "../activity/execution"
 export { getActivityCaptureRuntime } from "../activity/execution"
+export type { MediaTranscriber } from "../artifacts/media/transcriber"
+export { findMediaTranscriber } from "../artifacts/media/transcriber"
 export { getConnectorConnectionsRuntime } from "../connectors/connections/capability"
 export type {
   CompleteConnectorAuthorizationInput,
