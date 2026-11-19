@@ -76,6 +76,7 @@ export {
   type FrameRequest,
   type FrameResponse,
   type FrameStart,
+  type FrameVideoText,
   type FrameZoom,
   type FrameZoomStep,
   frameStartHash,
