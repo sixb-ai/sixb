@@ -263,6 +263,8 @@ What moves with what:
   into the scene as the scene moves, and goes with it. A soundtrack under every scene belongs to
   none. The Agent's guide puts a voice-over in its scene's file, where it moves with no rule.
 - The poster keeps its time into the scene on top at its instant, within that scene's length.
+- A write merged into the live document keeps every recording the merged HTML still plays, even
+  one the writer's copy no longer did: someone else may have just added a clip of it.
 
 Not covered: motion a scene's script writes (`gsap.timeline` positions) keeps its own times, and a
 recording a script plays without an element is not seen.
