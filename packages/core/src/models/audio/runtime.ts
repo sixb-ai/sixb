@@ -19,11 +19,18 @@ import type {
   TranscriptionModelResponseMetadata,
   TranscriptionModelResult,
   TranscriptionOutput,
+  TranscriptionSegment,
   TranscriptionWord,
 } from "./types"
 
+/** What audio calls read of their runtime: who calls, to admit them. */
+export type AudioRuntimeContext = Pick<
+  SixbRuntimeContext,
+  "projectId" | "runtimeAuthorization" | "authorization"
+>
+
 export function createAudioRuntime(
-  runtime: SixbRuntimeContext,
+  runtime: AudioRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
   session: ModelExecutionSession,
@@ -114,9 +121,20 @@ function transcriptOutput(
 
   const output = result?.output
   if (typeof output?.text !== "string") throw refuse()
+  if (output.language !== undefined && (typeof output.language !== "string" || !output.language)) {
+    throw refuse()
+  }
+
+  const segments = transcriptSegments(output.segments)
+  if (segments === null) throw refuse()
+  const described = {
+    text: output.text,
+    ...(segments.length ? { segments } : {}),
+    ...(output.language ? { language: output.language } : {}),
+  }
 
   const words: readonly unknown[] | undefined = output.words
-  if (words === undefined) return { text: output.text }
+  if (words === undefined) return described
   if (!Array.isArray(words)) throw refuse()
 
   const timed: TranscriptionWord[] = []
@@ -141,7 +159,28 @@ function transcriptOutput(
   }
 
   // An empty list says nothing; the absent field is the one way to say "no words".
-  return timed.length ? { text: output.text, words: timed } : { text: output.text }
+  return timed.length ? { ...described, words: timed } : described
+}
+
+/** The segments as they were timed; null when one cannot be trusted, as a word cannot. */
+function transcriptSegments(segments: unknown): TranscriptionSegment[] | null {
+  if (segments === undefined) return []
+  if (!Array.isArray(segments)) return null
+
+  const timed: TranscriptionSegment[] = []
+  for (const segment of segments) {
+    const entry = segment as Partial<TranscriptionSegment> | null | undefined
+    if (
+      typeof entry?.text !== "string" ||
+      !isMillisecond(entry.startMs) ||
+      !isMillisecond(entry.endMs) ||
+      entry.endMs < entry.startMs
+    ) {
+      return null
+    }
+    timed.push({ text: entry.text, startMs: entry.startMs, endMs: entry.endMs })
+  }
+  return timed
 }
 
 function isMillisecond(value: unknown): value is number {

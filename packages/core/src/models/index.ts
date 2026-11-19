@@ -31,6 +31,7 @@ export type {
   TranscriptionModelResponseMetadata,
   TranscriptionModelResult,
   TranscriptionOutput,
+  TranscriptionSegment,
   TranscriptionWord,
 } from "./audio/types"
 export type { ModelCallFiles, ModelCallsRuntime } from "./calls"

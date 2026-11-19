@@ -9,6 +9,7 @@ import {
   type TranscriptionModelRequest,
   TranscriptionModelResponseError,
   type TranscriptionModelResponseMetadata,
+  type TranscriptionSegment,
   type TranscriptionWord,
 } from "@sixb/core/models"
 import { readGatewayJson } from "./json-response"
@@ -157,9 +158,17 @@ export function createGatewayTranscription(
       }
 
       const words = transcriptionWords(payload.providerMetadata)
+      const segments = timedSegments(payload.segments)
+      const language =
+        typeof payload.language === "string" && payload.language ? payload.language : undefined
       return {
         ...responseMetadata,
-        output: { text: payload.text, ...(words ? { words } : {}) },
+        output: {
+          text: payload.text,
+          ...(words ? { words } : {}),
+          ...(segments.length ? { segments } : {}),
+          ...(language ? { language } : {}),
+        },
       }
     },
   })
@@ -277,6 +286,28 @@ function offsetWord(value: unknown, speaker: string | undefined): TranscriptionW
   if (!Number.isSafeInteger(endMs)) return undefined
 
   return { text: entry.text, startMs, endMs, ...(speaker === undefined ? {} : { speaker }) }
+}
+
+/**
+ * The segments the Gateway times itself, `{ text, startSecond, endSecond }` in seconds: sentences
+ * for most providers, and each word for some. One Sixb cannot place costs only itself.
+ */
+function timedSegments(value: unknown): TranscriptionSegment[] {
+  if (!Array.isArray(value)) return []
+
+  const segments: TranscriptionSegment[] = []
+  for (const entry of value) {
+    const segment = object(entry)
+    if (!segment || typeof segment.text !== "string") continue
+
+    const startMs = milliseconds(segment.startSecond)
+    const endMs = milliseconds(segment.endSecond)
+    if (startMs === undefined || endMs === undefined || endMs < startMs) continue
+
+    segments.push({ text: segment.text, startMs, endMs })
+  }
+
+  return segments
 }
 
 /** Azure counts speakers from zero; the label reads as ElevenLabs writes its own. */

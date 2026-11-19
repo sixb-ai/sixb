@@ -343,6 +343,39 @@ describe("audio transcription", () => {
     })
   })
 
+  // Removal proof: return `described` without segments or language; neither reaches the caller.
+  test("returns the segments a provider timed, and the language it heard", async () => {
+    const segments = [
+      { text: "Hello there.", startMs: 0, endMs: 900 },
+      { text: "Goodbye.", startMs: 1200, endMs: 1800 },
+    ]
+    const { sixb, audio } = await setup(
+      createTranscriber(async () => ({
+        output: { text: "Hello there. Goodbye.", language: "en", segments },
+      }))
+    )
+
+    expect((await sixb.models.audio.transcribe({ audio })).output).toEqual({
+      text: "Hello there. Goodbye.",
+      language: "en",
+      segments,
+    })
+  })
+
+  // Removal proof: pass `output.segments` through unchecked; the caller seeks to a segment's end
+  // before its start.
+  test("refuses segments it cannot place", async () => {
+    const { sixb, audio } = await setup(
+      createTranscriber(async () => ({
+        output: { text: "Hello", segments: [{ text: "Hello", startMs: 900, endMs: 100 }] },
+      }))
+    )
+
+    const error = await sixb.models.audio.transcribe({ audio }).catch((thrown) => thrown)
+
+    expect(error).toMatchObject({ code: "invalid_transcription_response" })
+  })
+
   // Removal proof: pass `output.words` through unchecked; the caller seeks to a negative second.
   test("refuses a word list it cannot place, after billing the reply once", async () => {
     const { sixb, audio, storage, identity } = await setup(
