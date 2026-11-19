@@ -231,7 +231,30 @@ describe("a large file a render wrote", () => {
       await new Response(await blobStorage.open(file.blobId)).arrayBuffer()
     )
     expect(stored.equals(video)).toBe(true)
-    expect(Math.max(...chunks)).toBeLessThanOrEqual(512 * 1024)
+    expect(Math.max(...chunks)).toBeLessThanOrEqual(720 * 1024)
+    expect(Math.max(...printed)).toBeLessThan(1024 * 1024)
+  })
+
+  // Reproduce with 512 KiB pieces: each command prints 683 KiB, and a 300 MB proxy takes 600
+  // commands instead of 427.
+  test("comes back in as few commands as a mebibyte of output allows", async () => {
+    const { sandbox: local, printed } = await sandbox()
+    const proxy = Buffer.alloc(2 * 1024 * 1024, 6)
+    writeFileSync(join(local.workingDirectory, "proxy.mp4"), proxy)
+
+    await storeSandboxFile(
+      new InMemoryBlobStorage(),
+      local,
+      {
+        path: join(local.workingDirectory, "proxy.mp4"),
+        bytes: proxy.length,
+        fileName: "proxy.mp4",
+        mediaType: "video/mp4",
+      },
+      { signal: new AbortController().signal }
+    )
+
+    expect(Math.max(...printed)).toBeGreaterThan(900 * 1024)
     expect(Math.max(...printed)).toBeLessThan(1024 * 1024)
   })
 })
