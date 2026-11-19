@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
-import { readFileSync, writeFileSync } from "node:fs"
+import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import {
   type ArtifactFile,
   type CreateSandboxOptions,
@@ -35,12 +35,18 @@ const projectId = "videos"
 /**
  * The project's sandboxes, real bash and curl on this host, whose HyperFrames and FFmpeg are the
  * test: asked to run `video.cjs`, each mode writes a file named after what it made, and reports
- * it, unless `report` says otherwise. Each run's mode, arguments and project are kept.
+ * it, unless `report` says otherwise. Each run's mode, arguments and project are kept: its
+ * `index.html`, and every file laid out there, by its path.
  */
 class VideoSandboxes implements Pick<SandboxFactory, "create" | "supportsRequestCredentials"> {
   readonly supportsRequestCredentials = true
   readonly created: CreateSandboxOptions[] = []
-  readonly ran: { readonly mode: string; readonly args: string[]; readonly index?: string }[] = []
+  readonly ran: {
+    readonly mode: string
+    readonly args: string[]
+    readonly index?: string
+    readonly project?: Readonly<Record<string, string>>
+  }[] = []
 
   constructor(private readonly report?: (mode: string) => Record<string, unknown> | undefined) {}
 
@@ -61,10 +67,22 @@ class VideoSandboxes implements Pick<SandboxFactory, "create" | "supportsRequest
             .match(/'[^']*'/g)
             ?.map((arg) => arg.slice(1, -1)) ?? []
         const project = mode === "assemble" ? undefined : rest[0]
+        const laid = project
+          ? readdirSync(project, { recursive: true, withFileTypes: true })
+              .filter((entry) => entry.isFile())
+              .map((entry) => `${entry.parentPath}/${entry.name}`.slice(project.length + 1))
+          : []
         this.ran.push({
           mode,
           args: rest,
-          ...(project ? { index: readFileSync(`${project}/index.html`, "utf8") } : {}),
+          ...(project
+            ? {
+                index: readFileSync(`${project}/index.html`, "utf8"),
+                project: Object.fromEntries(
+                  laid.map((path) => [path, readFileSync(`${project}/${path}`, "utf8")])
+                ),
+              }
+            : {}),
         })
 
         // A segment holds the scenes its project hosts; the MP4, its segments, in order.
@@ -106,8 +124,8 @@ const host = (id: string, start: string, duration: string, label?: string) =>
   `<div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="${duration}"${label ? ` data-label="${label}"` : ""}></div>`
 
 /**
- * A title, a demo over a clip, named "The product", and an outro that fades in over the demo's
- * last half second.
+ * A title, a demo over a muted clip, named "The product", and an outro that fades in over the
+ * demo's last half second, where someone says thanks.
  */
 const LAUNCH: Readonly<Record<string, string>> = {
   "index.html": `<html><body><div data-composition-id="main" data-width="1280" data-height="720" data-duration="6">${[
@@ -118,8 +136,9 @@ const LAUNCH: Readonly<Record<string, string>> = {
   ].join("")}</div></body></html>`,
   "scenes/intro.html": scene("intro"),
   "scenes/demo.html": scene("demo", '<video src="media/clip.mp4" muted></video>'),
-  "scenes/outro.html": scene("outro"),
+  "scenes/outro.html": scene("outro", '<video src="media/thanks.mp4"></video>'),
   "media/clip.mp4": "clip",
+  "media/thanks.mp4": "thanks",
   "media/music.m4a": "music",
 }
 
@@ -229,7 +248,7 @@ describe("a video's export in the render worker", () => {
     ])
 
     // The intro alone, from frame 0, without the demo's clip; the outro over the demo it fades
-    // in over, a range of their project; the sound from every file.
+    // in over, a range of their project; the sound from every file but the clip, which is muted.
     const [intro, demo, outro, sound] = segments.map(({ payload }) => payload)
     const paths = (files: readonly ArtifactFile[] | undefined) => files?.map(({ path }) => path)
     expect(paths(intro?.files)).toEqual(["index.html", "scenes/intro.html", "media/music.m4a"])
@@ -241,7 +260,9 @@ describe("a video's export in the render worker", () => {
     expect(demo?.frames).toEqual({ from: 0, to: 60 })
     expect(paths(outro?.files)).toContain("media/clip.mp4")
     expect(outro?.frames).toEqual({ from: 60, to: 120 })
-    expect(paths(sound?.files)).toEqual(Object.keys(LAUNCH))
+    expect(paths(sound?.files)).toEqual(
+      Object.keys(LAUNCH).filter((path) => path !== "media/clip.mp4")
+    )
 
     // It looks again a few seconds later, asking for nothing then.
     expect(asked.some((each) => each.type === "artifact.video.export.requested")).toBe(false)
@@ -306,6 +327,32 @@ describe("a video's export in the render worker", () => {
       sizeBytes: mp4.file.sizeBytes,
     })
     expect(await claimable()).toEqual([])
+  })
+
+  // Reproduce by asking for the sound with the version's files as they are, as it once did: the
+  // sandbox fetches the muted clip, which can be gigabytes of footage the sound never plays.
+  test("mixes the sound from the footage it hears, without fetching the muted clip", async () => {
+    const { exportJob, assemble, render, claimable, sandboxes } = await setup()
+    await assemble(await exportJob())
+    const sound = segmentsOf(await claimable()).find(
+      ({ payload }) => payload.segment.kind === "sound"
+    )
+    if (!sound) throw new Error("Expected the sound's segment.")
+
+    await render(sound)
+    const [mixed] = sandboxes.ran
+    expect(mixed?.mode).toBe("sound")
+    expect(Object.keys(mixed?.project ?? {}).sort()).toEqual([
+      "index.html",
+      "media/music.m4a",
+      "media/thanks.mp4",
+      "scenes/demo.html",
+      "scenes/intro.html",
+      "scenes/outro.html",
+    ])
+    // HyperFrames looks for no file of the muted clip, which plays none there.
+    expect(mixed?.project?.["scenes/demo.html"]).toBe(scene("demo", "<video  muted></video>"))
+    expect(mixed?.project?.["scenes/outro.html"]).toBe(LAUNCH["scenes/outro.html"])
   })
 
   // Reproduce by leaving nudgeVideoExport out of renderVideoSegment's `keep`: the export looks

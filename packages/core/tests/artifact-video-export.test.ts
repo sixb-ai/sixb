@@ -2,6 +2,7 @@ import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import type { ArtifactFile, Principal, SandboxFactory } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
 import type { VideoOutline } from "../src/artifacts/outline"
+import { videoSoundProject } from "../src/artifacts/publish/video"
 import { readVideoComposition } from "../src/artifacts/video/composition"
 import {
   type VideoExportSource,
@@ -287,6 +288,98 @@ describe("a segment's project", () => {
     expect(
       videoSegmentRender(composition(), { scene: "demo", startFrame: 60, endFrame: 135 }, true)
     ).toEqual({ scenes: ["demo"], shiftFrames: 0, from: 60, to: 135 })
+  })
+})
+
+describe("the sound's project", () => {
+  const ref = (path: string, mediaType: string) => ({
+    blobId: `blob_${path}`,
+    digest: `sha256:${path}` as const,
+    sizeBytes: 1,
+    mediaType,
+  })
+  const types: Readonly<Record<string, string>> = {
+    html: "text/html",
+    mp4: "video/mp4",
+    m4a: "audio/mp4",
+    png: "image/png",
+  }
+
+  const PAGES: Readonly<Record<string, string>> = {
+    "index.html": `<html><body><div data-composition-id="main" data-width="1920" data-height="1080" data-duration="6">${[
+      host("demo", "0", "3"),
+      host("talk", "demo", "3"),
+      '<video src="media/backdrop.mp4" data-start="0" data-duration="6" muted></video>',
+      MUSIC,
+    ].join("")}</div></body></html>`,
+    "scenes/demo.html": scene(
+      "demo",
+      [
+        '<video src="media/clip.mp4" muted playsinline></video>',
+        '<video data-has-audio="false"><source src="media/broll.mp4" type="video/mp4"></video>',
+        '<video src="artifact:art_k3m9q2x7tp/take.mp4" muted></video>',
+        '<video src="media/shared.mp4" muted></video>',
+      ].join("")
+    ),
+    "scenes/talk.html": scene(
+      "talk",
+      [
+        '<video src="media/interview.mp4" playsinline></video>',
+        '<video src="artifact:art_k3m9q2x7tp/voice.mp4"></video>',
+        '<video src="media/shared.mp4"></video>',
+        '<img src="media/logo.png" alt="">',
+      ].join("")
+    ),
+  }
+  const files: ArtifactFile[] = [
+    ...Object.keys(PAGES),
+    ...["clip", "broll", "backdrop", "shared", "interview", "unused"].map(
+      (name) => `media/${name}.mp4`
+    ),
+    "media/music.m4a",
+    "media/logo.png",
+  ].map((path) => ({ path, file: ref(path, types[path.split(".").at(-1) ?? ""] ?? "") }))
+
+  const lent = (path: string) => ({
+    address: `artifact:art_k3m9q2x7tp/${path}`,
+    file: ref(path, types[path.split(".").at(-1) ?? ""] ?? ""),
+  })
+
+  // Reproduce by returning every file and page as given: the footage nothing hears is fetched.
+  test("fetches the pages, the sounds, and the footage heard, and cuts every muted video", () => {
+    const sound = videoSoundProject({
+      files,
+      pages: new Map(Object.entries(PAGES)),
+      media: [lent("take.mp4"), lent("voice.mp4"), lent("badge.png")],
+    })
+
+    // A muted video, one with `data-has-audio="false"`, and footage nothing plays are left; a
+    // file a muted video and a heard one both play is fetched.
+    expect(sound.files.map(({ path }) => path)).toEqual([
+      "index.html",
+      "scenes/demo.html",
+      "scenes/talk.html",
+      "media/shared.mp4",
+      "media/interview.mp4",
+      "media/music.m4a",
+      "media/logo.png",
+    ])
+    expect(sound.media.map(({ address }) => address)).toEqual([
+      "artifact:art_k3m9q2x7tp/voice.mp4",
+      "artifact:art_k3m9q2x7tp/badge.png",
+    ])
+
+    // HyperFrames looks for no muted video's file: each muted video plays none.
+    expect([...sound.pages.keys()]).toEqual(["index.html", "scenes/demo.html"])
+    const demo = sound.pages.get("scenes/demo.html") ?? ""
+    expect(demo).not.toContain("src=")
+    expect(demo).toContain(
+      '<video  muted playsinline></video><video data-has-audio="false"><source  type="video/mp4"></video>'
+    )
+    expect(sound.pages.get("index.html")).toContain(
+      '<video  data-start="0" data-duration="6" muted></video>'
+    )
+    expect(sound.pages.get("index.html")).toContain(MUSIC)
   })
 })
 

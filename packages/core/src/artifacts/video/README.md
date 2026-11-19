@@ -152,7 +152,8 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
   → artifact.video.segment.requested  one job per segment key, shared by exports
       a scene: `index.html` keeping the scenes on screen during it (project.ts), in a sandbox
       once kept, asks the export that asked for it to look again at once
-      the sound: HyperFrames' own mix, through its distributed plan, which captures no frame
+      the sound: HyperFrames' own mix, through its distributed plan, which captures no frame,
+      from the version less the footage no unmuted video plays (`videoSoundProject`)
   → the export, once every segment is kept: joined without encoding again, the sound muxed
 ```
 
