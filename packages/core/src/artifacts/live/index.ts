@@ -1,9 +1,46 @@
 /**
  * An artifact edited live, as a viewer holds it: its open version as a Yjs document that everyone
- * editing it changes at once, read as files or, for a canvas, as its items; and the messages of
- * the `/ws/artifacts` socket that keeps it in step. Browser-safe.
+ * editing it changes at once, read as files or, for a canvas, as its items, and a video's edits
+ * as changes to its files' text; and the messages of the `/ws/artifacts` socket that keeps it in
+ * step. Browser-safe.
  */
 
+export {
+  readVideoComposition,
+  VIDEO_ENTRY,
+  type VideoComposition,
+  type VideoScene,
+} from "../video/composition"
+export {
+  duplicateScene,
+  insertClip,
+  keepClipRanges,
+  MIN_CLIP_MS,
+  moveClip,
+  moveScene,
+  readVideoFileTimeline,
+  removeClip,
+  removeScene,
+  setClipSound,
+  setClipTiming,
+  setSceneLabel,
+  setSceneLength,
+  setVideoText,
+  splitClip,
+  trimClip,
+  type VideoEdit,
+  type VideoEditResult,
+  type VideoImportKind,
+  type VideoRange,
+  type VideoSources,
+} from "../video/edit"
+export type {
+  VideoClip,
+  VideoClipKind,
+  VideoFileTimeline,
+  VideoText,
+  VideoTrack,
+} from "../video/timeline"
 export {
   type BlockMark,
   type BlockNode,

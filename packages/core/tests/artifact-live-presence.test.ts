@@ -45,3 +45,32 @@ describe("the boards an Agent turn changes", () => {
     expect(changedBoards(null, after)).toEqual(["welcome", "plan"])
   })
 })
+
+describe("the scenes of a video a turn changes", () => {
+  const video = (keys: Readonly<Record<string, string>>) => ({
+    artifactId: "art_teaser",
+    author: alice,
+    files: [],
+    outline: {
+      kind: "video" as const,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      durationMs: 9000,
+      scenes: Object.entries(keys).map(([id, renderKey], index) => ({
+        id,
+        startMs: index * 3000,
+        durationMs: 3000,
+        renderKey,
+      })),
+    },
+  })
+
+  test("are those whose render key moved, or that are new", () => {
+    const before = video({ hook: "k1", demo: "k2" })
+    const after = video({ hook: "k1", demo: "k3", outro: "k4" })
+
+    expect(changedBoards(before, after)).toEqual(["demo", "outro"])
+    expect(changedBoards(after, after)).toEqual([])
+  })
+})
