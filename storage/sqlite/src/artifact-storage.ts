@@ -17,6 +17,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
 } from "@sixb/core/internal/storage"
@@ -39,6 +40,7 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
   CreateArtifactInput,
@@ -55,6 +57,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListArtifactVideoRendersInput,
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
@@ -118,6 +121,8 @@ const BOARD_PREVIEW_COLUMNS =
 const PDF_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, file, pages, failure, created_at AS createdAt"
 const MEDIA_COLUMNS = "project_id AS projectId, digest, parts, attempts, updated_at AS updatedAt"
+
+const VIDEO_RENDER_COLUMNS = "project_id AS projectId, key, file, failure, created_at AS createdAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -805,6 +810,46 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         input.attempts,
         input.updatedAt.toISOString()
       )
+  }
+
+  async listVideoRenders(
+    input: ListArtifactVideoRendersInput
+  ): Promise<ArtifactVideoRenderRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT ${VIDEO_RENDER_COLUMNS} FROM artifact_video_renders
+         WHERE project_id = ? AND key IN (SELECT value FROM json_each(?))
+         ORDER BY key`
+      )
+      .all(input.projectId, JSON.stringify(input.keys)) as Row[]
+    return rows.map(parseArtifactVideoRenderRow)
+  }
+
+  async putVideoRender(input: ArtifactVideoRenderRecord): Promise<void> {
+    this.db
+      .query(
+        `INSERT INTO artifact_video_renders (project_id, key, file, failure, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, key) DO UPDATE SET
+           file = excluded.file, failure = NULL, created_at = excluded.created_at
+         WHERE artifact_video_renders.failure IS NOT NULL AND excluded.failure IS NULL`
+      )
+      .run(
+        input.projectId,
+        input.key,
+        "failure" in input ? null : JSON.stringify(input.file),
+        "failure" in input ? input.failure : null,
+        input.createdAt.toISOString()
+      )
+  }
+
+  async clearVideoRenderFailures(input: ListArtifactVideoRendersInput): Promise<void> {
+    this.db
+      .query(
+        `DELETE FROM artifact_video_renders
+         WHERE project_id = ? AND key IN (SELECT value FROM json_each(?)) AND failure IS NOT NULL`
+      )
+      .run(input.projectId, JSON.stringify(input.keys))
   }
 
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {

@@ -49,6 +49,7 @@ export {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
 } from "./artifacts/record"

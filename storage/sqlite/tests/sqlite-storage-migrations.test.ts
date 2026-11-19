@@ -228,6 +228,7 @@ const shippedMigrationIds = [
   "106-sync-run-connections",
   "107-video-artifacts",
   "108-artifact-media",
+  "109-artifact-video-renders",
 ]
 
 afterEach(async () => {
