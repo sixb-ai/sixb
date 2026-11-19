@@ -4,6 +4,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Clapperboard, Play } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { fileExtension, versionSummary } from "./card-details"
+import { useVideoRecordingPoster } from "./derived-media"
 import { formatFileSize } from "./file-size"
 import { type FileSource, videoPosterUrl } from "./file-source"
 import { fileView } from "./file-view"
@@ -177,30 +178,36 @@ function VersionPreview({
 }
 
 /**
- * A video as its poster, under a play mark, once it is snapshotted, its scenes along its length;
- * its dark screen until then, or in a project that snapshots nothing.
+ * A video as its poster, under a play mark, its scenes along its length. Until it is snapshotted,
+ * or in a project that snapshots nothing, the poster derived of its first recording; its dark
+ * screen without one.
  */
 function VideoPreview({ version }: { readonly version: ArtifactVersion }) {
   const { outline } = version
-  const [poster, setPoster] = useState<"loading" | "ready" | "none">("loading")
+  const [snapshotted, setSnapshotted] = useState(true)
+  const recording = useVideoRecordingPoster(version, !snapshotted)
+  const poster = snapshotted ? videoPosterUrl(version) : recording
+  const [loaded, setLoaded] = useState<string>()
+  const ready = poster !== undefined && loaded === poster
   return (
     <span className="flex h-full flex-col items-center justify-center bg-neutral-950">
       <Clapperboard className="size-6 stroke-[1.5] text-white/45" aria-hidden="true" />
-      {poster === "none" ? null : (
+      {poster === undefined ? null : (
         <img
-          src={videoPosterUrl(version)}
+          key={poster}
+          src={poster}
           alt=""
           aria-hidden="true"
           loading="lazy"
-          onLoad={() => setPoster("ready")}
-          onError={() => setPoster("none")}
+          onLoad={() => setLoaded(poster)}
+          onError={() => setSnapshotted(false)}
           className={cn(
             "absolute inset-0 size-full object-cover",
-            poster === "ready" ? "sixb-media-in" : "opacity-0"
+            ready ? "sixb-media-in" : "opacity-0"
           )}
         />
       )}
-      {poster === "ready" ? (
+      {ready ? (
         <span className="absolute inset-0 grid place-items-center bg-gradient-to-t from-black/45 via-transparent to-transparent">
           <span className="grid size-9 place-items-center rounded-full bg-black/45 text-white ring-1 ring-white/25 backdrop-blur-md">
             <Play className="ml-0.5 size-4 fill-current" aria-hidden="true" />
