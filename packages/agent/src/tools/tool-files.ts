@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import type { AgentToolFile, AgentToolFilePutInput, AgentToolFiles } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
-import { ARTIFACT_KINDS, artifactSizeLimits } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, type ArtifactKind, artifactSizeLimits } from "@sixb/core/artifacts"
 import {
   AGENT_FILE_MAX_BYTES,
   type AgentRunFileStore,
@@ -11,10 +11,12 @@ import {
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 export { AGENT_FILE_MAX_BYTES }
-/** What a run stores in all: at least an artifact's version as large as any kind's may be. */
-const DEFAULT_RUN_MAX_BYTES = Math.max(
-  ...ARTIFACT_KINDS.map((kind) => artifactSizeLimits(kind).maxVersionBytes)
-)
+/**
+ * What a run stores in all, the files its tools write and the artifacts it publishes: at least one
+ * artifact version as large as most kinds' may be. A publish of a kind whose versions may hold
+ * more, a file artifact's recording, may go past it by that much: see `reserveArtifact`.
+ */
+const DEFAULT_RUN_MAX_BYTES = ARTIFACT_LIMITS.maxVersionBytes
 
 interface CreateAgentToolFilesInput {
   readonly toolName: string
@@ -49,16 +51,31 @@ export class AgentFileBudget {
   }
 
   reserve(bytes: number, toolName: string): AgentFileReservation {
+    return this.#reserve(bytes, toolName, this.maxBytes)
+  }
+
+  /**
+   * A reservation for publishing an artifact of `kind`, which may take the run past `maxBytes` by
+   * as much more as one version of its kind may hold than other kinds': a file artifact's 2 GiB.
+   * Every other file the run stores stays within `maxBytes`.
+   */
+  reserveArtifact(kind: ArtifactKind, bytes: number, toolName: string): AgentFileReservation {
+    const headroom = artifactSizeLimits(kind).maxVersionBytes - ARTIFACT_LIMITS.maxVersionBytes
+    return this.#reserve(bytes, toolName, this.maxBytes + Math.max(0, headroom))
+  }
+
+  #reserve(bytes: number, toolName: string, limitBytes: number): AgentFileReservation {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
       throw new Error("[SixbAgent] Agent file reservation must be a safe non-negative integer.")
     }
-    this.add(bytes, toolName)
-    return new AgentFileReservation(this, bytes, toolName)
+    this.add(bytes, toolName, limitBytes)
+    return new AgentFileReservation(this, bytes, toolName, limitBytes)
   }
 
-  add(bytes: number, toolName: string): void {
-    if (this.#reservedBytes + bytes > this.maxBytes) {
-      throw toolFileError(toolName, `files exceed the ${this.maxBytes}-byte run limit`)
+  /** Counts `bytes`, unless the run would then hold more than `limitBytes`. */
+  add(bytes: number, toolName: string, limitBytes = this.maxBytes): void {
+    if (this.#reservedBytes + bytes > limitBytes) {
+      throw toolFileError(toolName, `files exceed the ${limitBytes}-byte run limit`)
     }
     this.#reservedBytes += bytes
   }
@@ -68,13 +85,18 @@ export class AgentFileBudget {
   }
 
   /** Counts content's bytes when no reservation holds the same digest yet, and nothing after. */
-  holdContent(digest: string, sizeBytes: number, toolName: string): void {
+  holdContent(
+    digest: string,
+    sizeBytes: number,
+    toolName: string,
+    limitBytes = this.maxBytes
+  ): void {
     const held = this.#contents.get(digest)
     if (held) {
       held.holders += 1
       return
     }
-    this.add(sizeBytes, toolName)
+    this.add(sizeBytes, toolName, limitBytes)
     this.#contents.set(digest, { sizeBytes, holders: 1 })
   }
 
@@ -96,19 +118,21 @@ export class AgentFileReservation {
   constructor(
     private readonly budget: AgentFileBudget,
     bytes: number,
-    private readonly toolName: string
+    private readonly toolName: string,
+    /** How much the run may hold once this reservation's bytes are counted. */
+    private readonly limitBytes: number
   ) {
     this.#bytes = bytes
   }
 
   add(bytes: number): void {
-    this.budget.add(bytes, this.toolName)
+    this.budget.add(bytes, this.toolName, this.limitBytes)
     this.#bytes += bytes
   }
 
   /** Reserves bytes whose SHA-256 is `digest`, unless the run already counts the same content. */
   addContent(digest: string, sizeBytes: number): void {
-    this.budget.holdContent(digest, sizeBytes, this.toolName)
+    this.budget.holdContent(digest, sizeBytes, this.toolName, this.limitBytes)
     this.#contents.push(digest)
   }
 

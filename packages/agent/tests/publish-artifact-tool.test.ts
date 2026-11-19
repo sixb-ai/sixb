@@ -1728,7 +1728,8 @@ describe("publish_artifact", () => {
     writeFileSync(join(root, "work/demo.mp4"), recording)
     const api = startSandboxApi()
     try {
-      const budget = new AgentFileBudget()
+      // A file artifact's publish may take the run past its budget; any other file may not.
+      const budget = new AgentFileBudget(1024 * 1024)
       const installed = install()
       const env = await installSandboxCli(api.baseUrl)
 

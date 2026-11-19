@@ -242,7 +242,7 @@ async function publish(
       `the files hold ${totalBytes} bytes; a version of a ${kind} artifact may hold at most ${maxVersionBytes}`
     )
   }
-  const reservation = input.budget.reserve(0, tool)
+  const reservation = input.budget.reserveArtifact(kind, 0, tool)
   const contents: PublishedArtifactFile[] = []
   let published: PublishedArtifact
   try {
@@ -251,7 +251,7 @@ async function publish(
       // A large file is uploaded by the sandbox itself. It is never one the layout check reads:
       // an entry, a board or a theme is at most 2 MB.
       if (!source.bytes && source.sizeBytes > SANDBOX_INLINE_BYTES) {
-        const file = await uploadSource(input, handle, source, reservation, signal)
+        const file = await uploadSource(input, handle, kind, source, reservation, signal)
         files.push({ path: source.path, file })
         contents.push({
           path: source.path,
@@ -478,12 +478,13 @@ async function publish(
 async function uploadSource(
   input: PublishToolsInput,
   handle: AgentSandboxHandle,
+  kind: ArtifactKind,
   source: PublishSource,
   reservation: AgentFileReservation,
   signal: AbortSignal
 ): Promise<FileRef> {
   const tool = CREATE_TOOL
-  const uploading = input.budget.reserve(source.sizeBytes, tool)
+  const uploading = input.budget.reserveArtifact(kind, source.sizeBytes, tool)
   let file: FileRef
   try {
     file = await uploadSandboxFile(handle, {

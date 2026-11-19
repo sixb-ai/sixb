@@ -7,22 +7,33 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
-import { artifactSizeLimits } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, artifactSizeLimits } from "@sixb/core/artifacts"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { AgentFileBudget, createAgentToolFiles } from "../src/tools/tool-files"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 describe("agent tool files", () => {
-  test("let a run store an artifact's version as large as one may be", () => {
-    // Reproduce by giving a run less than a version holds: publishing the largest version, a file
-    // artifact's, is refused for the run's budget, past what the artifact itself allows.
-    const reservation = new AgentFileBudget().reserve(0, "publish_artifact")
+  // Reproduce by giving the run a file artifact's 2 GiB as its budget: a tool's files then take it
+  // past 250 MiB. Or by reserving a publish as any other store: the recording is refused.
+  test("hold a run to its budget, which only a larger kind's publish may pass", () => {
+    const budget = new AgentFileBudget()
 
-    expect(() =>
-      reservation.addContent("a".repeat(64), artifactSizeLimits("file").maxVersionBytes)
-    ).not.toThrow()
-    expect(() => reservation.add(1)).toThrow()
+    const tool = budget.reserve(0, "create_image")
+    expect(() => tool.addContent("a".repeat(64), ARTIFACT_LIMITS.maxVersionBytes)).not.toThrow()
+    expect(() => tool.add(1)).toThrow("run limit")
+    tool.release()
+
+    const document = budget.reserveArtifact("document", 0, "publish_artifact")
+    expect(() => document.add(ARTIFACT_LIMITS.maxVersionBytes + 1)).toThrow("run limit")
+    document.release()
+
+    const recording = budget.reserveArtifact("file", 0, "publish_artifact")
+    const { maxVersionBytes } = artifactSizeLimits("file")
+    expect(() => recording.addContent("b".repeat(64), maxVersionBytes)).not.toThrow()
+    expect(() => recording.add(1)).toThrow("run limit")
+    // Past its budget, the run's tools store nothing more.
+    expect(() => budget.reserve(1, "create_image")).toThrow("run limit")
   })
 
   test("stores detected image bytes and materializes them under a safe sandbox path", async () => {
