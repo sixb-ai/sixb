@@ -151,17 +151,23 @@ A video takes minutes, longer than any request, so `../video/runtime.ts` splits 
 requests:
 
 ```text
-start(): admit the call, reserve its budget → provider start(callId) → keep the operation
+start(): admit the call, reserve its budget → keep the operation, queue its check
+         → provider start(callId) → keep the provider's handle
 get():   provider status(operation) → pending: answer as is
                                     → ended: record it as the attempt that admitted it,
                                       store the videos, settle the operation
 ```
 
-`start` admits the call like an image, then asks the provider to start a job and keeps the handle
-it returns in `aiUsage.createModelCallOperation`, with the execution attempt that admitted it,
-whether that reserved budget, and the price variant the provider bills the job at. The call ID is
-the provider's idempotency key, so a retried start never bills a second job. A start that fails
-keeps its reservation unknown, as a language call does.
+`start` admits the call like an image, then keeps it in `aiUsage.createModelCallOperation`, with
+the execution attempt that admitted it and whether that reserved budget, and queues its check,
+all before the provider sees it: a job the provider may bill always has a record, and a check
+that settles it. Only then does it ask the provider to start the job, and keep the handle it
+returns, with the price variant the provider bills the job at, through `startModelCallOperation`.
+The call ID is the provider's idempotency key, so a retried start never bills a second job. A
+start that fails, queueing its check included, settles the operation as failed and keeps its
+reservation unknown, as a language call does. A process that stops between the provider's start
+and keeping its handle leaves an operation with no handle, which its check settles the same way
+at the ceiling.
 
 Any later `get`, from the same request or another process, looks at the job once. The look that
 sees it end records the call through `accountingFor` the starting execution and `resumeCall`, so the
@@ -171,15 +177,16 @@ Settling is first-wins: two looks that see the end at once record the same ledge
 the first files, and both answer with the first settlement. A look that fails to ask, such as a
 network error, leaves the job pending. `generate` is `start`, then `get` every five seconds.
 
-No client has to come back. `start` also queues an `agent.model-call.check.requested` job on the
-agent lane, and the agent worker looks at the job with the same code (`../video/check.ts`), then
+No client has to come back. The `agent.model-call.check.requested` job `start` queued on the
+agent lane looks at the job with the same code (`../video/check.ts`) in the agent worker, then
 queues the next look, a quarter of the generation's age later, between one and five minutes. Since
 the handle lives in storage and the check in the queue, a process that stops between start and
 end loses nothing: whichever worker claims the check finishes it. A check that cannot ask is
 retried by the worker with backoff.
 
-Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation still running, or one it
-cannot ask about, as failed. The Gateway gives up on a provider's task after ten minutes and
+A generation is checked with the catalog entry its model has in `models.video`, so `start` takes
+only a listed model. Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation
+still running, or one it cannot ask about, as failed. The Gateway gives up on a provider's task after ten minutes and
 providers time their own out sooner, so an hour is far past any job that will still finish. Whether
 the provider billed it is unknown, so its reservation becomes unknown, as for a language call that
 never finished, rather than recorded as free.

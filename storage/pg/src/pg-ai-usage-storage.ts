@@ -6,6 +6,7 @@ import {
   normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
+  normalizeAiModelCallStart,
 } from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject, ReadonlyJsonValue } from "@sixb/core/storage"
@@ -25,6 +26,7 @@ import {
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
   type SettleAiModelCallOperationInput,
+  type StartAiModelCallOperationInput,
   type SummarizeAiUsageExecutionInput,
   type SummarizeAiUsageExecutionsInput,
 } from "@sixb/core/storage"
@@ -299,7 +301,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
       const inserted = await tx<OperationRow[]>`
         INSERT INTO ai_model_call_operations (
           project_id, call_id, execution_id, attempt, model_kind, provider_id, model_id,
-          operation, request, reserved, status, created_at
+          request, reserved, status, created_at
         )
         VALUES (
           ${record.projectId},
@@ -309,7 +311,6 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.modelKind},
           ${record.providerId},
           ${record.modelId},
-          ${JSON.stringify(record.operation)}::text::jsonb,
           ${JSON.stringify(record.request)}::text::jsonb,
           ${record.reserved},
           ${record.status},
@@ -335,6 +336,27 @@ export class PgAiUsageStorage implements AiUsageStorage {
       WHERE project_id = ${input.projectId} AND call_id = ${input.callId}
     `
     return row ? operationFromRow(row) : null
+  }
+
+  async startModelCallOperation(
+    input: StartAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const start = normalizeAiModelCallStart(input)
+
+    // Only a pending call without a handle takes one; any other reads back as it stands.
+    const [started] = await this.sql<OperationRow[]>`
+      UPDATE ai_model_call_operations
+      SET operation = ${JSON.stringify(start.operation)}::text::jsonb,
+        request = ${JSON.stringify(start.request)}::text::jsonb
+      WHERE project_id = ${start.projectId}
+        AND call_id = ${start.callId}
+        AND status = 'pending'
+        AND operation IS NULL
+      RETURNING *
+    `
+    if (started) return operationFromRow(started)
+
+    return this.getModelCallOperation(start)
   }
 
   async settleModelCallOperation(
@@ -414,7 +436,7 @@ interface OperationRow {
   readonly model_kind: AiModelCallOperationRecord["modelKind"]
   readonly provider_id: string
   readonly model_id: string
-  readonly operation: ReadonlyJsonValue
+  readonly operation: ReadonlyJsonValue | null
   readonly request: ReadonlyJsonObject
   readonly reserved: boolean
   readonly status: AiModelCallOperationRecord["status"]
@@ -433,7 +455,7 @@ function operationFromRow(row: OperationRow): AiModelCallOperationRecord {
     modelKind: row.model_kind,
     providerId: row.provider_id,
     modelId: row.model_id,
-    operation: row.operation,
+    ...(row.operation === null ? {} : { operation: row.operation }),
     request: row.request,
     reserved: row.reserved,
     status: row.status,

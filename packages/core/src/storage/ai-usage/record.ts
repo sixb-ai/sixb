@@ -13,6 +13,7 @@ import type {
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   SettleAiModelCallOperationInput,
+  StartAiModelCallOperationInput,
 } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
@@ -106,7 +107,7 @@ function cloneRequestedReasoning(
   return typeof reasoning === "string" ? reasoning : { budgetTokens: reasoning.budgetTokens }
 }
 
-/** Validate and defensively snapshot a running call's provider handle. */
+/** Validate and defensively snapshot a call about to start, before the provider has it. */
 export function normalizeAiModelCallOperation(
   input: CreateAiModelCallOperationInput
 ): AiModelCallOperationRecord {
@@ -120,11 +121,7 @@ export function normalizeAiModelCallOperation(
   assertNonBlank(input.providerId, "providerId")
   assertNonBlank(input.modelId, "modelId")
 
-  assertJsonValue(input.operation, "AI model-call operation")
-  if (!isPlainRecord(input.request)) {
-    throw new TypeError("[Sixb] AI model-call operation request must be a JSON object.")
-  }
-  assertJsonValue(input.request, "AI model-call operation request")
+  assertOperationRequest(input.request)
   if (typeof input.reserved !== "boolean") {
     throw new TypeError("[Sixb] AI model-call operation reserved must be a boolean.")
   }
@@ -137,12 +134,38 @@ export function normalizeAiModelCallOperation(
     modelKind: input.modelKind,
     providerId: input.providerId,
     modelId: input.modelId,
-    operation: structuredClone(input.operation),
     request: structuredClone(input.request),
     reserved: input.reserved,
     status: "pending",
     createdAt: cloneValidDate(input.createdAt ?? new Date(), "createdAt"),
   }
+}
+
+/** Validate the handle of a call the provider accepted. */
+export function normalizeAiModelCallStart(
+  input: StartAiModelCallOperationInput
+): StartAiModelCallOperationInput {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  if (input.operation === null || input.operation === undefined) {
+    throw new TypeError("[Sixb] AI model-call operation handle is required.")
+  }
+  assertJsonValue(input.operation, "AI model-call operation")
+  assertOperationRequest(input.request)
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    operation: structuredClone(input.operation),
+    request: structuredClone(input.request),
+  }
+}
+
+function assertOperationRequest(request: unknown): void {
+  if (!isPlainRecord(request)) {
+    throw new TypeError("[Sixb] AI model-call operation request must be a JSON object.")
+  }
+  assertJsonValue(request, "AI model-call operation request")
 }
 
 /** Validate how a running call ended. */

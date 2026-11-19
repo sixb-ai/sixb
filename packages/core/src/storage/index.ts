@@ -312,6 +312,7 @@ export type {
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SettleAiModelCallOperationInput,
+  StartAiModelCallOperationInput,
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./ai-usage"

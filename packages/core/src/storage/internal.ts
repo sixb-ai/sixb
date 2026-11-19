@@ -33,6 +33,7 @@ export {
   normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
+  normalizeAiModelCallStart,
 } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {

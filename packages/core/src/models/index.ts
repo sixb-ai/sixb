@@ -207,7 +207,6 @@ export type {
 export { RerankingModelResponseError } from "./reranking-model"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"
 export type { VideoModelCatalog, VideoModelEntry } from "./video/catalog"
-export { VideoModelResponseError } from "./video/errors"
 export type {
   VideoCostEstimator,
   VideoData,

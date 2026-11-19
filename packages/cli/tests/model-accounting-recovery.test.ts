@@ -73,6 +73,7 @@ for (const mode of ["cohost", "worker-group"] as const) {
               getModelCallFiles: (input) => usage.getModelCallFiles(input),
               createModelCallOperation: (input) => usage.createModelCallOperation(input),
               getModelCallOperation: (input) => usage.getModelCallOperation(input),
+              startModelCallOperation: (input) => usage.startModelCallOperation(input),
               settleModelCallOperation: (input) => usage.settleModelCallOperation(input),
               recordModelCall: (input) => {
                 if (!available) throw new Error("accounting temporarily unavailable")

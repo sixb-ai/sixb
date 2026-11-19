@@ -6,6 +6,7 @@ import {
   normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
+  normalizeAiModelCallStart,
 } from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject, ReadonlyJsonValue } from "@sixb/core/storage"
@@ -25,6 +26,7 @@ import {
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
   type SettleAiModelCallOperationInput,
+  type StartAiModelCallOperationInput,
   type SummarizeAiUsageExecutionInput,
   type SummarizeAiUsageExecutionsInput,
 } from "@sixb/core/storage"
@@ -165,9 +167,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             `
               INSERT INTO ai_model_call_operations (
                 project_id, call_id, execution_id, attempt, model_kind, provider_id, model_id,
-                operation, request, reserved, status, created_at
+                request, reserved, status, created_at
               )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `
           )
           .run(
@@ -178,7 +180,6 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             record.modelKind,
             record.providerId,
             record.modelId,
-            JSON.stringify(record.operation),
             JSON.stringify(record.request),
             record.reserved ? 1 : 0,
             record.status,
@@ -200,6 +201,31 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   ): Promise<AiModelCallOperationRecord | null> {
     assertNonBlankProjectId(input.projectId)
     return this.findOperation(input.projectId, input.callId)
+  }
+
+  async startModelCallOperation(
+    input: StartAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const start = normalizeAiModelCallStart(input)
+
+    // Only a pending call without a handle takes one; any other reads back as it stands.
+    return runImmediateTransaction(this.connection.db, () => {
+      this.connection.db
+        .query(
+          `
+            UPDATE ai_model_call_operations
+            SET operation = ?, request = ?
+            WHERE project_id = ? AND call_id = ? AND status = 'pending' AND operation IS NULL
+          `
+        )
+        .run(
+          JSON.stringify(start.operation),
+          JSON.stringify(start.request),
+          start.projectId,
+          start.callId
+        )
+      return this.findOperation(start.projectId, start.callId)
+    })
   }
 
   async settleModelCallOperation(
@@ -247,7 +273,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
       modelKind: row.model_kind,
       providerId: row.provider_id,
       modelId: row.model_id,
-      operation: JSON.parse(row.operation) as ReadonlyJsonValue,
+      ...(row.operation === null
+        ? {}
+        : { operation: JSON.parse(row.operation) as ReadonlyJsonValue }),
       request: JSON.parse(row.request) as ReadonlyJsonObject,
       reserved: row.reserved === 1,
       status: row.status,
@@ -462,7 +490,7 @@ interface OperationRow {
   readonly model_kind: AiModelCallOperationRecord["modelKind"]
   readonly provider_id: string
   readonly model_id: string
-  readonly operation: string
+  readonly operation: string | null
   readonly request: string
   readonly reserved: number
   readonly status: AiModelCallOperationRecord["status"]
