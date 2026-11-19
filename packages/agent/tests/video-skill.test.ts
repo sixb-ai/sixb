@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { renderInstanceHelp } from "@sixb/cli-core"
 import { ARTIFACT_LIMITS, quoteArtifactComment } from "@sixb/core/artifacts"
 import { VIDEO_FRAME_RATES } from "../../core/src/artifacts/video/composition"
+import { SANDBOX_ATTACHMENT_LIMITS } from "../src/attachments"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 
 // What the video guide teaches the Agent, held to what the app sends it, to what publishing
@@ -49,6 +50,21 @@ describe("the video guide", () => {
     expect(oneLine(videoGuide())).toContain(
       `A video holds at most ${limits.maxVideoScenes} scenes, ${limits.maxVideoSeconds / 60} minutes, and ${limits.maxVideoMediaFiles} video and sound files; each HTML file at most ${limits.maxSceneBytes / 1024 ** 2} MiB, each recording at most ${recording} GB.`
     )
+  })
+
+  test("says which of the user's clips the sandbox does not hold", () => {
+    const megabytes = SANDBOX_ATTACHMENT_LIMITS.fileMaxBytes / 1024 ** 2
+    expect(oneLine(videoGuide())).toContain(
+      `An attachment over ${megabytes} MB is not in the sandbox: download it straight into the folder`
+    )
+  })
+
+  // Guard proof: drop -nostdin from one of video.md's FFmpeg commands; FFmpeg in the sandbox then
+  // waits on its input until the command's limit, as it did in a real run.
+  test("runs FFmpeg without its input every time", () => {
+    const commands = videoGuide().match(/ffmpeg [^`\n]*/g) ?? []
+    expect(commands.length).toBeGreaterThan(2)
+    for (const command of commands) expect(command).toStartWith("ffmpeg -nostdin ")
   })
 
   test("names commands the sandbox's CLI has", () => {
