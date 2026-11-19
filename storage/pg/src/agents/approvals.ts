@@ -201,7 +201,7 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
           SET reported_in_message_id = NULL
           WHERE project_id = ${input.projectId}
             AND thread_id = ${input.threadId}
-            AND reported_in_message_id = ANY(${tx.array(clearedIds)}::text[])
+            AND reported_in_message_id = ANY(${clearedIds}::text[])
         `
       }
 
@@ -211,7 +211,7 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
         DELETE FROM agent_approvals
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
-          AND run_id = ANY(${tx.array(runIds)}::text[])
+          AND run_id = ANY(${runIds}::text[])
         RETURNING *
       `
 
@@ -306,7 +306,7 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
     const rows = await this.sql<{ id: string }[]>`
       UPDATE agent_approvals SET reported_in_message_id = ${input.messageId}
       WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
-        AND id = ANY(${this.sql.array(ids)}::text[]) AND reported_in_message_id IS NULL
+        AND id = ANY(${ids}::text[]) AND reported_in_message_id IS NULL
         AND (${input.resuming !== true} OR turn_stopped_at IS NULL)
       RETURNING id
     `
@@ -362,7 +362,7 @@ function listFilter(sql: SQLClient, input: ListAgentApprovalsInput) {
     AND (${runId}::text IS NULL OR run_id = ${runId})
     AND (${requesterType}::text IS NULL
       OR (requested_by_type = ${requesterType} AND requested_by_id = ${requesterId}))
-    AND (${statuses === null}::boolean OR status = ANY(${sql.array([...(statuses ?? [])])}::text[]))
+    AND (${statuses === null}::boolean OR status = ANY(${[...(statuses ?? [])]}::text[]))
     AND (${reported}::boolean IS NULL OR (reported_in_message_id IS NOT NULL) = ${reported})
   `
 }

@@ -227,7 +227,7 @@ export class PgMaterializationSessions {
               AND (sort_one, sort_two, record_key) > (${after[0]}, ${after[1]}, ${after[2]})
           )
           SELECT sort_one, sort_two, record_key, payload FROM changes
-          WHERE ref->>'objectTypeId' = ANY(${this.sql.array([...objectTypeIds])}::text[])
+          WHERE ref->>'objectTypeId' = ANY(${[...objectTypeIds]}::text[])
             OR EXISTS (
               SELECT 1 FROM object_vectors
               WHERE project_id = ${session.header.commit.projectId}

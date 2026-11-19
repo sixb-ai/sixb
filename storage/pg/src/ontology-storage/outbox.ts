@@ -87,7 +87,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
         JOIN executions
           ON executions.project_id = commits.project_id AND executions.id = commits.execution_id
         WHERE commits.project_id = ${input.projectId}
-          AND commits.id = ANY(${sql.array(commitIds)}::text[])
+          AND commits.id = ANY(${commitIds}::text[])
       `
       const contextOf = new Map(
         contexts.map((row) => [row.commit_id, outboxEventContext(input.projectId, row)])
@@ -106,7 +106,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
         WITH leased AS MATERIALIZED (
           SELECT id FROM ontology_outbox
           WHERE project_id = ${input.projectId}
-            AND id = ANY(${sql.array(ids)}::text[])
+            AND id = ANY(${ids}::text[])
             AND lease_id = ${input.leaseId}
             AND lease_expires_at IS NOT NULL
           FOR UPDATE
@@ -138,7 +138,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
         WITH leased AS MATERIALIZED (
           SELECT id FROM ontology_outbox
           WHERE project_id = ${input.projectId}
-            AND id = ANY(${sql.array(ids)}::text[])
+            AND id = ANY(${ids}::text[])
             AND lease_id = ${input.leaseId}
             AND lease_expires_at IS NOT NULL
           FOR UPDATE

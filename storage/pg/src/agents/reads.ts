@@ -146,7 +146,7 @@ async function readStates(
         AND reading.principal_type = 'user'
         AND reading.principal_id = ${principalId}
       WHERE thread.project_id = ${projectId}
-        AND thread.id = ANY(${sql.array([...threadIds])}::text[])
+        AND thread.id = ANY(${[...threadIds]}::text[])
     ) AS place
   `
 

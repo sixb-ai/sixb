@@ -143,7 +143,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
       UPDATE dataset_ingest_deliveries
       SET flush_id = ${flushId}
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId}
-        AND id = ANY(${this.sql.array([...deliveryIds])}::bigint[])
+        AND id = ANY(${[...deliveryIds]}::bigint[])
     `
   }
 
@@ -240,7 +240,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
         flush_id, flush_started_at, failure_streak, last_flushed_at
       FROM dataset_ingest_state
       WHERE project_id = ${projectId}
-        AND (${datasetIds === undefined} OR dataset_id = ANY(${this.sql.array([...(datasetIds ?? [])])}::text[]))
+        AND (${datasetIds === undefined} OR dataset_id = ANY(${[...(datasetIds ?? [])]}::text[]))
     `
     return rows.map(stateFromRow)
   }
@@ -265,7 +265,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
         count(*) FILTER (WHERE rejected_at IS NOT NULL)::text AS rejected
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId}
-        AND (${datasetIds === undefined} OR dataset_id = ANY(${this.sql.array([...(datasetIds ?? [])])}::text[]))
+        AND (${datasetIds === undefined} OR dataset_id = ANY(${[...(datasetIds ?? [])]}::text[]))
       GROUP BY dataset_id
     `
     return rows.map((row) => ({

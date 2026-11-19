@@ -243,7 +243,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
 
     return sql<AiUsageRow[]>`
       WITH requested(execution_id) AS (
-        SELECT * FROM unnest(${sql.array(executionIds)}::text[])
+        SELECT * FROM unnest(${executionIds}::text[])
       )
       SELECT usage.* FROM requested
       JOIN ai_model_call_usage AS usage

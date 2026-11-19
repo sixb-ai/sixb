@@ -532,8 +532,8 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
       WHERE roots.version_id = ${manifest.version_id}
         AND (
-          roots.root_key = ANY(${sql.array(rootKeys)}::text[])
-          OR roots.staging_ordinal = ANY(${sql.array(ordinals)}::bigint[])
+          roots.root_key = ANY(${rootKeys}::text[])
+          OR roots.staging_ordinal = ANY(${ordinals}::bigint[])
         )
     `
     return existing.map((row) => sourceStageRow(sourceAssertion(row)))

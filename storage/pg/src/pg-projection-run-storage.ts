@@ -516,7 +516,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       WHERE project_id = ${input.projectId}
         AND projection_id = ${run.projection_id}
         AND materialization_protocol = ${"replacement"}
-        AND status = ANY(${this.sql.array([...SUPERSEDING_PROJECTION_RUN_STATUSES])}::text[])
+        AND status = ANY(${[...SUPERSEDING_PROJECTION_RUN_STATUSES]}::text[])
         AND dataset_version_created_at COLLATE "C" > ${run.dataset_version_created_at} COLLATE "C"
       ORDER BY dataset_version_created_at COLLATE "C" DESC, id DESC
       LIMIT 1
