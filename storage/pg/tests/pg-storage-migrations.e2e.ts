@@ -1571,6 +1571,21 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("widens the kernel operation check without validating every execution", async () => {
+    // Removal proof: drop `NOT VALID` from 111's ADD CONSTRAINT; the check is then validated,
+    // which scans `executions` under the migration's ACCESS EXCLUSIVE lock.
+    await withDatabase({}, async ({ sql }) => {
+      const rows = await sql<{ convalidated: boolean }[]>`
+        SELECT convalidated
+        FROM pg_constraint
+        WHERE conrelid = 'executions'::regclass
+          AND conname = 'executions_authority_kernel_operation_check'
+      `
+
+      expect([...rows]).toEqual([{ convalidated: false }])
+    })
+  })
+
   test("backfills canonical workflow outputs by node index", async () => {
     await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
       await sql.unsafe(`CREATE SCHEMA ${quoteIdent(schemaName)}`)
