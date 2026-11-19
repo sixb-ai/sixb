@@ -171,13 +171,3 @@ export function useTranscript(url: string | undefined): {
   })
   return { transcript: query.data, failed: query.isError }
 }
-
-/**
- * A scene's still, a picture of its middle, once the export snapshots it. Until then the address
- * answers nothing, and whoever shows it falls back on a frame of the scene's footage.
- */
-export function sceneStillUrl(target: MediaTarget, scene: string): string {
-  return apiFileUrl(
-    `/api/artifacts/${encodeURIComponent(target.artifactId)}/versions/${target.version}/scenes/${encodeURIComponent(scene)}/still`
-  )
-}
