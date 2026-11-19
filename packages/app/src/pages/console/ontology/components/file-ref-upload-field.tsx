@@ -183,7 +183,9 @@ export function FileRefUploadField({
             dragging
               ? "border-primary/60 bg-primary/5"
               : "border-border/80 hover:border-border hover:bg-muted/20",
-            isDisabled && "pointer-events-none opacity-70"
+            isDisabled && "pointer-events-none",
+            // An upload under way keeps its progress legible: only a disabled field is dimmed.
+            disabled && "opacity-70"
           )}
         >
           <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
