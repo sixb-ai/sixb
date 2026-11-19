@@ -27,7 +27,7 @@ const STDERR_BYTES = 4096
 /** HyperFrames' low-memory profile renders by screenshots with one browser, twice slower. */
 const ENOUGH_MEMORY = 3 * 1024 ** 3
 
-/** HyperFrames reports usage unless told not to. */
+/** HyperFrames reports usage unless told not to; `hyperframesCache` adds where it may write. */
 const ENV = { ...process.env, HYPERFRAMES_NO_TELEMETRY: "1", DO_NOT_TRACK: "1" }
 
 const [mode, ...args] = process.argv.slice(2)
@@ -40,6 +40,7 @@ report(async () => {
   if (mode === "assemble") return assemble(left)
 
   if (!(await available("hyperframes"))) return { skipped: "no_hyperframes" }
+  await hyperframesCache()
   const engine = await hyperframesVersion()
   if (engine !== args[3]) return { skipped: "engine", engine: engine ?? "unknown" }
 
@@ -243,6 +244,36 @@ async function hyperframesProducer() {
     return `${name} exports no function ${missing.join(", ")}`
   }
   return `no module of ${dist} exports ${PRODUCER.join(", ")}`
+}
+
+/**
+ * HyperFrames keeps its history, fonts and frames in its cache, `~/.cache/hyperframes`, beside the
+ * browser it renders with, and stops when it cannot write there, as in a sandbox whose home is read
+ * only. Then it writes in the sandbox's working directory instead, its browser found where it is.
+ */
+async function hyperframesCache() {
+  const cache = process.env.HYPERFRAMES_CACHE_DIR || path.join(os.homedir(), ".cache", "hyperframes")
+  if (writable(cache)) return
+
+  if (!ENV.HYPERFRAMES_BROWSER_PATH) {
+    const browser = await execute("hyperframes", ["browser", "path"], { timeoutMs: 30_000, stdout: true })
+    const found = browser.failed ? "" : browser.stdout.toString("utf8").trim().split("\n").at(-1)
+    if (found && fs.existsSync(found)) ENV.HYPERFRAMES_BROWSER_PATH = found
+  }
+  ENV.HYPERFRAMES_CACHE_DIR = path.join(__dirname, ".hyperframes-cache")
+  fs.mkdirSync(ENV.HYPERFRAMES_CACHE_DIR, { recursive: true })
+}
+
+function writable(dir) {
+  const probe = path.join(dir, `.sixb-${process.pid}`)
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(probe, "")
+    fs.rmSync(probe)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function hyperframesVersion() {
