@@ -15,6 +15,7 @@ import type { FrameLayout } from "./entries"
 import { HYPERFRAMES_RUNTIME } from "./hyperframes"
 import { FRAME_DECK_CSS, FRAME_DOCUMENT_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
+import { videoFrameRuntime } from "./video-runtime"
 
 /**
  * Hosts a frame may load from besides its own files: CSS and script libraries and web fonts, Google
@@ -31,13 +32,14 @@ export const FRAME_CDN_ALLOWLIST = [
 
 /**
  * The files a frame gets besides the version's own, under `__sixb/`, which a version may not use:
- * a kit per layout, the runtime, and the HyperFrames runtime a video plays with. The server serves
- * them to the app's frames, and the Agent's layout check serves them to its browser, so both lay a
- * version out the same way. Their bodies are in every render key (`frameKitDigest`), so a new
- * HyperFrames release renders every video again.
+ * a kit per layout, the runtime, and a video's runtimes. The server serves them to the app's
+ * frames, and the Agent's layout check serves them to its browser, so both lay a version out the
+ * same way. Their bodies are in the render keys (`frameKitDigest`): a file with a `layout` is
+ * loaded by that layout's frames alone, and only that layout's keys take it in, so a new
+ * HyperFrames release renders every video again, and no deck, page or document.
  */
 export const FRAME_ASSETS: Readonly<
-  Record<string, { readonly body: string; readonly type: string }>
+  Record<string, { readonly body: string; readonly type: string; readonly layout?: FrameLayout }>
 > = {
   [`${FRAME_ASSET_PREFIX}deck.css`]: { body: FRAME_DECK_CSS, type: "text/css; charset=utf-8" },
   [`${FRAME_ASSET_PREFIX}page.css`]: { body: FRAME_PAGE_CSS, type: "text/css; charset=utf-8" },
@@ -49,9 +51,15 @@ export const FRAME_ASSETS: Readonly<
     body: `(${frameRuntime.toString()})(${documentData.toString()})\n`,
     type: "text/javascript; charset=utf-8",
   },
+  [`${FRAME_ASSET_PREFIX}video.js`]: {
+    body: `(${videoFrameRuntime.toString()})()\n`,
+    type: "text/javascript; charset=utf-8",
+    layout: "video",
+  },
   [`${FRAME_ASSET_PREFIX}hyperframes.js`]: {
     body: HYPERFRAMES_RUNTIME,
     type: "text/javascript; charset=utf-8",
+    layout: "video",
   },
 }
 
@@ -59,20 +67,19 @@ export const FRAME_ASSETS: Readonly<
  * The kit for the layout and the runtime, which reads the layout from its own tag, and a designed
  * document's paper: its width, height, and margins, top, right, bottom and left, in pixels.
  *
- * A video gets no kit: its scenes show as HyperFrames renders them, so what the app plays is what
- * an export renders. HyperFrames' runtime comes right after ours, before the scenes' scripts, as
- * its own player puts it.
+ * A video gets no kit and runtimes of its own: its scenes show as HyperFrames renders them, so
+ * what the app plays is what an export renders. HyperFrames' runtime comes right after the
+ * frame's, before the scenes' scripts, as its own player puts it.
  */
 function injected(layout: FrameLayout, base: string, paper?: DocumentPaper): string {
-  const runtime = `<script src="${base}${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"`
   if (layout === "video") {
-    return `${runtime}></script><script src="${base}${FRAME_ASSET_PREFIX}hyperframes.js"></script>`
+    return `<script src="${base}${FRAME_ASSET_PREFIX}video.js"></script><script src="${base}${FRAME_ASSET_PREFIX}hyperframes.js"></script>`
   }
 
   const sheet = paper
     ? ` data-sixb-paper="${[paper.width, paper.height, paper.margin.top, paper.margin.right, paper.margin.bottom, paper.margin.left].join(" ")}"`
     : ""
-  return `<link rel="stylesheet" href="${base}${FRAME_ASSET_PREFIX}${layout}.css">${runtime}${sheet}></script>`
+  return `<link rel="stylesheet" href="${base}${FRAME_ASSET_PREFIX}${layout}.css"><script src="${base}${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"${sheet}></script>`
 }
 
 /**

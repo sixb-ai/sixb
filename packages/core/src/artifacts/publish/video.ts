@@ -108,7 +108,7 @@ export function sceneRenderKeys(input: {
 
       const key = [
         RENDER_KEY_FORMAT,
-        frameKitDigest(),
+        frameKitDigest("video"),
         scene.id,
         sha256(root),
         beside.map((each) => [hostOf(each), each.startMs - scene.startMs, each.durationMs]),

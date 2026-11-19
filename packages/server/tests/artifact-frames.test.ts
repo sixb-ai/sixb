@@ -604,7 +604,7 @@ describe("a video's frame", () => {
 </body></html>`
 
   // Reproduce by leaving `video` out of frameLayout in frames/entries.ts: the mint answers 409.
-  test("serves its entry with the runtime and HyperFrames' own, its scenes as they are", async () => {
+  test("serves its entry with its runtime and HyperFrames' own, its scenes as they are", async () => {
     const fixture = createApp()
     const alice = await session(fixture.storage, "alice")
     const film = await publish(fixture, alice, "video", [
@@ -618,7 +618,7 @@ describe("a video's frame", () => {
     // No kit: a video shows as HyperFrames renders it.
     const html = await (await fixture.app.fetch(new Request(url(`${path}index.html`)))).text()
     expect(html).toContain(
-      '<head><script src="__sixb/runtime.js" data-sixb-layout="video"></script><script src="__sixb/hyperframes.js"></script><title>'
+      '<head><script src="__sixb/video.js"></script><script src="__sixb/hyperframes.js"></script><title>'
     )
     expect(html).not.toContain("stylesheet")
 

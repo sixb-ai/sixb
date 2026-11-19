@@ -13,6 +13,7 @@ import type {
 import { CANVAS_FILE } from "../canvas"
 import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
 import { FRAME_ASSETS } from "../frames/assets"
+import type { FrameLayout } from "../frames/entries"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
 import type { ArtifactOutline, CanvasOutline, CanvasOutlineItem } from "../outline"
 import { type ArtifactQueryResult, artifactQueryName } from "../queries"
@@ -117,7 +118,7 @@ export function boardRenderKey(input: {
     .update(
       JSON.stringify([
         RENDER_KEY_FORMAT,
-        frameKitDigest(),
+        frameKitDigest("page"),
         board.file,
         board.w,
         board.h,
@@ -464,12 +465,25 @@ async function storeQueryAnswers(
   })
 }
 
-let kitDigest: string | undefined
+const kitDigests = new Map<FrameLayout, string>()
 
-/** What a page runs with besides its own files: a new kit renders it anew. */
-export function frameKitDigest(): string {
-  kitDigest ??= createHash("sha256")
-    .update(JSON.stringify([FRAME_ASSETS, FRAME_DEFAULT_THEMES]))
-    .digest("hex")
-  return kitDigest
+/**
+ * What a frame of `layout` runs with besides its own files: a new kit renders it anew. The files
+ * every layout shares, and those of its own layout alone: a video's runtimes are in a video's keys,
+ * and in no deck's, page's or document's.
+ */
+export function frameKitDigest(layout: FrameLayout): string {
+  let digest = kitDigests.get(layout)
+  if (digest === undefined) {
+    const assets = Object.fromEntries(
+      Object.entries(FRAME_ASSETS).filter(
+        ([, asset]) => asset.layout === undefined || asset.layout === layout
+      )
+    )
+    digest = createHash("sha256")
+      .update(JSON.stringify([assets, FRAME_DEFAULT_THEMES]))
+      .digest("hex")
+    kitDigests.set(layout, digest)
+  }
+  return digest
 }

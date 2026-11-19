@@ -39,7 +39,9 @@ export function documentPdfKey(
     )
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   return createHash("sha256")
-    .update(JSON.stringify([RENDER_KEY_FORMAT, frameKitDigest(), version.artifactId, files]))
+    .update(
+      JSON.stringify([RENDER_KEY_FORMAT, frameKitDigest("document"), version.artifactId, files])
+    )
     .digest("hex")
 }
 
