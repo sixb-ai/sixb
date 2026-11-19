@@ -327,6 +327,7 @@ export type {
   ArtifactKind,
   ArtifactLatestVersion,
   ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
   ArtifactMediaPart,
   ArtifactMediaPartName,
   ArtifactMediaParts,

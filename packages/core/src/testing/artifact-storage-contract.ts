@@ -2033,11 +2033,20 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         )
         expect(await artifacts.listMedia({ projectId, digests: [] })).toEqual([])
 
-        // The worker's next attempt replaces what the last kept.
+        // The worker's next attempt replaces what the last kept; a retry counts from 0 again, and
+        // a part the project lacked a tool for says so.
         const transcribed = {
           ...derived,
-          parts: { ...derived.parts, transcript: sound.parts.transcript },
-          attempts: 2,
+          parts: {
+            ...derived.parts,
+            filmstrip: {
+              status: "unavailable" as const,
+              reason: "No FFmpeg.",
+              lacks: "sandbox_tools" as const,
+            },
+            transcript: sound.parts.transcript,
+          },
+          attempts: 0,
           updatedAt: at(1),
         }
         await artifacts.putMedia(transcribed)

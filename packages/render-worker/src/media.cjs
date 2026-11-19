@@ -3,9 +3,11 @@
 // picture cuts, and the sound for the transcription model. Each part is made on its own, so one
 // that fails costs only itself; each FFmpeg run is bounded by the media's length.
 //
-//   node media.cjs <original> <out dir> <budget ms> <max duration ms> <part>[,<part>]...
+//   node media.cjs <original> <out dir> <budget ms> <max duration ms> <proxy ms> <part>[,<part>]...
 //
-// Parts: proxy, poster, filmstrip, waveform, cuts, audio. The probe always runs. The report is
+// Parts: proxy, poster, filmstrip, waveform, cuts, audio; none probes alone, which says how long
+// the rest may take. The probe always runs. The proxy takes at most <proxy ms>, which the worker
+// scales by the pixels it decodes; every other step is bounded by the media's length. The report is
 // { parts: { probe, <part>: { status, ... } } }, or { skipped: "no_ffmpeg" }.
 
 const { spawn } = require("node:child_process")
@@ -46,7 +48,7 @@ const PLAYABLE_SOUNDS = [
   { container: /(^|,)flac(,|$)/, codecs: ["flac"] },
 ]
 
-const [original, out, budget, maxDuration, wanted] = process.argv.slice(2)
+const [original, out, budget, maxDuration, proxyBudget, wanted] = process.argv.slice(2)
 const deadline = Date.now() + Number(budget) - MARGIN_MS
 const parts = new Set(String(wanted ?? "").split(",").filter(Boolean))
 
@@ -190,8 +192,8 @@ function indexFirst(file) {
  * sound: AAC, only when browsers cannot play the original.
  */
 async function proxy(probed) {
-  const { video, audio, durationMs, container } = probed
-  const budgetMs = 120_000 + durationMs
+  const { video, audio, container } = probed
+  const budgetMs = Number(proxyBudget)
 
   if (!video) {
     const playable = PLAYABLE_SOUNDS.some(

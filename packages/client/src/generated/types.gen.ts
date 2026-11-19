@@ -25850,9 +25850,20 @@ export type GetArtifactMediaResponses = {
             }
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25873,9 +25884,20 @@ export type GetArtifactMediaResponses = {
             sizeBytes: number
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25900,9 +25922,20 @@ export type GetArtifactMediaResponses = {
             atMs: number
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25928,9 +25961,20 @@ export type GetArtifactMediaResponses = {
             height: number
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25951,9 +25995,20 @@ export type GetArtifactMediaResponses = {
             sizeBytes: number
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25969,9 +26024,20 @@ export type GetArtifactMediaResponses = {
             atMs: Array<number>
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }
@@ -25993,9 +26059,20 @@ export type GetArtifactMediaResponses = {
             language?: string
           }
         | {
-            status: "unavailable" | "failed"
+            status: "unavailable"
             /**
              * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
              */
             reason: string
           }

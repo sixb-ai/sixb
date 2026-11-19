@@ -13,7 +13,7 @@ import {
   type SandboxFactory,
   SixbHost,
 } from "@sixb/core"
-import { MEDIA_JOB } from "@sixb/core/internal/artifacts/publish"
+import { MEDIA_JOB, mediaJobBudget } from "@sixb/core/internal/artifacts/publish"
 import type { TranscriptionModel } from "@sixb/core/models"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { deriveArtifactMedia, failArtifactMedia } from "../src/media"
@@ -31,6 +31,9 @@ class DerivingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequ
   readonly supportsRequestCredentials = true
   readonly created: CreateSandboxOptions[] = []
   readonly asked: { readonly parts: string[]; readonly original: string }[] = []
+  /** The budget of each run that probed alone, and of each that derived. */
+  readonly probed: number[] = []
+  readonly budgets: { readonly script: number; readonly proxy: number }[] = []
   /** Resolves each time a sandbox is destroyed, which ends a job's work in its sandbox. */
   private onDestroy: (() => void) | undefined
 
@@ -60,14 +63,19 @@ class DerivingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequ
         const script = args?.at(-1) ?? ""
         if (!script.includes("media.cjs")) return run(command, args, runOptions)
 
-        // exec node 'media.cjs' '<original>' '<out>' '<budget>' '<max duration>' '<parts>'
-        const [, original = "", out = "", , , wanted = ""] =
+        // exec node 'media.cjs' '<original>' '<out>' '<budget>' '<max duration>' '<proxy>' '<parts>'
+        const [, original = "", out = "", budget = "", , proxy = "", wanted = ""] =
           script
             .slice(script.indexOf("exec node"))
             .match(/'[^']*'/g)
             ?.map((arg) => arg.slice(1, -1)) ?? []
         const parts = wanted.split(",").filter(Boolean)
-        this.asked.push({ parts, original: readFileSync(original, "utf8") })
+        // Asked for nothing, it probes alone.
+        if (parts.length === 0) this.probed.push(Number(budget))
+        else {
+          this.asked.push({ parts, original: readFileSync(original, "utf8") })
+          this.budgets.push({ script: Number(budget), proxy: Number(proxy) })
+        }
 
         mkdirSync(out, { recursive: true })
         const file = (name: string, body: string, mediaType: string, more = {}) => {
@@ -331,6 +339,7 @@ describe("what the render worker derives of a media", () => {
     expect((await kept())?.parts.transcript).toEqual({
       status: "unavailable",
       reason: "This project has no transcription model.",
+      lacks: "transcription_model",
     })
   })
 
@@ -361,6 +370,7 @@ describe("what the render worker derives of a media", () => {
     expect((await kept())?.parts.proxy).toEqual({
       status: "unavailable",
       reason: "This project's sandboxes have no FFmpeg to derive it with (the agent image has it).",
+      lacks: "sandbox_tools",
     })
   })
 
@@ -372,7 +382,8 @@ describe("what the render worker derives of a media", () => {
 
     const stopped = await derive().catch((error: unknown) => error)
     expect(String(stopped)).toContain("killed")
-    expect(await kept()).toBeUndefined()
+    // The attempt counts, though it kept nothing it derived.
+    expect(await kept()).toMatchObject({ attempts: 1, parts: { proxy: { status: "pending" } } })
 
     // Its last attempt given up, what was derived before stays, and the rest failed.
     const poster = { status: "ready", file: clip, atMs: 0 } as const
@@ -396,6 +407,52 @@ describe("what the render worker derives of a media", () => {
       poster,
       proxy: { status: "failed", reason: "It could not be derived." },
       transcript: { status: "failed", reason: "It could not be derived." },
+    })
+  })
+
+  // Reproduce by giving the script `MEDIA_JOB.maxTimeoutMs` in derive(): a ten-second clip has two
+  // hours to hang in, and a lost job is found lost only after them.
+  test("probes the media first, and gives the rest the time its probe says", async () => {
+    const { sandboxes, derive, kept } = await setup()
+
+    await derive()
+
+    const probe = (await kept())?.parts.probe
+    if (probe?.status !== "ready") throw new Error("Expected the probe.")
+    const budget = mediaJobBudget(probe)
+    expect(sandboxes.probed).toHaveLength(1)
+    expect(sandboxes.budgets).toEqual([{ script: budget.deriveMs, proxy: budget.proxyMs }])
+    expect(budget.timeoutMs).toBeLessThan(MEDIA_JOB.maxTimeoutMs / 2)
+  })
+
+  // Reproduce by counting attempts from the job's own in deriveArtifactMedia: a job asked for
+  // again once its queue lost it starts over, and a media that always fails never stops.
+  test("counts its attempts in what is kept, and fails what is pending once they are spent", async () => {
+    const { storage, sandboxes, clip, derive, kept } = await setup()
+    const pending = { status: "pending" } as const
+    await storage.artifacts?.putMedia({
+      projectId,
+      digest: clip.digest,
+      parts: {
+        probe: pending,
+        proxy: pending,
+        poster: pending,
+        filmstrip: pending,
+        waveform: pending,
+        cuts: pending,
+        transcript: pending,
+      },
+      attempts: MEDIA_JOB.attempts,
+      updatedAt: new Date(),
+    })
+
+    // A new job, at its first attempt.
+    await derive(clip, 1)
+
+    expect(sandboxes.created).toHaveLength(0)
+    expect(await kept()).toMatchObject({
+      attempts: MEDIA_JOB.attempts,
+      parts: { proxy: { status: "failed", reason: "It could not be derived." } },
     })
   })
 
