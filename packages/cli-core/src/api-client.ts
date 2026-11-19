@@ -23,6 +23,8 @@ const RUN_HEADER = "x-sixb-run"
 
 export class ApiClient {
   readonly baseUrl: string
+  /** Whether a file goes through the API even when blob storage would take it directly. */
+  readonly uploadsThroughApi: boolean
   private readonly socketPath: string | undefined
   private readonly authorization: string | undefined
   private readonly runId: string | undefined
@@ -38,6 +40,7 @@ export class ApiClient {
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost"
     this.authorization = options.authorization
     this.runId = options.runId || undefined
+    this.uploadsThroughApi = options.uploadsThroughApi ?? false
     this.missingBaseUrlMessage = options.missingBaseUrlMessage
     this.unavailableMessage = options.unavailableMessage
     this.unavailableHint = options.unavailableHint
@@ -60,6 +63,22 @@ export class ApiClient {
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
     })
+  }
+
+  /**
+   * Sends `body` as it streams, for a body too large to hold: `sizeBytes` says how large it is, so
+   * it is not sent in chunks of unknown length where the transport can tell.
+   */
+  async put(path: string, body: ReadableStream<Uint8Array>, sizeBytes: number): Promise<unknown> {
+    return this.json(this.url(path), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(sizeBytes),
+      },
+      body,
+      duplex: "half",
+    } as RequestInit)
   }
 
   /** `mediaType` labels the part; without it, the server reads the type from the file name. */
@@ -184,6 +203,8 @@ export interface ApiClientOptions {
   readonly authorization?: string
   /** The run whose commands send the requests, in a sandbox: `SIXB_RUN_ID`. */
   readonly runId?: string
+  /** A sandbox reaches the API for certain, and blob storage only if its network allows it. */
+  readonly uploadsThroughApi?: boolean
   readonly missingBaseUrlMessage: string
   readonly unavailableMessage: string
   readonly unavailableHint: string
@@ -232,9 +253,11 @@ async function sendOverNodeSocket(
   socketPath: string
 ): Promise<Response> {
   // A Request settles the body and its content type (a form's boundary included) as fetch would.
+  // A body of known length is sent whole; a stream, such as a large upload's, as it is read.
   const outgoing = new Request(url, init)
-  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined
   const headers: Record<string, string> = Object.fromEntries(outgoing.headers)
+  const streamed = init.body instanceof ReadableStream
+  const body = outgoing.body && !streamed ? Buffer.from(await outgoing.arrayBuffer()) : undefined
   if (body) headers["content-length"] = String(body.byteLength)
 
   return new Promise((resolve, reject) => {
@@ -265,7 +288,11 @@ async function sendOverNodeSocket(
       }
     )
     request.on("error", reject)
-    request.end(body)
+    if (streamed && outgoing.body) {
+      Readable.fromWeb(outgoing.body as unknown as NodeReadableStream)
+        .on("error", (error) => request.destroy(error))
+        .pipe(request)
+    } else request.end(body)
   })
 }
 
