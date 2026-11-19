@@ -812,8 +812,9 @@ media/<name>        the footage, sound, and images the scenes play
   length, and `data-label` its name as a chapter.
 - A root that plays something itself, such as a soundtrack, gives its own `data-duration`. No
   scene ends a frame or more after a root's `data-duration`.
-- The root's `data-poster="2.5"` names the instant, in seconds, the video shows before it plays.
-  Without one, it shows a moment late in its first scene.
+- The root's `data-poster="2.5"` names the instant, in seconds, the video shows before it plays,
+  on its card and in the player. Without one, it shows the middle of its first scene, before the
+  next one comes in.
 - A scene file's composition has its host's `data-composition-id`, the scene's id in addresses
   and comments. Every file a scene plays or nests is one of the version's; one it plays may also
   be another artifact's, by its address.
@@ -869,7 +870,7 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
 - Each scene also gets a still, a picture of its chapter's middle, a few seconds after the video is
   published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The video's poster,
   `GET …/versions/{version}/poster`, is the instant its root's `data-poster` names, or the first
-  scene's still.
+  scene's still: the frame the player opens on.
 
 ## Declare a query
 

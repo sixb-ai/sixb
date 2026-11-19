@@ -57,6 +57,27 @@ export function videoSegmentFrames(video: VideoTimeline): ReadonlyMap<string, Vi
 }
 
 /**
+ * The instant a segment's still shows: its middle, on the millisecond at or before it. A scene's
+ * segment ends where the next scene starts, so its middle shows the scene alone, come in.
+ */
+export function videoSegmentMiddleMs(segment: VideoSegmentFrames, fps: number): number {
+  const middle = (segment.startFrame + segment.endFrame) / 2
+  return Math.floor((middle * 1000) / fps)
+}
+
+/**
+ * The instant a video shows before it plays, which its card's poster pictures: the one its root's
+ * `data-poster` names, else its first scene's still, the middle of its segment.
+ */
+export function videoPosterMs(video: VideoTimeline & { readonly posterMs?: number }): number {
+  if (video.posterMs !== undefined) return video.posterMs
+
+  const first = video.scenes[0]
+  const segment = first ? videoSegmentFrames(video).get(first.id) : undefined
+  return segment ? videoSegmentMiddleMs(segment, video.fps) : 0
+}
+
+/**
  * The scenes on screen during the frames from `startFrame` up to `endFrame`, for a moment at
  * least, in the order they start: what a segment shows, and so what its key holds.
  */

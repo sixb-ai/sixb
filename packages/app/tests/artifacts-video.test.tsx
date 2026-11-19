@@ -579,13 +579,13 @@ describe("the player", () => {
     // Reproduce by dropping `playback.cue` from the effect that starts the video in player.tsx: no
     // seek is posted, and the stage shows the opening's first, often blank, frame.
     const { view, posted, runtime } = await openPlayer()
-    // 70% into the opening's 2 seconds, where it has come in.
+    // The middle of the opening's segment, where it has come in: its still, the card's poster.
     expect(posted.filter((message) => message.action === "seek")).toMatchObject([
-      { timeSeconds: 1.4 },
+      { timeSeconds: 1 },
     ])
 
     // The poster's frame is not where the playhead is.
-    await runtime({ ...RUNTIME, type: "state", currentTime: 1.4, isPlaying: false })
+    await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: false })
     const track = view.getByRole("slider", { name: "Position" })
     expect(track.getAttribute("aria-valuetext")).toBe("0:00 of 0:07, Opening")
 
@@ -598,7 +598,7 @@ describe("the player", () => {
   })
 
   test("opens on the instant its root's data-poster names", async () => {
-    // Reproduce by dropping the `posterMs` read from `posterAt` in player.tsx.
+    // Reproduce by dropping the `posterMs` read from `videoPosterMs` in core's video project.
     const outline = { ...OUTLINE, posterMs: 4200 }
     const view = render(
       <Wrap cache={frameCache()}>
