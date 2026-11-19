@@ -559,6 +559,28 @@ describe("a video's comments", () => {
     }
   })
 
+  test("say a new comment is at its instant, in its scene", () => {
+    // Reproduce by passing the instant as the card's `anchor` in `VideoCommentPins`: "On 0:02".
+    const commenting = {
+      marked: [],
+      active: null,
+      draft: { at: 2500, point: { x: 0.5, y: 0.5 } },
+    } as unknown as VideoCommenting
+    const view = render(
+      <Wrap cache={new QueryClient()}>
+        <VideoCommentPins
+          commenting={commenting}
+          outline={OUTLINE}
+          time={2.5}
+          width={640}
+          height={360}
+          onOpen={() => {}}
+        />
+      </Wrap>
+    )
+    expect(view.getByRole("dialog").textContent).toContain("At 0:02 · demo")
+  })
+
   // Reproduce by showing the open comment's pin at any instant in `VideoCommentPins`.
   test("show a pin only around its instant, the open one too", () => {
     const thread = {

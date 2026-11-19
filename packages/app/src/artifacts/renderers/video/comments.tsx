@@ -163,7 +163,7 @@ export function VideoCommentPins({
   readonly height: number
   readonly onOpen: (thread: CommentThread) => void
 }) {
-  const messages = useArtifactMessages().comments
+  const { comments: messages, video } = useArtifactMessages()
   const { marked, active, draft } = commenting
 
   // Only around its instant, the open one too: elsewhere a pin would point at another scene.
@@ -212,7 +212,7 @@ export function VideoCommentPins({
             style={cardPlace(draft.point.x * width, width)}
           >
             <DraftCard
-              anchor={draftPlace(outline, draft.at)}
+              heading={draftPlace(outline, draft.at, video.at)}
               onSubmit={commenting.submitDraft}
               onCancel={commenting.cancelDraft}
             />
@@ -229,9 +229,16 @@ function excerpt(thread: CommentThread): string {
   return words.length > EXCERPT_LENGTH ? `${words.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…` : words
 }
 
-/** Where a new comment goes, as its card says it: its instant, and its scene when there are more. */
-function draftPlace(outline: VideoOutline, at: number): string {
-  const time = formatClock(at / 1000)
-  const scene = outline.scenes.length > 1 ? chapterAt(outline, at / 1000) : undefined
+/**
+ * Where a new comment goes, as its card says it: at its instant, and its scene when there are
+ * more. `at` words the instant.
+ */
+function draftPlace(
+  outline: VideoOutline,
+  ms: number,
+  at: (time: string) => string
+): string {
+  const time = at(formatClock(ms / 1000))
+  const scene = outline.scenes.length > 1 ? chapterAt(outline, ms / 1000) : undefined
   return scene ? `${time} · ${chapterName(scene)}` : time
 }
