@@ -130,3 +130,34 @@ describe("sixb syncs and pipelines", () => {
     }
   })
 })
+
+describe("a sandbox's requests", () => {
+  // A child working in its parent's workspace calls the API with its parent's token, and says it is
+  // the child. Removal proof: drop the RUN_HEADER line in ApiClient.fetch; no request names a run.
+  test("name the run whose command sends them", async () => {
+    const runs: (string | null)[] = []
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        runs.push(request.headers.get("x-sixb-run"))
+        return Response.json({})
+      },
+    })
+    const api = createInstanceApiClient({
+      kind: "sandbox",
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      runContextPath: "",
+      runId: "agt_run_child_1",
+    })
+    const stdout = spyOn(process.stdout, "write").mockImplementation(() => true)
+
+    try {
+      await dispatch(api, "datasets", ["list"])
+    } finally {
+      stdout.mockRestore()
+    }
+
+    expect(runs).toEqual(["agt_run_child_1"])
+  })
+})

@@ -14,10 +14,18 @@ import { CliError, EXIT_API, fail } from "./output"
  */
 const UNIX_BASE_URL_PREFIX = "unix:"
 
+/**
+ * Names the run whose command sends a request (`AGENT_RUN_HEADER` in `@sixb/core`): a child working
+ * in its parent's workspace calls the API with its parent's token, and the server acts as the
+ * child it names.
+ */
+const RUN_HEADER = "x-sixb-run"
+
 export class ApiClient {
   readonly baseUrl: string
   private readonly socketPath: string | undefined
   private readonly authorization: string | undefined
+  private readonly runId: string | undefined
   private readonly missingBaseUrlMessage: string
   private readonly unavailableMessage: string
   private readonly unavailableHint: string
@@ -29,6 +37,7 @@ export class ApiClient {
       : undefined
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost"
     this.authorization = options.authorization
+    this.runId = options.runId || undefined
     this.missingBaseUrlMessage = options.missingBaseUrlMessage
     this.unavailableMessage = options.unavailableMessage
     this.unavailableHint = options.unavailableHint
@@ -119,6 +128,7 @@ export class ApiClient {
     try {
       const headers = new Headers(init.headers)
       if (this.authorization) headers.set("authorization", this.authorization)
+      if (this.runId) headers.set(RUN_HEADER, this.runId)
       response = await send(url, { ...init, headers }, this.socketPath)
     } catch (error) {
       if (init.signal?.aborted) throw error
@@ -172,6 +182,8 @@ export class ApiClient {
 export interface ApiClientOptions {
   readonly baseUrl: string
   readonly authorization?: string
+  /** The run whose commands send the requests, in a sandbox: `SIXB_RUN_ID`. */
+  readonly runId?: string
   readonly missingBaseUrlMessage: string
   readonly unavailableMessage: string
   readonly unavailableHint: string
