@@ -1013,6 +1013,7 @@ export type {
   ListArtifactsRuntimeInput,
   UpdateArtifactRuntimeInput,
 } from "./artifacts/execution"
+export type { VideoExportProgress } from "./artifacts/video/export"
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"
 export type { PublishedArtifact } from "./artifacts/publish/publish"
