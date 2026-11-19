@@ -774,7 +774,8 @@ media/<name>        the footage, sound, and images the scenes play
 - A scene's `data-start` is a number of seconds, another scene's id, to start when that one ends,
   or `intro + 0.5` and `intro - 0.5`, to start that much later or sooner. `data-duration` is its
   length, and `data-label` its name as a chapter.
-- A root that plays something itself, such as a soundtrack, gives its own `data-duration`.
+- A root that plays something itself, such as a soundtrack, gives its own `data-duration`. No
+  scene ends a frame or more after a root's `data-duration`.
 - A scene file's composition has its host's `data-composition-id`, the scene's id in addresses
   and comments. Every file a scene plays or nests is one of the version's; one it plays may also
   be another artifact's, by its address.

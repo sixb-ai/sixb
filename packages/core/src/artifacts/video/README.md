@@ -68,6 +68,8 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 - A root that plays something on its own timeline, a soundtrack or any element with `data-start`,
   writes its own `data-duration`. Without one, HyperFrames plays until the last of them ends, and a
   sound without `data-duration` lasts as long as its file: a length the HTML does not say.
+- A scene ends by the root's `data-duration`, where HyperFrames would cut it, or less than a frame
+  after it: a rounded start or length, which cuts nothing a frame shows.
 - A scene host sits in the root composition itself, never in another composition.
 - A scene file is one `<template>`, nothing beside it.
 

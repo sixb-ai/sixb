@@ -215,6 +215,7 @@ describe("a video's composition", () => {
     ...scenes,
   })
   const intro = host("intro", "0", "2")
+  const intro4 = host("intro", "0", "4")
 
   test.each([
     ["no root", { "index.html": "<main></main>" }, "index.html: it has no root composition"],
@@ -375,6 +376,32 @@ describe("a video's composition", () => {
   ])("refuses %s", (_, files, message) => {
     const result = read(files)
     expect("error" in result && result.error).toContain(message)
+  })
+
+  // A 30 fps frame is 33.3 ms, a 25 fps one 40 ms. Reproduce by comparing `durationMs < end`
+  // again in videoLength: the first two refuse.
+  test.each([
+    ["kept 20 ms past, as rounded seconds leave it", "30", "intro + 0.01", "8.01", undefined],
+    ["kept 33 ms past at 30 fps", "30", "intro", "8.033", undefined],
+    ["refused 34 ms past at 30 fps", "30", "intro", "8.034", "12.034"],
+    ["refused a whole frame past at 25 fps", "25", "intro", "8.04", "12.04"],
+  ])("a last scene ending past the video is %s", (_, fps, start, length, refusedEnd) => {
+    const hosts = [intro4, host("demo", start, length)]
+    const result = read({
+      ...withHosts(hosts),
+      "index.html": index(
+        hosts,
+        `data-width="1920" data-height="1080" data-fps="${fps}" data-duration="12"`
+      ),
+    })
+
+    if (refusedEnd) {
+      expect("error" in result && result.error).toContain(
+        `scene 'demo' ends at ${refusedEnd} s, after the root composition's data-duration of 12 s`
+      )
+    } else {
+      expect("composition" in result && result.composition.durationMs).toBe(12_000)
+    }
   })
 
   test(`refuses more than ${ARTIFACT_LIMITS.maxVideoScenes} scenes`, () => {
