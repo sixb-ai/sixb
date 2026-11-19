@@ -239,34 +239,8 @@ export function duplicateScene(
  */
 export function removeScene(sources: VideoSources, scene: string): VideoEditResult {
   return run(sources, (work) => {
-    const before = openRoot(work)
-    const removed = before.scenes.find((each) => each.id === scene)
-    if (!removed) throw new EditError(noScene(scene))
-    if (before.scenes.length === 1) throw new EditError("A video keeps at least one scene.")
-
-    const end = removed.startMs + removed.durationMs
-    for (const each of before.scenes) {
-      if (each.id === scene) continue
-
-      if (startsAfter(each.start, removed)) {
-        const offset = each.start.type === "after" ? each.start.offset : 0
-        const start =
-          removed.start.type === "at"
-            ? seconds(Math.max(0, removed.startMs + offset * 1000))
-            : chainedStart(removed.start.scene, removed.start.offset + offset)
-        setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, { "data-start": start })
-      } else if (each.start.type === "at" && each.startMs >= end - SAME_MS) {
-        setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
-          "data-start": seconds(each.startMs - removed.durationMs),
-        })
-      }
-    }
-
-    const block = lineBlock(work.text(VIDEO_ENTRY), hostOf(work, scene).host.element)
-    work.replace(VIDEO_ENTRY, block.start, block.end, "")
-    if (!before.scenes.some((each) => each.id !== scene && each.src === removed.src)) {
-      work.remove(removed.src)
-    }
+    openRoot(work)
+    dropScene(work, scene)
   })
 }
 
@@ -574,18 +548,44 @@ export function removeMediaRanges(
 }
 
 /**
- * Takes a stretch out of a composition, in milliseconds from its start, as a magnetic timeline
- * deletes a range: every clip loses what played then, a recording cut through is split around it,
- * and what followed moves back, the scene's end included.
+ * Takes a stretch out of the video, in milliseconds from its start, as a magnetic timeline deletes
+ * a range: each scene loses what it shows of it, from its start up to where the next scene starts,
+ * so a crossfade is cut once. Every clip of a scene loses what played then, a recording cut
+ * through is split around it, and what followed moves back; a scene the range covers whole goes.
  */
-export function cutRange(sources: VideoSources, file: string, range: VideoRange): VideoEditResult {
+export function cutRange(sources: VideoSources, range: VideoRange): VideoEditResult {
   return run(sources, (work) => {
     const startMs = Math.max(0, Math.round(range.startMs))
     const endMs = Math.round(range.endMs)
     if (endMs - startMs < MIN_CLIP_MS) {
       throw new EditError(`A cut lasts at least ${MIN_CLIP_MS} ms.`)
     }
-    rippleRemove(work, file, [{ startMs, endMs }])
+
+    const scenes = [...openRoot(work).scenes].sort((a, b) => a.startMs - b.startMs)
+    const shares = scenes.map((scene, index) => {
+      const until = Math.min(
+        scene.startMs + scene.durationMs,
+        scenes[index + 1]?.startMs ?? Number.POSITIVE_INFINITY
+      )
+      return {
+        scene,
+        from: Math.max(startMs, scene.startMs),
+        to: Math.min(endMs, until),
+        whole: startMs <= scene.startMs + SAME_MS && endMs >= until - SAME_MS,
+      }
+    })
+
+    // From the last: a cut moves only what comes after it, so each scene before is where it was.
+    for (const { scene, from, to, whole } of shares.reverse()) {
+      if (to - from < SAME_MS) continue
+
+      if (whole) dropScene(work, scene.id)
+      else {
+        rippleRemove(work, scene.src, [
+          { startMs: from - scene.startMs, endMs: to - scene.startMs },
+        ])
+      }
+    }
   })
 }
 
@@ -912,6 +912,41 @@ function lengthenScene(work: Working, scene: string, ms: number): void {
     setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
       "data-start": seconds(Math.max(0, each.startMs + delta)),
     })
+  }
+}
+
+/**
+ * Removes a scene from the root as it is now: its host, and its file unless another scene plays
+ * it. The scenes that followed it start where it started, keeping their own overlap or gap.
+ */
+function dropScene(work: Working, scene: string): void {
+  const now = rootOf(work)
+  const removed = now.scenes.find((each) => each.id === scene)
+  if (!removed) throw new EditError(noScene(scene))
+  if (now.scenes.length === 1) throw new EditError("A video keeps at least one scene.")
+
+  const end = removed.startMs + removed.durationMs
+  for (const each of now.scenes) {
+    if (each.id === scene) continue
+
+    if (startsAfter(each.start, removed)) {
+      const offset = each.start.type === "after" ? each.start.offset : 0
+      const start =
+        removed.start.type === "at"
+          ? seconds(Math.max(0, removed.startMs + offset * 1000))
+          : chainedStart(removed.start.scene, removed.start.offset + offset)
+      setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, { "data-start": start })
+    } else if (each.start.type === "at" && each.startMs >= end - SAME_MS) {
+      setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, {
+        "data-start": seconds(each.startMs - removed.durationMs),
+      })
+    }
+  }
+
+  const block = lineBlock(work.text(VIDEO_ENTRY), hostOf(work, scene).host.element)
+  work.replace(VIDEO_ENTRY, block.start, block.end, "")
+  if (!now.scenes.some((each) => each.id !== scene && each.src === removed.src)) {
+    work.remove(removed.src)
   }
 }
 
