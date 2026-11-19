@@ -233,7 +233,8 @@ How an operation works:
    finds what the one before left.
 2. A step that moves a scene first gives the root room for any length (`openRoot`), so every
    step in between reads as a video. The last step writes the root's real length, and moves a
-   soundtrack that ran to the end, and a poster past it, with it (`fitRoot`).
+   soundtrack that ran to the end, what the root plays during a scene, and the poster, with it
+   (`fitRoot`).
 3. The result is read as publishing reads a video (`readVideoComposition`); anything else is
    refused, with the reason.
 4. The edit is the difference from the files it started from: the live layer's line diff, each
@@ -257,6 +258,11 @@ What moves with what:
   it did, which the ripple then moves as any other's.
 - A copied scene's recordings take new ids, and every `#id` naming them in the file follows, as
   HyperFrames plays each recording by its id.
+- What `index.html` plays during one scene, a line of voice-over at a number of seconds, belongs
+  to the scene it plays most during, when it lasts no longer than that scene: it keeps its time
+  into the scene as the scene moves, and goes with it. A soundtrack under every scene belongs to
+  none. The Agent's guide puts a voice-over in its scene's file, where it moves with no rule.
+- The poster keeps its time into the scene on top at its instant, within that scene's length.
 
 Not covered: motion a scene's script writes (`gsap.timeline` positions) keeps its own times, and a
 recording a script plays without an element is not seen.

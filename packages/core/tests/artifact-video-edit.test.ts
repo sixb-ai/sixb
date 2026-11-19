@@ -195,9 +195,10 @@ describe("editing scenes", () => {
     expect(composition(files).durationMs).toBe(17_000)
     expect(readRootTimeline(files.get("index.html") as string)?.clips[0]?.durationMs).toBe(17_000)
 
-    // Three attributes written again: the scene's length, the video's, the soundtrack's.
+    // Four attributes written again: the video's length and its poster, which the end card it
+    // shows takes with it, the soundtrack's length, and the scene's.
     expect(inserted(result)).toEqual([
-      ' data-duration="17"',
+      ' data-duration="17" data-poster="14"',
       ' data-duration="17"',
       ' data-duration="10"',
     ])
@@ -332,6 +333,68 @@ describe("scenes at a number of seconds", () => {
       ["outro", 13_500, 4500],
     ])
     expect(composition(files).durationMs).toBe(18_000)
+  })
+})
+
+describe("what the root plays during a scene", () => {
+  /** The teaser narrated: a line of voice-over said over the demo, one over the end card. */
+  const narrated = new Map(SOURCES)
+  narrated.set(
+    "index.html",
+    INDEX.replace(
+      '<div id="hook"',
+      `<audio id="vo-demo" src="media/vo-demo.m4a" data-start="3" data-duration="2.5"></audio>
+    <audio id="vo-outro" src="media/vo-outro.m4a" data-start="11" data-duration="2"></audio>
+    <div id="hook"`
+    )
+  )
+  narrated.set("media/vo-demo.m4a", null)
+  narrated.set("media/vo-outro.m4a", null)
+
+  const root = (files: ReadonlyMap<string, string | null>) =>
+    (readRootTimeline(files.get("index.html") as string)?.clips ?? []).map((clip) => [
+      clip.ref,
+      clip.startMs,
+      clip.durationMs,
+    ])
+
+  // Guard proof: give no clip of the root an owner in fitRoot (sceneOfClip returning undefined);
+  // the voice-over keeps its seconds while the scenes it narrates move.
+  test("a line of voice-over moves with the scene it is said over; the soundtrack stays", () => {
+    const longer = applied(setSceneLength(narrated, "hook", 4000), narrated)
+    expect(root(longer)).toEqual([
+      ["music", 0, 16_000],
+      ["vo-demo", 4000, 2500],
+      ["vo-outro", 12_000, 2000],
+    ])
+
+    const moved = applied(moveScene(narrated, "outro", 0), narrated)
+    expect(times(moved)[0]).toEqual(["outro", 0, 4500])
+    expect(times(moved)[2]).toEqual(["demo", 7000, 8000])
+    expect(root(moved)).toEqual([
+      ["music", 0, 15_000],
+      ["vo-demo", 7500, 2500],
+      ["vo-outro", 500, 2000],
+    ])
+  })
+
+  test("a removed scene's voice-over goes with it, and what follows keeps its place in its scene", () => {
+    const files = applied(removeScene(narrated, "demo"), narrated)
+    expect(root(files)).toEqual([
+      ["music", 0, 7000],
+      ["vo-outro", 3000, 2000],
+    ])
+  })
+
+  // Guard proof: have posterAfter in edit.ts keep the poster's seconds unless they lie past the
+  // end, as before; it then stays at 12 s, in the middle of the longer demo.
+  test("the poster keeps its place in the scene it shows, and stays within it", () => {
+    const longer = composition(applied(setSceneLength(SOURCES, "demo", 10_000)))
+    expect(longer.posterMs).toBe(14_000)
+
+    // The end card made shorter than the poster's place in it: its last frame.
+    const shorter = composition(applied(setSceneLength(SOURCES, "outro", 1000)))
+    expect(shorter.posterMs).toBe(10_500 + 1000 - 34)
   })
 })
 
@@ -689,11 +752,13 @@ describe("minimal changes", () => {
     const changes = index && "changes" in index ? index.changes : []
     const outroLine = INDEX.split("\n").find((line) => line.includes('id="outro"')) ?? ""
 
-    // The outro's line comes first, with the hook's start, "0", now "outro"; its old line goes.
-    expect(changes).toHaveLength(2)
-    expect(changes[0]?.insert).toContain('data-composition-src="scenes/outro.html"')
-    expect(changes[0]?.insert.endsWith('data-start="outro')).toBe(true)
-    expect(changes[1]).toMatchObject({ remove: outroLine.length + 1, insert: "" })
+    // The poster, in the outro, goes with it. The outro's line comes first, with the hook's
+    // start, "0", now "outro"; its old line goes.
+    expect(changes).toHaveLength(3)
+    expect(changes[0]?.insert).toBe(' data-poster="1.5"')
+    expect(changes[1]?.insert).toContain('data-composition-src="scenes/outro.html"')
+    expect(changes[1]?.insert.endsWith('data-start="outro')).toBe(true)
+    expect(changes[2]).toMatchObject({ remove: outroLine.length + 1, insert: "" })
   })
 
   test("an edit undone by its inverse leaves the files as they were", () => {
