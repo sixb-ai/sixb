@@ -54,9 +54,9 @@ whatever is derived of it. A video's frame plays proxies, through `mediaProxyRef
 `requestedMediaProxy` (`media.ts`). The first names a ready proxy as the file's path with
 `?sixb-proxy=<the proxy's digest>`: `rewriteVideoProxies` (`frames/assets.ts`) adds that query to
 each recording a video's HTML file plays, its scenes' included. The second reads that name back on
-the frame's request (`server/src/routes/artifact-frames.ts`). The original's address always serves the original,
-so a page that loaded it keeps the bytes it loaded, and a page opened once the proxy is ready
-plays the proxy. A name that is not the ready proxy's is a 404, never other bytes.
+the frame's request (`server/src/routes/artifact-frames.ts`). The original's address always serves
+the original, so a page that loaded it keeps the bytes it loaded, and a page opened once the proxy
+is ready plays the proxy. A name that is not the ready proxy's is a 404, never other bytes.
 
 ## Who pays for the transcript
 
