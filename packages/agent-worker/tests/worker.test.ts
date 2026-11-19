@@ -9966,7 +9966,7 @@ describe("AgentWorker", () => {
       '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
     )
     expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
-    expect(system).not.toContain("Speak like a helpful teammate")
+    expect(system).not.toContain("Never ask for confirmation in text")
     expect(system).not.toContain("sixb memory save")
     // The task is dated as its requester reads the time, in their settings.
     expect(JSON.stringify(request?.messages.at(-1))).toContain(

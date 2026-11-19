@@ -138,6 +138,10 @@ grant.
 git push -u origin HEAD && gh pr create --fill
 ```
 
+In a conversation, the agent commits and pushes when the user asks, or when the project's
+[`SIXB.md`](../models/overview.md#give-it-project-instructions) says how changes are published,
+such as on a branch with a pull request.
+
 Write access lets the agent push to any branch of the repository and, through the API, merge pull
 requests or delete branches. Protect the default branch with branch protection or rulesets, for
 example by requiring a reviewed pull request, so that the agent's work reaches it only through

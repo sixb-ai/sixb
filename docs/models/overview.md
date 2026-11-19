@@ -158,6 +158,11 @@ The chat agent receives the file as written in every conversation, so keep it sh
 instructions for a particular task in a [skill](./tools-and-authorization.md#add-a-skill), which
 the agent reads only when relevant. AI workflow steps use their own `instructions` instead.
 
+Sixb sets no tone of its own: how the agent speaks, and how much of its work it shows, is up to
+this file. A new project's `SIXB.md` has it speak to people who do not write code, in the app's
+words, keeping commands and retries to itself. Whatever the tone, the agent always says what it
+checked and what it could not.
+
 When the agent works in a folder on [your computer](../cli/overview.md#work-with-the-agent) or in a
 repository [checkout](../sandboxes/overview.md#configure-the-environment), it also follows the
 instructions that folder carries:

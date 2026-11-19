@@ -55,7 +55,8 @@ skills/        Agent Skills (<name>/SKILL.md) for the chat agent and AI workflow
 app/           custom React UI — NOT discovered (served separately)
 ```
 
-An optional `SIXB.md` at the root holds instructions for the chat agent.
+`SIXB.md` at the root holds instructions for the chat agent: how it speaks to the app's users,
+and the project's vocabulary and conventions.
 
 Discovery matches **exported values by type**, not filenames. One file can export several
 definitions.

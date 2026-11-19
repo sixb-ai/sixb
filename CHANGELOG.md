@@ -2,6 +2,16 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Upgrade notes
+
+- The agent no longer has a tone of its own: Sixb stopped telling it to speak "not like a
+  developer", to keep its work silent and to answer briefly. To keep that tone, add it to your
+  `SIXB.md`, as a new project's [does](packages/create-sixb/template/SIXB.md). It now always says
+  what it checked and what it could not, and in a repository conversation it commits and pushes
+  when the project's `SIXB.md` asks it to, not only when the user does.
+
 ## 2026-11-19 — Sixb 0.2.6
 
 0.2.6 runs an OAuth connector's syncs once per connected account, lets people edit a message they
