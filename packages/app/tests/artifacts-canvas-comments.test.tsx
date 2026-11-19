@@ -14,12 +14,12 @@ import { act, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import type * as Y from "yjs"
+import type { ArtifactComment } from "../src/artifacts/comments/comments"
+import { commentThreads } from "../src/artifacts/comments/comments"
 import { commentsContext } from "../src/artifacts/comments-context"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { LiveHubProvider } from "../src/artifacts/live/hooks"
 import { LiveHub } from "../src/artifacts/live/session"
-import type { ArtifactComment } from "../src/artifacts/renderers/canvas/comments"
-import { commentThreads } from "../src/artifacts/renderers/canvas/comments"
 import { type AgentDraft, AgentDraftContext } from "../src/artifacts/view-context"
 import { Viewer } from "../src/artifacts/viewer"
 import { keepSharedSession } from "../src/shared-session"
@@ -563,6 +563,7 @@ describe("comments on a canvas", () => {
   // the comments are.
   test("reach the Agent with where they are, quoted as its skill reads them", () => {
     const { context, sent } = commentsContext({
+      kind: "canvas",
       artifactId: ARTIFACT_ID,
       title: "Onboarding",
       label: (count) => `${count} comments · Onboarding`,

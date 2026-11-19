@@ -3,9 +3,10 @@ import type { ArtifactOutline } from "../outline"
 /**
  * How the frame's runtime lays out what it serves: a deck shows 1280×720 slides scaled to fit, one
  * at a time or all at once; a page scrolls like any web page, as a canvas's boards do; a designed
- * document scrolls as one sheet, or as the pages its paper cuts it into.
+ * document scrolls as one sheet, or as the pages its paper cuts it into; a video is played by
+ * HyperFrames' runtime, at its own size, for the app to scale and drive.
  */
-export type FrameLayout = "deck" | "page" | "document"
+export type FrameLayout = "deck" | "page" | "document" | "video"
 
 /**
  * A version's frame layout, or null for one Sixb draws natively: a Markdown document, a sheet, or
@@ -20,6 +21,8 @@ export function frameLayout(version: { readonly outline: ArtifactOutline }): Fra
       return "page"
     case "document":
       return version.outline.format === "html" ? "document" : null
+    case "video":
+      return "video"
     default:
       return null
   }
@@ -27,8 +30,8 @@ export function frameLayout(version: { readonly outline: ArtifactOutline }): Fra
 
 /**
  * The files of a version its frame serves as pages, with the kit and the runtime first in their
- * `<head>`: a deck's, a page's or a designed document's entry, or each of a canvas's boards; none
- * for a version that does not open in a frame.
+ * `<head>`: a deck's, a page's, a designed document's or a video's entry, or each of a canvas's
+ * boards; none for a version that does not open in a frame.
  */
 export function frameEntries(version: {
   readonly entry: string

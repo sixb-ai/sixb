@@ -46,6 +46,8 @@ const MAX_WORDS = 1_500
  */
 export function commentsContext(input: {
   readonly artifactId: string
+  /** What the comments are on, which names the guide that tells the Agent how to read them. */
+  readonly kind: "canvas" | "video"
   readonly title: string
   readonly label: (count: number) => string
   readonly threads: readonly {
@@ -81,7 +83,7 @@ export function commentsContext(input: {
       kind: "app-state",
       id: `${COMMENTS_CONTEXT_PREFIX}${input.artifactId}`,
       label: input.label(comments.length),
-      description: `Comments the person chose on the canvas "${input.title}" (${input.artifactId}) for you to address. Each quote names where the comment is, as the canvas guide of the sixb-artifacts skill explains, then its words; replies follow it.`,
+      description: `Comments the person chose on the ${input.kind} "${input.title}" (${input.artifactId}) for you to address. Each quote names where the comment is, as the ${input.kind} guide of the sixb-artifacts skill explains, then its words; replies follow it.`,
       value,
     },
   }

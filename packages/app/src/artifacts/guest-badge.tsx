@@ -6,7 +6,7 @@ import { useArtifactMessages } from "./messages"
  * say. Everyone sees it, the guest included, so nobody takes them for a member of the same name.
  */
 export function GuestBadge({ className }: { readonly className?: string }) {
-  const messages = useArtifactMessages().canvas.comments
+  const messages = useArtifactMessages().comments
   return (
     <span
       title={messages.guestHint}
