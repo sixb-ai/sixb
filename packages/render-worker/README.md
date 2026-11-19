@@ -54,7 +54,7 @@ ways (`src/sandbox.ts`):
   may take, and the sandbox fetches it with curl from the API's public origin; the URLs are
   revoked once the fetch is over. The sandbox must be opened to that origin: pass
   `renderApiOrigin(host)` as `reach` to `inRenderSandbox`. A worker of its own learns the origin
-  from `SIXB_API_PUBLIC_ORIGIN`.
+  from `SIXB_API_PUBLIC_ORIGIN`, and `sixb worker render` refuses to start without it.
 - Out: `storeSandboxFile` streams a file the render wrote into blob storage, read back a piece at a
   time, a few pieces ahead.
 
