@@ -9,6 +9,7 @@ import {
   parseVideoScene,
   VIDEO_ENTRY,
   type VideoMediaReference,
+  type VideoScene,
   type VideoSceneFile,
   videoFilePath,
 } from "../../video/composition"
@@ -73,11 +74,13 @@ export async function validateVideo(
   )
 
   // What only other scenes load stays out of a scene's key: a scene's own HTML, and each file a
-  // scene plays that neither this scene nor the root does.
+  // scene plays that neither this scene nor the root does. A scene that plays while it does, as
+  // one fades into the next, is in its frames, so in its key.
   const sceneOwned = new Set([
     ...composition.scenes.map((scene) => scene.src),
     ...[...scenePlays.values()].flatMap((paths) => [...paths]),
   ])
+  const loads = (scene: VideoScene) => [scene.src, ...(scenePlays.get(scene.id) ?? [])]
 
   return {
     entry: VIDEO_ENTRY,
@@ -88,7 +91,8 @@ export async function validateVideo(
       fps: composition.fps,
       durationMs: composition.durationMs,
       scenes: composition.scenes.map((scene) => {
-        const own = new Set([scene.src, ...rootPlays, ...(scenePlays.get(scene.id) ?? [])])
+        const beside = composition.scenes.filter((other) => playTogether(scene, other))
+        const own = new Set([...rootPlays, ...beside.flatMap(loads)])
         const others = new Set([...sceneOwned].filter((path) => !own.has(path)))
         return {
           id: scene.id,
@@ -101,6 +105,11 @@ export async function validateVideo(
     },
     references,
   }
+}
+
+/** Whether two scenes are on screen at once, for a moment at least. */
+function playTogether(a: VideoScene, b: VideoScene): boolean {
+  return a.startMs < b.startMs + b.durationMs && b.startMs < a.startMs + a.durationMs
 }
 
 /**

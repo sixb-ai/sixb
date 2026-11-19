@@ -255,7 +255,7 @@ function readRoot(html: string): VideoRoot {
     width,
     height,
     fps,
-    durationMs: videoLength(root, scenes),
+    durationMs: videoLength(root, hosts, scenes),
     scenes,
     media: mediaOf(document.childNodes),
   }
@@ -267,9 +267,22 @@ function readRoot(html: string): VideoRoot {
  */
 function videoLength(
   root: Element,
+  hosts: readonly Element[],
   scenes: readonly { readonly id: string; readonly startMs: number; readonly durationMs: number }[]
 ): number {
   const end = Math.max(...scenes.map((scene) => scene.startMs + scene.durationMs))
+
+  // Without a length of its own, HyperFrames plays the root until the last thing on its timeline
+  // ends, a soundtrack as much as a scene, and a sound without data-duration for as long as its
+  // file lasts: a length the HTML does not say. The root says it instead.
+  const timed = has(root, "data-duration") ? undefined : ownTimeline(root, hosts)
+  if (timed) {
+    const id = attribute(timed, "id")
+    throw new CompositionError(
+      `<${timed.tagName}${id ? ` id="${id}"` : ""}> plays on the root composition's own timeline, so HyperFrames would play the video until it ends: give the root composition data-duration, the video's length in seconds.`
+    )
+  }
+
   const durationMs = has(root, "data-duration")
     ? readSeconds(root, "data-duration", "the root composition")
     : end
@@ -286,6 +299,19 @@ function videoLength(
     )
   }
   return durationMs
+}
+
+/**
+ * The first element on the root's own timeline, beside its scenes: one with `data-start`, or a
+ * video or sound, which HyperFrames plays from 0 without one. What a host holds is its scene's.
+ */
+function ownTimeline(root: Element, hosts: readonly Element[]): Element | undefined {
+  const hosted = new Set(hosts.flatMap((host) => [host, ...elements(host.childNodes)]))
+  return elements(root.childNodes).find(
+    (element) =>
+      !hosted.has(element) &&
+      (has(element, "data-start") || element.tagName === "audio" || element.tagName === "video")
+  )
 }
 
 /** A scene as its host in `index.html` writes it, before its start is resolved. */
@@ -462,9 +488,13 @@ function readStart(host: Element, id: string): VideoStart {
   return { type: "after", scene, offset: (sign === "-" ? -1 : 1) * Number(magnitude) }
 }
 
-/** A root composition's width or height: an even number of pixels, as H.264 encodes. */
+/**
+ * A root composition's width or height: an even number of pixels, as H.264 encodes. HyperFrames
+ * reads it with `parseInt`, so only digits read the same in both: it reads `1e3` as 1.
+ */
 function readSize(root: Element, name: "data-width" | "data-height"): number {
-  const value = Number(attribute(root, name)?.trim() || Number.NaN)
+  const written = attribute(root, name)?.trim() ?? ""
+  const value = /^\d+$/.test(written) ? Number(written) : Number.NaN
   const max = ARTIFACT_LIMITS.maxVideoSize
   if (!Number.isInteger(value) || value <= 0 || value > max || value % 2 !== 0) {
     throw new CompositionError(
@@ -474,11 +504,12 @@ function readSize(root: Element, name: "data-width" | "data-height"): number {
   return value
 }
 
+/** A root composition's frame rate: whole digits, as HyperFrames reads it, which refuses `30.0`. */
 function readFps(root: Element): number {
   const written = attribute(root, "data-fps")?.trim()
   if (written === undefined || written === "") return DEFAULT_FPS
 
-  const fps = Number(written)
+  const fps = /^\d+$/.test(written) ? Number(written) : Number.NaN
   if (!(VIDEO_FRAME_RATES as readonly number[]).includes(fps)) {
     throw new CompositionError(
       `data-fps is ${VIDEO_FRAME_RATES.join(", ")} frames a second, or ${DEFAULT_FPS} without one; it is "${written}".`
@@ -487,16 +518,16 @@ function readFps(root: Element): number {
   return fps
 }
 
-/** A length in seconds, more than none, as milliseconds. */
+/** A length in seconds, a millisecond or more, as milliseconds. */
 function readSeconds(element: Element, name: string, what: string): number {
   const written = attribute(element, name)?.trim() ?? ""
-  const seconds = Number(written || Number.NaN)
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  const ms = Math.round(Number(written || Number.NaN) * 1000)
+  if (!Number.isFinite(ms) || ms <= 0) {
     throw new CompositionError(
       `${what}'s ${name} is its length in seconds, such as 4 or 2.5; it is "${written}".`
     )
   }
-  return Math.round(seconds * 1000)
+  return ms
 }
 
 /** Every file reference among the nodes, inside templates too, in source order. */
