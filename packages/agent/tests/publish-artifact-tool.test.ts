@@ -2592,9 +2592,9 @@ describe("a video", () => {
       "media/clip.mp4": join(root, "film/media/clip.mp4"),
       "media/logo.svg": join(root, "film/media/logo.svg"),
     })
-    // The first frame, then each scene at its start, middle and end.
+    // The first frame, then each scene 0.4 s in, at its middle and at its end.
     expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual([
-      0, 0.3, 1, 1.8, 2.4, 3.5, 4.75,
+      0, 0.4, 1, 1.8, 2.4, 3.5, 4.75,
     ])
     expect(published.layoutCheck.frames).toHaveLength(7)
 
