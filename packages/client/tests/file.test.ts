@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { computeBlobDigest } from "@sixb/core/blob-storage/server"
-import { createSixbClient, SixbFileUploadError, uploadFile } from "../src"
+import { createSixbClient, type FileUploadProgress, SixbFileUploadError, uploadFile } from "../src"
 
 const encoder = new TextEncoder()
 
@@ -253,13 +253,22 @@ describe("uploadFile", () => {
 
   test("uses staged server upload when the file exceeds the staged threshold", async () => {
     const { client, requests } = createStagedUploadClient()
+    const progress: FileUploadProgress[] = []
 
     const fileRef = await uploadFile(new Blob(["hello staged"], { type: "text/plain" }), {
       client,
       fileName: "large.txt",
       logicalPath: "reports/large.txt",
       stagedUploadThresholdBytes: 0,
+      onProgress: (step) => progress.push(step),
     })
+
+    // Hashed, then sent in one request: fetch reports nothing in between.
+    expect(progress).toEqual([
+      { stage: "hash", loadedBytes: 12, totalBytes: 12 },
+      { stage: "upload", loadedBytes: 0, totalBytes: 12 },
+      { stage: "upload", loadedBytes: 12, totalBytes: 12 },
+    ])
 
     expect(fileRef).toEqual({
       blobId: "blob_staged",
