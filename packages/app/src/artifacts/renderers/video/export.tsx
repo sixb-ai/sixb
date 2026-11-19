@@ -116,7 +116,8 @@ export function VideoExportMenu({ version }: { readonly version: ArtifactVersion
                 <span className="truncate text-[13px] font-medium text-foreground">
                   {view.state === "failed" ? messages.tryAgain : messages.exportMp4}
                 </span>
-                <span className="truncate text-xs text-muted-foreground">
+                {/* A sentence: it wraps rather than lose its end. */}
+                <span className="text-xs leading-snug text-muted-foreground">
                   {messages.exportMp4Detail}
                 </span>
               </span>
