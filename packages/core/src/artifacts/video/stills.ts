@@ -90,7 +90,10 @@ function posterStill(outline: VideoOutline): VideoStill | undefined {
   }
 }
 
-/** The stills of a video version not kept, nor why they could not be made. */
+/**
+ * The stills of a video version not kept yet. One that could not be made is asked for again, once
+ * the video is published again: a still is cheap, and a failure may have been the sandbox's.
+ */
 export async function missingVideoStills(
   storage: Pick<ArtifactStorage, "listVideoRenders">,
   version: Pick<ArtifactVersionRecord, "projectId" | "outline">
@@ -102,7 +105,7 @@ export async function missingVideoStills(
     projectId: version.projectId,
     keys: stills.map((still) => still.key),
   })
-  const done = new Set(kept.map((record) => record.key))
+  const done = new Set(kept.flatMap((record) => ("failure" in record ? [] : [record.key])))
   return stills.filter((still) => !done.has(still.key))
 }
 

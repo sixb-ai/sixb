@@ -11,6 +11,7 @@ import {
 } from "../src/artifacts/video/export"
 import { videoSegmentIndex, videoSegmentRender } from "../src/artifacts/video/project"
 import {
+  missingVideoStills,
   VIDEO_STILLS_JOB,
   videoPoster,
   videoStillKey,
@@ -406,6 +407,22 @@ describe("a video's stills", () => {
       updatedAt: version.updatedAt.toISOString(),
       media: [{ address: `artifact:${logo}/logo.png`, file: logoFile }],
     })
+
+    // Reproduce by counting failures as kept in missingVideoStills: a still that once failed, in
+    // a sandbox without HyperFrames say, is never asked for again.
+    const [first] = outline.scenes
+    if (!first) throw new Error("Expected a scene.")
+    await storage().putVideoRender({
+      projectId: "videos",
+      key: videoStillKey(first),
+      failure: "It could not be snapshotted.",
+      createdAt: new Date(),
+    })
+    expect((await missingVideoStills(storage(), version)).map((still) => still.scene)).toEqual([
+      "intro",
+      "demo",
+      "outro",
+    ])
 
     const [jpeg] = await files({ "still.jpg": "jpeg" })
     if (!jpeg) throw new Error("Expected a file.")
