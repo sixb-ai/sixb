@@ -98,7 +98,11 @@ describe("agent system prompt", () => {
     expect(prompt).toContain('<workspace>\nWorking directory: "/workspace/repository"')
     expect(prompt).toContain('Source (git): "https://git.example.com/team/project"')
     expect(prompt).toContain("subject to workspace retention")
-    expect(prompt).toContain("Do not commit or push unless the user requests it.")
+    // The project may say how a thread's changes are published (a branch and a pull request):
+    // the rule leaves that to it, rather than overriding it.
+    expect(prompt).toContain(
+      "Do not commit or push unless the user or the project's agent instructions ask for it."
+    )
     expect(prompt).not.toContain("GitHub")
     if (authenticatedAccess) {
       expect(prompt).toContain(
@@ -302,10 +306,11 @@ describe("agent system prompt", () => {
     // Sixb asks for approval: a "yes" in the text is never one, so the model must not ask for it.
     expect(prompt).toContain("Never ask for confirmation in text")
     expect(prompt).not.toContain("until the user confirms")
-    expect(prompt).toContain("Speak like a helpful teammate")
-    expect(prompt).toContain("Keep intermediate work silent")
-    expect(prompt).toContain("commands, redirects, paths, sandbox restrictions")
-    expect(prompt).toContain("only when it prevents completing the request")
+    expect(prompt).toContain("say what you checked and what you could not check")
+    // How the agent speaks to the user belongs to the project: Sixb sets no tone of its own.
+    expect(prompt).not.toContain("Speak like a helpful teammate")
+    expect(prompt).not.toContain("Keep intermediate work silent")
+    expect(prompt).not.toContain("respond briefly")
     expect(prompt).toContain("<sixb_runtime_context>")
     expect(prompt).toContain("Available Agent Skills")
     expect(prompt).toContain("<agent_instructions>\nHelp the customer.")
@@ -339,7 +344,8 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("everything the next workflow node needs")
     expect(prompt).not.toContain("structured output contract")
     expect(prompt).toContain("<agent_instructions>\nReturn a decision.")
-    expect(prompt).not.toContain("Speak like a helpful teammate")
+    expect(prompt).not.toContain("Never ask for confirmation in text")
+    expect(prompt).toContain("say what you checked and what you could not check")
     expect(prompt).toContain("Workflow input files, when present")
     expect(prompt).toContain("upload the complete file with the `sixb` CLI")
     expect(prompt).not.toContain("publish_artifact")
@@ -388,15 +394,13 @@ describe("agent system prompt", () => {
       "Present dates and times in the latest message's time zone",
       "Verify remembered facts about live data before relying on them.",
       '<memory repo="project">\n# Shared\n- Revenue is netRevenue\n</memory>',
+      "When you deliver work, say what you checked and what you could not check.",
     ]) {
       expect(conversation).toContain(shared)
       expect(child).toContain(shared)
     }
 
     for (const userFacing of [
-      "Speak like a helpful teammate",
-      "Keep intermediate work silent",
-      "write one direct response after the work is complete",
       "Never ask for confirmation in text",
       "your turn pauses after that step",
       "<sixb_thread_summary>",
