@@ -11167,6 +11167,7 @@ describe("AgentWorker", () => {
         directory: ".sixb/agent/artifacts",
         manifestPath: ".sixb/agent/context/artifacts.json",
         maxBytes: 1_000_000,
+        blobStorage: sixb.blobStorage,
       },
       [],
       new Map(),
@@ -11182,7 +11183,7 @@ describe("AgentWorker", () => {
         getVersion: async () => latest,
       },
       blobStorage: sixb.blobStorage,
-      sandbox,
+      handle: { sandbox, contextDirectory: ".sixb/agent" },
       signal: new AbortController().signal,
     })
 

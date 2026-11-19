@@ -24,6 +24,7 @@ import {
   type AgentRunFileStore,
 } from "@sixb/core/internal/agents"
 import { frameLayout } from "@sixb/core/internal/artifacts/frames"
+import { isLiveTextPath } from "@sixb/core/internal/artifacts/live"
 import {
   ARTIFACT_LIMITS,
   answerArtifactQueries,
@@ -40,6 +41,7 @@ import {
   listSandboxFiles,
   readSandboxFile,
   resolveSandboxPath,
+  SANDBOX_INLINE_BYTES,
   SandboxFileError,
   statSandboxFile,
   uploadSandboxFile,
@@ -55,21 +57,14 @@ import {
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
-  readArtifactVersionFiles,
+  readBlob,
+  storedFiles,
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
 const OPEN_TOOL = "open_artifact"
 type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
-/**
- * Past this, a file goes from the sandbox to blob storage through the sandbox's own `sixb files
- * upload`, never through a command's output: read whole as base64 on stdout, it would be held twice
- * in the worker's memory and must fit what one command may print. Below it, one read is quicker
- * than an upload's few requests, and the publish keeps the bytes it checks the layout from: an
- * entry is at most 2 MB.
- */
-const SANDBOX_UPLOAD_BYTES = 8 * 1024 * 1024
 /** A file of up to 2 GB, uploaded from the sandbox through the API. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
@@ -253,7 +248,9 @@ async function publish(
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
-      if (!source.bytes && source.sizeBytes > SANDBOX_UPLOAD_BYTES) {
+      // A large file is uploaded by the sandbox itself. It is never one the layout check reads:
+      // an entry, a board or a theme is at most 2 MB.
+      if (!source.bytes && source.sizeBytes > SANDBOX_INLINE_BYTES) {
         const file = await uploadSource(input, handle, source, reservation, signal)
         files.push({ path: source.path, file })
         contents.push({
@@ -268,7 +265,7 @@ async function publish(
         source.bytes ??
         (await readSandboxFile(handle, {
           path: source.absolutePath,
-          maxBytes: SANDBOX_UPLOAD_BYTES,
+          maxBytes: SANDBOX_INLINE_BYTES,
           signal,
           timeoutMs: SANDBOX_TIMEOUT_MS,
         }).catch((error: unknown) => {
@@ -350,7 +347,7 @@ async function publish(
   let installedRevision = written !== undefined
   if (written) {
     try {
-      await installed.replace(handle.sandbox, published, written, signal)
+      await installed.replace(handle, published, written, signal)
       copy = installed.directoryOf(artifact.id)
     } catch (error) {
       if (signal.aborted) throw error
@@ -509,8 +506,9 @@ async function uploadSource(
 }
 
 /**
- * The files of a version merged with what others wrote, as its bytes; none when they cannot be
- * read, and the copy, the folder and the base of the next update then stay as they were.
+ * The files of a version merged with what others wrote: the text it merges as its bytes, which the
+ * layout check reads, and any other file as stored. None when they cannot be read, and the copy,
+ * the folder and the base of the next update then stay as they were.
  */
 async function mergedFiles(
   input: PublishToolsInput,
@@ -518,7 +516,15 @@ async function mergedFiles(
   signal: AbortSignal
 ): Promise<PublishedArtifactFile[] | undefined> {
   try {
-    return await readArtifactVersionFiles(input.blobStorage, published.version, signal)
+    const files: PublishedArtifactFile[] = []
+    for (const file of storedFiles(published.version)) {
+      files.push(
+        "file" in file && isLiveTextPath(file.path) && file.file.sizeBytes <= SANDBOX_INLINE_BYTES
+          ? { path: file.path, bytes: await readBlob(input.blobStorage, file.file.blobId, signal) }
+          : file
+      )
+    }
+    return files
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -644,10 +650,13 @@ async function artifactMoved(
 
   let folder: string | undefined
   try {
-    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
-    folder = await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
-      edited: latest.origin?.threadId !== input.threadId,
-    })
+    folder = await installed.replace(
+      handle,
+      { artifact, version: latest },
+      storedFiles(latest),
+      signal,
+      { edited: latest.origin?.threadId !== input.threadId }
+    )
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -691,9 +700,8 @@ async function open(
 
   const readOnly = updatable === null
   try {
-    const { sandbox } = await input.resolveSandbox()
-    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
-    await installed.replace(sandbox, { artifact, version: latest }, files, signal, {
+    const handle = await input.resolveSandbox()
+    await installed.replace(handle, { artifact, version: latest }, storedFiles(latest), signal, {
       edited: latest.origin?.threadId !== input.threadId,
       readOnly,
     })
@@ -793,11 +801,11 @@ async function listSources(
       sizeBytes,
     }
     checkFileSize(tool, kind, source.path, sizeBytes)
-    if (sizeBytes > SANDBOX_UPLOAD_BYTES) return [source]
+    if (sizeBytes > SANDBOX_INLINE_BYTES) return [source]
 
     const bytes = await readSandboxFile(handle, {
       path: absolutePath,
-      maxBytes: SANDBOX_UPLOAD_BYTES,
+      maxBytes: SANDBOX_INLINE_BYTES,
       signal,
       timeoutMs: SANDBOX_TIMEOUT_MS,
     }).catch((error: unknown) => {

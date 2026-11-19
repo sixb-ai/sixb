@@ -4,7 +4,7 @@
  */
 
 export { type LiveArtifactWrite, writeLiveArtifact } from "../execution"
-export { mergeIntoDocument, readChange } from "./document"
+export { isLiveTextPath, mergeIntoDocument, readChange } from "./document"
 export { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "./files"
 export {
   AGENT_PRESENCE_MS,

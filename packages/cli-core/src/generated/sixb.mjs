@@ -429,6 +429,7 @@ List options:
   sixb files upload <local-path> [--logical-path <path>] [--media-type <type>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
   sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download artifact <artifact-id> <version> --path <file-path> --output <local-path>
   sixb files download url <content-url> --output <local-path>
 
 \`upload\` prints the file's reference as JSON. A file past 25 MB, up to 2 GB, is sent in stages
@@ -1001,6 +1002,13 @@ async function files(api, args) {
       const type = positionals[1] ?? "";
       const id = positionals[2] ?? "";
       route = `/api/objects/${idSegment(type)}/${idSegment(id)}/files/content`;
+    } else if (context === "artifact") {
+      requireExact(positionals, 3, "files download artifact requires an artifact id and a version.");
+      const id = positionals[1] ?? "";
+      const version = positionals[2] ?? "";
+      if (!/^[1-9]\d*$/.test(version))
+        fail(`'${version}' is not a version number.`);
+      route = `/api/artifacts/${idSegment(id)}/versions/${version}/content`;
     } else if (context === "action-run" || context === "workflow-run") {
       requireExact(positionals, 2, `files download ${context} requires exactly one run id.`);
       const id = positionals[1] ?? "";

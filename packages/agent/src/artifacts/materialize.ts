@@ -1,5 +1,5 @@
 import { posix } from "node:path"
-import type { Sandbox, SandboxFileRecord } from "@sixb/core"
+import type { FileRef, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
 import type { AgentRunArtifacts, AgentRunFileStore } from "@sixb/core/internal/agents"
 import type {
@@ -9,6 +9,8 @@ import type {
   ArtifactVersionRecord,
 } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
+import { downloadArtifactFiles, SANDBOX_INLINE_BYTES } from "../sandbox-files"
+import type { AgentSandboxHandle } from "../sandbox-handle"
 
 /** How many of the thread's artifacts are installed, newest first, and how many bytes in all. */
 const MATERIALIZE_MAX_ARTIFACTS = 50
@@ -26,8 +28,8 @@ for path in "$@"; do
   mv -- "$copy/$path" "$staging/$path"
 done
 rm -rf -- "$copy"`
-/** Copying a large published file within the sandbox, as it is installed. */
-const COPY_TIMEOUT_MS = 5 * 60_000
+/** Copying or fetching large files of a version, as it is installed. */
+const COPY_TIMEOUT_MS = 10 * 60_000
 
 export interface MaterializedArtifacts {
   /** Files to write, at paths relative to the sandbox working directory or absolute. */
@@ -36,12 +38,14 @@ export interface MaterializedArtifacts {
 }
 
 /**
- * One file of a version just published: the bytes it holds, or, for a large one the sandbox
- * uploaded itself, where the sandbox holds them, which is copied there and never read out.
+ * One file of a version to install: the bytes it holds; where the sandbox holds it already, for a
+ * large one the sandbox uploaded itself, copied there; or its stored reference, read only once it
+ * is written, and a large one fetched by the sandbox itself, never through the worker.
  */
 export type PublishedArtifactFile =
   | { readonly path: string; readonly bytes: Uint8Array }
   | { readonly path: string; readonly sizeBytes: number; readonly sandboxPath: string }
+  | { readonly path: string; readonly file: FileRef }
 
 interface ManifestEntry {
   readonly id: string
@@ -109,6 +113,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       readonly directory: string
       readonly manifestPath: string
       readonly maxBytes: number
+      /** Where a stored file it installs is read. */
+      readonly blobStorage: AgentRunFileStore
     },
     entries: readonly ManifestEntry[],
     installed: Map<string, number>,
@@ -165,21 +171,21 @@ export class InstalledArtifacts implements MaterializedArtifacts {
    * wrote, as the Agent named it, if any.
    */
   replace(
-    sandbox: Sandbox,
+    handle: AgentSandboxHandle,
     published: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
     options: { readonly edited?: boolean; readonly readOnly?: boolean } = {}
   ): Promise<string | undefined> {
     const update = this.#updates.then(() =>
-      this.#replace(sandbox, published, files, signal, options)
+      this.#replace(handle, published, files, signal, options)
     )
     this.#updates = update.catch(() => {})
     return update
   }
 
   async #replace(
-    sandbox: Sandbox,
+    handle: AgentSandboxHandle,
     {
       artifact,
       version,
@@ -188,6 +194,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     signal: AbortSignal,
     options: { readonly edited?: boolean; readonly readOnly?: boolean }
   ): Promise<string | undefined> {
+    const { sandbox } = handle
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
     const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
@@ -240,13 +247,13 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
     const copy = install
-      ? sources.map((file) => ({ ...file, path: inSandbox(posix.join(directory, file.path)) }))
+      ? sources.map((file) => ({ to: inSandbox(posix.join(directory, file.path)), file }))
       : []
-    await writePublishedFiles(sandbox, copy, signal, [
+    await this.#write(handle, version, copy, signal, [
       { path: inSandbox(manifestPath), contents: manifestJson(entries) },
     ])
 
-    const moved = await this.#writeFolder(sandbox, artifact.id, previous, sources, signal)
+    const moved = await this.#writeFolder(handle, version, previous, sources, signal)
     await sandbox
       .runCommand("bash", ["-c", 'rm -rf -- "$1"', "clear", staging], {
         timeout: REMOVE_TIMEOUT_MS,
@@ -267,13 +274,13 @@ export class InstalledArtifacts implements MaterializedArtifacts {
    * folder, as the Agent named it, if any.
    */
   async #writeFolder(
-    sandbox: Sandbox,
-    artifactId: string,
+    handle: AgentSandboxHandle,
+    version: ArtifactVersionRecord,
     previous: readonly ArtifactFile[],
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal
   ): Promise<string | undefined> {
-    const folder = this.#folders.get(artifactId)
+    const folder = this.#folders.get(version.artifactId)
     if (!folder) return undefined
 
     const kept = new Set(files.map((file) => file.path))
@@ -281,7 +288,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       .filter((file) => !kept.has(file.path))
       .map((file) => posix.join(folder.absolute, file.path))
     if (gone.length > 0) {
-      const removedFiles = await sandbox.runCommand(
+      const removedFiles = await handle.sandbox.runCommand(
         "bash",
         ["-c", 'rm -f -- "$@"', "rm", ...gone],
         { timeout: REMOVE_TIMEOUT_MS, signal }
@@ -292,57 +299,82 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         )
       }
     }
-    // A file the sandbox uploaded from this folder is already there, as it was published.
-    await writePublishedFiles(
-      sandbox,
-      files
-        .map((file) => ({ ...file, path: posix.join(folder.absolute, file.path) }))
-        .filter((file) => !("sandboxPath" in file) || file.sandboxPath !== file.path),
-      signal
-    )
+
+    // The folder holds the revision before: a large file that did not change since is left as it
+    // is there, and one the sandbox uploaded from this folder is there already.
+    const before = new Map(previous.map((file) => [file.path, file.file.digest]))
+    const writes = files
+      .map((file) => ({ to: posix.join(folder.absolute, file.path), file }))
+      .filter(({ to, file }) =>
+        "sandboxPath" in file
+          ? file.sandboxPath !== to
+          : !("file" in file) ||
+            file.file.sizeBytes <= SANDBOX_INLINE_BYTES ||
+            before.get(file.path) !== file.file.digest
+      )
+    await this.#write(handle, version, writes, signal)
     return folder.path
+  }
+
+  /**
+   * Writes each file of a version at its place in the sandbox, with `others` beside them: bytes
+   * from here, a file the sandbox holds already copied there, a small stored one read from blob
+   * storage, and a large one fetched by the sandbox from the API.
+   */
+  async #write(
+    handle: AgentSandboxHandle,
+    version: ArtifactVersionRecord,
+    writes: readonly { readonly to: string; readonly file: PublishedArtifactFile }[],
+    signal: AbortSignal,
+    others: readonly SandboxFileRecord[] = []
+  ): Promise<void> {
+    const written: SandboxFileRecord[] = [...others]
+    const copied: string[] = []
+    const fetched: Parameters<typeof downloadArtifactFiles>[1][number][] = []
+    for (const { to, file } of writes) {
+      if ("bytes" in file) written.push({ path: to, contents: file.bytes })
+      else if ("sandboxPath" in file) copied.push(file.sandboxPath, to)
+      else if (file.file.sizeBytes <= SANDBOX_INLINE_BYTES) {
+        written.push({
+          path: to,
+          contents: await readBlob(this.layout.blobStorage, file.file.blobId, signal),
+        })
+      } else {
+        fetched.push({
+          artifactId: version.artifactId,
+          version: version.version,
+          path: file.path,
+          sizeBytes: file.file.sizeBytes,
+          to,
+        })
+      }
+    }
+
+    if (copied.length > 0) {
+      const result = await handle.sandbox.runCommand(
+        "bash",
+        [
+          "-c",
+          'while [ "$#" -gt 0 ]; do mkdir -p -- "$(dirname -- "$2")" && cp -- "$1" "$2"; shift 2; done',
+          "copy",
+          ...copied,
+        ],
+        { timeout: COPY_TIMEOUT_MS, signal }
+      )
+      if (result.exitCode !== 0 || result.timedOut) {
+        throw new Error(
+          `[SixbAgent] Could not copy the published files: ${result.stderr.trim() || `exit ${result.exitCode}`}`
+        )
+      }
+    }
+    await downloadArtifactFiles(handle, fetched, { signal, timeoutMs: COPY_TIMEOUT_MS })
+    await handle.sandbox.writeFiles(written)
   }
 }
 
 function publishedSize(file: PublishedArtifactFile): number {
-  return "bytes" in file ? file.bytes.byteLength : file.sizeBytes
-}
-
-/**
- * Writes each file at its path in the sandbox, with `others` beside them: bytes from here, and a
- * file the sandbox holds already copied there, inside the sandbox.
- */
-async function writePublishedFiles(
-  sandbox: Sandbox,
-  files: readonly PublishedArtifactFile[],
-  signal: AbortSignal,
-  others: readonly SandboxFileRecord[] = []
-): Promise<void> {
-  const written: SandboxFileRecord[] = [...others]
-  const copied: string[] = []
-  for (const file of files) {
-    if ("bytes" in file) written.push({ path: file.path, contents: file.bytes })
-    else copied.push(file.sandboxPath, file.path)
-  }
-
-  if (copied.length > 0) {
-    const result = await sandbox.runCommand(
-      "bash",
-      [
-        "-c",
-        'while [ "$#" -gt 0 ]; do mkdir -p -- "$(dirname -- "$2")" && cp -- "$1" "$2"; shift 2; done',
-        "copy",
-        ...copied,
-      ],
-      { timeout: COPY_TIMEOUT_MS, signal }
-    )
-    if (result.exitCode !== 0 || result.timedOut) {
-      throw new Error(
-        `[SixbAgent] Could not copy the published files: ${result.stderr.trim() || `exit ${result.exitCode}`}`
-      )
-    }
-  }
-  await sandbox.writeFiles(written)
+  if ("bytes" in file) return file.bytes.byteLength
+  return "sandboxPath" in file ? file.sizeBytes : file.file.sizeBytes
 }
 
 /** What a turn reads of its conversation's artifacts, as its requester, through its session. */
@@ -415,7 +447,12 @@ export async function materializeThreadArtifacts(input: {
     )
   }
   return new InstalledArtifacts(
-    { directory: input.directory, manifestPath: input.manifestPath, maxBytes },
+    {
+      directory: input.directory,
+      manifestPath: input.manifestPath,
+      maxBytes,
+      blobStorage: input.blobStorage,
+    },
     entries,
     installed,
     files,
@@ -433,7 +470,7 @@ export async function installTurnArtifacts(input: {
   readonly installed: InstalledArtifacts
   readonly artifacts: TurnArtifacts
   readonly blobStorage: AgentRunFileStore
-  readonly sandbox: Sandbox
+  readonly handle: AgentSandboxHandle
   readonly signal: AbortSignal
 }): Promise<string[]> {
   const [writes, artifacts] = await Promise.all([
@@ -453,11 +490,10 @@ export async function installTurnArtifacts(input: {
     try {
       const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
       if (!version) continue
-      const files = await readArtifactVersionFiles(input.blobStorage, version, input.signal)
       const folder = await input.installed.replace(
-        input.sandbox,
+        input.handle,
         { artifact, version },
-        files,
+        storedFiles(version),
         input.signal
       )
       if (folder) folders.push(folder)
@@ -555,19 +591,9 @@ function partsOf(
   return parts.length > 0 ? { parts } : {}
 }
 
-/** A version's files with the bytes each holds. Reading stops when the run is cancelled. */
-export async function readArtifactVersionFiles(
-  blobStorage: AgentRunFileStore,
-  version: ArtifactVersionRecord,
-  signal: AbortSignal
-): Promise<PublishedArtifactFile[]> {
-  const files: PublishedArtifactFile[] = []
-
-  for (const file of version.files) {
-    files.push({ path: file.path, bytes: await readBlob(blobStorage, file.file.blobId, signal) })
-  }
-
-  return files
+/** A version's files as stored: each is read, or fetched by the sandbox, only once it is written. */
+export function storedFiles(version: ArtifactVersionRecord): PublishedArtifactFile[] {
+  return version.files.map(({ path, file }) => ({ path, file }))
 }
 
 /** A blob's bytes. Reading stops when the run is cancelled. */
