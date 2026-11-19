@@ -6,6 +6,7 @@ import {
   type VideoScene,
   type VideoSourceSpan,
 } from "../video/composition"
+import { playTogether } from "../video/project"
 import { frameKitDigest } from "./previews"
 
 // A video renders scene by scene: each scene is a segment of the export, kept apart from the
@@ -32,8 +33,11 @@ const HOST_PLACE = "<!-- scene -->"
  * - its start in the video, only when the root plays or animates something of its own
  *   (`rootTimeline`): only then does what the scene shows depend on when it plays. A scene's own
  *   CSS animations and GSAP timeline run from its start, wherever it plays (measured: README);
- * - every other file of the version, with what it holds, but the other scenes' HTML and the videos
- *   and sounds neither the root, the scene, nor a scene on screen with it plays.
+ * - every other file of the version, with what it holds, but the other scenes' HTML, the videos
+ *   neither the root, the scene, nor a scene on screen with it plays, and every sound.
+ *
+ * A segment is pictures alone: the export mixes the whole video's sound once, apart, so a sound is
+ * in no key, and a soundtrack changed or moved renders no scene again.
  *
  * So trimming a scene renders it again, and the scenes it overlaps, but not the others unless the
  * root has a timeline of its own. Images, stylesheets, fonts, scripts, and nested compositions are
@@ -45,7 +49,7 @@ const HOST_PLACE = "<!-- scene -->"
  * The key names no artifact: two artifacts that hold the same scene, such as a copy, share its
  * segment. A segment is the scene's frames and nothing else, rendered by the worker from these
  * files alone, so it is the same picture whoever holds it. An `artifact:` address a scene plays
- * is in its HTML as written: what it resolves to is read when the scene renders.
+ * is in its HTML as written: the export adds what it resolves to, to its segment's own key.
  */
 export function sceneRenderKeys(input: {
   /** `index.html`'s text, which the composition's spans point into. */
@@ -74,13 +78,6 @@ export function sceneRenderKeys(input: {
     ].map((span) => ({ ...withSpaceBefore(index, span), with: "" })),
   ])
 
-  const sceneFiles = new Set(scenes.map((scene) => scene.src))
-  const recordings = new Set(
-    files
-      .filter(({ file }) => /^(video|audio)\//.test(file.mediaType ?? ""))
-      .map(({ path }) => path)
-  )
-
   const hostOf = (scene: VideoScene) => {
     const { element, attributes } = scene.host
     const times = HOST_TIMES.flatMap((name) => {
@@ -96,16 +93,14 @@ export function sceneRenderKeys(input: {
         .filter((other) => playTogether(scene, other))
         .sort((a, b) => a.host.element.start - b.host.element.start)
 
-      const own = new Set([
-        ...rootLoads,
-        ...beside.flatMap((each) => [...(loads.get(each.id) ?? [])]),
-      ])
-      const loaded = files
-        .filter(({ path }) => {
-          if (path === VIDEO_ENTRY) return false
-          if (own.has(path)) return true
-          return !sceneFiles.has(path) && !recordings.has(path)
-        })
+      const loaded = videoSceneFiles({
+        files,
+        composition,
+        rootLoads,
+        loads,
+        scenes: beside.map((each) => each.id),
+      })
+        .filter(({ path }) => path !== VIDEO_ENTRY)
         .map((entry) => [entry.path, entry.file.digest] as const)
         .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
 
@@ -123,9 +118,31 @@ export function sceneRenderKeys(input: {
   )
 }
 
-/** Whether two scenes are on screen at once, for a moment at least. */
-function playTogether(a: VideoScene, b: VideoScene): boolean {
-  return a.startMs < b.startMs + b.durationMs && b.startMs < a.startMs + a.durationMs
+/**
+ * The files the frames of `scenes`, shown together, are made of: `index.html`, what the root and
+ * those scenes play, and every other file of the version but the other scenes' HTML and the
+ * videos nothing among them plays. A sound shows in no frame and is left out, unless `sounds`:
+ * HyperFrames still loads every sound of what it renders.
+ */
+export function videoSceneFiles(input: {
+  readonly files: readonly ArtifactFile[]
+  readonly composition: Pick<VideoComposition, "scenes">
+  readonly rootLoads: ReadonlySet<string>
+  readonly loads: ReadonlyMap<string, ReadonlySet<string>>
+  readonly scenes: readonly string[]
+  readonly sounds?: boolean
+}): ArtifactFile[] {
+  const { files, composition, rootLoads, loads } = input
+  const sceneFiles = new Set(composition.scenes.map((scene) => scene.src))
+  const own = new Set([...rootLoads, ...input.scenes.flatMap((id) => [...(loads.get(id) ?? [])])])
+
+  return files.filter(({ path, file }) => {
+    const type = file.mediaType ?? ""
+    if (path === VIDEO_ENTRY) return true
+    if (type.startsWith("audio/") && !input.sounds) return false
+    if (own.has(path)) return true
+    return !sceneFiles.has(path) && !/^(video|audio)\//.test(type)
+  })
 }
 
 /** The span, with the spaces and line breaks right before it. */
