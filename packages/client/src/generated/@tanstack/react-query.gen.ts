@@ -73,6 +73,8 @@ import {
   getArtifact,
   getArtifactBoardPreview,
   getArtifactFileContent,
+  getArtifactMedia,
+  getArtifactMediaContent,
   getArtifactPdf,
   getArtifactQuery,
   getArtifactRestorePoint,
@@ -418,6 +420,12 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentError,
   GetArtifactFileContentResponse,
+  GetArtifactMediaContentData,
+  GetArtifactMediaContentError,
+  GetArtifactMediaContentResponse,
+  GetArtifactMediaData,
+  GetArtifactMediaError,
+  GetArtifactMediaResponse,
   GetArtifactPdfData,
   GetArtifactPdfError,
   GetArtifactPdfResponse,
@@ -7120,6 +7128,60 @@ export const getArtifactFileContentOptions = (options: Options<GetArtifactFileCo
       return data
     },
     queryKey: getArtifactFileContentQueryKey(options),
+  })
+
+export const getArtifactMediaQueryKey = (options: Options<GetArtifactMediaData>) =>
+  createQueryKey("getArtifactMedia", options)
+
+/**
+ * Get what is derived of a video or a sound
+ *
+ * What Sixb derives once from a video or a sound among the version's files: what it holds, a proxy that plays and scrubs in its place, a poster, a filmstrip, its peaks, its cuts, and its transcript. Each part is ready, with the URL of its file when it has one, pending, or unavailable or failed with why; retry=true derives each failed part again. A file published since it was last derived from is asked for: ask again after a few seconds. In a project without sandboxes, each part is unavailable. Whoever reads the artifact may ask. 400 invalid_artifact when the version holds no video or sound at path.
+ */
+export const getArtifactMediaOptions = (options: Options<GetArtifactMediaData>) =>
+  queryOptions<
+    GetArtifactMediaResponse,
+    GetArtifactMediaError,
+    GetArtifactMediaResponse,
+    ReturnType<typeof getArtifactMediaQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactMedia({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactMediaQueryKey(options),
+  })
+
+export const getArtifactMediaContentQueryKey = (options: Options<GetArtifactMediaContentData>) =>
+  createQueryKey("getArtifactMediaContent", options)
+
+/**
+ * Get a part of what is derived of a video or a sound
+ *
+ * The file of one part, as its URL in GET .../media names it: served inline, with Range, and cached for good when asked for by that URL. 404 media_not_found until it is derived, and when it will not be.
+ */
+export const getArtifactMediaContentOptions = (options: Options<GetArtifactMediaContentData>) =>
+  queryOptions<
+    GetArtifactMediaContentResponse,
+    GetArtifactMediaContentError,
+    GetArtifactMediaContentResponse,
+    ReturnType<typeof getArtifactMediaContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactMediaContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactMediaContentQueryKey(options),
   })
 
 export const listModelsQueryKey = (options?: Options<ListModelsData>) =>

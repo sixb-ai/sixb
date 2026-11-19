@@ -1,4 +1,4 @@
-import type { SixbHostView } from "@sixb/core"
+import type { FileRef, SixbHostView } from "@sixb/core"
 import { parseArtifactAddress } from "@sixb/core/artifacts"
 import { annotateBoard } from "@sixb/core/artifacts/live"
 import {
@@ -14,6 +14,7 @@ import {
   resolveArtifactFrame,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
+import { isMediaFile } from "@sixb/core/internal/artifacts/publish"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type {
   ArtifactFrameTarget,
@@ -147,9 +148,12 @@ async function frameResponse(
     )
   }
 
+  // A video or a sound plays from its proxy once one is derived, which is light and seeks at once,
+  // in every frame; from the original until then.
+  const proxy = isMediaFile(file) ? await mediaProxy(storage, host.id, file.file) : null
   const response = await createFileContentResponse({
     blobStorage: host.blobStorage,
-    fileRef: file.file,
+    fileRef: proxy ?? file.file,
     disposition: "inline",
     head: options.head,
     request,
@@ -159,6 +163,16 @@ async function frameResponse(
   for (const [name, value] of headers) response.headers.set(name, value)
   response.headers.set("content-disposition", "inline")
   return response
+}
+
+/** The proxy derived of a media, once it is ready. */
+async function mediaProxy(
+  storage: ArtifactStorage,
+  projectId: string,
+  file: FileRef
+): Promise<FileRef | null> {
+  const [media] = await storage.listMedia({ projectId, digests: [file.digest] })
+  return media?.parts.proxy.status === "ready" ? media.parts.proxy.file : null
 }
 
 async function lenderVersion(
