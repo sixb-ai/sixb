@@ -2,6 +2,7 @@ import { type GetArtifactMediaResponse, getArtifactMedia } from "@sixb/client"
 import { useQuery } from "@tanstack/react-query"
 import { apiFileUrl } from "../../../file-source"
 import type { ArtifactVersion } from "../../../queries"
+import { readMediaPart } from "../../../waveform"
 import { importKind } from "./import"
 import { readTranscript, type Transcript } from "./transcript"
 
@@ -155,31 +156,6 @@ export function readMediaParts(data: GetArtifactMediaResponse): MediaParts {
   }
 }
 
-/** A sound's peaks, from 0 to 100, `peaksPerSecond` of them a second. */
-export interface Peaks {
-  readonly peaksPerSecond: number
-  readonly peaks: readonly number[]
-  /** The loudest of them, which a waveform scales to. */
-  readonly loudest: number
-}
-
-/** The peaks a waveform's file holds, once read. */
-export function usePeaks(url: string | undefined): Peaks | undefined {
-  return useQuery({
-    queryKey: ["artifact-media-peaks", url],
-    queryFn: async ({ signal }): Promise<Peaks> => {
-      const body = await readJson(url ?? "", signal)
-      const peaks = Array.isArray(body.peaks) ? body.peaks.filter(isNumber) : []
-      const peaksPerSecond = isNumber(body.peaksPerSecond) ? body.peaksPerSecond : 50
-      const loudest = peaks.reduce((max, peak) => Math.max(max, peak), 1)
-      return { peaksPerSecond, peaks, loudest }
-    },
-    enabled: !!url,
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
-  }).data
-}
-
 /** A recording's transcript, as {@link readTranscript} reads its file, once read. */
 export function useTranscript(url: string | undefined): {
   readonly transcript: Transcript | undefined
@@ -188,23 +164,12 @@ export function useTranscript(url: string | undefined): {
   const query = useQuery({
     queryKey: ["artifact-media-transcript", url],
     queryFn: async ({ signal }): Promise<Transcript> =>
-      readTranscript(await readJson(url ?? "", signal)),
+      readTranscript(await readMediaPart(url ?? "", signal)),
     enabled: !!url,
     staleTime: Number.POSITIVE_INFINITY,
     retry: 1,
   })
   return { transcript: query.data, failed: query.isError }
-}
-
-async function readJson(url: string, signal: AbortSignal): Promise<Record<string, unknown>> {
-  const response = await fetch(url, { credentials: "include", signal })
-  if (!response.ok) throw new Error(`[Sixb] ${url} answered ${response.status}.`)
-  const body: unknown = await response.json()
-  return typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {}
-}
-
-function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value)
 }
 
 /**
