@@ -15,8 +15,6 @@ export {
   cutRange,
   duplicateScene,
   insertClip,
-  keepClipRanges,
-  MIN_CLIP_MS,
   moveClip,
   moveScene,
   readVideoFileTimeline,
