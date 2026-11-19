@@ -142,10 +142,14 @@ async function runNode(
 }
 
 /**
- * The most one command reads out of a sandbox. Some providers keep at most 1 MiB of a command's
- * output, and base64 is a third larger than what it holds.
+ * The most one command reads out of a sandbox: as much as fits in 1 MiB of output, which some
+ * providers keep at most (Azure fails a command past it). In base64, a third larger, 720 KiB is
+ * 960 KiB, which leaves room for each piece's line of JSON.
+ *
+ * The contract has no other way out of a sandbox. A streamed read of a file, as `writeFiles` is
+ * its way in, would take a large file back in one request.
  */
-const READ_BYTES = 512 * 1024
+const READ_BYTES = 720 * 1024
 const READ_TIMEOUT_MS = 60_000
 /** How many of those commands run at once. */
 const READS_AT_ONCE = 4

@@ -43,7 +43,7 @@ still waiting, and it runs once the canvas has rested 15 seconds. One render:
 
 Each render's steps are bounded by the time its job has left, and its sandbox is destroyed after,
 waited for at most 30 seconds. What a render wrote in the sandbox comes back a piece at a time,
-at most 512 KiB of it to a command, as some providers keep at most 1 MiB of a command's output.
+at most 720 KiB of it to a command, as some providers keep at most 1 MiB of a command's output.
 
 ## Large files
 
