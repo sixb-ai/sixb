@@ -753,6 +753,7 @@ media/<name>        the footage, sound, and images the scenes play
 ```
 
 ```html
+<!-- index.html, in its <body> -->
 <div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30">
   <div data-composition-id="intro" data-composition-src="scenes/intro.html"
        data-start="0" data-duration="4" data-label="Opening"></div>
