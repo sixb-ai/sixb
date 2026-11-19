@@ -10,10 +10,20 @@ import {
 } from "@sixb/core/artifacts/live"
 import { Button, Slider } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { AudioLines, Copy, Image as ImageIcon, Scissors, Trash2, Type, Video } from "lucide-react"
+import {
+  AudioLines,
+  Copy,
+  Image as ImageIcon,
+  Scissors,
+  Trash2,
+  TriangleAlert,
+  Type,
+  Video,
+} from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
+import { type MediaTarget, useMediaParts } from "./media"
 import { clipName, sceneName } from "./selection"
 import { TRACK_TONE } from "./timeline"
 
@@ -53,6 +63,7 @@ export function Inspector({
   scene,
   clip,
   splittable,
+  target,
   actions,
 }: {
   readonly composition: VideoComposition
@@ -63,13 +74,21 @@ export function Inspector({
   readonly clip: { readonly file: string; readonly clip: VideoClip } | undefined
   /** Whether the playhead is inside the selected clip, where it splits. */
   readonly splittable: boolean
+  /** Where its recordings' parts are read from. */
+  readonly target: MediaTarget
   readonly actions: InspectorActions
 }) {
   const messages = useArtifactMessages().videoEditor
 
   if (clip) {
     return (
-      <ClipInspector file={clip.file} clip={clip.clip} splittable={splittable} actions={actions} />
+      <ClipInspector
+        file={clip.file}
+        clip={clip.clip}
+        splittable={splittable}
+        target={target}
+        actions={actions}
+      />
     )
   }
 
@@ -174,15 +193,18 @@ function ClipInspector({
   file,
   clip,
   splittable,
+  target,
   actions,
 }: {
   readonly file: string
   readonly clip: VideoClip
   readonly splittable: boolean
+  readonly target: MediaTarget
   readonly actions: InspectorActions
 }) {
   const messages = useArtifactMessages().videoEditor
   const plays = clip.kind === "video" || clip.kind === "audio"
+  const { failed } = useMediaParts(plays ? target : null, clip.src)
   const sounds = clip.kind === "audio" || (clip.kind === "video" && !clip.silent)
   const kind = clip.caption ? messages.clipKinds.caption : messages.clipKinds[clip.kind]
 
@@ -212,6 +234,21 @@ function ClipInspector({
           </h3>
         </div>
       </header>
+
+      {failed ? (
+        <div
+          role="alert"
+          className="-mt-1 flex gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-[13px]"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="m-0 font-medium text-destructive">{messages.unreadableTitle}</p>
+            <p className="m-0 mt-0.5 text-muted-foreground">
+              {failed} {messages.unreadableHint}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <Section title={messages.timing}>
         <SecondsField

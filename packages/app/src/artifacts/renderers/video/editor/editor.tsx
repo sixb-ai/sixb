@@ -680,6 +680,7 @@ export default function VideoEditor({
                   clip && selection?.type === "clip" ? { file: selection.file, clip } : undefined
                 }
                 splittable={splittable}
+                target={target}
                 actions={inspectorActions}
               />
             ) : talking && open ? (
