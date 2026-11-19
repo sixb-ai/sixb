@@ -1,4 +1,4 @@
-import type { VideoOutline } from "@sixb/core/artifacts"
+import type { FrameVideoText, VideoOutline } from "@sixb/core/artifacts"
 import {
   type ArtifactLiveUser,
   cutRange,
@@ -67,6 +67,7 @@ import type { ArtifactVersion } from "../../../queries"
 import { typesItself } from "../keys"
 import { useSize } from "../player"
 import { useMediaImport } from "./import"
+import { InPlaceEditor, type InPlaceText } from "./in-place"
 import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
@@ -121,6 +122,8 @@ export default function VideoEditor({
     null
   )
   const [dropping, setDropping] = useState(false)
+  const [inPlace, setInPlace] = useState<InPlaceText | null>(null)
+  const picking = useRef<((target: FrameVideoText | null) => void) | null>(null)
 
   useEffect(() => {
     if (!notice) return
@@ -276,13 +279,15 @@ export default function VideoEditor({
     splitClip: (file, target) => splitAt(file, target),
   }
 
-  /** The clip the playhead splits: the one selected, else the picture on top under it. */
+  /** The clip the playhead splits: the one selected when it is under it, else the picture on top. */
   const splitTarget = (): LaidClip | undefined => {
     const under = clips.filter((laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100)
-    if (clip && selection?.type === "clip") {
-      return under.find((laid) => laid.file === selection.file && laid.clip.ref === clip.ref)
-    }
+    const chosen =
+      clip && selection?.type === "clip"
+        ? under.find((laid) => laid.file === selection.file && laid.clip.ref === clip.ref)
+        : undefined
     return (
+      chosen ??
       under.filter((laid) => laid.track === "picture" && laid.file !== VIDEO_ENTRY).at(-1) ??
       under.find((laid) => laid.file !== VIDEO_ENTRY)
     )
@@ -310,6 +315,43 @@ export default function VideoEditor({
       if (scene && scenes.length > 1) sceneActions.remove(scene)
     }
   }
+
+  /**
+   * A click on the paused picture: the words the frame finds there open to be typed over, as a
+   * scene's file holds them; anywhere else, the video plays.
+   */
+  const pick = (point: { readonly x: number; readonly y: number }) => {
+    if (inPlace) {
+      setInPlace(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      picking.current = null
+      playback.toggle()
+    }, 400)
+    picking.current = (target) => {
+      clearTimeout(timer)
+      picking.current = null
+      const found = target && composition ? textOf(target) : null
+      if (found) setInPlace(found)
+      else playback.toggle()
+    }
+    frame.current?.send("video.pick", point).catch(() => {})
+  }
+
+  /** The text of a scene's file the frame found, by its words and their place among the same. */
+  const textOf = (target: FrameVideoText): InPlaceText | null => {
+    const file = scenes.find((scene) => scene.id === target.scene)?.src ?? VIDEO_ENTRY
+    const same = (state.timelines.get(file)?.texts ?? []).filter(
+      (text) => text.tag === target.tag && text.text === target.text
+    )
+    const text = same[target.occurrence] ?? same[0]
+    return text ? { file, ref: text.ref, text: text.text, rect: target.rect } : null
+  }
+
+  useEffect(() => {
+    if (playback.playing) setInPlace(null)
+  }, [playback.playing])
 
   // ── Keys ───────────────────────────────────────────────────────────
 
@@ -530,7 +572,11 @@ export default function VideoEditor({
       : clips.find(
           (laid) => laid.file !== VIDEO_ENTRY && laid.clip.kind === "video" && !laid.clip.silent
         )?.clip.src
-  const splittable = !!clip && !!splitTarget()
+  const splittable =
+    !!clip &&
+    selection?.type === "clip" &&
+    splitTarget()?.clip.ref === clip.ref &&
+    splitTarget()?.file === selection.file
 
   return (
     <div
@@ -549,7 +595,22 @@ export default function VideoEditor({
             frame={frame}
             playback={playback}
             updating={updating}
-          />
+            onPick={pick}
+            onFrameEvent={(event) => {
+              if (event.event === "video.picked") picking.current?.(event.params.target)
+            }}
+          >
+            {inPlace ? (
+              <InPlaceEditor
+                key={`${inPlace.file}#${inPlace.ref}`}
+                target={inPlace}
+                onClose={() => setInPlace(null)}
+                onCommit={(text) =>
+                  edit((sources) => setVideoText(sources, inPlace.file, inPlace.ref, text))
+                }
+              />
+            ) : null}
+          </PreviewScreen>
         </div>
 
         <aside className="flex w-80 shrink-0 flex-col border-l border-border">
