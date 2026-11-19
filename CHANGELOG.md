@@ -4,6 +4,13 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ## Unreleased
 
+### Highlights
+
+- Auto picks a message's model with the message before it in view, and the tier that one ran on:
+  "Go ahead" after a plan for a large change stays on the plan's tier instead of reading like a
+  thank-you. Each tier's model description now steers the choice too, so a project can say what it
+  uses each tier for, such as code changes across a repository on `heavy`.
+
 ### Upgrade notes
 
 - The agent no longer has a tone of its own: Sixb stopped telling it to speak "not like a

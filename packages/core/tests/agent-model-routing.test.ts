@@ -264,6 +264,84 @@ describe("Sixb picks the model of each turn", () => {
     expect(cold.run.spec).toMatchObject({ model: ref("flash"), tier: "light" })
   })
 
+  test("judges a message alone when it starts the thread", async () => {
+    const { decision, sixb } = await routedSetup()
+
+    await sixb.agent.runs.request({ text: "How many orders shipped?" })
+
+    expect(decision.evaluate.mock.calls[0]?.[0].input).toBe("How many orders shipped?")
+  })
+
+  test("judges a follow-up with the message before it, and the tier that one ran on", async () => {
+    // Proven by removal: return turn.text alone from decisionInput; "Go ahead" reaches the decision
+    // model without the work it approves, and reads like thanks.
+    const { host, decision, sixb } = await routedSetup()
+    decision.answer(HEAVY)
+    const plan = await sixb.agent.runs.request({
+      text: "Plan how to move billing to the new ledger, across every package.",
+    })
+    await finish(host, plan.run)
+
+    await sixb.agent.runs.request({ threadId: plan.run.threadId, text: "Go ahead" })
+
+    expect(decision.evaluate.mock.calls[1]?.[0].input).toBe(
+      [
+        '<previous_message tier="heavy">',
+        "Plan how to move billing to the new ledger, across every package.",
+        "</previous_message>",
+        "",
+        "<message>",
+        "Go ahead",
+        "</message>",
+      ].join("\n")
+    )
+  })
+
+  test("reads the start of a long previous message", async () => {
+    // Proven by removal: drop the clipping; the whole brief reaches a decision that must answer
+    // in 2 seconds.
+    const { host, decision, sixb } = await routedSetup()
+    const brief = `${"a".repeat(2_000)}${"b".repeat(1_000)}`
+    const first = await sixb.agent.runs.request({ text: brief })
+    await finish(host, first.run)
+
+    await sixb.agent.runs.request({ threadId: first.run.threadId, text: "Continue" })
+
+    const input = String(decision.evaluate.mock.calls[1]?.[0].input)
+    expect(input).toContain(`\n${"a".repeat(2_000)}…\n</previous_message>`)
+    expect(input).not.toContain("b")
+  })
+
+  test("shows the decision model what each tier's model is for, as the project describes it", async () => {
+    // Proven by removal: return TIER_WORK[tier] alone from tierOption; the project's description
+    // of its heavy model no longer reaches the choice.
+    const decision = router()
+    const described = (modelId: string, description?: string) => {
+      const model = testLanguageModel(modelId)
+      return { ...model, definition: { ...model.definition, description } }
+    }
+    const { host } = setup({
+      language: {
+        light: described("flash"),
+        standard: described("sonnet", "  Everyday questions about the project's data.  "),
+        heavy: [described("opus", "Changes to the code across a repository."), gpt],
+      },
+      decision: [decision.model],
+    })
+    await createUser(host)
+
+    await userScope(host).agent.runs.request({ text: "Refactor the billing module" })
+
+    const { options } = decision.evaluate.mock.calls[0]?.[0].questions.tier as {
+      readonly options: Record<LanguageModelTier, string>
+    }
+    expect(options.heavy).toEndWith(" This tier's model: Changes to the code across a repository.")
+    expect(options.standard).toEndWith(
+      " This tier's model: Everyday questions about the project's data."
+    )
+    expect(options.light).not.toContain("This tier's model")
+  })
+
   test("steps down on an easy turn right after the thread moves workspaces", async () => {
     // Proven by removal: ignore the turns' places in previousTurn; the turn stays on heavy for a
     // cold workspace prefix it has never cached.

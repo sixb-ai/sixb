@@ -28,25 +28,53 @@ const DECISION_TIMEOUT_MS = 2_000
 /** How long a provider keeps a thread's prompt cache after the last call that read it. */
 const PROMPT_CACHE_TTL_MS = 5 * 60_000
 
-const TIER_QUESTIONS = {
-  tier: question.choice({
-    instructions:
-      "A user sent this message to a data agent. The agent answers from the project's data with " +
-      "tools: it searches and reads objects, queries and aggregates datasets, follows links, runs " +
-      "actions and writes reports. Pick the model tier the answer needs. Judge the work the " +
-      "answer takes, not the length or tone of the message.",
-    options: {
-      light:
-        "A lookup, a count, a filter or a list: one or two queries with an obvious answer. " +
-        "Greetings, thanks and short follow-ups.",
-      standard:
-        "Usual analysis: several queries, comparisons, trends or aggregations, a short summary, " +
-        "or a simple action, with a clear path to the answer.",
-      heavy:
-        "Open-ended work: a multi-step investigation, explaining why something happened, " +
-        "weighing trade-offs, building a plan, or writing a long report.",
-    },
-  }),
+/** How much of the previous message the decision model reads: enough to tell what work it set. */
+const PREVIOUS_MESSAGE_CHARS = 2_000
+
+/** What each tier is for, whatever the project: its models' descriptions say how it uses them. */
+const TIER_WORK: Readonly<Record<LanguageModelTier, string>> = {
+  light:
+    "A lookup, a count, a filter or a list with an obvious answer. Greetings, thanks, and short " +
+    "questions that start no new work.",
+  standard:
+    "Usual work with a clear path: several queries or reads, a comparison, a short summary, a " +
+    "simple action, or a small change to a few files.",
+  heavy:
+    "Open-ended or long work: a multi-step investigation, explaining why something happened, " +
+    "weighing trade-offs, building a plan, writing a long report, or changes across many files " +
+    "that must be checked.",
+}
+
+/**
+ * The tier question for a project: the work each tier is for, and the description of the model a
+ * routed turn runs on in that tier, which the project can write to steer the choice.
+ */
+function tierQuestions(language: LanguageModelCatalog) {
+  return {
+    tier: question.choice({
+      instructions:
+        "A user sent this message to an agent that works in a project with tools: it reads and " +
+        "changes the project's data, runs actions, writes documents, and in a workspace runs " +
+        "commands and edits files. Pick the model tier the answer needs. Judge the work the " +
+        "answer takes, not the length or tone of the message. When the input holds the " +
+        "previous message, with the tier it ran on, judge the <message> in its light: a short " +
+        "message that carries on that work, such as approving a plan or asking for the next " +
+        "step, takes the tier the work needs.",
+      options: {
+        light: tierOption(language, "light"),
+        standard: tierOption(language, "standard"),
+        heavy: tierOption(language, "heavy"),
+      },
+    }),
+  }
+}
+
+function tierOption(language: LanguageModelCatalog, tier: LanguageModelTier): string {
+  const description = language.tiers.includes(tier)
+    ? language.getByTier(tier).model.definition.description?.trim()
+    : undefined
+
+  return description ? `${TIER_WORK[tier]} This tier's model: ${description}` : TIER_WORK[tier]
 }
 
 export interface TurnModelChoice {
@@ -58,15 +86,23 @@ export interface TurnModelChoice {
   readonly tierProbabilities?: LanguageModelTierProbabilities
 }
 
+/** A turn whose model Sixb picks. */
+export interface TurnToRoute {
+  /** The words of its message. */
+  readonly text: string
+  /** The thread's previous turn, absent for its first. */
+  readonly previous?: {
+    readonly run: ConversationAgentRunRecord
+    /** The words of the message that started it, which a short follow-up carries on. */
+    readonly text?: string
+  }
+  /** Where the turn runs: the previous turn's cache holds its prompt only if it ran there. */
+  readonly place: AgentTurnPlace
+}
+
 export interface TurnModelRouter {
-  /**
-   * The model of a turn that names none, given the thread's previous turn and where this one runs.
-   */
-  choose(
-    text: string,
-    previous: ConversationAgentRunRecord | undefined,
-    place: AgentTurnPlace
-  ): Promise<TurnModelChoice>
+  /** The model of a turn that names none. */
+  choose(turn: TurnToRoute): Promise<TurnModelChoice>
 }
 
 /**
@@ -74,10 +110,12 @@ export interface TurnModelRouter {
  * Checked at startup: a model that cannot would leave every turn on `standard`, warning each time.
  */
 export function assertTurnModelRouting(models: ModelCatalog | undefined): void {
-  const tiers = models?.language?.tiers ?? []
+  const language = models?.language
   const decision = models?.decision?.default
-  if (tiers.length === 0 || !decision) return
-  if (supportsQuestion(decision.model.definition.capabilities, TIER_QUESTIONS.tier)) return
+  if (!language || language.tiers.length === 0 || !decision) return
+
+  const { tier } = tierQuestions(language)
+  if (supportsQuestion(decision.model.definition.capabilities, tier)) return
 
   throw new RuntimeError(
     `[Sixb] The default decision model '${decision.provider}/${decision.modelId}' cannot pick the tier of an Agent turn: it needs 'choice' questions with ${LANGUAGE_MODEL_TIERS.length} options. Put a decision model that supports them first in 'models.decision', or configure 'models.language' as a list.`
@@ -92,25 +130,55 @@ export function createTurnModelRouter(
   const language = models?.language
   if (!language || language.tiers.length === 0 || !models?.decision) return undefined
 
+  const questions = tierQuestions(language)
+
   return {
-    async choose(text, previous, place) {
+    async choose(turn) {
+      const last = turn.previous && previousTurn(language, turn.previous.run, turn.place)
+
       // Files sent alone leave nothing to judge: the turn aims for standard, and the cache rule
       // keeps a warm thread on its model.
-      const tierProbabilities = text.trim() ? await askTier(decision, text) : undefined
+      const tierProbabilities = turn.text.trim()
+        ? await askTier(decision, questions, decisionInput(turn, last))
+        : undefined
       const tier = tierProbabilities ? tierFor(tierProbabilities) : "standard"
 
       return {
-        model: turnModel(language, tier, previous, place),
+        model: turnModel(language, tier, last),
         ...(tierProbabilities ? { tierProbabilities } : {}),
       }
     },
   }
 }
 
+/**
+ * The message, after the one before it and the tier that one ran on: "Go ahead" after a plan for
+ * a large change asks for that change, and judged alone it reads like thanks.
+ */
+function decisionInput(turn: TurnToRoute, last: PreviousTurn | undefined): string {
+  const before = turn.previous?.text?.trim()
+  if (!before) return turn.text
+
+  const clipped =
+    before.length > PREVIOUS_MESSAGE_CHARS ? `${before.slice(0, PREVIOUS_MESSAGE_CHARS)}…` : before
+  const tier = last ? ` tier="${last.tier}"` : ""
+
+  return [
+    `<previous_message${tier}>`,
+    clipped,
+    "</previous_message>",
+    "",
+    "<message>",
+    turn.text,
+    "</message>",
+  ].join("\n")
+}
+
 /** The decision model's answer, or nothing when it fails or is too slow. */
 async function askTier(
   decision: DecisionModelsRuntime,
-  text: string
+  questions: ReturnType<typeof tierQuestions>,
+  input: string
 ): Promise<LanguageModelTierProbabilities | undefined> {
   const timeout = new AbortController()
   const timer = setTimeout(() => {
@@ -122,7 +190,7 @@ async function askTier(
   try {
     // The race holds the turn to its timeout even when a provider ignores the signal.
     const { output } = await Promise.race([
-      decision.evaluate({ input: text, questions: TIER_QUESTIONS, signal: timeout.signal }),
+      decision.evaluate({ input, questions, signal: timeout.signal }),
       rejectOnAbort(timeout.signal),
     ])
     const { light, standard, heavy } = output.tier.probabilities
@@ -155,11 +223,9 @@ function tierFor(probabilities: LanguageModelTierProbabilities): LanguageModelTi
 function turnModel(
   language: LanguageModelCatalog,
   tier: LanguageModelTier,
-  previous: ConversationAgentRunRecord | undefined,
-  place: AgentTurnPlace
+  last: PreviousTurn | undefined
 ): LanguageModelEntry {
   const target = language.getByTier(tier)
-  const last = previous && previousTurn(language, previous, place)
   if (!last) return target
 
   const change = tierRank(target.tier ?? tier) - tierRank(last.tier)
