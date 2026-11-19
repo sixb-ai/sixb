@@ -2783,4 +2783,49 @@ describe("a video", () => {
       "scenes/intro.html",
     ])
   })
+
+  // Guard proof: upload every large file again (drop storedAlready from publish, publish-tool.ts);
+  // the update from the same folder then posts the recording a second time.
+  test("never uploads again a recording the version holds, while its folder keeps it", async () => {
+    writeFilm("film")
+    const recording = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)
+    writeFileSync(join(root, "film/media/clip.mp4"), recording)
+    const api = startSandboxApi()
+    try {
+      const env = await installSandboxCli(api.baseUrl)
+      const installed = install()
+      const { artifactId } = (await publish(
+        { path: "film", kind: "video", title: "Launch film" },
+        { installed, env }
+      )) as { artifactId: string }
+      expect(api.requests).toEqual(["POST /api/files"])
+      const clip = async () =>
+        (await storage.artifacts.getVersion({ projectId, artifactId, version: 1 }))?.files.find(
+          (file) => file.path === "media/clip.mp4"
+        )?.file
+      const footage = await clip()
+
+      write("film/scenes/intro.html", scene("intro", "<h1>Ship faster</h1>"))
+      await publishVersion(
+        { id: artifactId, path: "film", title: "Launch film" },
+        { installed, env }
+      )
+
+      expect(api.requests).toEqual(["POST /api/files"])
+      expect(await clip()).toEqual(footage)
+
+      // Other bytes at its path are another recording.
+      recording[0] = 7
+      writeFileSync(join(root, "film/media/clip.mp4"), recording)
+      await publishVersion(
+        { id: artifactId, path: "film", title: "Launch film" },
+        { installed, env }
+      )
+
+      expect(api.requests).toEqual(["POST /api/files", "POST /api/files"])
+      expect((await clip())?.digest).not.toBe(footage?.digest)
+    } finally {
+      api.close()
+    }
+  })
 })

@@ -193,6 +193,29 @@ export async function statSandboxFile(
 }
 
 /**
+ * The SHA-256 of one regular file, checked as {@link readSandboxFile} checks it, hashed in the
+ * sandbox: the bytes never leave it. Resolves to its size and digest, as a `FileRef` writes it.
+ */
+export async function digestSandboxFile(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    /** An absolute path, as `resolveSandboxPath` returns it. */
+    readonly path: string
+  }
+): Promise<{ readonly sizeBytes: number; readonly digest: string }> {
+  const result = await runCheckedFileScript(handle, DIGEST_SANDBOX_FILE_SCRIPT, input, {})
+  const [size = "", hex = ""] = result.stdout.trim().split("\t")
+  const sizeBytes = Number(size)
+  if (result.exitCode !== 0 || !Number.isSafeInteger(sizeBytes) || !/^[0-9a-f]{64}$/.test(hex)) {
+    throw new SandboxFileError(
+      "failed",
+      `file could not be hashed (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+  return { sizeBytes, digest: `sha256:${hex}` }
+}
+
+/**
  * Upload one regular file, checked as {@link readSandboxFile} checks it, with the run's own `sixb`:
  * it reaches the API as the run, so the bytes go from the sandbox's disk to blob storage, never
  * through a command's output or the worker's memory. Resolves to the reference the API issued,
@@ -555,6 +578,16 @@ head -c "$max_bytes" "$resolved" | base64 | tr -d '\\n'`
 const STAT_SANDBOX_FILE_SCRIPT = `# sixb-stat-sandbox-file
 ${CHECKED_FILE_PRELUDE}
 printf '%s\\n' "$size"`
+
+// Prints `size<TAB>hex`. coreutils' sha256sum where there is one, else shasum, as on macOS.
+const DIGEST_SANDBOX_FILE_SCRIPT = `# sixb-digest-sandbox-file
+${CHECKED_FILE_PRELUDE}
+if command -v sha256sum >/dev/null 2>&1; then
+  sum="$(sha256sum < "$resolved")"
+else
+  sum="$(shasum -a 256 < "$resolved")"
+fi
+printf '%s\\t%s\\n' "$size" "\${sum%% *}"`
 
 // Fetches each \`<artifact> <version> <path> <to> <bytes>\` with the run's own \`sixb\`, which writes
 // it whole or not at all, and refuses one that is not as large as its version says.
