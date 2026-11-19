@@ -55,6 +55,9 @@ interface WorkerFactory {
 const AGENT_ORIGIN_REQUIRED =
   "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (agent workers call the API)"
 
+const RENDER_ORIGIN_REQUIRED =
+  "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (render sandboxes fetch their files from the API)"
+
 const workerFactories: Record<WorkerType, WorkerFactory> = {
   sync: {
     create: (sixb, options) =>
@@ -71,7 +74,7 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
         subagentConcurrencyPerRun: options.subagentConcurrencyPerRun,
       }),
     unmetRequirement: (options, agentApiRequired) =>
-      !agentApiRequired || agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
+      !agentApiRequired || apiPublicOrigin(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
   },
   pipeline: {
     create: (sixb, options) =>
@@ -95,6 +98,10 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   render: {
     create: (sixb, options) =>
       new RenderWorker(sixb, { concurrency: options.workerConcurrency?.render }),
+    // Without the origin it would still print PDFs, and fail every job that fetches a file only
+    // after its retries, where nobody looks.
+    unmetRequirement: (options) =>
+      apiPublicOrigin(options.agentApiBaseUrl) ? null : RENDER_ORIGIN_REQUIRED,
   },
 }
 
@@ -238,12 +245,12 @@ function isWorkerType(value: string): value is WorkerType {
   return WORKER_TYPES.some((workerType) => workerType === value)
 }
 
-function agentApiBaseUrl(value: string | undefined): string | null {
+function apiPublicOrigin(value: string | undefined): string | null {
   return configuredOrigin(value, "SIXB_API_PUBLIC_ORIGIN", "API public origin")
 }
 
 function resolveAgentApiBaseUrl(value: string | undefined): string {
-  const apiBaseUrl = agentApiBaseUrl(value)
+  const apiBaseUrl = apiPublicOrigin(value)
   if (!apiBaseUrl) {
     throw new Error(`[SixbWorker] The agent worker ${AGENT_ORIGIN_REQUIRED}.`)
   }
