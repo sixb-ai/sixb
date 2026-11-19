@@ -77,11 +77,13 @@ export function ControlBar({
   const messages = useArtifactMessages().video
   const { playing, muted, volume } = playback
   const silent = muted || volume === 0
+  // Inline on a phone, the bar keeps to the picture's foot: smaller buttons, closer together.
+  const tight = compact && !fullscreen
 
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 px-3 pb-2 sm:px-4 sm:pb-3",
+        tight ? "flex flex-col gap-0.5 px-2 pb-1" : "flex flex-col gap-1 px-3 pb-2 sm:px-4 sm:pb-3",
         // Filling a phone, the bar stays clear of its home indicator and, sideways, its notch.
         fullscreen &&
           "pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]"
@@ -89,7 +91,12 @@ export function ControlBar({
     >
       {scrubber}
 
-      <div className="flex items-center gap-0.5 text-white">
+      <div
+        className={cn(
+          "flex items-center gap-0.5 text-white",
+          tight && "[&_button]:size-9 [@media(pointer:coarse)]:[&_button]:size-10"
+        )}
+      >
         <BarButton
           label={playing ? messages.pause : messages.play}
           keys="K"
@@ -122,13 +129,13 @@ export function ControlBar({
           </div>
         </div>
 
-        <span className="ml-1.5 shrink-0 text-[12.5px] font-medium text-white/90 tabular-nums">
+        <span className="ml-1.5 shrink-0 text-[12.5px] font-medium text-white tabular-nums [text-shadow:0_1px_2px_rgb(0_0_0/0.5)]">
           {formatClock(playback.time)}
-          <span className="text-white/55"> / {formatClock(playback.duration)}</span>
+          <span className="text-white/70"> / {formatClock(playback.duration)}</span>
         </span>
 
         {chapter ? (
-          <span className="ml-3 hidden min-w-0 truncate text-[12.5px] text-white/75 @lg:block">
+          <span className="ml-3 hidden min-w-0 truncate text-[12.5px] text-white/85 [text-shadow:0_1px_2px_rgb(0_0_0/0.5)] @lg:block">
             <span aria-hidden="true" className="mr-2 text-white/35">
               ·
             </span>
