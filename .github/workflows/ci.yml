@@ -111,6 +111,9 @@ jobs:
       - name: Generate frame editor
         run: bun run generate:frame-editor
 
+      - name: Copy HyperFrames runtime
+        run: bun run generate:hyperframes-runtime
+
       - name: Verify generated artifacts are committed
         run: git diff --exit-code
 

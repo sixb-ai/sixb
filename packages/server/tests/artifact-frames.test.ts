@@ -9,7 +9,11 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { BlobStorageError } from "@sixb/core/blob-storage/server"
-import { createArtifactFrame, injectFrameAssets } from "@sixb/core/internal/artifacts/frames"
+import {
+  createArtifactFrame,
+  HYPERFRAMES_VERSION,
+  injectFrameAssets,
+} from "@sixb/core/internal/artifacts/frames"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -585,6 +589,63 @@ describe("a deck's frame", () => {
       expect(response.status, path).toBe(404)
       expectFrameHeaders(response, path)
     }
+  })
+})
+
+describe("a video's frame", () => {
+  const SCENE = `<template>
+  <div data-composition-id="intro" data-width="1280" data-height="720"><h1>Hello</h1></div>
+</template>`
+  const INDEX = `<!doctype html>
+<html><head><title>Film</title></head><body>
+<div data-composition-id="main" data-width="1280" data-height="720">
+  <div id="intro" data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2"></div>
+</div>
+</body></html>`
+
+  // Reproduce by leaving `video` out of frameLayout in frames/entries.ts: the mint answers 409.
+  test("serves its entry with the runtime and HyperFrames' own, its scenes as they are", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put("index.html", INDEX, "text/html"),
+      await fixture.put("scenes/intro.html", SCENE, "text/html"),
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    expect(minted.status).toBe(200)
+    const { path } = (await minted.json()) as { path: string }
+
+    // No kit: a video shows as HyperFrames renders it.
+    const html = await (await fixture.app.fetch(new Request(url(`${path}index.html`)))).text()
+    expect(html).toContain(
+      '<head><script src="__sixb/runtime.js" data-sixb-layout="video"></script><script src="__sixb/hyperframes.js"></script><title>'
+    )
+    expect(html).not.toContain("stylesheet")
+
+    const scene = await fixture.app.fetch(new Request(url(`${path}scenes/intro.html`)))
+    expect(await scene.text()).toBe(SCENE)
+
+    const runtime = await fixture.app.fetch(new Request(url(`${path}__sixb/hyperframes.js`)))
+    expectFrameHeaders(runtime, "hyperframes.js")
+    expect(runtime.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+    const body = await runtime.text()
+    expect(body).toStartWith(
+      `/*! HyperFrames runtime ${HYPERFRAMES_VERSION}, from @hyperframes/core`
+    )
+    expect(body).toContain('"hf-preview"')
+  })
+
+  test("lets the runtime load from the frame alone, and play its version's media", async () => {
+    // Its scenes and recordings are the version's files: the policy needs nothing beyond them.
+    const { app, frame } = await deck()
+    const response = await app.fetch(new Request(url(`${frame.path}__sixb/hyperframes.js`)))
+    const policy = response.headers.get("content-security-policy") ?? ""
+    const base = `http://api.localhost${frame.path}`
+    expect(policy).toContain(`script-src ${base} 'unsafe-inline'`)
+    expect(policy).toContain(`media-src ${base} data: blob:`)
+    expect(policy).toContain(`connect-src ${base}`)
+    expect(policy).toContain("sandbox allow-scripts allow-modals")
+    expect(policy).not.toContain("allow-same-origin")
   })
 })
 

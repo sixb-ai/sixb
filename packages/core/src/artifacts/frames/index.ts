@@ -22,5 +22,6 @@ export {
 } from "./assets"
 export { type FrameLayout, frameEntries, frameLayout } from "./entries"
 export { ARTIFACT_FRAME_ROUTE_PREFIX, createArtifactFrame, resolveArtifactFrame } from "./grants"
+export { HYPERFRAMES_VERSION } from "./hyperframes"
 export { FRAME_DEFAULT_THEMES } from "./kit"
 export { type LayoutProblem, layoutProbe } from "./probe"

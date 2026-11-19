@@ -19,7 +19,7 @@ export function LiveAvatars({ live }: { readonly live: LiveArtifact }) {
   if (people.length === 0 && !working) return null
 
   // A shared link's guest is named as one: the name is only what they typed.
-  const labels = { guest: messages.canvas.comments.guest, teamMember: messages.live.teamMember }
+  const labels = { guest: messages.comments.guest, teamMember: messages.live.teamMember }
   const nameOf = (person: (typeof people)[number]) => {
     const name = livePersonName(person, labels)
     return person.guest && person.name ? `${name} (${labels.guest})` : name

@@ -21,50 +21,36 @@ import {
   Eye,
   Lock,
   MessageSquare,
-  MessageSquarePlus,
   MoreHorizontal,
   RotateCcw,
   Sparkles,
   Trash2,
-  X,
 } from "lucide-react"
-import {
-  type ComponentPropsWithoutRef,
-  forwardRef,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
-import { useSharedGuest } from "../../../shared-session"
-import { GuestBadge } from "../../guest-badge"
-import { useArtifactMessages } from "../../messages"
-import { PersonAvatar } from "../../person-avatar"
-import { CommentComposer } from "./comment-pins"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { useSharedGuest } from "../../shared-session"
+import { GuestBadge } from "../guest-badge"
+import { useArtifactMessages } from "../messages"
+import { PersonAvatar } from "../person-avatar"
+import { IconButton, SidePanel } from "../side-panel"
 import {
   type ArtifactComment,
   CommentActionError,
   type CommentAuthor,
   type CommentThread,
 } from "./comments"
+import { CommentComposer } from "./composer"
 
-// The canvas's comments, as threads: the open ones, or those resolved, each saying where it is,
+// An artifact's comments, as threads: the open ones, or those resolved, each saying where it is,
 // who wrote it and its replies, resolved, reopened, replied to or deleted in place. The reader
 // picks some to send to the Agent, which puts them, quoted with where they are, in the message
-// they are writing. Beside the canvas while it is wide, a sheet over its foot on a phone.
+// they are writing. Beside the artifact while it is wide, a sheet over its foot on a phone. Where
+// a thread is, its kind says: a canvas's board and element, a video's instant and scene.
 //
 // A member is told who reads what: a reply in a guest's thread reaches the guest, and once guests
-// comment on the canvas, the team's own threads are marked internal. A guest reads only their
+// comment on the artifact, the team's own threads are marked internal. A guest reads only their
 // link's threads, as the API lists them, and is told nothing of the others.
 
 export type CommentFilter = "open" | "resolved"
-
-/** What the panel shows of a thread's place: its board's title, and its element, or none left. */
-export interface ThreadPlace {
-  readonly board: string | null
-  readonly element: string | null
-  readonly gone: boolean
-}
 
 export function CommentsPanel({
   threads,
@@ -72,7 +58,8 @@ export function CommentsPanel({
   failed,
   filter,
   active,
-  placeOf,
+  where,
+  emptyHint,
   nameOf,
   canManage,
   onFilter,
@@ -82,13 +69,17 @@ export function CommentsPanel({
   onDelete,
   onSend,
   onClose,
+  inline = false,
 }: {
   readonly threads: readonly CommentThread[]
   readonly loading: boolean
   readonly failed: boolean
   readonly filter: CommentFilter
   readonly active: string | null
-  readonly placeOf: (thread: CommentThread) => ThreadPlace
+  /** Where a thread is, as its artifact's kind says it. */
+  readonly where: (thread: CommentThread) => ReactNode
+  /** How to leave the first comment, under the empty list. */
+  readonly emptyHint: ReactNode
   readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
   readonly canManage: (comment: ArtifactComment) => boolean
   readonly onFilter: (filter: CommentFilter) => void
@@ -99,8 +90,10 @@ export function CommentsPanel({
   /** Puts these threads in the message to the Agent; none where there is no conversation. */
   readonly onSend: ((threads: readonly CommentThread[]) => void) | null
   readonly onClose: () => void
+  /** Filling the room it is given, as `SidePanel` says. */
+  readonly inline?: boolean
 }) {
-  const messages = useArtifactMessages().canvas.comments
+  const messages = useArtifactMessages().comments
   const open = threads.filter((thread) => !thread.comment.resolvedAt)
   const resolved = threads.filter((thread) => thread.comment.resolvedAt)
   const shown = filter === "open" ? open : resolved
@@ -109,7 +102,7 @@ export function CommentsPanel({
   const [sent, setSent] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
 
-  // Guests reach the canvas once one has commented: the team's own threads then say so. A guest
+  // Guests reach the artifact once one has commented: the team's own threads then say so. A guest
   // is listed no thread of the team's.
   const member = useSharedGuest() === null
   const guestsHere = threads.some((thread) => thread.comment.author.type === "guest")
@@ -146,44 +139,27 @@ export function CommentsPanel({
   }
 
   return (
-    <aside
-      aria-label={messages.panel}
+    <SidePanel
+      label={messages.panel}
+      title={messages.title}
+      count={open.length}
+      closeLabel={messages.close}
+      onClose={onClose}
+      inline={inline}
       data-comments-panel=""
-      className={cn(
-        // A sheet over the canvas's foot while it is narrow, a column beside it once it is wide.
-        "absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-[0_-12px_32px_-18px_rgb(0_0_0/0.35)]",
-        "motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in-0",
-        "@3xl/canvas:relative @3xl/canvas:inset-auto @3xl/canvas:z-auto @3xl/canvas:h-full @3xl/canvas:max-h-none @3xl/canvas:w-[22rem] @3xl/canvas:shrink-0 @3xl/canvas:rounded-none @3xl/canvas:border-t-0 @3xl/canvas:border-l @3xl/canvas:shadow-none @3xl/canvas:slide-in-from-right-4 @3xl/canvas:slide-in-from-bottom-0"
-      )}
+      actions={
+        onSend && filter === "open" && open.length > 0 && !choosing ? (
+          <button
+            type="button"
+            onClick={() => setChoosing(true)}
+            className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-primary outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
+          >
+            <Sparkles aria-hidden="true" />
+            {messages.select}
+          </button>
+        ) : null
+      }
     >
-      <span
-        aria-hidden="true"
-        className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border @3xl/canvas:hidden"
-      />
-      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <h2 className="m-0 text-sm font-semibold">{messages.title}</h2>
-        {open.length > 0 ? (
-          <span className="rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground tabular-nums">
-            {open.length}
-          </span>
-        ) : null}
-        <div className="ml-auto flex items-center gap-1">
-          {onSend && filter === "open" && open.length > 0 && !choosing ? (
-            <button
-              type="button"
-              onClick={() => setChoosing(true)}
-              className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-primary outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
-            >
-              <Sparkles aria-hidden="true" />
-              {messages.select}
-            </button>
-          ) : null}
-          <IconButton label={messages.close} onClick={onClose}>
-            <X />
-          </IconButton>
-        </div>
-      </header>
-
       <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
         <div
           role="group"
@@ -238,19 +214,7 @@ export function CommentsPanel({
             resolved.length > 0 ? (
               <Empty title={messages.emptyOpen} />
             ) : (
-              <Empty
-                title={messages.empty}
-                hint={
-                  <>
-                    {messages.emptyHint.before}{" "}
-                    <MessageSquarePlus
-                      className="inline size-3.5 align-[-0.2em] text-foreground"
-                      aria-label={messages.tool}
-                    />{" "}
-                    {messages.emptyHint.after}
-                  </>
-                }
-              />
+              <Empty title={messages.empty} hint={emptyHint} />
             )
           ) : (
             <Empty title={messages.emptyResolved} />
@@ -261,7 +225,7 @@ export function CommentsPanel({
               <ThreadCard
                 key={thread.comment.id}
                 thread={thread}
-                place={placeOf(thread)}
+                where={where(thread)}
                 active={active === thread.comment.id}
                 choosing={choosing}
                 chosen={chosen.has(thread.comment.id)}
@@ -322,13 +286,13 @@ export function CommentsPanel({
           {messages.sent}
         </p>
       ) : null}
-    </aside>
+    </SidePanel>
   )
 }
 
 function ThreadCard({
   thread,
-  place,
+  where,
   active,
   choosing,
   chosen,
@@ -343,14 +307,14 @@ function ThreadCard({
   onDelete,
 }: {
   readonly thread: CommentThread
-  readonly place: ThreadPlace
+  readonly where: ReactNode
   readonly active: boolean
   readonly choosing: boolean
   readonly chosen: boolean
   readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
   /** The guest who started the thread, who reads its replies, as a member is told. */
   readonly guest: string | null
-  /** The team's own thread, on a canvas guests comment on. */
+  /** The team's own thread, on an artifact guests comment on. */
   readonly internal: boolean
   readonly manages: boolean
   readonly onChoose: (chosen: boolean) => void
@@ -359,7 +323,7 @@ function ThreadCard({
   readonly onResolve: (resolved: boolean) => Promise<void>
   readonly onDelete: () => Promise<void>
 }) {
-  const messages = useArtifactMessages().canvas.comments
+  const messages = useArtifactMessages().comments
   const { comment, replies, number } = thread
   const resolved = Boolean(comment.resolvedAt)
   const [replying, setReplying] = useState(false)
@@ -416,10 +380,10 @@ function ThreadCard({
               onClick={onActivate}
               className="min-w-0 flex-1 rounded-sm text-left text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Where place={place} />
+              {where}
             </button>
             {manages ? (
-              <div className="-mt-1 -mr-1 flex shrink-0 items-center opacity-100 transition-opacity @3xl/canvas:opacity-0 @3xl/canvas:group-focus-within:opacity-100 @3xl/canvas:group-hover:opacity-100 @3xl/canvas:group-data-[active]:opacity-100">
+              <div className="-mt-1 -mr-1 flex shrink-0 items-center opacity-100 transition-opacity @3xl:opacity-0 @3xl:group-focus-within:opacity-100 @3xl:group-hover:opacity-100 @3xl:group-data-[active]:opacity-100">
                 <IconButton
                   label={resolved ? messages.reopen : messages.resolve}
                   onClick={() => void onResolve(!resolved)}
@@ -508,9 +472,9 @@ function ThreadCard({
   )
 }
 
-/** Beside a thread only the team reads, on a canvas guests comment on. */
+/** Beside a thread only the team reads, on an artifact guests comment on. */
 function InternalBadge() {
-  const messages = useArtifactMessages().canvas.comments
+  const messages = useArtifactMessages().comments
   return (
     <span
       title={messages.internalHint}
@@ -518,31 +482,6 @@ function InternalBadge() {
     >
       <Lock aria-hidden="true" />
       {messages.internal}
-    </span>
-  )
-}
-
-/** Where a thread is: its board, and its element by its first words, or that it is gone. */
-function Where({ place }: { readonly place: ThreadPlace }) {
-  const messages = useArtifactMessages().canvas.comments
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
-      <span className="truncate font-medium text-foreground/80">
-        {place.board ?? messages.onCanvas}
-      </span>
-      {place.board ? (
-        <>
-          <span aria-hidden="true">·</span>
-          <span className={cn("min-w-0 truncate", place.gone && "line-through decoration-1")}>
-            {place.element ? `“${place.element}”` : messages.wholeBoard}
-          </span>
-        </>
-      ) : null}
-      {place.gone ? (
-        <span className="rounded-sm bg-muted px-1 text-[10.5px] text-muted-foreground">
-          {messages.elementGone}
-        </span>
-      ) : null}
     </span>
   )
 }
@@ -557,7 +496,7 @@ function Message({
   /** At the end of its author's line: what the thread is, such as internal. */
   readonly badge?: ReactNode
 }) {
-  const messages = useArtifactMessages().canvas.comments
+  const messages = useArtifactMessages().comments
   const when = useWhen()
   const author = nameOf(comment)
   const name = author ? (author.you ? messages.you : author.name) : messages.someone
@@ -610,22 +549,3 @@ function Empty({ title, hint }: { readonly title: string; readonly hint?: ReactN
     </div>
   )
 }
-
-/** A quiet icon button; a menu's trigger takes it as its own. */
-const IconButton = forwardRef<
-  HTMLButtonElement,
-  ComponentPropsWithoutRef<"button"> & { readonly label: string }
->(function IconButton({ label, children, ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={label}
-      title={label}
-      className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted [&_svg]:size-4"
-      {...props}
-    >
-      {children}
-    </button>
-  )
-})

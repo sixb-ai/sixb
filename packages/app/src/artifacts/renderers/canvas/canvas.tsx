@@ -26,6 +26,8 @@ import {
   useRef,
   useState,
 } from "react"
+import { CommentModeHint, CommentTools } from "../../comments/commenting"
+import { CommentsPanel } from "../../comments/panel"
 import { useStartEditing } from "../../edit-session"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
@@ -36,8 +38,7 @@ import { CANVAS_EDGE_TYPES } from "./arrows"
 import { LiveBoardsProvider, useLiveSet } from "./board"
 import type { CommentPick } from "./board-editor"
 import { CanvasCommentPins } from "./comment-pins"
-import { CommentModeHint, CommentTools, useCanvasCommenting } from "./commenting"
-import { CommentsPanel } from "./comments-panel"
+import { CanvasCommentsHint, ThreadWhere, useCanvasCommenting } from "./commenting"
 import { CanvasControls } from "./controls"
 import type { Box } from "./draft"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
@@ -415,7 +416,7 @@ function Board({
                     onCancelDraft={cancelDraft}
                   />
                   <Panel position="top-right" className="!m-3">
-                    <CommentTools commenting={commenting} />
+                    <CommentTools commenting={commenting} onToggle={commenting.toggleCommenting} />
                   </Panel>
                   {commenting.commenting ? <ZoomVariable root={board.root} /> : null}
                 </>
@@ -426,7 +427,10 @@ function Board({
         {commenting.enabled && commenting.commenting && !draft && !opened ? (
           // An opened board says it in its header instead, clear of what is commented on.
           <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 max-sm:bottom-20">
-            <CommentModeHint onExit={() => setCommenting(false)} />
+            <CommentModeHint
+              hint={messages.comments.modeHint}
+              onExit={() => setCommenting(false)}
+            />
           </div>
         ) : null}
         {opened && version ? (
@@ -451,6 +455,7 @@ function Board({
                   tools: (
                     <CommentTools
                       commenting={commenting}
+                      onToggle={commenting.toggleCommenting}
                       className="border-0 bg-transparent p-0 shadow-none"
                     />
                   ),
@@ -479,7 +484,8 @@ function Board({
           failed={commenting.failed}
           filter={commenting.filter}
           active={commenting.active}
-          placeOf={commenting.placeOf}
+          where={(thread) => <ThreadWhere place={commenting.placeOf(thread)} />}
+          emptyHint={<CanvasCommentsHint />}
           nameOf={commenting.nameOf}
           canManage={commenting.canManage}
           onFilter={commenting.setFilter}
