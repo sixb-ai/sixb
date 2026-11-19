@@ -10,6 +10,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { loadSandboxCliAssets } from "@sixb/cli-core"
 import {
   AgentToolPublicError,
   AuthorizationError,
@@ -255,6 +256,8 @@ type ToolOptions = {
   readonly reader?: (reader: ReturnType<typeof readerFor>) => void
   /** The blob storage the tools store and read the Agent's files in; the project's when omitted. */
   readonly blobStorage?: BlobStorage
+  /** The run's environment in its sandbox, as `sixb` reads it. */
+  readonly env?: Readonly<Record<string, string>>
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -329,6 +332,7 @@ function tools(options: ToolOptions = {}) {
     resolveSandbox: async () => ({
       sandbox: sandbox(options.check),
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      ...(options.env ? { env: options.env } : {}),
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
@@ -366,6 +370,46 @@ function documentFile(markdown: string) {
     fileName: "document.md",
     mediaType: "text/markdown",
   })
+}
+
+/** The run's `sixb`, installed in the sandbox as a run installs it, reaching `apiBaseUrl`. */
+async function installSandboxCli(apiBaseUrl: string): Promise<Record<string, string>> {
+  const cli = await loadSandboxCliAssets()
+  const bin = join(root, SANDBOX_CONTEXT_DIRECTORY, "bin")
+  const lib = join(root, SANDBOX_CONTEXT_DIRECTORY, "lib")
+  for (const directory of [bin, lib]) mkdirSync(directory, { recursive: true })
+  writeFileSync(join(bin, "sixb"), cli.launcher, { mode: 0o755 })
+  writeFileSync(join(lib, "sixb.mjs"), cli.artifact)
+  return { SIXB_BIN_DIR: bin, SIXB_API_BASE_URL: apiBaseUrl, SIXB_RUN_CONTEXT: "" }
+}
+
+/** The API's simple upload, as far as the sandbox's `sixb` reaches it: into the project's blobs. */
+function startUploadApi() {
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    maxRequestBodySize: 64 * 1024 * 1024,
+    async fetch(request) {
+      const { pathname } = new URL(request.url)
+      requests.push(`${request.method} ${pathname}`)
+      const file =
+        request.method === "POST" && pathname === "/api/files"
+          ? (await request.formData()).get("file")
+          : null
+      if (!(file instanceof File)) {
+        return Response.json({ error: "Unexpected request" }, { status: 404 })
+      }
+      return Response.json(
+        await blobStorage.put({ body: file, fileName: file.name, mediaType: file.type })
+      )
+    },
+  })
+  return {
+    baseUrl: `http://127.0.0.1:${server.port}`,
+    requests,
+    close: () => server.stop(true),
+  }
 }
 
 function read(path: string): string {
@@ -1582,6 +1626,59 @@ describe("publish_artifact", () => {
 
   // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;
   // a model that fills every field, as strict mode has it, guesses a kind and is refused.
+  // Reproduce by raising SANDBOX_UPLOAD_BYTES past the recording: it is read through stdout, and
+  // the API never sees an upload. Leave it in the copy that `replace` removes, and publishing again
+  // from that copy finds nothing to copy back.
+  test("uploads a large file from the sandbox with its own sixb, never through stdout", async () => {
+    const recording = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)
+    mkdirSync(join(root, "work"), { recursive: true })
+    writeFileSync(join(root, "work/demo.mp4"), recording)
+    const api = startUploadApi()
+    try {
+      const budget = new AgentFileBudget()
+      const installed = install()
+      const env = await installSandboxCli(api.baseUrl)
+
+      const output = (await publish(
+        { path: "work/demo.mp4", kind: "file", title: "Demo" },
+        { budget, installed, env }
+      )) as { artifactId: string }
+
+      // Past the API's simple-upload ceiling, `sixb` uploads staged: its own tests cover that.
+      expect(api.requests).toEqual(["POST /api/files"])
+      const version = await storage.artifacts.getVersion({
+        projectId,
+        artifactId: output.artifactId,
+        version: 1,
+      })
+      const digest = `sha256:${new Bun.CryptoHasher("sha256").update(recording).digest("hex")}`
+      expect(version?.files).toEqual([
+        {
+          path: "demo.mp4",
+          file: expect.objectContaining({
+            digest,
+            sizeBytes: recording.byteLength,
+            mediaType: "video/mp4",
+          }),
+        },
+      ])
+      expect(budget.reservedBytes).toBe(recording.byteLength)
+
+      // The copy is made in the sandbox, from the file it uploaded: also when the Agent publishes
+      // again from that very copy, which the update replaces.
+      const copy = `.sixb/agent/artifacts/${output.artifactId}/demo.mp4`
+      expect(readFileSync(join(root, copy))).toEqual(Buffer.from(recording))
+      await publishVersion(
+        { id: output.artifactId, path: copy, title: "Demo, final" },
+        { budget, installed, env }
+      )
+      expect(readFileSync(join(root, copy))).toEqual(Buffer.from(recording))
+      expect(budget.reservedBytes).toBe(recording.byteLength)
+    } finally {
+      api.close()
+    }
+  })
+
   test("with an id, ignores a kind: the update keeps the artifact's", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const { artifactId } = (await publish({

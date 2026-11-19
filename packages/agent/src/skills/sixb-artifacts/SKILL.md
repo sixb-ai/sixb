@@ -109,7 +109,8 @@ may edit the object may change it.
 
 ## Rules
 
-- A version holds at most 500 files, 25 MB per file, and 250 MB in all.
+- A version holds at most 500 files, 25 MB per file, and 250 MB in all. A `file` artifact's one
+  file may be up to 2 GB.
 - A title is plain text of at most 200 characters that names the deliverable ("Q3 operations
   review"), not the request.
 - Files and folders whose names start with a dot are not published.

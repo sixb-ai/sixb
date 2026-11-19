@@ -14,6 +14,20 @@ import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
 const MATERIALIZE_MAX_ARTIFACTS = 50
 const MATERIALIZE_MAX_BYTES = 50 * 1024 * 1024
 const REMOVE_TIMEOUT_MS = 30_000
+// Removes the copy at $1, after moving the files named after $2 aside into $2, by their paths in
+// the copy.
+const REPLACE_COPY_SCRIPT = `set -eu
+copy="$1"
+staging="$2"
+shift 2
+rm -rf -- "$staging"
+for path in "$@"; do
+  mkdir -p -- "$(dirname -- "$staging/$path")"
+  mv -- "$copy/$path" "$staging/$path"
+done
+rm -rf -- "$copy"`
+/** Copying a large published file within the sandbox, as it is installed. */
+const COPY_TIMEOUT_MS = 5 * 60_000
 
 export interface MaterializedArtifacts {
   /** Files to write, at paths relative to the sandbox working directory or absolute. */
@@ -21,11 +35,13 @@ export interface MaterializedArtifacts {
   readonly manifestJson: string
 }
 
-/** One file of a version just published, with the bytes it holds. */
-export interface PublishedArtifactFile {
-  readonly path: string
-  readonly bytes: Uint8Array
-}
+/**
+ * One file of a version just published: the bytes it holds, or, for a large one the sandbox
+ * uploaded itself, where the sandbox holds them, which is copied there and never read out.
+ */
+export type PublishedArtifactFile =
+  | { readonly path: string; readonly bytes: Uint8Array }
+  | { readonly path: string; readonly sizeBytes: number; readonly sandboxPath: string }
 
 interface ManifestEntry {
   readonly id: string
@@ -175,22 +191,47 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
     const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
-    const sizeBytes = files.reduce((sum, file) => sum + file.bytes.byteLength, 0)
+    const sizeBytes = files.reduce((sum, file) => sum + publishedSize(file), 0)
     let othersBytes = 0
     for (const [id, bytes] of this.#installed) if (id !== artifact.id) othersBytes += bytes
     const install = othersBytes + sizeBytes <= maxBytes
 
     // An artifact's directory holds exactly one revision: files an older one had must not linger.
-    const removed = await sandbox.runCommand("bash", ["-c", 'rm -rf -- "$SIXB_ARTIFACT_COPY"'], {
-      env: { SIXB_ARTIFACT_COPY: inSandbox(directory) },
-      timeout: REMOVE_TIMEOUT_MS,
-      signal,
-    })
+    // A file the sandbox uploaded from that very directory is moved aside first, and copied back
+    // from there: it is in no other place.
+    const copyDirectory = inSandbox(directory)
+    const staging = `${copyDirectory}.publishing`
+    const inCopy = (file: PublishedArtifactFile) =>
+      "sandboxPath" in file && file.sandboxPath.startsWith(`${copyDirectory}/`)
+    const removed = await sandbox.runCommand(
+      "bash",
+      [
+        "-c",
+        REPLACE_COPY_SCRIPT,
+        "replace",
+        copyDirectory,
+        staging,
+        ...files.flatMap((file) =>
+          "sandboxPath" in file && inCopy(file)
+            ? [posix.relative(copyDirectory, file.sandboxPath)]
+            : []
+        ),
+      ],
+      { timeout: REMOVE_TIMEOUT_MS, signal }
+    )
     if (removed.exitCode !== 0 || removed.timedOut) {
       throw new Error(
         `[SixbAgent] Could not remove ${directory}: ${removed.stderr.trim() || `exit ${removed.exitCode}`}`
       )
     }
+    const sources = files.map((file) =>
+      "sandboxPath" in file && inCopy(file)
+        ? {
+            ...file,
+            sandboxPath: posix.join(staging, posix.relative(copyDirectory, file.sandboxPath)),
+          }
+        : file
+    )
     // The copy, the folder and the base move together: until both are written, the next update
     // starts from the revision before, which the folder still holds.
     const previous = this.#bases.get(artifact.id) ?? []
@@ -198,17 +239,20 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
-    await sandbox.writeFiles([
-      ...(install
-        ? files.map((file) => ({
-            path: inSandbox(posix.join(directory, file.path)),
-            contents: file.bytes,
-          }))
-        : []),
+    const copy = install
+      ? sources.map((file) => ({ ...file, path: inSandbox(posix.join(directory, file.path)) }))
+      : []
+    await writePublishedFiles(sandbox, copy, signal, [
       { path: inSandbox(manifestPath), contents: manifestJson(entries) },
     ])
 
-    const moved = await this.#writeFolder(sandbox, artifact.id, previous, files, signal)
+    const moved = await this.#writeFolder(sandbox, artifact.id, previous, sources, signal)
+    await sandbox
+      .runCommand("bash", ["-c", 'rm -rf -- "$1"', "clear", staging], {
+        timeout: REMOVE_TIMEOUT_MS,
+        signal,
+      })
+      .catch(() => {})
 
     if (install) this.#installed.set(artifact.id, sizeBytes)
     else this.#installed.delete(artifact.id)
@@ -248,11 +292,57 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         )
       }
     }
-    await sandbox.writeFiles(
-      files.map((file) => ({ path: posix.join(folder.absolute, file.path), contents: file.bytes }))
+    // A file the sandbox uploaded from this folder is already there, as it was published.
+    await writePublishedFiles(
+      sandbox,
+      files
+        .map((file) => ({ ...file, path: posix.join(folder.absolute, file.path) }))
+        .filter((file) => !("sandboxPath" in file) || file.sandboxPath !== file.path),
+      signal
     )
     return folder.path
   }
+}
+
+function publishedSize(file: PublishedArtifactFile): number {
+  return "bytes" in file ? file.bytes.byteLength : file.sizeBytes
+}
+
+/**
+ * Writes each file at its path in the sandbox, with `others` beside them: bytes from here, and a
+ * file the sandbox holds already copied there, inside the sandbox.
+ */
+async function writePublishedFiles(
+  sandbox: Sandbox,
+  files: readonly PublishedArtifactFile[],
+  signal: AbortSignal,
+  others: readonly SandboxFileRecord[] = []
+): Promise<void> {
+  const written: SandboxFileRecord[] = [...others]
+  const copied: string[] = []
+  for (const file of files) {
+    if ("bytes" in file) written.push({ path: file.path, contents: file.bytes })
+    else copied.push(file.sandboxPath, file.path)
+  }
+
+  if (copied.length > 0) {
+    const result = await sandbox.runCommand(
+      "bash",
+      [
+        "-c",
+        'while [ "$#" -gt 0 ]; do mkdir -p -- "$(dirname -- "$2")" && cp -- "$1" "$2"; shift 2; done',
+        "copy",
+        ...copied,
+      ],
+      { timeout: COPY_TIMEOUT_MS, signal }
+    )
+    if (result.exitCode !== 0 || result.timedOut) {
+      throw new Error(
+        `[SixbAgent] Could not copy the published files: ${result.stderr.trim() || `exit ${result.exitCode}`}`
+      )
+    }
+  }
+  await sandbox.writeFiles(written)
 }
 
 /** What a turn reads of its conversation's artifacts, as its requester, through its session. */
