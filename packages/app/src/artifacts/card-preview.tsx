@@ -1,6 +1,7 @@
 import { type CsvTable, parseCsv, type WorkbookChart } from "@sixb/core/artifacts"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
+import { Clapperboard } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
 import { fileExtension, versionSummary } from "./card-details"
 import { formatFileSize } from "./file-size"
@@ -21,6 +22,7 @@ import { previewFormatter } from "./renderers/sheet/format"
 import { MiniChart } from "./renderers/sheet/mini-chart"
 import { fileSheetModel, type SheetModel } from "./renderers/sheet/model"
 import { useSheetModel, useWorkbook } from "./renderers/sheet/workbook"
+import { VideoScenesBar } from "./renderers/video/renderer"
 import { artifactThemeAttributes } from "./theme"
 
 /**
@@ -163,12 +165,27 @@ function VersionPreview({
         <PageScreen version={version} />
       ) : kind === "canvas" ? (
         <CanvasPreview version={version} />
+      ) : kind === "video" ? (
+        <VideoPreview version={version} />
       ) : source ? (
         <FilePreview source={source} />
       ) : (
         <Skeleton />
       )}
     </div>
+  )
+}
+
+/** A video as its dark screen, its scenes along its length: what it shows comes with its player. */
+function VideoPreview({ version }: { readonly version: ArtifactVersion }) {
+  const { outline } = version
+  return (
+    <span className="flex h-full flex-col items-center justify-center bg-neutral-950">
+      <Clapperboard className="size-6 stroke-[1.5] text-white/45" aria-hidden="true" />
+      {outline.kind === "video" ? (
+        <VideoScenesBar outline={outline} className="absolute inset-x-3.5 bottom-3.5" />
+      ) : null}
+    </span>
   )
 }
 

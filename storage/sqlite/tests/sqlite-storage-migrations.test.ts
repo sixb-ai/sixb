@@ -226,6 +226,7 @@ const shippedMigrationIds = [
   "104-agent-inbox-edits",
   "105-agent-thread-reads",
   "106-sync-run-connections",
+  "107-video-artifacts",
 ]
 
 afterEach(async () => {
@@ -702,6 +703,79 @@ describe("SQLite storage migrations", () => {
       db.run("DELETE FROM artifacts WHERE id = 'art_deck000001'")
       expect(db.query("SELECT COUNT(*) AS n FROM artifact_versions").get()).toEqual({ n: 0 })
       expect(db.query("SELECT COUNT(*) AS n FROM artifact_frame_grants").get()).toEqual({ n: 0 })
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proofs: drop `revision, document, document_revision` from 107's INSERT and SELECT and
+  // the live canvas loses its document and its revision; drop the CHECK's 'video' and the video
+  // is refused; drop the RENAME and nothing references `artifacts` any more.
+  test("rebuilds artifacts for the video kind, keeping every column and what references them", () => {
+    const db = replayedDatabase("107-video-artifacts")
+    try {
+      const at = "2026-01-01T00:00:00.000Z"
+      const columns = readMemoryTableColumns(db, "artifacts")
+      db.run(
+        `INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id, latest_version,
+          next_version, created_at, updated_at, revision, document, document_revision
+        ) VALUES ('p', 'art_canvas01', 'canvas', 'Plan', 'user', 'u', 2, 3, ?, ?, 7, ?, 6)`,
+        [at, at, '{"blobId":"blob_1"}']
+      )
+      db.run(
+        `INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, created_at
+        ) VALUES ('p', 'art_canvas01', 1, 'Plan', 'canvas.json', '[]', '{"kind":"canvas"}', '[]',
+          'user', 'u', ?)`,
+        [at]
+      )
+      db.run(
+        `INSERT INTO artifact_comments (
+          project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+          created_at
+        ) VALUES ('p', 'art_canvas01', 'cmt_a', '{"revision":1}', 'Hm', 'user', 'u', ?)`,
+        [at]
+      )
+
+      migration("107-video-artifacts").up(db)
+
+      expect(readMemoryTableColumns(db, "artifacts")).toEqual(columns)
+      expect(
+        db
+          .query(
+            "SELECT id, kind, latest_version, revision, document, document_revision FROM artifacts"
+          )
+          .all()
+      ).toEqual([
+        {
+          id: "art_canvas01",
+          kind: "canvas",
+          latest_version: 2,
+          revision: 7,
+          document: '{"blobId":"blob_1"}',
+          document_revision: 6,
+        },
+      ])
+
+      const insert = (id: string, kind: string) =>
+        db.run(
+          `INSERT INTO artifacts (
+            project_id, id, kind, title, owner_principal_type, owner_principal_id, latest_version,
+            next_version, created_at, updated_at
+          ) VALUES ('p', ?, ?, 'New', 'user', 'u', 1, 2, ?, ?)`,
+          [id, kind, at, at]
+        )
+      insert("art_video01", "video")
+      expect(() => insert("art_film01", "film")).toThrow("CHECK constraint failed")
+
+      // Its versions and comments still belong to the rebuilt table: deleting it takes them.
+      db.run("PRAGMA foreign_keys = ON")
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+      db.run("DELETE FROM artifacts WHERE id = 'art_canvas01'")
+      expect(db.query("SELECT COUNT(*) AS n FROM artifact_versions").get()).toEqual({ n: 0 })
+      expect(db.query("SELECT COUNT(*) AS n FROM artifact_comments").get()).toEqual({ n: 0 })
     } finally {
       db.close()
     }

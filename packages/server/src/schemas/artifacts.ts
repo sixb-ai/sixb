@@ -97,6 +97,27 @@ const CanvasOutlineSchema = z.object({
     .describe("The modes each board has a preview in: both, or the one its theme.json pins"),
 })
 
+const VideoOutlineSchema = z.object({
+  kind: z.literal("video"),
+  width: z.number().int().describe("The frame's width, in pixels"),
+  height: z.number().int().describe("The frame's height, in pixels"),
+  fps: z.number().int().describe("Frames a second"),
+  durationMs: z.number().int(),
+  scenes: z
+    .array(
+      z.object({
+        id: z.string().describe("What #<id> names in an address to the scene"),
+        label: z.string().optional().describe("Its host's data-label"),
+        startMs: z.number().int(),
+        durationMs: z.number().int(),
+        renderKey: z
+          .string()
+          .describe("What the scene renders to: a scene kept as it was keeps its key"),
+      })
+    )
+    .describe("Its scenes, in the order they start"),
+})
+
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
 
 const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
@@ -105,6 +126,7 @@ const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
   SlidesOutlineSchema,
   PageOutlineSchema,
   CanvasOutlineSchema,
+  VideoOutlineSchema,
   FileOutlineSchema,
 ])
 
@@ -483,11 +505,18 @@ const ArtifactCommentAnchorSchema = z.object({
     .max(1000)
     .optional()
     .describe("The element's first words, which name it once it is gone; kept to 120 characters"),
+  at: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("The video's instant it is about, in milliseconds from its start"),
+  scene: z.string().max(200).optional().describe("The id of the video's scene it is about"),
   point: z
     .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
     .optional()
     .describe(
-      "Where on the board its pin is, as fractions of the board's width and height from its top left"
+      "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
     ),
   revision: RevisionSchema.describe("The artifact's revision its author saw"),
 })
@@ -536,7 +565,7 @@ export const AddArtifactCommentBodySchema = z.object({
   anchor: ArtifactCommentAnchorSchema.partial()
     .optional()
     .describe(
-      "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+      "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
     ),
   parentId: z.string().min(1).max(64).optional().describe("The comment it replies to"),
 })

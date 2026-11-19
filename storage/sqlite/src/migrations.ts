@@ -338,6 +338,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("104-agent-inbox-edits", agentInboxEditsSql),
     sqliteSql("105-agent-thread-reads", agentThreadReadsSql),
     sqliteSql("106-sync-run-connections", syncRunConnectionsSql),
+    sqliteSql("107-video-artifacts", videoArtifactsSql),
   ],
 })
 
@@ -781,3 +782,4 @@ import agentThreadInboxSql from "./migrations/103-agent-thread-inbox.sql" with {
 import agentInboxEditsSql from "./migrations/104-agent-inbox-edits.sql" with { type: "text" }
 import agentThreadReadsSql from "./migrations/105-agent-thread-reads.sql" with { type: "text" }
 import syncRunConnectionsSql from "./migrations/106-sync-run-connections.sql" with { type: "text" }
+import videoArtifactsSql from "./migrations/107-video-artifacts.sql" with { type: "text" }

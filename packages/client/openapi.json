@@ -61102,7 +61102,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["document", "sheet", "slides", "page", "canvas", "file"],
+              "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"],
               "description": "Only artifacts of this kind"
             }
           },
@@ -61144,7 +61144,15 @@
                           },
                           "kind": {
                             "type": "string",
-                            "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                            "enum": [
+                              "document",
+                              "sheet",
+                              "slides",
+                              "page",
+                              "canvas",
+                              "video",
+                              "file"
+                            ]
                           },
                           "title": {
                             "type": "string"
@@ -61367,7 +61375,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -61427,7 +61435,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -61487,7 +61495,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -61562,7 +61570,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -61923,6 +61931,68 @@
                                 }
                               },
                               "required": ["kind", "items"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["video"]
+                                },
+                                "width": {
+                                  "type": "integer",
+                                  "description": "The frame's width, in pixels"
+                                },
+                                "height": {
+                                  "type": "integer",
+                                  "description": "The frame's height, in pixels"
+                                },
+                                "fps": {
+                                  "type": "integer",
+                                  "description": "Frames a second"
+                                },
+                                "durationMs": {
+                                  "type": "integer"
+                                },
+                                "scenes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "description": "What #<id> names in an address to the scene"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "description": "Its host's data-label"
+                                      },
+                                      "startMs": {
+                                        "type": "integer"
+                                      },
+                                      "durationMs": {
+                                        "type": "integer"
+                                      },
+                                      "renderKey": {
+                                        "type": "string",
+                                        "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                      }
+                                    },
+                                    "required": ["id", "startMs", "durationMs", "renderKey"],
+                                    "additionalProperties": false
+                                  },
+                                  "description": "Its scenes, in the order they start"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "width",
+                                "height",
+                                "fps",
+                                "durationMs",
+                                "scenes"
+                              ],
                               "additionalProperties": false
                             },
                             {
@@ -62453,7 +62523,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -64610,7 +64680,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -64676,7 +64746,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -64742,7 +64812,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -64823,7 +64893,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -65184,6 +65254,68 @@
                                 }
                               },
                               "required": ["kind", "items"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["video"]
+                                },
+                                "width": {
+                                  "type": "integer",
+                                  "description": "The frame's width, in pixels"
+                                },
+                                "height": {
+                                  "type": "integer",
+                                  "description": "The frame's height, in pixels"
+                                },
+                                "fps": {
+                                  "type": "integer",
+                                  "description": "Frames a second"
+                                },
+                                "durationMs": {
+                                  "type": "integer"
+                                },
+                                "scenes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "description": "What #<id> names in an address to the scene"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "description": "Its host's data-label"
+                                      },
+                                      "startMs": {
+                                        "type": "integer"
+                                      },
+                                      "durationMs": {
+                                        "type": "integer"
+                                      },
+                                      "renderKey": {
+                                        "type": "string",
+                                        "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                      }
+                                    },
+                                    "required": ["id", "startMs", "durationMs", "renderKey"],
+                                    "additionalProperties": false
+                                  },
+                                  "description": "Its scenes, in the order they start"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "width",
+                                "height",
+                                "fps",
+                                "durationMs",
+                                "scenes"
+                              ],
                               "additionalProperties": false
                             },
                             {
@@ -65765,7 +65897,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -66126,6 +66258,68 @@
                                 }
                               },
                               "required": ["kind", "items"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["video"]
+                                },
+                                "width": {
+                                  "type": "integer",
+                                  "description": "The frame's width, in pixels"
+                                },
+                                "height": {
+                                  "type": "integer",
+                                  "description": "The frame's height, in pixels"
+                                },
+                                "fps": {
+                                  "type": "integer",
+                                  "description": "Frames a second"
+                                },
+                                "durationMs": {
+                                  "type": "integer"
+                                },
+                                "scenes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "description": "What #<id> names in an address to the scene"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "description": "Its host's data-label"
+                                      },
+                                      "startMs": {
+                                        "type": "integer"
+                                      },
+                                      "durationMs": {
+                                        "type": "integer"
+                                      },
+                                      "renderKey": {
+                                        "type": "string",
+                                        "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                      }
+                                    },
+                                    "required": ["id", "startMs", "durationMs", "renderKey"],
+                                    "additionalProperties": false
+                                  },
+                                  "description": "Its scenes, in the order they start"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "width",
+                                "height",
+                                "fps",
+                                "durationMs",
+                                "scenes"
+                              ],
                               "additionalProperties": false
                             },
                             {
@@ -66660,6 +66854,16 @@
                                 "maxLength": 1000,
                                 "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                               },
+                              "at": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "The video's instant it is about, in milliseconds from its start"
+                              },
+                              "scene": {
+                                "type": "string",
+                                "maxLength": 200,
+                                "description": "The id of the video's scene it is about"
+                              },
                               "point": {
                                 "type": "object",
                                 "properties": {
@@ -66676,7 +66880,7 @@
                                 },
                                 "required": ["x", "y"],
                                 "additionalProperties": false,
-                                "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                                "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                               },
                               "revision": {
                                 "type": "integer",
@@ -67030,6 +67234,16 @@
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "The video's instant it is about, in milliseconds from its start"
+                      },
+                      "scene": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "The id of the video's scene it is about"
+                      },
                       "point": {
                         "type": "object",
                         "properties": {
@@ -67046,7 +67260,7 @@
                         },
                         "required": ["x", "y"],
                         "additionalProperties": false,
-                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                        "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                       },
                       "revision": {
                         "type": "integer",
@@ -67056,7 +67270,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67097,6 +67311,16 @@
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "The video's instant it is about, in milliseconds from its start"
+                      },
+                      "scene": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "The id of the video's scene it is about"
+                      },
                       "point": {
                         "type": "object",
                         "properties": {
@@ -67113,7 +67337,7 @@
                         },
                         "required": ["x", "y"],
                         "additionalProperties": false,
-                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                        "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                       },
                       "revision": {
                         "type": "integer",
@@ -67123,7 +67347,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67164,6 +67388,16 @@
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "The video's instant it is about, in milliseconds from its start"
+                      },
+                      "scene": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "The id of the video's scene it is about"
+                      },
                       "point": {
                         "type": "object",
                         "properties": {
@@ -67180,7 +67414,7 @@
                         },
                         "required": ["x", "y"],
                         "additionalProperties": false,
-                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                        "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                       },
                       "revision": {
                         "type": "integer",
@@ -67190,7 +67424,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67241,6 +67475,16 @@
                           "maxLength": 1000,
                           "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                         },
+                        "at": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "The video's instant it is about, in milliseconds from its start"
+                        },
+                        "scene": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "description": "The id of the video's scene it is about"
+                        },
                         "point": {
                           "type": "object",
                           "properties": {
@@ -67257,7 +67501,7 @@
                           },
                           "required": ["x", "y"],
                           "additionalProperties": false,
-                          "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                          "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                         },
                         "revision": {
                           "type": "integer",
@@ -67792,6 +68036,16 @@
                           "maxLength": 1000,
                           "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                         },
+                        "at": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "The video's instant it is about, in milliseconds from its start"
+                        },
+                        "scene": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "description": "The id of the video's scene it is about"
+                        },
                         "point": {
                           "type": "object",
                           "properties": {
@@ -67808,7 +68062,7 @@
                           },
                           "required": ["x", "y"],
                           "additionalProperties": false,
-                          "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                          "description": "Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant"
                         },
                         "revision": {
                           "type": "integer",
@@ -69145,6 +69399,61 @@
                           "properties": {
                             "kind": {
                               "type": "string",
+                              "enum": ["video"]
+                            },
+                            "width": {
+                              "type": "integer",
+                              "description": "The frame's width, in pixels"
+                            },
+                            "height": {
+                              "type": "integer",
+                              "description": "The frame's height, in pixels"
+                            },
+                            "fps": {
+                              "type": "integer",
+                              "description": "Frames a second"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            },
+                            "scenes": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "description": "What #<id> names in an address to the scene"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "Its host's data-label"
+                                  },
+                                  "startMs": {
+                                    "type": "integer"
+                                  },
+                                  "durationMs": {
+                                    "type": "integer"
+                                  },
+                                  "renderKey": {
+                                    "type": "string",
+                                    "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                  }
+                                },
+                                "required": ["id", "startMs", "durationMs", "renderKey"],
+                                "additionalProperties": false
+                              },
+                              "description": "Its scenes, in the order they start"
+                            }
+                          },
+                          "required": ["kind", "width", "height", "fps", "durationMs", "scenes"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
                               "enum": ["file"]
                             },
                             "mediaType": {
@@ -69630,7 +69939,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "video", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -69991,6 +70300,68 @@
                                 }
                               },
                               "required": ["kind", "items"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["video"]
+                                },
+                                "width": {
+                                  "type": "integer",
+                                  "description": "The frame's width, in pixels"
+                                },
+                                "height": {
+                                  "type": "integer",
+                                  "description": "The frame's height, in pixels"
+                                },
+                                "fps": {
+                                  "type": "integer",
+                                  "description": "Frames a second"
+                                },
+                                "durationMs": {
+                                  "type": "integer"
+                                },
+                                "scenes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "description": "What #<id> names in an address to the scene"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "description": "Its host's data-label"
+                                      },
+                                      "startMs": {
+                                        "type": "integer"
+                                      },
+                                      "durationMs": {
+                                        "type": "integer"
+                                      },
+                                      "renderKey": {
+                                        "type": "string",
+                                        "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                      }
+                                    },
+                                    "required": ["id", "startMs", "durationMs", "renderKey"],
+                                    "additionalProperties": false
+                                  },
+                                  "description": "Its scenes, in the order they start"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "width",
+                                "height",
+                                "fps",
+                                "durationMs",
+                                "scenes"
+                              ],
                               "additionalProperties": false
                             },
                             {
@@ -71136,6 +71507,61 @@
                             }
                           },
                           "required": ["kind", "items"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["video"]
+                            },
+                            "width": {
+                              "type": "integer",
+                              "description": "The frame's width, in pixels"
+                            },
+                            "height": {
+                              "type": "integer",
+                              "description": "The frame's height, in pixels"
+                            },
+                            "fps": {
+                              "type": "integer",
+                              "description": "Frames a second"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            },
+                            "scenes": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "description": "What #<id> names in an address to the scene"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "Its host's data-label"
+                                  },
+                                  "startMs": {
+                                    "type": "integer"
+                                  },
+                                  "durationMs": {
+                                    "type": "integer"
+                                  },
+                                  "renderKey": {
+                                    "type": "string",
+                                    "description": "What the scene renders to: a scene kept as it was keeps its key"
+                                  }
+                                },
+                                "required": ["id", "startMs", "durationMs", "renderKey"],
+                                "additionalProperties": false
+                              },
+                              "description": "Its scenes, in the order they start"
+                            }
+                          },
+                          "required": ["kind", "width", "height", "fps", "durationMs", "scenes"],
                           "additionalProperties": false
                         },
                         {

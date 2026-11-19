@@ -336,6 +336,60 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // Removal proof: drop 'video' from a provider's kind CHECK and the video is refused; drop `at`
+    // or `scene` from storedCommentAnchor and the comment comes back without its instant.
+    test("keeps a video, lists it as its kind, and the instant and scene its comments are about", async () => {
+      await withStorage(async (artifacts) => {
+        const outline = {
+          kind: "video",
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          durationMs: 7000,
+          scenes: [
+            {
+              id: "intro",
+              label: "Opening",
+              startMs: 0,
+              durationMs: 2000,
+              renderKey: "a".repeat(64),
+            },
+            { id: "demo", startMs: 2000, durationMs: 5000, renderKey: "b".repeat(64) },
+          ],
+        } as const
+        const version = versionInput({
+          entry: "index.html",
+          files: [
+            { path: "index.html", file: fileRef("a", "text/html") },
+            { path: "media/clip.mp4", file: fileRef("b", "video/mp4") },
+          ],
+          outline,
+        })
+        await artifacts.create(createInput({ id: "art_film", kind: "video", version }))
+
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_film", version: 1 })
+        ).toMatchObject({ outline })
+        const videos = await artifacts.list({ projectId, kind: "video", limit: 10 })
+        expect(videos.artifacts.map((artifact) => artifact.id)).toEqual(["art_film"])
+
+        const anchor = { at: 2500, scene: "demo", point: { x: 0.5, y: 0.25 }, revision: 1 }
+        const comment = await artifacts.createComment({
+          projectId,
+          artifactId: "art_film",
+          id: "cmt_film",
+          anchor,
+          body: "Hold this shot",
+          author: otherOwner,
+          createdAt: at(1),
+        })
+        expect(comment.anchor).toEqual(anchor)
+        expect(
+          (await artifacts.listComments({ projectId, id: "art_film" })).map((each) => each.anchor)
+        ).toEqual([anchor])
+      })
+    })
+
     test("lists the latest versions that refer to an artifact, at any version, file, or part", async () => {
       await withStorage(async (artifacts) => {
         const refer = (address: string) => ({

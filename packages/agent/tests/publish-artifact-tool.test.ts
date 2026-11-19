@@ -2194,6 +2194,57 @@ describe("materializeThreadArtifacts", () => {
     ])
   })
 
+  // Guard proof: let PUBLISHABLE_KINDS (publish-tool.ts) take "video", and the Agent starts one
+  // without the guide it needs.
+  test("lists a video's scenes, a video the Agent revises but does not start", async () => {
+    const scene = (id: string) =>
+      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"></div></template>`
+    const film = (demo: string) =>
+      `<div data-composition-id="main" data-width="1280" data-height="720">
+        <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
+        <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="${demo}"></div>
+      </div>`
+    write("film/index.html", film("3"))
+    write("film/scenes/intro.html", scene("intro"))
+    write("film/scenes/demo.html", scene("demo"))
+
+    expect(() =>
+      tools().create.parseInput({ path: "film", kind: "video", title: "Launch film" })
+    ).toThrow("kind must be one of document, sheet, slides, page, canvas, file")
+
+    // Someone made the video in this conversation; the Agent lengthens its demo.
+    const stored = async (path: string) => {
+      const body = new TextEncoder().encode(readFileSync(join(root, "film", path), "utf8"))
+      return { path, file: await blobStorage.put({ body, expectedSizeBytes: body.byteLength }) }
+    }
+    const artifactId = "art_v1de0f17m0"
+    await storage.artifacts.create({
+      projectId,
+      id: artifactId,
+      kind: "video",
+      owner,
+      version: {
+        title: "Launch film",
+        entry: "index.html",
+        files: await Promise.all(
+          ["index.html", "scenes/intro.html", "scenes/demo.html"].map(stored)
+        ),
+        outline: { kind: "video", width: 1280, height: 720, fps: 30, durationMs: 5000, scenes: [] },
+        references: [],
+        author: owner,
+        origin: { threadId: run.threadId, runId: "run_person" },
+        updatedAt: new Date(),
+      },
+    })
+    write("film/index.html", film("4"))
+    await publishVersion({ id: artifactId, path: "film", title: "Launch film" })
+
+    expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
+      { address: `artifact:${artifactId}#intro`, name: "Scene intro, 0s to 2s: Opening" },
+      { address: `artifact:${artifactId}#demo`, name: "Scene demo, 2s to 6s" },
+    ])
+  })
+
   test("lists an artifact whose files cannot be read without them, and installs the rest", async () => {
     write("a/document.md", "# First\n\nOne.\n")
     write("b/document.md", "# Second\n\nTwo.\n")
