@@ -19,6 +19,14 @@ export type ResolvedArtifactPart =
   | { readonly type: "slide"; readonly slide: number }
   | { readonly type: "board"; readonly id: string }
   | { readonly type: "region"; readonly id: string }
+  | {
+      readonly type: "scene"
+      readonly id: string
+      readonly label?: string
+      readonly startMs: number
+      readonly durationMs: number
+    }
+  | { readonly type: "time"; readonly ms: number }
 
 /**
  * Finds what an address names in a version, against its outline and files. A problem says what is
@@ -99,10 +107,47 @@ export function resolveArtifactAddress(
       }
       return { part: { type: item.type === "board" ? "board" : "region", id: item.id } }
     }
+    case "video": {
+      // A video names its scenes, and its instants as Media Fragments write them: t=12.5.
+      const time = parseMediaTime(address.part)
+      if (time !== undefined) {
+        return time <= outline.durationMs
+          ? { part: { type: "time", ms: time } }
+          : { problem: `has no instant ${address.part}: it lasts ${outline.durationMs / 1000} s` }
+      }
+
+      const scene = outline.scenes.find((candidate) => candidate.id === address.part)
+      if (!scene) {
+        return {
+          problem: `has no scene '${address.part}'${listed(
+            "its scenes",
+            outline.scenes.map((candidate) => candidate.id)
+          )}, and names an instant as t=12.5`,
+        }
+      }
+      const { id, label, startMs, durationMs } = scene
+      return {
+        part: { type: "scene", id, ...(label ? { label } : {}), startMs, durationMs },
+      }
+    }
     case "page":
     case "file":
       return { problem: `is a ${target.kind}, which has no parts to name` }
   }
+}
+
+/**
+ * An instant as a Media Fragment's `t=` writes it, in milliseconds: seconds (`t=12.5`, or
+ * `t=npt:12.5`), or a clock (`t=1:05`, `t=0:01:05.5`). Undefined for anything else, a range among
+ * them: a part names one instant.
+ */
+function parseMediaTime(part: string): number | undefined {
+  const match = /^t=(?:npt:)?(?:(?:(\d+):)?([0-5]?\d):)?(\d+(?:\.\d+)?)$/.exec(part)
+  if (!match) return undefined
+
+  const [, hours = "0", minutes = "0", seconds = "0"] = match
+  if ((match[2] !== undefined || match[1] !== undefined) && Number(seconds) >= 60) return undefined
+  return Math.round((Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)) * 1000)
 }
 
 function listed(label: string, names: readonly string[]): string {

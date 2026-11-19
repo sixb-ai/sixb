@@ -15,6 +15,7 @@ import { ArtifactRequestError } from "./errors"
 import { announceArtifactComment } from "./events"
 import { createArtifactCommentId } from "./ids"
 import { ARTIFACT_COMMENT_LIMITS } from "./limits"
+import type { ArtifactOutline } from "./outline"
 
 // Comments on an artifact: whoever reads it reads and adds them, a shared link's guest included;
 // their author, or whoever may change the artifact, resolves or deletes them, and only the latter a
@@ -30,8 +31,9 @@ export interface ArtifactCommentInput {
   readonly body: string
   /**
    * What it is about: a canvas's board by its item id, an element of the board by the address
-   * `boardElements` gives it, with its first words as `label`, or, without, the artifact. At the
-   * revision its author saw, the artifact's by default. A reply is about what it replies to.
+   * `boardElements` gives it, with its first words as `label`; a video's instant, `at`, and its
+   * scene; or, without, the artifact. At the revision its author saw, the artifact's by default. A
+   * reply is about what it replies to.
    */
   readonly anchor?: Partial<ArtifactCommentAnchor>
   /** The comment this one replies to. */
@@ -236,8 +238,8 @@ function threadLink(thread: Pick<ArtifactCommentRecord, "author">): string | und
 }
 
 /**
- * The anchor as it is kept: a board the canvas's latest version shows, an element's address
- * under it, its label cut to length, and a revision the artifact has had.
+ * The anchor as it is kept: a place its artifact's latest version has, as its kind places a
+ * comment, its label cut to length, and a revision the artifact has had.
  */
 async function checkAnchor(
   storage: ArtifactStorage,
@@ -249,49 +251,131 @@ async function checkAnchor(
     throw invalid(`A comment is about a revision of the artifact, 1 to ${artifact.revision}.`)
   }
 
-  if (anchor.element !== undefined && anchor.board === undefined) {
-    throw invalid("A comment on an element names the board it is on.")
-  }
-  if (
-    anchor.element !== undefined &&
-    (anchor.element.length > MAX_ELEMENT_ADDRESS_LENGTH || !ELEMENT_ADDRESS.test(anchor.element))
-  ) {
-    throw invalid(`'${anchor.element}' is no element's address, as a board's elements have.`)
-  }
-  if (anchor.board !== undefined) {
-    const latest = await storage.getVersion({
-      projectId: artifact.projectId,
-      artifactId: artifact.id,
-      version: artifact.latestVersion,
-    })
-    const outline = latest?.outline
-    const shows =
-      outline?.kind === "canvas" &&
-      outline.items.some((item) => item.type === "board" && item.id === anchor.board)
-    if (!shows) throw invalid(`The artifact shows no board '${anchor.board}'.`)
-  }
-
-  const { point } = anchor
-  if (point !== undefined && anchor.board === undefined) {
-    throw invalid("A comment's point is on the board it names.")
-  }
-  if (
-    point !== undefined &&
-    ![point.x, point.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
-  ) {
-    throw invalid("A comment's point is on its board: x and y from 0 to 1.")
-  }
-
   const label = anchor.label
     ?.replace(/\s+/g, " ")
     .trim()
     .slice(0, ARTIFACT_COMMENT_LIMITS.maxLabelLength)
   return {
-    ...(anchor.board === undefined ? {} : { board: anchor.board }),
-    ...(anchor.element === undefined ? {} : { element: anchor.element }),
+    ...(await checkPlace(storage, artifact, anchor)),
     ...(label ? { label } : {}),
-    ...(point === undefined ? {} : { point: { x: point.x, y: point.y } }),
     revision,
+  }
+}
+
+type CommentPlace = Omit<ArtifactCommentAnchor, "label" | "revision">
+
+/**
+ * Where on the artifact a comment is, as its kind places one: on a canvas, a board, an element of
+ * it, and a point on it; on a video, an instant, its scene, and a point on the frame. A comment on
+ * any other kind is about the whole artifact.
+ */
+async function checkPlace(
+  storage: ArtifactStorage,
+  artifact: ArtifactRecord,
+  anchor: Partial<ArtifactCommentAnchor>
+): Promise<CommentPlace> {
+  const { board, element, at, scene, point } = anchor
+  const placed = [board, element, at, scene, point].some((value) => value !== undefined)
+  if (!placed) return {}
+
+  if (
+    point !== undefined &&
+    ![point.x, point.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
+  ) {
+    throw invalid("A comment's point is on what it is about: x and y from 0 to 1.")
+  }
+
+  const latest = async () =>
+    (
+      await storage.getVersion({
+        projectId: artifact.projectId,
+        artifactId: artifact.id,
+        version: artifact.latestVersion,
+      })
+    )?.outline
+
+  switch (artifact.kind) {
+    case "canvas":
+      return checkBoardPlace(anchor, latest)
+    case "video":
+      return checkScenePlace(anchor, latest)
+    default:
+      throw invalid(
+        `A comment on a ${artifact.kind} is about the whole artifact: it names no board, scene, or instant.`
+      )
+  }
+}
+
+/** A board the canvas's latest version shows, an element's address under it, and a point on it. */
+async function checkBoardPlace(
+  anchor: Partial<ArtifactCommentAnchor>,
+  latest: () => Promise<ArtifactOutline | undefined>
+): Promise<CommentPlace> {
+  const { board, element, point } = anchor
+  if (anchor.at !== undefined || anchor.scene !== undefined) {
+    throw invalid("A comment on a canvas is about a board, not an instant or a scene.")
+  }
+
+  if (element !== undefined && board === undefined) {
+    throw invalid("A comment on an element names the board it is on.")
+  }
+  if (
+    element !== undefined &&
+    (element.length > MAX_ELEMENT_ADDRESS_LENGTH || !ELEMENT_ADDRESS.test(element))
+  ) {
+    throw invalid(`'${element}' is no element's address, as a board's elements have.`)
+  }
+  if (point !== undefined && board === undefined) {
+    throw invalid("A comment's point is on the board it names.")
+  }
+
+  if (board !== undefined) {
+    const outline = await latest()
+    const shows =
+      outline?.kind === "canvas" &&
+      outline.items.some((item) => item.type === "board" && item.id === board)
+    if (!shows) throw invalid(`The artifact shows no board '${board}'.`)
+  }
+
+  return {
+    ...(board === undefined ? {} : { board }),
+    ...(element === undefined ? {} : { element }),
+    ...(point === undefined ? {} : { point: { x: point.x, y: point.y } }),
+  }
+}
+
+/**
+ * An instant within the video's latest version, a scene it has, and a point on the frame at that
+ * instant: the frame changes as it plays, so a point needs its instant.
+ */
+async function checkScenePlace(
+  anchor: Partial<ArtifactCommentAnchor>,
+  latest: () => Promise<ArtifactOutline | undefined>
+): Promise<CommentPlace> {
+  const { at, scene, point } = anchor
+  if (anchor.board !== undefined || anchor.element !== undefined) {
+    throw invalid("A comment on a video is about an instant or a scene, not a board.")
+  }
+  if (point !== undefined && at === undefined) {
+    throw invalid("A comment's point is on the frame at its instant: give it `at` too.")
+  }
+
+  const outline = await latest()
+  if (outline?.kind !== "video") throw invalid("The artifact has no video to comment on.")
+
+  if (at !== undefined && !(Number.isSafeInteger(at) && at >= 0 && at <= outline.durationMs)) {
+    throw invalid(
+      `A comment's instant is in the video: \`at\` is 0 to ${outline.durationMs} milliseconds.`
+    )
+  }
+  if (scene !== undefined && !outline.scenes.some((candidate) => candidate.id === scene)) {
+    throw invalid(`The video has no scene '${scene}'.`)
+  }
+
+  return {
+    ...(at === undefined ? {} : { at }),
+    ...(scene === undefined ? {} : { scene }),
+    ...(point === undefined ? {} : { point: { x: point.x, y: point.y } }),
   }
 }
 

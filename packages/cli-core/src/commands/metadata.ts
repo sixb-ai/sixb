@@ -292,7 +292,8 @@ exact email, ignoring case, and finds suspended members too. Each member is
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
 
 \`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
-address, label, revision), its body, authorName and its replies. A message quoting comments
+address and label on a canvas; at, in milliseconds, and scene on a video; revision), its body,
+authorName and its replies. A message quoting comments
 names each one's id as \`comment <id>\`. Resolve a comment once the change it asks for is made;
 reply to one to say why it is not. Reading takes access to the artifact; resolving, the right to
 change it or being the comment's author.`,

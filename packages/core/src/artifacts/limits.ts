@@ -20,6 +20,11 @@ export const ARTIFACT_LIMITS = {
    */
   sizesByKind: {
     file: { maxFileBytes: MAX_FILE_UPLOAD_BYTES, maxVersionBytes: MAX_FILE_UPLOAD_BYTES },
+    /**
+     * A video's footage is as large as one upload, and its version holds every original it plays:
+     * an export downloads them all to its sandbox's disk, beside the frames it renders.
+     */
+    video: { maxFileBytes: MAX_FILE_UPLOAD_BYTES, maxVersionBytes: 8 * 1024 * 1024 * 1024 },
   } satisfies Partial<Record<ArtifactKind, ArtifactSizeLimits>>,
   maxPathLength: 512,
   maxTitleLength: 200,
@@ -55,6 +60,15 @@ export const ARTIFACT_LIMITS = {
   maxCanvasLabelLength: 120,
   /** A board's HTML is parsed whole when it is published, as a page's is. */
   maxBoardBytes: 2 * 1024 * 1024,
+  /** A video's scenes, and how long it plays, in all. */
+  maxVideoScenes: 200,
+  maxVideoSeconds: 600,
+  /** A video frame's width or height, in pixels: 4K. */
+  maxVideoSize: 3840,
+  /** The video and sound files a video plays, each probed and proxied once it is published. */
+  maxVideoMediaFiles: 50,
+  /** A video's `index.html` and each scene's HTML are parsed whole when it is published. */
+  maxSceneBytes: 1024 * 1024,
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,
   /** `queries/<name>.json` files, each run for every reader who opens the version. */

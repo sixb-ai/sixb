@@ -338,6 +338,77 @@ describe("artifact routes", () => {
     expect(badReference.status).toBe(400)
   })
 
+  // Guard proof: leave VideoOutlineSchema out of ArtifactOutlineSchema, or `at` and `scene` out of
+  // ArtifactCommentAnchorSchema, and the version or the comment's instant does not come back.
+  test("publishes a video, reads its scenes back, and comments at an instant of it", async () => {
+    const { app, storage, put } = createApp()
+    const alice = await seedSession(storage, "alice")
+    const scene = (id: string) =>
+      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"></div></template>`
+    const files = [
+      await put(
+        "index.html",
+        `<div data-composition-id="main" data-width="1280" data-height="720">
+          <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
+          <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="3"></div>
+        </div>`,
+        "text/html"
+      ),
+      await put("scenes/intro.html", scene("intro"), "text/html"),
+      await put("scenes/demo.html", scene("demo"), "text/html"),
+    ]
+
+    const created = await app.fetch(
+      new Request(url("/api/artifacts"), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({ kind: "video", title: "Launch film", files }),
+      })
+    )
+    expect(created.status).toBe(201)
+    const { artifact } = await created.json()
+
+    const version = await app.fetch(
+      new Request(url(`/api/artifacts/${artifact.id}/versions/1`), { headers: alice.headers })
+    )
+    expect(version.status).toBe(200)
+    expect((await version.json()).outline).toEqual({
+      kind: "video",
+      width: 1280,
+      height: 720,
+      fps: 30,
+      durationMs: 5000,
+      scenes: [
+        {
+          id: "intro",
+          label: "Opening",
+          startMs: 0,
+          durationMs: 2000,
+          renderKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+        { id: "demo", startMs: 2000, durationMs: 3000, renderKey: expect.any(String) },
+      ],
+    })
+
+    const comment = await app.fetch(
+      new Request(url(`/api/artifacts/${artifact.id}/comments`), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({
+          body: "Hold this shot",
+          anchor: { at: 2500, scene: "demo", point: { x: 0.5, y: 0.5 } },
+        }),
+      })
+    )
+    expect(comment.status).toBe(201)
+    expect((await comment.json()).anchor).toEqual({
+      at: 2500,
+      scene: "demo",
+      point: { x: 0.5, y: 0.5 },
+      revision: 1,
+    })
+  })
+
   test("another user finds nothing, and unknown artifacts, versions, and paths are 404", async () => {
     const { app, storage, put } = createApp()
     const alice = await seedSession(storage, "alice")

@@ -15,11 +15,11 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  storedCommentAnchor,
   turnUndoable,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
-  ArtifactCommentAnchor,
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
@@ -803,7 +803,7 @@ export class PgArtifactStorage implements ArtifactStorage {
           origin_run_id
         ) VALUES (
           ${input.projectId}, ${input.artifactId}, ${input.id}, ${input.parentId ?? null},
-          ${JSON.stringify(commentAnchor(input.anchor))}::text::jsonb, ${input.body},
+          ${JSON.stringify(storedCommentAnchor(input.anchor))}::text::jsonb, ${input.body},
           ${input.author.type}, ${input.author.id},
           ${guest?.name ?? null}, ${guest?.grantId ?? null}, ${input.createdAt},
           ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}
@@ -864,17 +864,6 @@ export class PgArtifactStorage implements ArtifactStorage {
       RETURNING id
     `
     return rows.length > 0
-  }
-}
-
-/** A comment's anchor as its column holds it: only what it names. */
-function commentAnchor(anchor: ArtifactCommentAnchor): ArtifactCommentAnchor {
-  return {
-    ...(anchor.board === undefined ? {} : { board: anchor.board }),
-    ...(anchor.element === undefined ? {} : { element: anchor.element }),
-    ...(anchor.label === undefined ? {} : { label: anchor.label }),
-    ...(anchor.point === undefined ? {} : { point: { x: anchor.point.x, y: anchor.point.y } }),
-    revision: anchor.revision,
   }
 }
 
