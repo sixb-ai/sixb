@@ -16,6 +16,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
 } from "@sixb/core/internal/storage"
@@ -38,6 +39,7 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
   CreateArtifactInput,
@@ -54,6 +56,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListArtifactVideoRendersInput,
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
@@ -130,6 +133,10 @@ const PDF_COLUMNS = `
 
 const MEDIA_COLUMNS = `
   project_id AS "projectId", digest, parts, attempts, updated_at AS "updatedAt"
+`
+
+const VIDEO_RENDER_COLUMNS = `
+  project_id AS "projectId", key, file, failure, created_at AS "createdAt"
 `
 
 export class PgArtifactStorage implements ArtifactStorage {
@@ -793,6 +800,45 @@ export class PgArtifactStorage implements ArtifactStorage {
       )
       ON CONFLICT (project_id, digest) DO UPDATE SET
         parts = excluded.parts, attempts = excluded.attempts, updated_at = excluded.updated_at
+    `
+  }
+
+  async listVideoRenders(
+    input: ListArtifactVideoRendersInput
+  ): Promise<ArtifactVideoRenderRecord[]> {
+    if (input.keys.length === 0) return []
+
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(VIDEO_RENDER_COLUMNS)} FROM artifact_video_renders
+      WHERE project_id = ${input.projectId}
+        AND key = ANY(${[...new Set(input.keys)]}::text[])
+      ORDER BY key COLLATE "C"
+    `
+    return rows.map(parseArtifactVideoRenderRow)
+  }
+
+  async putVideoRender(input: ArtifactVideoRenderRecord): Promise<void> {
+    const file = "failure" in input ? null : JSON.stringify(input.file)
+    await this.sql`
+      INSERT INTO artifact_video_renders (project_id, key, file, failure, created_at)
+      VALUES (
+        ${input.projectId}, ${input.key}, ${file}::text::jsonb,
+        ${"failure" in input ? input.failure : null}, ${input.createdAt}
+      )
+      ON CONFLICT (project_id, key) DO UPDATE SET
+        file = excluded.file, failure = NULL, created_at = excluded.created_at
+      WHERE artifact_video_renders.failure IS NOT NULL AND excluded.failure IS NULL
+    `
+  }
+
+  async clearVideoRenderFailures(input: ListArtifactVideoRendersInput): Promise<void> {
+    if (input.keys.length === 0) return
+
+    await this.sql`
+      DELETE FROM artifact_video_renders
+      WHERE project_id = ${input.projectId}
+        AND key = ANY(${[...new Set(input.keys)]}::text[])
+        AND failure IS NOT NULL
     `
   }
 

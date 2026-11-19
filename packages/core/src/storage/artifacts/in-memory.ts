@@ -29,6 +29,7 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
   CreateArtifactInput,
@@ -45,6 +46,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListArtifactVideoRendersInput,
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
@@ -88,6 +90,7 @@ interface InMemoryArtifactSnapshot {
   readonly boardPreviews: ReadonlyMap<string, ArtifactBoardPreviewRecord>
   readonly pdfs: ReadonlyMap<string, ArtifactPdfRecord>
   readonly media: ReadonlyMap<string, ArtifactMediaRecord>
+  readonly videoRenders: ReadonlyMap<string, ArtifactVideoRenderRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -101,6 +104,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private pdfs = new Map<string, ArtifactPdfRecord>()
   /** By project and digest; no artifact owns one. */
   private media = new Map<string, ArtifactMediaRecord>()
+  /** By project and key; no artifact owns one. */
+  private videoRenders = new Map<string, ArtifactVideoRenderRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -535,6 +540,32 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.media.set(`${input.projectId}\0${input.digest}`, structuredClone(input))
   }
 
+  async listVideoRenders(
+    input: ListArtifactVideoRendersInput
+  ): Promise<ArtifactVideoRenderRecord[]> {
+    const kept = [...new Set(input.keys)].flatMap((key) => {
+      const render = this.videoRenders.get(`${input.projectId}\0${key}`)
+      return render ? [render] : []
+    })
+    return structuredClone(kept.sort((left, right) => (left.key < right.key ? -1 : 1)))
+  }
+
+  async putVideoRender(input: ArtifactVideoRenderRecord): Promise<void> {
+    const key = `${input.projectId}\0${input.key}`
+    const kept = this.videoRenders.get(key)
+    if (!kept || ("failure" in kept && !("failure" in input))) {
+      this.videoRenders.set(key, structuredClone(input))
+    }
+  }
+
+  async clearVideoRenderFailures(input: ListArtifactVideoRendersInput): Promise<void> {
+    for (const each of input.keys) {
+      const key = `${input.projectId}\0${each}`
+      const kept = this.videoRenders.get(key)
+      if (kept && "failure" in kept) this.videoRenders.delete(key)
+    }
+  }
+
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
     const key = artifactKey(input.projectId, input.artifactId)
     const stored = this.artifacts.get(key)
@@ -644,6 +675,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       boardPreviews: this.boardPreviews,
       pdfs: this.pdfs,
       media: this.media,
+      videoRenders: this.videoRenders,
     })
   }
 
@@ -655,6 +687,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.boardPreviews = new Map(restored.boardPreviews)
     this.pdfs = new Map(restored.pdfs)
     this.media = new Map(restored.media)
+    this.videoRenders = new Map(restored.videoRenders)
   }
 
   /**

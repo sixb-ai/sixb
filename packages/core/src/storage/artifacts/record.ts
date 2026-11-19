@@ -27,6 +27,7 @@ import type {
   ArtifactStateEntry,
   ArtifactTurnWriteRecord,
   ArtifactVersionRecord,
+  ArtifactVideoRenderRecord,
 } from "./types"
 
 // Rows arrive from providers with camelCase keys. JSON columns may arrive parsed (jsonb) or as text
@@ -235,6 +236,22 @@ export function parseArtifactPdfRow(row: Row): ArtifactPdfRecord {
   const file = json(row.file, "file", where)
   if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
   return { ...kept, file, pages: positiveInteger(row.pages, "pages", where) }
+}
+
+export function parseArtifactVideoRenderRow(row: Row): ArtifactVideoRenderRecord {
+  const key = text(row.key, "key", "video render")
+  const where = `video render '${key}'`
+  const kept = {
+    projectId: text(row.projectId, "projectId", where),
+    key,
+    createdAt: date(row.createdAt, "createdAt", where),
+  }
+  if (row.failure !== null && row.failure !== undefined) {
+    return { ...kept, failure: text(row.failure, "failure", where) }
+  }
+  const file = json(row.file, "file", where)
+  if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
+  return { ...kept, file }
 }
 
 export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewRecord {
