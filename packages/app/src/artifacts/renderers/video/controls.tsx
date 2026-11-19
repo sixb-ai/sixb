@@ -63,10 +63,11 @@ export function ControlBar({
     readonly placing: boolean
     readonly panel: boolean
     readonly onPlace: () => void
-    readonly onPanel: () => void
+    /** Opens the comments beside the video; none while it fills the screen. */
+    readonly onPanel: (() => void) | null
   } | null
   readonly chaptersOpen: boolean
-  /** Opens the chapters; none for a video of one scene. */
+  /** Opens the chapters; none for a video of one scene, or while it fills the screen. */
   readonly onChapters: (() => void) | null
   readonly fullscreen: boolean
   readonly onFullscreen: () => void
@@ -143,17 +144,19 @@ export function ControlBar({
               >
                 <MessageSquarePlus />
               </BarButton>
-              <BarButton
-                label={messages.commentsPanel(comments.open)}
-                pressed={comments.panel}
-                onClick={comments.onPanel}
-                className="w-auto gap-1 px-2"
-              >
-                <MessageSquare />
-                {comments.open > 0 ? (
-                  <span className="text-xs font-medium tabular-nums">{comments.open}</span>
-                ) : null}
-              </BarButton>
+              {comments.onPanel ? (
+                <BarButton
+                  label={messages.commentsPanel(comments.open)}
+                  pressed={comments.panel}
+                  onClick={comments.onPanel}
+                  className="w-auto gap-1 px-2"
+                >
+                  <MessageSquare />
+                  {comments.open > 0 ? (
+                    <span className="text-xs font-medium tabular-nums">{comments.open}</span>
+                  ) : null}
+                </BarButton>
+              ) : null}
             </>
           ) : null}
           {onChapters && !compact ? (
