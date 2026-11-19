@@ -53,6 +53,7 @@ import {
   wordAt,
   wordsCut,
 } from "../src/artifacts/renderers/video/editor/transcript"
+import { TranscriptPanel } from "../src/artifacts/renderers/video/editor/transcript-panel"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -709,6 +710,27 @@ describe("what is derived of a recording", () => {
     const alert = await waitFor(() => view.getByRole("alert"))
     expect(alert.textContent).toContain("This recording can’t be read")
     expect(alert.textContent).toContain("It could not be read as a video or a sound.")
+  })
+
+  // Reproduce by dropping the transcription-model notice from TranscriptPanel: the tab then says
+  // only that the project has none, with nothing the reader can act on.
+  test("says what editing by words needs when the project cannot transcribe", async () => {
+    serve()
+    const view = render(
+      wrap(
+        <TranscriptPanel
+          target={target}
+          src="media/voice.m4a"
+          clips={[]}
+          timeMs={0}
+          onSeek={() => {}}
+          onRemove={() => {}}
+        />
+      )
+    )
+
+    await waitFor(() => view.getByText("Editing by words needs a transcription model"))
+    expect(view.container.textContent).toContain("models.audio.transcription")
   })
 
   // Reproduce by polling while a recording has no filmstrip, as the editor did: a sound, which

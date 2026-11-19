@@ -895,6 +895,9 @@ export const en = {
     selectSpeech: "Select a clip with speech to edit it by what is said.",
     transcribing: "Transcribing",
     noTranscript: "No transcript for this clip",
+    noTranscriptionModel: "Editing by words needs a transcription model",
+    noTranscriptionModelHint:
+      "Whoever sets up this project can add one in models.audio.transcription, such as elevenlabs/scribe-v2. Each recording’s words then show here, to cut it by what is said.",
     transcriptFailed: "The transcript couldn’t be loaded",
     search: "Search the transcript",
     matches: (index: number, count: number) => `${number(index)} of ${number(count)}`,
@@ -1859,6 +1862,9 @@ export const fr: Translation<ArtifactMessages> = {
     selectSpeech: "Sélectionnez un plan parlé pour le monter par ce qui est dit.",
     transcribing: "Transcription en cours",
     noTranscript: "Pas de transcription pour ce plan",
+    noTranscriptionModel: "Monter par les mots demande un modèle de transcription",
+    noTranscriptionModelHint:
+      "La personne qui configure ce projet peut en ajouter un dans models.audio.transcription, comme elevenlabs/scribe-v2. Les mots de chaque enregistrement s’affichent alors ici, pour le couper par ce qui est dit.",
     transcriptFailed: "La transcription n’a pas pu être chargée",
     search: "Rechercher dans la transcription",
     matches: (index, count) => `${numberFr(index)} sur ${numberFr(count)}`,
