@@ -74,7 +74,8 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 - A scene host sits in the root composition itself, never in another composition.
 - The root's `data-poster`, which HyperFrames does not read (its lint passes it), is the instant
   that shows the video before it plays, in seconds from 0 to before its end. The app's player
-  opens on it; without one, 70% into the first scene, where an opening has come in.
+  opens on it, and its card shows it; without one, both show the first scene's still, the middle
+  of its segment, where an opening has come in (`videoPosterMs`).
 - A scene file is one `<template>`, nothing beside it.
 
 ## Source positions
