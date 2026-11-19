@@ -34,6 +34,7 @@ export function createInstanceApiClient(mode: InstanceCliMode): ApiClient {
     baseUrl: mode.baseUrl,
     ...(mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {}),
     ...(mode.kind === "sandbox" && mode.runId ? { runId: mode.runId } : {}),
+    ...(mode.kind === "sandbox" ? { uploadsThroughApi: true } : {}),
     missingBaseUrlMessage:
       mode.kind === "sandbox"
         ? "SIXB_API_BASE_URL is not set."

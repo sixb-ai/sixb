@@ -1321,6 +1321,71 @@ export function runSandboxCliProcessSmoke(runtime: SandboxCliProcess): void {
     },
     PROCESS_TIMEOUT_MS + 5_000
   )
+
+  // To check, send every file through `api.upload` again: the API answers a file past the
+  // simple-upload ceiling with 413, and nothing reaches the staged routes.
+  test(
+    `uploads a file past the simple-upload ceiling staged, from disk, on ${runtime.runtime}${
+      runtime.overUnixSocket ? " over a Unix socket" : ""
+    }`,
+    async () => {
+      const sizeBytes = 25 * 1024 * 1024 + 1
+      const fileRef = { blobId: "blob_staged", digest: "sha256:staged", sizeBytes }
+      const api = startTestApi(
+        (request) => {
+          switch (`${request.method} ${request.url.pathname}`) {
+            case "POST /api/files/uploads":
+              return json({
+                strategy: "server",
+                uploadId: "upload_1",
+                method: "PUT",
+                url: "/api/files/uploads/upload_1/content",
+                expiresAt: "2099-01-01T00:00:00.000Z",
+              })
+            case "PUT /api/files/uploads/upload_1/content":
+              return json({ success: true })
+            case "POST /api/files/uploads/upload_1/complete":
+              return json(fileRef)
+          }
+          return undefined
+        },
+        { overUnixSocket: runtime.overUnixSocket ?? false }
+      )
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-upload-"))
+      try {
+        const uploadPath = join(tempDir, "recording.txt")
+        const contents = "0123456789abcdef".repeat(Math.ceil(sizeBytes / 16)).slice(0, sizeBytes)
+        await writeFile(uploadPath, contents)
+        const digest = `sha256:${new Bun.CryptoHasher("sha256").update(contents).digest("hex")}`
+
+        const result = await runCommand([...runtime.command, "files", "upload", uploadPath], {
+          ...apiEnv(api),
+        })
+
+        expect(result).toMatchObject({ exitCode: 0, stderr: "" })
+        expect(JSON.parse(result.stdout)).toEqual(fileRef)
+        expect(api.requests.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+          "POST /api/files/uploads",
+          "PUT /api/files/uploads/upload_1/content",
+          "POST /api/files/uploads/upload_1/complete",
+        ])
+        const [created, content, completed] = api.requests
+        // A sandbox reaches the API for certain, and blob storage only if its network allows it.
+        expect(created?.body).toEqual({
+          fileName: "recording.txt",
+          sizeBytes,
+          digest,
+          strategy: "server",
+        })
+        expect(content?.body).toBe(contents)
+        expect(completed?.body).toEqual({ digest, sizeBytes })
+      } finally {
+        api.close()
+        await rm(tempDir, { recursive: true, force: true })
+      }
+    },
+    PROCESS_TIMEOUT_MS + 5_000
+  )
 }
 
 async function runCommand(
