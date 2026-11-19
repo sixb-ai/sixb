@@ -93,6 +93,8 @@ export function buildExecArgv(
     readonly secretEnv?: readonly string[]
     /** Leave the command running in the background (`--detach`). */
     readonly detach?: boolean
+    /** Forward the smolvm process's standard input to the command (`--interactive`). */
+    readonly interactive?: boolean
   }
 ): string[] {
   const argv = [config.bin, "machine", "exec", "--name", params.id, "--workdir", params.cwd]
@@ -103,6 +105,7 @@ export function buildExecArgv(
     argv.push("--secret-env", `${key}=${key}`)
   }
   if (params.detach) argv.push("--detach")
+  if (params.interactive) argv.push("--interactive")
   argv.push("--", params.command, ...params.args)
   return argv
 }

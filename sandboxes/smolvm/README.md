@@ -112,4 +112,5 @@ bun test sandboxes/smolvm/tests/   # VM tests skip without a smolvm binary
 ```
 
 Pure unit tests cover the CLI flags and network policy; a fake `smolvm` covers the lifecycle and the
-full data path; `smolvm-integration.test.ts` runs a real VM when a binary is present.
+full data path, and runs the shared sandbox contract; `smolvm-integration.test.ts` runs a real VM
+when a binary is present.

@@ -7,6 +7,8 @@ export interface ExecOptions {
   readonly env: Readonly<Record<string, string>>
   readonly timeoutMs?: number
   readonly signal?: AbortSignal
+  /** Written to the command's standard input, which is otherwise empty. */
+  readonly stdin?: Blob
 }
 
 const DEFAULT_KILL_EXIT_CODE = 137
@@ -38,7 +40,7 @@ export async function exec(options: ExecOptions): Promise<CommandResult> {
     proc = Bun.spawn([head, ...rest], {
       cwd: options.cwd,
       env: options.env,
-      stdin: "ignore",
+      stdin: options.stdin ?? "ignore",
       stdout: "pipe",
       stderr: "pipe",
       detached: true,

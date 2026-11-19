@@ -43,6 +43,21 @@ describe("exec", () => {
     expect(result.stderr).toContain(`'${cwd}'`)
   })
 
+  test("writes stdin to the command, which otherwise reads nothing", async () => {
+    const cwd = temporaryDirectory()
+
+    const given = await exec({
+      argv: ["/bin/sh", "-c", "cat"],
+      cwd,
+      env: {},
+      stdin: new Blob(["in"]),
+    })
+    const none = await exec({ argv: ["/bin/sh", "-c", "cat"], cwd, env: {} })
+
+    expect(given).toMatchObject({ exitCode: 0, stdout: "in" })
+    expect(none).toMatchObject({ exitCode: 0, stdout: "" })
+  })
+
   test("a missing program in an existing directory still reports the spawn error", async () => {
     const result = await exec({
       argv: ["sixb-no-such-program"],

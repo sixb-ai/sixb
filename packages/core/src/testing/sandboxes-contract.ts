@@ -370,6 +370,40 @@ export function runSandboxesContractSuite(
         }
       })
 
+      // An agent's run writes its skills and the sandbox's `sixb` in one call. Regression check:
+      // put every file's contents in one guest command's arguments again (smolvm once did); the
+      // kernel refuses an argument list this long, and the call fails.
+      test("writeFiles writes a large file and many files in one call", async () => {
+        const sandbox = await factory.create()
+        try {
+          const large = Uint8Array.from({ length: 2 * 1024 * 1024 }, (_, index) => index % 251)
+          const many = Array.from({ length: 200 }, (_, index) => ({
+            path: `many/${String(index).padStart(3, "0")}.txt`,
+            contents: `${index}\n`,
+          }))
+          await sandbox.writeFiles([{ path: "large.bin", contents: large }, ...many])
+
+          const size = await sandbox.runCommand("wc", ["-c", "large.bin"])
+          expect(size.exitCode).toBe(0)
+          expect(size.stdout.trim().split(/\s+/)[0]).toBe(String(large.length))
+
+          // The pattern's period is prime, so a dropped or shifted chunk changes the last bytes.
+          const tail = await sandbox.runCommand("/bin/sh", [
+            "-c",
+            "tail -c 4 large.bin | od -An -tu1",
+          ])
+          expect(tail.stdout.trim().split(/\s+/)).toEqual(
+            [...large.subarray(-4)].map((byte) => String(byte))
+          )
+
+          const listed = await sandbox.runCommand("/bin/sh", ["-c", "cat many/*.txt"])
+          expect(listed.exitCode).toBe(0)
+          expect(listed.stdout).toBe(many.map((file) => file.contents).join(""))
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
       test("writeFiles after stop rejects", async () => {
         const sandbox = await factory.create()
         await sandbox.stop()
