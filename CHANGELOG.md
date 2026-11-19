@@ -2,37 +2,125 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## Unreleased
+## 2026-11-19 — Sixb 0.2.6
+
+0.2.6 runs an OAuth connector's syncs once per connected account, lets people edit a message they
+sent and rewind the conversation, moves a conversation between the cloud and a computer in either
+direction, and deploys over SSH without downtime. The GitHub connector gains OAuth connections,
+pull request merges and reviews, and GitHub Actions.
 
 ### Highlights
 
-- The Usage page counts days, weeks and hours on the reader's calendar rather than UTC's, so its
-  last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
-  link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
-  series on the `timeZone` its query names, UTC when it names none.
+- An OAuth connector's sync runs once per connected account: each account has its own runs,
+  checkpoint and failures, and a newly connected account starts its first read at once instead of
+  waiting for everyone else's. `sixb.syncs.request()` runs every account you may run, or one with
+  `connectionId`, and `sixb.syncs.accounts.list(connectorId)` returns each account with the latest
+  run of each sync. The connector's page lists its accounts, the ones that need reconnecting or
+  failed first, and syncs one from its row.
+- Edit a message you sent: the conversation rewinds to it, the turns after it are undone
+  (artifacts they wrote included), and a new turn starts from the edited message. An edit sent
+  while a turn runs stops it first. Over HTTP,
+  `POST /api/agent-threads/:threadId/messages/:messageId/edit`.
+- Move a conversation between the cloud and a folder on a connected computer, in either direction
+  and as often as needed: `sixb.agent.threads.moveToComputer()` and `moveToCloud()`, the place
+  control in the conversation's header, or `/here` and `/cloud` in the terminal. A queued turn
+  travels with its conversation, the transcript marks every move, and a conversation that comes
+  back to a workspace reuses its prompt cache.
 - A conversation remembers how far each person has read it, on every device.
   `sixb.agent.threads.list()` and `getById()` return the caller's `read` (their place, the newest
   message and how many messages someone else wrote since) and `lastRun`, enough to offer Continue
   or Retry. `sixb.agent.threads.markRead(threadId, { throughMessageId })` moves the place, or to
   the newest message without one; over HTTP, `PUT /api/agent-threads/:threadId/read`.
+- A running Agent turn opened late, or after the stream dropped its place, shows everything it did,
+  its sub-agents and the messages it read included, instead of its last few seconds. The worker
+  logs each finished step to the run's `agents.runs.<runId>.steps` stream, and `/ws/agents` sends
+  a `run.steps` frame before the live records. Deltas streamed within 50 ms go out as one record: a
+  DeepSeek turn wrote one record per 4 characters, about 90,000 for 19 minutes.
+- Deploy without downtime with `@sixb/deploy-ssh`: a release boots on standby ports beside the live
+  one, Caddy switches to it once it is ready, and the retiring API and workers drain so requests
+  and Agent turns in progress finish. Browsers reconnect their live views without a visible drop. A
+  deploy whose release brings storage migrations still stops the live release first.
+- Stop a server and its workers cleanly: on SIGTERM, HTTP servers and workers finish what they
+  started before exiting, and a second SIGTERM no longer kills them mid-drain.
+- Connect people's own GitHub accounts with `@sixb/connector-github`'s
+  `github({ auth: { oauth: { clientId, clientSecret } } })`, or a GitHub App installation with
+  `auth: { app }`. In a sandbox, `githubOAuth({ connector })` lets the Agent commit, open pull
+  requests and attach files as the person who asked.
+- Create and delete branches, open, merge and review pull requests, write inline comments, read
+  check runs, and read, re-run, cancel and start GitHub Actions workflow runs with
+  `@sixb/connector-github`.
+- Transcription results carry `words`: each word with its `startMs`, `endMs` and, where the model
+  labels voices, its `speaker`. The AI Gateway binding reads them from ElevenLabs and Azure
+  models.
+- The Usage page counts days, weeks and hours on the reader's calendar rather than UTC's, so its
+  last bar is the reader's today: at 7 pm in New York the week no longer ends with tomorrow. A
+  link to a picked day opens that day for a reader in any zone, and the accounting API buckets a
+  series on the `timeZone` its query names, UTC when it names none.
 - Let a server on an Azure VM read its Key Vault with the VM's managed identity:
   `@sixb/env-azure-key-vault`'s `azureKeyVault({ vaults, server: { identity: "managed" } })`, with
   a `clientId` for a user-assigned identity. `sixb deploy setup` then creates no app registration
   and no secret that expires, and a deploy the vault refuses prints the command that grants the
   identity access.
+- The Agent wastes fewer turns: a stopped sandbox ends the turn and says so instead of retrying in
+  it, a Vercel command that times out or is stopped ends with everything it started, a `cwd` that
+  does not exist fails the command rather than the workspace, project commands in a sandbox run
+  the project's own `sixb`, and reasoning replays only to the model that produced it. The system
+  prompt names the model the run is on, and a misnamed property lists the properties the caller
+  may see.
+- Switching conversations no longer stalls the API: a thread's messages are checked once, and
+  leave out what only replays to the model. The app loads a conversation when the pointer rests
+  on it, keeps it loaded, and starts a new conversation on the last model chosen.
 
 ### Upgrade notes
 
-- Run the migrations: PostgreSQL `108-agent-thread-reads`, SQLite `105-agent-thread-reads`. Every
-  existing conversation's owner and participants start caught up.
-- A storage provider of your own implements `AgentStorage.reads` and
-  `AgentRunStore.latestByThread`, and its `messages.deleteByRunId` and `deleteFromSeq` bring any
-  place past the newest message left back to it.
+- Run the migrations: PostgreSQL `107-agent-inbox-edits` to `109-sync-run-connections`, SQLite
+  `104-agent-inbox-edits` to `106-sync-run-connections`. Every existing conversation's owner and
+  participants start caught up.
+- `sixb.syncs.request()` returns `{ runs }`, one per account, and so does
+  `POST /api/syncs/:syncId/runs`. Code that read `result.runId` reads `result.runs[0]?.runId` for
+  a sync of a connector without OAuth.
+- `defineSync` refuses `mode: "snapshot"` on an OAuth connector, since a snapshot of one account
+  would replace every other account's rows. Use `"merge"` and return `change.delete()` for records
+  the provider deleted, or `"append"`.
+- A run of an OAuth connector's sync queued before the upgrade ends cancelled without reading; the
+  next trigger queues one run per account.
+- A member sees the sync runs and run events of the project's accounts and their own, not a
+  colleague's. The connector's managers still see everyone's.
+- `@sixb/deploy-ssh` needs Caddy 2.7 or later; `sixb deploy check` stops on an older one and says
+  how to upgrade. Each project also uses `standbyPorts`, `ports` + 10 by default, so projects
+  sharing a server need ports 20 apart. The first deploy after the upgrade restarts the old
+  supervisor once, and this release's migrations stop the services during that deploy.
+- Each release on the server links to the shared `.env`, so `sixb deploy restart` applies an edit
+  to it.
+- A thread's messages over HTTP leave out `providerMetadata` and provider-state data, which only
+  replay to the model.
+- `AgentRunStreamEvent` has a new `agent.ui.steps` member, which `useAgentRunStream` and
+  `createAgentRunSocket` deliver to `onEvent`. A reducer over these events should replace its
+  parts with the event's chunks (see the app's `liveRunReducer`).
+- A sandbox provider of your own throws `SandboxNotRunningError` when its sandbox has stopped, so
+  the turn ends instead of retrying in it.
+- A storage provider of your own implements `AgentStorage.reads`,
+  `AgentRunStore.latestByThread`, the rewind an edit needs (`messages.deleteFromSeq`,
+  `checkpoints.deleteAfterSeq`, approvals' `rewind`), and a sync run's `connectionId` with
+  `listLatestByConnection`. Its `messages.deleteByRunId` and `deleteFromSeq` bring any read place
+  past the newest message left back to it.
 - `getAiAccountingOverview` takes an optional `timeZone`, an IANA name, and returns its periods on
   that calendar instead of always UTC's. Settings › Usage sends the browser's.
 - A UTC offset such as `"+05:30"` is refused wherever a time zone is asked for: the overview's
   `timeZone`, a project's `timeZone` and the agent's requester zone. Name the zone instead, such as
   `"Asia/Kolkata"`.
+
+### Package versions
+
+- `0.2.6`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/app`, `@sixb/cli`,
+  `@sixb/agent`, `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`, `@sixb/lake-worker`,
+  `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/render-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`, `@sixb/deploy-ssh`,
+  `@sixb/model-protocols`, `@sixb/anthropic`, `@sixb/azure-ai-foundry`, `@sixb/typesafe`,
+  `@sixb/vercel-ai-gateway`.
+- `0.2.4`: `@sixb/cli-core`, `@sixb/broker-redis`, `@sixb/env-azure-key-vault`,
+  `@sixb/connector-github`.
+- `0.2.1`: `@sixb/sandboxes-vercel`, `create-sixb`.
 
 ## 2026-11-17 — Sixb 0.2.5
 
@@ -92,11 +180,6 @@ Foundry image, speech, transcription, rerank and decision models.
   unknown cost.
 - The chat folds its composer on narrow screens, keeps unsent drafts and open artifacts per
   conversation, follows live work steps, and renders Markdown without re-rendering messages.
-- A running Agent turn opened late, or after the stream dropped its place, shows everything it did,
-  its sub-agents and the messages it read included, instead of its last few seconds. The worker logs each finished step to
-  the run's `agents.runs.<runId>.steps` stream, and `/ws/agents` sends a `run.steps` frame before
-  the live records. Deltas streamed within 50 ms go out as one record: a DeepSeek turn wrote one
-  record per 4 characters, about 90,000 for 19 minutes.
 
 ### Upgrade notes
 
@@ -106,9 +189,6 @@ Foundry image, speech, transcription, rerank and decision models.
   project with a sandbox provider. `sixb worker-group` with no types includes it. Until then,
   canvas boards get no new pictures and PDFs wait.
 - `Queues` gains a required `renders` lane, so a third-party queues provider must implement it.
-- `AgentRunStreamEvent` has a new `agent.ui.steps` member, which `useAgentRunStream` and
-  `createAgentRunSocket` deliver to `onEvent`. A reducer over these events should replace its
-  parts with the event's chunks (see the app's `liveRunReducer`).
 - `MetaClient` has a new `ads` member; Page and Instagram clients have none. A project type that
   omits members from `MetaClient` to describe those clients (`Omit<MetaClient, "pages">`) omits
   `"ads"` too.

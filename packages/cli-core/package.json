@@ -1,6 +1,6 @@
 {
   "name": "@sixb/cli-core",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Shared instance command runtime for Sixb CLIs",
   "keywords": [
     "sixb",
