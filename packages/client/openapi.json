@@ -72681,7 +72681,12 @@
                         },
                         "reason": {
                           "type": "string",
-                          "description": "Why it could not be rendered: which scene, or the sound"
+                          "description": "Why it could not be rendered: which scene, the sound, or what the project lacks"
+                        },
+                        "lacks": {
+                          "type": "string",
+                          "enum": ["sandboxes", "sandbox_tools"],
+                          "description": "What the project lacks to render it, when the video is not why: retry=true renders it once the project has it"
                         }
                       },
                       "required": ["status", "reason"],

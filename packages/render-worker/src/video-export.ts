@@ -20,7 +20,7 @@ import type {
   ArtifactVideoSegmentRequestedQueueJob,
   NewQueueJob,
 } from "@sixb/core/queues"
-import type { ArtifactVideoRenderRecord } from "@sixb/core/storage"
+import type { ArtifactVideoRenderLack, ArtifactVideoRenderRecord } from "@sixb/core/storage"
 import type { RenderHost } from "./host"
 import {
   downloadIntoSandbox,
@@ -72,17 +72,23 @@ export async function assembleVideoExport(input: {
 
   const kept = await artifacts.listVideoRenders({ projectId: host.id, keys: videoExportKeys(plan) })
   const status = videoExportStatus(plan, kept)
-  const fail = (failure: string) =>
-    artifacts.putVideoRender({ projectId: host.id, key: plan.key, failure, createdAt: new Date() })
+  const fail = (failure: string, lacks?: ArtifactVideoRenderLack) =>
+    artifacts.putVideoRender({
+      projectId: host.id,
+      key: plan.key,
+      failure,
+      ...(lacks ? { lacks } : {}),
+      createdAt: new Date(),
+    })
 
   if (status.status === "ready") return
   if (status.status === "failed") {
     // A segment's failure is the export's, until someone asks again.
-    if (!kept.some((record) => record.key === plan.key)) await fail(status.reason)
+    if (!kept.some((record) => record.key === plan.key)) await fail(status.reason, status.lacks)
     return
   }
   if (!host.sandboxes) {
-    await fail("This project has no sandboxes to render videos in.")
+    await fail("This project has no sandboxes to render videos in.", "sandboxes")
     return
   }
 

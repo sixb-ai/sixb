@@ -865,6 +865,8 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
   Each worker renders two segments at once; more workers render more.
 - When it could not be rendered, asking answers `{ status: "failed", reason }`, which names the
   scene, until you ask with `{ retry: true }` (`?retry=true`), which renders what failed again.
+  With `lacks: "sandbox_tools"`, the sandboxes have no HyperFrames, or another release: a retry
+  fails the same until their image has it. The app then says export is not available.
 - A project without a [sandbox provider](../sandboxes/overview.md) renders nothing: asking fails
   with `video_unavailable`.
 - Each scene also gets a still, a picture of its chapter's middle, a few seconds after the video is

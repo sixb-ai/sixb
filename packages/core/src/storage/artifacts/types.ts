@@ -452,8 +452,16 @@ export type ArtifactVideoRenderRecord = ArtifactVideoRenderKey & { readonly crea
     | {
         /** Why it could not be made, as whoever asked for it hears it. */
         readonly failure: string
+        /**
+         * What the project lacks to make it, when the video is not why: sandboxes, or the tools in
+         * them. Asking again makes it once the project has them, and only then.
+         */
+        readonly lacks?: ArtifactVideoRenderLack
       }
   )
+
+/** What a project lacks to render a video: sandboxes, or HyperFrames as the agent image has it. */
+export type ArtifactVideoRenderLack = Exclude<ArtifactMediaLack, "transcription_model">
 
 export interface ArtifactVideoRenderKey {
   readonly projectId: string
