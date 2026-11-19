@@ -521,6 +521,9 @@ vercelGateway.transcription("microsoft/mai-transcribe-2", {
 })
 ```
 
+`output.segments` lists the stretches the model timed, such as sentences, and `output.language` the
+language it heard, when it says.
+
 A model that times only phrases gives one entry per phrase, so seeking by word still lands on the
 right second and speaker. Sixb passes on what the model sends and never diarizes audio itself, so a
 `speaker` label, such as `speaker_0`, is stable within one transcript only. Text alone cannot say
