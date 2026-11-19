@@ -108,7 +108,8 @@ export function VideoRenderer({
 
 /**
  * A video's scenes as one bar along its length, each as long as it plays, the marked one brighter.
- * Drawn on the video's dark screen.
+ * Drawn on the video's dark screen, in solid greys: where one scene fades into the next, the later
+ * one lies over the earlier rather than adding up to a brighter mark.
  */
 export function VideoScenesBar({
   outline,
@@ -128,7 +129,7 @@ export function VideoScenesBar({
             key={scene.id}
             className={cn(
               "absolute inset-y-0 rounded-full border-x border-neutral-950",
-              scene.id === marked ? "bg-white/80" : "bg-white/25"
+              scene.id === marked ? "bg-neutral-200" : "bg-neutral-600"
             )}
             style={{
               left: `${(scene.startMs / length) * 100}%`,
