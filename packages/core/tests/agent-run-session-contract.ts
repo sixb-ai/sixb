@@ -1081,8 +1081,9 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     })
 
     // Guard proofs: drop the ModelConnectionLost or the interrupted ModelProviderError kind from
-    // encodeWireError, or send an error event on as any event in streamModelCall; over HTTP the
-    // runner then reads a failure its model loop does not make again.
+    // encodeModelCallError, encode either of streamModelCall's failures with encodeWireError, or
+    // send an error event on as any event; over HTTP the runner then reads a failure its model loop
+    // does not make again.
     test("fail an interrupted call as in process, before it answers or after", async () => {
       const { turn, open } = await seedConversation(claim)
       const session = await open(await turn("run-a", "m1"))
