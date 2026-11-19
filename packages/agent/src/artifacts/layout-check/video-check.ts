@@ -1,18 +1,24 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { VideoOutline } from "@sixb/core/artifacts"
-import { FRAME_CDN_ALLOWLIST, rewriteFrameReferences } from "@sixb/core/internal/artifacts/frames"
+import {
+  FRAME_CDN_ALLOWLIST,
+  HTML_ENTRY,
+  injectFrameAssets,
+  rewriteFrameReferences,
+} from "@sixb/core/internal/artifacts/frames"
 import type { ArtifactFrameTarget } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
-import { CHECKS_DIRECTORY, type LayoutCheck, type LayoutWarning } from "./layout-check"
+import { asset, CHECKS_DIRECTORY, type LayoutCheck, type LayoutWarning } from "./layout-check"
 import videoScript from "./video.cjs" with { type: "text" }
 
 /** Where the script is, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
 /**
- * HyperFrames' Chromium start, a check of the whole video, and a frame of each scene's start,
- * middle and end, footage decoded for each: a minute and a half for a teaser, more with footage.
+ * HyperFrames' Chromium start, a check of the whole video, a look at its media, and a frame of
+ * each scene's start, middle and end, footage decoded for each: a minute and a half for a teaser,
+ * more with footage.
  */
 const CHECK_TIMEOUT_MS = 240_000
 /** The most frames a check snapshots, whatever the video's length: its contact sheet stays legible. */
@@ -85,6 +91,8 @@ interface VideoReport {
     readonly ink?: number
   }[]
   readonly missing?: readonly { readonly path: string; readonly why: string }[]
+  /** What each scene playing at each instant shows of its media, as `mediaProbe` sees it. */
+  readonly media?: readonly MediaSample[]
   readonly stopped?: string
   readonly skipped?: string
   readonly failed?: string
@@ -105,12 +113,37 @@ interface VideoFinding {
   readonly url?: string
 }
 
+/** Why a video or an image cannot be seen at an instant. */
+export type MediaHidden = "display" | "visibility" | "opacity" | "size" | "outside"
+
+/** A `<video>` or an `<img>` of a scene playing at an instant, as the page computes it then. */
+export interface MediaSight {
+  readonly scene: string
+  /** Its place among the scene's media the probe looks at: the same element at every instant. */
+  readonly index: number
+  readonly tag: "video" | "img"
+  /** Its `src`, as the scene names it. */
+  readonly file: string
+  /** When it plays, in seconds from its scene's start, as its `data-start` and `data-duration` say. */
+  readonly start: number
+  readonly duration?: number
+  /** Why it cannot be seen; absent when it can. */
+  readonly hidden?: MediaHidden
+}
+
+/** What the probe saw at an instant of the check, in seconds. */
+export interface MediaSample {
+  readonly time: number
+  readonly sights: readonly MediaSight[]
+}
+
 /**
  * Checks a published video in the sandbox with HyperFrames, the release its export renders with,
  * on the files the export renders: `hyperframes check` for what breaks, overflows, reads poorly or
- * sounds wrong, and `hyperframes snapshot` for a contact sheet of each scene's start, middle and
- * end. A sandbox without HyperFrames skips it; so does a check that fails, which never costs the
- * Agent its publish.
+ * sounds wrong, `mediaProbe` at the snapshot's instants, in the root as the app's frame plays it,
+ * for footage never seen while it plays, and `hyperframes snapshot` for a contact sheet of each
+ * scene's start, middle and end. A sandbox without HyperFrames skips it; so does a check that
+ * fails, which never costs the Agent its publish.
  */
 export async function checkVideo(input: {
   readonly handle: AgentSandboxHandle
@@ -131,24 +164,44 @@ export async function checkVideo(input: {
 
   const frames = videoInstants(input.outline)
   const decoder = new TextDecoder()
+  const html = input.files.flatMap((file) =>
+    "html" in file
+      ? [
+          {
+            path: file.path,
+            contents: rewriteFrameReferences(
+              decoder.decode(file.html),
+              input.targets ?? [],
+              file.path
+            ),
+          },
+        ]
+      : []
+  )
+  const entry = html.find((file) => file.path === HTML_ENTRY)
+
   await sandbox.writeFiles([
     ...(installed.has(sandbox)
       ? []
-      : [{ path: posix.join(library, "video.cjs"), contents: videoScript }]),
-    ...input.files.flatMap((file) =>
-      "html" in file
-        ? [
-            {
-              path: posix.join(output, "project", file.path),
-              contents: rewriteFrameReferences(
-                decoder.decode(file.html),
-                input.targets ?? [],
-                file.path
-              ),
-            },
-          ]
-        : []
-    ),
+      : [
+          { path: posix.join(library, "video.cjs"), contents: videoScript },
+          { path: posix.join(library, "video.js"), contents: asset("__sixb/video.js") },
+          { path: posix.join(library, "hyperframes.js"), contents: asset("__sixb/hyperframes.js") },
+          { path: posix.join(library, "media.js"), contents: `(${mediaProbe.toString()})` },
+        ]),
+    ...html.map((file) => ({
+      path: posix.join(output, "project", file.path),
+      contents: file.contents,
+    })),
+    // The root as the app's frame plays it, which the check seeks to see what its media show.
+    ...(entry
+      ? [
+          {
+            path: posix.join(output, "frame.html"),
+            contents: injectFrameAssets(entry.contents, "video"),
+          },
+        ]
+      : []),
     {
       path: posix.join(output, "links.json"),
       contents: JSON.stringify(
@@ -167,7 +220,12 @@ export async function checkVideo(input: {
     },
     {
       path: posix.join(output, "instants.json"),
-      contents: JSON.stringify(frames.map((frame) => frame.atMs / 1000)),
+      contents: JSON.stringify(
+        frames.map((frame) => ({
+          at: frame.atMs / 1000,
+          scenes: scenesAt(input.outline, frame.atMs).map((scene) => scene.id),
+        }))
+      ),
     },
   ])
   installed.add(sandbox)
@@ -232,6 +290,7 @@ export async function checkVideo(input: {
     frames: taken,
     warnings: [
       ...craftWarnings(input.outline, taken),
+      ...hiddenMediaWarnings(input.outline, report.media ?? []),
       ...videoWarnings(report.findings ?? [], input.outline),
       // Left out before the check ran, such as a recording whose proxy is still being made, or
       // whose fetch failed in it.
@@ -354,12 +413,172 @@ export function craftWarnings(
   return warnings
 }
 
+/** How a warning says why a video or an image cannot be seen. */
+const HIDDEN: Record<MediaHidden, string> = {
+  display: "it or a parent is display: none",
+  visibility: "it is visibility: hidden",
+  opacity: "its opacity, or a parent's, is 0",
+  size: "it has no size",
+  outside: "it lies outside the frame",
+}
+
+/**
+ * A video or an image that is never seen while it plays: at every instant the check sampled while
+ * it plays, it was hidden, as `mediaProbe` computed it. A viewer sees what is behind it instead,
+ * such as a black phone where the footage should be; the tween that was to bring it in never ran.
+ * Each names its scene, its file and when.
+ */
+export function hiddenMediaWarnings(
+  outline: VideoOutline,
+  samples: readonly MediaSample[]
+): LayoutWarning[] {
+  const scenes = new Map(outline.scenes.map((scene) => [scene.id, scene]))
+  // Each element, by its scene and place, with what it showed at each instant it plays.
+  const media = new Map<
+    string,
+    { sight: MediaSight; seen: { atMs: number; hidden?: MediaHidden }[] }
+  >()
+
+  for (const sample of samples) {
+    const atMs = Math.round(sample.time * 1000)
+
+    for (const sight of sample.sights) {
+      const scene = scenes.get(sight.scene)
+      if (!scene) continue
+
+      // When it plays, within its scene: an instant outside it does not judge it.
+      const from = scene.startMs + sight.start * 1000
+      const sceneEnd = scene.startMs + scene.durationMs
+      const to = sight.duration === undefined ? sceneEnd : from + sight.duration * 1000
+      if (atMs < from || atMs >= Math.min(to, sceneEnd)) continue
+
+      const key = `${sight.scene}\0${sight.index}\0${sight.file}`
+      const each = media.get(key) ?? { sight, seen: [] }
+      each.seen.push({ atMs, ...(sight.hidden ? { hidden: sight.hidden } : {}) })
+      media.set(key, each)
+    }
+  }
+
+  const warnings: LayoutWarning[] = []
+  for (const { sight, seen } of media.values()) {
+    if (seen.length === 0 || seen.some((at) => at.hidden === undefined)) continue
+
+    const when = list(seen.map((at) => seconds(at.atMs)))
+    const why = [...new Set(seen.map((at) => HIDDEN[at.hidden ?? "opacity"]))].join(", then ")
+    warnings.push({
+      code: "video_media_hidden",
+      part: sight.scene,
+      message: `At ${when}, in scene '${sight.scene}': the <${sight.tag}> ${sight.file} never shows while it plays: ${why}. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.`,
+    })
+  }
+  return warnings.slice(0, MAX_WARNINGS)
+}
+
+/**
+ * Looks at the `<video>` and `<img>` elements of the scenes playing, the first few of each scene,
+ * in a video's page sought to an instant, and says why each cannot be seen, if it cannot: none of
+ * it shows, its opacity times its parents' is zero, or it has no size or lies outside the frame.
+ * Run in the page as its own source, `(${mediaProbe})(["demo"])`, so it names nothing outside
+ * itself. One that starts after another clip, rather than at a time, is left out: when it plays
+ * is not known here.
+ */
+export function mediaProbe(scenes: readonly string[]): MediaSight[] {
+  /** The most media of a scene it looks at: footage, then pictures. */
+  const MOST = 6
+  /** Under this opacity, its own times its parents', it cannot be seen. */
+  const MIN_OPACITY = 0.01
+
+  const root = document.querySelector("[data-composition-id]")
+  if (!root) return []
+  const frame = root.getBoundingClientRect()
+  const sights: MediaSight[] = []
+
+  for (const host of Array.from(root.querySelectorAll("[data-composition-src]"))) {
+    const scene = host.getAttribute("data-composition-id") ?? ""
+    if (!scenes.includes(scene) || host.parentElement?.closest("[data-composition-src]")) continue
+
+    const media = [
+      ...Array.from(host.querySelectorAll("video")),
+      ...Array.from(host.querySelectorAll("img")),
+    ].slice(0, MOST)
+
+    media.forEach((element, index) => {
+      // When it plays: while it and each clip it is in play, each timed from its composition's
+      // start, which a nested one takes from where it plays in its own.
+      const clips: Element[] = []
+      for (let node: Element | null = element; node && node !== host; node = node.parentElement) {
+        clips.unshift(node)
+      }
+      let offset = 0
+      let start = 0
+      let end = Number.POSITIVE_INFINITY
+      for (const clip of clips) {
+        const at = clip.getAttribute("data-start")
+        if (at === null) continue
+        const from = offset + Number(at)
+        if (!Number.isFinite(from)) return
+
+        const length = Number(clip.getAttribute("data-duration") ?? Number.NaN)
+        start = Math.max(start, from)
+        if (Number.isFinite(length)) end = Math.min(end, from + length)
+        if (clip.hasAttribute("data-composition-id")) offset = from
+      }
+      if (end <= start) return
+
+      let hidden: MediaHidden | undefined
+      let opacity = 1
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node)
+        if (style.display === "none") {
+          hidden = "display"
+          break
+        }
+        opacity *= Number(style.opacity)
+      }
+
+      const box = element.getBoundingClientRect()
+      const outside =
+        box.right <= frame.left ||
+        box.left >= frame.right ||
+        box.bottom <= frame.top ||
+        box.top >= frame.bottom
+      hidden ??=
+        getComputedStyle(element).visibility !== "visible"
+          ? "visibility"
+          : opacity < MIN_OPACITY
+            ? "opacity"
+            : box.width < 1 || box.height < 1
+              ? "size"
+              : outside
+                ? "outside"
+                : undefined
+
+      const src =
+        element.getAttribute("src") ?? element.querySelector("source")?.getAttribute("src") ?? ""
+      sights.push({
+        scene,
+        index,
+        tag: element instanceof HTMLVideoElement ? "video" : "img",
+        file: src.startsWith("data:") ? "(inline)" : src.replace(/[?#].*$/, ""),
+        start,
+        ...(Number.isFinite(end) ? { duration: end - start } : {}),
+        ...(hidden ? { hidden } : {}),
+      })
+    })
+  }
+  return sights
+}
+
 /** The scene on screen at an instant: of those that overlap there, the last to start. */
 function sceneAt(outline: VideoOutline, atMs: number): string {
-  const playing = outline.scenes.filter(
+  return (scenesAt(outline, atMs).at(-1) ?? outline.scenes.at(-1))?.id ?? ""
+}
+
+/** The scenes playing at an instant: two in a crossfade. */
+function scenesAt(outline: VideoOutline, atMs: number): VideoOutline["scenes"][number][] {
+  return outline.scenes.filter(
     (scene) => scene.startMs <= atMs && atMs < scene.startMs + scene.durationMs
   )
-  return (playing.at(-1) ?? outline.scenes.at(-1))?.id ?? ""
 }
 
 /**
@@ -439,6 +658,13 @@ function unreachable(finding: VideoFinding): boolean {
 /** `3.3 s`, as HyperFrames labels its frames. */
 function seconds(ms: number): string {
   return `${Number((ms / 1000).toFixed(2))} s`
+}
+
+/** `0.4 s, 2 s and 3.75 s`. */
+function list(items: readonly string[]): string {
+  return items.length < 2
+    ? (items[0] ?? "")
+    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 }
 
 function oneLine(text: string): string {

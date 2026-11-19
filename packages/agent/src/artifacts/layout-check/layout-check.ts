@@ -343,7 +343,8 @@ function overviewFiles(
   ]
 }
 
-function asset(path: string): string {
+/** A file of the frame's, which the checks serve to their browser as the API serves it. */
+export function asset(path: string): string {
   const file = FRAME_ASSETS[path]
   if (!file) throw new Error(`[SixbAgent] The frame has no '${path}'.`)
   return file.body

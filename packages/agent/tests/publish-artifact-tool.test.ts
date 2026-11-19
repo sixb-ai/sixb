@@ -2539,7 +2539,9 @@ describe("a video", () => {
 
   /** A video's check as HyperFrames runs it: a finding, and each instant snapshotted. */
   const videoCheck: Check = (output) => {
-    const instants = JSON.parse(readFileSync(join(output, "instants.json"), "utf8")) as number[]
+    const instants = JSON.parse(readFileSync(join(output, "instants.json"), "utf8")) as {
+      at: number
+    }[]
     mkdirSync(join(output, "frames"), { recursive: true })
     writeFileSync(join(output, "frames", "contact-sheet.jpg"), "the sheet")
     return {
@@ -2557,7 +2559,7 @@ describe("a video", () => {
         { pass: "audio", code: "audio_none", severity: "info", message: "The film has no sound." },
       ],
       sheets: [join(output, "frames", "contact-sheet.jpg")],
-      frames: instants.map((time, index) => ({
+      frames: instants.map(({ at: time }, index) => ({
         path: join(output, "frames", `frame-${String(index).padStart(2, "0")}-at-${time}s.png`),
         time,
       })),
@@ -2598,10 +2600,11 @@ describe("a video", () => {
       "media/clip.mp4": join(root, "film/media/clip.mp4"),
       "media/logo.svg": join(root, "film/media/logo.svg"),
     })
-    // The first frame, then each scene 0.4 s in, at its middle and at its end.
-    expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual([
-      0, 0.4, 1, 1.8, 2.4, 3.5, 4.75,
-    ])
+    // The first frame, then each scene 0.4 s in, at its middle and at its end, with the scenes
+    // playing at each, whose media the check looks at.
+    expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual(
+      [0, 0.4, 1, 1.8, 2.4, 3.5, 4.75].map((at) => ({ at, scenes: [at < 2 ? "intro" : "demo"] }))
+    )
     expect(published.layoutCheck.frames).toHaveLength(7)
 
     const { create } = tools()
