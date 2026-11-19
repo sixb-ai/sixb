@@ -496,6 +496,7 @@ export const en = {
     comment: "Comment",
     commentsPanel: (count: number) => (count > 0 ? `Comments, ${number(count)} open` : "Comments"),
     commentHint: "Click the frame to comment on this moment",
+    commentHintTouch: "Tap the frame to comment on this moment",
     commentsEmptyHint: "Pause where you want, click Comment, then the frame.",
     wholeVideo: "Whole video",
     settings: "Settings",
@@ -1285,6 +1286,7 @@ export const fr: Translation<ArtifactMessages> = {
         ? "Commentaires"
         : `Commentaires, ${numberFr(count)} ${count === 1 ? "ouvert" : "ouverts"}`,
     commentHint: "Cliquez sur l’image pour commenter ce moment",
+    commentHintTouch: "Touchez l’image pour commenter ce moment",
     commentsEmptyHint: "Mettez en pause où vous voulez, cliquez sur Commenter, puis sur l’image.",
     wholeVideo: "Toute la vidéo",
     settings: "Réglages",
