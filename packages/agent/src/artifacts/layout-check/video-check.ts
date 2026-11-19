@@ -17,8 +17,29 @@ const CHECKS = "checks"
 const CHECK_TIMEOUT_MS = 240_000
 /** The most frames a check snapshots, whatever the video's length: its contact sheet stays legible. */
 const MAX_FRAMES = 24
-/** The most a check reports; the contact sheet shows the rest. */
+/** The most a check reports of HyperFrames' findings; the contact sheet shows the rest. */
 const MAX_WARNINGS = 12
+
+/**
+ * The craft rules of the guide a check measures, so that no model can read past them: an end card
+ * holds three to four seconds, a scene stays long enough to be seen, and a teaser runs at most
+ * 45 seconds. Text too small for a phone is HyperFrames' own `text_below_floor`: 2.6% of the short
+ * side, 28 px at 1080p.
+ */
+const CRAFT = {
+  /** The last scene, the end card, past three to four seconds and a crossfade. */
+  maxEndCardMs: 4_500,
+  /** A scene shorter than this flashes by. */
+  minSceneMs: 1_000,
+  /** The longest a teaser runs, as the guide sets it. */
+  maxTeaserMs: 45_000,
+  /**
+   * A frame is empty under this share of edges: neighbouring pixels of a 192×108 grey copy that
+   * differ by more than 24 levels. A line of 48 px text on a plain ground measures about 3%, a
+   * busy app screen 10 to 25%, a lone logo on a plain ground 0.5%.
+   */
+  minInk: 0.01,
+}
 /**
  * The frames on each contact sheet, as `hyperframes snapshot` pages them: each sheet numbers its
  * own from 1.
@@ -48,13 +69,19 @@ export interface VideoFrame {
   readonly path: string
   readonly atMs: number
   readonly scene: string
+  /** How much it shows, as `CRAFT.minInk` measures it; absent when it could not be measured. */
+  readonly ink?: number
 }
 
 interface VideoReport {
   readonly layout?: "video"
   readonly findings?: readonly VideoFinding[]
   readonly sheets?: readonly string[]
-  readonly frames?: readonly { readonly path: string; readonly time: number }[]
+  readonly frames?: readonly {
+    readonly path: string
+    readonly time: number
+    readonly ink?: number
+  }[]
   readonly missing?: readonly { readonly path: string; readonly why: string }[]
   readonly stopped?: string
   readonly skipped?: string
@@ -179,15 +206,24 @@ export async function checkVideo(input: {
   const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
   const named = (path: string) => posix.join(checks, posix.relative(output, path))
   const shot = new Map((report.frames ?? []).map((frame) => [Math.round(frame.time * 1000), frame]))
+  const taken = frames.flatMap((frame) => {
+    const snapped = shot.get(frame.atMs)
+    if (!snapped) return []
+    return [
+      {
+        ...frame,
+        path: named(snapped.path),
+        ...(snapped.ink === undefined ? {} : { ink: snapped.ink }),
+      },
+    ]
+  })
 
   return {
     status: "checked",
     screenshots: (report.sheets ?? []).map(named),
-    frames: frames.flatMap((frame) => {
-      const taken = shot.get(frame.atMs)
-      return taken ? [{ ...frame, path: named(taken.path) }] : []
-    }),
+    frames: taken,
     warnings: [
+      ...craftWarnings(input.outline, taken),
       ...videoWarnings(report.findings ?? [], input.outline),
       ...(report.missing ?? []).map(({ path, why }) => ({
         code: "video_unchecked_media",
@@ -206,11 +242,17 @@ export async function checkVideo(input: {
 }
 
 /**
- * The instants a check snapshots: each scene's start, once what comes in has come in, its middle,
- * and its end, before it cuts away. Past `MAX_FRAMES`, each scene's middle, and past that, frames
- * spread evenly over the video, so a long one takes as long to check as a teaser.
+ * The instants a check snapshots: the first frame, the thumbnail, then each scene's start, once
+ * what comes in has come in, its middle, and its end, before it cuts away. Past `MAX_FRAMES`, each
+ * scene's middle, and past that, frames spread evenly over the video, so a long one takes as long
+ * to check as a teaser.
  */
 export function videoInstants(outline: VideoOutline): Omit<VideoFrame, "path">[] {
+  const first = { atMs: 0, scene: sceneAt(outline, 0) }
+  return [first, ...sceneInstants(outline, MAX_FRAMES - 1)]
+}
+
+function sceneInstants(outline: VideoOutline, most: number): Omit<VideoFrame, "path">[] {
   const { scenes, durationMs } = outline
   const last = Math.max(0, durationMs - 1)
 
@@ -219,7 +261,7 @@ export function videoInstants(outline: VideoOutline): Omit<VideoFrame, "path">[]
     return { atMs: at, scene: sceneAt(outline, at) }
   }
 
-  if (scenes.length * 3 <= MAX_FRAMES) {
+  if (scenes.length * 3 <= most) {
     return scenes.flatMap((scene) => {
       const end = scene.startMs + scene.durationMs
       return [
@@ -229,15 +271,68 @@ export function videoInstants(outline: VideoOutline): Omit<VideoFrame, "path">[]
       ].map((atMs) => ({ atMs: Math.round(atMs), scene: scene.id }))
     })
   }
-  if (scenes.length <= MAX_FRAMES) {
+  if (scenes.length <= most) {
     return scenes.map((scene) => ({
       atMs: Math.round(scene.startMs + scene.durationMs / 2),
       scene: scene.id,
     }))
   }
-  return Array.from({ length: MAX_FRAMES }, (_, index) =>
-    each(((index + 0.5) * durationMs) / MAX_FRAMES)
+  return Array.from({ length: most }, (_, index) => each(((index + 0.5) * durationMs) / most))
+}
+
+/**
+ * What the check measures of the guide's craft: a frame with nothing on it, a scene that flashes
+ * by, an end card that lingers, a teaser that runs long. Each names its scene and when.
+ */
+export function craftWarnings(
+  outline: VideoOutline,
+  frames: readonly Omit<VideoFrame, "path">[]
+): LayoutWarning[] {
+  const warnings: LayoutWarning[] = []
+
+  for (const frame of frames) {
+    if (frame.ink === undefined || frame.ink >= CRAFT.minInk) continue
+    const what = frame.atMs === 0 ? "The first frame, the video's thumbnail," : "The frame"
+    warnings.push({
+      code: "video_empty_frame",
+      part: frame.scene,
+      message: `At ${seconds(frame.atMs)}, in scene '${frame.scene}': ${what} is nearly empty. Show the subject from the first frame of each scene: words or the product, never a bare ground or a lone logo.`,
+    })
+  }
+
+  for (const scene of outline.scenes) {
+    if (scene.durationMs >= CRAFT.minSceneMs) continue
+    warnings.push({
+      code: "video_scene_short",
+      part: scene.id,
+      message: `At ${seconds(scene.startMs)}, scene '${scene.id}' lasts ${seconds(scene.durationMs)}, too short to be seen: give it a second or more, or fold it into the scene beside it.`,
+    })
+  }
+
+  // The scene that ends last, which a crossfade into it does not change.
+  const end = outline.scenes.reduce<VideoOutline["scenes"][number] | undefined>(
+    (latest, scene) =>
+      !latest || scene.startMs + scene.durationMs >= latest.startMs + latest.durationMs
+        ? scene
+        : latest,
+    undefined
   )
+  if (end && outline.scenes.length > 1 && end.durationMs > CRAFT.maxEndCardMs) {
+    warnings.push({
+      code: "video_end_card_long",
+      part: end.id,
+      message: `At ${seconds(end.startMs)}, the end card, scene '${end.id}', holds ${seconds(end.durationMs)}: shorten its host's data-duration to 3 to 4 s, still for the last two.`,
+    })
+  }
+
+  if (outline.durationMs > CRAFT.maxTeaserMs) {
+    warnings.push({
+      code: "video_long",
+      message: `It runs ${seconds(outline.durationMs)}, past the 45 s a teaser holds: cut it, unless the user asked for this length or it is not a teaser.`,
+    })
+  }
+
+  return warnings
 }
 
 /** The scene on screen at an instant: of those that overlap there, the last to start. */

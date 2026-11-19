@@ -2584,11 +2584,11 @@ describe("a video", () => {
       "media/clip.mp4": join(root, "film/media/clip.mp4"),
       "media/logo.svg": join(root, "film/media/logo.svg"),
     })
-    // Each scene at its start, middle and end.
+    // The first frame, then each scene at its start, middle and end.
     expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual([
-      0.3, 1, 1.8, 2.4, 3.5, 4.75,
+      0, 0.3, 1, 1.8, 2.4, 3.5, 4.75,
     ])
-    expect(published.layoutCheck.frames).toHaveLength(6)
+    expect(published.layoutCheck.frames).toHaveLength(7)
 
     const { create } = tools()
     const summary = create.toModelOutput?.(published as unknown as JsonValue, context)
@@ -2598,13 +2598,13 @@ describe("a video", () => {
     )
     expect(text).not.toContain("The film has no sound")
     expect(text).toContain(
-      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg (1–3 intro, 4–6 demo): 6 frames`
+      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg (1–4 intro, 5–7 demo): 7 frames`
     )
     expect(text).not.toContain("slide")
   })
 
   // Guard proof: number the frames across sheets in videoShots (publish-tool.ts), as before; the
-  // second sheet's legend then names frames 10 to 12, which no sheet shows.
+  // second sheet's legend then names frames 10 to 13, which no sheet shows.
   test("names the scenes of each contact sheet, as each numbers its frames from 1", async () => {
     const ids = ["intro", "demo", "detail", "outro"]
     write(
@@ -2635,7 +2635,7 @@ describe("a video", () => {
     const text = summary && "value" in summary ? String(summary.value) : ""
     const frames = `.sixb/agent/checks/${published.artifactId}-r1/frames`
     expect(text).toContain(
-      `Its contact sheets are ${frames}/contact-sheet-1.jpg (1–3 intro, 4–6 demo, 7–9 detail); ${frames}/contact-sheet-2.jpg (1–3 outro): 12 frames`
+      `Its contact sheets are ${frames}/contact-sheet-1.jpg (1–4 intro, 5–7 demo, 8–9 detail); ${frames}/contact-sheet-2.jpg (1 detail, 2–4 outro): 13 frames`
     )
   })
 
