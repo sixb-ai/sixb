@@ -9,9 +9,10 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowLeft, ArrowRight, Copy, Ellipsis, Pencil, Sparkles, Trash2 } from "lucide-react"
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react"
+import { videoStillUrl } from "../../../file-source"
 import { useArtifactMessages } from "../../../messages"
 import { useSize } from "../player"
-import { type MediaTarget, sceneStillUrl, useMediaParts } from "./media"
+import { type MediaTarget, useMediaParts } from "./media"
 import { sceneFootage, sceneName } from "./selection"
 
 // A scene on the timeline's Scenes track: a picture of its middle, its name and its length, along
@@ -334,7 +335,7 @@ export function SceneThumbnail({
   /** Fills its box, rather than taking the video's shape at its width. */
   readonly fill?: boolean
 }) {
-  const still = sceneStillUrl(target, scene.id)
+  const still = videoStillUrl(target, scene.id)
   // Each address is tried once: a scene renamed or another version tries again.
   const [tried, setTried] = useState<{
     readonly url: string
