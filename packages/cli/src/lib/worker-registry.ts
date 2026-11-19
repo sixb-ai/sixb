@@ -286,7 +286,7 @@ export function omittedWorkerWarnings(
       : []),
     ...(omitted("render") && renderWorkerRequired(sixb)
       ? [
-          "Documents print to PDF in a render worker and this group has none: run `sixb worker render`, or a PDF someone asks for never prints.",
+          "Documents print to PDF and videos render to MP4 in a render worker, and this group has none: run `sixb worker render`, or a PDF or an MP4 someone asks for never comes.",
         ]
       : []),
   ]

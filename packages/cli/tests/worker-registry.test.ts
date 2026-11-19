@@ -387,7 +387,7 @@ describe("renders", () => {
 
   test("warns about a worker list that leaves the render worker out", () => {
     expect(omittedWorkerWarnings(host(true), ["agent"])).toEqual([
-      expect.stringContaining("Documents print to PDF in a render worker"),
+      expect.stringContaining("Documents print to PDF and videos render to MP4 in a render worker"),
     ])
     expect(omittedWorkerWarnings(host(true), ["agent", "render"])).toEqual([])
     expect(omittedWorkerWarnings(host(false), ["agent"])).toEqual([])
