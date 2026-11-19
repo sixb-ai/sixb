@@ -151,9 +151,9 @@ publishes it when it is what you asked for.
 ## Edit in the app
 
 A Markdown document is typed into as it opens, like a page of notes: whoever may change it clicks
-and types, with no **Edit** to press. Sheets, canvases, and
-[designed documents](#design-a-document) are edited where they open: press **Edit** on the latest
-version.
+and types, with no **Edit** to press. Sheets, canvases,
+[designed documents](#design-a-document), and videos are edited where they open: press **Edit** on
+the latest version.
 
 A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
 **Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
@@ -161,7 +161,8 @@ numbered version in the version menu. ⌘S saves, and leaving with changes asks 
 changed the sheet while you were editing, the save stops and says so: open what they saved, or save
 yours over it.
 
-A document or a canvas is edited live, with everyone who has it open: there is no draft to save.
+A document, a canvas, or a video is edited live, with everyone who has it open: there is no draft
+to save.
 Your changes are saved as you make them, and everyone's are merged. See [Edit live](#edit-live).
 
 | In a Markdown document | |
@@ -213,12 +214,32 @@ kept as written and moves as a whole. A document whose HTML the editor cannot ho
 with no `<body>` tag or with markup after `</body>`, is edited word by word instead, as a board is,
 until a change makes it one it can.
 
+### Edit a video
+
+The picture plays the latest save; the timeline under it changes as you edit.
+
+| In a video | |
+| --- | --- |
+| Scenes | The row of cards: drag to reorder, or ⌥← ⌥→; its menu renames, duplicates, moves or deletes. Chained scenes follow |
+| Timeline | The open scene's clips on picture, text and sound tracks, over the video's soundtrack. Drag to move, drag an edge to trim; edges snap to the playhead, the marks, every edge and the footage's cuts (Shift: free) |
+| Magnetic | On by default: trimming or deleting a clip closes the gap, and the scene's end follows |
+| Keys | Space or K, J and L (1 s), ← → (a frame, a second with Shift), ↑ ↓ (edit points), I and O (marks), S (split at the playhead), ⌫ (delete, or cut between the marks), ⌘D (duplicate the scene), ⌘Z ⇧⌘Z |
+| Inspector | A scene's name, length and words on screen; a clip's start, length, where it starts in its file, volume, fades and words |
+| Transcript | A recording's words, the one being said lit as it plays. Select words and press Delete to cut them; **Remove silences** and **Remove filler words** show what they cut first |
+| Add media | Drop videos, sounds or pictures on the editor, or use **Add media**: each joins the open scene at the playhead |
+| Phone | Reorder scenes, change their length, retype their words and delete clips |
+
+Each edit changes the fewest characters it can in `index.html` or a scene's file, and is refused
+when it would leave something that is not a video. Motion a scene's script writes keeps its own
+times.
+
 On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
 works on the artifact, it starts from the latest version and keeps your changes.
 
 ## Edit live
 
-A document, Markdown or designed, or a canvas is edited by everyone at once over `/ws/artifacts`.
+A document, Markdown or designed, a canvas, or a video is edited by everyone at once over
+`/ws/artifacts`.
 Each person sees the others' changes as they make them, and who else is there.
 
 - Whoever may change the artifact edits it; whoever may only read it watches.
@@ -226,7 +247,8 @@ Each person sees the others' changes as they make them, and who else is there.
   10 seconds while someone keeps editing, and when the last editor leaves. Each write is a normal
   change, by the last person who edited, and sends `artifact.updated`.
 - What the Agent or anyone else publishes meanwhile is merged into what people are editing, and
-  their unsaved changes stay. While an Agent turn changes boards, everyone sees which ones.
+  their unsaved changes stay. While an Agent turn changes boards or scenes, everyone sees which
+  ones.
 - Everyone sees the others' changes and presence at once, whichever server they are connected
   to. Someone who reconnects after editing offline gets their changes merged in.
 - A write that fails is reported and tried again, for as long as the server runs; the changes stay
@@ -833,6 +855,8 @@ agent image renders with (0.9.68):
 - Keys: Space or K, J and L (10 s), ← and → (5 s, a frame with Shift while paused), `,` and `.`
   (a frame), Home, End, M (mute), F (fullscreen), C (comment).
 - Settings › Copy link gives a link that opens the video at the instant shown.
+
+People [edit a video](#edit-a-video) in the app, live.
 
 The Agent makes videos and revises them, from what it records of your app in its sandbox, the
 footage and sound you give it, and what your models make:
