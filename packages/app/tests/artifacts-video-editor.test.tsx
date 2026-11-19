@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { client, type GetArtifactMediaResponse } from "@sixb/client"
 import {
   type LiveFiles,
   readVideoComposition,
@@ -7,7 +8,7 @@ import {
 } from "@sixb/core/artifacts/live"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render } from "@testing-library/react"
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
@@ -19,6 +20,13 @@ import {
   SecondsField,
   TextField,
 } from "../src/artifacts/renderers/video/editor/inspector"
+import {
+  type MediaParts,
+  type MediaTarget,
+  pollAgainIn,
+  readMediaParts,
+  useMediaParts,
+} from "../src/artifacts/renderers/video/editor/media"
 import {
   editPoints,
   layClips,
@@ -69,6 +77,10 @@ installDom([
 ])
 
 afterEach(cleanup)
+
+const originalConfig = client.getConfig()
+afterEach(() => client.setConfig({ fetch: originalConfig.fetch }))
+afterAll(() => client.setConfig({ baseUrl: originalConfig.baseUrl }))
 
 // The video editor: the timeline's arithmetic, editing by the transcript, the live video the editor
 // reads and changes, and the pieces readers touch first.
@@ -424,7 +436,7 @@ describe("the editor's pieces", () => {
           index={1}
           count={2}
           timeline={undefined}
-          target={{ artifactId: "art_video", version: 1 }}
+          target={{ artifactId: "art_video", version: 1, files: [] }}
           open={false}
           agent
           people={[]}
@@ -541,3 +553,116 @@ function type(field: HTMLInputElement, value: string) {
   fireEvent.input(field, { target: { value } })
   fireEvent.keyUp(field, { key: value.at(-1) })
 }
+
+describe("what is derived of a recording", () => {
+  const blob = (path: string, mediaType: string) => ({
+    path,
+    file: { blobId: path, digest: `sha256:${path}`, sizeBytes: 1, mediaType },
+  })
+  const target: MediaTarget = {
+    artifactId: "art_video",
+    version: 2,
+    files: [
+      blob("media/voice.m4a", "audio/mp4"),
+      blob("media/talk.mp4", "video/mp4"),
+      blob("media/broken.mp4", "video/mp4"),
+      blob("media/logo.png", "image/png"),
+    ],
+  }
+
+  const unavailable = (reason: string, lacks?: string) => ({
+    status: "unavailable",
+    reason,
+    ...(lacks ? { lacks } : {}),
+  })
+  const failed = { status: "failed", reason: "It could not be read as a video or a sound." }
+  const ready = { status: "ready", url: "/part", mediaType: "x", sizeBytes: 1 }
+  const probe = { status: "ready", durationMs: 4800, container: "mp4" }
+
+  /** Each recording's parts, as the server derives them: a sound, footage still filming, one broken. */
+  const parts: Record<string, Record<string, unknown>> = {
+    "media/voice.m4a": {
+      probe,
+      proxy: unavailable("It plays as it is."),
+      poster: unavailable("It has no picture."),
+      filmstrip: unavailable("It has no picture."),
+      waveform: ready,
+      cuts: unavailable("It has no picture."),
+      transcript: unavailable("This project has no transcription model.", "transcription_model"),
+    },
+    "media/talk.mp4": {
+      probe,
+      proxy: ready,
+      poster: ready,
+      filmstrip: { status: "pending" },
+      waveform: ready,
+      cuts: { status: "ready", atMs: [] },
+      transcript: unavailable("This project has no transcription model.", "transcription_model"),
+    },
+    "media/broken.mp4": Object.fromEntries(
+      ["probe", "proxy", "poster", "filmstrip", "waveform", "cuts", "transcript"].map((part) => [
+        part,
+        failed,
+      ])
+    ),
+  }
+
+  /** The API, answering each recording's parts, and counting what was asked for each. */
+  function serve() {
+    const asked = new Map<string, number>()
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = new URL(new Request(input, init).url).searchParams.get("path") ?? ""
+          asked.set(path, (asked.get(path) ?? 0) + 1)
+          const found = parts[path]
+          if (!found) return Response.json({ error: "No video or sound there." }, { status: 400 })
+          return Response.json({ path, version: 2, parts: found })
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    return asked
+  }
+
+  test("is read once the version holds it, and only for a video or a sound", async () => {
+    const asked = serve()
+    const seen = new Map<string, MediaParts>()
+    function Probe({ path }: { readonly path: string }) {
+      seen.set(path, useMediaParts(target, path))
+      return null
+    }
+
+    const paths = ["media/voice.m4a", "media/broken.mp4", "media/logo.png", "media/imported.mp4"]
+    render(wrap(paths.map((path) => <Probe key={path} path={path} />)))
+    await waitFor(() => expect(seen.get("media/broken.mp4")?.failed).toBeDefined())
+    await waitFor(() => expect(seen.get("media/voice.m4a")?.durationMs).toBe(4800))
+
+    // A picture has nothing derived, and a recording not saved yet is not in the version.
+    expect([...asked.keys()].sort()).toEqual(["media/broken.mp4", "media/voice.m4a"])
+    expect(seen.get("media/logo.png")?.processing).toBe(false)
+    expect(seen.get("media/imported.mp4")?.processing).toBe(true)
+
+    expect(seen.get("media/voice.m4a")).toMatchObject({
+      processing: false,
+      durationMs: 4800,
+      transcriptLacks: "transcription_model",
+    })
+    expect(seen.get("media/broken.mp4")).toMatchObject({
+      processing: false,
+      failed: "It could not be read as a video or a sound.",
+    })
+  })
+
+  // Reproduce by polling while a recording has no filmstrip, as the editor did: a sound, which
+  // never gets one, and a broken recording are then asked for every 4 s for as long as it is open.
+  test("is asked for again only while a part is still being derived", () => {
+    const read = (path: string) =>
+      readMediaParts({ path, version: 2, parts: parts[path] } as GetArtifactMediaResponse)
+
+    expect(pollAgainIn(read("media/talk.mp4"))).toBe(4000)
+    expect(pollAgainIn(read("media/voice.m4a"))).toBe(false)
+    expect(pollAgainIn(read("media/broken.mp4"))).toBe(false)
+  })
+})
