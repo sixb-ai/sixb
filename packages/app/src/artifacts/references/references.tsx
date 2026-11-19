@@ -28,6 +28,7 @@ import {
   useState,
 } from "react"
 import { ArtifactCardFace } from "../card-preview"
+import { fileView } from "../file-view"
 import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
@@ -43,6 +44,7 @@ import {
 import { isDesignedDocument } from "../renderers/designed-document"
 import { Callout, documentComponents, isCalloutKind } from "../renderers/document"
 import { rehypeArtifactDocument, rehypeCallouts } from "../renderers/document-tree"
+import { AudioPlayer, VideoPlayer } from "../renderers/media"
 import { usePageEvents } from "../renderers/page"
 import { cellFormatter } from "../renderers/sheet/format"
 import { lockedCellLabel } from "../renderers/sheet/locked"
@@ -708,6 +710,13 @@ function FileEmbed({
       />
     )
   }
+  const view = source ? fileView(source.fileRef) : "download"
+  // A sound shows its file's name: the caption is under it already.
+  const name = path.split("/").at(-1) ?? path
+  if (source && view === "video") {
+    return <VideoPlayer source={source} name={caption || name} layout={fill ? "fill" : "inline"} />
+  }
+  if (source && view === "audio") return <AudioPlayer source={source} name={name} />
   return <CardEmbed version={version} address={address} />
 }
 

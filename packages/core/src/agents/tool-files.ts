@@ -194,16 +194,32 @@ function validatedMediaType(
   toolName: string
 ): string {
   const detected = sniffFileMediaType(bytes)
-  if (detected && declared && declared !== "application/octet-stream" && detected !== declared) {
+  const named = declared === "application/octet-stream" ? undefined : declared
+  if (detected && named && !declaresFormat(named, detected)) {
     throw toolFileError(
       toolName,
-      `file bytes are ${detected}, not the declared media type ${declared}`
+      `file bytes are ${detected}, not the declared media type ${named}`
     )
   }
-  if (declared && SIGNATURE_REQUIRED_MEDIA_TYPES.has(declared) && detected !== declared) {
-    throw toolFileError(toolName, `file bytes do not match the declared media type ${declared}`)
+  if (named && SIGNATURE_REQUIRED_MEDIA_TYPES.has(named) && detected !== named) {
+    throw toolFileError(toolName, `file bytes do not match the declared media type ${named}`)
   }
-  return detected ?? declared ?? "application/octet-stream"
+
+  // A declared type that agrees with the bytes may say more than their signature can.
+  return named ?? detected ?? "application/octet-stream"
+}
+
+/**
+ * Whether a declared type agrees with the one the bytes' signature names. A sound or video
+ * container's signature cannot say whether it holds a picture, nor tell a type from its aliases
+ * (`audio/x-wav`), so any sound or video type agrees with another.
+ */
+function declaresFormat(declared: string, detected: string): boolean {
+  return declared === detected || (isTimedMedia(declared) && isTimedMedia(detected))
+}
+
+function isTimedMedia(mediaType: string): boolean {
+  return mediaType.startsWith("audio/") || mediaType.startsWith("video/")
 }
 
 const SIGNATURE_REQUIRED_MEDIA_TYPES = new Set([

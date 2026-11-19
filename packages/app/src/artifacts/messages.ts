@@ -704,6 +704,13 @@ export const en = {
     emptyFile: "The file is empty.",
     pdfUnavailable: "This browser can't show the PDF here",
     pdfDescription: "Open it in a new tab, or download it.",
+    videoUnavailable: "This video can't play here",
+    audioUnavailable: "This audio can't play here",
+    mediaDescription:
+      "This browser may not play its format. Download it to play it on your device.",
+    play: (name: string) => `Play ${name}`,
+    pause: (name: string) => `Pause ${name}`,
+    position: "Playback position",
   },
   /** An artifact an object holds in one of its properties, as its page shows it. */
   held: {
@@ -1443,6 +1450,13 @@ export const fr: Translation<ArtifactMessages> = {
     emptyFile: "Le fichier est vide.",
     pdfUnavailable: "Ce navigateur ne peut pas afficher le PDF ici",
     pdfDescription: "Ouvrez-le dans un nouvel onglet, ou téléchargez-le.",
+    videoUnavailable: "Impossible de lire cette vidéo ici",
+    audioUnavailable: "Impossible de lire cet audio ici",
+    mediaDescription:
+      "Ce navigateur ne lit peut-être pas son format. Téléchargez-le pour le lire sur votre appareil.",
+    play: (name) => `Lire ${name}`,
+    pause: (name) => `Mettre ${name} en pause`,
+    position: "Position de lecture",
   },
   held: {
     open: (title) => `Ouvrir ${title}`,

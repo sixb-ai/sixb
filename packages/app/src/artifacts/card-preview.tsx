@@ -13,6 +13,7 @@ import { boardPreviewUrl, useBoardPreviews } from "./renderers/canvas/previews"
 import { useCanvas, useCanvasMode } from "./renderers/canvas/renderer"
 import { CanvasThumbnail } from "./renderers/canvas/thumbnail"
 import { DesignedDocumentScreen, isDesignedDocument } from "./renderers/designed-document"
+import { VideoPoster } from "./renderers/media"
 import { PageScreen } from "./renderers/page"
 import { chartData, chartReadsLocked } from "./renderers/sheet/chart-data"
 import { CHART_ICONS } from "./renderers/sheet/chart-icon"
@@ -448,11 +449,17 @@ export function previewColumns(model: SheetModel): number[] {
   return chosen.slice(0, PREVIEW_COLUMNS).sort((a, b) => a - b)
 }
 
-/** A file as its type allows: the image, a table's first rows, a text's start, or its format. */
+/**
+ * A file as its type allows: the image, a video's first frame, a table's first rows, a text's
+ * start, or its format.
+ */
 function FilePreview({ source }: { readonly source: FileSource }) {
   const view = fileView(source.fileRef)
   if (view === "image") {
     return <img src={source.inlineUrl} alt="" className="absolute inset-0 size-full object-cover" />
+  }
+  if (view === "video") {
+    return <VideoPoster source={source} fallback={<FormatPreview source={source} />} />
   }
   if (view === "csv" || view === "tsv") return <FileTablePreview source={source} kind={view} />
   if (view === "markdown" || view === "text") {
@@ -629,6 +636,8 @@ const FORMAT_COLORS: readonly [RegExp, string][] = [
   [/^(pptx?|odp|key)$/, "bg-[#f76b15]"],
   [/^(html?|xml|json|ya?ml)$/, "bg-[#8e4ec6]"],
   [/^(zip|tar|gz|tgz|7z|rar)$/, "bg-[#6f6e77]"],
+  [/^(mp4|m4v|mov|webm|ogv|mkv)$/, "bg-[#d6409f]"],
+  [/^(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba)$/, "bg-[#12a594]"],
 ]
 
 function fileFormat(
