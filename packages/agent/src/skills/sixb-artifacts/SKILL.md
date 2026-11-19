@@ -1,6 +1,6 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, a deck, a video, or a file they asked for, as an artifact, and revise it by publishing it again with its id. Read it before you start making one, since each kind has its own format and tools.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, a deck, a video, or a file they asked for, as an artifact, and revise it by publishing it again with its id. Read it before you start making one, since each kind has its own format and tools; for a video, such as a reel or a short cut from clips the user gives, before you touch any footage.
 ---
 
 # Artifacts
@@ -20,7 +20,7 @@ the question, answer in the chat.
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
 | `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
 | `canvas` | Work seen more than read, laid out in two dimensions: screens or frames side by side (a flow, a storyboard, variants, a moodboard), a brainstorm or retro of notes, a diagram | `canvas.md` |
-| `video` | Moving pictures with sound: a teaser, a product demo, an explainer, a social clip, a cut of an interview | `video.md` |
+| `video` | Moving pictures with sound: a teaser, a product demo, an explainer, a social clip, a reel or a short cut from the user's clips, a cut of an interview | `video.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
 To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
