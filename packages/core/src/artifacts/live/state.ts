@@ -10,11 +10,11 @@ import { readLiveFiles } from "./files"
 // the same history, so their changes merge as Yjs merges concurrent edits.
 
 /**
- * Whether an artifact is edited live, and so keeps its content as a document: a canvas, and a
- * document, Markdown or designed, which people edit in place.
+ * Whether an artifact is edited live, and so keeps its content as a document: a canvas, a
+ * document, Markdown or designed, which people edit in place, and a video, cut on its timeline.
  */
 export function keepsDocument(kind: ArtifactKind): boolean {
-  return kind === "canvas" || kind === "document"
+  return kind === "canvas" || kind === "document" || kind === "video"
 }
 
 /**

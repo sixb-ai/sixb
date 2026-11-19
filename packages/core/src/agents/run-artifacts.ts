@@ -221,9 +221,11 @@ export function agentRunArtifacts(
         return { prepared, stored }
       }
 
-      // What the canvas showed before, so that its viewers learn which boards the turn changes.
+      // What a canvas or a video showed before, so that its viewers learn which boards or scenes
+      // the turn changes.
+      const announces = kind === "canvas" || kind === "video"
       const before =
-        kind === "canvas" && "artifactId" in input
+        announces && "artifactId" in input
           ? await latestVersionOf(requireArtifacts(storage), projectId, input.artifactId)
           : null
 
@@ -253,7 +255,7 @@ export function agentRunArtifacts(
               merged: false,
             }
       if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
-      if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
+      if (announces) await announceAgentBoards(host, turnRunId, before, stored.version)
 
       // The render worker pictures what the boards miss, with their queries answered now, as the
       // requester, and derives what its media need.
@@ -284,7 +286,7 @@ async function latestVersionOf(
 }
 
 /**
- * Tells whoever has the canvas open which boards the turn is changing. The write is stored by
+ * Tells whoever has the canvas or the video open which boards or scenes the turn is changing. The write is stored by
  * now: a broker that refuses only leaves its viewers without the notice.
  */
 async function announceAgentBoards(
