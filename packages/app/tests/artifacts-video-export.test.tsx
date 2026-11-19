@@ -455,6 +455,103 @@ describe("a video's pictures", () => {
     expect(view.container.querySelector("img")).toBeNull()
   })
 
+  // Reproduce by dropping the recording's poster from VideoPreview: until its stills are
+  // snapshotted, or in a project that snapshots nothing, every video's card is the same dark tile.
+  test("its card shows its first recording's poster until it is snapshotted", async () => {
+    const poster =
+      "/api/artifacts/art_v1de0f17m0/versions/3/media/content?path=media/b-roll.mp4&part=poster"
+    const asked: string[] = []
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(new Request(input, init).url)
+          asked.push(`${url.pathname}${url.search}`)
+          const ready = { status: "ready", url: poster, mediaType: "image/jpeg", sizeBytes: 9 }
+          return Response.json({
+            path: url.searchParams.get("path"),
+            version: 3,
+            parts: { proxy: { status: "pending" }, poster: { ...ready, atMs: 1200 } },
+          })
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    const media = (path: string, mediaType: string, index: number) => ({
+      path,
+      file: {
+        blobId: `clip-${index}`,
+        digest: `sha256:${"c".repeat(63)}${index}`,
+        sizeBytes: 9,
+        mediaType,
+      },
+    })
+    const film = {
+      ...FILM,
+      files: [
+        ...FILM.files,
+        media("media/a-voice.m4a", "audio/mp4", 1),
+        media("media/b-roll.mp4", "video/mp4", 2),
+      ],
+    }
+    const view = render(
+      <Wrap>
+        <ArtifactPreview version={film} kind="video" loading={false} />
+      </Wrap>
+    )
+    // Its poster is read first: no recording is asked about while it may come.
+    expect(asked).toEqual([])
+    act(() => {
+      view.container.querySelector("img")?.dispatchEvent(new Event("error"))
+    })
+
+    const fallback = await waitFor(() => {
+      const found = view.container.querySelector<HTMLImageElement>("img")
+      if (!found?.getAttribute("src")?.includes("part=poster")) throw new Error("Not read yet.")
+      return found
+    })
+    expect(asked).toEqual([
+      "/api/artifacts/art_v1de0f17m0/versions/3/media?path=media%2Fb-roll.mp4",
+    ])
+    expect(fallback.getAttribute("src")).toBe(
+      "https://api.sixb.test/api/artifacts/art_v1de0f17m0/versions/3/media/content?path=media%2Fb-roll.mp4&part=poster"
+    )
+    act(() => {
+      fallback.dispatchEvent(new Event("load"))
+    })
+    expect(fallback.className).toContain("sixb-media-in")
+  })
+
+  // Reproduce by dropping `poster` from ChapterMark: a chapter not snapshotted shows its number.
+  test("a chapter not snapshotted yet shows its first recording's poster", () => {
+    const view = render(
+      <Wrap>
+        <ChaptersPanel
+          outline={OUTLINE}
+          still={(scene) => `https://stills.test/${scene.id}.jpg`}
+          poster="https://media.test/b-roll.jpg"
+          current="intro"
+          onSeek={() => {}}
+          onClose={() => {}}
+        />
+      </Wrap>
+    )
+    const [intro] = view.container.querySelectorAll("img.hidden")
+    act(() => {
+      intro?.dispatchEvent(new Event("error"))
+    })
+    const hidden = [...view.container.querySelectorAll("img.hidden")]
+    expect(hidden.map((image) => image.getAttribute("src"))).toEqual([
+      "https://media.test/b-roll.jpg",
+      "https://stills.test/outro.jpg",
+    ])
+    act(() => {
+      hidden[0]?.dispatchEvent(new Event("load"))
+    })
+    const shown = view.container.querySelector("img.sixb-media-in")
+    expect(shown?.getAttribute("src")).toBe("https://media.test/b-roll.jpg")
+  })
+
   test("each chapter shows its scene's still once it has loaded, its number until then", () => {
     const view = render(
       <Wrap>

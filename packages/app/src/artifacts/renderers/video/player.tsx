@@ -26,6 +26,7 @@ import { CommentModeHint } from "../../comments/commenting"
 import type { CommentThread } from "../../comments/comments"
 import { CommentsPanel } from "../../comments/panel"
 import { useCopyFeedback } from "../../copy-feedback"
+import { useVideoRecordingPoster } from "../../derived-media"
 import { videoStillUrl } from "../../file-source"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import { useArtifactMessages } from "../../messages"
@@ -202,6 +203,8 @@ export function VideoPlayer({
   const chapter = chapterAt(outline, playback.time)
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
   const many = outline.scenes.length > 1
+  // What the chapters show until their stills are snapshotted, read once they open.
+  const recordingPoster = useVideoRecordingPoster(version, chaptersOpen && many)
 
   const goTo = (seconds: number, say?: string) => {
     setBegun(true)
@@ -581,6 +584,7 @@ export function VideoPlayer({
       <ChaptersPanel
         outline={outline}
         still={(scene) => videoStillUrl(version, scene.id)}
+        poster={recordingPoster}
         current={chapter?.id}
         onSeek={goToChapter}
         onClose={() => setChaptersOpen(false)}
