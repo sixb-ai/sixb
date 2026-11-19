@@ -207,3 +207,48 @@ internally (`processCompositionAudio`, run by `planV2` and by every render). Any
 
 The first is the one to ask for: a CLI flag keeps the render worker on the same contract as its
 segments, and the sandbox needs nothing else.
+
+## Editing
+
+The app's editor changes a video in its live document: `index.html` and each scene file are
+`Y.Text`, each recording a reference. It never writes a file whole. `timeline.ts` reads what an
+editor touches, and `edit.ts` turns each operation into changes to the text.
+
+- **Clips** (`readSceneTimeline`, `readRootTimeline`): the timed elements of one composition,
+  anything with `data-start` and every `<video>` and `<audio>`, with their timing as written and the
+  span of each attribute. A clip is named by its `id`, else by its place among the file's clips
+  (`#2`). Its track follows from what it is: picture, text, or sound.
+- **Texts**: the elements holding words alone, timed or not, which an editor types over.
+- **Operations** take the files as they are and return an edit or a refusal: a scene's length,
+  label, place, copy and removal; a clip's timing, trim, move, split, removal, sound and words; an
+  import; a range cut from a scene; stretches of a recording cut wherever it plays.
+
+How an operation works:
+
+1. It changes a working copy step by step, reading the files again between steps, so each step
+   finds what the one before left.
+2. A step that moves a scene first gives the root room for any length (`openRoot`), so every
+   step in between reads as a video. The last step writes the root's real length, and moves a
+   soundtrack that ran to the end, and a poster past it, with it (`fitRoot`).
+3. The result is read as publishing reads a video (`readVideoComposition`); anything else is
+   refused, with the reason.
+4. The edit is the difference from the files it started from: the live layer's line diff, each
+   line written again narrowed to the words that changed. Two people editing at once change
+   different characters, which Yjs merges, and the Agent's next diff reads as an edit. Its changes
+   are `BoardChange`s, applied to a `Y.Text` by `applyBoardEditToText`.
+
+What moves with what:
+
+- Scenes chained by `data-start` follow as HyperFrames moves them. A scene at a number of seconds
+  after the change moves as much. A reorder or a removal chains the scenes whose predecessor
+  changed, each keeping its own overlap or gap.
+- A ripple trim moves what starts after the edge, the scene's end included. A cut (a ripple
+  delete, a marked range, words of a transcript) takes stretches out of the scene: a recording cut
+  through is split around them, each part playing on from where its file was cut; any other clip
+  is shortened; a clip with nothing left goes; the scene ends as much sooner.
+- A clip whose `data-start` names another clip follows it, and a ripple does not move it.
+- A copied scene's recordings take new ids, and every `#id` naming them in the file follows, as
+  HyperFrames plays each recording by its id.
+
+Not covered: motion a scene's script writes (`gsap.timeline` positions) keeps its own times, and a
+recording a script plays without an element is not seen.
