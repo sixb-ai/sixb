@@ -526,6 +526,10 @@ export const en = {
     assembling: "Putting it together",
     renderingHint: "You can keep watching; it renders on its own.",
     exportFailed: "The MP4 could not be rendered",
+    exportFailedDetail: "Something went wrong while rendering it.",
+    exportUnavailable: "MP4 export isn’t available",
+    exportUnavailableDetail:
+      "This project isn’t set up to render videos yet. Whoever manages it can turn it on.",
     tryAgain: "Try again",
     earlierVersion: (version: number) => `Download version ${number(version)}`,
     earlierDetail: "Earlier version · out of date",
@@ -1333,6 +1337,10 @@ export const fr: Translation<ArtifactMessages> = {
     assembling: "Assemblage",
     renderingHint: "Vous pouvez continuer à regarder : le rendu se fait seul.",
     exportFailed: "Le MP4 n’a pas pu être rendu",
+    exportFailedDetail: "Un problème est survenu pendant le rendu.",
+    exportUnavailable: "L’export MP4 n’est pas disponible",
+    exportUnavailableDetail:
+      "Ce projet n’est pas encore configuré pour rendre des vidéos. La personne qui le gère peut l’activer.",
     tryAgain: "Réessayer",
     earlierVersion: (version) => `Télécharger la version ${numberFr(version)}`,
     earlierDetail: "Version précédente · plus à jour",

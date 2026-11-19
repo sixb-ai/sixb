@@ -93,7 +93,8 @@ function serve(answers: (version: string, query: URLSearchParams) => unknown) {
         const url = new URL(request.url)
         asked.push(`${request.method} ${url.pathname}${url.search}`)
         const version = url.pathname.split("/").at(-2) ?? ""
-        return Response.json(answers(version, url.searchParams))
+        const answer = answers(version, url.searchParams)
+        return answer instanceof Response ? answer : Response.json(answer)
       },
       { preconnect: fetch.preconnect }
     ),
@@ -194,12 +195,42 @@ describe("a video's MP4 in its header", () => {
     ).toBe("Rendering the MP4, 1 of 3 parts done")
   })
 
-  test("says why it failed, and tries again with retry", async () => {
-    let retried = false
-    const asked = serve((_version, query) => {
-      if (query.get("retry") === "true") retried = true
-      return retried
+  // Reproduce by reading a failed answer as failed in videoExportView whether or not it was asked
+  // for here: a failure kept from before shows its warning in the header for good.
+  test("reads a failure kept from before as idle, and exporting it asks again", async () => {
+    const asked = serve((_version, query) =>
+      query.get("retry") === "true"
         ? rendering(0)
+        : { status: "failed", reason: "Scene 'outro' could not be rendered." }
+    )
+    const view = render(
+      <Wrap>
+        <VideoExportMenu version={FILM} />
+      </Wrap>
+    )
+    const trigger = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='idle']")
+      if (!found) throw new Error("Not read yet.")
+      return found
+    })
+    await open(trigger)
+    await act(async () => {
+      fireEvent.click(view.getByText("Export MP4"))
+    })
+    expect(asked).toContain("POST /api/artifacts/art_v1de0f17m0/versions/3/video?retry=true")
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
+    )
+  })
+
+  // Reproduce by showing the answer's reason in StatusLine: the reader reads a developer's words.
+  test("says it failed in plain words once asked, and tries again with retry", async () => {
+    let started = false
+    const asked = serve((_version, query) => {
+      if (query.get("render") === "false" && !started) return rendering(0)
+      started = true
+      return query.get("retry") === "true"
+        ? rendering(1)
         : { status: "failed", reason: "Scene 'outro' could not be rendered." }
     })
     const view = render(
@@ -208,18 +239,102 @@ describe("a video's MP4 in its header", () => {
       </Wrap>
     )
     const trigger = await waitFor(() => {
-      const found = view.container.querySelector("[data-video-export='failed']")
+      const found = view.container.querySelector("[data-video-export='idle']")
       if (!found) throw new Error("Not read yet.")
       return found
     })
     await open(trigger)
-    await view.findByText("Scene 'outro' could not be rendered.")
+    await act(async () => {
+      fireEvent.click(view.getByText("Export MP4"))
+    })
+    const failed = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='failed']")
+      if (!found) throw new Error("Not failed yet.")
+      return found
+    })
+
+    await open(failed)
+    await view.findByText("Something went wrong while rendering it.")
+    expect(view.queryByText("Scene 'outro' could not be rendered.")).toBeNull()
     await act(async () => {
       fireEvent.click(view.getByText("Try again"))
     })
     expect(asked).toContain("POST /api/artifacts/art_v1de0f17m0/versions/3/video?retry=true")
     await waitFor(() =>
       expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
+    )
+  })
+
+  // Reproduce by reading `lacks` as any failure in videoExportView: the header offers a retry
+  // that fails the same, in red, until the project's sandboxes have HyperFrames.
+  test("says export is not available, with no retry, when the project cannot render", async () => {
+    serve((_version, query) =>
+      query.get("render") === "false"
+        ? rendering(0)
+        : { status: "failed", reason: "No HyperFrames.", lacks: "sandbox_tools" }
+    )
+    const view = render(
+      <Wrap>
+        <VideoExportMenu version={FILM} />
+      </Wrap>
+    )
+    const trigger = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='idle']")
+      if (!found) throw new Error("Not read yet.")
+      return found
+    })
+    await open(trigger)
+    await act(async () => {
+      fireEvent.click(view.getByText("Export MP4"))
+    })
+    const unavailable = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='unavailable']")
+      if (!found) throw new Error("Not answered yet.")
+      return found
+    })
+    expect(unavailable.getAttribute("aria-label")).toBe("MP4 export isn’t available")
+
+    await open(unavailable)
+    await view.findByText(/isn’t set up to render videos/)
+    expect(view.queryAllByRole("menuitem")).toHaveLength(0)
+
+    // A write makes another video: the header offers to export it.
+    view.rerender(
+      <Wrap>
+        <VideoExportMenu version={{ ...FILM, revision: 2 }} />
+      </Wrap>
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='idle']")).not.toBeNull()
+    )
+  })
+
+  // Reproduce by dropping the video_unavailable catch in useVideoExport: Export does nothing.
+  test("says export is not available when the project has no sandboxes", async () => {
+    serve((_version, query) =>
+      query.get("render") === "false"
+        ? rendering(0)
+        : Response.json(
+            { error: "No sandbox provider.", code: "video_unavailable" },
+            { status: 400 }
+          )
+    )
+    const view = render(
+      <Wrap>
+        <VideoExportMenu version={FILM} />
+      </Wrap>
+    )
+    const trigger = await waitFor(() => {
+      const found = view.container.querySelector("[data-video-export='idle']")
+      if (!found) throw new Error("Not read yet.")
+      return found
+    })
+    await open(trigger)
+    await act(async () => {
+      fireEvent.click(view.getByText("Export MP4"))
+    })
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='unavailable']")).not.toBeNull()
     )
   })
 

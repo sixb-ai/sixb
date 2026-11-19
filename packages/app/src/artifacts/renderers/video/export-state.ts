@@ -1,4 +1,4 @@
-import { type ExportArtifactVideoResponse, exportArtifactVideo } from "@sixb/client"
+import { type ExportArtifactVideoResponse, exportArtifactVideo, isSixbApiError } from "@sixb/client"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import type { ArtifactVersion } from "../../queries"
@@ -8,6 +8,9 @@ import type { ArtifactVersion } from "../../queries"
 // and watches it render until it is ready to download. A version the reader has not exported, of
 // which the version before it was, offers that one's MP4 as out of date. The open version changes
 // under its number at each write: what the header knows of it is the revision's it read.
+//
+// Why an export failed is the reader's to hear once they asked, in words of their own: the
+// server's reason, which names a scene or what the project's sandboxes lack, is a developer's.
 
 /** How often a rendering export is asked about. */
 const WATCH_MS = 2_000
@@ -25,12 +28,16 @@ export type VideoExportView =
       readonly assembling: boolean
     }
   | { readonly state: "ready"; readonly durationMs: number; readonly sizeBytes: number }
-  | { readonly state: "failed"; readonly reason: string }
+  /** Asked for here, and it failed: asking again may render it. */
+  | { readonly state: "failed" }
+  /** Asked for here, and the project cannot render videos: asking again cannot help. */
+  | { readonly state: "unavailable" }
 
 /**
  * What the header shows of an answer. The server answers `rendering` for an export nobody asked
  * for as well, its parts rendered for another version counted, as an edit of one scene keeps the
- * others: one not asked for here is idle. Exporting it joins one already rendering.
+ * others: one not asked for here is idle. Exporting it joins one already rendering. So is one
+ * that failed, which the server keeps until someone asks again: exporting it asks anew.
  */
 export function videoExportView(
   answer: ExportArtifactVideoResponse | undefined,
@@ -42,9 +49,9 @@ export function videoExportView(
   if (answer.status === "ready") {
     return { state: "ready", durationMs: answer.durationMs, sizeBytes: answer.sizeBytes }
   }
-  if (answer.status === "failed") return { state: "failed", reason: answer.reason }
-
   if (!asked) return earlier === undefined ? { state: "idle" } : { state: "idle", earlier }
+
+  if (answer.status === "failed") return { state: answer.lacks ? "unavailable" : "failed" }
 
   const { ready, total, assembling } = answer.progress
   return { state: "rendering", ready, total, assembling }
@@ -92,7 +99,7 @@ export function useVideoExport(
       asked && query.state.data?.status === "rendering" ? WATCH_MS : false,
   })
 
-  const idle = current.data?.status === "rendering" && !asked
+  const idle = current.data !== undefined && current.data.status !== "ready" && !asked
   const previous = version.version - 1
   const earlier = useQuery({
     queryKey: videoExportQueryKey(version.artifactId, previous),
@@ -109,6 +116,10 @@ export function useVideoExport(
       query: failed ? { retry: "true" } : {},
       throwOnError: true,
     }).catch((error: unknown) => {
+      // A project without sandboxes cannot render: the header says so, as for missing tools.
+      if (isSixbApiError(error) && error.code === "video_unavailable") {
+        return { data: { status: "failed", reason: error.message, lacks: "sandboxes" } as const }
+      }
       // Not asked after all: the header offers to export it again.
       setExported((current) => (current === marker ? null : current))
       throw error

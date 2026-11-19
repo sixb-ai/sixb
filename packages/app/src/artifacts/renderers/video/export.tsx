@@ -20,8 +20,9 @@ import type { ArtifactVersion } from "../../queries"
 import { useVideoExport, type VideoExportView } from "./export-state"
 
 // A video's MP4, in its header: once it is rendered, the header's download is the MP4 itself.
-// Until then, a menu exports it, shows it rendering part by part on its button, and says why when
-// it could not, with a retry; a version not exported yet offers the one before it, out of date.
+// Until then, a menu exports it, shows it rendering part by part on its button, and says when it
+// could not, with a retry when one can help; a version not exported yet offers the one before it,
+// out of date.
 
 /** As the header's other actions: square, quiet, the same icon size. */
 const ACTION =
@@ -70,7 +71,9 @@ export function VideoExportMenu({ version }: { readonly version: ArtifactVersion
         : messages.renderingLabel(view.ready, view.total)
       : view.state === "failed"
         ? messages.exportFailed
-        : messages.exportMp4
+        : view.state === "unavailable"
+          ? messages.exportUnavailable
+          : messages.exportMp4
 
   return (
     <DropdownMenu modal={false}>
@@ -150,7 +153,10 @@ export function VideoExportMenu({ version }: { readonly version: ArtifactVersion
   )
 }
 
-/** The button's mark: the download arrow, how far it has rendered, or that it failed. */
+/**
+ * The button's mark: the download arrow, how far it has rendered, or that it failed. A project
+ * that cannot render keeps the arrow: nothing is wrong with the video.
+ */
 function ExportMark({ view }: { readonly view: VideoExportView }) {
   if (view.state === "failed") return <TriangleAlert aria-hidden="true" />
   if (view.state !== "rendering") return <ArrowDownToLine aria-hidden="true" />
@@ -231,16 +237,21 @@ function StatusLine({ view }: { readonly view: VideoExportView }) {
         ? messages.assembling
         : messages.rendering(view.ready, view.total)
       : view.state === "failed"
-        ? view.reason
-        : messages.notExported
+        ? messages.exportFailedDetail
+        : view.state === "unavailable"
+          ? messages.exportUnavailableDetail
+          : messages.notExported
+  // Why it failed, or that it cannot render, is a sentence: it wraps, where a status stays on one
+  // line.
+  const sentence = view.state === "failed" || view.state === "unavailable"
   return (
     <span
       role="status"
       title={text}
       className={cn(
         "text-xs tabular-nums",
-        // Why it failed is a sentence: it wraps, where a status stays on one line.
-        view.state === "failed" ? "line-clamp-3 text-destructive" : "truncate text-muted-foreground"
+        sentence ? "leading-snug" : "truncate",
+        view.state === "failed" ? "text-destructive" : "text-muted-foreground"
       )}
     >
       {text}
