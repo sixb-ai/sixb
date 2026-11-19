@@ -1,10 +1,11 @@
 import { isSixbError } from "../../errors/internal"
 import type { AuthorizablePrincipal } from "../../execution"
-import type {
-  AiLimitPolicy,
-  AiLimitQuantity,
-  AiModelCallReservationIdentity,
-  ReserveAiModelCallResult,
+import {
+  type AiLimitPolicy,
+  type AiLimitQuantity,
+  AiLimitStorageError,
+  type AiModelCallReservationIdentity,
+  type ReserveAiModelCallResult,
 } from "../../storage"
 import {
   aiLimitSubjectsFromAttribution,
@@ -88,6 +89,11 @@ export function createAiModelCallLimitController(input: {
       try {
         await input.storage.aiLimits.markReservationUnknown(identity)
       } catch (error) {
+        // Recording the call already reconciled the reservation: its outcome is known, and the
+        // store is not unavailable. The caller decides what that means for the call.
+        if (error instanceof AiLimitStorageError && error.code === "invalid_reservation_state") {
+          throw error
+        }
         throw limitStorageUnavailable(error)
       }
     },

@@ -623,6 +623,53 @@ describe("video generation", () => {
     }
   })
 
+  // Removal proof: drop the `isReconciled` catch from abandonVideoOperation, or let
+  // markModelCallUnknown wrap the refusal as unavailable again; past the ceiling the check throws
+  // on every look, so its job retries and the generation never settles.
+  test("a recorded call whose result could not be kept settles at the ceiling", async () => {
+    let checks = 0
+    const { model } = createVideoModel([], {
+      status: async () => {
+        if (checks++ > 0) throw new Error("Gateway unreachable")
+        return {
+          ...COMPLETED,
+          reportedCost: { money: { currency: "USD", amountNanos: "400000000" } },
+        }
+      },
+      costEstimator: {
+        estimateReservation: () => ({ currency: "USD", amountNanos: "800000000" }),
+        estimate: () => ({ status: "unpriceable", reason: "missing-rate-card" }),
+      },
+    })
+    const deps = await setup(model)
+    await createCostLimit(deps.storage)
+    // The facade over the in-memory store hides its methods from spyOn: spy on their class.
+    spyOn(InMemoryAiUsageStorage.prototype, "recordModelCallOperationResult").mockRejectedValueOnce(
+      new Error("storage blip")
+    )
+    const startedAt = new Date("2026-11-18T10:00:00.000Z")
+    setSystemTime(startedAt)
+    const { callId } = await deps.sixb.models.video.start({ prompt: "a fox", duration: 4 })
+    const check = () =>
+      runScheduledVideoCheck(restartedHost(deps, model), callId, AbortSignal.timeout(5_000))
+
+    // The call is in the ledger and its budget reconciled, but the record kept no result.
+    expect(await check().catch((error) => error)).toMatchObject({ message: "storage blip" })
+    const consumption = async () =>
+      (await deps.storage.aiLimits.listPolicyStatuses({ projectId: "videos" }))[0]!.consumption
+    expect((await consumption()).reserved).toMatchObject({ amount: { amountNanos: "0" } })
+
+    setSystemTime(new Date(startedAt.getTime() + VIDEO_GENERATION_CEILING_MS))
+    await check()
+    expect(await deps.sixb.models.video.get(callId)).toMatchObject({
+      status: "failed",
+      error: "The provider ended the video, but Sixb could not keep its outcome.",
+      files: [],
+    })
+    expect((await consumption()).unknown).toMatchObject({ amount: { amountNanos: "0" } })
+    mock.restore()
+  })
+
   // Removal proof: validate the status after checkVideoOperation's try; an invalid reply is
   // retried forever instead of settling.
   test("past the ceiling, a job Sixb can no longer ask about fails too", async () => {

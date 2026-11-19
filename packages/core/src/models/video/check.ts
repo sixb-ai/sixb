@@ -2,7 +2,11 @@ import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ReadonlyJsonObject } from "../../json"
 import type { AgentQueueJob, Queue } from "../../queues"
 import type { SixbHostContext } from "../../runtime/types"
-import type { AiModelCallOperationRecord, AiUsageStorage } from "../../storage"
+import {
+  AiLimitStorageError,
+  type AiModelCallOperationRecord,
+  type AiUsageStorage,
+} from "../../storage"
 import type { ExecutionRecord } from "../../storage/executions"
 import type { ModelCatalog } from "../catalog"
 import { ModelProviderError } from "../errors"
@@ -251,14 +255,30 @@ export async function abandonVideoOperation(
   accounting: AiModelCallRecorder,
   error: string
 ): Promise<AiModelCallOperationRecord> {
-  await accounting.markCallUnknown(record.callId)
-
   const result: StoredVideoResult = {
     usage: {},
     cost: { status: "unpriceable", reason: "missing-usage" },
     warnings: storedVideoRequest(record).warnings,
   }
+
+  try {
+    await accounting.markCallUnknown(record.callId)
+  } catch (markError) {
+    if (!isReconciled(markError)) throw markError
+
+    // A check put the call in the ledger, then could not keep what it reported: what the provider
+    // billed stands there, and only this record misses it.
+    return settleRecord(storage, record, { error: LOST_OUTCOME, result })
+  }
+
   return settleRecord(storage, record, { error, result })
+}
+
+const LOST_OUTCOME = "The provider ended the video, but Sixb could not keep its outcome."
+
+/** The limits store refuses to mark unknown a reservation that recording the call reconciled. */
+function isReconciled(error: unknown): boolean {
+  return error instanceof AiLimitStorageError && error.code === "invalid_reservation_state"
 }
 
 async function settle(
