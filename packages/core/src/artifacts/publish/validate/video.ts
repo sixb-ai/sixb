@@ -69,21 +69,28 @@ export async function validateVideo(
   const references: FoundReference[] = []
   const exists = (path: string) => byPath.has(path)
 
-  // A nested composition's file is read as a scene file is: a <template> holding one.
+  // A nested composition's file is read as a scene file is: a <template> holding one. Each is read
+  // once, however many scenes nest it.
+  const nestedFiles = new Map<string, VideoSceneFile>()
   const parsed = async (file: ArtifactFile): Promise<VideoSceneFile> => {
+    const known = scenes.get(file.path) ?? nestedFiles.get(file.path)
+    if (known) return known
+
     const scene = parseVideoScene(await read(file), file.path)
     if ("error" in scene) throw invalidArtifact(scene.error)
+    nestedFiles.set(file.path, scene.scene)
     return scene.scene
   }
 
   // What each composition file loads: itself, what it plays, and what it nests, all the way down.
-  // Each is read once, whichever scene nests it first.
-  const loaded = new Map<string, ReadonlySet<string>>()
+  // Each is walked once per scene, `loaded` being that scene's: a composition two scenes nest
+  // plays its `artifact:` addresses at both.
   const load = async (
     path: string,
     file: VideoSceneFile,
     at: string,
-    nesting: readonly string[]
+    nesting: readonly string[],
+    loaded: Map<string, ReadonlySet<string>>
   ): Promise<ReadonlySet<string>> => {
     const known = loaded.get(path)
     if (known) return known
@@ -107,8 +114,10 @@ export async function validateVideo(
         )
       }
 
-      const nestedFile = scenes.get(nested) ?? (await parsed(nestedEntry))
-      for (const each of await load(nested, nestedFile, at, [...nesting, path])) paths.add(each)
+      const nestedFile = await parsed(nestedEntry)
+      for (const each of await load(nested, nestedFile, at, [...nesting, path], loaded)) {
+        paths.add(each)
+      }
     }
 
     loaded.set(path, paths)
@@ -124,7 +133,7 @@ export async function validateVideo(
   const loads = new Map<string, ReadonlySet<string>>()
   for (const scene of composition.scenes) {
     const file = scenes.get(scene.src)
-    if (file) loads.set(scene.id, await load(scene.src, file, scene.id, []))
+    if (file) loads.set(scene.id, await load(scene.src, file, scene.id, [], new Map()))
   }
 
   const rootTimeline =
