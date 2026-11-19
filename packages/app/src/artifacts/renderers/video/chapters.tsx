@@ -67,10 +67,9 @@ export function ChaptersPanel({
                 aria-current={playing ? "true" : undefined}
                 onClick={() => onSeek(scene)}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  playing
-                    ? "bg-[color-mix(in_oklab,var(--primary)_7%,var(--background))] ring-1 ring-[color-mix(in_oklab,var(--primary)_22%,transparent)]"
-                    : "hover:bg-muted/60"
+                  "group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+                  // As the app's lists mark where the reader is: a quiet fill, no edge.
+                  playing ? "bg-muted" : "hover:bg-muted/60"
                 )}
               >
                 <span

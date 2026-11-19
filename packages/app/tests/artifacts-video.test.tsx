@@ -280,6 +280,8 @@ describe("the player", () => {
     fireEvent.click(view.getAllByRole("button", { name: "Play" })[0] as HTMLElement)
     expect(controls()).toContain("play")
 
+    // From its poster, it lands on its start first.
+    await runtime({ ...RUNTIME, type: "state", currentTime: 0, isPlaying: true })
     await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: true })
     expect(view.getByRole("slider", { name: "Position" }).getAttribute("aria-valuetext")).toBe(
       "0:01 of 0:07, Opening"
@@ -328,6 +330,7 @@ describe("the player", () => {
     const { view, posted } = await openPlayer()
     const track = view.getByRole("slider", { name: "Position" })
     track.getBoundingClientRect = () => ({ left: 0, width: 700, top: 0, height: 20 }) as DOMRect
+    posted.length = 0
 
     fireEvent.pointerDown(track, { button: 0, clientX: 175, pointerId: 1 })
     fireEvent.pointerMove(track, { clientX: 350, pointerId: 1 })
@@ -367,6 +370,71 @@ describe("the player", () => {
     fireEvent.click(view.getByRole("button", { name: "Try again" }))
     expect(view.queryByRole("alert")).toBeNull()
     expect(view.container.querySelector("iframe")).not.toBe(before)
+  })
+
+  test("says at once it could not start when the frame says HyperFrames' runtime did not load", async () => {
+    // Reproduce by dropping the `failed` event in player.tsx's `onEvent`: no alert shows until the
+    // start timeout.
+    const view = render(
+      <Wrap cache={frameCache()}>
+        <VideoRenderer version={FILM} />
+      </Wrap>
+    )
+    const target = view.container.querySelector("iframe")?.contentWindow
+    target!.postMessage = (() => {}) as never
+    await act(async () => {
+      browser.dispatchEvent(
+        new browser.MessageEvent("message", {
+          data: { protocol: FRAME_PROTOCOL, event: "failed", params: {} },
+          source: target as never,
+        })
+      )
+    })
+
+    expect(view.getByRole("alert").textContent).toContain("This video couldn’t start")
+    expect(view.getByRole("button", { name: "Try again" })).toBeTruthy()
+  })
+
+  test("opens on a poster from its first scene, and plays from its start", async () => {
+    // Reproduce by dropping `playback.cue` from the effect that starts the video in player.tsx: no
+    // seek is posted, and the stage shows the opening's first, often blank, frame.
+    const { view, posted, runtime } = await openPlayer()
+    expect(posted.filter((message) => message.action === "seek")).toMatchObject([
+      { timeSeconds: 1 },
+    ])
+
+    // The poster's frame is not where the playhead is.
+    await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: false })
+    const track = view.getByRole("slider", { name: "Position" })
+    expect(track.getAttribute("aria-valuetext")).toBe("0:00 of 0:07, Opening")
+
+    posted.length = 0
+    fireEvent.click(view.getAllByRole("button", { name: "Play" })[0] as HTMLElement)
+    expect(posted.map(({ action, timeSeconds }) => [action, timeSeconds])).toEqual([
+      ["seek", 0],
+      ["play", undefined],
+    ])
+  })
+
+  test("shows its large play mark before the first play and at the end, never on a pause", async () => {
+    // Reproduce by showing `BigPlay` whenever the video is paused in player.tsx.
+    const { view, runtime } = await openPlayer()
+    const bigPlay = () => view.container.querySelector("[data-video-big-play]")
+    expect(bigPlay()?.getAttribute("aria-label")).toBe("Play")
+
+    await runtime({ ...RUNTIME, type: "state", currentTime: 2, isPlaying: true })
+    await runtime({ ...RUNTIME, type: "state", currentTime: 3, isPlaying: false })
+    expect(bigPlay()).toBeNull()
+
+    await runtime({ ...RUNTIME, type: "state", currentTime: 7, isPlaying: false, ended: true })
+    expect(bigPlay()?.getAttribute("aria-label")).toBe("Play again")
+  })
+
+  test("leaves the picture clean once the reader moved the playhead, before any play", async () => {
+    // Reproduce by dropping `setBegun(true)` from `goTo` in player.tsx.
+    const { screen, view } = await openPlayer()
+    fireEvent.keyDown(screen, { key: "l" })
+    expect(view.container.querySelector("[data-video-big-play]")).toBeNull()
   })
 
   test("says a runtime of another version cannot play the video", async () => {
