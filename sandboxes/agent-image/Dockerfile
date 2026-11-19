@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv \
     pandoc tesseract-ocr tesseract-ocr-eng qpdf \
     libreoffice-writer libreoffice-calc libreoffice-impress poppler-utils \
+    ffmpeg \
     fonts-dejavu-core fonts-liberation2 fonts-noto-core \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/sixb/python
@@ -41,12 +42,24 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/sixb/browsers
 # Install the matching browser and its OS dependencies while building, including offline use.
 RUN node /opt/sixb/js/node_modules/playwright/cli.js install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
+
+# HyperFrames renders videos with that same headless shell: its deterministic frame capture needs
+# the shell, not a full Chrome. One stable path for both architectures, and no network at run time.
+RUN ln -s /opt/sixb/browsers/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell \
+      /usr/local/bin/chrome-headless-shell \
+    && ln -s /opt/sixb/js/node_modules/.bin/hyperframes /usr/local/bin/hyperframes
+ENV HYPERFRAMES_BROWSER_PATH=/usr/local/bin/chrome-headless-shell \
+    HYPERFRAMES_NO_TELEMETRY=1 \
+    HYPERFRAMES_NO_UPDATE_CHECK=1 \
+    HYPERFRAMES_NO_AUTO_INSTALL=1 \
+    HYPERFRAMES_SKIP_SKILLS=1
 COPY --chmod=0755 scripts/sixb-render /usr/local/bin/sixb-render
 COPY --chmod=0644 profile.sh /etc/profile.d/sixb.sh
 # Fail the build rather than publish an image missing a tool the skills rely on.
 RUN for tool in bash node bun python python3 pip pip3 uv pytest ruff git gh rg jq curl zip unzip \
       7z xz bzip2 patch rsync sqlite3 pandoc tesseract qpdf libreoffice pdftoppm pdfinfo \
-      pdftotext fc-match realpath head tail base64 unshare setpriv sixb-render; do \
+      pdftotext fc-match realpath head tail base64 unshare setpriv sixb-render \
+      ffmpeg ffprobe chrome-headless-shell hyperframes; do \
       command -v "$tool" >/dev/null || { echo "[SixbImage] missing $tool" >&2; exit 1; }; \
     done \
     && mkdir -p /workspace \

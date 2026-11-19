@@ -23,18 +23,21 @@ ghcr.io/sixb-ai/sixb-agent:<version>      linux/amd64, linux/arm64
 | Rendering | LibreOffice Writer/Calc/Impress, `sixb-render`; DejaVu, Liberation, and Noto fonts |
 | Conversion | Pandoc (no TeX engine) |
 | Web | Requests, Beautiful Soup, Playwright with Chromium headless shell |
+| Video | FFmpeg and ffprobe, the HyperFrames CLI (HTML compositions rendered to MP4 with that headless shell) |
 
 Everything works offline. Network access is set by the provider's sandbox policy, not the image.
 
 ## Layout
 
 ```text
-/workspace                   Default working directory
-/opt/sixb/python             Python environment behind python, python3, pip, pip3
-/opt/sixb/js/node_modules    pptxgenjs, playwright
-/opt/sixb/browsers           Chromium headless shell ($PLAYWRIGHT_BROWSERS_PATH)
-/etc/profile.d/sixb.sh       Image environment for login shells (bash -lc)
-/usr/local/bin/sixb-render   Document preview helper
+/workspace                             Default working directory
+/opt/sixb/python                       Python environment behind python, python3, pip, pip3
+/opt/sixb/js/node_modules              pptxgenjs, playwright, hyperframes
+/opt/sixb/browsers                     Chromium headless shell ($PLAYWRIGHT_BROWSERS_PATH)
+/etc/profile.d/sixb.sh                 Image environment for login shells (bash -lc)
+/usr/local/bin/sixb-render             Document preview helper
+/usr/local/bin/chrome-headless-shell   The headless shell, at one path on both architectures
+/usr/local/bin/hyperframes             HyperFrames CLI ($HYPERFRAMES_BROWSER_PATH points it at the shell)
 ```
 
 `/workspace` and `/opt/sixb/python` are writable by any user, because providers run commands as
@@ -156,7 +159,7 @@ check, not an exact match for Microsoft Office.
 ```dockerfile
 FROM ghcr.io/sixb-ai/sixb-agent:<version>
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends imagemagick \
     && rm -rf /var/lib/apt/lists/*
 ```
 

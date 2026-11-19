@@ -2,7 +2,8 @@
   "name": "sixb-agent-image-tools",
   "private": true,
   "dependencies": {
-    "pptxgenjs": "4.0.1",
-    "playwright": "1.63.0"
+    "hyperframes": "0.9.68",
+    "playwright": "1.63.0",
+    "pptxgenjs": "4.0.1"
   }
 }
