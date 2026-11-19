@@ -15,6 +15,7 @@ export type {
   ArtifactGuest,
   ArtifactKind,
   ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
   ArtifactMediaPart,
   ArtifactMediaPartName,
   ArtifactMediaParts,

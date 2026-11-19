@@ -46,12 +46,13 @@ holds one is published, in any kind of artifact, and when `sixb.artifacts.media(
 yet. One job per digest, so a file published again, anywhere, is derived once. One run:
 
 - Does nothing for the parts already kept: it derives what is still pending, as an attempt cut
-  short left it.
+  short left it. It counts the attempt in what is kept before it starts.
 - Opens a blank sandbox of the project that also reaches the API, where it fetches the original by
   a download URL (see Large files below).
-- Runs `media.cjs` there with the image's FFmpeg: the probe, then each part on its own, so one that
-  fails costs only itself and is kept failed with why. Each FFmpeg run is bounded by the media's
-  length, and media past 30 minutes get their probe alone.
+- Runs `media.cjs` there with the image's FFmpeg: the probe first, which gives the attempt its
+  time (`mediaJobBudget` in core: the proxy by the pixels it decodes, the rest by the length, two
+  hours at most), then each part on its own, so one that fails costs only itself and is kept failed
+  with why. Media past 30 minutes get their probe alone.
   - The proxy: H.264, its shorter side at most 720 pixels, at most 30 frames a second, a keyframe
     every half second, AAC, its index first. A sound gets an AAC proxy only when browsers cannot
     play it, such as AIFF.
@@ -63,8 +64,9 @@ yet. One job per digest, so a file published again, anywhere, is derived once. O
 - Transcribes the sound outside the sandbox with the project's transcription model, as the kernel
   operation `artifacts.transcribeMedia`, on the project's model budget, and keeps the transcript.
   Without a model, the transcript is unavailable, not failed.
-- A sandbox without FFmpeg makes each part unavailable. When the script stops, the job tries again
-  for what is pending; after its third attempt, what is still pending is kept as failed.
+- A sandbox without FFmpeg makes each part unavailable, lacking `sandbox_tools`, until a retry.
+  When the script stops, the job tries again for what is pending; after the third attempt since the
+  media was asked for, counted in what is kept, what is still pending is kept as failed.
 
 Each render's steps are bounded by the time its job has left, and its sandbox is destroyed after,
 waited for at most 30 seconds. What a render wrote in the sandbox comes back a piece at a time,

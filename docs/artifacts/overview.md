@@ -87,11 +87,13 @@ const media = await sixb.artifacts.media(artifactId, { path: "launch.mov" })
 media?.parts.poster // { status: "ready", file, atMs: 1520 }, or "pending" while it is derived
 ```
 
-- The app shows the poster on cards and plays the proxy, and every frame serves a video's proxy in
-  place of its original; **Download** still gives the original.
-- Each part is `ready`, `pending`, or `unavailable` or `failed` with a `reason`; ask with
-  `{ retry: true }` (`?retry=true` over HTTP) to derive each failed part again. A sound has no
-  poster, and a project without a [transcription model](../models/configuration.md#audio-transcription) no transcript.
+- The app shows the poster on cards and plays the proxy; **Download** still gives the original. A
+  deck or a page plays its clips as they are.
+- Each part is `ready`, `pending`, or `unavailable` or `failed` with a `reason`. An `unavailable`
+  part with `lacks` waits for the project: `sandboxes`, `sandbox_tools` (FFmpeg) or
+  `transcription_model`. Ask with `{ retry: true }` (`?retry=true` over HTTP) to derive each failed
+  or lacking part again; a transcript is asked for on its own once the project has a
+  [transcription model](../models/configuration.md#audio-transcription).
 - The [`render` worker](../cli/overview.md) derives them in a sandbox of the project with FFmpeg,
   as the Sixb agent image has it, from media up to 30 minutes long. A project without a sandbox
   provider derives nothing.

@@ -5,7 +5,7 @@ CREATE TABLE artifact_media (
   project_id TEXT NOT NULL,
   digest TEXT NOT NULL CHECK (length(digest) > 0),
   parts TEXT NOT NULL CHECK (json_valid(parts)),
-  attempts INTEGER NOT NULL CHECK (attempts > 0),
+  attempts INTEGER NOT NULL CHECK (attempts >= 0),
   updated_at TEXT NOT NULL,
   PRIMARY KEY (project_id, digest)
 );

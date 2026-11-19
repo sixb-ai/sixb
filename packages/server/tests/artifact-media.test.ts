@@ -136,6 +136,7 @@ describe("what is derived of a media, over the API", () => {
       poster: { status: "ready", file: poster, atMs: 1520 },
       proxy: { status: "failed", reason: "FFmpeg could not make it." },
       cuts: { status: "ready", atMs: [4200] },
+      waveform: { status: "unavailable", reason: "No FFmpeg.", lacks: "sandbox_tools" },
     })
     const ready = (await (await get(media)).json()) as {
       readonly parts: Record<string, Record<string, unknown>>
@@ -150,6 +151,12 @@ describe("what is derived of a media, over the API", () => {
     })
     expect(ready.parts.proxy).toEqual({ status: "failed", reason: "FFmpeg could not make it." })
     expect(ready.parts.cuts).toEqual({ status: "ready", atMs: [4200] })
+    // What the project lacks is said, for a client to offer a retry once it has it.
+    expect(ready.parts.waveform).toEqual({
+      status: "unavailable",
+      reason: "No FFmpeg.",
+      lacks: "sandbox_tools",
+    })
     // No blob of what is derived is named: it is reached through the artifact.
     expect(JSON.stringify(ready)).not.toContain("blobId")
   })
