@@ -14,7 +14,6 @@ export {
   MEDIA_JOB,
   MEDIA_PARTS,
   mapMediaParts,
-  mediaJobId,
   unmadeMediaParts,
 } from "../media/media"
 export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
