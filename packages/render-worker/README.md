@@ -74,8 +74,12 @@ for. It is joined from segments kept under their own keys, shared by every expor
 
 - Does nothing once the MP4, or why it could not be made, is kept.
 - While segments are missing, asks for each in a job of its own, then asks for itself again five
-  seconds later and returns: no worker sleeps while scenes render. That later run only looks.
-- A segment that failed fails the export, saying which scene.
+  seconds later and returns: no worker sleeps while scenes render. That later run only looks, and
+  each segment it asked for, once kept or failed, makes it look at once: the five seconds are a
+  backstop, for an export whose segment another export asked for first.
+- A segment that failed fails the export, naming the scene, by its label when it has one.
+- Asked for by a Sixb whose keys differ from the worker's, as during a deploy, it tries again,
+  then keeps that it was asked while Sixb was being updated: asking again asks anew.
 - Once every segment is kept, opens a blank sandbox of the project that reaches the API, fetches
   them by download URL, and joins them with FFmpeg without encoding them again, with the sound,
   its index first. Its frame count is checked, and the MP4 is kept, named after the version's
@@ -87,11 +91,12 @@ for. It is joined from segments kept under their own keys, shared by every expor
 - Opens a blank sandbox of the project that reaches the API and lays the project out there: its
   HTML written by the worker, each `artifact:` address pointed at the file it resolved to, the rest
   fetched by the sandbox.
-- A scene's project keeps the scenes on screen with it, moved earlier when it can so its first
-  frame is frame 0. HyperFrames renders it, `--no-low-memory-mode` when the sandbox has 3 GiB or
-  more, two browsers at once, H.264 at CRF 18 with a keyframe every two seconds; the sound is
-  dropped. A crossfade from the scene before, or a root that moves, renders a range of the
-  project instead.
+- A scene's project keeps the scenes on screen during its segment, moved earlier when it can so
+  its first frame is frame 0. HyperFrames renders it, `--no-low-memory-mode` when the sandbox has
+  3 GiB or more, two browsers at once, H.264 at CRF 18 with a keyframe every two seconds; the sound
+  is dropped. A scene that fades in over the one before, or a root that moves, renders a range of
+  the project instead, which HyperFrames captures in short chunks one after the other: about twice
+  slower, with a keyframe every half second.
 - The sound is mixed once for the whole video: HyperFrames' distributed plan, which captures no
   frame, mixes it exactly as its render does.
 - Each segment's time grows with its frames and their pixels: five minutes, then twenty seconds a
@@ -101,7 +106,7 @@ for. It is joined from segments kept under their own keys, shared by every expor
 
 `artifact.video.stills.requested`: the stills of a version's scenes, asked for when it is
 published, 15 seconds after the last write that asks. One sandbox snapshots each scene missing one
-at its middle, and the poster at the instant the root's `data-poster` names, with
+at the middle of its segment, and the poster at the instant the root's `data-poster` names, with
 `hyperframes snapshot`, from a project that holds those scenes and the ones on screen with them, as
 JPEGs at most 1,280 pixels wide. After three attempts, the scenes keep none.
 

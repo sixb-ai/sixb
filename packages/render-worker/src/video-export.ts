@@ -63,10 +63,11 @@ export async function assembleVideoExport(input: {
   const { payload } = job
   const plan = videoExportPlan(payload)
   if (plan.key !== payload.key) {
-    console.warn(
-      `[SixbRenderWorker] The export of ${exportName(job)} was asked for by another version of Sixb; ask for it again.`
+    // Thrown, the job tries again, as a deploy may be rolling out: once its attempts are spent,
+    // failVideoExport keeps why, and asking again asks anew.
+    throw new Error(
+      `[SixbRenderWorker] The export of ${exportName(job)} was asked for by another version of Sixb, whose keys differ from this worker's.`
     )
-    return
   }
 
   const kept = await artifacts.listVideoRenders({ projectId: host.id, keys: videoExportKeys(plan) })
@@ -170,11 +171,39 @@ export async function failVideoExport(input: {
   readonly host: Pick<RenderHost, "id" | "storage">
   readonly job: ArtifactVideoExportRequestedQueueJob
 }): Promise<void> {
+  const { payload } = input.job
+  const matches = videoExportPlan(payload).key === payload.key
   await input.host.storage.artifacts?.putVideoRender({
     projectId: input.host.id,
-    key: input.job.payload.key,
-    failure: "It could not be put together. Try again in a moment.",
+    key: payload.key,
+    failure: matches
+      ? "It could not be put together. Try again in a moment."
+      : "It was asked for while Sixb was being updated. Try again.",
     createdAt: new Date(),
+  })
+}
+
+/**
+ * Asks the export that waits for a segment to look again at once, as the segment is kept or
+ * failed: it joins the MP4 without waiting for its next look, `VIDEO_EXPORT_JOB.recheckMs`, which
+ * stays for the exports that share the segment. A look that runs then replaces this one.
+ */
+export async function nudgeVideoExport(
+  host: Pick<VideoExportHost, "id" | "queues">,
+  waiting: ArtifactVideoExportRequestedQueueJob["payload"] | undefined
+): Promise<void> {
+  if (!waiting) return
+
+  await host.queues.renders.enqueue({
+    projectId: host.id,
+    jobs: [
+      {
+        id: videoExportJobId(waiting.key),
+        replace: true,
+        type: "artifact.video.export.requested",
+        payload: waiting,
+      },
+    ],
   })
 }
 
@@ -204,9 +233,20 @@ async function askForSegments(
     durationMs: payload.outline.durationMs,
   }
 
+  // What each segment hands back once kept, so this export looks again at once.
+  const { retry: _retry, ...asked } = payload
+  const waitingExport = { ...asked, waiting: true }
+
   const jobs: NewQueueJob<ArtifactVideoSegmentRequestedQueueJob>[] = []
   for (const { key, ...segment } of missing) {
-    const common = { artifactId: payload.artifactId, version: payload.version, key, segment, video }
+    const common = {
+      artifactId: payload.artifactId,
+      version: payload.version,
+      key,
+      segment,
+      video,
+      waitingExport,
+    }
     const project =
       segment.kind === "scene" && read
         ? await sceneProject(host, read, payload, segment)
