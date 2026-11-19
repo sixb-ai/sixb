@@ -94,15 +94,16 @@ work/launch-teaser/
 A video is judged in its first three seconds, on a phone, with the sound off. Make what a senior
 motion designer would ship.
 
-- **Real footage first.** Show the actual product, recorded, never a mock-up of it. Generated
-  images (`sixb models image`) and voice (`sixb models speech`) come in when they serve the story,
-  as does generated video when the project has a model for it. Never draw a product or a person
-  as shapes, and never make music in code, from tones, oscillators or notes you write: a voice
-  alone is better than a cheap bed.
+- **Real footage first.** Show the actual product, recorded, never a mock-up of it nor a run of
+  stills. Generated images (`sixb models image`) and voice (`sixb models speech`) come in when
+  they serve the story, as does generated video when the project has a model for it. Never draw
+  a product or a person as shapes, and never make music in code, from tones, oscillators or
+  notes you write: a voice alone is better than a cheap bed.
 - **Cut more than you think.** One idea per scene, three to five seconds each; a teaser is 15 to
   45 seconds. Every scene earns its time: when you hesitate, cut it. Hold only the end card.
-- **The first frame is the thumbnail.** Frame 0 shows the promise in words or the product, never
-  an empty ground; the first three seconds say what this is and why it matters.
+- **The first frame is the thumbnail, and the hook.** Frame 0 shows a moment or a problem, in
+  words over the footage ("A boiler just went down."), never the product's name, a tagline or an
+  empty ground: the name belongs on the end card. The first three seconds say why this matters.
 - **Hierarchy.** One thing to read at a time, in three sizes at most. At 1080p, titles 120 to
   180 px set tight (-0.03em), lines and callouts 44 to 64 px, nothing under 36 px: it must read on
   a phone. Margins of at least 120 px; a 9:16 frame keeps words out of its top 250 px and bottom
@@ -127,6 +128,14 @@ motion designer would ship.
 - **An ending that lands.** The logo or product, one line, one thing to do: an end card of three
   to four seconds in all, still for the last two. Never a frame with nothing on it, at a cut
   either: a scene's last frame still shows its subject.
+
+## Work from a plan
+
+Write the story once, outside the video's folder, as `work/plan.json`: each scene's id, length,
+line, caption and shot. A small script writes `index.html` and the scenes from it, so a change of
+words or length is one edit there. Start what takes time in parallel, as background commands
+(`run_in_background`): the voice-over, one `sixb models speech` per line, and the recordings.
+Write the scenes while they run, and `wait` for them before you publish.
 
 ## Real footage
 
@@ -155,64 +164,72 @@ const { chromium } = require(process.env.SIXB_PLAYWRIGHT ?? "/opt/sixb/js/node_m
 ```
 
 ```bash
-ffmpeg -i work/rec/*.webm -c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart \
+ffmpeg -nostdin -i work/rec/*.webm -c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart \
   work/launch-teaser/media/dispatch.mp4
 ```
 
 A recording keeps the viewport's size whatever its `deviceScaleFactor`, and shows no cursor: when
 the story is a click, draw one in the page before acting (an element that follows
-`page.mouse.move`, with `steps` for a glide). For a still hero shot, a `page.screenshot` at
-`deviceScaleFactor: 2`, moved in HTML, is sharper than any recording.
-Look at a few frames of what you recorded (`ffmpeg -ss 3 -i <file> -frames:v 1 shot.png`, then
-read it) before you build on it.
+`page.mouse.move`, with `steps` for a glide). A video holds at most one still, a hero shot: a
+`page.screenshot` taken in a context of `deviceScaleFactor: 2`, moved in HTML. A product shown in
+stills is a slideshow: record it. Look at a few frames of what you recorded
+(`ffmpeg -nostdin -ss 3 -i <file> -frames:v 1 shot.png`, then read it) before you build on it.
+
+## The user's clips
+
+A clip the user gives goes into `media/` as it is: 4K, from a phone, up to 2 GB. Never re-encode,
+cut, crop or scale it with FFmpeg first: the app plays a proxy Sixb makes of it, the export reads
+the original, and both show a phone's clip upright. Cut it with `data-media-start` and
+`data-duration`, and frame it with CSS (`object-fit: cover`, a `transform`). A phone stores its
+clips sideways with a rotation: ffprobe's width and height are the stored frame, and the frame
+`$SIXB_ARTIFACTS` lists once it is published is the one shown.
+
+An attachment over 25 MB is not in the sandbox: download it straight into the folder
+(`sixb files download url <contentUrl> --output work/reel/media/talk.mov`) and publish. Then move
+it out of the folder (`mv work/reel/media/talk.mov work/footage/`): an update keeps every
+recording its scenes still play, and a folder that still holds one uploads it again on every
+publish. To look at footage, fetch its proxy outside the folder, and never publish it in the
+original's place:
+`sixb artifacts media <id> --path media/talk.mp4 --part proxy --output work/footage/talk.mp4`.
 
 ## Edit from the transcript
 
-A recording someone gave you is cut from what is said. Once published, `$SIXB_ARTIFACTS` lists each
-recording of a video under `media`, with its length, its frame, and each part derived of it:
-`ready`, `pending`, or why it will not come. Its copy holds, under `.derived/<path>/`:
+Once published, `$SIXB_ARTIFACTS` lists each recording of a video under `media`, with its length,
+its frame, and each part derived of it: `ready`, `pending`, or why it will not come. Its copy
+holds, under `.derived/<path>/`:
 
 - `transcript.json`: `{ text, words: [{ text, startMs, endMs }], segments }`, in milliseconds;
 - `cuts.json`: `{ atMs }`, each instant the picture cuts to another shot.
 
-1. Publish the recording in the video first, so it is transcribed; `pending` means a few seconds
-   more: `sixb artifacts media <id> --path media/talk.mp4` says where it stands, and
+1. Publish the recordings in the video first, so they are transcribed; `pending` means a few
+   seconds more: `sixb artifacts media <id> --path media/talk.mp4` says where it stands, and
    `--part transcript --output work/talk.transcript.json` fetches it once it is ready.
-   Some models time sentences, not words. When `words` is missing, look for a transcription
-   model that times them (`sixb models list --kind transcription`) and run
-   `sixb models transcribe <audio> --model <model>`: it prints `words` when the model times
-   them. When none does, cut between `segments`, and place a caption's line breaks on the
-   pauses `ffmpeg -i <audio> -af silencedetect=noise=-35dB:d=0.12 -f null -` finds. Then tell
-   the user that a model that times words, such as `elevenlabs/scribe-v2` first in the
-   project's `models.audio.transcription`, times every recording. `hyperframes transcribe`
-   needs whisper.cpp, which the sandbox does not have: don't install it.
-2. Read the words, and choose the cut in text: the sentences that carry it, in the order that
-   tells it best. Start a clip on a word's `startMs` and end it on another's `endMs`, with 0.1 to
-   0.2 s of air; a picture cut lands on a `cuts.json` instant.
-3. Write each kept stretch as a clip: a `<video>` with `data-media-start` (its first word, in
-   seconds) and `data-duration`, chained one after the other, in a scene of its own or one per
-   idea.
-4. Set the captions from the same words, a line of three to seven words at a time, timed to them.
-
-The recording stays in the API: your copy holds the scenes, not the footage, and an update from it
-keeps every recording its scenes still play. To see footage, download its proxy outside the
-video's folder: `sixb artifacts media <id> --path media/talk.mp4 --part proxy --output
-work/footage/talk.mp4`. Never publish a proxy in its original's place.
+2. Cut on words, never inside one. A clip starts up to 0.1 s before its first word's `startMs`
+   and ends up to 0.15 s after its last word's `endMs`, never reaching into the word beside it;
+   a picture cut lands on a `cuts.json` instant.
+3. When `words` is missing, or its entries hold several words or last seconds, only phrases are
+   timed. Look for a model that times words (`sixb models list --kind transcription`) and run
+   `sixb models transcribe <audio> --model <model>`. When none does, cut only on the pauses
+   `ffmpeg -nostdin -i <audio> -af silencedetect=noise=-35dB:d=0.12 -f null -` finds, never at
+   an instant you estimate, and tell the user so: a model that times words, such as
+   `elevenlabs/scribe-v2` first in the project's `models.audio.transcription`, cuts on every
+   word. `hyperframes transcribe` needs whisper.cpp, which the sandbox does not have.
+4. Choose the cut in text: the sentences that carry it, in the order that tells it best. Write
+   each kept stretch as a clip, a `<video>` with `data-media-start` and `data-duration`, chained
+   one after the other, and set the captions from the same words, three to seven at a time.
 
 ## Check
 
 Publishing refuses a scene whose file or host is missing, a start it cannot resolve, a file from
 outside the video, and limits passed, naming the scene. Then Sixb checks the published video in the
 sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
-its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings. HyperFrames finds text
-off the frame, text under 28 px (what a phone reads at 1080p), low contrast and a silent clip;
-the check measures a frame with nearly nothing on it, a scene under a second, an end card past
-4.5 s and a teaser past 45 s. Each names its scene and when: fix each, unless the user asked for
-what it names.
+its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings.
+HyperFrames finds text off the frame, text under 28 px (what a phone reads at 1080p), low
+contrast and a silent clip; the check measures a frame with nearly nothing on it, a scene under
+a second, an end card past 4.5 s and a teaser past 45 s. Each names its scene and when.
 
-A sandbox whose network leaves out the CDNs checks without them, and the check says so: its
-frames then show no GSAP motion and fallback fonts, which the app and the export do load. Judge
-the layout and the words from them, and keep the scripts and fonts as they are.
+A sandbox without the CDNs checks without them, and says so: its frames show no GSAP motion and
+fallback fonts, which the app and the export do load. Keep the scripts and fonts as they are.
 
 Agents believe they succeeded far more often than they did: a video that publishes is not a video
 that works. Never say it is ready without having looked.
@@ -225,13 +242,17 @@ that works. Never say it is ready without having looked.
    sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
    but not your intent or your plan, and ask what is weak, confusing, slow, unreadable on a phone
    or broken. A review needs eyes, not the strongest model: give it `model: "standard"`, unless
-   that model cannot read images. One reviewer reads every sheet; fix what it finds, then look
-   again yourself rather than spawning one per frame.
-3. Fix what the warnings name and what you saw, update the artifact with its `id`, and look again.
-   Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
-   folder, take `timeoutMs` up to ten minutes, or run in the background. Where HyperFrames takes
-   no frame, as in a sandbox whose home is read only, run it with `HYPERFRAMES_CHROME_SANDBOX=0`
-   and `HYPERFRAMES_CACHE_DIR=$PWD/.hyperframes-cache`.
+   that model cannot read images. Hand it the sheets at the paths the result names. One reviewer
+   reads every sheet; then look again yourself rather than spawning one per frame.
+3. Answer each point the review and the warnings raise: fix it, or know why not. Update the
+   artifact with its `id`, look again, and name in your reply each point you left open.
+
+Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
+folder, take a `timeoutMs` up to ten minutes; in the background, bound them with `timeout 900`.
+FFmpeg always takes `-nostdin`, and `-t` with `-loop 1`: without them it waits for input, or runs
+on, until the command is killed. Where HyperFrames takes no frame, as in a sandbox whose home is
+read only, run it with `HYPERFRAMES_CHROME_SANDBOX=0` and
+`HYPERFRAMES_CACHE_DIR=$PWD/.hyperframes-cache`.
 
 ## Revise
 
@@ -249,11 +270,10 @@ file, or a deliverable needs it, such as an attachment or a post:
 sixb artifacts export <id> --output work/launch-teaser.mp4
 ```
 
-It renders in the project's sandboxes, scene by scene, about as long as the video for titles and
-a few times longer for footage under blur, and keeps each scene: a version that changes one scene
-renders only that one again. Run it with `timeoutMs` of a few minutes, or in the background. A
-failure names the scene; fix it, update the artifact, and export again (`--retry` renders a failed
-scene anew). Don't export to check your work: the contact sheet and HyperFrames show it sooner.
+It renders scene by scene, about as long as the video, longer for footage under blur, and keeps
+each scene: a version that changes one renders only that one again. Run it with `timeoutMs` of a
+few minutes, or in the background. A failure names the scene; fix it, update the artifact, and
+export again (`--retry` renders a failed scene anew). Don't export to check your work.
 
 ## Comments
 
