@@ -184,13 +184,12 @@ the original, and both show a phone's clip upright. Cut it with `data-media-star
 clips sideways with a rotation: ffprobe's width and height are the stored frame, and the frame
 `$SIXB_ARTIFACTS` lists once it is published is the one shown.
 
-An attachment over 25 MB is not in the sandbox: download it straight into the folder
-(`sixb files download url <contentUrl> --output work/reel/media/talk.mov`) and publish. Then move
-it out of the folder (`mv work/reel/media/talk.mov work/footage/`): an update keeps every
-recording its scenes still play, and a folder that still holds one uploads it again on every
-publish. To look at footage, fetch its proxy outside the folder, and never publish it in the
-original's place:
-`sixb artifacts media <id> --path media/talk.mp4 --part proxy --output work/footage/talk.mp4`.
+An attachment goes in by its key, never downloaded: publish the folder with
+`attachments: [{ "path": "media/talk.mov", "key": "<its key in $SIXB_ATTACHMENTS>" }]`. Every
+update keeps a recording its scenes still play, so pass it once. Any other recording stays in
+`media/`: one the video holds already is not uploaded again. To look at footage, fetch its proxy
+outside the folder, and never publish it in the original's place:
+`sixb artifacts media <id> --path media/talk.mov --part proxy --output work/footage/talk.mp4`.
 
 ## Edit from the transcript
 
@@ -202,7 +201,7 @@ holds, under `.derived/<path>/`:
 - `cuts.json`: `{ atMs }`, each instant the picture cuts to another shot.
 
 1. Publish the recordings in the video first, so they are transcribed; `pending` means a few
-   seconds more: `sixb artifacts media <id> --path media/talk.mp4` says where it stands, and
+   seconds more: `sixb artifacts media <id> --path media/talk.mov` says where it stands, and
    `--part transcript --output work/talk.transcript.json` fetches it once it is ready.
 2. Cut on words, never inside one. A clip starts up to 0.1 s before its first word's `startMs`
    and ends up to 0.15 s after its last word's `endMs`, never reaching into the word beside it;
