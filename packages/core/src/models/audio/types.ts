@@ -32,25 +32,28 @@ export interface TranscriptionWord {
   readonly speaker?: string
 }
 
-/** A stretch of speech the provider timed, such as a sentence. */
+/** A stretch of speech the provider timed, such as a sentence, and who said it. */
 export interface TranscriptionSegment {
   readonly text: string
   /** Milliseconds from the start of the audio. */
   readonly startMs: number
   readonly endMs: number
+  /** The provider's label for who said it, as on a word. */
+  readonly speaker?: string
 }
 
 export interface TranscriptionOutput {
   readonly text: string
   /**
    * The words the provider timed, in spoken order. Text alone cannot say who was speaking at
-   * 12:04, or where to put the playhead. Absent when the provider returns none, which is what
-   * every provider that neither diarizes nor times words does.
+   * 12:04, or where to put the playhead. Absent when the provider times none, or the words of
+   * some phrases only: a phrase is never handed on as a word, since a cut on its bounds would
+   * fall mid-speech, and a phrase left untimed would read as silence. Fall back on `segments`.
    */
   readonly words?: readonly TranscriptionWord[]
   /**
-   * The stretches the provider timed, in spoken order: sentences for most, each word for some.
-   * Absent when it returns none.
+   * The stretches the provider timed, in spoken order: sentences for most, each word for some,
+   * with who said each where it labels voices. Absent when it returns none.
    */
   readonly segments?: readonly TranscriptionSegment[]
   /** The language the provider heard, as it names it, such as `en`. */

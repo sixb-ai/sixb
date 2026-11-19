@@ -220,6 +220,26 @@ describe("model generation routes", () => {
     expect(await transcript.response.json()).toMatchObject({ text: "Hello there.", words })
   })
 
+  // Removal proof: drop `speaker` from TranscriptionSegmentSchema; the route strips who spoke.
+  test("returns the phrases a model timed, with who said each, when it times no word", async () => {
+    const segments = [{ text: "Hello there.", startMs: 0, endMs: 900, speaker: "speaker_0" }]
+    const { blobStorage, granted } = await setup({
+      transcription: [
+        {
+          ...transcriber,
+          transcribe: async () => ({ output: { text: "Hello there.", segments } }),
+        },
+      ],
+    })
+    const audio = await blobStorage.put({ body: MP3, mediaType: "audio/mpeg" })
+
+    const transcript = await granted("/api/models/audio/transcriptions", { audio })
+    const body = await transcript.response.json()
+
+    expect(body).toMatchObject({ text: "Hello there.", segments })
+    expect("words" in body).toBe(false)
+  })
+
   // Removal proof: remove assertModelAccess from the image runtime; the plain user generates.
   test("calling a model takes can.run(project.models)", async () => {
     let calls = 0

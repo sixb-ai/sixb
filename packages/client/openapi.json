@@ -14462,6 +14462,9 @@
                           "endMs": {
                             "type": "integer",
                             "minimum": 0
+                          },
+                          "speaker": {
+                            "type": "string"
                           }
                         },
                         "required": ["text", "startMs", "endMs"],

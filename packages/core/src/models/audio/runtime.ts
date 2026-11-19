@@ -174,11 +174,17 @@ function transcriptSegments(segments: unknown): TranscriptionSegment[] | null {
       typeof entry?.text !== "string" ||
       !isMillisecond(entry.startMs) ||
       !isMillisecond(entry.endMs) ||
-      entry.endMs < entry.startMs
+      entry.endMs < entry.startMs ||
+      (entry.speaker !== undefined && (typeof entry.speaker !== "string" || !entry.speaker))
     ) {
       return null
     }
-    timed.push({ text: entry.text, startMs: entry.startMs, endMs: entry.endMs })
+    timed.push({
+      text: entry.text,
+      startMs: entry.startMs,
+      endMs: entry.endMs,
+      ...(entry.speaker === undefined ? {} : { speaker: entry.speaker }),
+    })
   }
   return timed
 }
