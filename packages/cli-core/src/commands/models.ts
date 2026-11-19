@@ -111,6 +111,13 @@ interface CallResult {
   readonly warnings?: readonly string[]
 }
 
+/** A transcription's answer: its words and segments when the model times them, in milliseconds. */
+interface TranscriptionResult extends CallResult {
+  readonly words?: readonly unknown[]
+  readonly segments?: readonly unknown[]
+  readonly language?: string
+}
+
 const SPEECH_FORMATS = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -257,11 +264,17 @@ async function transcribe(api: ApiClient, args: readonly string[]): Promise<void
   const result = (await api.post("/api/models/audio/transcriptions", {
     ...model,
     audio,
-  })) as CallResult
+  })) as TranscriptionResult
+
+  // The times are what an edit or a caption is placed by: every one the model gave is printed.
+  const { words, segments, language } = result
   writeJson({
     callId: result.callId,
     model: result.model.modelId,
     text: result.text,
+    ...(language === undefined ? {} : { language }),
+    ...(words === undefined ? {} : { words }),
+    ...(segments === undefined ? {} : { segments }),
     cost: describeCost(result.cost),
   })
 }
