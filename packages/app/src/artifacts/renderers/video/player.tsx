@@ -379,6 +379,9 @@ export function VideoPlayer({
           onPointerUp={(event) => {
             if (event.button === 0) onPictureClick(event)
           }}
+          // A tap's mouse events follow its pointer's: its mousedown would take the focus back
+          // from the comment field the tap just opened. The click above places the focus itself.
+          onMouseDown={(event) => event.preventDefault()}
           onDoubleClick={() => {
             if (!commenting.commenting) fullscreen.toggle()
           }}

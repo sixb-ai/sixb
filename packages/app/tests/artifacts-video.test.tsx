@@ -2,12 +2,13 @@ import { afterEach, describe, expect, jest, test } from "bun:test"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { versionSummary } from "../src/artifacts/card-details"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { frameLinkKey } from "../src/artifacts/frame"
 import { en, fr } from "../src/artifacts/messages"
+import { CommentModeHint } from "../src/artifacts/comments/commenting"
 import type { CommentThread } from "../src/artifacts/comments/comments"
 import { chapterAt } from "../src/artifacts/renderers/video/chapters"
 import {
@@ -526,6 +527,38 @@ describe("the player", () => {
 })
 
 describe("a video's comments", () => {
+  test("keep the focus a tap on the frame gives the comment field", async () => {
+    // Reproduce by dropping `onMouseDown` from the layer over the frame in player.tsx: a tap's
+    // mousedown, which comes after its pointer's events, moves the focus off the field it opened.
+    const { view } = await openPlayer()
+    const layer = view.container.querySelector("[data-video-picture] > div")
+    if (!layer) throw new Error("Expected the layer over the frame.")
+    expect(fireEvent.mouseDown(layer)).toBe(false)
+  })
+
+  test("say how to stop commenting with a key, and under a finger with a close mark", () => {
+    // Reproduce by always drawing the Esc key in `CommentModeHint`.
+    const hint = () =>
+      render(
+        <Wrap cache={new QueryClient()}>
+          <CommentModeHint hint="Tap the frame to comment on this moment" onExit={() => {}} />
+        </Wrap>
+      )
+    const exit = (view: ReturnType<typeof hint>) =>
+      view.getByRole("button", { name: "Stop commenting" }).textContent
+
+    expect(exit(hint())).toBe("Esc")
+    cleanup()
+
+    const coarse = (query: string) => ({ matches: query === "(pointer: coarse)" })
+    Object.assign(globalThis, { matchMedia: coarse })
+    try {
+      expect(exit(hint())).toBe("")
+    } finally {
+      Reflect.deleteProperty(globalThis, "matchMedia")
+    }
+  })
+
   // Reproduce by showing the open comment's pin at any instant in `VideoCommentPins`.
   test("show a pin only around its instant, the open one too", () => {
     const thread = {
