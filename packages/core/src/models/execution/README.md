@@ -171,8 +171,21 @@ Settling is first-wins: two looks that see the end at once record the same ledge
 the first files, and both answer with the first settlement. A look that fails to ask, such as a
 network error, leaves the job pending. `generate` is `start`, then `get` every five seconds.
 
+No client has to come back. `start` also queues an `agent.model-call.check.requested` job on the
+agent lane, and the agent worker looks at the job with the same code (`../video/check.ts`), then
+queues the next look, a quarter of the generation's age later, between one and five minutes. Since
+the handle lives in storage and the check in the queue, a process that stops between start and
+end loses nothing: whichever worker claims the check finishes it. A check that cannot ask is
+retried by the worker with backoff.
+
+Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation still running, or one it
+cannot ask about, as failed. The Gateway gives up on a provider's task after ten minutes and
+providers time their own out sooner, so an hour is far past any job that will still finish. Whether
+the provider billed it is unknown, so its reservation becomes unknown, as for a language call that
+never finished, rather than recorded as free.
+
 Usage is `outputVideoMs`: what the provider reports, else the requested length times the clips
 returned, which is what providers bill. The job's price variant, such as `{ resolution: "720p",
 audio: "audio" }`, comes from the binding at start, since the binding knows how its catalog names
-tiers. A generation nobody looks at stays pending, its budget reserved, until someone does.
+tiers.
 

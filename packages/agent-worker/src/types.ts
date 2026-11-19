@@ -1,5 +1,6 @@
 import type { AgentExecutionContext, AgentRunSettings } from "@sixb/agent"
 import type {
+  BlobStorage,
   Broker,
   DomainEventLog,
   Queues,
@@ -46,6 +47,8 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
+  /** Where a video generation's clips are stored once a scheduled check sees it end. */
+  readonly blobStorage?: BlobStorage
   readonly definitions: Pick<
     SixbDefinitions,
     "workflows" | "ontology" | "security" | "models" | "tools" | "agent"
