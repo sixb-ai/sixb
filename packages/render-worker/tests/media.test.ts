@@ -288,6 +288,38 @@ describe("what the render worker derives of a media", () => {
     })
   })
 
+  // Reproduce by keeping `...derived.parts` with the transcript in deriveArtifactMedia: it keeps the
+  // proxy failed as the job first made it, and the job asked for behind it finds nothing to do.
+  test("leaves pending what a retry asked for while it ran, for the job behind it", async () => {
+    let retry = async () => {}
+    const sandboxes = new DerivingSandboxes((part) =>
+      part === "proxy" ? { status: "failed", reason: "FFmpeg could not make it." } : "file"
+    )
+    const { storage, derive, kept } = await setup({
+      sandboxes,
+      transcription: transcriber(async () => {
+        await retry()
+        return { output: { text: "Welcome to Sixb." } }
+      }),
+    })
+    // While the model transcribes, the proxy that failed is asked for again.
+    retry = async () => {
+      const media = await kept()
+      if (!media) throw new Error("Expected what was derived first.")
+      await storage.artifacts?.putMedia({
+        ...media,
+        parts: { ...media.parts, proxy: { status: "pending" } },
+      })
+    }
+
+    await derive()
+
+    expect((await kept())?.parts).toMatchObject({
+      proxy: { status: "pending" },
+      transcript: { status: "ready" },
+    })
+  })
+
   // Reproduce by asking for the sound without a model in derive(): the sandbox extracts and the
   // worker reads back a sound nothing will transcribe.
   test("has no transcript in a project without a transcription model", async () => {

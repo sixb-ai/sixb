@@ -78,14 +78,20 @@ export async function deriveArtifactMedia(input: {
 
   const transcriber = findMediaTranscriber(host)
   const transcribes = wanted.includes("transcript") && transcriber?.model != null
-  const keep = (parts: ArtifactMediaParts) =>
-    artifacts.putMedia({
+  /**
+   * Keeps the parts this attempt made over what is kept by then, not over what it read first: a
+   * retry asked meanwhile made other parts pending again, for the job waiting behind this one.
+   */
+  const keep = async (made: Partial<ArtifactMediaParts>) => {
+    const [now] = await artifacts.listMedia({ projectId: host.id, digests: [file.digest] })
+    await artifacts.putMedia({
       projectId: host.id,
       digest: file.digest,
-      parts,
+      parts: { ...(now?.parts ?? before), ...made },
       attempts: job.attempt,
       updatedAt: new Date(),
     })
+  }
 
   const derived = await inRenderSandbox(
     { sandboxes: host.sandboxes },
@@ -105,20 +111,17 @@ export async function deriveArtifactMedia(input: {
       })
   )
 
-  const parts: ArtifactMediaParts = {
-    ...before,
+  await keep({
     ...derived.parts,
     ...(wanted.includes("transcript") && !transcribes
       ? {
           transcript: { status: "unavailable", reason: "This project has no transcription model." },
         }
       : {}),
-  }
-  await keep(parts)
+  })
 
   if (derived.audio && transcriber) {
     await keep({
-      ...parts,
       transcript: await transcribe({
         host,
         transcriber,
