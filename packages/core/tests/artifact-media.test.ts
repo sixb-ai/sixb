@@ -127,6 +127,37 @@ describe("what is derived of a media", () => {
     expect((await claimable()).map(({ payload }) => payload)).toEqual([{ file: voice.file }])
   })
 
+  test("is asked for what a video's scenes play", async () => {
+    const { sixb, put, claimable } = setup()
+    const clip = await put("media/clip.mp4", "clip", "video/mp4")
+
+    await sixb.artifacts.create({
+      kind: "video",
+      title: "Launch film",
+      files: [
+        await put(
+          "index.html",
+          '<!doctype html><div data-composition-id="main" data-width="1920" data-height="1080"><div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="0" data-duration="3"></div></div>',
+          "text/html"
+        ),
+        await put(
+          "scenes/demo.html",
+          '<template><div data-composition-id="demo"><video src="media/clip.mp4" muted></video></div></template>',
+          "text/html"
+        ),
+        clip,
+      ],
+    })
+
+    expect(await claimable()).toEqual([
+      {
+        id: `art_media_${clip.file.digest.slice(7)}`,
+        type: "artifact.media.requested",
+        payload: { file: clip.file },
+      },
+    ])
+  })
+
   test("is not asked for in a project without sandboxes, nor for what is no media", async () => {
     const { sixb, put, claimable } = setup({ sandboxes: false })
     await sixb.artifacts.create({
