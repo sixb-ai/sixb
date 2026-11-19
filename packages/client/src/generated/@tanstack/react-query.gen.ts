@@ -83,6 +83,7 @@ import {
   getArtifactState,
   getArtifactVersion,
   getArtifactVideo,
+  getArtifactVideoPoster,
   getArtifactVideoStill,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
@@ -453,6 +454,9 @@ import type {
   GetArtifactVersionResponse,
   GetArtifactVideoData,
   GetArtifactVideoError,
+  GetArtifactVideoPosterData,
+  GetArtifactVideoPosterError,
+  GetArtifactVideoPosterResponse,
   GetArtifactVideoResponse,
   GetArtifactVideoStillData,
   GetArtifactVideoStillError,
@@ -7144,6 +7148,33 @@ export const getArtifactVideoStillOptions = (options: Options<GetArtifactVideoSt
       return data
     },
     queryKey: getArtifactVideoStillQueryKey(options),
+  })
+
+export const getArtifactVideoPosterQueryKey = (options: Options<GetArtifactVideoPosterData>) =>
+  createQueryKey("getArtifactVideoPoster", options)
+
+/**
+ * Get a video's poster
+ *
+ * A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.
+ */
+export const getArtifactVideoPosterOptions = (options: Options<GetArtifactVideoPosterData>) =>
+  queryOptions<
+    GetArtifactVideoPosterResponse,
+    GetArtifactVideoPosterError,
+    GetArtifactVideoPosterResponse,
+    ReturnType<typeof getArtifactVideoPosterQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactVideoPoster({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactVideoPosterQueryKey(options),
   })
 
 export const getArtifactBoardPreviewQueryKey = (options: Options<GetArtifactBoardPreviewData>) =>

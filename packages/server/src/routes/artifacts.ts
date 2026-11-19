@@ -26,6 +26,8 @@ import {
   boardPreviews,
   boardsReadLiveData,
   documentPdfKey,
+  type VideoStill,
+  videoPoster,
   videoStillKey,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
@@ -678,14 +680,17 @@ async function artifactVideoResponse(
   }
 }
 
-/** A still of a video's scene, its middle, once snapshotted; 404 `still_not_found` until then. */
+/**
+ * A still of a video, once snapshotted: a scene's middle, or, without `scene`, its poster; 404
+ * `still_not_found` until then.
+ */
 async function artifactVideoStillResponse(
   host: SixbHostView,
   context: {
     readonly params: {
       readonly artifactId: string
       readonly version: string
-      readonly scene: string
+      readonly scene?: string
     }
     readonly request: Request
     readonly set: RouteSet & { headers: Record<string, string | number> }
@@ -697,14 +702,17 @@ async function artifactVideoStillResponse(
     const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
     if (!version) return await refusal(context, artifactId, context.set)
 
-    const scene =
-      version.outline.kind === "video"
-        ? version.outline.scenes.find((candidate) => candidate.id === id)
-        : undefined
+    const { outline } = version
+    let wanted: Pick<VideoStill, "key" | "scene"> | undefined
+    if (outline.kind === "video" && id === undefined) wanted = videoPoster(outline)
+    if (outline.kind === "video" && id !== undefined) {
+      const scene = outline.scenes.find((candidate) => candidate.id === id)
+      wanted = scene && { key: videoStillKey(scene), scene: scene.id }
+    }
     const storage = host.storage.artifacts
     const [still] =
-      scene && storage && seesVideoStill(context, version, scene.id)
-        ? await storage.listVideoRenders({ projectId: host.id, keys: [videoStillKey(scene)] })
+      wanted && storage && seesVideoStill(context, version, wanted.scene)
+        ? await storage.listVideoRenders({ projectId: host.id, keys: [wanted.key] })
         : []
     const response =
       still &&
@@ -1752,6 +1760,30 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
               content: { "image/jpeg": { schema: { type: "string", format: "binary" } } },
             },
             304: { description: "The still is unchanged; reuse the privately cached one" },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+          },
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/poster",
+      async (context) => artifactVideoStillResponse(host, context),
+      {
+        params: ArtifactVersionParamsSchema,
+        detail: {
+          summary: "Get a video's poster",
+          description:
+            "A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactVideoPoster",
+          security: accessTokenSecurityRequirement("getArtifactVideoPoster"),
+          responses: {
+            200: {
+              description: "The poster",
+              content: { "image/jpeg": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The poster is unchanged; reuse the privately cached one" },
             403: artifactErrorResponse(403),
             404: artifactErrorResponse(404),
           },

@@ -46,8 +46,10 @@ export {
   missingVideoStills,
   VIDEO_STILL_WIDTH,
   VIDEO_STILLS_JOB,
-  videoStillAtMs,
+  type VideoStill,
+  videoPoster,
   videoStillKey,
+  videoStills,
 } from "../video/stills"
 export {
   DOCUMENT_PDF_JOB,

@@ -165,6 +165,11 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
 - **The sound** is one mix of the whole video, so music that crosses a cut never breaks: the
   `audio.m4a` of HyperFrames' distributed plan (`planV2`), the very track its own render muxes,
   bit for bit (measured on 0.9.68). A video with no sound gets silence, so every MP4 has a track.
+  No package export reaches the plan: `video.cjs` finds the module of the CLI's `dist` that
+  exports `planV2` and the request helpers beside it. That holds only because every key pins
+  `VIDEO_ENGINE`, which a sandbox must run. When the module is gone, or its manifest moved, the
+  sound fails at once, kept with what changed, and `video-export.e2e.ts` fails by name on an
+  image that upgrades HyperFrames.
 - **Waiting** is a job, not a worker: the export looks again a few seconds later in a job it asks
   for in its own place, asking for nothing then. A segment job always keeps its file or why not,
   so asking again for a segment never strands an export; a retry forgets the failures and asks
@@ -175,3 +180,15 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
 - **Stills** (`stills.ts`): each scene's middle, snapshotted with `hyperframes snapshot` when a
   version is published, once it rests, and kept under the scene's key. The first scene's is the
   video's poster: HyperFrames has no notion of one.
+
+### What to ask HyperFrames for
+
+The scan goes once HyperFrames exports a way to mix a project's sound alone, which its CLI has
+internally (`processCompositionAudio`, run by `planV2` and by every render). Any of these would do:
+
+- `hyperframes render --audio-only -o mix.m4a`, the render's own delivery mix, no frame captured;
+- an `audio` mode on `hyperframes/api`: `mixAudio(projectDir, { fps, signal }) → { path, durationMs }`;
+- `planV2` and its request helpers on `hyperframes/api`, with the manifest's layout documented.
+
+The first is the one to ask for: a CLI flag keeps the render worker on the same contract as its
+segments, and the sandbox needs nothing else.
