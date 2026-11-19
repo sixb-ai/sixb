@@ -1,4 +1,5 @@
 import { describe, expect, setSystemTime, test } from "bun:test"
+import type { KernelOperation } from "../execution/types"
 import type { AuthStorage } from "../storage/auth"
 import type {
   CreateExecutionInput,
@@ -114,6 +115,11 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
           ...trustedPrimitiveKinds.map((kind) => trustedPrimitive(`${kind}-execution`, {}, kind)),
           agentExecution("agent-execution"),
           kernelExecution("kernel-execution"),
+          // Reproduce by leaving `artifacts.transcribeMedia` out of a provider's migration.
+          kernelExecution("media-execution", {
+            type: "artifacts.transcribeMedia",
+            digest: `sha256:${"a".repeat(64)}`,
+          }),
           scriptExecution("script-execution"),
         ] as const
 
@@ -785,8 +791,10 @@ function scriptExecution(id: string): CreateExecutionInput {
   }
 }
 
-function kernelExecution(id: string): CreateExecutionInput {
-  const operation = { type: "ontology.recover", recoveryId: `recovery-${id}` } as const
+function kernelExecution(
+  id: string,
+  operation: KernelOperation = { type: "ontology.recover", recoveryId: `recovery-${id}` }
+): CreateExecutionInput {
   return {
     id,
     projectId,
