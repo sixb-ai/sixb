@@ -46,8 +46,11 @@ afterEach(async () => {
   for (const window of windows.splice(0)) await window.happyDOM.close()
 })
 
-/** The frame's runtime in a video's page, under a browser's name, with the app as its parent. */
-function videoFrame(userAgent: string) {
+/**
+ * The frame's runtime in a video's page, under a browser's name, with the app as its parent, and
+ * HyperFrames' runtime loaded beside it unless `loaded` is false.
+ */
+function videoFrame(userAgent: string, { loaded = true }: { readonly loaded?: boolean } = {}) {
   const window = new Window({
     url: "https://frame.test/index.html",
     settings: { navigator: { userAgent } },
@@ -70,7 +73,9 @@ function videoFrame(userAgent: string) {
     })
   const script = document.createElement("script")
   script.setAttribute("data-sixb-layout", "video")
-  const frameWindow = proxy(window, { parent })
+  // What HyperFrames' runtime leaves on the page: its API once loaded, why its startup stopped.
+  const page: Record<string, unknown> = { parent, ...(loaded ? { __hyperframes: {} } : {}) }
+  const frameWindow = proxy(window, page)
   const frameDocument = proxy(document, { currentScript: script })
 
   // The runtime is served as its own source: it runs here the same, against this DOM.
@@ -95,7 +100,7 @@ function videoFrame(userAgent: string) {
 
   const send = (data: Record<string, unknown>) =>
     window.dispatchEvent(new window.MessageEvent("message", { data, source: parent as never }))
-  return { window, document, posted, played, send }
+  return { window, document, page, posted, played, send }
 }
 
 describe("the frame's runtime in a video", () => {
@@ -109,6 +114,27 @@ describe("the frame's runtime in a video", () => {
     expect(posted).toContainEqual({ protocol: FRAME_PROTOCOL, id: 1 })
     expect(document.getElementById("sixb-theme")).toBeNull()
     expect(document.documentElement.classList.contains("dark")).toBe(false)
+  })
+
+  test("says at once that the video cannot start when HyperFrames' runtime did not load", () => {
+    // Reproduce by dropping the `__hyperframes` check from `ready` in runtime.ts: the frame says
+    // it is ready, and the app waits out its timeout before saying anything.
+    const { posted } = videoFrame("Mozilla/5.0 (Macintosh)", { loaded: false })
+    expect(posted).toEqual([{ protocol: FRAME_PROTOCOL, event: "failed", params: {} }])
+  })
+
+  test("says the video cannot start once HyperFrames' startup stops at an error", () => {
+    // Reproduce by dropping the `error` listener from `ready` in runtime.ts: nothing is posted.
+    const { window, page, posted } = videoFrame("Mozilla/5.0 (Macintosh)")
+    const failed = { protocol: FRAME_PROTOCOL, event: "failed", params: {} }
+
+    // A scene's own error, with HyperFrames started, is the scene's to report.
+    window.dispatchEvent(new window.ErrorEvent("error", { message: "a scene threw" }))
+    expect(posted).not.toContainEqual(failed)
+
+    page.__hfStartupError = "HyperFrames runtime failed: TypeError"
+    window.dispatchEvent(new window.ErrorEvent("error", { message: "TypeError" }))
+    expect(posted.at(-1)).toEqual(failed)
   })
 
   test("on a phone, starts and stops every recording on the first play, in the reader's tap", () => {

@@ -71,8 +71,9 @@ import type {
  * places the caret rather than following it.
  *
  * A video is HyperFrames' to play: its runtime, served beside this one, answers the app's own
- * messages to it (`hf-parent`). This runtime only says the frame is ready, and leaves the video's
- * look alone, whatever the app's theme, as an export renders it. On a phone, the reader's tap on
+ * messages to it (`hf-parent`). This runtime says the frame is ready, or that the video cannot
+ * start: HyperFrames' runtime did not load, or stopped at its startup. It leaves the video's look
+ * alone, whatever the app's theme, as an export renders it. On a phone, the reader's tap on
  * play reaches the frame as the app's message, and WebKit lets only what that moment starts make
  * a sound: the first play starts and stops every recording the page holds then, so that each may
  * play later, when its scene comes, as HyperFrames' own player does.
@@ -1433,6 +1434,17 @@ export function frameRuntime(data?: () => DocumentData): void {
       })
     }
     if (video) {
+      // HyperFrames' runtime ran in the page's head, after this one: by now it is there, or it
+      // never loaded. Its startup runs next, and an error it stops at is saved before it is thrown.
+      const player = window as Window & { __hyperframes?: unknown; __hfStartupError?: unknown }
+      if (!player.__hyperframes) {
+        post({ event: "failed", params: {} })
+        return
+      }
+      window.addEventListener("error", () => {
+        if (typeof player.__hfStartupError === "string") post({ event: "failed", params: {} })
+      })
+
       post({ event: "ready", params: {} })
       return
     }
