@@ -131,8 +131,8 @@ function frameReferencePath(target: ArtifactFrameTarget, entry: string): string 
  * Points each file an entry shows or plays from another artifact (`<img src="artifact:…">`, a
  * `<video>`'s source or poster, an `<audio>`'s, a `<source>`'s) at the copy its frame serves, marked
  * `data-sixb-ref`. A file its reader cannot see, or that the frame has no target for, loses its
- * attribute and is marked unavailable: the kit draws an image as an empty box. Addresses are
- * compared as publishing recorded them, with their entities decoded.
+ * attribute and is marked unavailable: the kit draws an image or a video as an empty box.
+ * Addresses are compared as publishing recorded them, with their entities decoded.
  */
 export function rewriteFrameReferences(
   html: string,
@@ -149,7 +149,10 @@ export function rewriteFrameReferences(
         const path = target ? frameReferencePath(target, entry) : null
         if (path) {
           element.setAttribute(attribute, path)
-          element.setAttribute("data-sixb-ref", "")
+          // A `<video>` names two files: either one unavailable marks it.
+          if (element.getAttribute("data-sixb-ref") !== "unavailable") {
+            element.setAttribute("data-sixb-ref", "")
+          }
         } else {
           element.removeAttribute(attribute)
           element.setAttribute("data-sixb-ref", "unavailable")

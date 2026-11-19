@@ -219,6 +219,20 @@ describe("inferFileMediaType", () => {
     expect(inferFileMediaType("photo.avif", avif)).toBe("application/octet-stream")
   })
 
+  // Reproduce by accepting any MPEG audio layer in mpegAudioMediaType: the byte order mark `FF FE`
+  // reads as a layer I header, and each of these files as `audio/mpeg`.
+  test("leaves UTF-16 text, whose byte order mark looks like an MP3 frame, to the name", () => {
+    for (const [fileName, text, mediaType] of [
+      ["export.csv", "id,city\n", "text/csv"],
+      ["notes.txt", "Draft\n", "text/plain"],
+      ["data.json", '{"a":1}', "application/json"],
+    ] as const) {
+      const utf16 = Uint8Array.from([0xff, 0xfe, ...Buffer.from(text, "utf16le")])
+      expect(sniffFileMediaType(utf16), fileName).toBeUndefined()
+      expect(inferFileMediaType(fileName, utf16), fileName).toBe(mediaType)
+    }
+  })
+
   test("names captions and media by their extension, and lets it say a container holds sound", () => {
     for (const [fileName, content, mediaType] of [
       ["intro.MP4", undefined, "video/mp4"],
