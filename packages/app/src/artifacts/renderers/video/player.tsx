@@ -2,6 +2,7 @@ import type { VideoOutline, VideoOutlineScene } from "@sixb/core/artifacts"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
+  Check,
   ListVideo,
   MessageSquare,
   MessageSquarePlus,
@@ -427,6 +428,19 @@ export function VideoPlayer({
         </p>
       ) : null}
 
+      {/* The menu it was copied from has closed: the picture says so. */}
+      {copied ? (
+        <p
+          role="status"
+          className="pointer-events-none absolute inset-x-0 top-3 z-30 m-0 flex justify-center px-3"
+        >
+          <span className="flex h-8 items-center gap-1.5 rounded-full bg-black/60 px-3 text-xs font-medium text-white ring-1 ring-white/15 backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 [&_svg]:size-3.5">
+            <Check aria-hidden="true" />
+            {messages.linkCopied}
+          </span>
+        </p>
+      ) : null}
+
       {playback.soundBlocked && !playback.muted ? (
         <button
           type="button"
@@ -477,7 +491,6 @@ export function VideoPlayer({
             fullscreen={filling}
             onFullscreen={fullscreen.toggle}
             onCopyLink={copyLink}
-            copied={copied}
             menuContainer={fullscreen.on ? screen.current : null}
             scrubber={
               <Scrubber
