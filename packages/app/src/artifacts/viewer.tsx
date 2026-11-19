@@ -79,6 +79,7 @@ import { PageRenderer } from "./renderers/page"
 import { useWorkbookDownloads } from "./renderers/sheet/downloads"
 import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
+import { VideoExportMenu } from "./renderers/video/export"
 import { VideoRenderer } from "./renderers/video/renderer"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 import { VersionMenu } from "./version-menu"
@@ -782,6 +783,11 @@ function ArtifactHeader({
       ) : null}
       {artifact.kind === "sheet" ? (
         <SheetDownloadMenu version={version} />
+      ) : artifact.kind === "video" ? (
+        // A video downloads as its MP4, in a project that renders it.
+        version.exportable ? (
+          <VideoExportMenu version={version} />
+        ) : null
       ) : (
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
