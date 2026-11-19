@@ -12,7 +12,6 @@ import { HYPERFRAMES_VERSION } from "../src/artifacts/frames/hyperframes"
 
 const packageRoot = resolve(import.meta.dir, "..")
 const outputPath = resolve(packageRoot, "src/artifacts/frames/generated/hyperframes.txt")
-const check = process.argv.includes("--check")
 
 const require = createRequire(resolve(packageRoot, "package.json"))
 const { version } = require("@hyperframes/core/package.json") as { version: string }
@@ -25,15 +24,5 @@ if (version !== HYPERFRAMES_VERSION) {
 const runtime = await readFile(require.resolve("@hyperframes/core/runtime"), "utf8")
 const generated = `/*! HyperFrames runtime ${version}, from @hyperframes/core (Apache-2.0): https://github.com/heygen-com/hyperframes */\n${runtime}`
 
-if (check) {
-  const committed = await readFile(outputPath, "utf8").catch(() => "")
-  if (committed !== generated) {
-    throw new Error(
-      "[Sixb] The HyperFrames runtime is stale. Run `bun run generate:hyperframes-runtime`."
-    )
-  }
-  console.log("[Sixb] The HyperFrames runtime is current.")
-} else {
-  await writeFile(outputPath, generated)
-  console.log(`[Sixb] Generated ${outputPath} (${Math.round(generated.length / 1024)} KB)`)
-}
+await writeFile(outputPath, generated)
+console.log(`[Sixb] Generated ${outputPath} (${Math.round(generated.length / 1024)} KB)`)

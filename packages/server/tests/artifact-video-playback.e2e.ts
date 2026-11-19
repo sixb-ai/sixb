@@ -66,7 +66,7 @@ const { chromium } = require(process.env.SIXB_PLAYWRIGHT)
     const box = () => frame.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector(".box")).transform).m41)
     const time = () => page.evaluate(() => window.reports.filter((report) => report.type === "state").at(-1).currentTime)
     const settle = () => page.waitForTimeout(400)
-    const seen = {}
+    const seen = { frame: await page.evaluate(() => window.frameEvents) }
 
     await page.evaluate(() => window.control("play"))
     await page.waitForTimeout(1000)
@@ -97,9 +97,12 @@ const PLAYER = (src: string) => `<!doctype html><html><body>
 <iframe id="frame" src="${src}" sandbox="allow-scripts allow-modals" allow="autoplay; fullscreen" style="width: 1280px; height: 720px; border: 0"></iframe>
 <script>
   window.reports = []
+  window.frameEvents = []
   const frame = document.getElementById("frame")
   addEventListener("message", (event) => {
-    if (event.source === frame.contentWindow && event.data && event.data.source === "hf-preview") window.reports.push(event.data)
+    if (event.source !== frame.contentWindow || !event.data) return
+    if (event.data.source === "hf-preview") window.reports.push(event.data)
+    if (event.data.protocol === "sixb-frame/1" && event.data.event) window.frameEvents.push(event.data.event)
   })
   window.control = (action, extra) => frame.contentWindow.postMessage({
     source: "hf-parent", type: "control", action, protocolVersion: 1,
@@ -224,6 +227,11 @@ describe.skipIf(!playwright)("a video in a browser", () => {
       expect(code, errors).toBe(0)
 
       const seen = JSON.parse(output.trim().split("\n").at(-1) ?? "{}")
+      // The frame finds HyperFrames' runtime where it looks for it: a release that moved it would
+      // have every video say it cannot start. Reproduce by checking another global than
+      // `__hyperframes` in runtime.ts's `ready`: the frame posts `failed`.
+      expect(seen.frame).toContain("ready")
+      expect(seen.frame).not.toContain("failed")
       // Playing a second moves the box on, about 250px a second.
       expect(seen.played.time).toBeGreaterThan(0.5)
       expect(seen.played.box).toBeGreaterThan(100)

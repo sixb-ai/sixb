@@ -102,6 +102,11 @@ export interface FrameResponse {
 export type FrameEvent =
   /** The frame has laid out its entry: a deck says how many slides it has. */
   | FrameEventOf<"ready", { readonly slides?: number }>
+  /**
+   * A video cannot start: HyperFrames' runtime did not load beside the frame's, or stopped at its
+   * startup. Retrying may help; waiting for its timeline will not.
+   */
+  | FrameEventOf<"failed", Record<string, never>>
   /** The reader picked a slide in the overview. */
   | FrameEventOf<"select", { readonly slide: number }>
   /** A key the app handles, pressed while the frame had focus. */
@@ -375,6 +380,8 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
     case "ready":
       if (params.slides === undefined) return event("ready", {})
       return isCount(params.slides) ? event("ready", { slides: params.slides }) : null
+    case "failed":
+      return event("failed", {})
     case "select":
       return isCount(params.slide) && params.slide > 0
         ? event("select", { slide: params.slide })
