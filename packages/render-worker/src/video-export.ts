@@ -133,6 +133,7 @@ export async function assembleVideoExport(input: {
           mp4,
           Math.floor(left() * JOIN_SHARE),
           plan.frames,
+          payload.outline.fps,
           sound,
           ...pictures.map((each) => each.path),
         ],

@@ -6,7 +6,7 @@
 //   node video.cjs sound <project> <out.m4a> <budget ms> <engine> <fps> <frames>
 //     Mixes the whole project's sound once, as HyperFrames' own render mixes it, through the plan
 //     its distributed render makes: AAC. A project with no sound gets silence, as long as it.
-//   node video.cjs assemble <out.mp4> <budget ms> <frames> <sound> <segment>...
+//   node video.cjs assemble <out.mp4> <budget ms> <frames> <fps> <sound> <segment>...
 //     Joins the segments in order without encoding them again, with the sound, its index first.
 //   node video.cjs stills <project> <out dir> <budget ms> <engine> <width> <second>[,<second>]...
 //     Snapshots the project at each moment, as JPEGs at most <width> pixels wide.
@@ -71,10 +71,16 @@ async function segment(left) {
   )
   if (rendered.failed) return { failed: `HyperFrames: ${rendered.failed}` }
 
-  // Silent, and its index first: the export mixes the sound, and joins segments as they are.
+  // Silent, and its index first: the export mixes the sound, and joins segments as they are. A
+  // whole render and a range keep time in different units (1/15360 and 1/90000 at 30 fps), which
+  // the join would read as the first one's: every segment keeps it in 90000ths of a second, a
+  // whole number of them a frame at every rate a video plays at.
   const kept = await execute(
     "ffmpeg",
-    ["-v", "error", "-y", "-i", raw, "-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", out],
+    [
+      ...["-v", "error", "-y", "-i", raw, "-map", "0:v:0", "-c", "copy"],
+      ...["-video_track_timescale", "90000", "-movflags", "+faststart", out],
+    ],
     { timeoutMs: left() }
   )
   fs.rmSync(raw, { force: true })
@@ -135,7 +141,7 @@ async function sound(left) {
 }
 
 async function assemble(left) {
-  const [out, , frames, soundtrack, ...segments] = args
+  const [out, , frames, fps, soundtrack, ...segments] = args
   const list = `${out}.txt`
   fs.writeFileSync(list, segments.map((segment) => `file '${segment.replaceAll("'", "'\\''")}'\n`).join(""))
 
@@ -151,6 +157,13 @@ async function assemble(left) {
 
   const counted = await countFrames(out, left)
   if (counted !== Number(frames)) return { failed: `it holds ${counted} frames, not ${frames}` }
+
+  // Every frame where it plays: segments joined at the wrong time play a frozen frame.
+  const lasts = await videoDuration(out, left)
+  const length = Number(frames) / Number(fps)
+  if (!(Math.abs(lasts - length) * Number(fps) < 1)) {
+    return { failed: `it plays ${lasts} seconds, not ${length}` }
+  }
   return ready(out, "video/mp4", { frames: counted })
 }
 
@@ -239,6 +252,16 @@ async function countFrames(file, left) {
     { timeoutMs: left(), stdout: true }
   )
   return run.failed ? -1 : Number(run.stdout.toString("utf8").trim())
+}
+
+/** How long a file's picture plays, in seconds, from its first frame's start to its last's end. */
+async function videoDuration(file, left) {
+  const run = await execute(
+    "ffprobe",
+    [...["-v", "error", "-select_streams", "v:0"], ...["-show_entries", "stream=duration", "-of", "csv=p=0", file]],
+    { timeoutMs: left(), stdout: true }
+  )
+  return run.failed ? Number.NaN : Number(run.stdout.toString("utf8").trim())
 }
 
 function ready(file, mediaType, fields) {
