@@ -3,9 +3,10 @@
  *
  * Elysia parses a JSON or form body before the auth guard runs, so the server caps every body it
  * receives at `DEFAULT_REQUEST_BODY_LIMIT_BYTES` (`limitRequestBody`). A route that takes more,
- * such as a file upload, reads its own body with `readRequestBodyWithLimit`, whose limit replaces
- * that cap. Both apply the limit DURING streaming (not after buffering), so an oversized or
- * chunked/unknown-length body is rejected before it is fully read.
+ * such as a file upload, reads its own body with `readRequestBodyWithLimit`, or hands it on with
+ * `streamRequestBodyWithLimit`, whose limit replaces that cap. Each applies its limit DURING
+ * streaming (not after buffering), so an oversized or chunked/unknown-length body is rejected
+ * before it is fully read.
  */
 
 /** The most a request body may be, unless the route reading it allows more. */
