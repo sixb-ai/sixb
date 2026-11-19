@@ -482,6 +482,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("109-sync-run-connections", syncRunConnectionsSql),
     pgSql("110-video-artifacts", videoArtifactsSql),
     pgSql("111-artifact-media", artifactMediaSql),
+    pgSql("112-artifact-video-renders", artifactVideoRendersSql),
   ],
 })
 
@@ -593,3 +594,6 @@ import agentThreadReadsSql from "./migrations/108-agent-thread-reads.sql" with {
 import syncRunConnectionsSql from "./migrations/109-sync-run-connections.sql" with { type: "text" }
 import videoArtifactsSql from "./migrations/110-video-artifacts.sql" with { type: "text" }
 import artifactMediaSql from "./migrations/111-artifact-media.sql" with { type: "text" }
+import artifactVideoRendersSql from "./migrations/112-artifact-video-renders.sql" with {
+  type: "text",
+}

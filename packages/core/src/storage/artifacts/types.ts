@@ -442,6 +442,30 @@ export interface ArtifactPdfKeyInput {
 }
 
 /**
+ * What a video renders to, kept under a key that hashes what it is made of: a scene's segment of
+ * its export, the whole video's sound, a scene's still, or the export itself. Versions and
+ * artifacts that hold the same share it, so deleting an artifact keeps them. When one could not
+ * be made, why is kept in its place, until it is made or someone asks for it again.
+ */
+export type ArtifactVideoRenderRecord = ArtifactVideoRenderKey & { readonly createdAt: Date } & (
+    | { readonly file: FileRef }
+    | {
+        /** Why it could not be made, as whoever asked for it hears it. */
+        readonly failure: string
+      }
+  )
+
+export interface ArtifactVideoRenderKey {
+  readonly projectId: string
+  readonly key: string
+}
+
+export interface ListArtifactVideoRendersInput {
+  readonly projectId: string
+  readonly keys: readonly string[]
+}
+
+/**
  * What Sixb derives once from a video or a sound, kept under the digest of its bytes: every file
  * that holds them, in any version of any artifact, shares it. Each part is ready, still to come,
  * or says why it will not come, so a poster can be ready while the proxy failed.
@@ -745,6 +769,16 @@ export interface ArtifactStorage {
   putPdf(input: ArtifactPdfRecord): Promise<void>
   /** Forgets why the PDF under a render key could not be printed. A PDF kept there stays. */
   clearPdfFailure(input: ArtifactPdfKeyInput): Promise<void>
+  /** What a video rendered to under these keys, or why it could not, by key; one without is left out. */
+  listVideoRenders(input: ListArtifactVideoRendersInput): Promise<ArtifactVideoRenderRecord[]>
+  /**
+   * Keeps what a video rendered to, or why it could not, under its key. A file replaces a
+   * failure; anything else already kept there stays: the key names what it is made of. Deleting an
+   * artifact keeps them.
+   */
+  putVideoRender(input: ArtifactVideoRenderRecord): Promise<void>
+  /** Forgets why each render under these keys could not be made. A file kept there stays. */
+  clearVideoRenderFailures(input: ListArtifactVideoRendersInput): Promise<void>
   /** What is derived of the media under these digests, by digest; one without any is left out. */
   listMedia(input: ListArtifactMediaInput): Promise<ArtifactMediaRecord[]>
   /**

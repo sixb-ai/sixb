@@ -1977,6 +1977,80 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps what a video renders to by key, the first file kept staying", async () => {
+      await withStorage(async (artifacts) => {
+        const [segment, sound, other] = ["f", "a", "b"].map((each) => each.repeat(64)) as [
+          string,
+          string,
+          string,
+        ]
+        const render = (key: string, seed: string, createdAt = t0) => ({
+          projectId,
+          key,
+          file: fileRef(seed, "video/mp4"),
+          createdAt,
+        })
+        expect(await artifacts.listVideoRenders({ projectId, keys: [segment] })).toEqual([])
+
+        await artifacts.putVideoRender(render(segment, "1"))
+        // A key names what it is made of: a second render of it is the same.
+        await artifacts.putVideoRender(render(segment, "2", at(1)))
+        await artifacts.putVideoRender(render(sound, "3"))
+
+        // By key, each once, whatever the order asked for.
+        expect(
+          await artifacts.listVideoRenders({ projectId, keys: [segment, other, sound, segment] })
+        ).toEqual([render(sound, "3"), render(segment, "1")])
+        expect(await artifacts.listVideoRenders({ projectId, keys: [] })).toEqual([])
+        expect(
+          await artifacts.listVideoRenders({ projectId: otherProjectId, keys: [segment] })
+        ).toEqual([])
+
+        // A file kept stays: neither a failure nor clearing one replaces it.
+        await artifacts.putVideoRender({
+          projectId,
+          key: segment,
+          failure: "No browser.",
+          createdAt: at(2),
+        })
+        await artifacts.clearVideoRenderFailures({ projectId, keys: [segment] })
+        expect(await artifacts.listVideoRenders({ projectId, keys: [segment] })).toEqual([
+          render(segment, "1"),
+        ])
+      })
+    })
+
+    test("keeps why a video could not render, until it renders or the failure is cleared", async () => {
+      await withStorage(async (artifacts) => {
+        const [key, kept] = ["c", "d"].map((each) => each.repeat(64)) as [string, string]
+        const failure = (reason: string, createdAt = t0) => ({
+          projectId,
+          key,
+          failure: reason,
+          createdAt,
+        })
+        await artifacts.putVideoRender(failure("No browser."))
+        await artifacts.putVideoRender(failure("Timed out.", at(1)))
+        expect(await artifacts.listVideoRenders({ projectId, keys: [key] })).toEqual([
+          failure("No browser."),
+        ])
+        await artifacts.clearVideoRenderFailures({ projectId: otherProjectId, keys: [key] })
+        expect(await artifacts.listVideoRenders({ projectId, keys: [key] })).toHaveLength(1)
+
+        // Clearing forgets failures alone, of every key asked for.
+        const ready = { projectId, key: kept, file: fileRef("1", "video/mp4"), createdAt: t0 }
+        await artifacts.putVideoRender(ready)
+        await artifacts.clearVideoRenderFailures({ projectId, keys: [key, kept] })
+        expect(await artifacts.listVideoRenders({ projectId, keys: [key, kept] })).toEqual([ready])
+
+        // A render made after all replaces the failure.
+        await artifacts.putVideoRender(failure("No browser."))
+        const rendered = { projectId, key, file: fileRef("2", "video/mp4"), createdAt: at(2) }
+        await artifacts.putVideoRender(rendered)
+        expect(await artifacts.listVideoRenders({ projectId, keys: [key] })).toEqual([rendered])
+      })
+    })
+
     test("keeps what is derived of a media by digest, each part as it was put", async () => {
       await withStorage(async (artifacts) => {
         const clip = fileRef("a", "video/mp4").digest
