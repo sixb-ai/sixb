@@ -1,16 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { Window } from "happy-dom"
 import agentImageTools from "../../../sandboxes/agent-image/tooling/package.json"
 import corePackage from "../package.json"
 import { FRAME_ASSETS, injectFrameAssets } from "../src/artifacts/frames/assets"
 import { frameEntries, frameLayout } from "../src/artifacts/frames/entries"
 import { HYPERFRAMES_RUNTIME, HYPERFRAMES_VERSION } from "../src/artifacts/frames/hyperframes"
+import { FRAME_DEFAULT_THEMES } from "../src/artifacts/frames/kit"
 import { FRAME_PROTOCOL } from "../src/artifacts/frames/protocol"
-import { frameRuntime } from "../src/artifacts/frames/runtime"
+import { videoFrameRuntime } from "../src/artifacts/frames/video-runtime"
 import type { VideoOutline } from "../src/artifacts/outline"
+import { frameKitDigest } from "../src/artifacts/publish/previews"
 
 // A video plays in its frame with HyperFrames' runtime, the release the agent image renders with,
-// served beside the frame's own runtime, which leaves the video's look alone.
+// served beside a runtime of the frame's own for videos, which leaves the video's look alone.
 
 const OUTLINE: VideoOutline = {
   kind: "video",
@@ -29,15 +32,31 @@ describe("a video's frame", () => {
     expect(HYPERFRAMES_RUNTIME).toStartWith(`/*! HyperFrames runtime ${HYPERFRAMES_VERSION},`)
   })
 
-  test("serves its entry with both runtimes and no kit, and the runtime is in every render key", () => {
+  test("serves its entry with its runtimes and no kit", () => {
     expect(frameLayout({ outline: OUTLINE })).toBe("video")
     expect(frameEntries({ entry: "index.html", outline: OUTLINE })).toEqual(["index.html"])
 
     expect(injectFrameAssets("<html><head></head><body></body></html>", "video")).toBe(
-      '<html><head><script src="__sixb/runtime.js" data-sixb-layout="video"></script><script src="__sixb/hyperframes.js"></script></head><body></body></html>'
+      '<html><head><script src="__sixb/video.js"></script><script src="__sixb/hyperframes.js"></script></head><body></body></html>'
     )
-    // `frameKitDigest` hashes the assets' bodies: a new runtime renders every video again.
     expect(FRAME_ASSETS["__sixb/hyperframes.js"]?.body).toBe(HYPERFRAMES_RUNTIME)
+  })
+
+  test("its runtimes are in a video's render keys, and in no other layout's", () => {
+    // Reproduce by hashing every asset in `frameKitDigest` (publish/previews.ts): a HyperFrames
+    // release would render every deck's, page's and document's previews again.
+    const shared = Object.fromEntries(
+      Object.entries(FRAME_ASSETS).filter(([, asset]) => asset.layout === undefined)
+    )
+    const sharedDigest = createHash("sha256")
+      .update(JSON.stringify([shared, FRAME_DEFAULT_THEMES]))
+      .digest("hex")
+
+    expect(Object.keys(shared)).not.toContain("__sixb/hyperframes.js")
+    for (const layout of ["deck", "page", "document"] as const) {
+      expect(frameKitDigest(layout)).toBe(sharedDigest)
+    }
+    expect(frameKitDigest("video")).not.toBe(sharedDigest)
   })
 })
 
@@ -71,22 +90,15 @@ function videoFrame(userAgent: string, { loaded = true }: { readonly loaded?: bo
         return typeof value === "function" ? value.bind(object) : value
       },
     })
-  const script = document.createElement("script")
-  script.setAttribute("data-sixb-layout", "video")
   // What HyperFrames' runtime leaves on the page: its API once loaded, why its startup stopped.
   const page: Record<string, unknown> = { parent, ...(loaded ? { __hyperframes: {} } : {}) }
-  const frameWindow = proxy(window, page)
-  const frameDocument = proxy(document, { currentScript: script })
 
   // The runtime is served as its own source: it runs here the same, against this DOM.
-  new Function(
-    "window",
-    "document",
-    "navigator",
-    "ResizeObserver",
-    "CustomEvent",
-    `(${frameRuntime.toString()})()`
-  )(frameWindow, frameDocument, window.navigator, window.ResizeObserver, window.CustomEvent)
+  new Function("window", "document", "navigator", `(${videoFrameRuntime.toString()})()`)(
+    proxy(window, page),
+    document,
+    window.navigator
+  )
 
   const audio = document.querySelector("audio") as unknown as HTMLMediaElement
   const played: string[] = []
@@ -105,8 +117,6 @@ function videoFrame(userAgent: string, { loaded = true }: { readonly loaded?: bo
 
 describe("the frame's runtime in a video", () => {
   test("says it is ready, and keeps the video's own colors whatever the app's theme", () => {
-    // Reproduce by dropping `if (video) return` from the theme request in runtime.ts: the page
-    // takes the app's dark tokens and color scheme, which an export never shows.
     const { document, posted, send } = videoFrame("Mozilla/5.0 (Macintosh)")
     expect(posted).toContainEqual({ protocol: FRAME_PROTOCOL, event: "ready", params: {} })
 
@@ -114,17 +124,25 @@ describe("the frame's runtime in a video", () => {
     expect(posted).toContainEqual({ protocol: FRAME_PROTOCOL, id: 1 })
     expect(document.getElementById("sixb-theme")).toBeNull()
     expect(document.documentElement.classList.contains("dark")).toBe(false)
+
+    // What a page's frame does, a video's refuses rather than leave the app waiting.
+    send({ protocol: FRAME_PROTOCOL, id: 2, method: "goto", params: { slide: 2 } })
+    expect(posted.at(-1)).toEqual({
+      protocol: FRAME_PROTOCOL,
+      id: 2,
+      error: "A video's frame does not answer 'goto'.",
+    })
   })
 
   test("says at once that the video cannot start when HyperFrames' runtime did not load", () => {
-    // Reproduce by dropping the `__hyperframes` check from `ready` in runtime.ts: the frame says
+    // Reproduce by dropping the `__hyperframes` check from `ready` in video-runtime.ts: the frame says
     // it is ready, and the app waits out its timeout before saying anything.
     const { posted } = videoFrame("Mozilla/5.0 (Macintosh)", { loaded: false })
     expect(posted).toEqual([{ protocol: FRAME_PROTOCOL, event: "failed", params: {} }])
   })
 
   test("says the video cannot start once HyperFrames' startup stops at an error", () => {
-    // Reproduce by dropping the `error` listener from `ready` in runtime.ts: nothing is posted.
+    // Reproduce by dropping the `error` listener from `ready` in video-runtime.ts: nothing is posted.
     const { window, page, posted } = videoFrame("Mozilla/5.0 (Macintosh)")
     const failed = { protocol: FRAME_PROTOCOL, event: "failed", params: {} }
 
@@ -138,7 +156,7 @@ describe("the frame's runtime in a video", () => {
   })
 
   test("on a phone, starts and stops every recording on the first play, in the reader's tap", () => {
-    // Reproduce by dropping the `prime` listener from runtime.ts: nothing is played on the tap,
+    // Reproduce by dropping the `prime` listener from video-runtime.ts: nothing is played on the tap,
     // and an iPhone keeps the music silent when its scene comes.
     const phone = videoFrame("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)")
     const play = { source: "hf-parent", type: "control", action: "play" }

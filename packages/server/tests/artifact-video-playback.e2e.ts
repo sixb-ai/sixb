@@ -229,7 +229,7 @@ describe.skipIf(!playwright)("a video in a browser", () => {
       const seen = JSON.parse(output.trim().split("\n").at(-1) ?? "{}")
       // The frame finds HyperFrames' runtime where it looks for it: a release that moved it would
       // have every video say it cannot start. Reproduce by checking another global than
-      // `__hyperframes` in runtime.ts's `ready`: the frame posts `failed`.
+      // `__hyperframes` in video-runtime.ts's `ready`: the frame posts `failed`.
       expect(seen.frame).toContain("ready")
       expect(seen.frame).not.toContain("failed")
       // Playing a second moves the box on, about 250px a second.
