@@ -927,6 +927,8 @@ export const en = {
     inPlaceHint: "Enter to keep · Esc to leave as it was",
     broken: "The video’s files don’t read as a video right now",
     phoneNote: "Open this video on a computer to edit its timeline, clips and transcript.",
+    /** Edit, as More offers it on a phone, where editing is the scenes' list. */
+    editDetail: "Reorder, trim and retitle its scenes",
     titles: "Titles",
     clips: "Clips",
     done: "Done",
@@ -1894,6 +1896,7 @@ export const fr: Translation<ArtifactMessages> = {
     broken: "Les fichiers de la vidéo ne se lisent pas comme une vidéo pour l’instant",
     phoneNote:
       "Ouvrez cette vidéo sur un ordinateur pour monter sa timeline, ses plans et sa transcription.",
+    editDetail: "Réordonner, raccourcir et renommer ses scènes",
     titles: "Titres",
     clips: "Plans",
     done: "Terminé",

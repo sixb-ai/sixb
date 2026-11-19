@@ -655,6 +655,9 @@ function ArtifactHeader({
   const heldLive = !!liveView && !liveView.state.left
   // A Markdown document held live is typed into as it is shown: there is no editing to start.
   const typedInto = artifact.kind === "document" && !isDesignedDocument(version)
+  // A phone's header folds a video's Edit into More, with its MP4, so the title keeps its room.
+  const videoEdit =
+    artifact.kind === "video" && heldLive && liveView.editable ? liveView.start : undefined
   if (liveView?.editing) {
     return <LiveEditBar chrome={chrome} detail={detail} version={version} liveView={liveView} />
   }
@@ -770,7 +773,11 @@ function ArtifactHeader({
     >
       {live ? <RefreshButton version={version} /> : null}
       {heldLive ? (
-        liveView.editable && !typedInto ? (
+        videoEdit ? (
+          <span className="hidden @md:contents">
+            <EditButton onClick={videoEdit} />
+          </span>
+        ) : liveView.editable && !typedInto ? (
           <EditButton onClick={liveView.start} />
         ) : !liveView.state.synced && edit.available ? (
           <Button size="sm" variant="ghost" className="mr-0.5 text-muted-foreground" disabled>
@@ -787,9 +794,13 @@ function ArtifactHeader({
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
       {artifact.kind === "video" && version.exportable ? (
-        <VideoExportActions detail={detail} chrome={chrome} version={version} />
+        <VideoExportActions detail={detail} chrome={chrome} version={version} onEdit={videoEdit} />
       ) : (
-        <ArtifactMenu detail={detail} chrome={chrome} />
+        <ArtifactMenu
+          detail={detail}
+          chrome={chrome}
+          folded={videoEdit ? <VideoEditEntry onEdit={videoEdit} /> : null}
+        />
       )}
       {chrome.withoutPageLink || guest ? null : (
         <CopyLinkButton
@@ -940,13 +951,20 @@ function VideoExportActions({
   detail,
   chrome,
   version,
+  onEdit,
 }: {
   readonly detail: ArtifactDetail
   readonly chrome: ViewerChrome
   readonly version: ArtifactVersion
+  /** Edit, which a phone's header folds into More before the MP4. */
+  readonly onEdit?: (() => void) | undefined
 }) {
   const exported = useVideoExport(version)
   const { view } = exported
+  const entries =
+    view.state === "loading" ? null : (
+      <VideoExportEntries version={version} exported={exported} keepOpen />
+    )
 
   return (
     <>
@@ -957,13 +975,32 @@ function VideoExportActions({
         detail={detail}
         chrome={chrome}
         folded={
-          view.state === "loading" ? null : (
-            <VideoExportEntries version={version} exported={exported} keepOpen />
+          onEdit ? (
+            <>
+              <VideoEditEntry onEdit={onEdit} />
+              {entries ? <DropdownMenuSeparator className="my-1" /> : null}
+              {entries}
+            </>
+          ) : (
+            entries
           )
         }
         foldedMark={view.state === "rendering" ? <VideoExportMark view={view} /> : null}
       />
     </>
+  )
+}
+
+/** A video's Edit, in More on a phone's header, where editing is the scenes' list. */
+function VideoEditEntry({ onEdit }: { readonly onEdit: () => void }) {
+  const messages = useArtifactMessages()
+  return (
+    <MenuAction
+      icon={PencilLine}
+      title={messages.edit.edit}
+      detail={messages.videoEditor.editDetail}
+      onSelect={onEdit}
+    />
   )
 }
 
