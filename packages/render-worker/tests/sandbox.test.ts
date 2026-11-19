@@ -109,6 +109,41 @@ describe("files a render fetches into its sandbox", () => {
     }
   })
 
+  // Reproduce by fetching with `-P 1`: one file at a time, each answered alone, the API never
+  // sees more than one request at once.
+  test("arrive a few at a time, not one after another", async () => {
+    const { sandbox: local } = await sandbox()
+    const host = {
+      id: "renders",
+      storage: new InMemoryStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+    }
+    const recordings = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        host.blobStorage.put({ body: Buffer.alloc(1024, index), fileName: `take-${index}.mp4` })
+      )
+    )
+    const api = startDownloadApi(host, { together: 4 })
+    try {
+      const files = recordings.map((file, index) => ({
+        path: join(local.workingDirectory, `media/take-${index}.mp4`),
+        file,
+      }))
+      await downloadIntoSandbox(host, local, files, {
+        timeoutMs: 30_000,
+        signal: new AbortController().signal,
+        executionId: "render_job_1",
+      })
+
+      for (const [index, { path }] of files.entries()) {
+        expect(readFileSync(path).equals(Buffer.alloc(1024, index))).toBe(true)
+      }
+      expect(api.peak()).toBe(4)
+    } finally {
+      api.close()
+    }
+  })
+
   test("fail when a file does not arrive whole", async () => {
     const { sandbox: local } = await sandbox()
     const { host, file } = await downloadHost()

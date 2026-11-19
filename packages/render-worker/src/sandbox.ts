@@ -241,9 +241,9 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
 
 /**
  * Puts each file at its path in the sandbox, which fetches it itself with curl from a download URL
- * of the API: a large one never passes through the worker, as `writeFiles` would take it. Each URL
- * lasts as long as the fetch may, and is revoked once it is over. The sandbox must reach the API:
- * create it with {@link renderApiOrigin} in `reach`.
+ * of the API, {@link FETCHES_AT_ONCE} at a time: a large one never passes through the worker, as
+ * `writeFiles` would take it. Each URL lasts as long as the fetch may, and is revoked once it is
+ * over. The sandbox must reach the API: create it with {@link renderApiOrigin} in `reach`.
  */
 export async function downloadIntoSandbox(
   host: RenderDownloadHost,
@@ -278,6 +278,7 @@ export async function downloadIntoSandbox(
         "-c",
         FETCH_SCRIPT,
         "fetch",
+        FETCH_FILE_SCRIPT,
         ...files.flatMap(({ path, file }, index) => [
           path,
           urls[index]?.url ?? "",
@@ -301,18 +302,28 @@ export async function downloadIntoSandbox(
   }
 }
 
-// Fetches each `<path> <url> <bytes>` in turn, and refuses a file that did not arrive whole.
+/**
+ * How many files a sandbox fetches at once: one connection rarely carries what the API and the
+ * sandbox can, and a version's recordings are many.
+ */
+const FETCHES_AT_ONCE = 4
+
+// Runs FETCH_FILE_SCRIPT for each `<path> <url> <bytes>` that follows it, a few at a time. Once one
+// fails, those still waiting are skipped, and xargs waits for those running: a fetch left running
+// would hold the command's output open past its end on some providers.
 const FETCH_SCRIPT = `set -eu
 command -v curl >/dev/null 2>&1 || { echo "the sandbox has no curl" >&2; exit 3; }
-while [ "$#" -gt 0 ]; do
-  path="$1"
-  url="$2"
-  bytes="$3"
-  shift 3
-  mkdir -p -- "$(dirname -- "$path")"
-  curl --fail --silent --show-error --retry 3 --output "$path" --url "$url"
-  [ "$(wc -c < "$path" | tr -d ' ')" = "$bytes" ] || { echo "$path did not arrive whole" >&2; exit 1; }
-done`
+fetch_file="$1"
+shift
+failed="$(mktemp -d)"
+export FETCH_FAILED="$failed/failed"
+printf '%s\\0' "$@" | xargs -0 -n 3 -P ${FETCHES_AT_ONCE} sh -c "$fetch_file" fetch`
+
+// Fetches one file, and refuses it when it did not arrive whole.
+const FETCH_FILE_SCRIPT = `[ ! -e "$FETCH_FAILED" ] || exit 1
+mkdir -p -- "$(dirname -- "$1")"
+curl --fail --silent --show-error --retry 3 --output "$1" --url "$2" || { touch "$FETCH_FAILED"; exit 1; }
+[ "$(wc -c < "$1" | tr -d ' ')" = "$3" ] || { echo "$1 did not arrive whole" >&2; touch "$FETCH_FAILED"; exit 1; }`
 
 /**
  * Stores a file a script wrote in the sandbox, `bytes` long as the script said: it streams into
