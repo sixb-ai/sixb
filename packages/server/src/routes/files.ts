@@ -4,8 +4,8 @@ import {
   type FileRef,
   type SixbHostView,
 } from "@sixb/core"
-import { supportsDirectUpload } from "@sixb/core/blob-storage/server"
-import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
+import { supportsDirectUpload, supportsRangeRead } from "@sixb/core/blob-storage/server"
+import { canonicalMediaType, inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -362,7 +362,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             throw new Error("Direct file uploads require an expected digest and size.")
           }
 
-          const fileRef =
+          const uploaded =
             session.strategy === "server"
               ? completeServerUpload(session)
               : await completeProviderUpload({
@@ -373,11 +373,12 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
                   blobStorage: host.blobStorage,
                 })
 
-          const identityError = expectedFileRefError(expected, fileRef)
+          const identityError = expectedFileRefError(expected, uploaded)
           if (identityError) {
             throw new Error(identityError)
           }
 
+          const fileRef = await withMediaType(host.blobStorage, uploaded)
           await uploadSessions.complete(session.id, fileRef)
           return FileRefSchema.parse(fileRef)
         } catch (error) {
@@ -536,6 +537,44 @@ function checkedUploadContent(
   )
 
   return { body, refused: () => refused }
+}
+
+/** How many leading bytes tell a file's type by its signature. */
+const SNIFF_BYTES = 64
+
+/**
+ * The file with a media type: the one its upload declared, else the one its leading bytes or its
+ * name tell, as a file the Agent or a tool stores is typed. Read from the stored blob, a few bytes.
+ */
+async function withMediaType(
+  blobStorage: SixbHostView["blobStorage"],
+  fileRef: FileRef
+): Promise<FileRef> {
+  if (fileRef.mediaType !== undefined) return fileRef
+
+  const leading: Uint8Array[] = []
+  if (fileRef.sizeBytes > 0) {
+    const body = supportsRangeRead(blobStorage)
+      ? await blobStorage.openRange(fileRef.blobId, {
+          start: 0,
+          endInclusive: Math.min(fileRef.sizeBytes, SNIFF_BYTES) - 1,
+        })
+      : await blobStorage.open(fileRef.blobId)
+    const reader = body.getReader()
+    try {
+      for (let read = 0; read < SNIFF_BYTES; ) {
+        const { done, value } = await reader.read()
+        if (done) break
+        leading.push(value)
+        read += value.byteLength
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  }
+
+  const bytes = Buffer.concat(leading).subarray(0, SNIFF_BYTES)
+  return { ...fileRef, mediaType: inferFileMediaType(fileRef.fileName ?? "", bytes) }
 }
 
 function completeServerUpload(session: FileUploadSession): FileRef {

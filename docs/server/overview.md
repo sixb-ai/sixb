@@ -73,7 +73,7 @@ Upload a small file with `POST /api/files` using multipart form data. A file pas
 | Send | `PUT` the bytes where the answer says: through the API, or, with S3 or Azure Blob Storage, straight to storage, in parts when it asks |
 | Finish | `POST /api/files/uploads/:uploadId/complete`, which answers the file's reference |
 
-The API streams what it receives to blob storage and checks it against the declared size and digest. `sixb files upload` does all three steps for you, and access tokens can call them.
+The API streams what it receives to blob storage and checks it against the declared size and digest. A file opened without a `mediaType` is typed by its first bytes, else by its name. `sixb files upload` does all three steps for you, and access tokens can call them.
 
 Read a file through the object or run that owns its reference. For example, download the `scan` property from an invoice:
 
