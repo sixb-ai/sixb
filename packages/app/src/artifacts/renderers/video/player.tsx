@@ -993,7 +993,7 @@ function useWidth(element: RefObject<HTMLElement | null>): number {
  * differs. A layout that answers its own resize then never resizes what is observed within the
  * same frame, which the browser reports as a ResizeObserver loop.
  */
-function useSize(element: RefObject<HTMLElement | null>): { width: number; height: number } {
+export function useSize(element: RefObject<HTMLElement | null>): { width: number; height: number } {
   const [size, setSize] = useState({ width: 0, height: 0 })
   useLayoutEffect(() => {
     const target = element.current
