@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { FRAME_CDN_TARGETS } from "@sixb/core/internal/artifacts/frames"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import { FRAME_CDN_TARGETS, workspaceNetwork } from "../src/workspace-network"
+import { workspaceNetwork } from "../src/workspace-network"
 
 const api = "https://api.example.com"
 const repository = "https://github.com"

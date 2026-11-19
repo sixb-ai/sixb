@@ -94,6 +94,7 @@ import {
   type WorkflowAgentNodeSession,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
+import { FRAME_CDN_TARGETS } from "@sixb/core/internal/artifacts/frames"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -204,7 +205,6 @@ import type {
 import { workflowStepTools } from "../src/workflow-node-execution"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
-import { FRAME_CDN_TARGETS } from "../src/workspace-network"
 import { expectReplayedPrefix, withJsonbKeyOrder } from "./replay-bytes"
 
 const PROJECT_ID = "agent-worker-tests"
