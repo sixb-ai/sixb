@@ -154,13 +154,12 @@ async function main() {
 
   const findings = []
   let stopped
-  const budget = Math.min(
-    Math.max(CHECK_BUDGET_MS.min, Math.min(CHECK_BUDGET_MS.max, left() / 2)),
-    left() - SNAPSHOT_RESERVE_MS - CHECK_GRACE_MS
-  )
+  // HyperFrames takes no budget under its floor, which the fetches left time for.
+  const spare = left() - SNAPSHOT_RESERVE_MS - CHECK_GRACE_MS
+  const budget = Math.max(CHECK_BUDGET_MS.min, Math.min(CHECK_BUDGET_MS.max, left() / 2, spare))
   const checked = await run(
     "hyperframes",
-    ["check", "--json", `--budget=${Math.max(1, Math.floor(budget / 1000))}s`, project],
+    ["check", "--json", `--budget=${Math.floor(budget / 1000)}s`, project],
     budget + CHECK_GRACE_MS
   )
   const check = json(checked.stdout)
