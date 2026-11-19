@@ -1,6 +1,6 @@
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
-import { MessageSquare, MessageSquarePlus } from "lucide-react"
+import { MessageSquare, MessageSquarePlus, X } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 import { useCurrentUser } from "../../session"
 import { commentsContext } from "../comments-context"
@@ -218,7 +218,10 @@ export function CommentTools({
   )
 }
 
-/** Says, while the reader is placing a comment, what a click places it on, and how to stop. */
+/**
+ * Says, while the reader is placing a comment, what a click places it on, and how to stop: Esc,
+ * or under a finger, which has no keys, a close mark.
+ */
 export function CommentModeHint({
   hint,
   onExit,
@@ -227,6 +230,7 @@ export function CommentModeHint({
   readonly onExit: () => void
 }) {
   const messages = useArtifactMessages().comments
+  const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
   return (
     <div
       role="status"
@@ -239,9 +243,14 @@ export function CommentModeHint({
         onClick={onExit}
         aria-label={messages.exit}
         title={messages.exit}
-        className="shrink-0 rounded-full border border-border bg-muted px-1.5 font-mono text-[10px] leading-4 font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          "shrink-0 rounded-full border border-border bg-muted text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+          touch
+            ? "flex size-6 items-center justify-center [&_svg]:size-3.5"
+            : "px-1.5 font-mono text-[10px] leading-4 font-medium"
+        )}
       >
-        Esc
+        {touch ? <X aria-hidden="true" /> : "Esc"}
       </button>
     </div>
   )
