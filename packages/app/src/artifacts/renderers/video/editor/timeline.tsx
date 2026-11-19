@@ -985,7 +985,11 @@ function ClipBlock({
         <span
           className={cn(
             "truncate",
-            filmed && "-mx-0.5 rounded-[3px] bg-black/55 px-1 text-white backdrop-blur-sm"
+            filmed && "-mx-0.5 rounded-[3px] bg-black/55 px-1 text-white backdrop-blur-sm",
+            !filmed &&
+              clip.kind === "audio" &&
+              parts.waveform &&
+              "-mx-0.5 rounded-[3px] bg-background/80 px-1"
           )}
         >
           {name}
@@ -1119,7 +1123,7 @@ function Waveform({
   return (
     <svg
       aria-hidden="true"
-      className={cn("absolute inset-x-0 bottom-0", compact ? "h-1/3" : "h-full")}
+      className={cn("absolute inset-x-0 bottom-0 w-full", compact ? "h-1/3" : "h-full")}
       viewBox={`0 0 ${Math.max(1, width)} 100`}
       preserveAspectRatio="none"
     >

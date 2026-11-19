@@ -187,6 +187,18 @@ describe("the timeline's arithmetic", () => {
     expect(trackRows(laid)).toEqual({ picture: 2, text: 1, sound: 1 })
   })
 
+  // Reproduce by laying each clip its whole length: footage of 5.8 s in a scene trimmed to 5.15 s
+  // then draws over the start of the next scene.
+  test("a clip longer than its scene ends where the scene does", () => {
+    const timeline = {
+      composition: { element: { start: 0, end: 0 }, tag: { start: 0, end: 0 }, attributes: {} },
+      texts: [],
+      clips: [{ ref: "footage", track: "picture", startMs: 0, durationMs: 5800 }],
+    } as never
+    const [footage] = layClips(timeline, "scenes/case.html", 4000, 9150)
+    expect(footage).toMatchObject({ startMs: 4000, endMs: 9150, open: false })
+  })
+
   test("the arrows jump between every scene's and clip's edges", () => {
     const points = editPoints(composition(), [])
     expect(points).toEqual([0, 3000, 10_000])

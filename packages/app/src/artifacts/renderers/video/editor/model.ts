@@ -99,7 +99,8 @@ export interface LaidClip {
 
 /**
  * The clips of a file, placed in the video: a scene's from its start, and each lasting its length,
- * or until its composition ends when it writes none.
+ * or until its composition ends when it writes none. None shows past that end, where it is never
+ * seen: footage longer than its scene, once the scene is trimmed, ends with it.
  */
 export function layClips(
   timeline: VideoFileTimeline,
@@ -109,8 +110,10 @@ export function layClips(
 ): LaidClip[] {
   const placed = timeline.clips.map((clip) => {
     const startMs = offsetMs + clip.startMs
-    const end =
-      clip.durationMs === undefined ? Math.max(startMs + 1, endMs) : startMs + clip.durationMs
+    const end = Math.max(
+      startMs + 1,
+      clip.durationMs === undefined ? endMs : Math.min(startMs + clip.durationMs, endMs)
+    )
     return {
       clip,
       file,
