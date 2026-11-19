@@ -433,6 +433,11 @@ function resolveStarts(hosts: readonly HostedScene[]): ReadonlyMap<string, numbe
 
     if (resolving.includes(host.id)) {
       const cycle = resolving.slice(resolving.indexOf(host.id)).map((id) => `'${id}'`)
+      if (cycle.length === 1) {
+        throw new CompositionError(
+          `scene '${host.id}' starts after itself, so it never starts: start it at a number of seconds, or after another scene.`
+        )
+      }
       throw new CompositionError(
         `scenes ${cycle.join(", ")} each start after another of them, so none starts: start one of them at a number of seconds.`
       )

@@ -271,6 +271,11 @@ describe("a video's composition", () => {
       "scenes 'intro', 'demo' each start after another of them, so none starts",
     ],
     [
+      "a scene that starts after itself",
+      withHosts([host("intro", "intro + 1", "2")]),
+      "scene 'intro' starts after itself, so it never starts",
+    ],
+    [
       "a start before the video",
       withHosts([intro, host("demo", "intro - 5", "2")]),
       "scene 'demo' starts at -3 s: a scene starts at 0 or later",

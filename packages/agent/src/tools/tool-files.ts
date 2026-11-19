@@ -14,7 +14,8 @@ export { AGENT_FILE_MAX_BYTES }
 /**
  * What a run stores in all, the files its tools write and the artifacts it publishes: at least one
  * artifact version as large as most kinds' may be. A publish of a kind whose versions may hold
- * more, a file artifact's recording, may go past it by that much: see `reserveArtifact`.
+ * more, a file artifact's recording or a video's footage, may go past it by that much: see
+ * `reserveArtifact`.
  */
 const DEFAULT_RUN_MAX_BYTES = ARTIFACT_LIMITS.maxVersionBytes
 
@@ -56,7 +57,8 @@ export class AgentFileBudget {
 
   /**
    * A reservation for publishing an artifact of `kind`, which may take the run past `maxBytes` by
-   * as much more as one version of its kind may hold than other kinds': a file artifact's 2 GiB.
+   * as much more as one version of its kind may hold than other kinds': a file artifact's 2 GiB,
+   * a video's 8 GiB.
    * Every other file the run stores stays within `maxBytes`.
    */
   reserveArtifact(kind: ArtifactKind, bytes: number, toolName: string): AgentFileReservation {
