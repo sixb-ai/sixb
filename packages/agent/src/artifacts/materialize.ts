@@ -1,9 +1,11 @@
 import { posix } from "node:path"
-import type { FileRef, SandboxFileRecord } from "@sixb/core"
+import type { ArtifactMedia, FileRef, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
 import type { AgentRunArtifacts, AgentRunFileStore } from "@sixb/core/internal/agents"
+import { isMediaFile } from "@sixb/core/internal/artifacts/publish"
 import type {
   ArtifactFile,
+  ArtifactMediaPart,
   ArtifactOutline,
   ArtifactRecord,
   ArtifactVersionRecord,
@@ -30,6 +32,8 @@ done
 rm -rf -- "$copy"`
 /** Copying or fetching large files of a version, as it is installed. */
 const COPY_TIMEOUT_MS = 10 * 60_000
+/** Where a video's copy holds what is derived of its recordings: never published, as a dot-folder. */
+const DERIVED_DIRECTORY = ".derived"
 
 export interface MaterializedArtifacts {
   /** Files to write, at paths relative to the sandbox working directory or absolute. */
@@ -78,6 +82,8 @@ interface ManifestEntry {
   /** Where the version's files are, as the agent names it; absent when not installed. */
   readonly directory?: string
   readonly files: readonly string[]
+  /** A video's recordings, which its copy leaves in the API, each with what is derived of it. */
+  readonly media?: readonly ManifestMedia[]
   /**
    * The latest version was last written outside this conversation: a person's edit in the app,
    * another conversation, or the project's code. An update starts from it and keeps its changes.
@@ -85,6 +91,27 @@ interface ManifestEntry {
   readonly edited?: true
   /** The requester reads it, through an object that holds it, and cannot change it. */
   readonly readOnly?: true
+}
+
+/**
+ * A video's recording, as its manifest entry lists it: its original stays in the API, and the
+ * Agent edits from what is derived of it. Its transcript and its cuts are written in the copy,
+ * under `.derived/<path>/`, once they are ready; every other part downloads with
+ * `sixb artifacts media`.
+ */
+interface ManifestMedia {
+  readonly path: string
+  readonly sizeBytes: number
+  /** What it holds, once it is probed. */
+  readonly durationMs?: number
+  readonly video?: { readonly width: number; readonly height: number; readonly fps?: number }
+  readonly audio?: true
+  /** Where its transcript is, as JSON: `{ text, language?, words?, segments? }`, in milliseconds. */
+  readonly transcript?: string
+  /** Where its cuts are, as JSON: `{ atMs }`, each instant the picture cuts to another shot. */
+  readonly cuts?: string
+  /** Each part: `ready`, `pending`, or why it will not come. */
+  readonly parts?: Readonly<Record<string, string>>
 }
 
 /**
@@ -115,6 +142,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       readonly maxBytes: number
       /** Where a stored file it installs is read. */
       readonly blobStorage: AgentRunFileStore
+      /** What is derived of a video's recordings, which its copy lists in their place. */
+      readonly artifacts: MediaReader
     },
     entries: readonly ManifestEntry[],
     installed: Map<string, number>,
@@ -155,6 +184,17 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     const revision = this.revisionOf(artifactId)
     const files = this.#bases.get(artifactId)
     return revision === undefined || !files ? undefined : { revision, files }
+  }
+
+  /**
+   * The files of an artifact's base that its copy leaves in the API, a video's recordings: an
+   * update from the copy keeps those its scenes still play.
+   */
+  remoteOf(artifactId: string): readonly ArtifactFile[] {
+    const kind = this.#entries.find((entry) => entry.id === artifactId)?.kind
+    const files = this.#bases.get(artifactId) ?? []
+    const remote = remotePaths(kind ?? "", files)
+    return files.filter((file) => remote.has(file.path))
   }
 
   /** Records the folder the Agent published an artifact from: `path` as it named it. */
@@ -198,7 +238,18 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
     const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
-    const sizeBytes = files.reduce((sum, file) => sum + publishedSize(file), 0)
+
+    // A video's copy holds its scenes and what is derived of its recordings, which stay remote.
+    const media =
+      artifact.kind === "video"
+        ? await videoMedia(this.layout.artifacts, artifact.id, version, signal)
+        : undefined
+    const remotePath = remotePaths(artifact.kind, version.files)
+    const remote = (file: PublishedArtifactFile) => remotePath.has(file.path)
+    const sizeBytes = [...files.filter((file) => !remote(file)), ...(media?.files ?? [])].reduce(
+      (sum, file) => sum + publishedSize(file),
+      0
+    )
     let othersBytes = 0
     for (const [id, bytes] of this.#installed) if (id !== artifact.id) othersBytes += bytes
     const install = othersBytes + sizeBytes <= maxBytes
@@ -243,17 +294,23 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     // starts from the revision before, which the folder still holds.
     const previous = this.#bases.get(artifact.id) ?? []
     const entries = [
-      manifestEntry(artifact, version, install ? directory : undefined, options),
+      manifestEntry(artifact, version, install ? directory : undefined, {
+        ...options,
+        ...(media ? { media: media.media } : {}),
+      }),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
     const copy = install
-      ? sources.map((file) => ({ to: inSandbox(posix.join(directory, file.path)), file }))
+      ? [...sources.filter((file) => !remote(file)), ...(media?.files ?? [])].map((file) => ({
+          to: inSandbox(posix.join(directory, file.path)),
+          file,
+        }))
       : []
     await this.#write(handle, version, copy, signal, [
       { path: inSandbox(manifestPath), contents: manifestJson(entries) },
     ])
 
-    const moved = await this.#writeFolder(handle, version, previous, sources, signal)
+    const moved = await this.#writeFolder(handle, version, previous, sources, remote, signal)
     await sandbox
       .runCommand("bash", ["-c", 'rm -rf -- "$1"', "clear", staging], {
         timeout: REMOVE_TIMEOUT_MS,
@@ -278,6 +335,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     version: ArtifactVersionRecord,
     previous: readonly ArtifactFile[],
     files: readonly PublishedArtifactFile[],
+    remote: (file: PublishedArtifactFile) => boolean,
     signal: AbortSignal
   ): Promise<string | undefined> {
     const folder = this.#folders.get(version.artifactId)
@@ -301,7 +359,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }
 
     // The folder holds the revision before: a large file that did not change since is left as it
-    // is there, and one the sandbox uploaded from this folder is there already.
+    // is there, and one the sandbox uploaded from this folder is there already. A recording a
+    // video keeps in the API is never fetched: the folder keeps whatever it holds of it.
     const before = new Map(previous.map((file) => [file.path, file.file.digest]))
     const writes = files
       .map((file) => ({ to: posix.join(folder.absolute, file.path), file }))
@@ -309,8 +368,9 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         "sandboxPath" in file
           ? file.sandboxPath !== to
           : !("file" in file) ||
-            file.file.sizeBytes <= SANDBOX_INLINE_BYTES ||
-            before.get(file.path) !== file.file.digest
+            (!remote(file) &&
+              (file.file.sizeBytes <= SANDBOX_INLINE_BYTES ||
+                before.get(file.path) !== file.file.digest))
       )
     await this.#write(handle, version, writes, signal)
     return folder.path
@@ -380,6 +440,9 @@ function publishedSize(file: PublishedArtifactFile): number {
 /** What a turn reads of its conversation's artifacts, as its requester, through its session. */
 export type TurnArtifacts = Pick<AgentRunArtifacts, "getVersion" | "list" | "turnWrites">
 
+/** What is derived of a video's recordings, which its copy lists in their place. */
+type MediaReader = Pick<AgentRunArtifacts, "media">
+
 /**
  * The latest version of each artifact the conversation shares, installed under `<directory>/<id>/`
  * and listed in a manifest, so the Agent edits what was published rather than whatever an older
@@ -390,7 +453,7 @@ export type TurnArtifacts = Pick<AgentRunArtifacts, "getVersion" | "list" | "tur
 export async function materializeThreadArtifacts(input: {
   /** The conversation's thread, whose artifacts a copy published elsewhere is edited from. */
   readonly threadId: string
-  readonly artifacts: TurnArtifacts
+  readonly artifacts: TurnArtifacts & MediaReader
   readonly blobStorage: AgentRunFileStore
   /** As the agent names it: relative to the working directory, or absolute. */
   readonly directory: string
@@ -413,16 +476,32 @@ export async function materializeThreadArtifacts(input: {
     signal.throwIfAborted()
     const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
     if (!version) continue
-    const sizeBytes = version.files.reduce((sum, file) => sum + file.file.sizeBytes, 0)
+
+    // A video's copy holds its scenes and what is derived of its recordings, which stay remote.
+    const media =
+      artifact.kind === "video"
+        ? await videoMedia(input.artifacts, artifact.id, version, signal)
+        : undefined
+    const remote = remotePaths(artifact.kind, version.files)
+    const installing: InstalledFile[] = [
+      ...version.files
+        .filter((file) => !remote.has(file.path))
+        .map(({ path, file }) => ({ path, file })),
+      ...(media?.files ?? []),
+    ]
+    const sizeBytes = installing.reduce((sum, file) => sum + publishedSize(file), 0)
     const directory = posix.join(input.directory, artifact.id)
     let install = installedBytes + sizeBytes <= maxBytes
     if (install) {
       try {
         const copy: SandboxFileRecord[] = []
-        for (const file of version.files) {
+        for (const file of installing) {
           copy.push({
             path: posix.join(directory, file.path),
-            contents: await readBlob(input.blobStorage, file.file.blobId, signal),
+            contents:
+              "bytes" in file
+                ? file.bytes
+                : await readBlob(input.blobStorage, file.file.blobId, signal),
           })
         }
         files.push(...copy)
@@ -443,6 +522,7 @@ export async function materializeThreadArtifacts(input: {
     entries.push(
       manifestEntry(artifact, version, install ? directory : undefined, {
         edited: version.origin?.threadId !== input.threadId,
+        ...(media ? { media: media.media } : {}),
       })
     )
   }
@@ -452,6 +532,7 @@ export async function materializeThreadArtifacts(input: {
       manifestPath: input.manifestPath,
       maxBytes,
       blobStorage: input.blobStorage,
+      artifacts: input.artifacts,
     },
     entries,
     installed,
@@ -521,7 +602,13 @@ function manifestEntry(
   {
     edited = false,
     readOnly = false,
-  }: { readonly edited?: boolean; readonly readOnly?: boolean } = {}
+    media,
+  }: {
+    readonly edited?: boolean
+    readonly readOnly?: boolean
+    /** A video's recordings, their derived files' paths relative to its copy. */
+    readonly media?: readonly ManifestMedia[]
+  } = {}
 ): ManifestEntry {
   // Only a frozen version is pinned: an open one changes with every update.
   const pinnedAt = version.frozenAt ? version.version : undefined
@@ -539,9 +626,30 @@ function manifestEntry(
     ...partsOf(artifact.id, pinnedAt, version.outline),
     ...(directory === undefined ? {} : { directory }),
     files: version.files.map((file) => file.path),
+    ...(media ? { media: media.map((each) => installedMedia(each, directory)) } : {}),
     ...(edited ? { edited: true as const } : {}),
     ...(readOnly ? { readOnly: true as const } : {}),
   }
+}
+
+/** A recording as the manifest lists it: its derived files where the copy has them, if it is installed. */
+function installedMedia(media: ManifestMedia, directory: string | undefined): ManifestMedia {
+  const { transcript, cuts, ...rest } = media
+  if (directory === undefined) return rest
+
+  return {
+    ...rest,
+    ...(transcript ? { transcript: posix.join(directory, transcript) } : {}),
+    ...(cuts ? { cuts: posix.join(directory, cuts) } : {}),
+  }
+}
+
+/**
+ * The paths of the files a version's copy leaves in the API: a video's recordings, which the Agent
+ * looks at through what is derived of them, and edits around, never in.
+ */
+function remotePaths(kind: string, files: readonly ArtifactFile[]): ReadonlySet<string> {
+  return new Set(kind === "video" ? files.filter(isMediaFile).map((file) => file.path) : [])
 }
 
 /**
@@ -596,6 +704,92 @@ function partsOf(
                 )
               : []
   return parts.length > 0 ? { parts } : {}
+}
+
+/** A file a copy installs from here: its bytes, or its stored reference, read as it is written. */
+type InstalledFile =
+  | { readonly path: string; readonly bytes: Uint8Array }
+  | { readonly path: string; readonly file: FileRef }
+
+/**
+ * What is derived of each of a video's recordings, as its manifest entry lists it, and the files
+ * its copy holds of them: each one's transcript and cuts, under `.derived/<path>/`. A recording
+ * whose parts cannot be read is listed by its path alone.
+ */
+async function videoMedia(
+  reader: MediaReader,
+  artifactId: string,
+  version: ArtifactVersionRecord,
+  signal: AbortSignal
+): Promise<{ readonly media: ManifestMedia[]; readonly files: InstalledFile[] }> {
+  const media: ManifestMedia[] = []
+  const files: InstalledFile[] = []
+
+  for (const recording of version.files.filter(isMediaFile)) {
+    signal.throwIfAborted()
+    const { path } = recording
+    const listed = { path, sizeBytes: recording.file.sizeBytes }
+
+    let derived: ArtifactMedia | null
+    try {
+      derived = await reader.media(artifactId, { version: version.version, path })
+    } catch (error) {
+      signal.throwIfAborted()
+      console.warn(
+        `[SixbAgent] Could not read what is derived of '${path}' in artifact '${artifactId}':`,
+        error
+      )
+      derived = null
+    }
+    if (!derived) {
+      media.push(listed)
+      continue
+    }
+
+    const { probe, transcript, cuts } = derived.parts
+    const folder = posix.join(DERIVED_DIRECTORY, path)
+    const written: { transcript?: string; cuts?: string } = {}
+    if (transcript.status === "ready") {
+      written.transcript = posix.join(folder, "transcript.json")
+      files.push({ path: written.transcript, file: transcript.file })
+    }
+    if (cuts.status === "ready") {
+      written.cuts = posix.join(folder, "cuts.json")
+      files.push({
+        path: written.cuts,
+        bytes: new TextEncoder().encode(JSON.stringify({ atMs: cuts.atMs })),
+      })
+    }
+
+    const probed = probe.status === "ready" ? probe : undefined
+    media.push({
+      ...listed,
+      ...(probed ? { durationMs: probed.durationMs } : {}),
+      ...(probed?.video
+        ? {
+            video: {
+              width: probed.video.width,
+              height: probed.video.height,
+              ...(probed.video.fps === undefined ? {} : { fps: probed.video.fps }),
+            },
+          }
+        : {}),
+      ...(probed?.audio ? { audio: true as const } : {}),
+      ...written,
+      parts: Object.fromEntries(
+        Object.entries(derived.parts).map(([name, part]) => [name, partStatus(part)])
+      ),
+    })
+  }
+
+  return { media, files }
+}
+
+/** `ready`, `pending`, or why a part will not come: `unavailable: <reason>`, `failed: <reason>`. */
+function partStatus(part: ArtifactMediaPart<object>): string {
+  return part.status === "ready" || part.status === "pending"
+    ? part.status
+    : `${part.status}: ${part.reason}`
 }
 
 /** A version's files as stored: each is read, or fetched by the sandbox, only once it is written. */

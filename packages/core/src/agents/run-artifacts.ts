@@ -50,6 +50,8 @@ export interface AgentRunArtifacts {
   getVersion: ArtifactsRuntime["getVersion"]
   listVersions: ArtifactsRuntime["listVersions"]
   query: ArtifactsRuntime["query"]
+  /** What is derived of a video or a sound a version holds, which a video's copy lists. */
+  media: ArtifactsRuntime["media"]
   /**
    * The artifact, when the run may write it: its requester owns it, or the conversation shares it
    * and they take part. Another is `null`, even one they could update from another conversation:
@@ -145,6 +147,7 @@ export function agentRunArtifacts(
     getVersion: async (...args) => (await sdk()).artifacts.getVersion(...args),
     listVersions: async (...args) => (await sdk()).artifacts.listVersions(...args),
     query: async (...args) => (await sdk()).artifacts.query(...args),
+    media: async (...args) => (await sdk()).artifacts.media(...args),
     updatable,
 
     async publish(input) {

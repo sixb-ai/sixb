@@ -283,14 +283,15 @@ function install(
 }
 
 /**
- * The run's sandbox: a real bash in the directory, without the agent image's browser, so a deck's
- * layout check skips at once on any host. layout-check.test.ts runs the check itself.
+ * The run's sandbox: a real bash in the directory, without the agent image's browser or
+ * HyperFrames, so a layout or a video check skips at once on any host. layout-check.test.ts runs
+ * the layout check itself.
  */
 function sandbox(check: Check = skippedCheck): LocalBashSandbox {
   const local = new LocalBashSandbox(root)
   const run = local.runCommand.bind(local)
   local.runCommand = async (command, args, options) =>
-    options?.env?.SIXB_CHECK_DECK === undefined
+    options?.env?.SIXB_CHECK_OUT === undefined
       ? run(command, args, options)
       : {
           exitCode: 0,
@@ -1714,7 +1715,7 @@ describe("publish_artifact", () => {
   test("refuses input outside its schema", () => {
     const { create } = tools()
     expect(() => create.parseInput({ path: "a", kind: "map", title: "A" })).toThrow(
-      "kind must be one of document, sheet, slides, page, canvas, file"
+      "kind must be one of document, sheet, slides, page, canvas, video, file"
     )
     expect(() => create.parseInput({ path: "a", kind: "file", title: "A", version: 2 })).toThrow(
       "unknown property 'version'"
@@ -2194,57 +2195,6 @@ describe("materializeThreadArtifacts", () => {
     ])
   })
 
-  // Guard proof: let PUBLISHABLE_KINDS (publish-tool.ts) take "video", and the Agent starts one
-  // without the guide it needs.
-  test("lists a video's scenes, a video the Agent revises but does not start", async () => {
-    const scene = (id: string) =>
-      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"></div></template>`
-    const film = (demo: string) =>
-      `<div data-composition-id="main" data-width="1280" data-height="720">
-        <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
-        <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="${demo}"></div>
-      </div>`
-    write("film/index.html", film("3"))
-    write("film/scenes/intro.html", scene("intro"))
-    write("film/scenes/demo.html", scene("demo"))
-
-    expect(() =>
-      tools().create.parseInput({ path: "film", kind: "video", title: "Launch film" })
-    ).toThrow("kind must be one of document, sheet, slides, page, canvas, file")
-
-    // Someone made the video in this conversation; the Agent lengthens its demo.
-    const stored = async (path: string) => {
-      const body = new TextEncoder().encode(readFileSync(join(root, "film", path), "utf8"))
-      return { path, file: await blobStorage.put({ body, expectedSizeBytes: body.byteLength }) }
-    }
-    const artifactId = "art_v1de0f17m0"
-    await storage.artifacts.create({
-      projectId,
-      id: artifactId,
-      kind: "video",
-      owner,
-      version: {
-        title: "Launch film",
-        entry: "index.html",
-        files: await Promise.all(
-          ["index.html", "scenes/intro.html", "scenes/demo.html"].map(stored)
-        ),
-        outline: { kind: "video", width: 1280, height: 720, fps: 30, durationMs: 5000, scenes: [] },
-        references: [],
-        author: owner,
-        origin: { threadId: run.threadId, runId: "run_person" },
-        updatedAt: new Date(),
-      },
-    })
-    write("film/index.html", film("4"))
-    await publishVersion({ id: artifactId, path: "film", title: "Launch film" })
-
-    expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
-      { address: `artifact:${artifactId}#intro`, name: "Scene intro, 0s to 2s: Opening" },
-      { address: `artifact:${artifactId}#demo`, name: "Scene demo, 2s to 6s" },
-    ])
-  })
-
   test("lists an artifact whose files cannot be read without them, and installs the rest", async () => {
     write("a/document.md", "# First\n\nOne.\n")
     write("b/document.md", "# Second\n\nTwo.\n")
@@ -2506,5 +2456,266 @@ describe("a version's queries", () => {
     expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
       error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'.",
     })
+  })
+})
+
+describe("a video", () => {
+  const scene = (id: string, body = "") =>
+    `<template><div data-composition-id="${id}" data-width="1280" data-height="720">${body}</div></template>`
+  const film = (demo = 3) =>
+    `<div data-composition-id="main" data-width="1280" data-height="720">
+      <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
+      <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="${demo}"></div>
+    </div>`
+  const clip = '<video src="media/clip.mp4" muted></video>'
+
+  /** A film whose demo plays a clip: its index, its scenes, its footage and its logo. */
+  function writeFilm(folder: string, demo = scene("demo", clip)) {
+    write(`${folder}/index.html`, film())
+    write(`${folder}/scenes/intro.html`, scene("intro", '<img src="media/logo.svg" alt="">'))
+    write(`${folder}/scenes/demo.html`, demo)
+    write(`${folder}/media/logo.svg`, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    write(`${folder}/media/clip.mp4`, "the footage")
+  }
+
+  /** What is derived of a file: its probe, proxy, cuts and transcript ready. */
+  async function derive(digest: string) {
+    const transcript = new TextEncoder().encode(
+      JSON.stringify({ text: "Hello there", words: [{ text: "Hello", startMs: 0, endMs: 400 }] })
+    )
+    const stored = await blobStorage.put({
+      body: transcript,
+      expectedSizeBytes: transcript.byteLength,
+    })
+    await storage.artifacts.putMedia({
+      projectId,
+      digest,
+      parts: {
+        probe: {
+          status: "ready",
+          durationMs: 12_000,
+          container: "mov,mp4,m4a,3gp,3g2,mj2",
+          video: { codec: "h264", width: 1920, height: 1080, rotation: 0, fps: 30 },
+          audio: { codec: "aac" },
+        },
+        proxy: { status: "ready", file: stored },
+        poster: { status: "pending" },
+        filmstrip: { status: "failed", reason: "FFmpeg stopped." },
+        waveform: { status: "pending" },
+        cuts: { status: "ready", atMs: [4_200, 8_000] },
+        transcript: { status: "ready", file: stored },
+      },
+      attempts: 1,
+      updatedAt: new Date(),
+    })
+  }
+
+  /** A video's check as HyperFrames runs it: a finding, and each instant snapshotted. */
+  const videoCheck: Check = (output) => {
+    const instants = JSON.parse(readFileSync(join(output, "instants.json"), "utf8")) as number[]
+    mkdirSync(join(output, "frames"), { recursive: true })
+    writeFileSync(join(output, "frames", "contact-sheet.jpg"), "the sheet")
+    return {
+      layout: "video",
+      findings: [
+        {
+          pass: "layout",
+          code: "canvas_overflow",
+          severity: "warning",
+          message: "Text extends outside the composition canvas.",
+          text: "Ship faster",
+          time: 2.4,
+          fixHint: "Move the text inward, or reduce its size.",
+        },
+        { pass: "audio", code: "audio_none", severity: "info", message: "The film has no sound." },
+      ],
+      sheets: [join(output, "frames", "contact-sheet.jpg")],
+      frames: instants.map((time, index) => ({
+        path: join(output, "frames", `frame-${String(index).padStart(2, "0")}-at-${time}s.png`),
+        time,
+      })),
+      missing: [],
+    }
+  }
+
+  test("is published, checked on the files its export renders, and shown as a contact sheet", async () => {
+    write("shot/a.png", "a picture")
+    const shot = (await publish({ path: "shot/a.png", kind: "file", title: "Shot" })) as {
+      artifactId: string
+    }
+    writeFilm("film")
+    write(
+      "film/scenes/intro.html",
+      scene("intro", `<img src="artifact:${shot.artifactId}/a.png" alt="">`)
+    )
+    const published = (await publish(
+      { path: "film", kind: "video", title: "Launch film" },
+      { check: videoCheck }
+    )) as { artifactId: string; layoutCheck: { frames: unknown[] } }
+
+    const checks = join(root, `.sixb/agent/checks/${published.artifactId}-r1`)
+    // Its HTML as a frame serves it, an address it cannot reach dropped; every other file linked
+    // from where the Agent wrote it.
+    expect(
+      read(`.sixb/agent/checks/${published.artifactId}-r1/project/scenes/intro.html`)
+    ).not.toContain("artifact:")
+    expect(JSON.parse(readFileSync(join(checks, "links.json"), "utf8"))).toEqual({
+      "media/clip.mp4": join(root, "film/media/clip.mp4"),
+      "media/logo.svg": join(root, "film/media/logo.svg"),
+    })
+    // Each scene at its start, middle and end.
+    expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual([
+      0.3, 1, 1.8, 2.4, 3.5, 4.75,
+    ])
+    expect(published.layoutCheck.frames).toHaveLength(6)
+
+    const { create } = tools()
+    const summary = create.toModelOutput?.(published as unknown as JsonValue, context)
+    const text = summary && "value" in summary ? String(summary.value) : ""
+    expect(text).toContain(
+      `Warning (demo): At 2.4 s, in scene 'demo': Text extends outside the composition canvas. (“Ship faster”) Move the text inward, or reduce its size.`
+    )
+    expect(text).not.toContain("The film has no sound")
+    expect(text).toContain(
+      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg: 6 frames, numbered by scene (1–3 intro, 4–6 demo)`
+    )
+    expect(text).not.toContain("slide")
+  })
+
+  // Guard proof: install a video's recordings as any other file (remotePaths in materialize.ts
+  // returning nothing); the copy then holds the footage, and no transcript or cuts beside it.
+  test("is installed without its recordings, each listed with what is derived of it", async () => {
+    writeFilm("film")
+    const { artifactId } = (await publish({
+      path: "film",
+      kind: "video",
+      title: "Launch film",
+    })) as {
+      artifactId: string
+    }
+    const version = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    const footage = version?.files.find((file) => file.path === "media/clip.mp4")
+    await derive(footage?.file.digest ?? "")
+
+    const installed = await install()
+    const [entry] = JSON.parse(installed.manifestJson).artifacts
+    const directory = `.sixb/agent/artifacts/${artifactId}`
+    expect(entry.parts).toEqual([
+      { address: `artifact:${artifactId}#intro`, name: "Scene intro, 0s to 2s: Opening" },
+      { address: `artifact:${artifactId}#demo`, name: "Scene demo, 2s to 5s" },
+    ])
+    expect(entry.media).toEqual([
+      {
+        path: "media/clip.mp4",
+        sizeBytes: "the footage".length,
+        durationMs: 12_000,
+        video: { width: 1920, height: 1080, fps: 30 },
+        audio: true,
+        transcript: `${directory}/.derived/media/clip.mp4/transcript.json`,
+        cuts: `${directory}/.derived/media/clip.mp4/cuts.json`,
+        parts: {
+          probe: "ready",
+          proxy: "ready",
+          poster: "pending",
+          filmstrip: "failed: FFmpeg stopped.",
+          waveform: "pending",
+          cuts: "ready",
+          transcript: "ready",
+        },
+      },
+    ])
+
+    const paths = installed.files.map((file) => file.path).sort()
+    expect(paths).toEqual([
+      `${directory}/.derived/media/clip.mp4/cuts.json`,
+      `${directory}/.derived/media/clip.mp4/transcript.json`,
+      `${directory}/index.html`,
+      `${directory}/media/logo.svg`,
+      `${directory}/scenes/demo.html`,
+      `${directory}/scenes/intro.html`,
+    ])
+    const written = (path: string) =>
+      new TextDecoder().decode(
+        installed.files.find((file) => file.path === `${directory}/${path}`)?.contents as Uint8Array
+      )
+    expect(JSON.parse(written(".derived/media/clip.mp4/cuts.json"))).toEqual({
+      atMs: [4_200, 8_000],
+    })
+    expect(JSON.parse(written(".derived/media/clip.mp4/transcript.json")).text).toBe("Hello there")
+  })
+
+  test("counts only what its copy holds against the install budget", async () => {
+    writeFilm("film")
+    write("film/media/clip.mp4", "f".repeat(64 * 1024))
+    await publish({ path: "film", kind: "video", title: "Launch film" })
+
+    const installed = await install({ maxBytes: 16 * 1024 })
+    expect(JSON.parse(installed.manifestJson).artifacts[0].directory).toBeDefined()
+  })
+
+  // Guard proof: drop keptRecordings from publish (publish-tool.ts); the update from the copy then
+  // plays a file it does not hold, and publishing refuses it.
+  test("updated from its copy, keeps the recordings its scenes still play, fetched for its check", async () => {
+    writeFilm("film")
+    const { artifactId } = (await publish({
+      path: "film",
+      kind: "video",
+      title: "Launch film",
+    })) as {
+      artifactId: string
+    }
+    const first = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    const footage = first?.files.find((file) => file.path === "media/clip.mp4")
+    await derive(footage?.file.digest ?? "")
+
+    // A later turn edits the copy, which holds no footage.
+    const installed = install()
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    for (const file of (await installed).files)
+      write(file.path, new TextDecoder().decode(file.contents as Uint8Array))
+    rmSync(join(root, "film"), { recursive: true })
+    write(`${copy}/index.html`, film(4))
+
+    const updated = (await publishVersion(
+      { id: artifactId, path: copy, title: "Launch film" },
+      { installed, check: videoCheck }
+    )) as { revision: number }
+    const second = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    expect(second?.files.find((file) => file.path === "media/clip.mp4")?.file).toEqual(
+      footage?.file
+    )
+    expect(existsSync(join(root, copy, "media/clip.mp4"))).toBe(false)
+
+    // The check fetches its proxy, as the export renders it from the original.
+    const fetches = JSON.parse(
+      read(`.sixb/agent/checks/${artifactId}-r${updated.revision}/fetches.json`)
+    )
+    expect(fetches).toEqual([
+      {
+        path: "media/clip.mp4",
+        args: [
+          "artifacts",
+          "media",
+          artifactId,
+          "--version",
+          "1",
+          "--path",
+          "media/clip.mp4",
+          "--part",
+          "proxy",
+        ],
+      },
+    ])
+
+    // A scene that no longer plays it leaves it out.
+    write(`${copy}/scenes/demo.html`, scene("demo", "<h1>Ship faster</h1>"))
+    await publishVersion({ id: artifactId, path: copy, title: "Launch film" }, { installed })
+    const third = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    expect(third?.files.map((file) => file.path).sort()).toEqual([
+      "index.html",
+      "media/logo.svg",
+      "scenes/demo.html",
+      "scenes/intro.html",
+    ])
   })
 })

@@ -184,6 +184,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       getVersion: (...args) => call("artifacts.getVersion", args),
       listVersions: (...args) => call("artifacts.listVersions", args),
       query: (...args) => call("artifacts.query", args),
+      media: (...args) => call("artifacts.media", args),
       updatable: (artifactId) => call("artifacts.updatable", [artifactId]),
       publish: (publish) => call("artifacts.publish", [publish]),
       turnWrites: () => call("artifacts.turnWrites", []),
