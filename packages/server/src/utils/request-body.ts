@@ -7,6 +7,10 @@
  * `streamRequestBodyWithLimit`, whose limit replaces that cap. Each applies its limit DURING
  * streaming (not after buffering), so an oversized or chunked/unknown-length body is rejected
  * before it is fully read.
+ *
+ * Bun's own limit is the largest any route takes, a staged upload's, so a body declared past the
+ * cap is refused up front (`declaredBodyTooLarge`) unless its route is one of
+ * `LARGER_BODY_ROUTES`.
  */
 
 /** The most a request body may be, unless the route reading it allows more. */
@@ -21,6 +25,52 @@ export class RequestBodyTooLargeError extends Error {
   ) {
     super(message)
   }
+}
+
+/**
+ * The routes that read a body past the cap, each within its own limit once it knows the caller.
+ * A path's `:name` segment matches any one segment, and a trailing `*` whatever follows.
+ */
+const LARGER_BODY_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  // A file in one request, and a staged upload's content.
+  { method: "POST", path: "/api/files" },
+  { method: "PUT", path: "/api/files/uploads/:uploadId/content" },
+  // Minutes of base64 dictation.
+  { method: "POST", path: "/api/models/audio/transcriptions" },
+  // A webhook's body, within the limit its definition sets, whatever its method.
+  { method: "*", path: "/api/webhooks/:connectorId/:webhookId" },
+  // A runner's calls to its run's session.
+  { method: "*", path: "/api/agent-runs/:runId/session/*" },
+]
+
+/**
+ * Why `request` is refused before any of its body is read: it declares a body past the cap, and
+ * its route never reads one that large. Undefined when it may go on.
+ */
+export function declaredBodyTooLarge(request: Request): RequestBodyTooLargeError | undefined {
+  const declared = Number(request.headers.get("content-length"))
+  if (!Number.isSafeInteger(declared) || declared <= DEFAULT_REQUEST_BODY_LIMIT_BYTES) {
+    return undefined
+  }
+
+  const method = request.method.toUpperCase()
+  const segments = new URL(request.url).pathname.split("/")
+  const readsMore = LARGER_BODY_ROUTES.some(
+    (route) =>
+      (route.method === "*" || route.method === method) && matchesSegments(segments, route.path)
+  )
+  return readsMore ? undefined : new RequestBodyTooLargeError(DEFAULT_REQUEST_BODY_LIMIT_BYTES)
+}
+
+function matchesSegments(segments: readonly string[], pattern: string): boolean {
+  const expected = pattern.split("/")
+  for (const [index, segment] of expected.entries()) {
+    const actual = segments[index]
+    if (segment === "*") return actual !== undefined && actual !== ""
+    if (actual === undefined) return false
+    if (segment.startsWith(":") ? actual === "" : actual !== segment) return false
+  }
+  return segments.length === expected.length
 }
 
 const requestBodyCaps = new WeakMap<Request, { lifted: boolean }>()
