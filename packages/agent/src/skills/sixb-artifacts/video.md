@@ -204,11 +204,15 @@ work/footage/talk.mp4`. Never publish a proxy in its original's place.
 Publishing refuses a scene whose file or host is missing, a start it cannot resolve, a file from
 outside the video, and limits passed, naming the scene. Then Sixb checks the published video in the
 sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
-each scene's start, middle and end, and the warnings HyperFrames found: text off the frame or too
-small, low contrast, a silent clip, an empty first frame. A sandbox that cannot reach the CDNs
-checks without them, and the check says so: its frames then show no GSAP motion and fallback
-fonts, which the app and the export do load. Judge the layout and the words from them, and keep
-the scripts and fonts as they are.
+its first frame and each scene's start, middle and end, and its warnings. HyperFrames finds text
+off the frame, text under 28 px (what a phone reads at 1080p), low contrast and a silent clip;
+the check measures a frame with nearly nothing on it, a scene under a second, an end card past
+4.5 s and a teaser past 45 s. Each names its scene and when: fix each, unless the user asked for
+what it names.
+
+A sandbox whose network leaves out the CDNs checks without them, and the check says so: its
+frames then show no GSAP motion and fallback fonts, which the app and the export do load. Judge
+the layout and the words from them, and keep the scripts and fonts as they are.
 
 Agents believe they succeeded far more often than they did: a video that publishes is not a video
 that works. Never say it is ready without having looked.
