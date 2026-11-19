@@ -268,8 +268,18 @@ function mediaPart<T extends z.ZodRawShape>(ready: T) {
     z.object({ status: z.literal("pending") }),
     z.object({ status: z.literal("ready"), ...ready }),
     z.object({
-      status: z.enum(["unavailable", "failed"]),
+      status: z.literal("unavailable"),
       reason: z.string().describe("Why it will not come, as a reader hears it"),
+      lacks: z
+        .enum(["sandboxes", "sandbox_tools", "transcription_model"])
+        .optional()
+        .describe(
+          "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+        ),
+    }),
+    z.object({
+      status: z.literal("failed"),
+      reason: z.string().describe("Why it did not come, as a reader hears it"),
     }),
   ])
 }

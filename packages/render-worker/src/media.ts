@@ -4,7 +4,9 @@ import {
   MAX_MEDIA_DURATION_MS,
   MEDIA_JOB,
   MEDIA_PARTS,
+  type MediaJobBudget,
   mapMediaParts,
+  mediaJobBudget,
   unmadeMediaParts,
 } from "@sixb/core/internal/artifacts/publish"
 import { findMediaTranscriber, type MediaTranscriber } from "@sixb/core/internal/runtime"
@@ -44,8 +46,10 @@ export type MediaHost = RenderHost & RenderDownloadHost
 const ORIGINAL = "media/original"
 const OUT = "media/derived"
 const SCRIPT = "media.cjs"
-/** Of the time left once the original is fetched: the rest reads what it derived back. */
+/** Of the time left once the original is probed: the rest reads what it derived back. */
 const DERIVE_SHARE = 0.8
+/** How long ffprobe may read the original, before the probe says how long the rest takes. */
+const PROBE_MS = 90_000
 
 /** The script's own parts: the transcript needs its sound, which the host transcribes. */
 const SCRIPT_PARTS: Partial<Record<ArtifactMediaPartName, string>> = {
@@ -76,35 +80,48 @@ export async function deriveArtifactMedia(input: {
   const wanted = MEDIA_PARTS.filter((name) => before[name].status === "pending")
   if (wanted.length === 0) return
 
+  // Asked for again once its job was lost after its last attempt: what is pending failed.
+  const attempt = (kept?.attempts ?? 0) + 1
+  if (attempt > MEDIA_JOB.attempts) return failArtifactMedia({ host, job })
+
   const transcriber = findMediaTranscriber(host)
   const transcribes = wanted.includes("transcript") && transcriber?.model != null
   /**
    * Keeps the parts this attempt made over what is kept by then, not over what it read first: a
-   * retry asked meanwhile made other parts pending again, for the job waiting behind this one.
+   * retry asked meanwhile made other parts pending again, for the job waiting behind this one, and
+   * counts its attempts from 0 again.
    */
-  const keep = async (made: Partial<ArtifactMediaParts>) => {
+  const keep = async (made: Partial<ArtifactMediaParts>, attempts?: number) => {
     const [now] = await artifacts.listMedia({ projectId: host.id, digests: [file.digest] })
     await artifacts.putMedia({
       projectId: host.id,
       digest: file.digest,
       parts: { ...(now?.parts ?? before), ...made },
-      attempts: job.attempt,
+      attempts: attempts ?? now?.attempts ?? attempt,
       updatedAt: new Date(),
     })
   }
 
+  // The attempt is counted before it starts, so one that is cut short still counts.
+  await keep({}, attempt)
+  const startedAt = Date.now()
+
   const derived = await inRenderSandbox(
     { sandboxes: host.sandboxes },
     `derived ${mediaName(file)}`,
-    { timeoutMs: MEDIA_JOB.timeoutMs, signal: input.signal, reach: [renderApiOrigin(host)] },
+    { timeoutMs: MEDIA_JOB.maxTimeoutMs, signal: input.signal, reach: [renderApiOrigin(host)] },
     (sandbox, left, signal) =>
       derive({
         host,
         sandbox,
-        left,
         signal,
         file,
         jobId: job.id,
+        probe: before.probe.status === "ready" ? before.probe : undefined,
+        keepProbe: (probe) => keep({ probe }),
+        // What is left of the attempt once the media is probed, its transcription aside.
+        left: (budget) =>
+          Math.min(left(), startedAt + budget.timeoutMs - budget.transcribeMs - Date.now()),
         // Without a transcription model, the sound is not extracted for one.
         wanted: transcribes ? wanted : wanted.filter((name) => name !== "transcript"),
         maxAudioBytes: transcribes ? (transcriber?.model?.maxInputBytes ?? 0) : 0,
@@ -115,7 +132,11 @@ export async function deriveArtifactMedia(input: {
     ...derived.parts,
     ...(wanted.includes("transcript") && !transcribes
       ? {
-          transcript: { status: "unavailable", reason: "This project has no transcription model." },
+          transcript: {
+            status: "unavailable",
+            reason: "This project has no transcription model.",
+            lacks: "transcription_model",
+          },
         }
       : {}),
   })
@@ -127,11 +148,26 @@ export async function deriveArtifactMedia(input: {
         transcriber,
         file,
         job,
+        attempt,
         audio: derived.audio,
-        signal: input.signal,
+        signal: AbortSignal.any([input.signal, AbortSignal.timeout(derived.budget.transcribeMs)]),
       }),
     })
   }
+}
+
+/** How many attempts were made at a media since it was last asked for, as what is kept says. */
+export async function mediaAttempts(input: {
+  readonly host: Pick<RenderHost, "id" | "storage">
+  readonly job: ArtifactMediaRequestedQueueJob
+}): Promise<number> {
+  const { digest } = input.job.payload.file
+  const [kept] =
+    (await input.host.storage.artifacts?.listMedia({
+      projectId: input.host.id,
+      digests: [digest],
+    })) ?? []
+  return kept?.attempts ?? input.job.attempt
 }
 
 /**
@@ -153,67 +189,77 @@ export async function failArtifactMedia(input: {
     projectId: input.host.id,
     digest,
     parts: mapMediaParts(parts, (part) => (part.status === "pending" ? failed : part)),
-    attempts: input.job.attempt,
+    attempts: kept?.attempts ?? input.job.attempt,
     updatedAt: new Date(),
   })
 }
 
 /**
- * Fetches the original into `sandbox`, a blank one created for it, derives the `wanted` parts
- * there, and stores the files it wrote. The sound for the transcript comes back as bytes, at
- * most `maxAudioBytes`, for the host to transcribe.
+ * Fetches the original into `sandbox`, a blank one created for it, probes it unless an attempt
+ * did, derives the `wanted` parts there in the time the probe gives it, and stores the files it
+ * wrote. The sound for the transcript comes back as bytes, at most `maxAudioBytes`, for the host
+ * to transcribe.
  */
 async function derive(input: {
   readonly host: MediaHost
   readonly sandbox: Sandbox
-  readonly left: () => number
   readonly signal: AbortSignal
   readonly file: FileRef
   readonly jobId: string
+  /** What an earlier attempt read the media holds. */
+  readonly probe: ArtifactMediaProbe | undefined
+  readonly keepProbe: (probe: ArtifactMediaParts["probe"]) => Promise<void>
+  /** What is left of the attempt: before the probe, of the longest any media has. */
+  readonly left: (budget: MediaJobBudget) => number
   readonly wanted: readonly ArtifactMediaPartName[]
   readonly maxAudioBytes: number
-}): Promise<{ readonly parts: Partial<ArtifactMediaParts>; readonly audio?: Uint8Array }> {
+}): Promise<{
+  readonly parts: Partial<ArtifactMediaParts>
+  readonly audio?: Uint8Array
+  readonly budget: MediaJobBudget
+}> {
   const { host, sandbox, signal, file } = input
   const original = posix.resolve(sandbox.workingDirectory, ORIGINAL)
   const out = posix.resolve(sandbox.workingDirectory, OUT)
+  const unprobed = mediaJobBudget(undefined)
 
   await downloadIntoSandbox(host, sandbox, [{ path: original, file }], {
-    timeoutMs: input.left(),
+    timeoutMs: input.left(unprobed),
     signal,
     executionId: input.jobId,
   })
   await sandbox.writeFiles(scriptFiles(sandbox, SCRIPT, mediaScript))
 
-  // Part of what is left, so the script says what it made before its command is killed.
-  const timeoutMs = input.left()
-  const scriptParts = input.wanted.flatMap((name) => SCRIPT_PARTS[name] ?? [])
-  const { report, stderr } = await runScript(
-    sandbox,
-    posix.resolve(sandbox.workingDirectory, SCRIPT),
-    [
-      original,
-      out,
-      Math.floor(timeoutMs * DERIVE_SHARE),
-      MAX_MEDIA_DURATION_MS,
-      scriptParts.join(","),
-    ],
-    { timeoutMs, signal }
-  )
+  // What the media holds says how long the rest may take.
+  let probe = input.probe
+  if (!probe) {
+    const probed = await runMedia(input, [original, out, PROBE_MS, MAX_MEDIA_DURATION_MS, 0, ""])
+    if ("lacking" in probed)
+      return { parts: pickParts(probed.lacking, input.wanted), budget: unprobed }
 
-  // A sandbox without the tools: nothing will come, until the project's image has them.
-  if (report?.skipped) {
-    const tool = report.skipped === "no_node" ? "Node.js" : "FFmpeg"
-    const reason = `This project's sandboxes have no ${tool} to derive it with (the agent image has it).`
-    const unavailable = unmadeMediaParts(() => ({ status: "unavailable", reason }))
-    return { parts: pickParts(unavailable, input.wanted) }
+    const part = probePart(probed.reported.probe)
+    await input.keepProbe(part)
+    if (part.status !== "ready") {
+      const unread = unmadeMediaParts(() => ({ status: "failed", reason: part.reason }))
+      return { parts: pickParts({ ...unread, probe: part }, input.wanted), budget: unprobed }
+    }
+    probe = part
   }
-  const reported = report?.parts
-  if (!isRecord(reported)) {
-    // Thrown, the job tries again.
-    throw new Error(
-      `[SixbRenderWorker] Deriving ${mediaName(file)} stopped: ${String(report?.failed ?? (stderr || "the script reported nothing")).slice(0, 500)}`
-    )
-  }
+
+  // Part of what is left, so the script says what it made before its command is killed.
+  const budget = mediaJobBudget(probe)
+  const timeoutMs = Math.max(0, input.left(budget))
+  const scriptParts = input.wanted.flatMap((name) => SCRIPT_PARTS[name] ?? [])
+  const run = await runMedia({ ...input, timeoutMs }, [
+    original,
+    out,
+    Math.floor(Math.min(budget.deriveMs, timeoutMs * DERIVE_SHARE)),
+    MAX_MEDIA_DURATION_MS,
+    budget.proxyMs,
+    scriptParts.join(","),
+  ])
+  if ("lacking" in run) return { parts: pickParts(run.lacking, input.wanted), budget }
+  const { reported } = run
 
   const wants = (name: ArtifactMediaPartName) => input.wanted.includes(name)
   /** A file the script wrote, stored as its part with what `fields` reads of the report. */
@@ -255,16 +301,16 @@ async function derive(input: {
       : {}),
     ...(wants("cuts") ? { cuts: cutsPart(reported.cuts, file) } : {}),
   }
-  if (!wants("transcript")) return { parts }
+  if (!wants("transcript")) return { parts, budget }
 
   // The sound comes back whole, for the model; one past what the model takes is not transcribed.
   const sound = reported.audio
   if (!isReady(sound)) {
-    return { parts: { ...parts, transcript: notMade(sound, "transcript", file) } }
+    return { parts: { ...parts, transcript: notMade(sound, "transcript", file) }, budget }
   }
   if (sound.bytes > input.maxAudioBytes) {
     const reason = "It is too long for this project's transcription model."
-    return { parts: { ...parts, transcript: { status: "unavailable", reason } } }
+    return { parts: { ...parts, transcript: { status: "unavailable", reason } }, budget }
   }
   const [audio] = await readSandboxFiles(sandbox, [{ path: sound.path, bytes: sound.bytes }], {
     maxBytes: input.maxAudioBytes,
@@ -273,7 +319,44 @@ async function derive(input: {
   if (!(audio instanceof Uint8Array)) {
     throw new Error(`[SixbRenderWorker] The sound of ${mediaName(file)} could not be read back.`)
   }
-  return { parts: { ...parts, transcript: { status: "pending" } }, audio }
+  return { parts: { ...parts, transcript: { status: "pending" } }, audio, budget }
+}
+
+/**
+ * Runs media.cjs with `args`, within what is left, and reads its report: each part it made or why
+ * not, or every part unavailable in a sandbox without the tools, until the project's image has
+ * them. A script that reports nothing throws, and the job tries again.
+ */
+async function runMedia(
+  input: {
+    readonly sandbox: Sandbox
+    readonly signal: AbortSignal
+    readonly file: FileRef
+    readonly timeoutMs?: number
+  },
+  args: readonly (string | number)[]
+): Promise<
+  { readonly reported: Record<string, unknown> } | { readonly lacking: ArtifactMediaParts }
+> {
+  const { sandbox, signal } = input
+  const timeoutMs = input.timeoutMs ?? PROBE_MS + 30_000
+  const script = posix.resolve(sandbox.workingDirectory, SCRIPT)
+  const { report, stderr } = await runScript(sandbox, script, args, { timeoutMs, signal })
+
+  if (report?.skipped) {
+    const tool = report.skipped === "no_node" ? "Node.js" : "FFmpeg"
+    const reason = `This project's sandboxes have no ${tool} to derive it with (the agent image has it).`
+    const lacking = { status: "unavailable", reason, lacks: "sandbox_tools" } as const
+    return { lacking: unmadeMediaParts(() => lacking) }
+  }
+
+  const reported = report?.parts
+  if (!isRecord(reported)) {
+    throw new Error(
+      `[SixbRenderWorker] Deriving ${mediaName(input.file)} stopped: ${String(report?.failed ?? (stderr || "the script reported nothing")).slice(0, 500)}`
+    )
+  }
+  return { reported }
 }
 
 /** A file the script wrote: where it is, how large, its type, and what else it says of it. */
@@ -324,7 +407,11 @@ function pickParts(
 }
 
 /** The script's probe, with only what a probe holds. */
-function probePart(made: unknown): ArtifactMediaPart<ArtifactMediaProbe> {
+function probePart(
+  made: unknown
+):
+  | ({ readonly status: "ready" } & ArtifactMediaProbe)
+  | { readonly status: "failed"; readonly reason: string } {
   const probe = isRecord(made) && made.status === "ready" ? parseArtifactMediaProbe(made) : null
   if (probe) return { status: "ready", ...probe }
 
@@ -349,6 +436,8 @@ async function transcribe(input: {
   readonly transcriber: MediaTranscriber
   readonly file: FileRef
   readonly job: ArtifactMediaRequestedQueueJob
+  /** The attempt at the media, which the model's calls are recorded under. */
+  readonly attempt: number
   readonly audio: Uint8Array
   readonly signal: AbortSignal
 }): Promise<ArtifactMediaParts["transcript"]> {
@@ -357,7 +446,7 @@ async function transcribe(input: {
     const output = await input.transcriber.transcribe({
       digest: file.digest,
       jobId: input.job.id,
-      attempt: input.job.attempt,
+      attempt: input.attempt,
       audio: { data: input.audio, mediaType: "audio/mpeg" },
       signal: input.signal,
     })

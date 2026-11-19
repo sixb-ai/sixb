@@ -42,6 +42,7 @@ import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "
 import { firstArtifactDocument, keepsDocument } from "./live/state"
 import {
   isMediaFile,
+  refreshArtifactMedia,
   requestArtifactMedia,
   retryArtifactMedia,
   unmadeMediaParts,
@@ -518,6 +519,8 @@ export function createArtifactsRuntime(
      * documents to PDF, and derives what plays and shows in place of a video or a sound.
      */
     readonly rendersInSandboxes?: boolean
+    /** The project has a transcription model, which transcribes what its media say. */
+    readonly transcribesMedia?: boolean
   } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
@@ -688,12 +691,17 @@ export function createArtifactsRuntime(
     }
     return { objectTypeId: holder.objectTypeId, primaryId }
   }
+  const mediaContext = (storage: ArtifactStorage) => ({
+    storage,
+    queue: runtime.queues.renders,
+    transcribes: options.transcribesMedia === true,
+  })
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
     if (!options.rendersInSandboxes || !storage) return
 
     // Each video and sound of any kind, once for every file with its bytes.
-    await requestArtifactMedia({ storage, queue: runtime.queues.renders }, version)
+    await requestArtifactMedia(mediaContext(storage), version)
 
     // Its queries are answered as whoever published it, who is this runtime's caller.
     await requestBoardPreviews(
@@ -1126,20 +1134,21 @@ export function createArtifactsRuntime(
         projectId: runtime.projectId,
         digests: [file.file.digest],
       })
-      const queue = runtime.queues.renders
-      if (kept && mediaOptions.retry && options.rendersInSandboxes) {
-        return { ...media, parts: await retryArtifactMedia({ storage, queue }, kept, file.file) }
-      }
-      if (kept) return { ...media, parts: kept.parts }
       if (!options.rendersInSandboxes) {
         const reason = "This project has no sandboxes to derive it in."
-        return { ...media, parts: unmadeMediaParts(() => ({ status: "unavailable", reason })) }
+        const lacking = { status: "unavailable", reason, lacks: "sandboxes" } as const
+        return { ...media, parts: kept?.parts ?? unmadeMediaParts(() => lacking) }
       }
 
-      // Published before media were derived, or asked for when its job could not be: ask now.
-      if (mediaOptions.derive !== false) {
-        await requestArtifactMedia({ storage, queue }, version)
+      const context = mediaContext(storage)
+      if (kept && mediaOptions.retry) {
+        return { ...media, parts: await retryArtifactMedia(context, kept, file.file) }
       }
+      if (kept && mediaOptions.derive === false) return { ...media, parts: kept.parts }
+      if (kept) return { ...media, parts: await refreshArtifactMedia(context, kept, file.file) }
+
+      // Published before media were derived, or asked for when its job could not be: ask now.
+      if (mediaOptions.derive !== false) await requestArtifactMedia(context, version)
       return { ...media, parts: unmadeMediaParts(() => ({ status: "pending" })) }
     },
 

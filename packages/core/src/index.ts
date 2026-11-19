@@ -1330,6 +1330,7 @@ export type {
 export type {
   ArtifactFile,
   ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
   ArtifactMediaPart,
   ArtifactMediaPartName,
   ArtifactMediaParts,

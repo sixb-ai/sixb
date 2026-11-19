@@ -8,7 +8,7 @@ import type { ClaimedQueueJob, Queues, RenderQueueJob } from "@sixb/core/queues"
 import { renderBoardPreviews } from "./board-previews"
 import { failDocumentPdf, printDocumentPdf } from "./document-pdf"
 import type { RenderHost } from "./host"
-import { deriveArtifactMedia, failArtifactMedia } from "./media"
+import { deriveArtifactMedia, failArtifactMedia, mediaAttempts } from "./media"
 import type { RenderDownloadHost } from "./sandbox"
 
 const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
@@ -76,7 +76,9 @@ export class RenderWorker extends QueueWorker<RenderQueueJob, typeof FAILURE_COD
     if (job.type === "artifact.media.requested") {
       const { file } = job.payload
       console.error(`[SixbRenderWorker] Could not derive '${file.fileName ?? file.digest}'.`, error)
-      if (job.attempt < MEDIA_JOB.attempts) return retry(MEDIA_JOB.backoffMs)
+      // Counted in what is kept, across the jobs a lost one is asked for again by.
+      const attempts = await mediaAttempts({ host: this.host, job }).catch(() => job.attempt)
+      if (attempts < MEDIA_JOB.attempts) return retry(MEDIA_JOB.backoffMs)
       await failArtifactMedia({ host: this.host, job }).catch((failure: unknown) => {
         console.error(
           `[SixbRenderWorker] Could not keep why '${file.digest}' was not derived.`,

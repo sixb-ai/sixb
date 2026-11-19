@@ -73182,11 +73182,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73235,11 +73255,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73293,11 +73333,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73376,11 +73436,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73429,11 +73509,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73478,11 +73578,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],
@@ -73534,11 +73654,31 @@
                               "properties": {
                                 "status": {
                                   "type": "string",
-                                  "enum": ["unavailable", "failed"]
+                                  "enum": ["unavailable"]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "description": "Why it will not come, as a reader hears it"
+                                },
+                                "lacks": {
+                                  "type": "string",
+                                  "enum": ["sandboxes", "sandbox_tools", "transcription_model"],
+                                  "description": "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+                                }
+                              },
+                              "required": ["status", "reason"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["failed"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "description": "Why it did not come, as a reader hears it"
                                 }
                               },
                               "required": ["status", "reason"],

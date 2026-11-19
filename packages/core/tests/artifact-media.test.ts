@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import type { ArtifactFile, Principal, SandboxFactory } from "../src"
+import type { ArtifactFile, ArtifactMediaProbe, Principal, SandboxFactory } from "../src"
 import { SixbHost } from "../src"
+import {
+  MEDIA_JOB,
+  MEDIA_PROXY_PARAM,
+  mediaJobBudget,
+  mediaProxyReference,
+  requestedMediaProxy,
+} from "../src/artifacts/media/media"
 import { findMediaTranscriber } from "../src/artifacts/media/transcriber"
 import { emptyGrantIndex } from "../src/authorization/types"
 import type { TranscriptionModel } from "../src/models"
+import type { ArtifactMediaRecord } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -64,6 +72,64 @@ function setup(
 }
 
 const pending = { status: "pending" } as const
+
+/** What is derived of a 12 s clip at 720p, every part ready but the poster, which failed. */
+function derived(digest: string): ArtifactMediaRecord {
+  const file = {
+    blobId: `blob_${"b".repeat(64)}`,
+    digest: `sha256:${"b".repeat(64)}`,
+    sizeBytes: 5,
+    mediaType: "video/mp4",
+  } as const
+  return {
+    projectId: "media",
+    digest,
+    parts: {
+      probe: probe(),
+      proxy: { status: "ready", file },
+      poster: { status: "failed", reason: "FFmpeg could not make it." },
+      filmstrip: {
+        status: "ready",
+        file,
+        intervalMs: 1000,
+        count: 12,
+        columns: 10,
+        width: 160,
+        height: 90,
+      },
+      waveform: { status: "ready", file },
+      cuts: { status: "ready", atMs: [] },
+      transcript: { status: "ready", file },
+    },
+    attempts: 1,
+    updatedAt: new Date(),
+  }
+}
+
+function probe(video: Partial<NonNullable<ArtifactMediaProbe["video"]>> = {}, durationMs = 12_000) {
+  return {
+    status: "ready",
+    durationMs,
+    container: "mov,mp4,m4a,3gp,3g2,mj2",
+    video: { codec: "h264", width: 1280, height: 720, rotation: 0, fps: 30, ...video },
+  } as const
+}
+
+function transcriptionModel(): TranscriptionModel {
+  return {
+    providerId: "test",
+    modelId: "transcriber",
+    definition: {
+      kind: "transcription",
+      providerId: "test",
+      modelId: "transcriber",
+      maxInputBytes: 1024,
+    },
+    async transcribe() {
+      return { output: { text: "Hello there." } }
+    },
+  }
+}
 
 describe("what is derived of a media", () => {
   // Reproduce by leaving requestArtifactMedia out of the artifacts runtime's requestPreviews:
@@ -221,8 +287,9 @@ describe("what is derived of a media", () => {
   })
 
   // Reproduce by returning what is kept at once in media(), whatever `retry` says: a proxy that
-  // failed once never comes.
-  test("derives again what failed when asked with retry, and nothing else", async () => {
+  // failed once never comes. And by resetting failed parts alone in retryArtifactMedia: cuts a
+  // sandbox without FFmpeg could not find stay unavailable once it has it.
+  test("derives again what failed, and what the project lacked, when asked with retry", async () => {
     const { sixb, put, claimable, artifacts } = setup()
     const clip = await put("clip.mp4", "clip", "video/mp4")
     const { artifact } = await sixb.artifacts.create({ kind: "file", title: "Clip", files: [clip] })
@@ -230,6 +297,7 @@ describe("what is derived of a media", () => {
     const poster = { status: "ready", file: clip.file, atMs: 1000 } as const
     const unavailable = { status: "unavailable", reason: "No transcription model." } as const
     const failed = { status: "failed", reason: "FFmpeg could not make it." } as const
+    const lacking = { status: "unavailable", reason: "No FFmpeg.", lacks: "sandbox_tools" } as const
     const kept = {
       projectId: "media",
       digest: clip.file.digest,
@@ -239,7 +307,7 @@ describe("what is derived of a media", () => {
         poster,
         filmstrip: failed,
         waveform: { status: "ready", file: clip.file },
-        cuts: { status: "ready", atMs: [] },
+        cuts: lacking,
         transcript: unavailable,
       },
       attempts: 3,
@@ -254,17 +322,17 @@ describe("what is derived of a media", () => {
     expect(await claimable()).toEqual([])
 
     const retried = await sixb.artifacts.media(artifact.id, { path: "clip.mp4", retry: true })
-    expect(retried?.parts).toMatchObject({
-      proxy: pending,
-      filmstrip: pending,
-      poster,
-      transcript: unavailable,
-    })
+    // One by one: Bun's toMatchObject checks an expected object it meets twice only once.
+    expect(retried?.parts.proxy).toEqual(pending)
+    expect(retried?.parts.filmstrip).toEqual(pending)
+    expect(retried?.parts.cuts).toEqual(pending)
+    expect(retried?.parts).toMatchObject({ poster, transcript: unavailable })
     const [stored] = await artifacts().listMedia({
       projectId: "media",
       digests: [clip.file.digest],
     })
-    expect(stored?.parts.proxy).toEqual(pending)
+    // A new ask: its attempts start over.
+    expect(stored).toMatchObject({ attempts: 0, parts: { proxy: pending } })
     expect((await claimable()).map(({ id }) => id)).toEqual([
       `art_media_${clip.file.digest.slice(7)}`,
     ])
@@ -272,10 +340,76 @@ describe("what is derived of a media", () => {
     // Nothing failed any more: asking again with retry asks nothing more of the worker.
     await artifacts().putMedia({
       ...kept,
-      parts: { ...kept.parts, proxy: { status: "ready", file: clip.file }, filmstrip: unavailable },
+      parts: {
+        ...kept.parts,
+        proxy: { status: "ready", file: clip.file },
+        filmstrip: unavailable,
+        cuts: { status: "ready", atMs: [] },
+      },
     })
     await sixb.artifacts.media(artifact.id, { path: "clip.mp4", retry: true })
     expect(await claimable()).toEqual([])
+  })
+
+  // Reproduce by leaving the transcript out of refreshArtifactMedia: a clip published before the
+  // project had a transcription model is never transcribed.
+  test("asks for a transcript once the project has a transcription model", async () => {
+    const { sixb, put, claimable, artifacts } = setup({ transcription: transcriptionModel() })
+    const clip = await put("clip.mp4", "clip", "video/mp4")
+    const { artifact } = await sixb.artifacts.create({ kind: "file", title: "Clip", files: [clip] })
+    await claimable()
+    await artifacts().putMedia({
+      ...derived(clip.file.digest),
+      parts: {
+        ...derived(clip.file.digest).parts,
+        transcript: {
+          status: "unavailable",
+          reason: "This project has no transcription model.",
+          lacks: "transcription_model",
+        },
+      },
+      attempts: 3,
+    })
+
+    const media = await sixb.artifacts.media(artifact.id, { path: "clip.mp4" })
+
+    expect(media?.parts.transcript).toEqual(pending)
+    const [stored] = await artifacts().listMedia({
+      projectId: "media",
+      digests: [clip.file.digest],
+    })
+    expect(stored).toMatchObject({ attempts: 0, parts: { transcript: pending } })
+    expect(await claimable()).toHaveLength(1)
+  })
+
+  // Reproduce by leaving isMediaLost out of refreshArtifactMedia: a job its queue lost leaves what
+  // is pending pending for good.
+  test("asks again for what is pending once its job is lost, its attempts kept", async () => {
+    const { sixb, put, claimable, artifacts } = setup()
+    const clip = await put("clip.mp4", "clip", "video/mp4")
+    const { artifact } = await sixb.artifacts.create({ kind: "file", title: "Clip", files: [clip] })
+    await claimable()
+    const waiting = {
+      ...derived(clip.file.digest),
+      parts: { ...derived(clip.file.digest).parts, transcript: pending },
+      attempts: 2,
+    }
+
+    // A job still within its time: nothing is asked.
+    await artifacts().putMedia({ ...waiting, updatedAt: new Date() })
+    await sixb.artifacts.media(artifact.id, { path: "clip.mp4" })
+    expect(await claimable()).toEqual([])
+
+    // One silent for longer than an attempt takes, on publish as on a read.
+    await artifacts().putMedia({ ...waiting, updatedAt: new Date(Date.now() - 4 * 60 * 60_000) })
+    await sixb.artifacts.media(artifact.id, { path: "clip.mp4" })
+    await sixb.artifacts.create({ kind: "file", title: "Again", files: [clip] })
+    expect(await claimable()).toHaveLength(1)
+    const [stored] = await artifacts().listMedia({
+      projectId: "media",
+      digests: [clip.file.digest],
+    })
+    expect(stored?.attempts).toBe(2)
   })
 
   test("is unavailable in a project without sandboxes", async () => {
@@ -290,6 +424,7 @@ describe("what is derived of a media", () => {
     expect(media?.parts.transcript).toEqual({
       status: "unavailable",
       reason: "This project has no sandboxes to derive it in.",
+      lacks: "sandboxes",
     })
     expect(await claimable()).toEqual([])
   })
@@ -373,5 +508,54 @@ describe("a media's transcript", () => {
   test("has no model in a project that configures none", () => {
     const { host } = setup()
     expect(findMediaTranscriber(host)?.model).toBeNull()
+  })
+})
+
+describe("the time a media takes to derive", () => {
+  // Reproduce by giving every media `MEDIA_JOB.maxTimeoutMs`: a lost job of a short clip is found
+  // lost only two hours on, and a hung FFmpeg holds a sandbox as long.
+  test("scales with what the proxy decodes, within the longest a job has", () => {
+    const clip = mediaJobBudget(probe())
+    const film = mediaJobBudget(
+      probe({ width: 3840, height: 2160, fps: 60, codec: "hevc" }, 20 * 60_000)
+    )
+
+    expect(clip.timeoutMs).toBeLessThan(MEDIA_JOB.maxTimeoutMs / 3)
+    expect(film.proxyMs).toBeGreaterThan(20 * clip.proxyMs)
+    expect(film.timeoutMs).toBe(MEDIA_JOB.maxTimeoutMs)
+    expect(mediaJobBudget(undefined).timeoutMs).toBe(MEDIA_JOB.maxTimeoutMs)
+    expect(clip.deriveMs + clip.transcribeMs).toBeLessThan(clip.timeoutMs)
+  })
+})
+
+describe("a frame's address of a media's proxy", () => {
+  const original: ArtifactFile = {
+    path: "media/launch clip.mov",
+    file: { blobId: `blob_${"a".repeat(64)}`, digest: `sha256:${"a".repeat(64)}`, sizeBytes: 9 },
+  }
+  const media = derived(original.file.digest)
+
+  // Reproduce by naming the proxy by the original's path alone: a page that loaded the original
+  // gets the proxy's bytes under the same address, and its player stops.
+  test("names the proxy's bytes, and nothing before it is ready", () => {
+    const reference = mediaProxyReference(original, media)
+    expect(reference).toBe(`media/launch%20clip.mov?${MEDIA_PROXY_PARAM}=${"b".repeat(16)}`)
+
+    expect(mediaProxyReference(original, undefined)).toBeNull()
+    expect(
+      mediaProxyReference(original, { ...media, parts: { ...media.parts, proxy: pending } })
+    ).toBeNull()
+    // What is derived of other bytes is not this file's.
+    expect(mediaProxyReference(original, derived(`sha256:${"c".repeat(64)}`))).toBeNull()
+  })
+
+  test("is served as the proxy it names, the original without one, and nothing else", () => {
+    const named = new URLSearchParams({ [MEDIA_PROXY_PARAM]: "b".repeat(16) })
+    expect(requestedMediaProxy(original, media, named)).toMatchObject({ mediaType: "video/mp4" })
+    expect(requestedMediaProxy(original, media, new URLSearchParams())).toBeUndefined()
+
+    const other = new URLSearchParams({ [MEDIA_PROXY_PARAM]: "d".repeat(16) })
+    expect(requestedMediaProxy(original, media, other)).toBeNull()
+    expect(requestedMediaProxy(original, undefined, named)).toBeNull()
   })
 })

@@ -451,7 +451,10 @@ export interface ArtifactMediaRecord {
   /** The digest of the original's bytes, as its `FileRef` names it. */
   readonly digest: string
   readonly parts: ArtifactMediaParts
-  /** How many times the render worker has tried to derive them. */
+  /**
+   * How many times the render worker has tried to derive what is pending since it was last asked
+   * for: 0 once `retry`, or a project that now has what a part lacked, asks again.
+   */
   readonly attempts: number
   readonly updatedAt: Date
 }
@@ -485,13 +488,29 @@ export interface ArtifactMediaParts {
 export type ArtifactMediaPartName = keyof ArtifactMediaParts
 
 /**
- * One part of what is derived from a media. `unavailable` will not come and is no error: it does
- * not apply, as a sound's poster, or the project has nothing to make it with.
+ * One part of what is derived from a media. `unavailable` is no error: it does not apply, as a
+ * sound's poster, or the project lacks what makes it, as `lacks` says.
  */
 export type ArtifactMediaPart<T extends object> =
   | { readonly status: "pending" }
   | ({ readonly status: "ready" } & T)
-  | { readonly status: "unavailable" | "failed"; readonly reason: string }
+  | {
+      readonly status: "unavailable"
+      readonly reason: string
+      /**
+       * What the project lacks to make it, when the media is not why: it is made once the project
+       * has it, asked with `retry`, and a transcript on the next read once the project has a
+       * transcription model.
+       */
+      readonly lacks?: ArtifactMediaLack
+    }
+  | { readonly status: "failed"; readonly reason: string }
+
+/**
+ * What a project lacks to derive a part: sandboxes, the tools in them (Node.js and FFmpeg, as the
+ * agent image has them), or a transcription model.
+ */
+export type ArtifactMediaLack = "sandboxes" | "sandbox_tools" | "transcription_model"
 
 /** What a media file holds: its streams are absent when it has none. */
 export interface ArtifactMediaProbe {

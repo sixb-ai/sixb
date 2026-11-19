@@ -16,6 +16,7 @@ import type {
   ArtifactFrameTarget,
   ArtifactKind,
   ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
   ArtifactMediaPart,
   ArtifactMediaPartName,
   ArtifactMediaProbe,
@@ -286,9 +287,13 @@ export function parseArtifactMediaRow(row: Row): ArtifactMediaRecord {
         return { file, ...(language === undefined ? {} : { language }) }
       }),
     },
-    attempts: positiveInteger(row.attempts, "attempts", where),
+    attempts: count(row.attempts, "attempts", where),
     updatedAt: date(row.updatedAt, "updatedAt", where),
   }
+}
+
+function isMediaLack(value: unknown): value is ArtifactMediaLack {
+  return value === "sandboxes" || value === "sandbox_tools" || value === "transcription_model"
 }
 
 /** A part pending, ready with what `ready` reads of it, or why it is not. */
@@ -301,8 +306,13 @@ function mediaPart<T extends object>(
 
   const { status } = value
   if (status === "pending") return { status }
-  if ((status === "unavailable" || status === "failed") && typeof value.reason === "string") {
+  if (status === "failed" && typeof value.reason === "string")
     return { status, reason: value.reason }
+  if (status === "unavailable" && typeof value.reason === "string") {
+    const { lacks } = value
+    if (lacks === undefined) return { status, reason: value.reason }
+    if (!isMediaLack(lacks)) throw corrupted()
+    return { status, reason: value.reason, lacks }
   }
   const fields = status === "ready" ? ready(value) : null
   if (!fields) throw corrupted()
@@ -653,6 +663,14 @@ function json(value: unknown, column: string, where: string): unknown {
 function text(value: unknown, column: string, where: string): string {
   if (typeof value !== "string" || value.length === 0) throw corrupt(where, `${column} is not text`)
   return value
+}
+
+function count(value: unknown, column: string, where: string): number {
+  const number = typeof value === "bigint" ? Number(value) : value
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0) {
+    throw corrupt(where, `${column} is not a count`)
+  }
+  return number
 }
 
 function positiveInteger(value: unknown, column: string, where: string): number {
