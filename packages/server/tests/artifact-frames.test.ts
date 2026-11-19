@@ -848,8 +848,10 @@ describe("a deck's images from other artifacts", () => {
     expect(await piece.text()).toBe("0123456789")
   })
 
-  test("play a video from its proxy once one is derived, its own or lent", async () => {
-    // Reproduce by serving `file.file` alone in frameResponse: every frame plays the original.
+  // A deck's clips are capped at a size a frame plays as they are, and shown full screen: a proxy
+  // would cost them their quality, and swapping the bytes under a page that loaded them breaks a
+  // clip that plays. Reproduce by serving a ready proxy in frameResponse.
+  test("play a video's original, its own or lent, even once a proxy is derived", async () => {
     const fixture = createApp()
     const alice = await session(fixture.storage, "alice")
     const clip = await fixture.put("clip.mov", "the original, 2 GB", "video/quicktime")
@@ -892,9 +894,9 @@ describe("a deck's images from other artifacts", () => {
       updatedAt: new Date(),
     })
 
-    const fromProxy = { type: "video/mp4", body: "the proxy, 20 MB" }
-    expect(await played(lent)).toEqual(fromProxy)
-    expect(await played(`${frame}own.mov`)).toEqual(fromProxy)
+    const original = { type: "video/quicktime", body: "the original, 2 GB" }
+    expect(await played(lent)).toEqual(original)
+    expect(await played(`${frame}own.mov`)).toEqual(original)
   })
 
   test("mark a video unavailable when its clip is, whatever its poster", async () => {
