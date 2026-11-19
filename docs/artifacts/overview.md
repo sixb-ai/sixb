@@ -67,6 +67,38 @@ From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{arti
 with files uploaded through `POST /api/files`, or staged past 25 MiB, as `sixb files upload` does
 ([Files](../server/overview.md#files)).
 
+### Videos and sounds
+
+Every video and sound file you publish, in any kind of artifact, gets what makes it cheap to show
+and to read, derived once for every file that holds the same bytes:
+
+| Part         | What it is                                                                 |
+| ------------ | -------------------------------------------------------------------------- |
+| `probe`      | Its length, size, rotation, frame rate, codecs, and whether it has sound   |
+| `proxy`      | H.264 at most 720p, a keyframe every half second: plays and scrubs at once |
+| `poster`     | A JPEG of a representative moment, not a black first frame                 |
+| `filmstrip`  | Thumbnails at a regular interval, in one JPEG                              |
+| `waveform`   | The sound's peaks, 50 a second                                             |
+| `cuts`       | Where the picture cuts to another shot                                     |
+| `transcript` | Each word and when it is said, from the project's transcription model      |
+
+```ts
+const media = await sixb.artifacts.media(artifactId, { path: "launch.mov" })
+media?.parts.poster // { status: "ready", file, atMs: 1520 }, or "pending" for a few seconds
+```
+
+- The app shows the poster on cards and plays the proxy, and every frame serves a video's proxy in
+  place of its original; **Download** still gives the original.
+- Each part is `ready`, `pending`, or `unavailable` or `failed` with a `reason`; ask with
+  `{ retry: true }` (`?retry=true` over HTTP) to derive each failed part again. A sound has no
+  poster, and a project without a [transcription model](../models/configuration.md#audio-transcription) no transcript.
+- The [`render` worker](../cli/overview.md) derives them in a sandbox of the project with FFmpeg,
+  as the Sixb agent image has it, from media up to 30 minutes long. A project without a sandbox
+  provider derives nothing.
+- The transcript is billed to the project's model budget, under no one person's limits.
+- Over HTTP, `GET /api/artifacts/{id}/versions/{version}/media?path=` answers each part with the
+  URL of its file.
+
 ## Versions and restore points
 
 - The latest version is **open**: each update, from your code, the Agent, or a save in the app,
