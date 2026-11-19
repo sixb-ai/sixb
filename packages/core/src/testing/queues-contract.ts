@@ -141,6 +141,34 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
       })
     })
 
+    // The renders lane carries what is derived of a media, with the file it is derived from.
+    test("renders carry a media's file to derive", async () => {
+      await withQueues(async (queues) => {
+        const file = {
+          blobId: `blob_${"a".repeat(64)}`,
+          digest: `sha256:${"a".repeat(64)}` as const,
+          sizeBytes: 2048,
+          fileName: "clip.mp4",
+          mediaType: "video/mp4",
+        }
+        await queues.renders.enqueue({
+          projectId: "project-a",
+          jobs: [
+            {
+              id: `art_media_${"a".repeat(64)}`,
+              type: "artifact.media.requested" as const,
+              payload: { file },
+            },
+          ],
+        })
+
+        const claimed = await queues.renders.claim({ projectId: "project-a", workerId: "render" })
+        expect(claimed.map(({ job }) => [job.type, job.payload])).toEqual([
+          ["artifact.media.requested", { file }],
+        ])
+      })
+    })
+
     describe("enqueue", () => {
       test("returns envelopes with generated id, createdAt, availableAt, attempt=0", async () => {
         await withQueues(async (queues) => {

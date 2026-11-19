@@ -14,6 +14,7 @@ import type {
   ArtifactCommentAuthor,
   ArtifactFile,
   ArtifactGuest,
+  ArtifactMediaParts,
   ArtifactRecord,
   ArtifactRestorePointRecord,
   ArtifactStorage,
@@ -39,6 +40,12 @@ import { type ArtifactHolding, readableHoldings } from "./holders"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { firstArtifactDocument, keepsDocument } from "./live/state"
+import {
+  isMediaFile,
+  requestArtifactMedia,
+  retryArtifactMedia,
+  unmadeMediaParts,
+} from "./media/media"
 import type { DocumentHolder } from "./outline"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
@@ -225,6 +232,26 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
     }
   ): Promise<ArtifactPdf | null>
   /**
+   * What Sixb derives of a video or a sound among a version's files, at `path`: what it holds, a
+   * proxy that plays in its place, a poster, a filmstrip, its peaks, its cuts and its transcript,
+   * each ready, pending, or why it will not come. They are derived once for every file that holds
+   * the same bytes, in a sandbox of the project, when a version holding it is published; one
+   * nothing was derived of yet is asked for now, unless `derive: false`. A part that `failed` says
+   * why until asked with `retry`, which derives each failed part again. In a project without
+   * sandboxes, each part is unavailable. Whoever reads the artifact may ask. `null` when the
+   * caller cannot read the artifact or it has no such version. Throws `invalid_artifact` when the
+   * version holds no video or sound at `path`.
+   */
+  media(
+    artifactId: string,
+    options: {
+      readonly path: string
+      readonly version?: number | "latest"
+      readonly derive?: boolean
+      readonly retry?: boolean
+    }
+  ): Promise<ArtifactMedia | null>
+  /**
    * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
    * cannot view refuses it, and a marked property they are not cleared for is left out of each
    * row. Whoever reads the artifact runs its queries, an observer too. `null` when the caller
@@ -284,6 +311,15 @@ export type ArtifactPdf = (
 ) & {
   /** The values a document that shows live data prints, to ask for that PDF again with. */
   readonly key?: string
+}
+
+/** What Sixb derives of a video or a sound of a version. */
+export interface ArtifactMedia {
+  readonly version: number
+  readonly path: string
+  /** The original, as the version holds it. */
+  readonly file: FileRef
+  readonly parts: ArtifactMediaParts
 }
 
 /** The objects that hold an artifact, as the caller reads them. */
@@ -350,8 +386,9 @@ export function artifactQueryChecker(artifacts: Partial<ArtifactsRuntime>): Arti
 }
 
 /**
- * What asks for the pictures a stored version's boards miss, in the project `artifacts` belongs
- * to: nothing in a project without sandboxes, where nothing renders them.
+ * What asks for the pictures a stored version's boards miss, and for what is derived of its media,
+ * in the project `artifacts` belongs to: nothing in a project without sandboxes, where nothing
+ * renders them.
  */
 export function artifactPreviewRequester(
   artifacts: Partial<ArtifactsRuntime>
@@ -477,8 +514,8 @@ export function createArtifactsRuntime(
   blobStorage: BlobStorage,
   options: {
     /**
-     * The project has sandboxes, where the render worker pictures canvas boards and prints
-     * designed documents to PDF.
+     * The project has sandboxes, where the render worker pictures canvas boards, prints designed
+     * documents to PDF, and derives what plays and shows in place of a video or a sound.
      */
     readonly rendersInSandboxes?: boolean
   } = {}
@@ -654,6 +691,9 @@ export function createArtifactsRuntime(
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
     if (!options.rendersInSandboxes || !storage) return
+
+    // Each video and sound of any kind, once for every file with its bytes.
+    await requestArtifactMedia({ storage, queue: runtime.queues.renders }, version)
 
     // Its queries are answered as whoever published it, who is this runtime's caller.
     await requestBoardPreviews(
@@ -1066,6 +1106,41 @@ export function createArtifactsRuntime(
         retry: pdfOptions.retry === true,
       })
       return { status: "printing", ...keyed }
+    },
+
+    async media(artifactId, mediaOptions) {
+      const read = await readVersion(artifactId, mediaOptions.version ?? "latest")
+      if (!read) return null
+
+      const { version } = read
+      const file = version.files.find((candidate) => candidate.path === mediaOptions.path)
+      if (!file || !isMediaFile(file)) {
+        throw invalidArtifact(
+          `Version ${version.version} of '${artifactId}' holds no video or sound at '${mediaOptions.path}'.`
+        )
+      }
+
+      const storage = requireStorage()
+      const media = { version: version.version, path: file.path, file: file.file }
+      const [kept] = await storage.listMedia({
+        projectId: runtime.projectId,
+        digests: [file.file.digest],
+      })
+      const queue = runtime.queues.renders
+      if (kept && mediaOptions.retry && options.rendersInSandboxes) {
+        return { ...media, parts: await retryArtifactMedia({ storage, queue }, kept, file.file) }
+      }
+      if (kept) return { ...media, parts: kept.parts }
+      if (!options.rendersInSandboxes) {
+        const reason = "This project has no sandboxes to derive it in."
+        return { ...media, parts: unmadeMediaParts(() => ({ status: "unavailable", reason })) }
+      }
+
+      // Published before media were derived, or asked for when its job could not be: ask now.
+      if (mediaOptions.derive !== false) {
+        await requestArtifactMedia({ storage, queue }, version)
+      }
+      return { ...media, parts: unmadeMediaParts(() => ({ status: "pending" })) }
     },
 
     async query(artifactId, name, options = {}) {
