@@ -221,7 +221,8 @@ that works. Never say it is ready without having looked.
    sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
    but not your intent or your plan, and ask what is weak, confusing, slow, unreadable on a phone
    or broken. A review needs eyes, not the strongest model: give it `model: "standard"`, unless
-   that model cannot read images. Fix what it finds.
+   that model cannot read images. One reviewer reads every sheet; fix what it finds, then look
+   again yourself rather than spawning one per frame.
 3. Fix what the warnings name and what you saw, update the artifact with its `id`, and look again.
    Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
    folder, take `timeoutMs` up to ten minutes, or run in the background. Where HyperFrames takes
