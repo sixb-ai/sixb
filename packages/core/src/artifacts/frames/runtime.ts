@@ -69,14 +69,6 @@ import type {
  * app sends runs once, leaving a start function the runtime takes at once, and is handed the port
  * that came with the request and the body, which it edits in place. From then on a click on a link
  * places the caret rather than following it.
- *
- * A video is HyperFrames' to play: its runtime, served beside this one, answers the app's own
- * messages to it (`hf-parent`). This runtime says the frame is ready, or that the video cannot
- * start: HyperFrames' runtime did not load, or stopped at its startup. It leaves the video's look
- * alone, whatever the app's theme, as an export renders it. On a phone, the reader's tap on
- * play reaches the frame as the app's message, and WebKit lets only what that moment starts make
- * a sound: the first play starts and stops every recording the page holds then, so that each may
- * play later, when its scene comes, as HyperFrames' own player does.
  */
 export function frameRuntime(data?: () => DocumentData): void {
   const PROTOCOL = "sixb-frame/1"
@@ -136,7 +128,6 @@ export function frameRuntime(data?: () => DocumentData): void {
   const layout = script?.getAttribute("data-sixb-layout") ?? "deck"
   const deck = layout === "deck"
   const designed = layout === "document"
-  const video = layout === "video"
   const start = new URLSearchParams(window.location.hash.slice(1))
   if (deck) {
     root.classList.add("sixb-deck")
@@ -1024,9 +1015,6 @@ export function frameRuntime(data?: () => DocumentData): void {
         startEditor(String(params.code ?? ""))
         return
       case "theme": {
-        // A video looks as it renders, in its own colors.
-        if (video) return
-
         // In the theme's layer, not inline: the deck's own CSS, unlayered, still wins.
         const tokens = (params.tokens ?? {}) as Record<string, string>
         const declarations = Object.entries(tokens)
@@ -1253,28 +1241,6 @@ export function frameRuntime(data?: () => DocumentData): void {
     true
   )
 
-  // A phone's WebKit plays a recording with sound only once the reader's gesture started it: the
-  // app's first `play`, sent as they tap, carries that gesture here.
-  const touchWebKit =
-    /iP(hone|ad|od)/.test(navigator.userAgent) ||
-    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
-  if (video && touchWebKit) {
-    const prime = (event: MessageEvent) => {
-      const data = event.data as Record<string, unknown> | null
-      if (event.source !== window.parent || data?.source !== "hf-parent") return
-      if (data.type !== "control" || data.action !== "play") return
-
-      window.removeEventListener("message", prime, true)
-      for (const media of Array.from(document.querySelectorAll("video, audio"))) {
-        const recording = media as HTMLMediaElement
-        if (!recording.paused) continue
-        recording.play().catch(() => {})
-        recording.pause()
-      }
-    }
-    window.addEventListener("message", prime, true)
-  }
-
   // A deck's keys move it wherever focus is; a page's keys are its own.
   window.addEventListener("keydown", (event) => {
     if (!deck || event.metaKey || event.ctrlKey || event.altKey) return
@@ -1432,21 +1398,6 @@ export function frameRuntime(data?: () => DocumentData): void {
         markBreaks()
         settled().then(openSection)
       })
-    }
-    if (video) {
-      // HyperFrames' runtime ran in the page's head, after this one: by now it is there, or it
-      // never loaded. Its startup runs next, and an error it stops at is saved before it is thrown.
-      const player = window as Window & { __hyperframes?: unknown; __hfStartupError?: unknown }
-      if (!player.__hyperframes) {
-        post({ event: "failed", params: {} })
-        return
-      }
-      window.addEventListener("error", () => {
-        if (typeof player.__hfStartupError === "string") post({ event: "failed", params: {} })
-      })
-
-      post({ event: "ready", params: {} })
-      return
     }
     if (!deck) {
       post({ event: "ready", params: {} })
