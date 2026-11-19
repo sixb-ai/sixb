@@ -44,6 +44,7 @@ import {
 } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactFrameTarget, ArtifactRecord } from "@sixb/core/storage"
+import type { PreparedAgentAttachment } from "../attachments"
 import { agentToolErrorText } from "../model-adapters"
 import {
   digestSandboxFile,
@@ -97,6 +98,7 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   description: [
     "Publish a file or directory in the sandbox as an artifact: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish.",
     "Pass kind for a new artifact. Pass id to update one of this conversation's, or one an object the user may edit holds: your files replace its current version's, which stays open, and its kind stays; versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first.",
+    "Pass attachments to add files of the conversation as they are stored, such as a user's recording, without downloading them.",
     "Returns the artifact's id, version and revision; a refusal says what to fix.",
   ].join("\n"),
   inputSchema: {
@@ -112,6 +114,23 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
       id: {
         type: "string",
         description: "The artifact to update, such as art_k3m9q2x7tp. Leave it out to create one.",
+      },
+      attachments: {
+        type: "array",
+        description:
+          "Files of this conversation the version holds as they are stored, by their key in $SIXB_ATTACHMENTS, such as a user's recording: never downloaded into the sandbox. Each goes at its path, beside the files of path.",
+        items: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Its path in the artifact, such as media/talk.mov.",
+            },
+            key: { type: "string", description: "Its key in $SIXB_ATTACHMENTS." },
+          },
+          required: ["path", "key"],
+          additionalProperties: false,
+        },
       },
     },
     required: ["path", "title"],
@@ -154,6 +173,8 @@ interface PublishToolsInput {
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   /** The conversation's artifacts in the sandbox, which each publish keeps current. */
   readonly installed: Promise<InstalledArtifacts>
+  /** The run's attachments, as `$SIXB_ATTACHMENTS` lists them: a version holds one by its key. */
+  readonly attachments?: readonly Pick<PreparedAgentAttachment, "key" | "fileRef">[]
 }
 
 /**
@@ -200,6 +221,8 @@ interface PublishRequest {
   readonly title: string
   /** A new artifact of this kind, or this artifact's latest version. */
   readonly target: { readonly kind: ArtifactKind } | { readonly artifactId: string }
+  /** The run's attachments the version holds, each at its path, by its key. */
+  readonly attachments?: readonly { readonly path: string; readonly key: string }[]
 }
 
 async function publish(
@@ -233,6 +256,7 @@ async function publish(
 
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
+  const attached = await attachedFiles(input, request, sources)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
   // drop whatever was written since. A canvas or a document is merged instead, from the copy's files.
@@ -297,6 +321,12 @@ async function publish(
       })
       files.push({ path: source.path, file: fileRef })
       contents.push({ path: source.path, bytes })
+    }
+
+    // An attachment is stored already: the run stores nothing of it.
+    for (const file of attached) {
+      files.push(file)
+      contents.push(file)
     }
 
     // A video's copy leaves its recordings in the API: an update keeps those its scenes still play.
@@ -529,6 +559,42 @@ async function storedAlready(
     throw toPublishError(error, CREATE_TOOL, source.path)
   })
   return sizeBytes === stored.sizeBytes && digest === stored.digest ? stored : undefined
+}
+
+/**
+ * The run's attachments the version holds, each at the path the Agent names: the stored file as
+ * it is, whose bytes never pass through the sandbox. Only a key `$SIXB_ATTACHMENTS` lists
+ * resolves, so a version never takes another conversation's file.
+ */
+async function attachedFiles(
+  input: PublishToolsInput,
+  request: PublishRequest,
+  sources: readonly PublishSource[]
+): Promise<ArtifactFile[]> {
+  const tool = CREATE_TOOL
+  const inFolder = new Set(sources.map((source) => source.path))
+  const files: ArtifactFile[] = []
+  for (const { path, key } of request.attachments ?? []) {
+    const attachment = input.attachments?.find((each) => each.key === key)
+    if (!attachment) {
+      throw publishError(
+        tool,
+        `'${key}' is not an attachment of this conversation: pass a key $SIXB_ATTACHMENTS lists`
+      )
+    }
+    if (inFolder.has(path)) {
+      throw publishError(
+        tool,
+        `'${path}' is both a file of '${request.path}' and attachment '${key}': remove one of them`
+      )
+    }
+    if (!(await statFileRef(input.blobStorage, attachment.fileRef))) {
+      throw publishError(tool, `attachment '${key}' is no longer stored`)
+    }
+
+    files.push({ path, file: attachment.fileRef })
+  }
+  return files
 }
 
 /**
@@ -1215,7 +1281,7 @@ function publishSummary(output: JsonValue): string {
 }
 
 function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
-  const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id"])
+  const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id", "attachments"])
   const kind = input.kind === undefined || input.kind === null ? undefined : input.kind
   if (kind !== undefined && !ARTIFACT_KINDS.includes(kind as ArtifactKind)) {
     throw publishError(CREATE_TOOL, `kind must be one of ${ARTIFACT_KINDS.join(", ")}`)
@@ -1240,11 +1306,35 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   }
   const path = pathInput(input.path, CREATE_TOOL)
   const title = titleInput(input.title, CREATE_TOOL)
+  const attachments = attachmentsInput(input.attachments)
   // With an id, a kind is ignored: an update keeps the artifact's, and a model that sends every
   // field, as strict mode has it, fills one in.
-  return noId
-    ? { path, title, target: { kind: kind as ArtifactKind } }
-    : { path, title, target: { artifactId: id } }
+  return {
+    path,
+    title,
+    target: noId ? { kind: kind as ArtifactKind } : { artifactId: id },
+    ...(attachments.length === 0 ? {} : { attachments }),
+  }
+}
+
+function attachmentsInput(value: unknown): { readonly path: string; readonly key: string }[] {
+  if (value === undefined || value === null) return []
+
+  const invalid = () =>
+    publishError(
+      CREATE_TOOL,
+      "attachments must be a list of { path, key }: its path in the artifact, and its key in $SIXB_ATTACHMENTS"
+    )
+  if (!Array.isArray(value)) throw invalid()
+  return value.map((item: unknown) => {
+    if (typeof item !== "object" || item === null) throw invalid()
+
+    const { path, key } = item as Record<string, unknown>
+    if (typeof path !== "string" || !path.trim() || typeof key !== "string" || !key.trim()) {
+      throw invalid()
+    }
+    return { path, key }
+  })
 }
 
 function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
