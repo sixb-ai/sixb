@@ -1,5 +1,6 @@
 import { getArtifactMedia } from "@sixb/client"
 import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 import { apiFileUrl, type FileSource } from "./file-source"
 
 // A video or a sound of an artifact plays from the light proxy Sixb derives of it once it is
@@ -23,10 +24,12 @@ export function derivedMediaQueryKey(source: FileSource): readonly unknown[] {
 
 /**
  * What is derived of `source`, once it is read: `undefined` while it is, `{}` for a file of no
- * artifact, one nothing is derived of yet, or one the server could not answer for.
+ * artifact, one nothing is derived of yet, or one the server could not answer for. The first
+ * answer stays while the caller is mounted, whatever the query cache reads again.
  */
 export function useDerivedMedia(source: FileSource, enabled = true): DerivedMedia | undefined {
   const file = source.artifactFile
+  const [first, setFirst] = useState<DerivedMedia>()
   const query = useQuery({
     queryKey: derivedMediaQueryKey(source),
     queryFn: async ({ signal }): Promise<DerivedMedia> => {
@@ -51,6 +54,10 @@ export function useDerivedMedia(source: FileSource, enabled = true): DerivedMedi
   })
 
   if (!file) return NONE
-  if (query.isError) return NONE
-  return query.data
+
+  const answer = query.isError ? NONE : query.data
+  // Read again on a return to the app, or by another card, a proxy now ready would swap the
+  // source of a player midway.
+  if (first === undefined && answer !== undefined) setFirst(answer)
+  return first ?? answer
 }
