@@ -2248,6 +2248,7 @@ function withAiUsageRecordInterceptor(
     getModelCallFiles: (input) => usage.getModelCallFiles(input),
     createModelCallOperation: (input) => usage.createModelCallOperation(input),
     getModelCallOperation: (input) => usage.getModelCallOperation(input),
+    startModelCallOperation: (input) => usage.startModelCallOperation(input),
     settleModelCallOperation: (input) => usage.settleModelCallOperation(input),
   })
   return {

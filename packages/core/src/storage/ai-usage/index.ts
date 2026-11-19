@@ -12,6 +12,7 @@ export {
   normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
+  normalizeAiModelCallStart,
 } from "./record"
 export type {
   AiModelCallFilesRecord,
@@ -30,6 +31,7 @@ export type {
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SettleAiModelCallOperationInput,
+  StartAiModelCallOperationInput,
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./types"

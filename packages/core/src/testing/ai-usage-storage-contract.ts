@@ -723,6 +723,8 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       })
     })
 
+    // Removal proof: drop `operation IS NULL` from a provider's start update; the second start
+    // replaces the first handle.
     test("keeps a running call's operation until its first settlement", async () => {
       await withStorage(async (storage) => {
         const input = {
@@ -733,19 +735,36 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           modelKind: "video" as const,
           providerId: "vercel-ai-gateway",
           modelId: "google/veo-3.1-fast-generate-001",
-          operation: { gatewayJobId: "job_1", nested: [1, "two", null] },
-          request: { durationSeconds: 4, dimensions: { resolution: "720p" } },
+          request: { durationSeconds: 4 },
           reserved: true,
           createdAt: at("2026-06-23T10:00:00.000Z"),
         }
-        const pending: AiModelCallOperationRecord = { ...input, status: "pending" }
-        expect(await storage.createModelCallOperation(input)).toEqual(pending)
-        expect(await storage.getModelCallOperation({ projectId, callId: "call_video" })).toEqual(
-          pending
-        )
+        const created: AiModelCallOperationRecord = { ...input, status: "pending" }
+        expect(await storage.createModelCallOperation(input)).toEqual(created)
 
         const duplicate = await storage.createModelCallOperation(input).catch((error) => error)
         expect(duplicate).toMatchObject({ code: "duplicate_id" })
+
+        // The provider accepted the call: its handle and what it said of the request.
+        const start = {
+          projectId,
+          callId: "call_video",
+          operation: { gatewayJobId: "job_1", nested: [1, "two", null] },
+          request: { durationSeconds: 4, dimensions: { resolution: "720p" } },
+        }
+        const pending: AiModelCallOperationRecord = {
+          ...created,
+          operation: start.operation,
+          request: start.request,
+        }
+        expect(await storage.startModelCallOperation(start)).toEqual(pending)
+        expect(
+          await storage.startModelCallOperation({ ...start, operation: "job_2", request: {} })
+        ).toEqual(pending)
+        expect(await storage.getModelCallOperation({ projectId, callId: "call_video" })).toEqual(
+          pending
+        )
+        expect(await storage.startModelCallOperation({ ...start, callId: "call_other" })).toBeNull()
 
         const result = { usage: { outputVideoMs: 0 }, cost: { status: "reported" } }
         const failed: AiModelCallOperationRecord = {
@@ -804,7 +823,6 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           modelKind: "video" as const,
           providerId: "vercel-ai-gateway",
           modelId: "google/veo-3.1-fast-generate-001",
-          operation: "op_1",
           request: {},
           reserved: false,
         }

@@ -7,6 +7,7 @@ import {
   normalizeAiModelCallOperation,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
+  normalizeAiModelCallStart,
 } from "./record"
 import type {
   AiModelCallFilesRecord,
@@ -21,6 +22,7 @@ import type {
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SettleAiModelCallOperationInput,
+  StartAiModelCallOperationInput,
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./types"
@@ -184,6 +186,26 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
   ): Promise<AiModelCallOperationRecord | null> {
     const record = this.operations.get(modelCallRecordKey(input.projectId, input.callId))
     return record ? structuredClone(record) : null
+  }
+
+  async startModelCallOperation(
+    input: StartAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const start = normalizeAiModelCallStart(input)
+    const key = modelCallRecordKey(start.projectId, start.callId)
+    const existing = this.operations.get(key)
+    if (!existing) return null
+    if (existing.status !== "pending" || existing.operation !== undefined) {
+      return structuredClone(existing)
+    }
+
+    const started: AiModelCallOperationRecord = {
+      ...existing,
+      operation: start.operation,
+      request: start.request,
+    }
+    this.operations.set(key, structuredClone(started))
+    return structuredClone(started)
   }
 
   async settleModelCallOperation(

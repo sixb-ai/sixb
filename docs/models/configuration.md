@@ -635,7 +635,8 @@ const video = await sixb.models.video.get(callId) // status: "pending" | "comple
 | `audio` | Make sound with the picture, where the model can. |
 | `firstFrame`, `lastFrame` | Images the clip starts from and ends on, as `FileRef`s. |
 | `referenceImages` | Characters, objects or a style the clip should show. |
-| `n`, `seed`, `model`, `signal` | As for images. |
+| `n`, `seed`, `signal` | As for images. |
+| `model` | One of `models.video`; Sixb checks on the clip with it later, from any process. |
 
 `files` are MP4 `FileRef`s in the project's blob storage: Sixb downloads each clip as soon as it
 is ready, because the provider's copy expires. A generation is as visible as the run that started
