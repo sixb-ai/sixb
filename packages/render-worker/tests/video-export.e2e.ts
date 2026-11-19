@@ -156,10 +156,30 @@ describe.skipIf(!tools)("a video exported scene by scene", () => {
             '    <video src="media/clip.mp4" data-start="0" data-duration="2" muted playsinline></video>'
           )
         ),
-        await put("scenes/outro.html", title("outro", "Thanks", "#8c2d5a")),
+        await put(
+          "scenes/outro.html",
+          title("outro", "Thanks", "#8c2d5a").replace(
+            "Thanks</div>",
+            `Thanks</div>\n    <img src="artifact:${logo}/logo.png" style="position: absolute; left: 0; top: 0; width: 160px; height: 160px">`
+          )
+        ),
         await put("media/clip.mp4", await readFile(clip)),
         await put("media/music.m4a", await readFile(music)),
       ]
+
+      // The outro shows a red square another artifact holds, by its address.
+      const square = join(dir, "logo.png")
+      await run("ffmpeg", [
+        ...["-v", "error", "-f", "lavfi", "-i", "color=red:size=160x160", "-frames:v", "1"],
+        ...["-y", square],
+      ])
+      const logo = (
+        await sixb.artifacts.create({
+          kind: "file",
+          title: "Logo",
+          files: [await put("logo.png", await readFile(square))],
+        })
+      ).version.artifactId
 
       const api = startDownloadApi(host)
       const worker = new RenderWorker(host, { concurrency: 4 })
@@ -206,6 +226,31 @@ describe.skipIf(!tools)("a video exported scene by scene", () => {
           "165"
         )
         await run("ffmpeg", ["-v", "error", "-i", mp4, "-f", "null", "-"])
+
+        // Each scene plays where it should: the intro's blue, the outro's plum, and the square the
+        // outro shows, lent from its artifact as a frame lends it: reproduce its absence by writing
+        // the HTML as it is in placeVideoProject. A join at the wrong time is refused before: keep
+        // each segment's own timescale in video.cjs, and the MP4 plays 32 seconds, the outro's
+        // range among them, so the export fails.
+        const pixel = async (seconds: number, x: number, y: number) => [
+          ...(await run("ffmpeg", [
+            ...["-v", "error", "-ss", String(seconds), "-i", mp4, "-frames:v", "1"],
+            ...[
+              "-vf",
+              `format=rgb24,crop=1:1:${x}:${y}`,
+              "-f",
+              "rawvideo",
+              "-pix_fmt",
+              "rgb24",
+              "-",
+            ],
+          ])),
+        ]
+        const near = (seen: number[], color: number[]) =>
+          seen.every((value, index) => Math.abs(value - (color[index] ?? 0)) < 24)
+        expect(near(await pixel(1, 600, 20), [0x2d, 0x3a, 0x8c])).toBe(true)
+        expect(near(await pixel(4.5, 600, 20), [0x8c, 0x2d, 0x5a])).toBe(true)
+        expect(near(await pixel(5, 80, 80), [255, 0, 0])).toBe(true)
 
         // The tone holds its level across both cuts, at 2 and 3.5 seconds: no gap, no click.
         // Reproduce a dip by joining each segment's own sound instead of the whole video's (map
