@@ -786,6 +786,38 @@ describe("editing live", () => {
     ).toHaveLength(1)
   })
 
+  // Guard proof: delete every path `next` lacks at once, as before, in mergeIntoDocument. The
+  // merged end card then plays media/talk.mp4, which the version no longer holds.
+  test("the Agent's write keeps a recording a person's concurrent clip still plays", () => {
+    const doc = createArtifactDocument("video", live(SOURCES))
+
+    // The person adds a clip of the demo's recording to the end card, live.
+    editDocument(
+      doc,
+      insertClip(sourcesOf(doc), "scenes/outro.html", {
+        kind: "video",
+        src: "media/talk.mp4",
+        startMs: 0,
+        durationMs: 2000,
+      })
+    )
+
+    // Meanwhile, the Agent removes the demo from the files before the clip, and its write leaves
+    // out the recordings its copy no longer plays, as an update does.
+    const agent = applied(removeScene(SOURCES, "demo"))
+    agent.delete("media/talk.mp4")
+    agent.delete("media/screen.mp4")
+    mergeIntoDocument(doc, live(SOURCES), live(agent))
+
+    const files = sourcesOf(doc)
+    expect(files.get("scenes/outro.html")).toContain('src="media/talk.mp4"')
+    expect(files.has("media/talk.mp4")).toBe(true)
+
+    // What nothing plays any more goes, as the Agent wrote.
+    expect(files.has("media/screen.mp4")).toBe(false)
+    expect(files.has("scenes/demo.html")).toBe(false)
+  })
+
   test("two people's edits to two scenes merge, and each is a step of its own", () => {
     const one = createArtifactDocument("video", live(SOURCES))
     const two = new Y.Doc()
