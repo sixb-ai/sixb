@@ -27,8 +27,18 @@ const STDERR_BYTES = 4096
 /** HyperFrames' low-memory profile renders by screenshots with one browser, twice slower. */
 const ENOUGH_MEMORY = 3 * 1024 ** 3
 
-/** HyperFrames reports usage unless told not to; `hyperframesCache` adds where it may write. */
-const ENV = { ...process.env, HYPERFRAMES_NO_TELEMETRY: "1", DO_NOT_TRACK: "1" }
+/**
+ * What HyperFrames runs with, set on this process, as the plan that mixes the sound runs in it, and
+ * passed to every tool it starts; `hyperframesCache` adds where it may write. It reports usage
+ * unless told not to. Its Chrome runs without a sandbox of its own, as Playwright's does in every
+ * render: the render's sandbox is the boundary, and a seatbelt, as a local one on macOS, refuses
+ * to nest Chrome's, whose GPU process then crashes.
+ */
+const ENV = Object.assign(process.env, {
+  HYPERFRAMES_NO_TELEMETRY: "1",
+  DO_NOT_TRACK: "1",
+  HYPERFRAMES_CHROME_SANDBOX: "0",
+})
 
 const [mode, ...args] = process.argv.slice(2)
 

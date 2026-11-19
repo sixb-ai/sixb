@@ -858,7 +858,7 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
   takes about 21 seconds. A scene of titles takes a few seconds more than it lasts.
 - Blur and `backdrop-filter` cost the most: Chromium draws them without a GPU.
 - The [`render` worker](../cli/overview.md) renders it in sandboxes whose image has HyperFrames and
-  FFmpeg, as the Sixb agent image has them, with at least 4 GB of memory for its fast capture.
+  FFmpeg, as the Sixb agent image has them, with at least 3 GB of memory for its fast capture.
   Each worker renders two segments at once; more workers render more.
 - When it could not be rendered, asking answers `{ status: "failed", reason }`, which names the
   scene, until you ask with `{ retry: true }` (`?retry=true`), which renders what failed again.
