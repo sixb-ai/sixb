@@ -315,7 +315,10 @@ describe("the player", () => {
 
   test("goes to a chapter's start from the chapters", async () => {
     const { view, posted } = await openPlayer()
-    fireEvent.click(view.getByRole("button", { name: "Chapters" }))
+    // A wide player opens on its chapters; a narrower one opens them from its bar.
+    if (!view.queryByRole("complementary", { name: "Chapters" })) {
+      fireEvent.click(view.getByRole("button", { name: "Chapters" }))
+    }
     const chapters = view.getByRole("complementary", { name: "Chapters" })
     fireEvent.click(within(chapters).getByText("Thanks"))
     expect(posted.at(-1)).toMatchObject({ action: "seek", timeSeconds: 5.5 })

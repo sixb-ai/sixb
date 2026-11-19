@@ -482,6 +482,7 @@ export const en = {
     unmuted: "Sound on",
     volume: "Volume",
     soundBlocked: "Turn on sound",
+    mediaFailed: "A clip in this video couldn’t load",
     position: "Position",
     positionText: (time: string, duration: string, chapter?: string) =>
       `${time} of ${duration}${chapter ? `, ${chapter}` : ""}`,
@@ -1267,6 +1268,7 @@ export const fr: Translation<ArtifactMessages> = {
     unmuted: "Son activé",
     volume: "Volume",
     soundBlocked: "Activer le son",
+    mediaFailed: "Un extrait de cette vidéo n’a pas pu être chargé",
     position: "Position",
     positionText: (time, duration, chapter) =>
       `${time} sur ${duration}${chapter ? `, ${chapter}` : ""}`,

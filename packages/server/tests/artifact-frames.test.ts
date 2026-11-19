@@ -635,6 +635,74 @@ describe("a video's frame", () => {
     expect(body).toContain('"hf-preview"')
   })
 
+  // Reproduce by dropping `rewriteVideoProxies` from frameResponse: the scene keeps playing the
+  // original once its proxy is ready.
+  test("plays each recording's proxy once it is ready, by its own name, in its scenes too", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = await fixture.put("media/clip.mov", "the original, 2 GB", "video/quicktime")
+    const scene = SCENE.replace("<h1>Hello</h1>", '<video src="../media/clip.mov" muted></video>')
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put(
+        "index.html",
+        INDEX.replace('data-height="720">', 'data-height="720" data-duration="2">').replace(
+          "</div>\n</body>",
+          '<audio src="media/clip.mov"></audio></div>\n</body>'
+        ),
+        "text/html"
+      ),
+      await fixture.put("scenes/intro.html", scene, "text/html"),
+      clip,
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    const { path } = (await minted.json()) as { path: string }
+    const read = async (file: string) =>
+      fixture.app.fetch(
+        new Request(url(`${path}${file}`), { headers: { "sec-fetch-dest": "video" } })
+      )
+
+    // Until it is ready, every recording plays its original.
+    expect(await (await read("scenes/intro.html")).text()).toBe(scene)
+
+    const proxy = await fixture.blobStorage.put({
+      body: new TextEncoder().encode("the proxy, 20 MB"),
+      fileName: "clip.proxy.mp4",
+      mediaType: "video/mp4",
+    })
+    const pending = { status: "pending" } as const
+    await artifactStorage(fixture.storage).putMedia({
+      projectId: PROJECT_ID,
+      digest: clip.file.digest,
+      parts: {
+        probe: pending,
+        proxy: { status: "ready", file: proxy },
+        poster: pending,
+        filmstrip: pending,
+        waveform: pending,
+        cuts: pending,
+        transcript: pending,
+      },
+      attempts: 1,
+      updatedAt: new Date(),
+    })
+    const name = proxy.digest.replace(/^sha256:/, "").slice(0, 16)
+
+    // The path stays as written: HyperFrames resolves it from the scene's folder as before.
+    expect(await (await read("scenes/intro.html")).text()).toContain(
+      `<video src="../media/clip.mov?sixb-proxy=${name}" muted>`
+    )
+    expect(await (await read("index.html")).text()).toContain(
+      `<audio src="media/clip.mov?sixb-proxy=${name}">`
+    )
+
+    const played = await read(`media/clip.mov?sixb-proxy=${name}`)
+    expect(played.headers.get("content-type")).toBe("video/mp4")
+    expect(await played.text()).toBe("the proxy, 20 MB")
+    // The original's address keeps serving the original, and a name that is not the proxy's none.
+    expect(await (await read("media/clip.mov")).text()).toBe("the original, 2 GB")
+    expect((await read("media/clip.mov?sixb-proxy=0000000000000000")).status).toBe(404)
+  })
+
   test("lets the runtime load from the frame alone, and play its version's media", async () => {
     // Its scenes and recordings are the version's files: the policy needs nothing beyond them.
     const { app, frame } = await deck()
