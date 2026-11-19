@@ -834,7 +834,14 @@ agent image renders with (0.9.68):
   (a frame), Home, End, M (mute), F (fullscreen), C (comment).
 - Settings › Copy link gives a link that opens the video at the instant shown.
 
-The Agent revises a video someone made, and does not start one.
+The Agent makes videos and revises them, from what it records of your app in its sandbox, the
+footage and sound you give it, and what your models make:
+
+- Its copy of a video holds the scenes, not the recordings: it edits footage from the transcript,
+  the cuts and a proxy, and an update keeps every recording its scenes still play.
+- Each publish is checked with HyperFrames on the files the export renders, and the Agent looks
+  at a contact sheet of every scene's start, middle and end before it says the video is ready.
+- It acts on comments left at an instant, then resolves or answers them.
 
 ### Export a video
 

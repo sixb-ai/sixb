@@ -1,0 +1,51 @@
+/* One look for every scene: an ink ground, one accent, Inter Tight set tight. */
+:root {
+  --ink: #0e1116;
+  --paper: #f4f2ee;
+  --muted: #9aa3ad;
+  --accent: #3ddc97;
+  --radius: 28px;
+  font-family: "Inter Tight", system-ui, sans-serif;
+}
+
+html, body { margin: 0; background: var(--ink); }
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+
+.display {
+  margin: 0;
+  font-size: 168px;
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+}
+
+.display .line { display: block; }
+
+.callout {
+  position: absolute;
+  left: 160px;
+  bottom: 120px;
+  margin: 0;
+  padding: 22px 34px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 48px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
