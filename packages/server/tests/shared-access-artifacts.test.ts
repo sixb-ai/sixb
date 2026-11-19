@@ -20,7 +20,11 @@ import {
 } from "@sixb/core"
 import { CANVAS_FILE } from "@sixb/core/artifacts"
 import { decodeLiveData, encodeLiveData } from "@sixb/core/artifacts/live"
-import { videoExportPlan, videoSceneStills } from "@sixb/core/internal/artifacts/publish"
+import {
+  documentPdfKey,
+  videoExportPlan,
+  videoSceneStills,
+} from "@sixb/core/internal/artifacts/publish"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
@@ -410,6 +414,43 @@ describe("a shared link's guest", () => {
     )
     expect(refused.status).toBe(404)
     expect(await refused.json()).toMatchObject({ code: "preview_not_found" })
+  })
+
+  // A designed document's PDF downloads by a link. Guard proof: drop `/pdf` from LOADED_BY_TAGS
+  // (auth/shared-access.ts); the guest's download is then refused.
+  test("downloads a document's PDF the way a link does", async () => {
+    const { app, storage, blobStorage, marie, put, meetings, visit } = await setup()
+    const proposal = await marie.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files: await put({
+        "document.html": "<!doctype html><html><body><h1>Proposal</h1></body></html>",
+      }),
+    })
+    await meetings.upsert({ properties: { id: "m1", board: artifactRef(proposal.artifact.id) } })
+    const guest = await visit()
+
+    // The worker printed it.
+    await storage.artifacts.putPdf({
+      projectId,
+      renderKey: documentPdfKey(proposal.version) ?? "",
+      file: await blobStorage.put({
+        body: new TextEncoder().encode("%PDF-1.7 proposal"),
+        fileName: "Proposal.pdf",
+        mediaType: "application/pdf",
+      }),
+      pages: 1,
+      createdAt: new Date(),
+    })
+
+    const downloaded = await app.fetch(
+      new Request(
+        `http://api.localhost/api/artifacts/${proposal.artifact.id}/versions/1/pdf?shareGrant=${guest.grantId}`,
+        { headers: { cookie: guest.cookie } }
+      )
+    )
+    expect(downloaded.status).toBe(200)
+    expect(await downloaded.text()).toBe("%PDF-1.7 proposal")
   })
 
   // A video's poster, its chapters' stills and its MP4 load as an `<img>` and a download link do,

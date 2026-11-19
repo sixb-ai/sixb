@@ -40,8 +40,8 @@ const SHARED_SESSION_ROUTES = SIXB_API_ROUTES.filter((route) => route.sharedSess
  */
 const SHARED_SESSION_SOCKETS: readonly string[] = [ARTIFACT_LIVE_ROUTE, "/ws/events"]
 
-/** What tags load: a file, a board's picture, a video's still, its poster, and its MP4. */
-const LOADED_BY_TAGS = ["/content", "/preview", "/still", "/poster", "/video"]
+/** What tags load: a file, a board's picture, a PDF, a video's still, its poster, and its MP4. */
+const LOADED_BY_TAGS = ["/content", "/preview", "/pdf", "/still", "/poster", "/video"]
 
 /**
  * Where the grant may be named in the query: what `<img>`, `<video>` and download links load, and
