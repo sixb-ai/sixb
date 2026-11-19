@@ -59,7 +59,7 @@ work/launch-teaser/
 ## The format
 
 - **The root**, `index.html`'s first `data-composition-id`: `data-width` and `data-height` in even
-  pixels (1920×1080, 1080×1920 for a phone, 1080×1080), `data-fps` (24, 25, 30, 50 or 60),
+  pixels (1920×1080, 1080×1920 for a phone, 1080×1080), `data-fps` (24, 25, 30 or 60),
   `data-duration`, its length in seconds, `data-poster`, the instant shown before it plays, and
   `data-no-timeline` unless a script of its own registers one: without it, every render waits 45
   seconds for one.
