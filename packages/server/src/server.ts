@@ -1,6 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
@@ -58,7 +59,6 @@ import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
 import { agentRunSessionHandler, startLapsedRunSweeper } from "./routes/agent-runners"
 import { registerAuthRoutes } from "./routes/auth"
-import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./routes/files"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
@@ -672,8 +672,9 @@ function startApiServer(
   const bunServer = Bun.serve({
     port: options.port,
     hostname: options.host,
-    // No route reads more than a simple upload form, so Bun rejects anything larger with 413.
-    maxRequestBodySize: DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES,
+    // No route reads more than a staged upload's content, so Bun rejects anything larger with 413.
+    // Every other body stays capped by `limitRequestBody` below, as it streams.
+    maxRequestBodySize: MAX_FILE_UPLOAD_BYTES,
     fetch: (incoming: Request, server: Server<unknown>) => {
       const socketAddress = server.requestIP(incoming)?.address
       // Elysia parses a body before the auth guard runs, so cap it here, as it streams. The capped

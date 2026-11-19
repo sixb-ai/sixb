@@ -35828,6 +35828,9 @@
             "sixbCsrf": []
           },
           {
+            "sixbAccessToken": []
+          },
+          {
             "sixbSession": []
           }
         ],
@@ -35846,7 +35849,8 @@
                   },
                   "sizeBytes": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 2147483648
                   },
                   "digest": {
                     "type": "string",
@@ -35854,6 +35858,11 @@
                   },
                   "logicalPath": {
                     "type": "string"
+                  },
+                  "strategy": {
+                    "type": "string",
+                    "enum": ["server"],
+                    "description": "Send the content through the API even when blob storage takes direct uploads: for a caller that reaches only the API, such as a sandbox"
                   }
                 },
                 "additionalProperties": false
@@ -35871,7 +35880,8 @@
                   },
                   "sizeBytes": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 2147483648
                   },
                   "digest": {
                     "type": "string",
@@ -35879,6 +35889,11 @@
                   },
                   "logicalPath": {
                     "type": "string"
+                  },
+                  "strategy": {
+                    "type": "string",
+                    "enum": ["server"],
+                    "description": "Send the content through the API even when blob storage takes direct uploads: for a caller that reaches only the API, such as a sandbox"
                   }
                 },
                 "additionalProperties": false
@@ -35896,7 +35911,8 @@
                   },
                   "sizeBytes": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 2147483648
                   },
                   "digest": {
                     "type": "string",
@@ -35904,6 +35920,11 @@
                   },
                   "logicalPath": {
                     "type": "string"
+                  },
+                  "strategy": {
+                    "type": "string",
+                    "enum": ["server"],
+                    "description": "Send the content through the API even when blob storage takes direct uploads: for a caller that reaches only the API, such as a sandbox"
                   }
                 },
                 "additionalProperties": false
@@ -36054,6 +36075,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
           },
           {
             "sixbSession": []
@@ -36214,6 +36238,9 @@
             "sixbCsrf": []
           },
           {
+            "sixbAccessToken": []
+          },
+          {
             "sixbSession": []
           }
         ],
@@ -36369,6 +36396,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
           },
           {
             "sixbSession": []
@@ -36626,6 +36656,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
           },
           {
             "sixbSession": []

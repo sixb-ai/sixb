@@ -6,6 +6,7 @@ export {
   fileNameFor,
   isBlobDigest,
   isFileRef,
+  MAX_FILE_UPLOAD_BYTES,
 } from "./browser"
 export { BlobStorageError } from "./errors"
 export { InMemoryBlobStorage } from "./in-memory"
