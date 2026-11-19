@@ -21466,6 +21466,10 @@ export type CreateArtifactResponses = {
        * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
       printable?: boolean
+      /**
+       * true for a video in a project that renders it to MP4: POST to its video route to render it
+       */
+      exportable?: boolean
     }
     warnings: Array<{
       code: string
@@ -22771,6 +22775,10 @@ export type UpdateArtifactResponses = {
        * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
       printable?: boolean
+      /**
+       * true for a video in a project that renders it to MP4: POST to its video route to render it
+       */
+      exportable?: boolean
     }
     warnings: Array<{
       code: string
@@ -23159,6 +23167,10 @@ export type FreezeArtifactVersionResponses = {
        * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
       printable?: boolean
+      /**
+       * true for a video in a project that renders it to MP4: POST to its video route to render it
+       */
+      exportable?: boolean
     }
   }
 }
@@ -24813,6 +24825,10 @@ export type RestoreArtifactResponses = {
        * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
        */
       printable?: boolean
+      /**
+       * true for a video in a project that renders it to MP4: POST to its video route to render it
+       */
+      exportable?: boolean
     }
   }
 }
@@ -25260,6 +25276,10 @@ export type GetArtifactVersionResponses = {
      * true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads
      */
     printable?: boolean
+    /**
+     * true for a video in a project that renders it to MP4: POST to its video route to render it
+     */
+    exportable?: boolean
   }
 }
 
@@ -25470,6 +25490,261 @@ export type PrintArtifactPdfResponses = {
 }
 
 export type PrintArtifactPdfResponse = PrintArtifactPdfResponses[keyof PrintArtifactPdfResponses]
+
+export type GetArtifactVideoData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}/video"
+}
+
+export type GetArtifactVideoErrors = {
+  /**
+   * Response for status 403
+   */
+  403: ArtifactErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ArtifactErrorResponse
+  /**
+   * The range asked for is not in the MP4
+   */
+  416: unknown
+}
+
+export type GetArtifactVideoError = GetArtifactVideoErrors[keyof GetArtifactVideoErrors]
+
+export type GetArtifactVideoResponses = {
+  /**
+   * The MP4
+   */
+  200: Blob | File
+  /**
+   * A range of the MP4
+   */
+  206: Blob | File
+}
+
+export type GetArtifactVideoResponse = GetArtifactVideoResponses[keyof GetArtifactVideoResponses]
+
+export type ExportArtifactVideoData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query?: {
+    /**
+     * true asks again for an MP4 that could not be rendered, instead of hearing why
+     */
+    retry?: "true" | "false"
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/video"
+}
+
+export type ExportArtifactVideoErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ExportArtifactVideoError = ExportArtifactVideoErrors[keyof ExportArtifactVideoErrors]
+
+export type ExportArtifactVideoResponses = {
+  /**
+   * Response for status 200
+   */
+  200:
+    | {
+        status: "ready"
+        /**
+         * How long it plays
+         */
+        durationMs: number
+        /**
+         * How large the MP4 is
+         */
+        sizeBytes: number
+      }
+    | {
+        status: "rendering"
+        /**
+         * How far it has come
+         */
+        progress: {
+          /**
+           * Its segments rendered
+           */
+          ready: number
+          /**
+           * All its segments: one per scene, and its sound
+           */
+          total: number
+          /**
+           * Every segment is rendered, and the MP4 is being joined from them
+           */
+          assembling: boolean
+        }
+      }
+    | {
+        status: "failed"
+        /**
+         * Why it could not be rendered: which scene, or the sound
+         */
+        reason: string
+      }
+}
+
+export type ExportArtifactVideoResponse =
+  ExportArtifactVideoResponses[keyof ExportArtifactVideoResponses]
+
+export type GetArtifactVideoStillData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+    /**
+     * The scene's id in the video
+     */
+    scene: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}/scenes/{scene}/still"
+}
+
+export type GetArtifactVideoStillErrors = {
+  /**
+   * Response for status 403
+   */
+  403: ArtifactErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ArtifactErrorResponse
+}
+
+export type GetArtifactVideoStillError =
+  GetArtifactVideoStillErrors[keyof GetArtifactVideoStillErrors]
+
+export type GetArtifactVideoStillResponses = {
+  /**
+   * The still
+   */
+  200: Blob | File
+}
+
+export type GetArtifactVideoStillResponse =
+  GetArtifactVideoStillResponses[keyof GetArtifactVideoStillResponses]
 
 export type GetArtifactBoardPreviewData = {
   body?: never

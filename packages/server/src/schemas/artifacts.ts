@@ -206,6 +206,12 @@ export const ArtifactVersionSchema = z.object({
     .describe(
       "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
     ),
+  exportable: z
+    .boolean()
+    .optional()
+    .describe(
+      "true for a video in a project that renders it to MP4: POST to its video route to render it"
+    ),
 })
 
 const ArtifactPdfKeySchema = z
@@ -238,6 +244,37 @@ export const ArtifactPdfQuerySchema = z.object({
 })
 
 export const ArtifactPdfDownloadQuerySchema = z.object({ key: ArtifactPdfKeySchema.optional() })
+
+export const ArtifactVideoExportResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    durationMs: z.number().int().min(0).describe("How long it plays"),
+    sizeBytes: z.number().int().min(0).describe("How large the MP4 is"),
+  }),
+  z.object({
+    status: z.literal("rendering"),
+    progress: z
+      .object({
+        ready: z.number().int().min(0).describe("Its segments rendered"),
+        total: z.number().int().min(0).describe("All its segments: one per scene, and its sound"),
+        assembling: z
+          .boolean()
+          .describe("Every segment is rendered, and the MP4 is being joined from them"),
+      })
+      .describe("How far it has come"),
+  }),
+  z.object({
+    status: z.literal("failed"),
+    reason: z.string().describe("Why it could not be rendered: which scene, or the sound"),
+  }),
+])
+
+export const ArtifactVideoExportQuerySchema = z.object({
+  retry: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("true asks again for an MP4 that could not be rendered, instead of hearing why"),
+})
 
 /** The parts of a media served as files, by the media content route. */
 export const ARTIFACT_MEDIA_FILE_PARTS = [
@@ -376,6 +413,10 @@ export const ArtifactVersionParamsSchema = ArtifactParamsSchema.extend({
     .string()
     .regex(/^(?:latest|[1-9]\d*)$/)
     .describe('A version number, or "latest"'),
+})
+
+export const ArtifactVideoStillParamsSchema = ArtifactVersionParamsSchema.extend({
+  scene: z.string().min(1).describe("The scene's id in the video"),
 })
 
 export const ArtifactBoardPreviewParamsSchema = ArtifactVersionParamsSchema.extend({
