@@ -299,6 +299,7 @@ export function useUploadFile(): UseMutationResult<
       client: inputClient,
       stagedUploadThresholdBytes,
       signal,
+      onProgress,
     }) =>
       uploadFile(file, {
         client: inputClient ?? client,
@@ -307,6 +308,7 @@ export function useUploadFile(): UseMutationResult<
         logicalPath,
         stagedUploadThresholdBytes,
         signal,
+        onProgress,
       }),
   })
 }
