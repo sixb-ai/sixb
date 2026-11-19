@@ -33,6 +33,8 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
+  ArrowRightFromLine,
+  ArrowRightToLine,
   Keyboard,
   Magnet,
   Maximize2,
@@ -73,13 +75,12 @@ import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
 import { editPoints, type LaidClip, nextEditPoint, sceneAt } from "./model"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
-import { ScenesStrip } from "./scenes"
 import { type EditorSelection, laidClips, openEnd, selectedClip, selectedScene } from "./selection"
 import { Timeline, type ZoomControls } from "./timeline"
 import { TranscriptPanel } from "./transcript-panel"
 
-// Editing a video: its picture and the selection's settings at the top, its scenes in a row, and
-// the timeline at the foot. Every edit is a change to the live document, everyone's at once, and
+// Editing a video: its picture and the selection's settings at the top, and the timeline at the
+// foot, its scenes along its first track. Every edit is a change to the live document, everyone's at once, and
 // a step of the reader's undo; the Agent's own changes show as they land, and the scene it is
 // changing glows. On a phone, the scenes are a list to reorder, trim and retitle.
 
@@ -109,7 +110,7 @@ export default function VideoEditor({
   const { width } = useSize(root)
   const compact = width > 0 && width < COMPACT_WIDTH
 
-  const { frame, playback } = usePreview(version, outline)
+  const { frame, playback, cover } = usePreview(version, outline)
   const timeMs = Math.round(playback.time * 1000)
 
   const [selection, setSelection] = useState<EditorSelection>(null)
@@ -123,7 +124,11 @@ export default function VideoEditor({
   )
   const [dropping, setDropping] = useState(false)
   const [inPlace, setInPlace] = useState<InPlaceText | null>(null)
-  const picking = useRef<((target: FrameVideoText | null) => void) | null>(null)
+  // The click on the picture waiting for the frame's answer, by its own request.
+  const picking = useRef<{
+    readonly answer: (target: FrameVideoText | null) => void
+    readonly timer: ReturnType<typeof setTimeout>
+  } | null>(null)
 
   useEffect(() => {
     if (!notice) return
@@ -169,7 +174,9 @@ export default function VideoEditor({
     return byScene
   }, [presence.peers, liveState.user?.id])
 
-  // The picture lags the timeline until the change is saved, and the version read again.
+  // The picture lags the timeline until the change is saved, and the version read again; offline,
+  // until the reader reconnects.
+  const offline = liveState.connection === "offline"
   const updating =
     liveState.pending || (liveState.save !== null && liveState.save.revision > version.revision)
 
@@ -325,27 +332,38 @@ export default function VideoEditor({
       setInPlace(null)
       return
     }
-    const timer = setTimeout(() => {
-      picking.current = null
-      playback.toggle()
-    }, 400)
-    picking.current = (target) => {
-      clearTimeout(timer)
-      picking.current = null
-      const found = target && composition ? textOf(target) : null
-      if (found) setInPlace(found)
-      else playback.toggle()
+    // A click before the last one's answer replaces it, and the first answer then serves it once.
+    if (picking.current) clearTimeout(picking.current.timer)
+    const request = {
+      timer: setTimeout(() => {
+        if (picking.current !== request) return
+        picking.current = null
+        playback.toggle()
+      }, 400),
+      answer: (target: FrameVideoText | null) => {
+        if (picking.current !== request) return
+        clearTimeout(request.timer)
+        picking.current = null
+        const found = target && composition ? textOf(target) : null
+        if (found) setInPlace(found)
+        else playback.toggle()
+      },
     }
+    picking.current = request
     frame.current?.send("video.pick", point).catch(() => {})
   }
 
-  /** The text of a scene's file the frame found, by its words and their place among the same. */
+  /**
+   * The text of a scene's file the frame found, by its words and their place among the same; none
+   * for words of a composition the editor does not open, or no longer where the frame saw them.
+   */
   const textOf = (target: FrameVideoText): InPlaceText | null => {
-    const file = scenes.find((scene) => scene.id === target.scene)?.src ?? VIDEO_ENTRY
+    const file = target.scene ? scenes.find((scene) => scene.id === target.scene)?.src : VIDEO_ENTRY
+    if (!file) return null
     const same = (state.timelines.get(file)?.texts ?? []).filter(
       (text) => text.tag === target.tag && text.text === target.text
     )
-    const text = same[target.occurrence] ?? same[0]
+    const text = same[target.occurrence]
     return text ? { file, ref: text.ref, text: text.text, rect: target.rect } : null
   }
 
@@ -515,8 +533,10 @@ export default function VideoEditor({
           version={version}
           outline={outline}
           frame={frame}
+          cover={cover}
           playback={playback}
           updating={updating}
+          offline={offline}
           compact
         >
           {!playback.playing && playback.phase === "ready" ? (
@@ -593,11 +613,13 @@ export default function VideoEditor({
             version={version}
             outline={outline}
             frame={frame}
+            cover={cover}
             playback={playback}
             updating={updating}
+            offline={offline}
             onPick={pick}
             onFrameEvent={(event) => {
-              if (event.event === "video.picked") picking.current?.(event.params.target)
+              if (event.event === "video.picked") picking.current?.answer(event.params.target)
             }}
           >
             {inPlace ? (
@@ -677,21 +699,10 @@ export default function VideoEditor({
         </aside>
       </div>
 
-      <ScenesStrip
-        composition={composition}
-        timelines={state.timelines}
-        target={target}
-        selected={open?.id}
-        playing={playing?.id}
-        agentScenes={agentScenes}
-        people={people}
-        formatLength={length}
-        actions={sceneActions}
-      />
-
       {banner}
 
-      <div className="flex max-h-[45%] min-h-[12rem] shrink-0 flex-col border-t border-border">
+      {/* A height of its own, so opening a scene with more rows never moves the picture. */}
+      <div className="flex h-[min(45%,18.5rem)] min-h-[12rem] shrink-0 flex-col border-t border-border">
         <Timeline
           composition={composition}
           clips={clips}
@@ -701,9 +712,12 @@ export default function VideoEditor({
           marks={marks}
           snapping={snapping}
           agentScenes={agentScenes}
+          people={people}
+          timelines={state.timelines}
           target={target}
           uploads={uploads}
           dropTarget={dropping}
+          formatLength={length}
           edits={{
             seek,
             select: setSelection,
@@ -722,6 +736,7 @@ export default function VideoEditor({
               )
             },
             sceneLength: sceneActions.sceneLength,
+            scene: sceneActions,
           }}
           toolbar={(zoom) => (
             <Toolbar
@@ -919,10 +934,10 @@ function Toolbar({
         <Trash2 />
       </ToolButton>
       <ToolButton label={editor.markIn} onClick={onMarkIn} pressed={marks.in !== undefined}>
-        <span className="text-[13px] font-semibold">I</span>
+        <ArrowRightFromLine />
       </ToolButton>
       <ToolButton label={editor.markOut} onClick={onMarkOut} pressed={marks.out !== undefined}>
-        <span className="text-[13px] font-semibold">O</span>
+        <ArrowRightToLine />
       </ToolButton>
       {marked ? (
         <>
@@ -975,15 +990,20 @@ function Toolbar({
           </TooltipTrigger>
           <TooltipContent>{editor.magneticHint}</TooltipContent>
         </Tooltip>
-        <Toggle
-          size="sm"
-          pressed={snapping}
-          onPressedChange={onSnapping}
-          aria-label={editor.snapping}
-          className="h-8 px-2 text-[13px]"
-        >
-          {editor.snapping}
-        </Toggle>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Toggle
+              size="sm"
+              pressed={snapping}
+              onPressedChange={onSnapping}
+              aria-label={editor.snapping}
+              className="h-8 px-2 text-[13px]"
+            >
+              {editor.snapping}
+            </Toggle>
+          </TooltipTrigger>
+          <TooltipContent>{editor.snappingHint}</TooltipContent>
+        </Tooltip>
         <Divider />
         <ToolButton label={editor.zoomOut} onClick={zoom.zoomOut} disabled={!zoom.canZoomOut}>
           <ZoomOut />
@@ -998,6 +1018,7 @@ function Toolbar({
           <PopoverTrigger asChild>
             <button
               type="button"
+              title={editor.shortcuts}
               aria-label={editor.shortcuts}
               className="grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-4"
             >

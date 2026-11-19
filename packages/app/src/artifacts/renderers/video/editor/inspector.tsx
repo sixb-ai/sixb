@@ -1,9 +1,10 @@
-import type {
-  VideoClip,
-  VideoComposition,
-  VideoFileTimeline,
-  VideoScene,
-  VideoText,
+import {
+  VIDEO_ENTRY,
+  type VideoClip,
+  type VideoComposition,
+  type VideoFileTimeline,
+  type VideoScene,
+  type VideoText,
 } from "@sixb/core/artifacts/live"
 import { Button, Slider } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -12,6 +13,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import { clipName, sceneName } from "./selection"
+import { TRACK_TONE } from "./timeline"
 
 // What the selection is, and its settings: a scene's name, length and words on screen; a clip's
 // timing, sound and words. Each field changes the video once the reader commits it, with Enter or
@@ -116,7 +118,7 @@ function SceneInspector({
         <h3 className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">{sceneName(scene)}</h3>
       </header>
 
-      <Section title={messages.scenes}>
+      <Section title={messages.scene}>
         <TextField
           label={messages.name}
           value={scene.label ?? ""}
@@ -187,10 +189,8 @@ function ClipInspector({
       <header className="flex items-center gap-2">
         <span
           className={cn(
-            "grid size-7 shrink-0 place-items-center rounded-md text-white [&_svg]:size-3.5",
-            clip.track === "picture" && "bg-sky-700",
-            clip.track === "text" && "bg-violet-600",
-            clip.track === "sound" && "bg-emerald-700"
+            "grid size-7 shrink-0 place-items-center rounded-md [&_svg]:size-3.5",
+            TRACK_TONE[clip.track]
           )}
         >
           {clip.kind === "audio" ? (
@@ -211,9 +211,10 @@ function ClipInspector({
         </div>
       </header>
 
-      <Section title={messages.timeline}>
+      <Section title={messages.timing}>
         <SecondsField
           label={messages.start}
+          hint={file === VIDEO_ENTRY ? messages.startIn.video : messages.startIn.scene}
           ms={clip.startMs}
           min={0}
           onCommit={(ms) => actions.clipTiming(file, clip, { startMs: ms })}
@@ -348,8 +349,9 @@ export function SecondsField({
 
   return (
     <div className={cn("flex items-center justify-between gap-3", compact && "gap-2")}>
-      <label htmlFor={id} className="text-[13px] text-muted-foreground" title={hint}>
+      <label htmlFor={id} className="flex min-w-0 flex-col text-[13px] text-muted-foreground">
         {label}
+        {hint ? <span className="text-[11px] text-muted-foreground/75">{hint}</span> : null}
       </label>
       <div className="flex h-8 w-24 items-center rounded-md border border-input bg-background pr-2 focus-within:ring-2 focus-within:ring-ring/50">
         <input

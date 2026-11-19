@@ -10,6 +10,58 @@ export interface TranscriptWord {
   readonly endMs: number
 }
 
+/**
+ * How finely a transcript is timed: each word, or only phrases, as a model that times sentences,
+ * or the whole text as one entry, gives them. Phrases are cut whole: the editor never pretends to
+ * know where a word inside one starts.
+ */
+export type TranscriptTiming = "words" | "phrases"
+
+/** A transcript as the editor reads it: its timed entries, in spoken order, and how fine they are. */
+export interface Transcript {
+  readonly words: readonly TranscriptWord[]
+  readonly timing: TranscriptTiming
+}
+
+/** An entry this long, or with a space inside, is a phrase, not a word. */
+const PHRASE_CHARACTERS = 24
+
+/**
+ * A transcript's file read for editing: its words when the model timed each, else whichever of its
+ * words or segments is finer, as phrases. Entries it cannot place cost only themselves.
+ */
+export function readTranscript(body: Readonly<Record<string, unknown>>): Transcript {
+  const words = timedEntries(body.words)
+  if (words.length > 0 && wordTimed(words)) return { words, timing: "words" }
+
+  const segments = timedEntries(body.segments)
+  const finer = segments.length > words.length ? segments : words
+  return { words: finer, timing: wordTimed(finer) && finer.length > 0 ? "words" : "phrases" }
+}
+
+/** Whether nearly every entry is one word: a few phrases, such as a name, do not count. */
+function wordTimed(entries: readonly TranscriptWord[]): boolean {
+  const phrases = entries.filter(
+    (entry) => /\s/.test(entry.text) || entry.text.length > PHRASE_CHARACTERS
+  ).length
+  return phrases <= entries.length * 0.1
+}
+
+function timedEntries(value: unknown): TranscriptWord[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null) return []
+    const { text, startMs, endMs } = entry as Record<string, unknown>
+    if (typeof text !== "string" || !isTime(startMs) || !isTime(endMs)) return []
+    const words = text.replace(/\s+/g, " ").trim()
+    return words === "" ? [] : [{ text: words, startMs, endMs: Math.max(endMs, startMs) }]
+  })
+}
+
+function isTime(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+}
+
 /** The air left beside a cut, so a word kept is never clipped. */
 export const AIR_MS = 120
 
@@ -155,10 +207,21 @@ export function wordAt(words: readonly TranscriptWord[], ms: number): number {
   return found
 }
 
-/** The words whose text holds `query`, by index, its case and accents aside. */
-export function findWords(words: readonly TranscriptWord[], query: string): number[] {
+/**
+ * The words whose text holds `query`, by index, its case and accents aside: the first of each run
+ * of words it spans, or each phrase that holds it whole.
+ */
+export function findWords(
+  words: readonly TranscriptWord[],
+  query: string,
+  timing: TranscriptTiming = "words"
+): number[] {
   const wanted = fold(query.trim())
   if (wanted === "") return []
+
+  if (timing === "phrases") {
+    return words.flatMap((word, index) => (fold(word.text).includes(wanted) ? [index] : []))
+  }
 
   // A query of several words matches them in a row.
   const parts = wanted.split(/\s+/)
