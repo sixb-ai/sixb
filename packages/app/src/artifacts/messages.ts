@@ -1298,7 +1298,8 @@ export const fr: Translation<ArtifactMessages> = {
     fullscreen: "Plein écran",
     exitFullscreen: "Quitter le plein écran",
     failed: "Cette vidéo n’a pas pu démarrer",
-    failedDetail: "Réessayez, ou ouvrez-la dans un autre navigateur si elle ne démarre toujours pas.",
+    failedDetail:
+      "Réessayez, ou ouvrez-la dans un autre navigateur si elle ne démarre toujours pas.",
     retry: "Réessayer",
     unsupported: "Cette vidéo ne peut pas être lue ici",
     unsupportedDetail: "Elle a été faite pour une autre version du lecteur.",
