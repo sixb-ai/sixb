@@ -20,6 +20,7 @@ import {
 } from "@sixb/core/internal/artifacts/frames"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type {
+  ArtifactFile,
   ArtifactFrameTarget,
   ArtifactMediaRecord,
   ArtifactStorage,
@@ -118,18 +119,16 @@ async function frameResponse(
   if (!file) return notFound()
 
   const search = new URL(request.url).searchParams
-  // A video's frame plays each recording's proxy once it is ready, named in its HTML, its scenes'
-  // included, by an address of the proxy's own: a page that loaded the original keeps it.
-  const video = !lent && version.outline.kind === "video"
-  const scene = video && isHtml(file.path)
-  const media =
-    scene || (video && search.has(MEDIA_PROXY_PARAM))
-      ? await videoMedia(storage, host.id, version)
-      : new Map<string, ArtifactMediaRecord>()
+  // A video's frame plays each recording's proxy once it is ready, its own and those other
+  // artifacts lend it, named in its HTML, its scenes' included, by an address of the proxy's own:
+  // a page that loaded the original keeps it.
+  const video = frame.version.outline.kind === "video"
+  const recordings =
+    video && !lent && isHtml(file.path) ? await videoRecordings(storage, host.id, frame) : undefined
 
   const layout = frameLayout(version)
   const entry = !lent && layout !== null && frameEntries(version).includes(file.path)
-  if (scene && !entry) {
+  if (recordings && !entry) {
     const text = await readText(host, file.file)
     if (text === null) return notFound()
     headers.set("content-type", "text/html; charset=utf-8")
@@ -137,9 +136,10 @@ async function frameResponse(
     if (options.head) return new Response(null, { headers })
 
     const referenced = rewriteFrameReferences(text, frame.targets, file.path)
-    return new Response(rewriteVideoProxies(referenced, file.path, version.files, media), {
-      headers,
-    })
+    return new Response(
+      rewriteVideoProxies(referenced, file.path, recordings.files, recordings.media),
+      { headers }
+    )
   }
 
   if (entry && layout) {
@@ -166,7 +166,9 @@ async function frameResponse(
     const referenced = rewriteFrameReferences(source, frame.targets, file.path)
     return new Response(
       injectFrameAssets(
-        video ? rewriteVideoProxies(referenced, file.path, version.files, media) : referenced,
+        recordings
+          ? rewriteVideoProxies(referenced, file.path, recordings.files, recordings.media)
+          : referenced,
         layout,
         file.path,
         outline.kind === "document" ? outline.paper : undefined
@@ -175,8 +177,12 @@ async function frameResponse(
     )
   }
 
-  // A proxy that is not the recording's ready one is never served as if it were.
-  const proxy = video ? requestedMediaProxy(file, media.get(file.file.digest), search) : undefined
+  // A proxy that is not the recording's ready one is never served as if it were. A lent one is
+  // served only where its original is: under a target the frame was issued for its reader.
+  const proxy =
+    video && search.has(MEDIA_PROXY_PARAM)
+      ? requestedMediaProxy(file, await keptMedia(storage, host.id, file), search)
+      : undefined
   if (proxy === null) return notFound()
 
   const response = await createFileContentResponse({
@@ -193,19 +199,53 @@ async function frameResponse(
   return response
 }
 
-/** What is derived of each recording a video's version holds, by the digest of its bytes. */
-async function videoMedia(
+/**
+ * The recordings a video's frame plays, at the paths it serves them: the version's own, and each
+ * one a target lends it under `__sixb/ref/`, with what is derived of each, by the digest of its
+ * bytes. Only a file a target names is lent, so only one its reader may read.
+ */
+async function videoRecordings(
   storage: ArtifactStorage,
   projectId: string,
-  version: ArtifactVersionRecord
-): Promise<ReadonlyMap<string, ArtifactMediaRecord>> {
-  const digests = version.files
-    .filter(({ file }) => /^(video|audio)\//.test(file.mediaType ?? ""))
-    .map(({ file }) => file.digest)
-  if (digests.length === 0) return new Map()
+  frame: {
+    readonly version: ArtifactVersionRecord
+    readonly targets: readonly ArtifactFrameTarget[]
+  }
+): Promise<{
+  readonly files: readonly ArtifactFile[]
+  readonly media: ReadonlyMap<string, ArtifactMediaRecord>
+}> {
+  const files = [...frame.version.files]
+  for (const target of frame.targets) {
+    const path = parseArtifactAddress(target.address)?.path
+    const lender = path ? await lenderVersion(storage, projectId, target) : null
+    const lent = lender?.files.find((candidate) => candidate.path === path)
+    if (!lent || !isRecording(lent)) continue
 
-  const records = await storage.listMedia({ projectId, digests })
-  return new Map(records.map((record) => [record.digest, record]))
+    files.push({
+      path: `${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`,
+      file: lent.file,
+    })
+  }
+  const digests = new Set(files.filter(isRecording).map(({ file }) => file.digest))
+  if (digests.size === 0) return { files, media: new Map() }
+
+  const records = await storage.listMedia({ projectId, digests: [...digests] })
+  return { files, media: new Map(records.map((record) => [record.digest, record])) }
+}
+
+/** What is derived of a recording, by the digest of its bytes. */
+async function keptMedia(
+  storage: ArtifactStorage,
+  projectId: string,
+  file: ArtifactFile
+): Promise<ArtifactMediaRecord | undefined> {
+  const [record] = await storage.listMedia({ projectId, digests: [file.file.digest] })
+  return record
+}
+
+function isRecording({ file }: ArtifactFile): boolean {
+  return /^(video|audio)\//.test(file.mediaType ?? "")
 }
 
 async function readText(host: SixbHostView, file: FileRef): Promise<string | null> {
