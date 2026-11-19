@@ -18,7 +18,7 @@ import { cannotRender, placeVideoProject, runVideoScript, type VideoHost } from 
 
 // The stills of a video version's scenes, asked for when it is published: the worker opens a blank
 // sandbox of the project that reaches the API, lays out a project holding the scenes that miss one
-// and those on screen with them, and HyperFrames snapshots each at its middle. Each is kept under
+// and those on screen with them, and HyperFrames snapshots each at its segment's middle. Each is kept under
 // its scene's still key, so a version that keeps a scene keeps its still.
 
 /** Where the project is laid out in the sandbox, and where the script writes the stills. */

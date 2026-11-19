@@ -369,6 +369,11 @@ export interface ArtifactVideoSegmentRequestedQueueJob
       readonly media: readonly VideoMediaFile[]
       /** A scene's frames in that project: from `from`, up to `to`. */
       readonly frames?: { readonly from: number; readonly to: number }
+      /**
+       * The export that asked for it, as it asked: once the segment is kept, or why it could not
+       * be, that export looks again at once. Others that share the segment look on their own.
+       */
+      readonly waitingExport?: ArtifactVideoExportRequestedQueueJob["payload"]
     }
   > {}
 

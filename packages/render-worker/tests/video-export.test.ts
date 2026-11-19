@@ -25,7 +25,7 @@ import type {
 } from "@sixb/core/queues"
 import { createTestSixb } from "@sixb/core/testing"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
-import { assembleVideoExport } from "../src/video-export"
+import { assembleVideoExport, failVideoExport } from "../src/video-export"
 import { failVideoSegment, renderVideoSegment } from "../src/video-segment"
 import { startDownloadApi } from "./download-api"
 
@@ -101,14 +101,17 @@ afterEach(() => {
 
 const scene = (id: string, body = `<h1>${id}</h1>`) =>
   `<template><div data-composition-id="${id}" data-width="1280" data-height="720">${body}</div></template>`
-const host = (id: string, start: string, duration: string) =>
-  `<div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="${duration}"></div>`
+const host = (id: string, start: string, duration: string, label?: string) =>
+  `<div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="${duration}"${label ? ` data-label="${label}"` : ""}></div>`
 
-/** A title, a demo over a clip, and an outro that fades in over the demo's last half second. */
+/**
+ * A title, a demo over a clip, named "The product", and an outro that fades in over the demo's
+ * last half second.
+ */
 const LAUNCH: Readonly<Record<string, string>> = {
   "index.html": `<html><body><div data-composition-id="main" data-width="1280" data-height="720" data-duration="6">${[
     host("intro", "0", "2"),
-    host("demo", "intro", "2.5"),
+    host("demo", "intro", "2.5", "The product"),
     host("outro", "demo - 0.5", "2"),
     '<audio src="media/music.m4a" data-start="0" data-duration="6"></audio>',
   ].join("")}</div></body></html>`,
@@ -185,7 +188,18 @@ async function setup(sandboxes = new VideoSandboxes()) {
     if (!storage.artifacts) throw new Error("Expected artifact storage.")
     return storage.artifacts
   }
-  return { sixb, version, sandboxes, claimable, exportJob, assemble, render, text, artifacts }
+  return {
+    sixb,
+    version,
+    queues,
+    sandboxes,
+    claimable,
+    exportJob,
+    assemble,
+    render,
+    text,
+    artifacts,
+  }
 }
 
 const segmentsOf = (jobs: readonly RenderQueueJob[]) =>
@@ -208,7 +222,7 @@ describe("a video's export in the render worker", () => {
     const segments = segmentsOf(asked)
     expect(segments.map(({ payload }) => payload.segment)).toEqual([
       { kind: "scene", scene: "intro", startFrame: 0, endFrame: 60 },
-      { kind: "scene", scene: "demo", startFrame: 60, endFrame: 120 },
+      { kind: "scene", scene: "demo", label: "The product", startFrame: 60, endFrame: 120 },
       { kind: "scene", scene: "outro", startFrame: 120, endFrame: 180 },
       { kind: "sound" },
     ])
@@ -266,7 +280,10 @@ describe("a video's export in the render worker", () => {
       "sound",
     ])
 
-    await assemble(job)
+    // The last segment kept, the export looks again at once, and joins them.
+    const [look] = await claimable()
+    expect(look?.id).toBe(job.id)
+    await assemble(look as ArtifactVideoExportRequestedQueueJob)
     const joined = sandboxes.ran.at(-1)
     // Its frames and their rate, the sound, then each scene's segment, in the order they play.
     expect(joined?.mode).toBe("assemble")
@@ -278,8 +295,8 @@ describe("a video's export in the render worker", () => {
     const [mp4] = await artifacts().listVideoRenders({ projectId, keys: [plan.key] })
     if (!mp4 || "failure" in mp4) throw new Error("Expected the MP4.")
     expect(mp4.file).toMatchObject({ fileName: "Launch Q4.mp4", mediaType: "video/mp4" })
-    // The demo's project hosts the outro, which fades in over its end.
-    expect(await text(mp4.file)).toBe("intro|demo+outro|demo+outro")
+    // The outro fades in as the demo's segment ends: only its own project hosts both.
+    expect(await text(mp4.file)).toBe("intro|demo|demo+outro")
 
     expect(await sixb.artifacts.video(version.artifactId)).toEqual({
       status: "ready",
@@ -288,6 +305,41 @@ describe("a video's export in the render worker", () => {
       sizeBytes: mp4.file.sizeBytes,
     })
     expect(await claimable()).toEqual([])
+  })
+
+  // Reproduce by leaving nudgeVideoExport out of renderVideoSegment's `keep`: the export looks
+  // again only VIDEO_EXPORT_JOB.recheckMs later.
+  test("asks the export that waits for a segment to look again as soon as it is kept", async () => {
+    const { exportJob, assemble, render, claimable } = await setup()
+    const job = await exportJob()
+    await assemble(job)
+    const [intro] = segmentsOf(await claimable())
+
+    await render(intro as ArtifactVideoSegmentRequestedQueueJob)
+    const [look] = await claimable()
+    expect(look?.id).toBe(job.id)
+    expect(look?.payload).toMatchObject({ key: job.payload.key, waiting: true })
+    expect(look?.payload).not.toHaveProperty("retry")
+  })
+
+  // Reproduce by returning for a key that differs from the payload's, as it once did: the job
+  // completes, and asking again for the export finds it settled and asks nothing.
+  test("tries again while the version that asked keys exports otherwise, then says so", async () => {
+    const { exportJob, assemble, artifacts } = await setup()
+    const job = await exportJob()
+    const skewed = { ...job, payload: { ...job.payload, key: "f".repeat(64) } }
+
+    const failed = await assemble(skewed).catch((error: unknown) => error)
+    expect(String(failed)).toContain("asked for by another version of Sixb")
+
+    await failVideoExport({
+      host: { id: projectId, storage: { artifacts: artifacts() } },
+      job: skewed,
+    })
+    const [kept] = await artifacts().listVideoRenders({ projectId, keys: [skewed.payload.key] })
+    expect(kept).toMatchObject({
+      failure: "It was asked for while Sixb was being updated. Try again.",
+    })
   })
 
   // Reproduce by throwing for a skipped report in renderVideoSegment: the job tries again with a
@@ -313,20 +365,23 @@ describe("a video's export in the render worker", () => {
   // Reproduce by asking for the segments without `replace` on a retry: the failed segment's job,
   // settled, answers the ask, and the export waits forever.
   test("names the scene that could not render, and renders it again when asked", async () => {
-    const { sixb, version, exportJob, assemble, claimable, artifacts } = await setup()
+    const { sixb, version, queues, exportJob, assemble, claimable, artifacts } = await setup()
     const job = await exportJob()
     await assemble(job)
     const [, demo] = segmentsOf(await claimable())
     if (!demo) throw new Error("Expected the demo's segment.")
     await failVideoSegment({
-      host: { id: projectId, storage: { artifacts: artifacts() } },
+      host: { id: projectId, storage: { artifacts: artifacts() }, queues },
       job: demo,
     })
 
+    // Reproduce by naming the scene by its id alone: "Scene 'demo'".
     expect(await sixb.artifacts.video(version.artifactId)).toEqual({
       status: "failed",
-      reason: "Scene 'demo' could not be rendered. Try again in a moment.",
+      reason: "Scene 'The product' could not be rendered. Try again in a moment.",
     })
+    // The export that waited for it heard at once.
+    expect((await claimable()).map(({ id }) => id)).toEqual([job.id])
 
     await sixb.artifacts.video(version.artifactId, { retry: true })
     const [retried] = await claimable()

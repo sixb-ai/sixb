@@ -7,9 +7,9 @@ import {
   videoSegmentTimeoutMs,
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactVideoSegmentRequestedQueueJob } from "@sixb/core/queues"
-import type { RenderHost } from "./host"
 import { inRenderSandbox, renderApiOrigin, storeSandboxFile } from "./sandbox"
-import { cannotRender, placeVideoProject, runVideoScript, type VideoHost } from "./video-project"
+import { nudgeVideoExport, type VideoExportHost } from "./video-export"
+import { cannotRender, placeVideoProject, runVideoScript } from "./video-project"
 
 // A segment of a video's export, which its export asked for: the frames of one scene, rendered
 // alone by HyperFrames from a project that holds that scene and those on screen with it, or the
@@ -29,7 +29,7 @@ const RENDER_SHARE = 0.85
  * more: what an earlier delivery kept is found.
  */
 export async function renderVideoSegment(input: {
-  readonly host: VideoHost
+  readonly host: VideoExportHost
   readonly job: ArtifactVideoSegmentRequestedQueueJob
   readonly signal: AbortSignal
 }): Promise<void> {
@@ -41,8 +41,11 @@ export async function renderVideoSegment(input: {
   const [kept] = await artifacts.listVideoRenders({ projectId: host.id, keys: [key] })
   if (kept) return
 
-  const keep = (made: { readonly file: FileRef } | { readonly failure: string }) =>
-    artifacts.putVideoRender({ projectId: host.id, key, createdAt: new Date(), ...made })
+  // Kept, or why not: the export that waits for it looks again at once.
+  const keep = async (made: { readonly file: FileRef } | { readonly failure: string }) => {
+    await artifacts.putVideoRender({ projectId: host.id, key, createdAt: new Date(), ...made })
+    await nudgeVideoExport(host, job.payload.waitingExport)
+  }
 
   if (!host.sandboxes) {
     await keep({ failure: "This project has no sandboxes to render videos in." })
@@ -136,19 +139,23 @@ export async function renderVideoSegment(input: {
  * waits for it hears so, until someone asks again.
  */
 export async function failVideoSegment(input: {
-  readonly host: Pick<RenderHost, "id" | "storage">
+  readonly host: Pick<VideoExportHost, "id" | "storage" | "queues">
   readonly job: ArtifactVideoSegmentRequestedQueueJob
 }): Promise<void> {
-  const { segment } = input.job.payload
-  await input.host.storage.artifacts?.putVideoRender({
+  const { segment, waitingExport } = input.job.payload
+  const artifacts = input.host.storage.artifacts
+  if (!artifacts) return
+
+  await artifacts.putVideoRender({
     projectId: input.host.id,
     key: input.job.payload.key,
     failure:
       segment.kind === "sound"
         ? "Its sound could not be mixed. Try again in a moment."
-        : `Scene '${segment.scene}' could not be rendered. Try again in a moment.`,
+        : `Scene '${segment.label ?? segment.scene}' could not be rendered. Try again in a moment.`,
     createdAt: new Date(),
   })
+  await nudgeVideoExport(input.host, waitingExport)
 }
 
 /** How logs name a segment: its scene, or the sound, and the version it was asked for. */
