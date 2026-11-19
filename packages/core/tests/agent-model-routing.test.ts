@@ -332,14 +332,17 @@ describe("Sixb picks the model of each turn", () => {
 
     await userScope(host).agent.runs.request({ text: "Refactor the billing module" })
 
-    const { options } = decision.evaluate.mock.calls[0]?.[0].questions.tier as {
-      readonly options: Record<LanguageModelTier, string>
-    }
-    expect(options.heavy).toEndWith(" This tier's model: Changes to the code across a repository.")
-    expect(options.standard).toEndWith(
+    const tier = decision.evaluate.mock.calls[0]?.[0].questions.tier
+    expect(tier?.type).toBe("choice")
+    const options = tier?.type === "choice" ? tier.options : {}
+
+    expect(String(options.heavy)).toEndWith(
+      " This tier's model: Changes to the code across a repository."
+    )
+    expect(String(options.standard)).toEndWith(
       " This tier's model: Everyday questions about the project's data."
     )
-    expect(options.light).not.toContain("This tier's model")
+    expect(String(options.light)).not.toContain("This tier's model")
   })
 
   test("steps down on an easy turn right after the thread moves workspaces", async () => {
