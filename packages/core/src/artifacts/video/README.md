@@ -88,11 +88,22 @@ edit, in the live document and in the Agent's diffs.
   styles, and what it shows itself;
 - the scene's host and those of the scenes on screen with it, as one fades into the next, with
   their times resolved and their order in `index.html`, which stacks them;
-- the scene's start in the video, only when `rootTimeline` says the root plays or animates
-  something of its own: a timed element, a recording, a script, a CSS animation or transition, or
-  a linked stylesheet, which is not read;
+- the scene's start in the video, only when the root plays or animates something of its own: a
+  timed element, a recording, a script that may build a timeline, or CSS that moves;
 - every other file, but two kinds: the other scenes' HTML, and the videos and sounds neither the
   root, the scene, nor a scene beside it plays, the heavy files a version mostly changes.
+
+`rootTimeline` reads `index.html` alone; publishing then reads what it links. An inline script
+counts, as it may build the root's timeline, and so does a script of the version that registers
+one (`__timelines`); a library, from a CDN or the version, only loads. A stylesheet of the version
+counts when its CSS moves, Google Fonts never, and any other stylesheet from elsewhere always,
+since it cannot be read.
+
+A scene's own motion does not count. HyperFrames runs a scene's CSS animations and its registered
+GSAP timeline from the scene's start, wherever it plays. Measured on 0.9.68: one scene, a box
+moved by a 2 s CSS animation, then by a GSAP timeline, placed at 0 s and at 2 s, each range
+rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are identical, all 60
+distinct. The control, the same box animated in the root, differs on all 60 frames.
 
 So trimming a scene re-renders it and the scenes it overlaps, and those after it only when the
 root has a timeline of its own. An image, a stylesheet, a font, a script, or a nested composition

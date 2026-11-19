@@ -543,6 +543,19 @@ describe("publishing a video", () => {
       demo: expect.not.stringMatching(untrimmed.demo ?? ""),
     })
 
+    // A scene's own CSS animation and GSAP timeline run from its start, wherever it plays: an
+    // outro that animates keeps its key too (measured with HyperFrames, see video/README.md).
+    const animated = scene(
+      "outro",
+      "<style>h1 { animation: rise 1s }</style><script>window.__timelines = { outro: gsap.timeline() }</script>"
+    )
+    const moving = async (root: string) =>
+      keysOf(
+        (await publish({ ...LAUNCH, "index.html": root, "scenes/outro.html": animated })).version
+          .outline
+      ).outro
+    expect(await moving(trim(silent))).toBe(await moving(silent))
+
     // A start written otherwise, or a new label, shows the same frames.
     const rewritten = silent.replace('data-start="intro"', 'data-start="2"')
     expect(await keys(rewritten.replace('data-label="Opening"', 'data-label="Hello"'))).toEqual(
