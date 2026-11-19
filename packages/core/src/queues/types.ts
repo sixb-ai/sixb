@@ -298,8 +298,25 @@ export interface ArtifactPreviewsRequestedQueueJob
     }
   > {}
 
-/** What renders in a browser, in a sandbox of the project: RenderWorker consumes it. */
-export type RenderQueueJob = ArtifactPdfRequestedQueueJob | ArtifactPreviewsRequestedQueueJob
+/**
+ * A video or a sound was published that nothing has been derived from yet: the render worker
+ * derives its proxy, poster, filmstrip, peaks, cuts and transcript in a blank sandbox of the
+ * project. One job per digest, so a file published again asks nothing more.
+ */
+export interface ArtifactMediaRequestedQueueJob
+  extends QueueJob<
+    "artifact.media.requested",
+    {
+      /** The original, which the sandbox fetches by a download URL. */
+      readonly file: FileRef
+    }
+  > {}
+
+/** What renders in a sandbox of the project: RenderWorker consumes it. */
+export type RenderQueueJob =
+  | ArtifactPdfRequestedQueueJob
+  | ArtifactPreviewsRequestedQueueJob
+  | ArtifactMediaRequestedQueueJob
 
 export interface Queues {
   readonly vectorIndexing: Queue<
@@ -313,9 +330,9 @@ export interface Queues {
    */
   readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   /**
-   * What the framework renders in a browser, in a sandbox of the project: a designed document's
-   * PDF, and the pictures of a canvas's boards. RenderWorker consumes this lane, so a render never waits behind an agent's run or takes
-   * its slot.
+   * What the framework renders in a sandbox of the project: a designed document's PDF, the
+   * pictures of a canvas's boards, and what is derived of a video or a sound. RenderWorker
+   * consumes this lane, so a render never waits behind an agent's run or takes its slot.
    */
   readonly renders: Queue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>

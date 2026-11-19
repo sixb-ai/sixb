@@ -20,6 +20,7 @@ export type {
   AgentQueueJobFailureCode,
   AgentRunRequestedQueueJob,
   AgentWorkflowNodeRequestedQueueJob,
+  ArtifactMediaRequestedQueueJob,
   ArtifactPdfRequestedQueueJob,
   ArtifactPreviewsRequestedQueueJob,
   ClaimedQueueJob,
