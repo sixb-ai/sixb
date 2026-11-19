@@ -36,6 +36,12 @@ export interface FileSource {
   /** Identity of its bytes in the query cache. */
   readonly queryKey: readonly unknown[]
   readonly load: (signal: AbortSignal) => Promise<Blob>
+  /** The artifact version's file it is: a video or a sound of one has a poster and a proxy. */
+  readonly artifactFile?: {
+    readonly artifactId: string
+    readonly version: number
+    readonly path: string
+  }
 }
 
 export function artifactFileSource(input: {
@@ -58,6 +64,7 @@ export function artifactFileSource(input: {
     inlineUrl: url("inline"),
     downloadUrl: url("attachment"),
     queryKey: ["artifact-file", input.artifactId, input.version, input.path, input.fileRef.digest],
+    artifactFile: { artifactId: input.artifactId, version: input.version, path: input.path },
     load: async (signal) => {
       const response = await getArtifactFileContent({
         path: { artifactId: input.artifactId, version: String(input.version) },
@@ -201,6 +208,12 @@ export function documentPdfUrl(
     `/api/artifacts/${encodeURIComponent(version.artifactId)}/versions/${version.version}/pdf`,
     key ? { key } : {}
   )
+}
+
+/** An address the API answered with, such as `/api/...?path=...`, as {@link contentUrl} makes. */
+export function apiFileUrl(address: string): string {
+  const [routePath = "", search = ""] = address.split("?")
+  return contentUrl(routePath, Object.fromEntries(new URLSearchParams(search)))
 }
 
 /**
