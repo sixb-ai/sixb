@@ -96,23 +96,6 @@ export function Scrubber({
         </div>
       ) : null}
 
-      {marks.map((mark) => (
-        <button
-          key={mark.id}
-          type="button"
-          aria-label={mark.label}
-          title={mark.label}
-          data-track-mark={mark.id}
-          onClick={() => onMark(mark.id)}
-          className={cn(
-            "absolute bottom-full z-10 mb-0.5 size-2.5 -translate-x-1/2 rounded-full rounded-bl-[2px] ring-2 ring-black/40 outline-none transition-transform focus-visible:ring-white motion-safe:hover:scale-125",
-            // As the pins on the video: white, the open one in the selection blue.
-            mark.active ? "bg-[#0a84ff]" : "bg-white"
-          )}
-          style={{ left: `${(Math.min(mark.seconds, length) / length) * 100}%` }}
-        />
-      ))}
-
       <div
         ref={track}
         role="slider"
@@ -165,6 +148,33 @@ export function Scrubber({
           style={{ left: `${(shown / length) * 100}%` }}
         />
       </div>
+
+      {/*
+       * On the track, never over the picture. A finger scrubs through them, as their dots are too
+       * small to aim at: on a phone, the comments' panel opens each.
+       */}
+      {marks.map((mark) => (
+        <button
+          key={mark.id}
+          type="button"
+          aria-label={mark.label}
+          title={mark.label}
+          data-track-mark={mark.id}
+          onClick={() => onMark(mark.id)}
+          className="group/mark absolute top-1/2 z-10 flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none [@media(pointer:coarse)]:pointer-events-none"
+          style={{ left: `${(Math.min(mark.seconds, length) / length) * 100}%` }}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-2.5 rounded-full rounded-bl-[2px] ring-2 ring-black/50 transition-transform group-hover/mark:scale-125 group-focus-visible/mark:ring-white motion-reduce:transition-none",
+              // As the pins on the video, a bubble, unlike the playhead's dot: white, the open one
+              // in the selection blue.
+              mark.active ? "bg-[#0a84ff]" : "bg-white"
+            )}
+          />
+        </button>
+      ))}
     </div>
   )
 }

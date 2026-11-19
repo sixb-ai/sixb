@@ -344,9 +344,8 @@ function ThreadCard({
         data-active={active ? "" : undefined}
         className={cn(
           "group relative flex gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors",
-          active
-            ? "bg-[color-mix(in_oklab,var(--primary)_7%,var(--background))] ring-1 ring-[color-mix(in_oklab,var(--primary)_30%,transparent)]"
-            : "hover:bg-muted/50",
+          // As the app's lists mark where the reader is: a quiet fill, no edge.
+          active ? "bg-muted" : "hover:bg-muted/50",
           resolved && "opacity-80"
         )}
       >

@@ -46,7 +46,11 @@ import { Scrubber } from "./scrubber"
 // which plays, pauses, or places a comment. So the player's keys, its controls and its comments
 // stay the app's, wherever the reader's pointer is.
 
-/** How long the runtime has, once the frame loaded, to build the video's timeline. */
+/**
+ * How long the runtime has, once the frame loaded, to build the video's timeline. A runtime that
+ * did not load, or stopped at its startup, is told at once by the frame; this bounds the rest, such
+ * as a scene that never arrives.
+ */
 const START_TIMEOUT_MS = 20_000
 
 /** How long the loading mark waits before showing, so a quick start shows none. */
@@ -91,13 +95,22 @@ export function VideoPlayer({
     duration: outline.durationMs / 1000,
   })
 
-  // Once the runtime has built its timeline, the video goes where it opens.
+  // Whether the reader has begun watching: played, or moved the playhead. Until then the video
+  // shows a poster and a large play mark; from then on, a pause leaves the picture clean.
+  const [begun, setBegun] = useState(false)
+  useEffect(() => {
+    if (playback.playing) setBegun(true)
+  }, [playback.playing])
+
+  // Once the runtime has built its timeline, the video goes where it opens. Opened at its start,
+  // it shows its poster instead of a first frame its opening has not come into yet.
   const started = useRef<number | null>(null)
   useEffect(() => {
     if (playback.phase !== "ready" || started.current === attempt) return
     started.current = attempt
     if (resumeAt.current > 0) playback.seek(resumeAt.current)
-  }, [playback.phase, playback.seek, attempt])
+    else if (!begun) playback.cue(posterAt(outline))
+  }, [playback.phase, playback.seek, playback.cue, attempt, begun, outline])
 
   // A frame that loaded, but whose runtime never built the timeline, failed to start.
   useEffect(() => {
@@ -117,11 +130,6 @@ export function VideoPlayer({
   const compact = width > 0 && width < COMPACT_WIDTH
   const box = useSize(picture)
   const scale = Math.min(box.width / outline.width, box.height / outline.height) || 0
-
-  const [hasPlayed, setHasPlayed] = useState(false)
-  useEffect(() => {
-    if (playback.playing) setHasPlayed(true)
-  }, [playback.playing])
 
   // Commenting, on the latest version only, as the API places comments on it.
   const commenting = useVideoCommenting({
@@ -167,6 +175,7 @@ export function VideoPlayer({
   const many = outline.scenes.length > 1
 
   const goTo = (seconds: number, say?: string) => {
+    setBegun(true)
     playback.seek(seconds)
     if (say) setAnnouncement(say)
   }
@@ -181,6 +190,7 @@ export function VideoPlayer({
   const openThread = (thread: CommentThread) => {
     const at = thread.comment.anchor.at
     if (at !== undefined) {
+      setBegun(true)
       playback.pause()
       playback.seek(at / 1000)
     }
@@ -191,7 +201,7 @@ export function VideoPlayer({
   // What the reader clicks on the video: a comment's place while commenting; else play or pause
   // with a mouse, and, under a finger, the controls shown or hidden, as phones' players do.
   const onPictureClick = (event: ReactPointerEvent<HTMLDivElement>) => {
-    screen.current?.focus({ preventScroll: true })
+    screen.current?.focus({ preventScroll: true, focusVisible: false })
     if (commenting.commenting) {
       const area = event.currentTarget.getBoundingClientRect()
       playback.pause()
@@ -205,7 +215,7 @@ export function VideoPlayer({
       commenting.cancelDraft()
       return
     }
-    if (event.pointerType === "touch" && hasPlayed) {
+    if (event.pointerType === "touch" && begun) {
       controls.toggle()
       return
     }
@@ -337,6 +347,8 @@ export function VideoPlayer({
             className="size-full"
             onEvent={(event) => {
               if (event.event === "ready") setLoaded(attempt)
+              // At once, rather than at the timeout: a runtime that did not load builds nothing.
+              if (event.event === "failed" && playback.phase === "loading") setFailed(attempt)
             }}
             onFailure={() => setFailed(attempt)}
           />
@@ -388,12 +400,12 @@ export function VideoPlayer({
         />
       ) : null}
 
-      {!loading && !broken && (!hasPlayed || playback.ended) && !commenting.commenting ? (
+      {!loading && !broken && (!begun || playback.ended) && !commenting.commenting ? (
         <BigPlay
           label={playback.ended ? messages.replay : messages.play}
           replay={playback.ended}
           onClick={() => {
-            screen.current?.focus({ preventScroll: true })
+            screen.current?.focus({ preventScroll: true, focusVisible: false })
             playback.play()
           }}
         />
@@ -473,6 +485,7 @@ export function VideoPlayer({
                   active: thread.comment.id === commenting.active,
                 }))}
                 onScrubStart={() => {
+                  setBegun(true)
                   resume.current = playback.playing
                   if (playback.playing) playback.pause()
                 }}
@@ -914,6 +927,15 @@ function useDelayed(value: boolean, ms: number): boolean {
     return () => clearTimeout(timer)
   }, [value, ms])
   return shown
+}
+
+/**
+ * Where a video shows before it first plays: the middle of its first scene, where its opening has
+ * come in, rather than its first frame, which is often still blank.
+ */
+function posterAt(outline: VideoOutline): number {
+  const first = outline.scenes[0]
+  return first ? (first.startMs + first.durationMs / 2) / 1000 : 0
 }
 
 function clamp(value: number): number {

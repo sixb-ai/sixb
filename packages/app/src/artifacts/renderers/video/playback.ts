@@ -22,6 +22,11 @@ export interface Playback extends PlaybackState {
   readonly toggle: () => void
   /** Moves the playhead; a drag shows each frame it passes. Playing goes on after a seek. */
   readonly seek: (seconds: number, mode?: SeekMode) => void
+  /**
+   * Shows the frame at `seconds` as a poster while the playhead stays where it is, until the
+   * reader plays or moves it: playing starts from the playhead.
+   */
+  readonly cue: (seconds: number) => void
   readonly muted: boolean
   readonly setMuted: (muted: boolean) => void
   /** From 0 to 1. */
@@ -53,6 +58,7 @@ export function usePlayback({
   const [rate, setRateState] = useState(1)
 
   const held = useRef<{ readonly seconds: number; readonly until: number } | null>(null)
+  const cued = useRef(false)
   const latest = useRef(state)
   latest.current = state
   const settings = useRef({ muted, volume, rate })
@@ -68,6 +74,7 @@ export function usePlayback({
   // A new frame starts loading again, with the reader's sound and speed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: each frame loaded starts over.
   useEffect(() => {
+    cued.current = false
     setState((current) => ({ ...initialPlayback(current.duration), time: current.time }))
   }, [key])
 
@@ -96,6 +103,12 @@ export function usePlayback({
         held.current = null
       }
 
+      // A poster's frame is not where the playhead is.
+      if (report.type === "state" && cued.current) {
+        setState((current) => playbackAfter(current, { ...report, time: current.time }))
+        return
+      }
+
       setState((current) => playbackAfter(current, report))
     }
     window.addEventListener("message", listen)
@@ -107,6 +120,7 @@ export function usePlayback({
       const current = latest.current
       const to = Math.min(Math.max(seconds, 0), current.duration)
       held.current = { seconds: to, until: performance.now() + SEEK_HOLD_MS }
+      cued.current = false
 
       post({ action: "seek", seconds: to, mode })
       // HyperFrames pauses on a seek: playing goes on from where it lands.
@@ -117,13 +131,24 @@ export function usePlayback({
     [post]
   )
 
+  const cue = useCallback(
+    (seconds: number) => {
+      cued.current = true
+      post({ action: "seek", seconds: Math.min(Math.max(seconds, 0), latest.current.duration) })
+    },
+    [post]
+  )
+
   const play = useCallback(() => {
     const current = latest.current
-    // At the end, playing starts over.
-    if (current.ended || current.time >= current.duration - 1 / fps) {
-      held.current = { seconds: 0, until: performance.now() + SEEK_HOLD_MS }
-      post({ action: "seek", seconds: 0 })
-      setState((state) => ({ ...state, time: 0 }))
+    // At the end, playing starts over; from a poster, where the playhead is.
+    const ended = current.ended || current.time >= current.duration - 1 / fps
+    if (ended || cued.current) {
+      const from = ended ? 0 : current.time
+      cued.current = false
+      held.current = { seconds: from, until: performance.now() + SEEK_HOLD_MS }
+      post({ action: "seek", seconds: from })
+      setState((state) => ({ ...state, time: from }))
     }
     post({ action: "play" })
     setState((state) => ({ ...state, playing: true, ended: false }))
@@ -174,6 +199,7 @@ export function usePlayback({
       pause,
       toggle,
       seek,
+      cue,
       muted,
       setMuted,
       volume,
@@ -181,6 +207,6 @@ export function usePlayback({
       rate,
       setRate,
     }),
-    [state, play, pause, toggle, seek, muted, setMuted, volume, setVolume, rate, setRate]
+    [state, play, pause, toggle, seek, cue, muted, setMuted, volume, setVolume, rate, setRate]
   )
 }
