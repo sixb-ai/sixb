@@ -1,4 +1,5 @@
 import type { FrameRect } from "@sixb/core/artifacts"
+import type { VideoTarget } from "@sixb/core/artifacts/live"
 import { cn } from "@sixb/ui/lib/utils"
 import { useEffect, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
@@ -8,9 +9,10 @@ import { useArtifactMessages } from "../../../messages"
 // breaks the line, Escape or a click elsewhere leaves them as they were.
 
 export interface InPlaceText {
-  /** The file its words are in, and its ref among the file's texts. */
+  /** The file its words are in, and the text there, as the reader clicked it. */
   readonly file: string
   readonly ref: string
+  readonly target: VideoTarget
   readonly text: string
   /** Where it shows, in fractions of the picture. */
   readonly rect: FrameRect

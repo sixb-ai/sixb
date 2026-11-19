@@ -191,3 +191,34 @@ export function sceneAt<T extends { readonly startMs: number; readonly durationM
   }
   return found ?? scenes.at(-1)
 }
+
+/**
+ * Where each scene shows on the Scenes track, in play order: from where it starts, or where the
+ * one before it ends when they cross, to where the next starts when they cross. What two scenes
+ * play together is a crossfade of its own, after the first, so neither covers the other.
+ */
+export function sceneSpans(
+  scenes: readonly { readonly startMs: number; readonly endMs: number }[]
+): {
+  readonly startMs: number
+  readonly endMs: number
+  /** What it plays together with the next scene. */
+  readonly crossfade?: { readonly startMs: number; readonly endMs: number }
+}[] {
+  return scenes.map((scene, index) => {
+    const before = scenes[index - 1]
+    const after = scenes[index + 1]
+    const startMs = before
+      ? Math.min(Math.max(scene.startMs, before.endMs), scene.endMs)
+      : scene.startMs
+    const crossing = after && after.startMs < scene.endMs
+    const endMs = crossing ? Math.max(startMs, after.startMs) : scene.endMs
+    return crossing
+      ? {
+          startMs,
+          endMs,
+          crossfade: { startMs: endMs, endMs: Math.min(scene.endMs, after.endMs) },
+        }
+      : { startMs, endMs }
+  })
+}

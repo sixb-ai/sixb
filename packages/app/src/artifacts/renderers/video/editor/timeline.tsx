@@ -1,14 +1,18 @@
 import {
   type ArtifactLiveUser,
+  findVideoTarget,
   VIDEO_ENTRY,
   type VideoComposition,
   type VideoFileTimeline,
   type VideoScene,
   type VideoTrack,
+  videoTarget,
 } from "@sixb/core/artifacts/live"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { AudioLines, Image as ImageIcon, Type, Video } from "lucide-react"
 import {
+  Fragment,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type Ref,
@@ -19,12 +23,14 @@ import {
   useState,
 } from "react"
 import { useArtifactMessages } from "../../../messages"
+import { formatClock } from "../../../playback"
 import { type MediaTarget, type Peaks, useMediaParts, usePeaks } from "./media"
 import {
   fitZoom,
   type LaidClip,
   rulerSteps,
   SNAP_PX,
+  sceneSpans,
   snapMove,
   snapTo,
   trackRows,
@@ -338,7 +344,11 @@ export function Timeline({
         return
       case "move":
         if (!current.moved) {
-          edits.select({ type: "clip", file: current.clip.file, ref: current.clip.clip.ref })
+          edits.select({
+            type: "clip",
+            file: current.clip.file,
+            target: videoTarget(current.clip.clip),
+          })
           return
         }
         edits.moveClip(current.clip, current.startMs)
@@ -359,6 +369,15 @@ export function Timeline({
   }
 
   // ── Layout ─────────────────────────────────────────────────────────
+
+  // The clip selected, as its file is now.
+  const chosen =
+    selection?.type === "clip"
+      ? findVideoTarget(
+          clips.filter((laid) => laid.file === selection.file).map((laid) => laid.clip),
+          selection.target
+        )
+      : undefined
 
   const rows = trackRows(clips)
   const sceneClips = clips.filter((clip) => clip.file !== VIDEO_ENTRY)
@@ -401,6 +420,15 @@ export function Timeline({
       rows: Math.max(1, ...ownClips.map((clip) => clip.row + 1)),
     })
   }
+
+  // Each scene where it shows, its end as dragged, and what it plays with the next.
+  const sceneEnd = (scene: VideoScene) =>
+    drag?.type === "scene" && drag.scene.id === scene.id
+      ? drag.endMs
+      : scene.startMs + scene.durationMs
+  const spans = sceneSpans(
+    composition.scenes.map((scene) => ({ startMs: scene.startMs, endMs: sceneEnd(scene) }))
+  )
 
   /** Where a scene dropped in `slot` goes: the start of the scene there, or the video's end. */
   const dropAt = (slot: number) => {
@@ -474,45 +502,63 @@ export function Timeline({
             onBackground={(event) => edits.seek(msAt(event.clientX), "commit")}
           >
             {composition.scenes.map((scene, index) => {
-              const dragged = drag?.type === "scene" && drag.scene.id === scene.id ? drag : null
-              const end = dragged ? dragged.endMs : scene.startMs + scene.durationMs
+              const span = spans[index]
+              if (!span) return null
+              const endHandle = (
+                <EdgeHandle
+                  edge="end"
+                  label={messages.length}
+                  onPointerDown={(event) =>
+                    startDrag(event, {
+                      type: "scene",
+                      scene,
+                      x: event.clientX,
+                      endMs: scene.startMs + scene.durationMs,
+                    })
+                  }
+                  {...dragHandlers}
+                />
+              )
               return (
-                <div
-                  key={scene.id}
-                  data-timeline-scene={scene.id}
-                  data-reorder-id={scene.id}
-                  className="absolute inset-y-1"
-                  style={{ left: px(scene.startMs), width: Math.max(4, px(end - scene.startMs)) }}
-                >
-                  <SceneBlock
-                    scene={scene}
-                    index={index}
-                    count={composition.scenes.length}
-                    timeline={timelines.get(scene.src)}
-                    target={target}
-                    open={open?.id === scene.id}
-                    agent={agentScenes.has(scene.id)}
-                    people={people.get(scene.id) ?? []}
-                    dragging={reorder?.id === scene.id}
-                    length={formatLength(end - scene.startMs)}
-                    actions={edits.scene}
-                    onPress={(event) => startReorder(event, scene.id, () => edits.open(scene))}
+                <Fragment key={scene.id}>
+                  <div
+                    data-timeline-scene={scene.id}
+                    data-reorder-id={scene.id}
+                    className="absolute inset-y-1"
+                    style={{
+                      left: px(span.startMs),
+                      width: Math.max(4, px(span.endMs - span.startMs)),
+                    }}
                   >
-                    <EdgeHandle
-                      edge="end"
-                      label={messages.length}
-                      onPointerDown={(event) =>
-                        startDrag(event, {
-                          type: "scene",
-                          scene,
-                          x: event.clientX,
-                          endMs: scene.startMs + scene.durationMs,
-                        })
-                      }
-                      {...dragHandlers}
-                    />
-                  </SceneBlock>
-                </div>
+                    <SceneBlock
+                      scene={scene}
+                      index={index}
+                      count={composition.scenes.length}
+                      timeline={timelines.get(scene.src)}
+                      target={target}
+                      open={open?.id === scene.id}
+                      agent={agentScenes.has(scene.id)}
+                      people={people.get(scene.id) ?? []}
+                      dragging={reorder?.id === scene.id}
+                      length={formatLength(sceneEnd(scene) - scene.startMs)}
+                      actions={edits.scene}
+                      onPress={(event) => startReorder(event, scene.id, () => edits.open(scene))}
+                    >
+                      {span.crossfade ? null : endHandle}
+                    </SceneBlock>
+                  </div>
+                  {span.crossfade ? (
+                    <Crossfade
+                      left={px(span.crossfade.startMs)}
+                      width={px(span.crossfade.endMs - span.crossfade.startMs)}
+                      label={messages.crossfade(
+                        formatLength(span.crossfade.endMs - span.crossfade.startMs)
+                      )}
+                    >
+                      {endHandle}
+                    </Crossfade>
+                  ) : null}
+                </Fragment>
               )
             })}
             {reorder ? <SceneDropMark left={dropAt(reorder.slot)} /> : null}
@@ -538,10 +584,7 @@ export function Timeline({
                 />
               ) : null}
               {track.clips.map((laid) => {
-                const selected =
-                  selection?.type === "clip" &&
-                  selection.file === laid.file &&
-                  selection.ref === laid.clip.ref
+                const selected = chosen === laid.clip
                 const moving =
                   drag?.type === "move" && drag.clip === laid && drag.moved ? drag : null
                 const trimming = drag?.type === "trim" && drag.clip === laid ? drag : null
@@ -588,7 +631,11 @@ export function Timeline({
                       })
                     }
                     onSelect={() =>
-                      edits.select({ type: "clip", file: laid.file, ref: laid.clip.ref })
+                      edits.select({
+                        type: "clip",
+                        file: laid.file,
+                        target: videoTarget(laid.clip),
+                      })
                     }
                     dragHandlers={dragHandlers}
                   />
@@ -756,6 +803,44 @@ function rulerLabel(ms: number, step: number): string {
   return `${minutes}:${shown.padStart(step < 1000 ? 4 : 2, "0")}`
 }
 
+/**
+ * Two scenes playing together, between them on the Scenes track: a band of their own, hatched,
+ * which says how long they cross. It holds the first scene's end, which a drag moves.
+ */
+function Crossfade({
+  left,
+  width,
+  label,
+  children,
+}: {
+  readonly left: number
+  readonly width: number
+  readonly label: string
+  readonly children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          role="img"
+          aria-label={label}
+          data-crossfade=""
+          className="group/sceneblock absolute inset-y-1 overflow-hidden rounded-[3px] border border-border bg-muted"
+          style={{
+            left,
+            width: Math.max(4, width),
+            backgroundImage:
+              "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in oklab, var(--foreground) 16%, transparent) 4px 5px)",
+          }}
+        >
+          {children}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function EdgeHandle({
   edge,
   label,
@@ -828,6 +913,12 @@ function ClipBlock({
   // Where in its file the block's left edge is: a start trimmed moves into it.
   const mediaAt = clip.mediaStartMs + (viewStartMs - laid.startMs)
   const filmed = clip.kind === "video" && !!parts.filmstrip
+  // Where its recording ends, from the block's left edge, when the clip lasts longer than it.
+  const fileEndPx =
+    (clip.kind === "video" || clip.kind === "audio") && parts.durationMs !== undefined
+      ? ((parts.durationMs - mediaAt) / 1000) * zoom
+      : undefined
+  const runsOut = fileEndPx !== undefined && fileEndPx < width - 2
 
   return (
     <div
@@ -873,6 +964,12 @@ function ClipBlock({
           compact={clip.kind === "video"}
         />
       ) : null}
+      {runsOut && parts.durationMs !== undefined ? (
+        <FileEnd
+          left={Math.max(0, fileEndPx ?? 0)}
+          label={messages.fileEnds(formatClock(parts.durationMs / 1000))}
+        />
+      ) : null}
       {media && parts.processing ? (
         <span
           aria-hidden="true"
@@ -880,7 +977,7 @@ function ClipBlock({
         />
       ) : null}
 
-      <span className="relative flex h-full min-w-0 items-start gap-1 px-1.5 pt-1 text-[11px] leading-tight font-medium">
+      <span className="pointer-events-none relative flex h-full min-w-0 items-start gap-1 px-1.5 pt-1 text-[11px] leading-tight font-medium">
         {clip.kind === "image" ? (
           <ImageIcon className="mt-px size-3 shrink-0" aria-hidden="true" />
         ) : null}
@@ -909,6 +1006,32 @@ function ClipBlock({
         <TrimHandle edge="end" onPointerDown={(event) => onTrim(event, "end")} {...dragHandlers} />
       )}
     </div>
+  )
+}
+
+/**
+ * What a clip plays past the end of its recording: dimmed and hatched from where the file ends,
+ * which its tooltip says. The picture holds its last frame there, and the sound is silent.
+ */
+function FileEnd({ left, label }: { readonly left: number; readonly label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-file-end=""
+          className="absolute inset-y-0 right-0 border-l border-current/50"
+          style={{
+            left,
+            backgroundColor: "color-mix(in oklab, var(--background) 62%, transparent)",
+            backgroundImage:
+              "repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in oklab, var(--foreground) 14%, transparent) 5px 6px)",
+          }}
+        >
+          <span className="sr-only">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -1,8 +1,10 @@
-import type {
-  VideoClip,
-  VideoComposition,
-  VideoFileTimeline,
-  VideoScene,
+import {
+  type VideoClip,
+  type VideoComposition,
+  type VideoFileTimeline,
+  type VideoScene,
+  type VideoTarget,
+  videoTarget,
 } from "@sixb/core/artifacts/live"
 import { cn } from "@sixb/ui/lib/utils"
 import {
@@ -41,7 +43,7 @@ export interface MobileActions {
   readonly sceneLength: (scene: VideoScene, ms: number) => void
   readonly duplicate: (scene: VideoScene) => void
   readonly remove: (scene: VideoScene) => void
-  readonly text: (file: string, ref: string, text: string) => void
+  readonly text: (file: string, text: VideoTarget, words: string) => void
   readonly removeClip: (file: string, clip: VideoClip) => void
 }
 
@@ -217,7 +219,7 @@ function SceneDetails({
               value={text.text}
               multiline
               hideLabel
-              onCommit={(value) => actions.text(scene.src, text.ref, value)}
+              onCommit={(value) => actions.text(scene.src, videoTarget(text), value)}
             />
           ))}
         </section>

@@ -4,7 +4,9 @@ import {
   type VideoComposition,
   type VideoFileTimeline,
   type VideoScene,
+  type VideoTarget,
   type VideoText,
+  videoTarget,
 } from "@sixb/core/artifacts/live"
 import { Button, Slider } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -39,7 +41,7 @@ export interface InspectorActions {
     clip: VideoClip,
     sound: { readonly volume?: number; readonly fadeInMs?: number; readonly fadeOutMs?: number }
   ) => void
-  readonly text: (file: string, ref: string, text: string) => void
+  readonly text: (file: string, text: VideoTarget, words: string) => void
   readonly clipText: (file: string, clip: VideoClip, text: string) => void
   readonly removeClip: (file: string, clip: VideoClip) => void
   readonly splitClip: (file: string, clip: VideoClip) => void
@@ -142,7 +144,7 @@ function SceneInspector({
               label={textKind(text, messages)}
               value={text.text}
               multiline
-              onCommit={(value) => actions.text(scene.src, text.ref, value)}
+              onCommit={(value) => actions.text(scene.src, videoTarget(text), value)}
             />
           ))}
         </Section>

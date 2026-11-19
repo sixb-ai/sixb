@@ -19,6 +19,7 @@ import {
   layClips,
   nextEditPoint,
   rulerSteps,
+  sceneSpans,
   snapMove,
   snapTo,
   trackRows,
@@ -117,6 +118,22 @@ describe("the timeline's arithmetic", () => {
     expect(snapMove(1020, 2000, [950, 3000], 100)).toEqual({ startMs: 1000, target: 3000 })
     expect(snapMove(980, 2000, [950, 3500], 100)).toEqual({ startMs: 950, target: 950 })
     expect(snapMove(1500, 2000, [0], 100)).toEqual({ startMs: 1500 })
+  })
+
+  // Guard proof: start each span at its scene's own start in sceneSpans; the interview then
+  // starts under the opening's end, and covers it.
+  test("two scenes that cross lie apart, their crossfade between them", () => {
+    expect(
+      sceneSpans([
+        { startMs: 0, endMs: 5000 },
+        { startMs: 4500, endMs: 20_000 },
+        { startMs: 20_000, endMs: 24_000 },
+      ])
+    ).toEqual([
+      { startMs: 0, endMs: 4500, crossfade: { startMs: 4500, endMs: 5000 } },
+      { startMs: 5000, endMs: 20_000 },
+      { startMs: 20_000, endMs: 24_000 },
+    ])
   })
 
   // Guard proof: scroll to `atMs * pxPerSecond` in zoomAround, without the anchor; the instant
