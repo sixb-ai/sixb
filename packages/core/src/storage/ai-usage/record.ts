@@ -12,6 +12,7 @@ import type {
   CreateAiModelCallOperationInput,
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
+  RecordAiModelCallOperationResultInput,
   SettleAiModelCallOperationInput,
   StartAiModelCallOperationInput,
 } from "./types"
@@ -161,6 +162,24 @@ export function normalizeAiModelCallStart(
   }
 }
 
+/** Validate what a pending call reported once it is in the ledger. */
+export function normalizeAiModelCallOperationResult(
+  input: RecordAiModelCallOperationResultInput
+): RecordAiModelCallOperationResultInput {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  assertOperationResult(input.result)
+
+  return { projectId: input.projectId, callId: input.callId, result: structuredClone(input.result) }
+}
+
+function assertOperationResult(result: unknown): void {
+  if (!isPlainRecord(result)) {
+    throw new TypeError("[Sixb] AI model-call operation result must be a JSON object.")
+  }
+  assertJsonValue(result, "AI model-call operation result")
+}
+
 function assertOperationRequest(request: unknown): void {
   if (!isPlainRecord(request)) {
     throw new TypeError("[Sixb] AI model-call operation request must be a JSON object.")
@@ -178,10 +197,7 @@ export function normalizeAiModelCallSettlement(
     throw new TypeError("[Sixb] AI model-call operation status must be 'completed' or 'failed'.")
   }
   if (input.error !== undefined) assertNonBlank(input.error, "operation error")
-  if (!isPlainRecord(input.result)) {
-    throw new TypeError("[Sixb] AI model-call operation result must be a JSON object.")
-  }
-  assertJsonValue(input.result, "AI model-call operation result")
+  assertOperationResult(input.result)
 
   return {
     projectId: input.projectId,

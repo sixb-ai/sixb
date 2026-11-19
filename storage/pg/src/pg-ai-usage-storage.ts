@@ -4,6 +4,7 @@ import {
   assertSameCallExecution,
   normalizeAiModelCallFilesRecord,
   normalizeAiModelCallOperation,
+  normalizeAiModelCallOperationResult,
   normalizeAiModelCallRecord,
   normalizeAiModelCallSettlement,
   normalizeAiModelCallStart,
@@ -24,6 +25,7 @@ import {
   type GetLatestAiModelCallForExecutionInput,
   type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
+  type RecordAiModelCallOperationResultInput,
   type RecordAiModelCallResult,
   type SettleAiModelCallOperationInput,
   type StartAiModelCallOperationInput,
@@ -357,6 +359,26 @@ export class PgAiUsageStorage implements AiUsageStorage {
     if (started) return operationFromRow(started)
 
     return this.getModelCallOperation(start)
+  }
+
+  async recordModelCallOperationResult(
+    input: RecordAiModelCallOperationResultInput
+  ): Promise<AiModelCallOperationRecord | null> {
+    const recorded = normalizeAiModelCallOperationResult(input)
+
+    // Only a pending call without a result takes one; any other reads back as it stands.
+    const [kept] = await this.sql<OperationRow[]>`
+      UPDATE ai_model_call_operations
+      SET result = ${JSON.stringify(recorded.result)}::text::jsonb
+      WHERE project_id = ${recorded.projectId}
+        AND call_id = ${recorded.callId}
+        AND status = 'pending'
+        AND result IS NULL
+      RETURNING *
+    `
+    if (kept) return operationFromRow(kept)
+
+    return this.getModelCallOperation(recorded)
   }
 
   async settleModelCallOperation(

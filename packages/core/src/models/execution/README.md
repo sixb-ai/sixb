@@ -186,10 +186,15 @@ retried by the worker with backoff.
 
 A generation is checked with the catalog entry its model has in `models.video`, so `start` takes
 only a listed model. Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation
-still running, or one it cannot ask about, as failed. The Gateway gives up on a provider's task after ten minutes and
-providers time their own out sooner, so an hour is far past any job that will still finish. Whether
-the provider billed it is unknown, so its reservation becomes unknown, as for a language call that
-never finished, rather than recorded as free.
+still running, or one it cannot ask about, as failed. The Gateway gives up on a provider's task
+after ten minutes and providers time their own out sooner, so an hour is far past any job that
+will still finish. Whether the provider billed it is unknown, so its reservation becomes unknown,
+as for a language call that never finished, rather than recorded as free.
+
+A generation the ledger already records is different: the look that sees it end keeps its result
+on the operation (`recordModelCallOperationResult`) before storing the videos. If they cannot be
+stored by the ceiling, it settles as failed with that usage and cost, its budget reconciled, and
+the check stops.
 
 Usage is `outputVideoMs`: what the provider reports, else the requested length times the clips
 returned, which is what providers bill. The job's price variant, such as `{ resolution: "720p",
