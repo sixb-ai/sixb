@@ -28,6 +28,7 @@ import {
   trimClip,
   type VideoEditResult,
   type VideoSources,
+  videoTarget,
 } from "../src/artifacts/video/edit"
 import { readRootTimeline, readSceneTimeline } from "../src/artifacts/video/timeline"
 
@@ -596,6 +597,73 @@ describe("a clip that follows another", () => {
       chained
     )
     expect(after(files)?.startMs).toBe(5000)
+  })
+})
+
+describe("an element without an id, named by its place", () => {
+  const caption = (files: ReadonlyMap<string, string | null>, words: string) =>
+    demoClips(files).find((clip) => clip.text === words)
+
+  /** The demo as the Agent leaves it once it adds a caption before the others. */
+  const withAgentCaption = (sources: VideoSources, words = "Meet the dispatcher") => {
+    const files = new Map(sources)
+    files.set(
+      "scenes/demo.html",
+      (sources.get("scenes/demo.html") as string).replace(
+        '    <p class="caption" data-start="0.5"',
+        `    <p class="caption" data-start="0.1" data-duration="0.3">${words}</p>\n    <p class="caption" data-start="0.5"`
+      )
+    )
+    return files
+  }
+
+  // Guard proof: return the element at the target's place in resolveTarget, whatever it holds;
+  // the trim then lands on "Assign the nearest tech", which took that place.
+  test("is found where the Agent's insertion moved it", () => {
+    const chosen = caption(SOURCES, "in two taps")
+    if (!chosen) throw new Error("No caption.")
+    const target = videoTarget(chosen)
+    expect(target).toMatchObject({ ref: "#3", tag: "p", words: "in two taps" })
+
+    const moved = withAgentCaption(SOURCES)
+    const files = applied(
+      setClipTiming(moved, "scenes/demo.html", target, { durationMs: 1000 }),
+      moved
+    )
+    expect(caption(files, "in two taps")?.durationMs).toBe(1000)
+    expect(caption(files, "Assign the nearest tech")?.durationMs).toBe(1500)
+    expect(caption(files, "Meet the dispatcher")?.durationMs).toBe(300)
+  })
+
+  test("is refused when it is gone, or when two are now alike, rather than edit another", () => {
+    const chosen = caption(SOURCES, "in two taps")
+    if (!chosen) throw new Error("No caption.")
+    const target = videoTarget(chosen)
+
+    const gone = new Map(SOURCES)
+    gone.set(
+      "scenes/demo.html",
+      DEMO.replace('<p class="caption" data-start="2.5" data-duration="2">in two taps</p>', "")
+    )
+    const removed = removeClip(gone, "scenes/demo.html", target)
+    expect("error" in removed && removed.error).toContain("changed or was removed")
+
+    const twice = withAgentCaption(SOURCES, "in two taps")
+    const alike = removeClip(twice, "scenes/demo.html", target)
+    expect("error" in alike && alike.error).toContain("2 clips like the one you chose")
+  })
+
+  test("a text typed over is found the same way", () => {
+    const text = readSceneTimeline(DEMO)?.texts.find((each) => each.text === "in two taps")
+    if (!text) throw new Error("No text.")
+    const moved = withAgentCaption(SOURCES)
+    const files = applied(
+      setVideoText(moved, "scenes/demo.html", videoTarget(text), "in two quick taps"),
+      moved
+    )
+    expect(caption(files, "in two quick taps")).toBeDefined()
+    expect(caption(files, "Meet the dispatcher")).toBeDefined()
+    expect(caption(files, "Assign the nearest tech")).toBeDefined()
   })
 })
 
