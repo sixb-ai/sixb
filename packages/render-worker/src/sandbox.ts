@@ -395,6 +395,16 @@ export async function storeSandboxFile(
   })
 }
 
+/** A title as a file name: what one may not hold, and each run of spaces, one space. */
+export function titleFileName(title: string, fallback: string): string {
+  const name = [...title]
+    .map((char) => (char < " " || '\\/:*?"<>|'.includes(char) ? " " : char))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+  return name || fallback
+}
+
 function lastJsonLine(stdout: string): Record<string, unknown> | null {
   return parse(stdout.trim().split("\n").at(-1) ?? "")
 }
