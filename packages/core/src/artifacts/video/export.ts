@@ -160,6 +160,14 @@ export function videoExportJobId(key: string): string {
   return `art_vexp_${key}`
 }
 
+/**
+ * Where a retry asks anew for an export's segments: apart from the export's own job, which a
+ * segment that finishes takes the place of with the payload it was asked with.
+ */
+function videoExportRetryJobId(key: string): string {
+  return `art_vexp_retry_${key}`
+}
+
 /** Where it renders a segment: one job per segment, by its key. */
 export function videoSegmentJobId(key: string): string {
   return `art_vseg_${key}`
@@ -228,7 +236,8 @@ export function videoExportKeys(plan: VideoExportPlan): string[] {
 /**
  * Asks the render worker to assemble a video version's export, carrying what the version holds
  * now. Asking again while it is asked for asks nothing more; `retry` forgets why the export or its
- * segments could not be made, and asks again for each.
+ * segments could not be made, and asks again for each, in a job of its own: one in the export's
+ * place could be taken by a segment that finishes meanwhile, which asks for nothing.
  */
 export async function requestVideoExport(
   context: {
@@ -251,9 +260,11 @@ export async function requestVideoExport(
     projectId: version.projectId,
     jobs: [
       {
-        // One job per export: one asked for answers asking again, unless it is a retry.
-        id: videoExportJobId(plan.key),
-        ...(options.retry ? { replace: true } : {}),
+        // One job per export: one asked for answers asking again. A retry, in its own, replaces
+        // the retry before it.
+        ...(options.retry
+          ? { id: videoExportRetryJobId(plan.key), replace: true }
+          : { id: videoExportJobId(plan.key) }),
         type: "artifact.video.export.requested",
         payload: {
           artifactId: version.artifactId,

@@ -94,6 +94,14 @@ export async function assembleVideoExport(input: {
     return
   }
 
+  if (payload.retry) {
+    // Apart from the export's own job, which a segment that finishes takes the place of, asking
+    // for nothing: the retry asks for what is missing, and the export looks at once.
+    if (!status.progress.assembling) await askForSegments(host, job, plan, kept)
+    await lookAgain(host, job, plan, 0)
+    return
+  }
+
   if (!status.progress.assembling) {
     if (Date.now() - Date.parse(payload.askedAt) > VIDEO_EXPORT_JOB.waitMs) {
       await fail("It took too long to render. Try again.")
@@ -194,7 +202,8 @@ export async function failVideoExport(input: {
 /**
  * Asks the export that waits for a segment to look again at once, as the segment is kept or
  * failed: it joins the MP4 without waiting for its next look, `VIDEO_EXPORT_JOB.recheckMs`, which
- * stays for the exports that share the segment. A look that runs then replaces this one.
+ * stays for the exports that share the segment. A look that runs then replaces this one. A retry
+ * runs in a job of its own, which this never replaces.
  */
 export async function nudgeVideoExport(
   host: Pick<VideoExportHost, "id" | "queues">,
@@ -271,14 +280,15 @@ async function askForSegments(
 }
 
 /**
- * Asks for this export again, `VIDEO_EXPORT_JOB.recheckMs` from now, in its own place, which it
- * holds: the id waits as the new job once this one is settled. It only looks whether the segments
- * are rendered.
+ * Asks for this export again, `VIDEO_EXPORT_JOB.recheckMs` from now unless said, in the export's
+ * own place, which it holds: the id waits as the new job once this one is settled. It only looks
+ * whether the segments are rendered.
  */
 async function lookAgain(
   host: VideoExportHost,
   job: ArtifactVideoExportRequestedQueueJob,
-  plan: VideoExportPlan
+  plan: VideoExportPlan,
+  inMs: number = VIDEO_EXPORT_JOB.recheckMs
 ): Promise<void> {
   const { retry: _retry, ...payload } = job.payload
   await host.queues.renders.enqueue({
@@ -289,7 +299,7 @@ async function lookAgain(
         replace: true,
         type: "artifact.video.export.requested",
         payload: { ...payload, waiting: true },
-        availableAt: new Date(Date.now() + VIDEO_EXPORT_JOB.recheckMs).toISOString(),
+        availableAt: new Date(Date.now() + inMs).toISOString(),
       },
     ],
   })
