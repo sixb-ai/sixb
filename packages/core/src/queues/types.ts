@@ -327,8 +327,6 @@ export interface ArtifactVideoExportRequestedQueueJob
     {
       readonly artifactId: string
       readonly version: number
-      /** The name the MP4 downloads as. */
-      readonly title: string
       /** What the export is made of, as `videoExportPlan` hashes it. */
       readonly key: string
       readonly outline: VideoOutline

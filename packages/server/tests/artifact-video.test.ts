@@ -185,6 +185,47 @@ describe("a video's MP4 over the API", () => {
     expect(await range.text()).toBe("mp4")
   })
 
+  // Reproduce by naming the MP4 as it is assembled, as it once was: kept under a key that names
+  // only what it is made of, a copy, and the artifact renamed, download it under the first title.
+  test("downloads named after the title of the version read, whoever asked for it first", async () => {
+    const fixture = createApp()
+    const { alice, artifactId, version } = await launch(fixture)
+    const publish = async (title: string, path = "/api/artifacts", method = "POST") => {
+      const response = await fixture.app.fetch(
+        new Request(url(path), {
+          method,
+          headers: alice.mutationHeaders,
+          body: JSON.stringify({ kind: "video", title, files: version.files }),
+        })
+      )
+      expect(response.status).toBeLessThan(300)
+      return ((await response.json()) as { readonly artifact: { readonly id: string } }).artifact
+    }
+    const copy = await publish("Teaser: for clients")
+
+    // Named as the first export once named it, which reading renames.
+    const mp4 = await fixture.put("Launch.mp4", "the mp4", "video/mp4")
+    await fixture.storage.artifacts?.putVideoRender({
+      projectId: PROJECT_ID,
+      key: planOf(version).key,
+      file: mp4.file,
+      createdAt: new Date(),
+    })
+    const downloaded = async (id: string) => {
+      const response = await fixture.app.fetch(
+        new Request(url(`/api/artifacts/${id}/versions/latest/video`), { headers: alice.headers })
+      )
+      expect(response.status).toBe(200)
+      return response.headers.get("content-disposition")
+    }
+    expect(await downloaded(artifactId)).toContain('filename="Launch.mp4"')
+    expect(await downloaded(copy.id)).toContain('filename="Teaser for clients.mp4"')
+
+    // Renamed, the same MP4 downloads under its new title.
+    await publish("Launch, final cut", `/api/artifacts/${artifactId}/content`, "PUT")
+    expect(await downloaded(artifactId)).toContain('filename="Launch, final cut.mp4"')
+  })
+
   test("says why it could not render until asked to retry, and is refused where nothing renders", async () => {
     const fixture = createApp()
     const { alice, artifactId, version } = await launch(fixture)

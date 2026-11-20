@@ -51,6 +51,7 @@ export {
   videoSceneStills,
   videoStills,
 } from "../video/stills"
+export { titleFileName } from "./files"
 export {
   DOCUMENT_PDF_JOB,
   documentPdfKey,
