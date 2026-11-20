@@ -69,7 +69,8 @@ work/launch-teaser/
   comments and renders: keep it across versions.
 - **Starts chain.** `data-start` is seconds, or the scene it follows: `"hook"` starts when `hook`
   ends, `"hook - 0.4"` overlaps it for a crossfade, `"hook + 1"` leaves a gap. Chained, a scene you
-  lengthen moves the ones after it.
+  lengthen moves the ones after it. An overlap shows both scenes: keep what each repeats, such as a
+  chapter index or a captions bar, in the root, or out of the overlap.
 - **A scene file** is one `<template>` whose composition has its host's id and the root's size.
   Times inside it count from the scene's start. Scope its selectors to it,
   `[data-composition-id="demo"] .callout`, and register its GSAP timeline, `{ paused: true }`, as
