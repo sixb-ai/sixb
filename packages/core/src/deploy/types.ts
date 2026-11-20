@@ -134,8 +134,6 @@ export interface DeployTarget {
   ): Promise<void>
   /** What stands between the target and a working deploy of the release, changing nothing. */
   check(release: DeployRelease, context: DeployCheckContext): Promise<readonly DeployCheck[]>
-  /** Prepares the target for the release, fixing what `check` reports as fixable. */
-  setup?(release: DeployRelease, context: DeploySetupContext): Promise<void>
   /**
    * Runs a script against the deployed project, as `sixb run` would there, with the environment the
    * deployment's services start from and the script's output on this terminal. Resolves with its
@@ -153,8 +151,8 @@ export interface DeployCheck {
   /** What was checked, such as `"SSH"` or `"api DNS"`. */
   readonly label: string
   /**
-   * `fixable`: `sixb deploy setup` fixes it. `manual`: only you can, as `remedy` says. Both stop
-   * a deploy; a `warning` does not.
+   * `fixable`: the server lacks something its provisioning provides. `manual`: only you can fix
+   * it, as `remedy` says. Both stop a deploy; a `warning` does not.
    */
   readonly status: "ok" | "fixable" | "manual" | "warning"
   readonly detail: string
@@ -165,17 +163,6 @@ export interface DeployCheck {
 export interface DeployCheckContext extends DeployOperationContext {
   /** The project's directory inside its repository: `.` at the root. */
   readonly projectPath: string
-}
-
-export interface DeploySetupContext extends DeployCheckContext {
-  /** The account with sudo that prepares a server, for a target that needs one. */
-  readonly admin?: string
-  /** A public key file to authorize for deploys, instead of the one the target would pick. */
-  readonly key?: string
-  /** Creates the token `steps.env` reads with, for a target that doesn't have one yet. */
-  readonly createEnvToken?: () => Promise<string>
-  /** A line of progress for the person running setup. */
-  write(line: string): void
 }
 
 export interface DeployAccess {

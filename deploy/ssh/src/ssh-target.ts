@@ -14,15 +14,13 @@ import type {
   DeployOperationContext,
   DeployRelease,
   DeployScript,
-  DeploySetupContext,
   DeploySource,
   DeployStatus,
   DeployTarget,
 } from "@sixb/core/deploy"
 import { addKey, listKeys, removeKeys, removeKeysWhere } from "./access"
-import { checkDns, ENV_TOKEN_CHECK, runChecks } from "./check"
+import { checkDns, runChecks } from "./check"
 import { generateCiKey, knownHostsLines, readHostKeys, renderCiInstall } from "./ci"
-import { ENV_TOKEN_FILE } from "./layout"
 import {
   controlServices,
   deployRelease,
@@ -30,8 +28,6 @@ import {
   runDeployScript,
   streamLogs,
 } from "./operations"
-import { ensureEnvToken, pickPublicKey, renderAdminScript } from "./setup"
-import { shellQuote } from "./shell"
 import { resolveSshConfig } from "./ssh-config"
 import { RemoteScriptError, type RemoteShell, SshShell } from "./transport"
 
@@ -170,63 +166,6 @@ export class SshTarget implements DeployTarget {
       server = [sshCheck(this.location, error)]
     }
     return [...server, ...(await dns)]
-  }
-
-  /**
-   * Prepares the server as the admin login when the deploy user or the server is not set up
-   * yet, then the project as the deploy user. Running it again changes nothing that is right.
-   */
-  async setup(release: DeployRelease, context: DeploySetupContext): Promise<void> {
-    const before = await this.check(release, context)
-    const serverFixes = before.filter(
-      (check) =>
-        (check.status === "fixable" &&
-          check.id !== "project.env" &&
-          check.id !== ENV_TOKEN_CHECK) ||
-        (check.id === "ssh" && check.status !== "ok")
-    )
-    const unreachable = before.find((check) => check.id === "ssh" && check.status === "manual")
-    if (unreachable) {
-      throw new Error(`[SshTarget] ${unreachable.detail}`)
-    }
-
-    if (serverFixes.length > 0) {
-      const admin = context.admin ?? "root"
-      const { identityFiles } = await resolveSshConfig(this.location)
-      const key = await pickPublicKey({ key: context.key, identityFiles })
-      context.write(
-        `Setting up ${this.host} as ${admin}, authorizing ${key.source} for ${this.user}.`
-      )
-      await runAsAdmin(
-        `${admin}@${this.host}`,
-        admin === "root",
-        renderAdminScript({ user: this.user, publicKey: key.text, admin })
-      )
-    }
-
-    context.write(`Preparing ${context.name} as ${this.user}.`)
-    await this.#connected((shell) =>
-      shell.run(
-        [
-          `root="$HOME"/${shellQuote(context.name)}`,
-          `project="$HOME"/${shellQuote(`${context.name}/code/${context.projectPath}`)}`,
-          'mkdir -p "$root/shared"',
-          'if [ ! -L "$root/code" ]; then mkdir -p "$project"; fi',
-          'if [ -f "$root/shared/.env" ]; then chmod 600 "$root/shared/.env"; fi',
-          'if [ -f "$project/.env" ]; then chmod 600 "$project/.env"; fi',
-          `token="$HOME"/${shellQuote(`${context.name}/${ENV_TOKEN_FILE}`)}`,
-          'if [ -f "$token" ]; then chmod 600 "$token"; fi',
-        ].join("\n")
-      )
-    )
-
-    const { createEnvToken } = context
-    if (release.steps.env && createEnvToken) {
-      const installed = await this.#connected((shell) =>
-        ensureEnvToken(shell, context.name, createEnvToken)
-      )
-      if (installed) context.write(`Installed a read-only token for ${context.name}.`)
-    }
   }
 
   readonly access: DeployAccess = {
@@ -395,7 +334,7 @@ function sshCheck(location: string, error: unknown): DeployCheck {
       label: "SSH",
       status: "fixable",
       detail: message,
-      remedy: `Run \`sixb deploy setup --admin <login>\` with a login that has sudo: it creates the deploy user and authorizes your key. Or have someone with access run \`sixb deploy access add\` with your key.`,
+      remedy: `Have someone with access run \`sixb deploy access add\` with your key.`,
     }
   }
   return {
@@ -408,23 +347,4 @@ function sshCheck(location: string, error: unknown): DeployCheck {
 
 function withoutLine({ type, fingerprint, comment, restricted }: DeployAccessKey): DeployAccessKey {
   return { type, fingerprint, comment, restricted }
-}
-
-/**
- * Runs the setup script as the admin login with the terminal attached, so sudo can ask for its
- * password and the person running setup sees each step.
- */
-async function runAsAdmin(destination: string, root: boolean, script: string): Promise<void> {
-  const command = `${root ? "" : "sudo "}bash -c ${shellQuote(script)}`
-  // LogLevel=ERROR drops the "Connection closed" line a terminal session ends with, not errors.
-  const ssh = ["ssh", "-tt", "-o", "ConnectTimeout=15", "-o", "LogLevel=ERROR"]
-  const child = Bun.spawn([...ssh, destination, command], {
-    stdio: ["inherit", "inherit", "inherit"],
-  })
-  const exitCode = await child.exited
-  if (exitCode !== 0) {
-    throw new Error(
-      `[SshTarget] Setting up the server as ${destination} failed (exit code ${exitCode}).`
-    )
-  }
 }

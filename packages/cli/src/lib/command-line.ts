@@ -166,16 +166,6 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Replace a hand-written .env, losing what the source doesn't have",
     kind: "boolean",
   },
-  admin: {
-    syntax: "--admin <login>",
-    summary: "Login with sudo that prepares the server (default: root)",
-    kind: "string",
-  },
-  key: {
-    syntax: "--key <path>",
-    summary: "Public key to authorize for deploys (default: the one SSH uses)",
-    kind: "string",
-  },
   branch: {
     syntax: "--branch <name>",
     summary: "Branch whose pushes deploy (default: the repository's default branch)",
@@ -257,7 +247,6 @@ export type LocalCommandId =
   | "deploy:restart"
   | "deploy:start"
   | "deploy:stop"
-  | "deploy:setup"
   | "deploy:check"
   | "deploy:ci"
   | "deploy:access:list"
@@ -622,10 +611,6 @@ const commandTree: readonly CommandNode[] = [
       rootHelpLabel: "deploy ...",
     }),
     children: [
-      command("deploy:setup", "Prepare the server and project for deploys", {
-        path: ["deploy", "setup"],
-        options: ["admin", "key"],
-      }),
       command("deploy:check", "Check what stands between you and a working deploy", {
         path: ["deploy", "check"],
         options: ["json"],

@@ -465,12 +465,6 @@ async function main(): Promise<void> {
       break
     }
 
-    case "deploy:setup": {
-      const { runDeploySetup } = await import("./commands/deploy")
-      await runDeploySetup({ admin: getFlag("admin"), key: getFlag("key") })
-      break
-    }
-
     case "deploy:check": {
       const { runDeployCheck } = await import("./commands/deploy")
       await runDeployCheck({ json: hasFlag("json") })
