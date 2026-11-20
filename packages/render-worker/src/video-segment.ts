@@ -44,7 +44,12 @@ export async function renderVideoSegment(input: {
 
   const { key, segment } = job.payload
   const [kept] = await artifacts.listVideoRenders({ projectId: host.id, keys: [key] })
-  if (kept) return
+  if (kept) {
+    // Kept by an earlier delivery, as when a retry asks for it again while it renders: the export
+    // looks again as this job was asked, so its last look carries the retry's `askedAt`.
+    await nudgeVideoExport(host, job.payload.waitingExport)
+    return
+  }
 
   // Kept, or why not: the export that waits for it looks again at once.
   const keep = async (made: { readonly file: FileRef } | VideoRenderFailure) => {

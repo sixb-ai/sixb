@@ -181,7 +181,9 @@ sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
   once kept or failed, carrying the export's payload; the later look is a backstop, for an export
   whose segment another asked for first. A segment job always keeps its file or why not,
   so asking again for a segment never strands an export; a retry forgets the failures and asks
-  anew with `replace`.
+  anew with `replace`, in a job apart from the export's, since a segment that finishes takes the
+  export's place with the payload it was asked with, which asks for nothing. A segment found kept
+  still makes its export look, so the last look carries the latest ask's `askedAt`.
 - **Failures.** A segment that fails after `VIDEO_SEGMENT_JOB.attempts` fails the export, naming
   the scene by its label, else its id. An export asked for by a Sixb whose keys differ from the
   worker's, as while a deploy rolls out, tries again until its attempts are spent, then keeps why.

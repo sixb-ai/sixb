@@ -15,7 +15,6 @@ import {
 import {
   VIDEO_ENGINE,
   VIDEO_EXPORT_JOB,
-  videoExportJobId,
   videoExportPlan,
 } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
@@ -228,6 +227,12 @@ const segmentsOf = (jobs: readonly RenderQueueJob[]) =>
       job.type === "artifact.video.segment.requested"
   )
 
+const exportsOf = (jobs: readonly RenderQueueJob[]) =>
+  jobs.filter(
+    (job): job is ArtifactVideoExportRequestedQueueJob =>
+      job.type === "artifact.video.export.requested"
+  )
+
 describe("a video's export in the render worker", () => {
   // Reproduce by putting `index.html` as written in sceneProject, not videoSegmentIndex's: each
   // segment renders every scene.
@@ -434,9 +439,49 @@ describe("a video's export in the render worker", () => {
 
     await sixb.artifacts.video(version.artifactId, { retry: true })
     const [retried] = await claimable()
-    expect(retried?.id).toBe(videoExportJobId(job.payload.key))
+    expect(retried?.payload).toMatchObject({ key: job.payload.key, retry: true })
     await assemble(retried as ArtifactVideoExportRequestedQueueJob)
     const asked = await claimable()
     expect(segmentsOf(asked).map(({ id }) => id)).toContain(demo.id)
+  })
+
+  // Reproduce by asking for a retry in the export's own job, videoExportJobId, as it once was: the
+  // intro, kept before the retry runs, takes its place with the export as first asked for, which
+  // asks for nothing, and the demo is never rendered again. Reproduce the last look's `askedAt` by
+  // returning at once for a segment found kept in renderVideoSegment.
+  test("asks again for a scene that failed, though another finishes before the retry runs", async () => {
+    const { sixb, version, queues, exportJob, assemble, render, claimable, artifacts } =
+      await setup()
+    const job = await exportJob()
+    await assemble(job)
+    const [intro, demo, outro, sound] = segmentsOf(await claimable())
+    if (!intro || !demo || !outro || !sound) throw new Error("Expected the segments.")
+
+    // The demo fails while the others render, and the export hears so.
+    await failVideoSegment({
+      host: { id: projectId, storage: { artifacts: artifacts() }, queues },
+      job: demo,
+    })
+    for (const look of exportsOf(await claimable())) await assemble(look)
+
+    // Retried a minute later, behind the intro, which is kept meanwhile and nudges the export.
+    setSystemTime(new Date(Date.now() + 60_000))
+    await sixb.artifacts.video(version.artifactId, { retry: true })
+    await render(intro)
+
+    // Their stills, asked for when the video was published, are not under test here.
+    const exports = exportsOf(await claimable())
+    const retry = exports.find(({ payload }) => payload.retry)
+    for (const each of exports) await assemble(each)
+    const asked = segmentsOf(await claimable())
+    expect(asked.map(({ id }) => id)).toEqual([demo.id, outro.id, sound.id])
+
+    // The outro, still rendering as first asked when the retry asked for it again, nudges the
+    // export as first asked; its job the retry asked for finds it kept, and nudges as retried.
+    await render(outro)
+    await render(asked[1] as ArtifactVideoSegmentRequestedQueueJob)
+    const [look] = await claimable()
+    expect(look?.payload).toMatchObject({ waiting: true, askedAt: retry?.payload.askedAt })
+    expect(retry?.payload.askedAt).not.toBe(job.payload.askedAt)
   })
 })
