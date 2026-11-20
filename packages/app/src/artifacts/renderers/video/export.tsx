@@ -11,6 +11,7 @@ import {
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowDownToLine, Clapperboard, RotateCcw, TriangleAlert } from "lucide-react"
+import { useRef } from "react"
 import { formatFileSize } from "../../file-size"
 import { videoExportUrl } from "../../file-source"
 import { FileTypeIcon } from "../../file-type-icon"
@@ -20,10 +21,10 @@ import type { ArtifactVersion } from "../../queries"
 import type { VideoExport, VideoExportView } from "./export-state"
 
 // A video's MP4, in its header: once it is rendered, the header's download is the MP4 itself.
-// Until then, a menu exports it, shows it rendering part by part on its button, and says when it
-// could not, with a retry when one can help; a version not exported yet offers the one before it,
-// out of date. A phone's header folds it into More, the same entries in it, so the title keeps
-// its room.
+// Until then, a menu exports it, shows it rendering part by part on its button, a ring and the
+// parts done beside it, and says when it could not, with a retry when one can help; a version not
+// exported yet offers the one before it, out of date. A phone's header folds it into More, the
+// same entries in it, so the title keeps its room.
 
 /** As the header's other actions: square, quiet, the same icon size. */
 const ACTION =
@@ -39,6 +40,9 @@ export function VideoExportMenu({
   const messages = useArtifactMessages().video
   const { view } = exported
   const detail = useReadyDetail(view)
+  // Whether the menu was last used with a pointer: closing it then leaves the focus where the
+  // pointer is, rather than on the button, which would show its ring and its tooltip.
+  const pointer = useRef(false)
 
   if (view.state === "loading") return null
 
@@ -78,15 +82,40 @@ export function VideoExportMenu({
 
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger
-        aria-label={label}
-        title={label}
-        data-video-export={view.state}
-        className={cn(ACTION, view.state === "failed" && "text-destructive hover:text-destructive")}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger
+            aria-label={label}
+            data-video-export={view.state}
+            className={cn(
+              ACTION,
+              view.state === "failed" && "text-destructive hover:text-destructive",
+              // Wide enough for how far it is, which the reader reads at a glance.
+              view.state === "rendering" && "w-auto gap-1.5 px-2"
+            )}
+          >
+            <VideoExportMark view={view} />
+            {view.state === "rendering" ? <RenderingCount view={view} /> : null}
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          {label}
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="w-72 p-1.5"
+        onPointerDown={() => {
+          pointer.current = true
+        }}
+        onKeyDown={() => {
+          pointer.current = false
+        }}
+        onCloseAutoFocus={(event) => {
+          if (pointer.current) event.preventDefault()
+        }}
       >
-        <VideoExportMark view={view} />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1.5">
         <VideoExportEntries version={version} exported={exported} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -222,6 +251,31 @@ export function VideoExportMark({ view }: { readonly view: VideoExportView }) {
   if (view.state === "failed") return <TriangleAlert aria-hidden="true" />
   if (view.state !== "rendering") return <ArrowDownToLine aria-hidden="true" />
   return <ProgressRing fraction={view.assembling ? null : view.ready / Math.max(1, view.total)} />
+}
+
+/**
+ * How far it has rendered, beside the ring: the parts done, `4/13`, after *Rendering* in a header
+ * with room for it; while the parts are put together, that it is finishing. The button's label
+ * says it in full.
+ */
+function RenderingCount({
+  view,
+}: {
+  readonly view: Extract<VideoExportView, { state: "rendering" }>
+}) {
+  const messages = useArtifactMessages().video
+  return (
+    <span aria-hidden="true" className="text-xs font-medium whitespace-nowrap tabular-nums">
+      {view.assembling ? (
+        messages.assemblingShort
+      ) : (
+        <>
+          <span className="hidden @lg:inline">{messages.renderingWord} </span>
+          {messages.renderingCount(view.ready, view.total)}
+        </>
+      )}
+    </span>
+  )
 }
 
 /**
