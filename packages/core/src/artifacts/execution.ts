@@ -50,7 +50,7 @@ import {
   unmadeMediaParts,
 } from "./media/media"
 import type { DocumentHolder } from "./outline"
-import { invalidArtifact, readArtifactText } from "./publish/files"
+import { invalidArtifact, readArtifactText, titleFileName } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
 import { documentPdfKey, requestDocumentPdf } from "./publish/pdf"
 import {
@@ -265,10 +265,10 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
     }
   ): Promise<ArtifactMedia | null>
   /**
-   * A video version's MP4: `ready` with its file once rendered, else `rendering` with how far it
-   * has come, having asked the render worker for it; `render: false` reads it without asking. It
-   * renders scene by scene in sandboxes of the project, about as long as the video itself for a
-   * light one, and keeps each scene's segment, so a version that changes one scene renders only
+   * A video version's MP4: `ready` with its file once rendered, named after the version's title,
+   * else `rendering` with how far it has come, having asked the render worker for it;
+   * `render: false` reads it without asking. It renders scene by scene in sandboxes of the
+   * project, about as long as the video itself for a light one, and keeps each scene's segment, so a version that changes one scene renders only
    * that scene again. Its `artifact:` files are those the caller reads. `failed` with why when it
    * could not be rendered; `retry` asks again instead. Whoever reads the artifact may ask. `null`
    * when the caller cannot read the artifact or it has no such version. Throws `invalid_artifact`
@@ -1276,9 +1276,11 @@ export function createArtifactsRuntime(
       // How far it has come, what failed asked for again.
       const progress = () => videoExportProgress(plan, kept)
       if (status.status === "ready") {
+        // Kept for every version made the same, it downloads named after this one's title.
+        const fileName = `${titleFileName(version.title, "Video")}.mp4`
         return {
           status: "ready",
-          file: status.file,
+          file: { ...status.file, fileName },
           durationMs: outline.durationMs,
           sizeBytes: status.file.sizeBytes,
         }

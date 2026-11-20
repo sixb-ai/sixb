@@ -4502,7 +4502,7 @@ export const printArtifactPdf = <ThrowOnError extends boolean = false>(
 /**
  * Get a video's MP4
  *
- * The version rendered to MP4, H.264 and AAC, its index first, as a download named after the title it rendered with, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.
+ * The version rendered to MP4, H.264 and AAC, its index first, as a download named after the version's title, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.
  */
 export const getArtifactVideo = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactVideoData, ThrowOnError>

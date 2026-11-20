@@ -321,13 +321,14 @@ describe("a video's export in the render worker", () => {
     const plan = videoExportPlan(job.payload)
     const [mp4] = await artifacts().listVideoRenders({ projectId, keys: [plan.key] })
     if (!mp4 || "failure" in mp4) throw new Error("Expected the MP4.")
-    expect(mp4.file).toMatchObject({ fileName: "Launch Q4.mp4", mediaType: "video/mp4" })
+    // Kept for every version made the same, it is named after the title of the one read.
+    expect(mp4.file).toMatchObject({ fileName: "video.mp4", mediaType: "video/mp4" })
     // The outro fades in as the demo's segment ends: only its own project hosts both.
     expect(await text(mp4.file)).toBe("intro|demo|demo+outro")
 
     expect(await sixb.artifacts.video(version.artifactId)).toEqual({
       status: "ready",
-      file: mp4.file,
+      file: { ...mp4.file, fileName: "Launch Q4.mp4" },
       durationMs: 6000,
       sizeBytes: mp4.file.sizeBytes,
     })

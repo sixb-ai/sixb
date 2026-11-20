@@ -244,7 +244,7 @@ export async function requestVideoExport(
     readonly storage: Pick<ArtifactStorage, "clearVideoRenderFailures">
     readonly queue: Pick<Queue<RenderQueueJob>, "enqueue">
   },
-  version: Pick<ArtifactVersionRecord, "projectId" | "artifactId" | "version" | "title">,
+  version: Pick<ArtifactVersionRecord, "projectId" | "artifactId" | "version">,
   source: VideoExportSource,
   options: { readonly plan: VideoExportPlan; readonly retry?: boolean }
 ): Promise<void> {
@@ -269,7 +269,6 @@ export async function requestVideoExport(
         payload: {
           artifactId: version.artifactId,
           version: version.version,
-          title: version.title,
           key: plan.key,
           outline: source.outline,
           files: source.files,

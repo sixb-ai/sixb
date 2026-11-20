@@ -29,7 +29,6 @@ import {
   readBlob,
   renderApiOrigin,
   storeSandboxFile,
-  titleFileName,
 } from "./sandbox"
 import { runVideoScript, type VideoHost } from "./video-project"
 
@@ -169,7 +168,8 @@ export async function assembleVideoExport(input: {
         {
           path: mp4,
           bytes: report.bytes,
-          fileName: `${titleFileName(payload.title, "Video")}.mp4`,
+          // Shared by every version made the same, whatever its title: reading it names it.
+          fileName: "video.mp4",
           mediaType: "video/mp4",
         },
         { signal }
