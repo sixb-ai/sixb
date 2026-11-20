@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { afterEach, describe, expect, jest, mock, setSystemTime, spyOn, test } from "bun:test"
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import {
   type ArtifactFile,
@@ -13,8 +13,11 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
+  missingVideoStills,
   VIDEO_ENGINE,
   VIDEO_EXPORT_JOB,
+  VIDEO_SEGMENT_JOB,
+  VIDEO_STILLS_JOB,
   videoExportPlan,
 } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
@@ -27,6 +30,7 @@ import { createTestSixb } from "@sixb/core/testing"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { assembleVideoExport, failVideoExport } from "../src/video-export"
 import { failVideoSegment, renderVideoSegment } from "../src/video-segment"
+import { RenderWorker } from "../src/worker"
 import { startDownloadApi } from "./download-api"
 
 const projectId = "videos"
@@ -111,9 +115,21 @@ class VideoSandboxes implements Pick<SandboxFactory, "create" | "supportsRequest
   }
 }
 
+/** Sandboxes that never open, so each render fails as it starts. */
+class ClosedSandboxes extends VideoSandboxes {
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    this.created.push(options)
+    throw new Error("No sandbox opens here.")
+  }
+}
+
 const apis: { close(): void }[] = []
-afterEach(() => {
+const workers: RenderWorker[] = []
+afterEach(async () => {
+  await Promise.all(workers.splice(0).map((worker) => worker.stop()))
   for (const api of apis.splice(0)) api.close()
+  jest.useRealTimers()
+  mock.restore()
   setSystemTime()
 })
 
@@ -208,6 +224,7 @@ async function setup(sandboxes = new VideoSandboxes()) {
     return storage.artifacts
   }
   return {
+    host: sixbHost,
     sixb,
     version,
     queues,
@@ -484,5 +501,143 @@ describe("a video's export in the render worker", () => {
     const [look] = await claimable()
     expect(look?.payload).toMatchObject({ waiting: true, askedAt: retry?.payload.askedAt })
     expect(retry?.payload.askedAt).not.toBe(job.payload.askedAt)
+  })
+})
+
+/**
+ * A render worker on the project's lane, whose deliveries are counted by type. `until` runs its
+ * timers a second at a time, its backoffs included, until `done`, for at most `ms` of them.
+ */
+async function runWorker(host: ConstructorParameters<typeof RenderWorker>[0]) {
+  const deliveries = new Map<string, number>()
+  const claim = host.queues.renders.claim.bind(host.queues.renders)
+  host.queues.renders.claim = async (input) => {
+    const claimed = await claim(input)
+    for (const { job } of claimed) deliveries.set(job.type, (deliveries.get(job.type) ?? 0) + 1)
+    return claimed
+  }
+
+  const worker = new RenderWorker(host)
+  workers.push(worker)
+  await worker.start()
+
+  const until = async (done: () => Promise<boolean>, ms: number) => {
+    for (let elapsed = 0; elapsed <= ms; elapsed += 1_000) {
+      for (let turn = 0; turn < 20; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      if (await done()) return
+      jest.advanceTimersByTime(1_000)
+    }
+    throw new Error(`Not done within ${ms / 1_000} seconds of the worker's timers.`)
+  }
+  return { worker, until, deliveries: (type: RenderQueueJob["type"]) => deliveries.get(type) ?? 0 }
+}
+
+/** Where an export stands, read without asking for it. */
+const read = { render: false } as const
+
+// Reproduce each by trying its job again without its bound in RenderWorker.onExecutionError, as
+// `if (true) return retry(...)`: the job is delivered again each backoff, a sandbox each time, and
+// nothing ever says it failed.
+describe("a video's job whose every render fails, in a running worker", () => {
+  test("tries a segment VIDEO_SEGMENT_JOB.attempts times, then fails its export", async () => {
+    jest.useFakeTimers()
+    spyOn(console, "error").mockImplementation(() => {})
+    const { host, sixb, version, queues, exportJob, assemble, claimable } = await setup(
+      new ClosedSandboxes()
+    )
+    const job = await exportJob()
+    await assemble(job)
+    const [intro] = segmentsOf(await claimable())
+    if (!intro) throw new Error("Expected the intro's segment.")
+    // Its stills, asked for when the video was published, are not under test here.
+    jest.setSystemTime(Date.now() + VIDEO_STILLS_JOB.settleMs)
+    await claimable()
+
+    // The intro is asked for again, alone: the worker delivers it until it gives up.
+    const { worker, until, deliveries } = await runWorker(host)
+    await queues.renders.enqueue({
+      projectId,
+      jobs: [{ id: intro.id, replace: true, type: intro.type, payload: intro.payload }],
+    })
+    await until(
+      async () => (await sixb.artifacts.video(version.artifactId, read))?.status === "failed",
+      VIDEO_SEGMENT_JOB.attempts * VIDEO_SEGMENT_JOB.backoffMs
+    )
+    expect(await sixb.artifacts.video(version.artifactId, read)).toEqual({
+      status: "failed",
+      reason: "Scene 'intro' could not be rendered. Try again in a moment.",
+    })
+    expect(deliveries("artifact.video.segment.requested")).toBe(VIDEO_SEGMENT_JOB.attempts)
+
+    await worker.stop()
+    jest.setSystemTime(Date.now() + VIDEO_EXPORT_JOB.waitMs)
+    expect(await claimable()).toEqual([])
+  })
+
+  test("tries an export VIDEO_EXPORT_JOB.attempts times, then says it could not be put together", async () => {
+    jest.useFakeTimers()
+    spyOn(console, "error").mockImplementation(() => {})
+    const { host, sixb, version, queues, exportJob, claimable, artifacts } = await setup(
+      new ClosedSandboxes()
+    )
+    // Every segment is rendered: what is left is joining them, in a sandbox.
+    const job = await exportJob()
+    const file = version.files[0]?.file
+    if (!file) throw new Error("Expected a file.")
+    for (const segment of videoExportPlan(job.payload).segments) {
+      await artifacts().putVideoRender({ projectId, key: segment.key, file, createdAt: new Date() })
+    }
+    jest.setSystemTime(Date.now() + VIDEO_STILLS_JOB.settleMs)
+    await claimable()
+
+    const { worker, until, deliveries } = await runWorker(host)
+    await queues.renders.enqueue({
+      projectId,
+      jobs: [{ id: job.id, replace: true, type: job.type, payload: job.payload }],
+    })
+    await until(
+      async () => (await sixb.artifacts.video(version.artifactId, read))?.status === "failed",
+      VIDEO_EXPORT_JOB.attempts * VIDEO_EXPORT_JOB.backoffMs
+    )
+    expect(await sixb.artifacts.video(version.artifactId, read)).toEqual({
+      status: "failed",
+      reason: "It could not be put together. Try again in a moment.",
+    })
+    expect(deliveries("artifact.video.export.requested")).toBe(VIDEO_EXPORT_JOB.attempts)
+
+    await worker.stop()
+    jest.setSystemTime(Date.now() + VIDEO_EXPORT_JOB.waitMs)
+    expect(await claimable()).toEqual([])
+  })
+
+  test("tries the stills VIDEO_STILLS_JOB.attempts times, then keeps why for each", async () => {
+    jest.useFakeTimers()
+    spyOn(console, "error").mockImplementation(() => {})
+    const { host, version, claimable, artifacts } = await setup(new ClosedSandboxes())
+    const record = await artifacts().getVersion({
+      projectId,
+      artifactId: version.artifactId,
+      version: version.version,
+    })
+    if (!record) throw new Error("Expected the version.")
+    const keys = (await missingVideoStills(artifacts(), record)).map(({ key }) => key)
+    const kept = () => artifacts().listVideoRenders({ projectId, keys })
+
+    // What publishing asked for: its stills, once the video rests.
+    const { worker, until, deliveries } = await runWorker(host)
+    await until(
+      async () => (await kept()).length === keys.length,
+      VIDEO_STILLS_JOB.settleMs + VIDEO_STILLS_JOB.attempts * VIDEO_STILLS_JOB.backoffMs
+    )
+    expect((await kept()).map((each) => "failure" in each && each.failure)).toEqual(
+      keys.map(() => "It could not be snapshotted.")
+    )
+    expect(deliveries("artifact.video.stills.requested")).toBe(VIDEO_STILLS_JOB.attempts)
+
+    await worker.stop()
+    jest.setSystemTime(Date.now() + VIDEO_EXPORT_JOB.waitMs)
+    expect(await claimable()).toEqual([])
   })
 })
