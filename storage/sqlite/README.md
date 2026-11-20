@@ -39,6 +39,12 @@ file when upgrading normally; incompatible or dirty history fails startup instea
 rewriting an unknown schema. Before 1.0, an explicitly breaking migration may still require deleting
 the database file and starting over.
 
+A deploy migrates while the release before it keeps serving, so each migration works alongside
+that release: it adds tables, and columns that are nullable or have a default. Dropping, renaming or
+tightening waits for the release after the last code that uses the old shape. A migration that
+can't wait is listed with `{ incompatible: true }`; a deploy stops the services while it runs, and
+only when told it may.
+
 ## Vector profiles
 
 Named `search.vectors` profiles persist outside object properties as float32 blobs with their

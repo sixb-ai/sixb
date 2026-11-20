@@ -373,11 +373,12 @@ function isStorageMigration(command: DeployCommand): boolean {
 }
 
 /**
- * The live release cannot run against a schema it does not know, so a release with storage
- * migrations pending stops the services before migrating. "Start new release" then finds nothing
- * running and starts it cold. `sixb db migrate --check` reads the schema without changing it, and
- * exits 3 when migrations are pending. A release whose `sixb` predates `--check` rejects the
- * option with 2: nothing says the schema stays, so the services stop too.
+ * Migrations work alongside the release before them, which keeps serving while they run, except
+ * one marked incompatible: then the services stop before migrating, and "Start new release" finds
+ * nothing running and starts it cold. `sixb db migrate --check` reads the schema without changing
+ * it: 0 when it is current, 3 when every pending migration is compatible, 4 when one is not. A
+ * release whose `sixb` predates `--check` rejects the option with 2: nothing says the live release
+ * can stay, so the services stop too.
  */
 function stopForSchemaChange(): Step {
   return {
@@ -388,12 +389,12 @@ function stopForSchemaChange(): Step {
       '"$BUN" "$RELEASE_PROJECT/node_modules/.bin/sixb" db migrate --check || migrations=$?',
       "",
       'case "$migrations" in',
-      "  0) ;;",
-      "  2 | 3)",
-      '    if [ "$migrations" = 3 ]; then',
-      "      echo 'This release changes the storage schema, so the services stop while it migrates.'",
+      "  0 | 3) ;;",
+      "  2 | 4)",
+      '    if [ "$migrations" = 4 ]; then',
+      "      echo 'A migration in this release breaks the live release, so the services stop while it migrates.'",
       "    else",
-      "      echo 'This release cannot tell whether its schema changes, so the services stop while it migrates.'",
+      "      echo 'This release cannot tell whether its migrations break the live release, so the services stop while it migrates.'",
       "    fi",
       '    if systemctl --user is-active --quiet "$UNIT"; then systemctl --user stop "$UNIT"; fi',
       '    deploy_mode="stopped"',
