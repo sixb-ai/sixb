@@ -5,6 +5,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowLeft, ArrowRight, Copy, Ellipsis, Pencil, Sparkles, Trash2 } from "lucide-react"
@@ -16,10 +19,10 @@ import { type MediaTarget, useMediaParts } from "./media"
 import { sceneFootage, sceneName } from "./selection"
 
 // A scene on the timeline's Scenes track: a picture of its middle, its name and its length, along
-// the time it plays. It is dragged along the track to reorder, its end to make it longer or
-// shorter, double-clicked to rename, and its menu, or a right click, duplicates, moves or deletes
-// it. The scene the Agent is changing glows as a canvas's boards do; the people on the video show
-// on the scene they have open.
+// the time it plays; too short for its name, its number, the name in a tooltip. It is dragged
+// along the track to reorder, its end to make it longer or shorter, double-clicked to rename, and
+// its menu, or a right click, duplicates, moves or deletes it. The scene the Agent is changing
+// glows as a canvas's boards do; the people on the video show on the scene they have open.
 
 export interface SceneActions {
   readonly select: (scene: VideoScene) => void
@@ -29,9 +32,18 @@ export interface SceneActions {
   readonly rename: (scene: VideoScene, label: string) => void
 }
 
-/** The narrowest a scene shows its picture at, and how wide it shows it, in pixels. */
-const PICTURE_FROM_PX = 120
+/**
+ * The narrowest a scene shows its name at, in pixels, its menu's room taken: a few letters of it.
+ * Narrower, it shows its number.
+ */
+const NAME_FROM_PX = 72
+
+/**
+ * How wide a scene shows its picture, and the narrowest it shows it at, in pixels: with room left
+ * beside it, past the gap between them, for its name.
+ */
 const PICTURE_PX = 72
+const PICTURE_FROM_PX = PICTURE_PX + 8 + NAME_FROM_PX
 
 export function SceneBlock({
   scene,
@@ -73,6 +85,72 @@ export function SceneBlock({
   const [menu, setMenu] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
   const { width } = useSize(box)
+  // Until it is measured, it is laid out as a scene with room for its name.
+  const narrow = width > 0 && width < NAME_FROM_PX
+
+  const block = (
+    <button
+      type="button"
+      aria-pressed={open}
+      aria-label={messages.sceneLabel(index + 1, name, length)}
+      title={narrow ? undefined : agent ? messages.agentEditing : messages.sceneHint}
+      className={cn(
+        "absolute inset-0 flex touch-none items-center gap-2 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        narrow ? "justify-center p-0" : "p-1 pr-9"
+      )}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || renaming) return
+        event.stopPropagation()
+        onPress(event)
+      }}
+      // A press opens it as it lifts; Enter or Space, which press no pointer, open it here.
+      onClick={(event) => {
+        if (event.detail === 0) actions.select(scene)
+      }}
+      onDoubleClick={() => setRenaming(true)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        setMenu(true)
+      }}
+      onKeyDown={(event) => {
+        if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
+        event.preventDefault()
+        event.stopPropagation()
+        actions.move(scene, index + (event.key === "ArrowLeft" ? -1 : 1))
+      }}
+    >
+      {narrow ? (
+        <span
+          aria-hidden="true"
+          className="text-[11px] font-semibold text-muted-foreground tabular-nums"
+        >
+          {renaming ? null : index + 1}
+        </span>
+      ) : (
+        <>
+          {width >= PICTURE_FROM_PX ? (
+            <span
+              className="relative h-full shrink-0 overflow-hidden rounded-[4px]"
+              style={{ width: PICTURE_PX }}
+            >
+              <SceneThumbnail scene={scene} timeline={timeline} target={target} fill />
+            </span>
+          ) : null}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+            {renaming ? null : (
+              <span className="truncate text-xs font-medium text-foreground">{name}</span>
+            )}
+            <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground tabular-nums">
+              {agent ? (
+                <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+              ) : null}
+              {length}
+            </span>
+          </span>
+        </>
+      )}
+    </button>
+  )
 
   return (
     <div
@@ -86,53 +164,20 @@ export function SceneBlock({
         dragging && "opacity-40"
       )}
     >
-      <button
-        type="button"
-        aria-pressed={open}
-        aria-label={messages.sceneLabel(index + 1, name, length)}
-        title={agent ? messages.agentEditing : messages.sceneHint}
-        className="absolute inset-0 flex touch-none items-center gap-2 p-1 pr-9 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-        onPointerDown={(event) => {
-          if (event.button !== 0 || renaming) return
-          event.stopPropagation()
-          onPress(event)
-        }}
-        // A press opens it as it lifts; Enter or Space, which press no pointer, open it here.
-        onClick={(event) => {
-          if (event.detail === 0) actions.select(scene)
-        }}
-        onDoubleClick={() => setRenaming(true)}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          setMenu(true)
-        }}
-        onKeyDown={(event) => {
-          if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
-          event.preventDefault()
-          event.stopPropagation()
-          actions.move(scene, index + (event.key === "ArrowLeft" ? -1 : 1))
-        }}
-      >
-        {width >= PICTURE_FROM_PX ? (
-          <span
-            className="relative h-full shrink-0 overflow-hidden rounded-[4px]"
-            style={{ width: PICTURE_PX }}
-          >
-            <SceneThumbnail scene={scene} timeline={timeline} target={target} fill />
-          </span>
-        ) : null}
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-          {renaming ? null : (
-            <span className="truncate text-xs font-medium text-foreground">{name}</span>
-          )}
-          <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground tabular-nums">
+      {narrow ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{block}</TooltipTrigger>
+          <TooltipContent>
+            <span className="font-medium">{messages.sceneTitle(index + 1, name)}</span>
+            <span className="text-background/70 tabular-nums"> · {length}</span>
             {agent ? (
-              <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+              <span className="block text-background/70">{messages.agentEditing}</span>
             ) : null}
-            {length}
-          </span>
-        </span>
-      </button>
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        block
+      )}
 
       {renaming ? (
         <div
@@ -165,12 +210,15 @@ export function SceneBlock({
         </span>
       ) : null}
 
+      {/* Too narrow for its name, a scene keeps its menu for a right click: it would cover it. */}
       <div
         className={cn(
           "absolute top-1 right-3 z-10 transition-opacity",
-          open || menu
+          menu || (open && !narrow)
             ? "opacity-100"
-            : "opacity-0 group-focus-within/sceneblock:opacity-100 group-hover/sceneblock:opacity-100"
+            : narrow
+              ? "pointer-events-none opacity-0"
+              : "opacity-0 group-focus-within/sceneblock:opacity-100 group-hover/sceneblock:opacity-100"
         )}
       >
         <SceneMenu

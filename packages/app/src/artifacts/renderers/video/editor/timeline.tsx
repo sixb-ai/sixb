@@ -52,6 +52,8 @@ import { clipName, type EditorSelection } from "./selection"
 const LABELS_PX = 112
 /** Room after the video's end, to drop and trim past it. */
 const TAIL_PX = 160
+/** The playhead's knob on the ruler, centred on its line; each ruler mark's time starts past it. */
+const KNOB_PX = 11
 
 const ROW_PX: Record<"ruler" | "scenes" | VideoTrack, number> = {
   ruler: 24,
@@ -102,7 +104,6 @@ type Drag =
 export interface TimelineEdits {
   readonly seek: (ms: number, mode: "drag" | "commit") => void
   readonly select: (selection: EditorSelection) => void
-  readonly open: (scene: VideoScene) => void
   readonly moveClip: (clip: LaidClip, startMs: number) => void
   readonly trimClip: (clip: LaidClip, edge: "start" | "end", atMs: number) => void
   readonly sceneLength: (scene: VideoScene, ms: number) => void
@@ -545,7 +546,9 @@ export function Timeline({
                       dragging={reorder?.id === scene.id}
                       length={formatLength(sceneEnd(scene) - scene.startMs)}
                       actions={edits.scene}
-                      onPress={(event) => startReorder(event, scene.id, () => edits.open(scene))}
+                      onPress={(event) =>
+                        startReorder(event, scene.id, () => edits.scene.select(scene))
+                      }
                     >
                       {span.crossfade ? null : endHandle}
                     </SceneBlock>
@@ -692,7 +695,10 @@ export function Timeline({
             className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-red-500"
             style={{ left: LABELS_PX + px(timeMs) }}
           >
-            <span className="absolute -top-px -left-[5px] h-3 w-[11px] rounded-b-sm bg-red-500" />
+            <span
+              className="absolute -top-px h-3 rounded-b-sm bg-red-500"
+              style={{ left: -Math.floor(KNOB_PX / 2), width: KNOB_PX }}
+            />
           </span>
         </div>
       </div>
@@ -791,8 +797,12 @@ function Ruler({
           )}
           style={{ left: px(tick.ms) }}
         >
+          {/* Past the playhead's knob, so the time it rests on stays readable, 0:00 first. */}
           {tick.major ? (
-            <span className="absolute bottom-3 left-1 text-[10px] whitespace-nowrap text-muted-foreground tabular-nums">
+            <span
+              className="absolute bottom-3 text-[10px] whitespace-nowrap text-muted-foreground tabular-nums"
+              style={{ left: Math.ceil(KNOB_PX / 2) + 2 }}
+            >
               {rulerLabel(tick.ms, major)}
             </span>
           ) : null}
