@@ -393,6 +393,34 @@ describe("a video's export in the render worker", () => {
     expect(look?.payload).not.toHaveProperty("retry")
   })
 
+  // Reproduce by never giving up in assembleVideoExport, `if (false)`, or by a look that counts
+  // from when it looks: an export whose segment never comes renders forever, and cannot be retried.
+  test("gives up VIDEO_EXPORT_JOB.waitMs after it was asked for, however often it looked", async () => {
+    const { sixb, version, exportJob, assemble, claimable } = await setup()
+    const job = await exportJob()
+    await assemble(job)
+    // Its segments, which never render.
+    await claimable()
+
+    // It looks again a few seconds later, then once more just past its wait.
+    setSystemTime(new Date(Date.now() + VIDEO_EXPORT_JOB.recheckMs))
+    const [look] = exportsOf(await claimable())
+    if (!look) throw new Error("Expected the export to look again.")
+    await assemble(look)
+    setSystemTime(new Date(Date.parse(job.payload.askedAt) + VIDEO_EXPORT_JOB.waitMs + 1))
+    const [last] = exportsOf(await claimable())
+    if (!last) throw new Error("Expected the export to look again.")
+    expect(last.payload).toMatchObject({ waiting: true, askedAt: job.payload.askedAt })
+
+    await assemble(last)
+    expect(await sixb.artifacts.video(version.artifactId, { render: false })).toEqual({
+      status: "failed",
+      reason: "It took too long to render. Try again.",
+    })
+    setSystemTime(new Date(Date.now() + VIDEO_EXPORT_JOB.recheckMs))
+    expect(exportsOf(await claimable())).toEqual([])
+  })
+
   // Reproduce by returning for a key that differs from the payload's, as it once did: the job
   // completes, and asking again for the export finds it settled and asks nothing.
   test("tries again while the version that asked keys exports otherwise, then says so", async () => {
