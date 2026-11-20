@@ -12,7 +12,6 @@ import {
   readAppliedMarkingNotices,
   stopSixbProviders,
 } from "../lib/runtime"
-import { findPendingMigrations } from "../lib/storage-migration"
 import { generateProjectTypes } from "../lib/typegen"
 import { checkView, dbMigrateView, lakeCheckView, renderStatic, withTask } from "../ui"
 
@@ -111,13 +110,12 @@ async function probe(sixb: LoadedSixbHost, entry: string, lake: boolean): Promis
 
 const CLOSE_TIMEOUT_MS = 10_000
 
-/** Migrates before anything is probed, since the probes read the schema. */
+/**
+ * Migrates before anything is probed, since the probes read the schema. Always, as
+ * `sixb db migrate` does: a release with no schema change can still add a query index or make a
+ * property unique, and the services start with `--no-migrate`.
+ */
 async function migrate(sixb: LoadedSixbHost): Promise<void> {
-  const pending = await withTask("check", "Reading the storage schema", () =>
-    findPendingMigrations(sixb.storage)
-  )
-  if (pending.length === 0) return
-
   const result = await withTask("check", "Migrating storage", () =>
     migrateStorage(sixb.storage, {
       projectId: sixb.id,

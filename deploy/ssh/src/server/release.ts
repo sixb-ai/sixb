@@ -79,6 +79,8 @@ const SUPERVISOR_START_MS = 15_000
 /** How long a service left draining by an earlier deploy gets before it is killed for this one. */
 const LEFTOVER_STOP_MS = 10_000
 
+type Undo = () => Promise<void>
+
 /** The live release: a slot, a deployment from before slots, or nothing running. */
 type Live =
   | { readonly kind: "slot"; readonly slot: DeploySlot; readonly manifest: ProcessManifest }
@@ -130,7 +132,8 @@ export async function runRelease(
   const live = await findLive(layout, host)
   let serving = live
   const slot = slotLayout(layout, live ? otherSlot(live.slot) : await idleSlot(layout))
-  const undo: (() => Promise<void>)[] = []
+  const undo: Undo[] = []
+  let committed = false
 
   if (release.steps.env) {
     const pull = release.steps.env
@@ -237,22 +240,25 @@ export async function runRelease(
       if (exclusive.length > 0) await host.sleep(2_000)
       await assertHealthy(slot, host, false)
     })
+
+    await step("Retire previous release", async () => {
+      await makeLive({ layout, slot, next, release, plan, previous: live, host, undo })
+      committed = true
+      await cleanUp({ layout, slot, next, previous: live, host })
+    })
   } catch (error) {
+    // Past `makeLive`, the new release is the one that starts at boot and that `ctl` runs: only
+    // stopping and pruning what came before failed, and undoing would take down what serves.
+    if (committed) {
+      throw new Error(
+        `${errorMessage(error)}\nThe new release is serving; cleaning up after the previous one failed.`
+      )
+    }
     for (const back of undo.reverse()) {
       await back().catch((failure: unknown) => host.print(errorMessage(failure)))
     }
     throw new Error(`${errorMessage(error)}${afterRollback(live, serving)}`)
   }
-
-  await step("Retire previous release", async () => {
-    await retire({ layout, slot, next, release, plan, previous: live, host }).catch(
-      (error: unknown) => {
-        throw new Error(
-          `${errorMessage(error)}\nThe new release is serving; cleaning up after the previous one failed.`
-        )
-      }
-    )
-  })
 }
 
 /** What serves once a failed deploy has been undone. */
@@ -453,10 +459,12 @@ async function startLive(layout: DeploymentLayout, live: Live, host: ReleaseHost
 }
 
 /**
- * The new release serves: record it, start it at boot, let the previous one drain, and keep the
- * releases still in use.
+ * Makes the new release the one that starts at boot, that `current` names and that `ctl` runs,
+ * each step with its undo, so a failure here still rolls the whole deploy back. The previous
+ * release's unit is disabled first: a service from before slots starts through `ctl`, which then
+ * names the new slot.
  */
-async function retire(input: {
+async function makeLive(input: {
   readonly layout: DeploymentLayout
   readonly slot: SlotLayout
   readonly next: ReleaseLayout
@@ -465,9 +473,9 @@ async function retire(input: {
   /** What was live when the deploy began, whether or not a migration stopped it since. */
   readonly previous: Live | null
   readonly host: ReleaseHost
+  readonly undo: Undo[]
 }): Promise<void> {
-  const { layout, slot, next, release, plan, previous, host } = input
-  const previousRelease = await currentReleaseId(layout)
+  const { layout, slot, next, release, plan, previous, host, undo } = input
 
   // Restarted by systemd, the slot runs everything: it is live now.
   const manifest = renderProcessManifest(releaseForSlot(release, SLOT_PORTS[slot.slot]), {
@@ -478,30 +486,108 @@ async function retire(input: {
   })
   await writeFileAtomically(slot.manifest, `${JSON.stringify(manifest, null, 2)}\n`)
 
+  const previousUnit =
+    previous?.kind === "legacy"
+      ? legacyLayout(layout).unit
+      : previous?.kind === "slot"
+        ? slotLayout(layout, previous.slot).unit
+        : null
+  if (previousUnit) {
+    undo.push(() => systemctlOrThrow(host, "enable", previousUnit))
+    await systemctlOrThrow(host, "disable", previousUnit)
+  }
+  undo.push(() => systemctlOrThrow(host, "disable", slot.unit))
+  await systemctlOrThrow(host, "enable", slot.unit)
+
   // A deployment from before releases kept its code in `code/` itself.
   if ((await lstat(layout.code).catch(() => null))?.isDirectory()) {
+    const legacyCode = join(layout.releasesDir, "legacy")
     await mkdir(layout.releasesDir, { recursive: true })
-    await rm(join(layout.releasesDir, "legacy"), { recursive: true, force: true })
-    await rename(layout.code, join(layout.releasesDir, "legacy"))
+    await rm(legacyCode, { recursive: true, force: true })
+    undo.push(async () => {
+      await rm(layout.code, { force: true })
+      await rename(legacyCode, layout.code)
+    })
+    await rename(layout.code, legacyCode)
   }
+  const previousCurrent = await readlink(layout.currentLink).catch(() => null)
+  undo.push(() =>
+    previousCurrent === null
+      ? rm(layout.currentLink, { force: true })
+      : replaceLink(layout.currentLink, previousCurrent)
+  )
   await replaceLink(layout.currentLink, posix.join("releases", next.id))
   await replaceLink(layout.code, "current")
-  await writeFileAtomically(layout.releaseRecord, `${JSON.stringify(plan.record)}\n`)
-  await writeExecutable(layout.ctl, renderCtl(next, slot))
 
-  await host.systemctl("enable", slot.unit)
-  await host.systemctl("disable", slotLayout(layout, otherSlot(slot.slot)).unit)
+  undo.push(await restorer(layout.releaseRecord))
+  await writeFileAtomically(layout.releaseRecord, `${JSON.stringify(plan.record)}\n`)
+  undo.push(await restorer(layout.ctl, writeExecutable))
+  await writeExecutable(layout.ctl, renderCtl(next, slot))
+}
+
+/**
+ * What only tidies up once the new release is live: the previous one drains, and releases no slot
+ * runs go. The other slot keeps its release while it drains, and a rollback may want it.
+ */
+async function cleanUp(input: {
+  readonly layout: DeploymentLayout
+  readonly slot: SlotLayout
+  readonly next: ReleaseLayout
+  readonly previous: Live | null
+  readonly host: ReleaseHost
+}): Promise<void> {
+  const { layout, slot, next, previous, host } = input
   if (previous?.kind === "slot") {
     await host.systemctl("stop", "--no-block", slotLayout(layout, previous.slot).unit)
   } else if (previous?.kind === "legacy") {
     await retireLegacy(layout, host, { drain: true })
   }
 
-  // The previous release drains for a few minutes, and the next deploy may roll back to it.
-  const keep = new Set([next.id, previousRelease, previous?.kind === "legacy" ? "legacy" : null])
+  // The previous release drains from its own folder, whatever kind of service runs it, and the
+  // other slot keeps its release for the next deploy to roll back to.
+  const other = await loadProcessManifest(slotLayout(layout, otherSlot(slot.slot)).manifest).catch(
+    () => null
+  )
+  const keep = new Set([
+    next.id,
+    manifestRelease(layout, other),
+    manifestRelease(layout, previous?.manifest ?? null),
+  ])
+  // Code from before releases stays while that service drains, and through the deploy that
+  // retired it.
+  if (previous?.kind === "legacy" || (await host.isActive(legacyLayout(layout).unit))) {
+    keep.add("legacy")
+  }
   for (const entry of await readdir(layout.releasesDir).catch(() => [])) {
     if (!keep.has(entry))
       await rm(join(layout.releasesDir, entry), { recursive: true, force: true })
+  }
+}
+
+/** The release a manifest runs, by its folder name, or nothing for none or code from before releases. */
+function manifestRelease(
+  layout: DeploymentLayout,
+  manifest: Pick<ProcessManifest, "cwd"> | null
+): string | null {
+  if (!manifest) return null
+  // Its processes run in `releases/<id>/<project path>`.
+  const [id] = relative(layout.releasesDir, manifest.cwd).split("/")
+  return id && id !== ".." ? id : null
+}
+
+/** An undo that puts a file back as it was, or removes it when there was none. */
+async function restorer(
+  path: string,
+  write: (path: string, content: string) => Promise<void> = writeFileAtomically
+): Promise<Undo> {
+  const before = await readText(path)
+  return () => (before === null ? rm(path, { force: true }) : write(path, before))
+}
+
+async function systemctlOrThrow(host: ReleaseHost, ...args: string[]): Promise<void> {
+  const code = await host.systemctl(...args)
+  if (code !== 0) {
+    throw new Error(`[SshTarget] systemctl ${args.join(" ")} exited with code ${code}.`)
   }
 }
 
@@ -571,11 +657,6 @@ async function printLogTail(slot: SlotLayout, file: string, host: ReleaseHost): 
   if (!text) return
   host.print(`Its latest log lines (${file}):`)
   for (const line of text.trimEnd().split("\n").slice(-30)) host.print(line)
-}
-
-async function currentReleaseId(layout: DeploymentLayout): Promise<string | null> {
-  const target = await readlink(layout.currentLink).catch(() => null)
-  return target ? posix.basename(target) : null
 }
 
 async function replaceLink(path: string, target: string): Promise<void> {

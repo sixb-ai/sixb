@@ -56,9 +56,11 @@ export function parseFacts(lines: readonly string[]): HostFacts {
 
 /** What the facts mean for a deploy, one check per host requirement. */
 export function judge(facts: HostFacts, input: JudgeInput): DeployCheck[] {
-  // The fixes name the account the probe ran as; a probe that didn't say leaves a placeholder.
-  const user = facts.get("account.name") || "<account>"
-  const root = `${facts.get("account.home") || "~"}/${input.name}`
+  // The fixes name the account and its home as the server reports them, and are pasted into a root
+  // shell: anything that would need quoting gets no commands, only the remedy.
+  const user = pasteable(facts.get("account.name"))
+  const home = pasteable(facts.get("account.home"))
+  const root = home && pasteable(input.name) ? `${home}/${input.name}` : null
   return [
     server(facts),
     account(facts),
@@ -91,7 +93,7 @@ function server(facts: HostFacts): DeployCheck {
       })
 }
 
-/** SSH may pick the account, so the check is where `root` is turned away. */
+/** `root` is refused in `sixb.deploy.ts`, and again here, where SSH config could still map to it. */
 function account(facts: HostFacts): DeployCheck {
   const name = facts.get("account.name") || "an unknown account"
   return facts.get("account.uid") === "0"
@@ -110,15 +112,15 @@ function deployments(facts: HostFacts): DeployCheck {
       )
 }
 
-function linger(facts: HostFacts, user: string): DeployCheck {
+function linger(facts: HostFacts, user: string | null): DeployCheck {
   return facts.get("linger") === "yes"
     ? ok("linger", "Services at boot", "lingering is on")
     : fail("linger", "Services at boot", "lingering is off: the services would stop at logout", {
-        commands: [`loginctl enable-linger ${user}`],
+        commands: user ? [`loginctl enable-linger ${user}`] : [],
       })
 }
 
-function caddy(facts: HostFacts, user: string): DeployCheck {
+function caddy(facts: HostFacts, user: string | null): DeployCheck {
   const version = facts.get("caddy.version") ?? ""
   const routes = facts.get("caddy.routes") ?? "the routes folder"
   const problems = [
@@ -137,29 +139,31 @@ function caddy(facts: HostFacts, user: string): DeployCheck {
   if (problems.length === 0) return ok("caddy", "Caddy", `${version}, routes in ${routes}`)
 
   const folder = `/etc/caddy/sixb.d/${user}`
-  const configure = [
-    ...(facts.get("caddy.caddyfile-imports") === "yes"
-      ? []
-      : [
-          // Safe to paste twice: a second import of the same files is an error Caddy won't reload.
-          "grep -qxF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile || echo 'import /etc/caddy/sixb.d/*.caddy' >> /etc/caddy/Caddyfile",
-        ]),
-    ...(facts.get("caddy.routes-imported") === "yes"
-      ? []
-      : [
-          "install -d -m 0755 /etc/caddy/sixb.d",
-          `echo 'import ${folder}/*.caddy' > ${folder}.caddy`,
-        ]),
-    ...(facts.get("caddy.routes-writable") === "yes"
-      ? []
-      : [`install -d -m 0755 -o ${user} -g ${user} ${folder}`]),
-    ...(facts.get("caddy.reload") === "yes"
-      ? []
-      : [
-          `echo '${user} ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/${user}`,
-          `chmod 440 /etc/sudoers.d/${user}`,
-        ]),
-  ]
+  const configure = !user
+    ? []
+    : [
+        ...(facts.get("caddy.caddyfile-imports") === "yes"
+          ? []
+          : [
+              // Safe to paste twice: a second import of the same files is an error Caddy won't reload.
+              "grep -qxF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile || echo 'import /etc/caddy/sixb.d/*.caddy' >> /etc/caddy/Caddyfile",
+            ]),
+        ...(facts.get("caddy.routes-imported") === "yes"
+          ? []
+          : [
+              "install -d -m 0755 /etc/caddy/sixb.d",
+              `echo 'import ${folder}/*.caddy' > ${folder}.caddy`,
+            ]),
+        ...(facts.get("caddy.routes-writable") === "yes"
+          ? []
+          : [`install -d -m 0755 -o ${user} -g ${user} ${folder}`]),
+        ...(facts.get("caddy.reload") === "yes"
+          ? []
+          : [
+              `echo '${user} ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/${user}`,
+              `chmod 440 /etc/sudoers.d/${user}`,
+            ]),
+      ]
   const install = !version
     ? INSTALL_CADDY
     : atLeast(version, MIN_CADDY)
@@ -174,7 +178,12 @@ function caddy(facts: HostFacts, user: string): DeployCheck {
   })
 }
 
-function settings(facts: HostFacts, source: JudgeInput["settings"], root: string): DeployCheck {
+function settings(
+  facts: HostFacts,
+  source: JudgeInput["settings"],
+  root: string | null
+): DeployCheck {
+  const folder = root ?? "~/<name>"
   if (source === "identity") {
     return ok("settings", "Settings", "the source reads with the server's own identity")
   }
@@ -182,13 +191,13 @@ function settings(facts: HostFacts, source: JudgeInput["settings"], root: string
     const token = fileFact(facts.get("file.env-token"))
     if (!token || token.size === 0) {
       return fail("settings", "Settings", "no env token: the deploy can't pull .env", {
-        remedy: `Put a read-only token for the project's prod values at ${root}/env-token, mode 600. See ${ENV_TOKEN_DOCS}.`,
+        remedy: `Put a read-only token for the project's prod values at ${folder}/env-token, mode 600. See ${ENV_TOKEN_DOCS}.`,
       })
     }
     return token.mode === "600"
       ? ok("settings", "Settings", "env token in place")
       : fail("settings", "Settings", `the env token is readable by others (mode ${token.mode})`, {
-          commands: [`chmod 600 ${root}/env-token`],
+          commands: root ? [`chmod 600 ${root}/env-token`] : [],
         })
   }
   // A deployment from before releases keeps its settings in its code folder.
@@ -196,13 +205,13 @@ function settings(facts: HostFacts, source: JudgeInput["settings"], root: string
   const env = shared ?? fileFact(facts.get("file.legacy-env"))
   if (!env) {
     return fail("settings", "Settings", "no .env on the server", {
-      remedy: `Create ${root}/shared/.env, mode 600, with the project's settings.`,
+      remedy: `Create ${folder}/shared/.env, mode 600, with the project's settings.`,
     })
   }
   return env.mode === "600"
     ? ok("settings", "Settings", ".env in place")
     : fail("settings", "Settings", `.env is readable by others (mode ${env.mode})`, {
-        ...(shared ? { commands: [`chmod 600 ${root}/shared/.env`] } : {}),
+        commands: shared && root ? [`chmod 600 ${root}/shared/.env`] : [],
       })
 }
 
@@ -260,6 +269,11 @@ function fail(
     remedy: fix.remedy ?? `See ${HOST_REQUIREMENTS}.`,
     ...(commands.length > 0 ? { commands } : {}),
   }
+}
+
+/** A name or path that pastes into a shell as it is, or nothing when it would need quoting. */
+function pasteable(value: string | undefined): string | null {
+  return value && /^[A-Za-z0-9._/-]+$/.test(value) ? value : null
 }
 
 /** `mode size` from the probe, or nothing when the file is missing. */

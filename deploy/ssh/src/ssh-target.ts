@@ -29,12 +29,11 @@ import { type RemoteShell, SshShell } from "./transport"
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
   readonly host: string
-  /**
-   * The account the deployment logs in and runs as, never `root`. Without it, SSH decides, as
-   * `ssh <host>` would: the `User` your SSH config sets for the host, or your own login name.
-   */
+  /** The account the deployment logs in and runs as, never `root`. Defaults to `"sixb"`. */
   readonly user?: string
 }
+
+const DEFAULT_USER = "sixb"
 
 /** Options earlier versions took, and why they went. */
 const REMOVED_OPTIONS: Readonly<Record<string, string>> = {
@@ -53,7 +52,7 @@ export class SshTarget implements DeployTarget {
   readonly kind = "ssh"
   readonly host: string
   /** The account the options name; without one, SSH picks it. */
-  readonly user: string | undefined
+  readonly user: string
   readonly location: string
 
   constructor(options: SshTargetOptions) {
@@ -71,8 +70,8 @@ export class SshTarget implements DeployTarget {
     }
 
     this.host = validateHost(options.host)
-    this.user = options.user === undefined ? undefined : validateUser(options.user)
-    this.location = this.user === undefined ? this.host : `${this.user}@${this.host}`
+    this.user = validateUser(options.user ?? DEFAULT_USER)
+    this.location = `${this.user}@${this.host}`
   }
 
   listenAddress(service: DeployHttpServiceName): DeployListenAddress {
@@ -106,19 +105,12 @@ export class SshTarget implements DeployTarget {
   }
 
   async check(release: DeployRelease, context: DeployCheckContext): Promise<DeployCheck[]> {
-    const ssh = await resolveSshConfig(this.location)
-    const dns = checkDns(release, ssh.hostname)
-    // Without `user`, the account is SSH's choice, which the check spells out.
-    const chosen = this.user === undefined ? ssh.user : undefined
+    const { hostname } = await resolveSshConfig(this.location)
+    const dns = checkDns(release, hostname)
     let server: DeployCheck[]
     try {
       server = await this.#connected(async (shell) => [
-        {
-          id: "ssh",
-          label: "SSH",
-          status: "ok" as const,
-          detail: chosen ? `${chosen}@${this.host}` : this.location,
-        },
+        { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
         ...(await checkHost(shell, {
           name: context.name,
           projectPath: context.projectPath,
@@ -133,7 +125,7 @@ export class SshTarget implements DeployTarget {
         })),
       ])
     } catch (error) {
-      server = [sshCheck(this.location, error, chosen)]
+      server = [sshCheck(this.location, error)]
     }
     return [...server, ...(await dns)]
   }
@@ -185,15 +177,12 @@ function validateHost(value: unknown): string {
 }
 
 /** A failed connection, as the check that stops a deploy. */
-function sshCheck(location: string, error: unknown, chosen: string | undefined): DeployCheck {
+function sshCheck(location: string, error: unknown): DeployCheck {
   const [message = ""] = (error instanceof Error ? error.message : String(error)).split("\n")
-  const detail = message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`
   return {
     id: "ssh",
     label: "SSH",
     status: "fail",
-    detail: chosen
-      ? `${detail} SSH logged in as ${chosen}: set \`user\` to deploy as another account.`
-      : detail,
+    detail: message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`,
   }
 }

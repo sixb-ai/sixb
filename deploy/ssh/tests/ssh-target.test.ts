@@ -11,9 +11,8 @@ describe("SshTarget", () => {
     expect(target.listenAddress("api")).toEqual({ host: "127.0.0.1", port: 3002 })
   })
 
-  // Reproduce: default `user` to an account name; SSH then ignores the `User` the config sets.
-  test("leaves the account to SSH when it names none", () => {
-    expect(new SshTarget({ host: "shop-prod" }).location).toBe("shop-prod")
+  test("deploys as sixb unless it names another account, as before", () => {
+    expect(new SshTarget({ host: "shop-prod" }).location).toBe("sixb@shop-prod")
   })
 
   test("accepts an IPv6 address", () => {

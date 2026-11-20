@@ -4,8 +4,6 @@ export interface ResolvedSshConfig {
   /** The real hostname or address behind the target's host, which may be an SSH config alias. */
   readonly hostname: string
   readonly port: number
-  /** The account SSH logs in as: the destination's, the config's `User`, or your login name. */
-  readonly user?: string
   /** The host SSH jumps through first, when the config sets one. */
   readonly proxyJump?: string
   /** Identity files SSH would offer, in order, with `~` expanded. */
@@ -20,7 +18,6 @@ export async function resolveSshConfig(destination: string): Promise<ResolvedSsh
 
   let hostname = destination.split("@").at(-1) ?? destination
   let port = 22
-  let user: string | undefined
   let proxyJump: string | undefined
   const identityFiles: string[] = []
   for (const line of output.split("\n")) {
@@ -28,18 +25,11 @@ export async function resolveSshConfig(destination: string): Promise<ResolvedSsh
     const value = rest.join(" ")
     if (key === "hostname" && value) hostname = value
     if (key === "port" && Number(value) > 0) port = Number(value)
-    if (key === "user" && value) user = value
     // `ssh -G` prints `none` for a host reached directly.
     if ((key === "proxyjump" || key === "proxycommand") && value && value !== "none") {
       proxyJump = value
     }
     if (key === "identityfile" && value) identityFiles.push(value.replace(/^~(?=\/)/, homedir()))
   }
-  return {
-    hostname,
-    port,
-    identityFiles,
-    ...(user ? { user } : {}),
-    ...(proxyJump ? { proxyJump } : {}),
-  }
+  return { hostname, port, identityFiles, ...(proxyJump ? { proxyJump } : {}) }
 }

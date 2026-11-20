@@ -39,6 +39,8 @@ export async function deployRelease(
     [
       `root="$HOME"/${shellQuote(release.name)}`,
       'mkdir -p "$root/deploy/incoming" "$root/deploy/runs"',
+      // Run logs hold all the build and migration output: for the deploy account alone.
+      'chmod 700 "$root/deploy/runs"',
       `incoming="$(mktemp -d "$root/deploy/incoming/${releaseId}.XXXXXX")"`,
       // `mktemp` makes it 0700, and tar passes the mode of the upload's `.` on to the release.
       'chmod 755 "$incoming"',

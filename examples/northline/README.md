@@ -176,11 +176,11 @@ committed.
    point `*.<your domain>` at it, and have PostgreSQL and Redis running where it can reach them.
 2. Put `DATABASE_URL` and `REDIS_URL` in `~/northline/shared/.env` on the server, mode 600.
 3. Check the server, then deploy the committed code. `NORTHLINE_DEPLOY_USER` names the account to
-   deploy as, unless your SSH config already does:
+   deploy as, when it isn't `sixb`:
 
    ```bash
    cd examples/northline
-   export NORTHLINE_DEPLOY_HOST=203.0.113.10 NORTHLINE_DEPLOY_USER=deploy NORTHLINE_DEPLOY_DOMAIN=example.com
+   export NORTHLINE_DEPLOY_HOST=203.0.113.10 NORTHLINE_DEPLOY_DOMAIN=example.com
    bun run deploy check
    bun run deploy
    ```

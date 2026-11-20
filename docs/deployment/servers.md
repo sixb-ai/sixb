@@ -30,7 +30,7 @@ import { SshTarget } from "@sixb/deploy-ssh"
 export default defineDeploy({
   name: "shop",
   domain: "example.com",
-  target: new SshTarget({ host: "203.0.113.10", user: "deploy" }),
+  target: new SshTarget({ host: "203.0.113.10" }),
 })
 ```
 
@@ -60,7 +60,7 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 | Option | Purpose |
 | --- | --- |
 | `host` | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
-| `user` | The account the deployment logs in and runs as, never `root`. Leave it out and SSH decides, as `ssh <host>` would: the `User` your SSH config sets for the host, or your own login name. |
+| `user` | The account the deployment logs in and runs as, never `root`. Defaults to `"sixb"`. |
 
 A server runs one deployment.
 
@@ -121,8 +121,8 @@ To keep them in one place across your team and servers, use [environment variabl
 Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in `~/<name>/shared/.env` on the server. Create it readable only by the deploy account, then edit it:
 
 ```bash
-ssh deploy@203.0.113.10 'mkdir -p ~/shop/shared && install -m 600 /dev/null ~/shop/shared/.env'
-ssh -t deploy@203.0.113.10 'nano ~/shop/shared/.env'
+ssh sixb@203.0.113.10 'mkdir -p ~/shop/shared && install -m 600 /dev/null ~/shop/shared/.env'
+ssh -t sixb@203.0.113.10 'nano ~/shop/shared/.env'
 ```
 
 Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces it, even when the repository has a `.env`.

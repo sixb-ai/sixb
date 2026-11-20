@@ -306,8 +306,8 @@ describe("a deploy beside the live release", () => {
       "blue stop watcher",
       "green start orchestrator",
       "green start watcher",
-      "systemctl enable sixb-northline@green.service",
       "systemctl disable sixb-northline@blue.service",
+      "systemctl enable sixb-northline@green.service",
       "systemctl stop --no-block sixb-northline@blue.service",
     ])
     // The previous release drains, and a rollback may need it; older ones go.
@@ -446,18 +446,69 @@ describe("a deploy beside the live release", () => {
     expect(recordedAtSwitch).toBe("green\n")
   })
 
-  test("a failure while retiring blue says green serves", async () => {
+  // Reproduce: make green live in the cleanup, after the commit, as retire once did; this failure
+  // then leaves blue starting at boot, `current` on r1 and green serving.
+  test("a failure making green live rolls the whole deploy back", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await writeFile(layout.ctl, "blue's ctl")
     server.refuses.add("systemctl enable sixb-northline@green.service")
 
     const error = await runRelease(plan(), server, { home, user: "deploy" }).catch(
       (failure: unknown) => failure
     )
 
+    expect(String(error)).toContain("The previous release is still serving.")
+    expect(server.routedPort()).toBe("3001")
+    expect(
+      server.calls.slice(server.calls.indexOf("systemctl enable sixb-northline@green.service"))
+    ).toEqual([
+      "systemctl enable sixb-northline@green.service",
+      "systemctl disable sixb-northline@green.service",
+      "systemctl enable sixb-northline@blue.service",
+      "green stop orchestrator",
+      "green stop watcher",
+      "blue start orchestrator",
+      "blue start watcher",
+      "reload caddy -> 3001",
+      "systemctl stop sixb-northline@green.service",
+    ])
+    expect(await readlink(layout.currentLink)).toBe("releases/r1")
+    expect(await readFile(layout.ctl, "utf8")).toBe("blue's ctl")
+    expect(await readFile(layout.liveSlotFile, "utf8")).toBe("blue\n")
+  })
+
+  test("a failure stopping blue after green is live says green serves", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.refuses.add("systemctl stop --no-block sixb-northline@blue.service")
+
+    const error = await runRelease(plan(), server, { home, user: "deploy" }).catch(
+      (failure: unknown) => failure
+    )
+
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
     expect(String(error)).toContain("The new release is serving; cleaning up after the previous")
     expect(server.routedPort()).toBe("3011")
-    expect(await readFile(join(home, "northline", "deploy", "live-slot"), "utf8")).toBe("green\n")
+    expect(await readlink(layout.currentLink)).toBe("releases/r2")
+    expect(server.calls).toContain("systemctl enable sixb-northline@green.service")
+  })
+
+  // Reproduce: prune by `readlink(current)`, as retire once did; a release `current` no longer
+  // names but blue still drains on then goes.
+  test("keeps the release the other slot runs, whatever `current` says", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await oldReleases("r0")
+    // A crash once left `current` behind on r0 while blue ran r1.
+    await rm(layout.currentLink)
+    await symlink("releases/r0", layout.currentLink)
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    expect((await readdir(layout.releasesDir)).sort()).toEqual(["r1", "r2"])
   })
 })
 
@@ -538,6 +589,44 @@ describe("the first slot deploy on a server from before slots", () => {
 
   // Reproduce: pass retire what still serves instead of what was live; the old service stays
   // enabled and starts beside the slot at the next boot.
+  // Reproduce: disable the old service after writing `ctl` or enabling blue; a crash in between
+  // then boots both, two supervisors on blue's manifest.
+  test("disables the old service before `ctl` names blue or blue starts at boot", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await legacyInGreen(server)
+    await writeFile(layout.ctl, "the old service's ctl")
+    let ctlAtDisable = ""
+    const systemctl = server.systemctl.bind(server)
+    server.systemctl = async (...args: string[]) => {
+      if (args.join(" ") === "disable sixb-northline.service" && !ctlAtDisable) {
+        ctlAtDisable = await readFile(layout.ctl, "utf8")
+      }
+      return systemctl(...args)
+    }
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    expect(ctlAtDisable).toBe("the old service's ctl")
+    expect(server.calls.indexOf("systemctl disable sixb-northline.service")).toBeLessThan(
+      server.calls.indexOf("systemctl enable sixb-northline@blue.service")
+    )
+  })
+
+  // Reproduce: leave the previous manifest's release out of `keep` in cleanUp; a server main
+  // deployed then loses the folder its old service is still draining from.
+  test("keeps the release the old service drains from", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await legacyInGreen(server)
+    // Main already ran releases: its service runs from `releases/x`, which its manifest names.
+    await oldReleases("x", "older")
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    expect((await readdir(layout.releasesDir)).sort()).toEqual(["legacy", "r2", "x"])
+  })
+
   test("with migrations pending, still retires the service it stopped", async () => {
     const server = new FakeServer()
     const layout = deploymentLayout({ home, user: "deploy", name: "northline" })

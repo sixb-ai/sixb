@@ -78,7 +78,7 @@ With `source` set, each [deploy to a server](servers.md) writes that release's `
 
 ```bash
 doppler configs tokens create sixb-shop --project shop --config prd --access read --plain |
-  ssh deploy@203.0.113.10 'mkdir -p ~/shop && umask 077 && cat > ~/shop/env-token'
+  ssh sixb@203.0.113.10 'mkdir -p ~/shop && umask 077 && cat > ~/shop/env-token'
 ```
 
 To replace it, revoke it in Doppler and write the new one over it.

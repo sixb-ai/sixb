@@ -162,6 +162,22 @@ describe("judging the host", () => {
     expect(checks({}).some((check) => check.commands)).toBe(false)
   })
 
+  // Reproduce: drop `pasteable`; a home the server reports with a `;` in it then lands in a command
+  // pasted into a root shell.
+  test("gives no commands for an account or home that would need quoting", () => {
+    const odd = checks({
+      "account.home": "/home/x;rm -rf /",
+      "account.name": "dep loy",
+      linger: "no",
+      "caddy.reload": "no",
+      "file.env-token": "644 54",
+    })
+    for (const id of ["linger", "caddy", "settings"]) {
+      expect(odd.find((check) => check.id === id)?.commands).toBeUndefined()
+    }
+    expect(odd.find((check) => check.id === "linger")?.status).toBe("fail")
+  })
+
   test("names the deployment's files in what fixes its settings", () => {
     const loose = checks({ "file.env-token": "644 54" }).find((check) => check.id === "settings")
     expect(loose?.commands).toEqual(["chmod 600 /home/deploy/shop/env-token"])

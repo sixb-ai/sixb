@@ -77,6 +77,8 @@ describe("deploying from the laptop", () => {
     expect(plan).toMatchObject({ projectPath: "examples/northline" })
     expect(plan.record).toMatchObject({ commit: "c2c2c2c2c2c2c2", ref: "main", deployedBy: "ci" })
     expect([...shell.uploads.keys()].some((path) => path.endsWith(".sh"))).toBe(true)
+    // Reproduce: drop the chmod; the run's log, with all the build output, is then world-readable.
+    expect(shell.scripts[0]).toContain('chmod 700 "$root/deploy/runs"')
     // Detached from this connection: a dropped laptop never leaves half a deploy.
     expect(shell.scripts.find((script) => script.startsWith("setsid nohup bash"))).toContain(
       "< /dev/null &"
