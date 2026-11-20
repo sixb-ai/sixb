@@ -333,7 +333,12 @@ async function main(): Promise<void> {
 
     case "check": {
       const { runCheck } = await import("./commands/check")
-      await runCheck({ entry: getFlag("entry") })
+      await runCheck({
+        entry: getFlag("entry"),
+        migrate: hasFlag("migrate"),
+        allowIncompatible: hasFlag("allow-incompatible"),
+        lake: hasFlag("lake"),
+      })
       break
     }
 

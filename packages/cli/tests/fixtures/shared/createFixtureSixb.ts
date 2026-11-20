@@ -72,6 +72,8 @@ function createFixtureStorage(logStorageMigrate: boolean, logStoragePrepare: boo
     },
     async migrate() {
       logFixtureEvent({ type: "storage.migrate" })
+      // Migrated, the schema reads as current to whatever probes it next.
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "current"
       return {
         adapterId: "FixtureStorage",
         latestVersion: 1,

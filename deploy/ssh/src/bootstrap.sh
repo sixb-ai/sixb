@@ -79,6 +79,10 @@ for package in @sixb/cli:sixb @sixb/deploy-ssh:sixb-deploy-ssh; do
     exit 1
   fi
 done
+if [ ! -e node_modules/@sixb/deploy-ssh/src/server/release.ts ]; then
+  echo "This commit's @sixb/deploy-ssh predates 0.3.0, which this deploy needs. Upgrade it, or deploy the commit with its own sixb." >&2
+  exit 1
+fi
 event "Install dependencies" "done"
 
 "$bun" "node_modules/.bin/sixb-deploy-ssh" release "$plan"

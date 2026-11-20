@@ -8,7 +8,7 @@ export const release: DeployRelease = {
   env: { NODE_ENV: "production" },
   steps: {
     build: [{ program: "sixb", args: ["build"] }],
-    beforeStart: [{ program: "sixb", args: ["db", "migrate"] }],
+    beforeStart: [{ program: "sixb", args: ["check", "--migrate", "--lake"] }],
   },
   services: [
     {

@@ -63,14 +63,16 @@ class FakeServer implements ReleaseHost {
   routes: string | null = null
   ready = true
   caddyAccepts = true
-  migrateCheck = 0
+  /** What `sixb check --migrate` exits with: 4 when a pending migration breaks the live release. */
+  migrationCheck = 0
 
   async run(command: readonly string[]) {
     const words = command.map((word) =>
       word.replace(/.*\/node_modules\/\.bin\//, "").replace(/.*\/\.sixb\/bun\/[^/]+\/bun$/, "bun")
     )
     this.calls.push(words.join(" "))
-    if (words.join(" ").endsWith("db migrate --check")) return this.migrateCheck
+    const line = words.join(" ")
+    if (line.endsWith("check --migrate --lake")) return this.migrationCheck
     return 0
   }
 
@@ -223,7 +225,8 @@ describe("a first deploy", () => {
     await runRelease(plan(), server, home)
 
     const layout = deploymentLayout({ home, name: "northline" })
-    expect(server.calls).not.toContain("sixb db migrate --check")
+    // Nothing is live, so nothing a migration does can break it.
+    expect(server.calls[1]).toBe("bun sixb check --migrate --lake --allow-incompatible")
     expect(server.calls).toContain("systemctl start sixb-northline@blue.service")
     expect(server.calls).toContain("ready http://127.0.0.1:3002/ready")
     expect(server.routedPort()).toBe("3001")
@@ -237,7 +240,7 @@ describe("a first deploy", () => {
     )
     expect(server.steps()).toEqual([
       "sixb build",
-      "sixb db migrate",
+      "sixb check --migrate --lake",
       "Start new release",
       "Check services",
       "Update routes",
@@ -257,8 +260,7 @@ describe("a deploy beside the live release", () => {
 
     expect(server.calls).toEqual([
       "bun sixb build",
-      "bun sixb db migrate --check",
-      "bun sixb db migrate",
+      "bun sixb check --migrate --lake",
       "systemctl daemon-reload",
       "systemctl start sixb-northline@green.service",
       "ready http://127.0.0.1:3012/ready",
@@ -360,23 +362,23 @@ describe("a migration that breaks the live release", () => {
   test("stops the deploy before anything changes, unless downtime is accepted", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrateCheck = 4
+    server.migrationCheck = 4
 
     const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
 
     expect(String(error)).toContain("Deploy again with --accept-downtime")
-    expect(server.calls).not.toContain("bun sixb db migrate")
+    expect(server.calls).not.toContain("bun sixb check --migrate --lake --allow-incompatible")
     expect(server.active).toEqual(new Set(["sixb-northline@blue.service"]))
   })
 
   test("with downtime accepted, stops blue for the migration, then starts green cold", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrateCheck = 4
+    server.migrationCheck = 4
 
     await runRelease(plan({ acceptDowntime: true }), server, home)
 
-    const migrate = server.calls.indexOf("bun sixb db migrate")
+    const migrate = server.calls.indexOf("bun sixb check --migrate --lake --allow-incompatible")
     expect(server.calls.indexOf("systemctl stop sixb-northline@blue.service")).toBeLessThan(migrate)
     // Nothing else runs the singletons, so green starts them at once.
     const green = slotLayout(deploymentLayout({ home, name: "northline" }), "green")
@@ -388,10 +390,10 @@ describe("a migration that breaks the live release", () => {
     expect(server.routedPort()).toBe("3011")
   })
 
-  test("a compatible migration runs while blue keeps serving", async () => {
+  test("compatible migrations run while blue keeps serving", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrateCheck = 3
+    server.migrationCheck = 0
 
     await runRelease(plan(), server, home)
 
