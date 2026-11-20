@@ -140,6 +140,21 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Branch, tag, or commit to deploy (default: HEAD)",
     kind: "string",
   },
+  migrate: {
+    syntax: "--migrate",
+    summary: "Bring the storage schema up to date first, as a deploy does",
+    kind: "boolean",
+  },
+  "allow-incompatible": {
+    syntax: "--allow-incompatible",
+    summary: "With --migrate, run a migration that breaks the release before it",
+    kind: "boolean",
+  },
+  lake: {
+    syntax: "--lake",
+    summary: "Check the lake's dataset definitions too",
+    kind: "boolean",
+  },
   "accept-downtime": {
     syntax: "--accept-downtime",
     summary: "Let a migration that breaks the live release stop the services while it runs",
@@ -532,7 +547,9 @@ const commandTree: readonly CommandNode[] = [
     maximumPositionals: Number.POSITIVE_INFINITY,
     rootHelpLabel: "worker-group [types...]",
   }),
-  command("check", "Validate project configuration and health", { options: ["entry"] }),
+  command("check", "Validate project configuration and health", {
+    options: ["entry", "migrate", "allow-incompatible", "lake"],
+  }),
   command("run", "Run a script against the project, here or in production", {
     usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
     options: ["entry", "deployed", "yes"],

@@ -135,24 +135,24 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
 
   for (const command of release.steps.beforeStart) {
     await step(commandLabel(command), async () => {
-      if (live && isStorageMigration(command)) {
-        const check = await sixb(["db", "migrate", "--check"])
-        if (check === 4 || check === 2) {
-          if (!plan.acceptDowntime) {
-            throw new Error(
-              check === 4
-                ? "[SshTarget] A migration in this release breaks the live release. Deploy again with --accept-downtime to stop the services while it runs."
-                : "[SshTarget] This release can't tell whether its migrations break the live release. Deploy again with --accept-downtime to stop the services while they run."
-            )
-          }
-          host.print("Stopping the services: a migration in this release breaks the live release.")
-          await stopLive(layout, live, host)
-          live = null
-        } else if (check !== 0 && check !== 3) {
-          throw new Error(`[SshTarget] sixb db migrate --check exited with code ${check}.`)
-        }
+      if (!migrates(command)) return mustRun(command)
+      const anyway = { ...command, args: [...command.args, "--allow-incompatible"] }
+      // With nothing live, there is nothing a migration could break.
+      if (!live) return mustRun(anyway)
+      const code = await sixb(command.args)
+      if (code === 0) return
+      if (code !== INCOMPATIBLE_MIGRATION) {
+        throw new Error(`[SshTarget] ${commandLabel(command)} exited with code ${code}.`)
       }
-      await mustRun(command)
+      if (!plan.acceptDowntime) {
+        throw new Error(
+          "[SshTarget] A migration in this release breaks the live release. Deploy again with --accept-downtime to stop the services while it runs."
+        )
+      }
+      host.print("Stopping the services: a migration in this release breaks the live release.")
+      await stopLive(layout, live, host)
+      live = null
+      await mustRun(anyway)
     })
   }
 
@@ -465,8 +465,11 @@ export async function carryAssets(previousProject: string, nextProject: string):
 
 const CARRIED_ASSET = /^(chunk-|asset-|app-.+\.|shared-app-.+\.|auth-.+\.)/
 
-function isStorageMigration(command: DeployCommand): boolean {
-  return command.program === "sixb" && command.args[0] === "db" && command.args[1] === "migrate"
+/** `sixb check --migrate` exits with this when a pending migration breaks the live release. */
+const INCOMPATIBLE_MIGRATION = 4
+
+function migrates(command: DeployCommand): boolean {
+  return command.program === "sixb" && command.args.includes("--migrate")
 }
 
 function isExclusive(kind: DeployRelease["services"][number]["kind"]): boolean {

@@ -43,7 +43,7 @@ async function runBootstrap(
       "#!/bin/sh",
       'case "$1" in',
       "  --version) echo 1.4.2 ;;",
-      `  install) mkdir -p node_modules/.bin && touch node_modules/.bin/sixb${options.withoutDeployBin ? "" : " node_modules/.bin/sixb-deploy-ssh"} ;;`,
+      `  install) mkdir -p node_modules/.bin node_modules/@sixb/deploy-ssh/src/server && touch node_modules/@sixb/deploy-ssh/src/server/release.ts node_modules/.bin/sixb${options.withoutDeployBin ? "" : " node_modules/.bin/sixb-deploy-ssh"} ;;`,
       `  *) echo "runner $*"; exit ${options.runnerExit ?? 0} ;;`,
       "esac",
     ].join("\n"),

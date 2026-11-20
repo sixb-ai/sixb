@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path"
+import { migrateStorage } from "@sixb/core"
 import { getLakeRetentionRuntime, ingestStalledSince } from "@sixb/core/internal/runtime"
 import { countLostRuns } from "@sixb/core/internal/workers"
 import { assertDeclaredEnv } from "../lib/env-config"
@@ -6,16 +7,37 @@ import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import {
+  checkRuntimeLakeDefinitions,
   checkRuntimePipelineMarkings,
   readAppliedMarkingNotices,
   stopSixbProviders,
 } from "../lib/runtime"
+import { findPendingMigrations } from "../lib/storage-migration"
 import { generateProjectTypes } from "../lib/typegen"
-import { checkView, renderStatic, withTask } from "../ui"
+import {
+  checkView,
+  dbMigrateCheckView,
+  dbMigrateView,
+  lakeCheckView,
+  renderStatic,
+  withTask,
+} from "../ui"
 
 export interface CheckOptions {
   entry?: string
+  /**
+   * Brings the storage schema up to date first, in the same project load, as a deploy does. A
+   * pending migration that breaks the release before it stops the check with exit code 4.
+   */
+  migrate?: boolean
+  /** Runs that migration even so: the services it would break have stopped. */
+  allowIncompatible?: boolean
+  /** Checks the lake's dataset definitions too, as `sixb lake check` does. */
+  lake?: boolean
 }
+
+/** The release before this one can't run against what a pending migration does. */
+const INCOMPATIBLE_MIGRATIONS_EXIT_CODE = 4
 
 export async function runCheck(options: CheckOptions = {}) {
   const entry = resolve(options.entry ?? "sixb.config.ts")
@@ -29,54 +51,11 @@ export async function runCheck(options: CheckOptions = {}) {
   })
 
   try {
-    const objectTypes = sixb.definitions.ontology.listObjectTypes()
-    const { health, markings } = await withTask("check", "Probing providers", async (task) => {
-      const health = await checkRuntimeHealth(sixb)
-      task.step("Checking markings")
-      return { health, markings: await checkMarkings(sixb, health.storage.ok) }
-    })
-
-    const projectValidation =
-      objectTypes.length > 0
-        ? {
-            ok: true,
-            message: `${objectTypes.length} object type${objectTypes.length === 1 ? "" : "s"}`,
-          }
-        : { ok: false, message: "No object types loaded" }
-
-    await renderStatic(
-      checkView({
-        projectId: sixb.id,
-        storage: health.storage,
-        timeseries: health.timeseries,
-        broker: health.broker,
-        queues: health.queues,
-        projectValidation,
-        markings,
-        ontology: {
-          enabled: true,
-          source: entry,
-          errors: objectTypes.length > 0 ? 0 : 1,
-          // Ontology warnings, which nothing produces yet. The provider warnings below
-          // are a different thing and counting them here read as ontology drift.
-          warnings: 0,
-        },
-        warnings: [
-          ...health.warnings,
-          ...markings.warnings,
-          ...(await lakeWorkerWarnings(sixb, health.storage.ok)),
-          ...(await lostRunWarnings(sixb, health.storage.ok)),
-        ],
-      })
-    )
-
-    // A failing probe exits non-zero so `sixb check` can gate a deploy. `exitCode`, not
-    // `exit()`: `process.exit()` terminates immediately and the `finally` below never runs, so
-    // the providers this command opened were left unclosed on the one path where that matters.
-    const failed = [health.storage, health.timeseries, health.broker, health.queues, markings].some(
-      (check) => !check.ok
-    )
-    if (objectTypes.length === 0 || failed) process.exitCode = 1
+    if (options.migrate && !(await migrate(sixb, options.allowIncompatible === true))) {
+      process.exitCode = INCOMPATIBLE_MIGRATIONS_EXIT_CODE
+    } else {
+      await probe(sixb, entry, options.lake === true)
+    }
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the
     // process can exit instead of hanging on open connections. Mirrors lake-check.
@@ -92,7 +71,95 @@ export async function runCheck(options: CheckOptions = {}) {
   process.exit(process.exitCode ?? 0)
 }
 
+/** Probes every provider and the project, and the lake's datasets when asked. */
+async function probe(sixb: LoadedSixbHost, entry: string, lake: boolean): Promise<void> {
+  const objectTypes = sixb.definitions.ontology.listObjectTypes()
+  const { health, markings } = await withTask("check", "Probing providers", async (task) => {
+    const health = await checkRuntimeHealth(sixb)
+    task.step("Checking markings")
+    return { health, markings: await checkMarkings(sixb, health.storage.ok) }
+  })
+
+  const projectValidation =
+    objectTypes.length > 0
+      ? {
+          ok: true,
+          message: `${objectTypes.length} object type${objectTypes.length === 1 ? "" : "s"}`,
+        }
+      : { ok: false, message: "No object types loaded" }
+
+  await renderStatic(
+    checkView({
+      projectId: sixb.id,
+      storage: health.storage,
+      timeseries: health.timeseries,
+      broker: health.broker,
+      queues: health.queues,
+      projectValidation,
+      markings,
+      ontology: {
+        enabled: true,
+        source: entry,
+        errors: objectTypes.length > 0 ? 0 : 1,
+        // Ontology warnings, which nothing produces yet. The provider warnings below
+        // are a different thing and counting them here read as ontology drift.
+        warnings: 0,
+      },
+      warnings: [
+        ...health.warnings,
+        ...markings.warnings,
+        ...(await lakeWorkerWarnings(sixb, health.storage.ok)),
+        ...(await lostRunWarnings(sixb, health.storage.ok)),
+      ],
+    })
+  )
+
+  // A failing probe exits non-zero so `sixb check` can gate a deploy. `exitCode`, not
+  // `exit()`: `process.exit()` terminates immediately and the `finally` below never runs, so
+  // the providers this command opened were left unclosed on the one path where that matters.
+  const failed = [health.storage, health.timeseries, health.broker, health.queues, markings].some(
+    (check) => !check.ok
+  )
+  if (objectTypes.length === 0 || failed) process.exitCode = 1
+  else if (lake) {
+    await withTask("check", "Checking lake datasets", () => checkRuntimeLakeDefinitions(sixb))
+    await renderStatic(lakeCheckView({ projectId: sixb.id }))
+  }
+}
+
 const CLOSE_TIMEOUT_MS = 10_000
+
+/**
+ * Migrates before anything is probed, since the probes read the schema. Resolves false, having
+ * migrated nothing, when a pending migration breaks the release before it and that isn't allowed.
+ */
+async function migrate(sixb: LoadedSixbHost, allowIncompatible: boolean): Promise<boolean> {
+  const pending = await withTask("check", "Reading the storage schema", () =>
+    findPendingMigrations(sixb.storage)
+  )
+  const incompatible = pending.some((status) => status.state !== "current" && status.incompatible)
+  if (incompatible && !allowIncompatible) {
+    await renderStatic(dbMigrateCheckView({ projectId: sixb.id, pending }))
+    return false
+  }
+  if (pending.length === 0) return true
+
+  const result = await withTask("check", "Migrating storage", () =>
+    migrateStorage(sixb.storage, {
+      projectId: sixb.id,
+      ontology: sixb.definitions.ontology,
+      security: sixb.definitions.security,
+    })
+  )
+  await renderStatic(
+    dbMigrateView({
+      projectId: sixb.id,
+      status: result.status,
+      applied: result.reports.flatMap((report) => report.applied),
+    })
+  )
+  return true
+}
 
 /**
  * What storage says, since no process knows what the others run. A storage that is down or behind

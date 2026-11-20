@@ -135,11 +135,7 @@ describe("deploy release", () => {
     // No `env` step: a project without a source keeps its own `.env`.
     expect(built.steps).toEqual({
       build: [{ program: "sixb", args: ["build"] }],
-      beforeStart: [
-        { program: "sixb", args: ["db", "migrate"] },
-        { program: "sixb", args: ["check"] },
-        { program: "sixb", args: ["lake", "check"] },
-      ],
+      beforeStart: [{ program: "sixb", args: ["check", "--migrate", "--lake"] }],
     })
   })
 

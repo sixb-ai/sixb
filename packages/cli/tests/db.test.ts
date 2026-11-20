@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import { runCheck } from "../src/commands/check"
 import { runDbMigrate } from "../src/commands/db-migrate"
 import { runDbPrepare } from "../src/commands/db-prepare"
 import { FAST_CLI_TIMEOUT_MS, readLogEntries, runCliToCompletion } from "./shared/cli-process"
@@ -130,5 +131,43 @@ describe("sixb db", () => {
     expect(logEntries).toContainEqual({ type: "storage:migrate" })
     expect(logEntries).toContainEqual({ type: "queues:close" })
     expect(logEntries).toContainEqual({ type: "lake-storage:close" })
+  })
+})
+
+// A deploy runs `sixb check --migrate --lake` while the live release keeps serving: one project
+// load instead of three.
+describe("sixb check --migrate", () => {
+  test("migrates before it probes anything, in the same load", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "pending"
+      return runCheck({ entry, migrate: true })
+    })
+
+    expect(result.output).toContain("Database migrations complete")
+    expect(result.output).toMatch(/✓ \S+ is healthy/)
+    expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
+  })
+
+  // Reproduce: drop the incompatible branch in `migrate`; the live release then runs against a
+  // schema it can't use while the deploy goes on.
+  test("exits 4, migrating nothing, when a pending migration breaks the release before it", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "incompatible-pending"
+      return runCheck({ entry, migrate: true })
+    })
+
+    expect(result.exitCode).toBe(4)
+    expect(result.output).toContain("001-fixture breaks the release before it")
+    expect(result.logEntries).toEqual([])
+  })
+
+  test("runs that migration when the services it would break have stopped", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "incompatible-pending"
+      return runCheck({ entry, migrate: true, allowIncompatible: true })
+    })
+
+    expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
+    expect(result.output).toContain("Database migrations complete")
   })
 })
