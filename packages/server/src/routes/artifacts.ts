@@ -1730,7 +1730,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Get a video's MP4",
           description:
-            "The version rendered to MP4, H.264 and AAC, its index first, as a download named after the title it rendered with, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.",
+            "The version rendered to MP4, H.264 and AAC, its index first, as a download named after the version's title, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactVideo",
           security: accessTokenSecurityRequirement("getArtifactVideo"),

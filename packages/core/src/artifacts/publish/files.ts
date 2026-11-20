@@ -85,6 +85,16 @@ export function isArtifactPath(path: string): boolean {
   )
 }
 
+/** A title as a file name: what one may not hold, and each run of spaces, one space. */
+export function titleFileName(title: string, fallback: string): string {
+  const name = [...title]
+    .map((char) => (char < " " || '\\/:*?"<>|'.includes(char) ? " " : char))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+  return name || fallback
+}
+
 export function invalidArtifact(message: string): ArtifactRequestError {
   return new ArtifactRequestError("invalid_artifact", `[Sixb] ${message}`)
 }

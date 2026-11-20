@@ -408,7 +408,6 @@ describe("sixb.artifacts.video()", () => {
     expect(jobs[0]?.payload).toMatchObject({
       artifactId: version.artifactId,
       version: 1,
-      title: "Launch",
       key: plan.key,
       files: version.files,
       // What its addresses resolve to, as Alice reads them.
@@ -475,7 +474,7 @@ describe("sixb.artifacts.video()", () => {
     })
     expect(await sixb.artifacts.video(version.artifactId)).toEqual({
       status: "ready",
-      file: mp4.file,
+      file: { ...mp4.file, fileName: "Launch.mp4" },
       durationMs: 7000,
       sizeBytes: 3,
     })

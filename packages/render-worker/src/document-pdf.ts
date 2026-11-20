@@ -5,6 +5,7 @@ import {
   DOCUMENT_PDF_JOB,
   documentPdfKey,
   MAX_DOCUMENT_PDF_BYTES,
+  titleFileName,
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactPdfRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
@@ -17,7 +18,6 @@ import {
   readSandboxFiles,
   runScript,
   scriptFiles,
-  titleFileName,
 } from "./sandbox"
 
 // A designed document's PDF, which someone asked for: the worker opens a blank sandbox of the
