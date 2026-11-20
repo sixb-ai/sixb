@@ -343,6 +343,46 @@ async function openPlayer(part?: string, viewer?: ArtifactViewContext, version =
   return { view, frame, posted, runtime, controls, screen }
 }
 
+/**
+ * Lays the player out at these sizes, which the test DOM never computes: the app's root, by its
+ * width, the screen's picture, and the bar's height. Returns what puts the DOM's own back.
+ */
+function stubSizes(sizes: {
+  readonly root: number
+  readonly screen: readonly [number, number]
+  readonly bar: number
+}): () => void {
+  const prototype = browser.HTMLElement.prototype
+  const measured = (element: Element, key: "clientWidth" | "clientHeight") => {
+    const width = key === "clientWidth"
+    if (element.hasAttribute("data-video-bar")) return width ? sizes.screen[0] : sizes.bar
+    if (element.matches("[data-video-screen] > :first-child")) return sizes.screen[width ? 0 : 1]
+    if (element.hasAttribute("data-sixb-artifact")) return width ? sizes.root : 0
+    return 0
+  }
+  const keys = ["clientWidth", "clientHeight"] as const
+  for (const key of keys) {
+    Object.defineProperty(prototype, key, {
+      configurable: true,
+      get(this: Element) {
+        return measured(this, key)
+      },
+    })
+  }
+  return () => {
+    for (const key of keys) Reflect.deleteProperty(prototype, key)
+  }
+}
+
+/** Where the picture is on the screen, as the layer over it is laid out. */
+function pictureOf(container: HTMLElement): { top: number; height: number } {
+  const layer = container.querySelector<HTMLElement>("[data-video-picture]")
+  return {
+    top: Number.parseFloat(layer?.style.top ?? ""),
+    height: Number.parseFloat(layer?.style.height ?? ""),
+  }
+}
+
 describe("the player", () => {
   test("plays the frame with sound allowed, and its runtime plays and pauses as asked", async () => {
     const { view, frame, controls, runtime } = await openPlayer()
@@ -597,38 +637,76 @@ describe("the player", () => {
     expect(bigPlay()?.getAttribute("aria-label")).toBe("Play again")
   })
 
-  test("leaves a paused frame whole once the pointer leaves it, and shows its controls again on it", async () => {
-    // Reproduce by showing the controls whenever the video is paused in `useControlsShown`: they
-    // stay over the frame's own captions.
-    const { screen } = await openPlayer()
-    expect(screen.hasAttribute("data-controls")).toBe(true)
-
-    fireEvent.pointerLeave(screen, { pointerType: "mouse" })
-    expect(screen.hasAttribute("data-controls")).toBe(false)
-
-    fireEvent.pointerMove(screen, { pointerType: "mouse" })
-    expect(screen.hasAttribute("data-controls")).toBe(true)
-  })
-
-  test("with a mouse, opens and pauses on a whole frame until the pointer comes over it", async () => {
-    // Reproduce by setting `active` to true on a pause in `useControlsShown`, whatever the pointer:
-    // a desktop opening the video, or pausing it at a key with the pointer elsewhere, then shows
-    // the bar over the frame's captions.
+  // Guard proof: leave `room` at 0 in player.tsx, and the paused bar lies over the picture's foot,
+  // where the film writes its captions; make `paused` wait for `controls.shown` again, or drop
+  // `!playing` from `shown` in `useControlsShown`, and the picture grows each time the mouse leaves
+  // it and shrinks as it comes back, a comment's pin moving away from the pointer reaching for it.
+  // Drop `playback.playing` from the tap in `onPictureClick`, and a tap on a paused tablet does
+  // nothing.
+  test("keeps its bar under a paused picture wherever the pointer is, and over it as it plays", async () => {
+    // The screen is 1280 by 720, as the video, and its bar 80 high.
+    const restore = stubSizes({ root: 1280, screen: [1280, 720], bar: 80 })
     const global = globalThis as { matchMedia?: unknown }
     global.matchMedia = (query: string) => ({ matches: query === "(hover: hover)" })
     try {
-      const { screen, runtime } = await openPlayer()
-      expect(screen.hasAttribute("data-controls")).toBe(false)
+      const { view, screen, runtime, controls } = await openPlayer()
 
-      fireEvent.pointerMove(screen, { pointerType: "mouse" })
+      // Opened on its poster, the mouse elsewhere: the bar shows, under the picture.
+      const paused = pictureOf(view.container)
       expect(screen.hasAttribute("data-controls")).toBe(true)
-      fireEvent.pointerLeave(screen, { pointerType: "mouse" })
+      expect(paused.top + paused.height).toBeLessThanOrEqual(720 - 80)
 
-      await runtime({ ...RUNTIME, type: "state", currentTime: 2, isPlaying: true })
-      await runtime({ ...RUNTIME, type: "state", currentTime: 3, isPlaying: false })
+      // The mouse coming and going moves nothing.
+      fireEvent.pointerMove(screen, { pointerType: "mouse" })
+      expect(pictureOf(view.container)).toEqual(paused)
+      fireEvent.pointerLeave(screen, { pointerType: "mouse" })
+      expect(pictureOf(view.container)).toEqual(paused)
+      expect(screen.hasAttribute("data-controls")).toBe(true)
+
+      // Playing, the picture fills the screen, and the bar leaves with the mouse.
+      await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: true })
+      expect(pictureOf(view.container)).toEqual({ top: 0, height: 720 })
+      fireEvent.pointerLeave(screen, { pointerType: "mouse" })
       expect(screen.hasAttribute("data-controls")).toBe(false)
+
+      // Paused again, at a key with the mouse elsewhere: the bar is back under the picture.
+      await runtime({ ...RUNTIME, type: "state", currentTime: 2, isPlaying: false })
+      expect(screen.hasAttribute("data-controls")).toBe(true)
+      expect(pictureOf(view.container)).toEqual(paused)
+
+      // A bar that stays has nothing for a tap to hide: a tap plays, as a click does.
+      const layer = view.container.querySelector("[data-video-picture] > div")
+      fireEvent.pointerUp(layer as Element, { button: 0, pointerType: "touch" })
+      expect(controls().at(-1)).toBe("play")
     } finally {
       delete global.matchMedia
+      restore()
+    }
+  })
+
+  // Guard proof: drop `docked` from `room` in player.tsx, or the screen's `paddingBottom`; on a
+  // phone the picture then shrinks to make room as it pauses, or the bar lies on it as it plays.
+  // Drop `!docked` from the tap in `onPictureClick`: a tap hides a bar that never hides.
+  test("on a phone, docks its bar under the picture, which never shrinks or moves", async () => {
+    // A phone 390 wide: the 16:9 picture is 219.375 high, and the screen as much as its bar more.
+    const restore = stubSizes({ root: 390, screen: [390, 219.375 + 48], bar: 48 })
+    try {
+      const { view, screen, runtime, controls } = await openPlayer()
+      expect(screen.style.paddingBottom).toBe("48px")
+      const whole = { top: 0, height: 219.375 }
+
+      expect(pictureOf(view.container)).toEqual(whole)
+      await runtime({ ...RUNTIME, type: "state", currentTime: 1, isPlaying: true })
+      expect(pictureOf(view.container)).toEqual(whole)
+
+      // With the bar always there, a tap on the picture pauses it, as a click does.
+      const layer = view.container.querySelector("[data-video-picture] > div")
+      fireEvent.pointerUp(layer as Element, { button: 0, pointerType: "touch" })
+      expect(controls().at(-1)).toBe("pause")
+      await runtime({ ...RUNTIME, type: "state", currentTime: 2, isPlaying: false })
+      expect(pictureOf(view.container)).toEqual(whole)
+    } finally {
+      restore()
     }
   })
 
@@ -708,7 +786,6 @@ describe("a video's comments", () => {
             outline={OUTLINE}
             time={at / 1000}
             width={640}
-            height={360}
             onOpen={() => {}}
           />
         </Wrap>
@@ -802,7 +879,6 @@ describe("a video's comments", () => {
             outline={OUTLINE}
             time={time}
             width={640}
-            height={360}
             onOpen={() => {}}
           />
         </Wrap>

@@ -186,21 +186,19 @@ export function ThreadInstant({
 
 /**
  * The pins of the comments at the instant the frame shows, at the points they were placed, and the
- * new comment's pin and card: drawn over the frame in its own pixels, `width` by `height`.
+ * new comment's pin and card: drawn over the frame, `width` pixels wide, which keeps the card in it.
  */
 export function VideoCommentPins({
   commenting,
   outline,
   time,
   width,
-  height,
   onOpen,
 }: {
   readonly commenting: VideoCommenting
   readonly outline: VideoOutline
   readonly time: number
   readonly width: number
-  readonly height: number
   readonly onOpen: (thread: CommentThread) => void
 }) {
   const { comments: messages, video } = useArtifactMessages()
@@ -217,6 +215,7 @@ export function VideoCommentPins({
       {shown.map(({ thread, label }) => {
         const { point } = thread.comment.anchor
         // A comment with no point, as the Agent may leave, sits at the frame's top right.
+        // In fractions of the picture, so a pin moves with it as it makes room for the bar.
         const at = point ?? { x: 1, y: 0.04 + unplaced++ * 0.1 }
         return (
           <div
@@ -224,8 +223,8 @@ export function VideoCommentPins({
             className="absolute"
             style={{
               ...PIN_ON_VIDEO,
-              left: at.x * width - (point ? 0 : 36),
-              top: at.y * height + (point ? 0 : 30),
+              left: `calc(${at.x * 100}% - ${point ? 0 : 36}px)`,
+              top: `calc(${at.y * 100}% + ${point ? 0 : 30}px)`,
             }}
           >
             <CommentPin
@@ -242,7 +241,7 @@ export function VideoCommentPins({
       {draft ? (
         <div
           className="absolute"
-          style={{ left: draft.point.x * width, top: draft.point.y * height }}
+          style={{ left: `${draft.point.x * 100}%`, top: `${draft.point.y * 100}%` }}
         >
           <span style={PIN_ON_VIDEO}>
             <CommentPin label={messages.newPin} active resolved={false} draft />
