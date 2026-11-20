@@ -94,8 +94,8 @@ so a change stays one small text edit, in the live document and in the Agent's d
   `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself;
 - the scene's host and those of the scenes on screen during its segment, from the frame it starts
   on up to the one the next scene starts on, as one fades into it, with their times resolved and
-  their order in `index.html`, which stacks them. A scene that fades in after the segment ends
-  shows in none of its frames, and is not in its key;
+  their order in `index.html` and their `z-index`, which stack them. A scene that fades in after
+  the segment ends shows in none of its frames, and is not in its key;
 - the scene's start in the video, only when the root shows something that moves of its own: a
   timed element, a video, a script that may build a timeline, or CSS that moves;
 - every other file, but three kinds: the other scenes' HTML, the videos neither the root nor a
@@ -250,6 +250,14 @@ What moves with what:
 - Scenes chained by `data-start` follow as HyperFrames moves them. A scene at a number of seconds
   after the change moves as much. A reorder or a removal chains the scenes whose predecessor
   changed, each keeping its own overlap or gap.
+- A reorder writes starts, never a host's line: Yjs cannot move text, so a line moved is deleted
+  and copied, and someone's concurrent edit of it would be left as stray text. HyperFrames paints
+  scenes on screen together in `index.html`'s order, unless a `z-index` says otherwise. After a
+  reorder, scenes on screen together stack in play order, the later on top, as a crossfade shows
+  it: a scene that must sit above one later in the file writes the least `z-index` that puts it
+  there, and drops it once the file's order does. What the root paints over the scenes, the
+  elements after its first host such as a captions bar, then writes one above the highest scene's,
+  and drops it with the last.
 - A ripple trim moves what starts after the edge, the scene's end included. A cut (a ripple
   delete, a marked range, words of a transcript) takes stretches out of a scene: a recording cut
   through is split around them, each part playing on from where its file was cut; any other clip
