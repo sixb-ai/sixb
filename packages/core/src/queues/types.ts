@@ -336,9 +336,15 @@ export interface ArtifactVideoExportRequestedQueueJob
       readonly references: readonly ArtifactReference[]
       /** What its `artifact:` addresses resolved to, as whoever asked reads them. */
       readonly media: readonly VideoMediaFile[]
-      /** When it was first asked for, as ISO: past `VIDEO_EXPORT_JOB.waitMs`, it gives up. */
+      /**
+       * When it was asked for, as ISO, or retried since: past `VIDEO_EXPORT_JOB.waitMs`, it gives
+       * up.
+       */
       readonly askedAt: string
-      /** Asked again after a failure: it asks anew for each segment still missing. */
+      /**
+       * Asked again after a failure, in a job apart from the export's: it asks anew for each
+       * segment still missing, then has the export look at once.
+       */
       readonly retry?: boolean
       /** Its segments are asked for: it looks again whether they are rendered, asking nothing. */
       readonly waiting?: boolean
