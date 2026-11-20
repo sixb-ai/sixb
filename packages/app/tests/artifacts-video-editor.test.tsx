@@ -262,28 +262,37 @@ describe("editing by the transcript", () => {
   const BOUNDS = { startMs: 0, endMs: 5000 }
 
   test("cutting words takes the pause before them, and leaves air beside the words kept", () => {
-    // "um,": from 120 ms after "So," ends to 120 ms before "thanks" starts.
-    expect(wordsCut(WORDS, 1, 1, BOUNDS)).toEqual({ startMs: 520, endMs: 1180 })
+    // "um,": from 120 ms after "So," ends to 120 ms before "thanks" starts. Growing to whole
+    // frames, the cut may take the rest of the pauses, up to the words either side.
+    expect(wordsCut(WORDS, 1, 1, BOUNDS)).toEqual({
+      startMs: 520,
+      endMs: 1180,
+      room: { startMs: 400, endMs: 1300 },
+    })
     // Words closer than twice the air split the pause between them.
-    expect(wordsCut(WORDS, 3, 3, BOUNDS)).toEqual({ startMs: 1625, endMs: 1825 })
+    expect(wordsCut(WORDS, 3, 3, BOUNDS)).toEqual({
+      startMs: 1625,
+      endMs: 1825,
+      room: { startMs: 1600, endMs: 1850 },
+    })
   })
 
   test("a cut never reaches into a word kept, and lands on a cut of the picture nearby", () => {
     const cut = wordsCut(WORDS, 1, 1, BOUNDS, [500])
-    expect(cut).toEqual({ startMs: 500, endMs: 1180 })
+    expect(cut).toMatchObject({ startMs: 500, endMs: 1180 })
     // A picture cut inside a word kept is no place to land.
-    expect(wordsCut(WORDS, 1, 1, BOUNDS, [300])).toEqual({ startMs: 520, endMs: 1180 })
+    expect(wordsCut(WORDS, 1, 1, BOUNDS, [300])).toMatchObject({ startMs: 520, endMs: 1180 })
   })
 
   test("the first and last words cut to the ends of the clip", () => {
-    expect(wordsCut(WORDS, 0, 0, BOUNDS)).toEqual({ startMs: 0, endMs: 680 })
-    expect(wordsCut(WORDS, 5, 5, BOUNDS)).toEqual({ startMs: 2420, endMs: 5000 })
+    expect(wordsCut(WORDS, 0, 0, BOUNDS)).toMatchObject({ startMs: 0, endMs: 680 })
+    expect(wordsCut(WORDS, 5, 5, BOUNDS)).toMatchObject({ startMs: 2420, endMs: 5000 })
   })
 
   test("silences longer than a breath are shortened to the air either side", () => {
     expect(silences(WORDS, BOUNDS)).toEqual([
-      { startMs: 2420, endMs: 3880 },
-      { startMs: 4520, endMs: 5000 },
+      { startMs: 2420, endMs: 3880, room: { startMs: 2300, endMs: 4000 } },
+      { startMs: 4520, endMs: 5000, room: { startMs: 4400, endMs: 5000 } },
     ])
   })
 
@@ -291,7 +300,7 @@ describe("editing by the transcript", () => {
     expect(isFiller("Um,")).toBe(true)
     expect(isFiller("euh…")).toBe(true)
     expect(isFiller("umbrella")).toBe(false)
-    expect(fillers(WORDS, BOUNDS)).toEqual([{ startMs: 520, endMs: 1180 }])
+    expect(fillers(WORDS, BOUNDS)).toMatchObject([{ startMs: 520, endMs: 1180 }])
   })
 
   test("words are found, in a row, whatever their case and accents", () => {
@@ -640,6 +649,52 @@ describe("the editor's pieces", () => {
     type(name, "Opening")
     fireEvent.keyDown(name, { key: "Enter" })
     expect(names).toEqual(["Opening"])
+  })
+
+  // Reproduce by leaving `round` off the scene's Length field in SceneInspector: it keeps "2.95",
+  // which the scene, still 3 s long, does not last.
+  test("a scene's length shows the length the edit gives it, in whole frame steps", () => {
+    const composition = new LiveVideo(createArtifactDocument("video", FILES)).getState().composition
+    const title = composition?.scenes[0]
+    if (!composition || !title) throw new Error("No scene.")
+
+    const lengths: number[] = []
+    const noop = () => {}
+    const view = render(
+      wrap(
+        <Inspector
+          composition={{ ...composition, fps: 24 }}
+          timelines={new Map()}
+          scene={title}
+          clip={undefined}
+          splittable={false}
+          target={{ artifactId: "art_video", version: 2, files: [] }}
+          actions={{
+            renameScene: noop,
+            sceneLength: (_scene, ms) => lengths.push(ms),
+            duplicateScene: noop,
+            removeScene: noop,
+            clipTiming: noop,
+            clipSound: noop,
+            text: noop,
+            clipText: noop,
+            removeClip: noop,
+            splitClip: noop,
+          }}
+        />
+      )
+    )
+    const length = view.getByRole("textbox", { name: "Length" }) as HTMLInputElement
+
+    // At 24 fps a step is 125 ms: 2.95 s is the scene's 3 s, and 4.2 s is 4.25 s.
+    type(length, "2.95")
+    fireEvent.keyDown(length, { key: "Enter" })
+    expect(length.value).toBe("3")
+    type(length, "4.2")
+    fireEvent.keyDown(length, { key: "Enter" })
+    expect(length.value).toBe("4.25")
+    // Enter commits it, and so does the blur it causes, with this scene still 3 s long.
+    expect([...new Set(lengths)]).toEqual([4250])
   })
 })
 

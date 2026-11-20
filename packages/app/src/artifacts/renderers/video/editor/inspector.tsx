@@ -6,6 +6,7 @@ import {
   type VideoScene,
   type VideoTarget,
   type VideoText,
+  videoSceneLength,
   videoTarget,
 } from "@sixb/core/artifacts/live"
 import { Button, Slider } from "@sixb/ui/components"
@@ -150,6 +151,7 @@ function SceneInspector({
           label={messages.length}
           ms={scene.durationMs}
           min={100}
+          round={(ms) => videoSceneLength(ms, composition.fps)}
           onCommit={(ms) => actions.sceneLength(scene, ms)}
         />
         <Fact label={messages.starts} value={startsText(scene, composition, messages)} />
@@ -359,6 +361,7 @@ export function SecondsField({
   hint,
   ms,
   min,
+  round = Math.round,
   onCommit,
   compact = false,
 }: {
@@ -367,6 +370,8 @@ export function SecondsField({
   /** Undefined for a time not written, as a clip that plays to its end. */
   readonly ms: number | undefined
   readonly min: number
+  /** The time an edit makes of the one typed, which the field shows once committed. */
+  readonly round?: (ms: number) => number
   readonly onCommit: (ms: number) => void
   readonly compact?: boolean
 }) {
@@ -383,7 +388,7 @@ export function SecondsField({
       setText(shown)
       return
     }
-    const next = Math.max(min, Math.round(value))
+    const next = Math.max(min, round(value))
     setText(formatSeconds(next))
     if (next !== ms) onCommit(next)
   }
