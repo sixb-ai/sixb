@@ -214,7 +214,7 @@ function describe(
   if (id.startsWith("project.port.")) {
     return {
       ...check,
-      remedy: "Give this service another port in the target's `ports` or `standbyPorts`.",
+      remedy: "Stop the program holding the port: a server runs one deployment.",
     }
   }
   if (id === "server.caddy") {

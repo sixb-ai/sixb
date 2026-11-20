@@ -65,7 +65,6 @@ const release: DeployRelease = {
 
 const layout = deploymentLayout({
   home: "/home/sixb",
-  user: "sixb",
   name: "northline",
   projectPath: "examples/northline",
   bunVersion: "1.4.2",
@@ -750,7 +749,6 @@ async function standInServer(
   const calls = join(root, "calls.txt")
   const serverLayout = deploymentLayout({
     home: root,
-    user: "sixb",
     name: "northline",
     projectPath: "examples/northline",
     bunVersion: "1.4.2",
