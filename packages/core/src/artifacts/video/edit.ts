@@ -58,6 +58,15 @@ export interface VideoRange {
   readonly endMs: number
 }
 
+/**
+ * A stretch to cut, and the `room` around it the cut may take as it grows to whole frames without
+ * touching anything kept: for a transcript's words, the pauses up to the words either side.
+ * Without one, the cut grows as much on each side.
+ */
+export interface VideoCut extends VideoRange {
+  readonly room?: VideoRange
+}
+
 /** The shortest a scene or a clip may become: a few frames. */
 export const MIN_CLIP_MS = 100
 
@@ -98,15 +107,25 @@ export type VideoImportKind = "video" | "audio" | "image"
 // Scenes ------------------------------------------------------------------------------------------
 
 /**
- * Makes a scene `ms` long. The scenes after it move with its end: those chained to it as
- * HyperFrames moves them, and those at a number of seconds by as much. The video's own length,
- * and a soundtrack that ran to its end, follow.
+ * Makes a scene about `ms` long, as long as {@link videoSceneLength} says. The scenes after it
+ * move with its end: those chained to it as HyperFrames moves them, and those at a number of
+ * seconds by as much. The video's own length, and a soundtrack that ran to its end, follow.
  */
 export function setSceneLength(sources: VideoSources, scene: string, ms: number): VideoEditResult {
   return run(sources, (work) => {
     if (!(ms >= MIN_CLIP_MS)) throw new EditError(`A scene lasts at least ${MIN_CLIP_MS} ms.`)
-    lengthenScene(work, scene, Math.round(ms))
+    lengthenScene(work, scene, videoSceneLength(ms, rootOf(work).fps))
   })
+}
+
+/**
+ * The length {@link setSceneLength} gives a scene asked to last `ms` in a video at `fps`: the
+ * nearest whole number of frame steps, 100 ms at 30 fps, so the scenes after move by whole frames.
+ * A field shows it as soon as it is typed.
+ */
+export function videoSceneLength(ms: number, fps: number): number {
+  const step = frameStepMs(fps)
+  return Math.max(Math.ceil(MIN_CLIP_MS / step), Math.round(ms / step)) * step
 }
 
 /** Names a scene, as its chapter shows it; an empty label removes it. */
@@ -501,23 +520,27 @@ export function removeMediaRanges(
   sources: VideoSources,
   file: string,
   src: string,
-  ranges: readonly VideoRange[],
+  ranges: readonly VideoCut[],
   options: { readonly endMs?: number } = {}
 ): VideoEditResult {
   return run(sources, (work) => {
-    const removed = mergeRanges(ranges)
-    const cut: VideoRange[] = []
+    const removed = mergeCuts(ranges)
+    const cut: VideoCut[] = []
     for (const clip of timelineOf(work, file).clips) {
       if (clip.src !== src || !playsFile(clip)) continue
 
+      // From the file's time to the composition's, within what the clip plays.
       const from = clip.mediaStartMs
       const to = from + clipEnd(clip, options.endMs) - clip.startMs
+      const at = (ms: number) => clip.startMs + Math.min(to, Math.max(from, ms)) - from
+
       for (const range of removed) {
-        const startMs = Math.max(from, range.startMs)
-        const endMs = Math.min(to, range.endMs)
-        if (endMs > startMs) {
-          cut.push({ startMs: clip.startMs + startMs - from, endMs: clip.startMs + endMs - from })
-        }
+        const startMs = at(range.startMs)
+        const endMs = at(range.endMs)
+        if (endMs <= startMs) continue
+
+        const room = range.room ?? range
+        cut.push({ startMs, endMs, room: { startMs: at(room.startMs), endMs: at(room.endMs) } })
       }
     }
     if (cut.length === 0) return
@@ -1348,10 +1371,14 @@ function ripple(
  * Takes stretches out of a composition's timeline: each clip moves back by what was cut before it
  * and loses what was cut of it. A recording cut through is split around the cut, each part
  * playing on from where its file was cut; another clip is only shortened, and one with nothing
- * left is removed. The scene ends as much sooner.
+ * left is removed. The scene ends as much sooner: by whole frame steps, as each stretch it shows
+ * is made ({@link inFrameSteps}).
  */
-function rippleRemove(work: Working, file: string, cut: readonly VideoRange[]): void {
-  const spans = mergeRanges(cut)
+function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): void {
+  const shown = sceneOf(work, file)
+  const spans = shown
+    ? inFrameSteps(cut, shown.durationMs, frameStepMs(rootOf(work).fps))
+    : mergeRanges(cut)
   const map = (t: number) =>
     t - spans.reduce((sum, span) => sum + Math.max(0, Math.min(t, span.endMs) - span.startMs), 0)
 
@@ -1417,6 +1444,98 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoRange[]): 
 
   const scene = sceneOf(work, file)
   if (scene) lengthenScene(work, scene.id, Math.max(MIN_CLIP_MS, map(scene.durationMs)))
+}
+
+/**
+ * The shortest stretch that is whole frames and whole milliseconds, which times are written in:
+ * a frame at 25 and 50 fps, three at 24, 30 and 60 (125, 100 and 50 ms). A scene made longer or
+ * shorter by steps moves those after it by whole frames: each still starts as far into its frame,
+ * shows the same frames, and keeps its rendered segment.
+ */
+function frameStepMs(fps: number): number {
+  let [a, b] = [fps, 1000]
+  while (b > 0) [a, b] = [b, a % b]
+  return 1000 / a
+}
+
+/**
+ * Stretches cut from a scene `lengthMs` long, sorted and apart, each kept to what the scene shows
+ * and grown to the whole steps that cover it, so nothing marked to go stays. What it grows by goes
+ * into its room first, as evenly as each side has some, then evenly beyond, and always within
+ * the scene. Two that come to touch are joined, and grown again.
+ */
+function inFrameSteps(cut: readonly VideoCut[], lengthMs: number, step: number): VideoRange[] {
+  const scene = (ms: number) => Math.min(lengthMs, Math.max(0, ms))
+  let spans = mergeCuts(
+    cut.map((each) => {
+      const room = each.room ?? each
+      return {
+        startMs: scene(Math.floor(each.startMs)),
+        endMs: scene(Math.ceil(each.endMs)),
+        room: { startMs: scene(Math.ceil(room.startMs)), endMs: scene(Math.floor(room.endMs)) },
+      }
+    })
+  )
+
+  for (;;) {
+    const grown = mergeCuts(spans.map((span) => growToSteps(span, step, lengthMs)))
+    if (grown.length === spans.length) return grown
+    spans = grown
+  }
+}
+
+/** A cut grown to the whole steps that cover it: into its room, then beyond, within `lengthMs`. */
+function growToSteps(cut: VideoCut, step: number, lengthMs: number): VideoCut {
+  const length = cut.endMs - cut.startMs
+  const extra = Math.ceil(length / step) * step - length
+  const room = cut.room ?? cut
+  const roomBefore = Math.max(0, cut.startMs - room.startMs)
+  const roomAfter = Math.max(0, room.endMs - cut.endMs)
+
+  // Half each side, as far as its room goes; what one side lacks, the other takes.
+  let before = Math.min(roomBefore, Math.floor(extra / 2))
+  const after = Math.min(roomAfter, extra - before)
+  before = Math.min(roomBefore, extra - after)
+
+  // Past the room, half each side.
+  const beyond = extra - before - after
+  let startMs = cut.startMs - before - Math.floor(beyond / 2)
+  let endMs = cut.endMs + after + Math.ceil(beyond / 2)
+
+  // Within the scene: what would fall before it or after it goes on the other side.
+  if (startMs < 0) [startMs, endMs] = [0, endMs - startMs]
+  if (endMs > lengthMs) [startMs, endMs] = [Math.max(0, startMs - (endMs - lengthMs)), lengthMs]
+
+  return {
+    startMs,
+    endMs,
+    room: { startMs: Math.min(room.startMs, startMs), endMs: Math.max(room.endMs, endMs) },
+  }
+}
+
+/** Cuts sorted, and those that touch or overlap joined, with the room of each. */
+function mergeCuts(cuts: readonly VideoCut[]): VideoCut[] {
+  const sorted = cuts.filter((cut) => cut.endMs > cut.startMs).sort((a, b) => a.startMs - b.startMs)
+
+  const merged: VideoCut[] = []
+  for (const cut of sorted) {
+    const room = cut.room ?? cut
+    const last = merged.at(-1)
+    if (last && cut.startMs <= last.endMs) {
+      const lastRoom = last.room ?? last
+      merged[merged.length - 1] = {
+        startMs: last.startMs,
+        endMs: Math.max(last.endMs, cut.endMs),
+        room: {
+          startMs: Math.min(lastRoom.startMs, room.startMs),
+          endMs: Math.max(lastRoom.endMs, room.endMs),
+        },
+      }
+    } else {
+      merged.push({ startMs: cut.startMs, endMs: cut.endMs, room })
+    }
+  }
+  return merged
 }
 
 /** A range without the spans, sorted and apart: what is left of it, in pieces. */

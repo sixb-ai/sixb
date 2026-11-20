@@ -26,6 +26,7 @@ import {
   setVideoText,
   splitClip,
   trimClip,
+  type VideoCut,
   type VideoEditResult,
   type VideoSources,
   videoTarget,
@@ -716,6 +717,64 @@ describe("cutting by the transcript", () => {
     expect(cutRange(SOURCES, { startMs: 0, endMs: 15_000 })).toEqual({
       error: "A video keeps at least one scene.",
     })
+  })
+
+  // The talk as a cut of its file leaves it: where its first part ends, where its second starts
+  // in the file.
+  const cutTalk = (sources: VideoSources, cut: VideoCut) => {
+    const files = applied(
+      removeMediaRanges(sources, "scenes/demo.html", "media/talk.mp4", [cut]),
+      sources
+    )
+    const [first, second] = demoClips(files)
+    return { files, endMs: first?.durationMs, resumesAt: second?.mediaStartMs }
+  }
+  const at24 = new Map(SOURCES).set("index.html", INDEX.replace('data-fps="30"', 'data-fps="24"'))
+
+  // Guard proof: cut the spans as merged in rippleRemove, and the demo loses 40 ms; let
+  // frameStepMs return one frame, and it loses 33.33 ms, written as 33: the outro then starts a
+  // third of a millisecond into a frame.
+  test("a cut takes whole frame steps, so the scenes after move by whole frames", () => {
+    // A 40 ms word of the talk, at 30 fps: three frames, 100 ms, as much on each side.
+    const { files, endMs, resumesAt } = cutTalk(SOURCES, { startMs: 3500, endMs: 3540 })
+    expect(times(files)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 7900],
+      ["outro", 10_400, 4500],
+    ])
+    expect([endMs, resumesAt]).toEqual([1470, 3570])
+
+    // At 24 fps, three frames are 125 ms, and a scene's length is the nearest number of them.
+    expect(times(cutTalk(at24, { startMs: 3500, endMs: 3540 }).files)[2]).toEqual([
+      "outro",
+      10_375,
+      4500,
+    ])
+    expect(times(applied(setSceneLength(at24, "demo", 8200), at24))[1]).toEqual([
+      "demo",
+      2500,
+      8250,
+    ])
+  })
+
+  // Guard proof: round each stretch to the nearest number of steps in growToSteps rather than up,
+  // and 27 ms of the "um" is heard on either side of a 125 ms cut.
+  test("a cut grows to whole frames around what it removes, never into it", () => {
+    // An "um" of 180 ms, 1.5 s into the talk, at 24 fps: two steps, 250 ms, 35 ms on each side.
+    const { endMs, resumesAt } = cutTalk(at24, { startMs: 3500, endMs: 3680 })
+    expect([endMs, resumesAt]).toEqual([1465, 3715])
+  })
+
+  // Guard proof: grow every cut as much on each side in growToSteps, its room aside, and the cut
+  // takes 20 ms of the word before it.
+  test("a cut grows into the pauses beside it before any word kept", () => {
+    // 40 ms, with 10 ms of pause before it and 160 ms after: 10 ms before, 50 ms after.
+    const { endMs, resumesAt } = cutTalk(SOURCES, {
+      startMs: 3500,
+      endMs: 3540,
+      room: { startMs: 3490, endMs: 3700 },
+    })
+    expect([endMs, resumesAt]).toEqual([1490, 3590])
   })
 
   test("a recording's stretch is cut wherever a clip plays it", () => {

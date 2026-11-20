@@ -1,4 +1,4 @@
-import { VIDEO_ENTRY, type VideoRange } from "@sixb/core/artifacts/live"
+import { VIDEO_ENTRY, type VideoCut, type VideoRange } from "@sixb/core/artifacts/live"
 import {
   Button,
   DropdownMenu,
@@ -77,7 +77,7 @@ export function TranscriptTab({
   readonly selected: SpokenRecording | undefined
   readonly timeMs: number
   readonly onSeek: (ms: number) => void
-  readonly onRemove: (recording: SpokenRecording, ranges: readonly VideoRange[]) => void
+  readonly onRemove: (recording: SpokenRecording, ranges: readonly VideoCut[]) => void
 }) {
   const messages = useArtifactMessages().videoEditor
   const parts = useMediaPartsOf(
@@ -243,7 +243,7 @@ export function TranscriptPanel({
   readonly timeMs: number
   readonly onSeek: (ms: number) => void
   /** Cuts these stretches of the recording, in milliseconds into its file. */
-  readonly onRemove: (ranges: readonly VideoRange[]) => void
+  readonly onRemove: (ranges: readonly VideoCut[]) => void
 }) {
   const messages = useArtifactMessages().videoEditor
   const parts = useMediaParts(target, src)
@@ -317,7 +317,7 @@ function NoTranscriptionModel() {
 /** What a cleanup would cut, shown before it does. */
 interface Proposal {
   readonly kind: "silences" | "fillers"
-  readonly ranges: readonly VideoRange[]
+  readonly ranges: readonly VideoCut[]
 }
 
 function Words({
@@ -335,7 +335,7 @@ function Words({
   readonly clips: readonly LaidClip[]
   readonly timeMs: number
   readonly onSeek: (ms: number) => void
-  readonly onRemove: (ranges: readonly VideoRange[]) => void
+  readonly onRemove: (ranges: readonly VideoCut[]) => void
 }) {
   const messages = useArtifactMessages().videoEditor
   const phrases = timing === "phrases"
