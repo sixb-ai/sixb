@@ -336,8 +336,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Removal proof: drop 'video' from a provider's kind CHECK and the video is refused; drop `at`
-    // or `scene` from storedCommentAnchor and the comment comes back without its instant.
+    // Removal proof: drop 'video' from a provider's kind CHECK and the video is refused; drop
+    // `scene` or `offset` from storedCommentAnchor and the comment comes back without its instant.
     test("keeps a video, lists it as its kind, and the instant and scene its comments are about", async () => {
       await withStorage(async (artifacts) => {
         const outline = {
@@ -373,7 +373,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         const videos = await artifacts.list({ projectId, kind: "video", limit: 10 })
         expect(videos.artifacts.map((artifact) => artifact.id)).toEqual(["art_film"])
 
-        const anchor = { at: 2500, scene: "demo", point: { x: 0.5, y: 0.25 }, revision: 1 }
+        const anchor = {
+          scene: "demo",
+          offset: 500,
+          point: { x: 0.5, y: 0.25 },
+          revision: 1,
+        }
         const comment = await artifacts.createComment({
           projectId,
           artifactId: "art_film",

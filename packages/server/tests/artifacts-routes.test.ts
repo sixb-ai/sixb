@@ -401,9 +401,10 @@ describe("artifact routes", () => {
       })
     )
     expect(comment.status).toBe(201)
+    // Kept as how far into its scene, which it follows in later versions.
     expect((await comment.json()).anchor).toEqual({
-      at: 2500,
       scene: "demo",
+      offset: 500,
       point: { x: 0.5, y: 0.5 },
       revision: 1,
     })

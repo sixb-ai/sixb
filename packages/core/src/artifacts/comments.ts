@@ -11,6 +11,7 @@ import type {
   ArtifactStorage,
 } from "../storage/artifacts/types"
 import type { ArtifactAccess } from "./access"
+import { videoSceneAt } from "./comment-place"
 import { ArtifactRequestError } from "./errors"
 import { announceArtifactComment } from "./events"
 import { createArtifactCommentId } from "./ids"
@@ -31,16 +32,22 @@ export interface ArtifactCommentInput {
   readonly body: string
   /**
    * What it is about: a canvas's board by its item id, an element of the board by the address
-   * `boardElements` gives it, with its first words as `label`; a video's instant, `at`, and its
-   * scene; or, without, the artifact. At the revision its author saw, the artifact's by default. A
-   * reply is about what it replies to.
+   * `boardElements` gives it, with its first words as `label`; a video's instant in its latest
+   * version, `at`, and the scene playing then, or a scene; or, without, the artifact. At the
+   * revision its author saw, the artifact's by default. A reply is about what it replies to.
    */
-  readonly anchor?: Partial<ArtifactCommentAnchor>
+  readonly anchor?: ArtifactCommentPlaceInput
   /** The comment this one replies to. */
   readonly parentId?: string
   /** The Agent's run that writes it for the caller, and that run's conversation. */
   readonly origin?: ArtifactOrigin
 }
+
+/**
+ * Where a new comment is, as its author names it: a video's instant from its start, which the
+ * comment keeps as an offset into the scene playing it.
+ */
+export type ArtifactCommentPlaceInput = Partial<Omit<ArtifactCommentAnchor, "offset">>
 
 /** The comment methods of the artifacts runtime. */
 export interface ArtifactCommentsRuntime {
@@ -244,25 +251,23 @@ function threadLink(thread: Pick<ArtifactCommentRecord, "author">): string | und
 async function checkAnchor(
   storage: ArtifactStorage,
   artifact: ArtifactRecord,
-  anchor: Partial<ArtifactCommentAnchor>
+  anchor: ArtifactCommentPlaceInput
 ): Promise<ArtifactCommentAnchor> {
   const revision = anchor.revision ?? artifact.revision
   if (!Number.isSafeInteger(revision) || revision < 1 || revision > artifact.revision) {
     throw invalid(`A comment is about a revision of the artifact, 1 to ${artifact.revision}.`)
   }
 
-  const label = anchor.label
+  // A video's scene is named by its own label, which still names it once a version drops it.
+  const { label: named, ...place } = await checkPlace(storage, artifact, anchor)
+  const label = (named ?? anchor.label)
     ?.replace(/\s+/g, " ")
     .trim()
     .slice(0, ARTIFACT_COMMENT_LIMITS.maxLabelLength)
-  return {
-    ...(await checkPlace(storage, artifact, anchor)),
-    ...(label ? { label } : {}),
-    revision,
-  }
+  return { ...place, ...(label ? { label } : {}), revision }
 }
 
-type CommentPlace = Omit<ArtifactCommentAnchor, "label" | "revision">
+type CommentPlace = Omit<ArtifactCommentAnchor, "revision">
 
 /**
  * Where on the artifact a comment is, as its kind places one: on a canvas, a board, an element of
@@ -272,7 +277,7 @@ type CommentPlace = Omit<ArtifactCommentAnchor, "label" | "revision">
 async function checkPlace(
   storage: ArtifactStorage,
   artifact: ArtifactRecord,
-  anchor: Partial<ArtifactCommentAnchor>
+  anchor: ArtifactCommentPlaceInput
 ): Promise<CommentPlace> {
   const { board, element, at, scene, point } = anchor
   const placed = [board, element, at, scene, point].some((value) => value !== undefined)
@@ -308,7 +313,7 @@ async function checkPlace(
 
 /** A board the canvas's latest version shows, an element's address under it, and a point on it. */
 async function checkBoardPlace(
-  anchor: Partial<ArtifactCommentAnchor>,
+  anchor: ArtifactCommentPlaceInput,
   latest: () => Promise<ArtifactOutline | undefined>
 ): Promise<CommentPlace> {
   const { board, element, point } = anchor
@@ -346,10 +351,12 @@ async function checkBoardPlace(
 
 /**
  * An instant within the video's latest version, a scene it has, and a point on the frame at that
- * instant: the frame changes as it plays, so a point needs its instant.
+ * instant: the frame changes as it plays, so a point needs its instant. An instant is kept as how
+ * far into the scene playing it, the one named or else the one on screen then, so that it follows
+ * the scene in later versions; one that plays no scene keeps its instant from the video's start.
  */
 async function checkScenePlace(
-  anchor: Partial<ArtifactCommentAnchor>,
+  anchor: ArtifactCommentPlaceInput,
   latest: () => Promise<ArtifactOutline | undefined>
 ): Promise<CommentPlace> {
   const { at, scene, point } = anchor
@@ -372,13 +379,16 @@ async function checkScenePlace(
   if (scene !== undefined && !named) throw invalid(`The video has no scene '${scene}'.`)
   if (named && at !== undefined && (at < named.startMs || at > named.startMs + named.durationMs)) {
     throw invalid(
-      `Scene '${named.id}' plays from ${named.startMs} to ${named.startMs + named.durationMs} milliseconds: a comment's \`at\` is in the scene it names.`
+      `Scene '${named.id}' plays from ${named.startMs} to ${named.startMs + named.durationMs} milliseconds: a comment's \`at\` is in the scene it names, or names none.`
     )
   }
 
+  const playing = named ?? (at === undefined ? undefined : videoSceneAt(outline, at))
+  const instant = at === undefined ? {} : playing ? { offset: at - playing.startMs } : { at }
   return {
-    ...(at === undefined ? {} : { at }),
-    ...(scene === undefined ? {} : { scene }),
+    ...(playing ? { scene: playing.id } : {}),
+    ...(playing?.label === undefined ? {} : { label: playing.label }),
+    ...instant,
     ...(point === undefined ? {} : { point: { x: point.x, y: point.y } }),
   }
 }

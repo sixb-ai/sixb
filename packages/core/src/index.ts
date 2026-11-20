@@ -996,7 +996,7 @@ export type {
   AgentThreadView,
 } from "./agents/thread-access"
 export type { ArtifactAccess } from "./artifacts/access"
-export type { ArtifactCommentInput } from "./artifacts/comments"
+export type { ArtifactCommentInput, ArtifactCommentPlaceInput } from "./artifacts/comments"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {

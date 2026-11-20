@@ -563,12 +563,20 @@ export interface ListArtifactMediaInput {
 export interface ArtifactCommentAnchor {
   readonly board?: string
   readonly element?: string
-  /** The element's first words, which name it once it is gone. */
+  /** The element's first words, or the video scene's label: what names it once it is gone. */
   readonly label?: string
-  /** A video's instant, in milliseconds from its start. */
+  /**
+   * A video's instant that plays no scene, between two or past the last, in milliseconds from its
+   * start. An instant within a scene is kept as `offset` into it instead.
+   */
   readonly at?: number
   /** The id of the video's scene it is about. */
   readonly scene?: string
+  /**
+   * How far into `scene` its instant is, in milliseconds: it follows the scene wherever a later
+   * version moves it, and stops at its end once it is shorter.
+   */
+  readonly offset?: number
   /**
    * Where its pin is, as fractions of the width and height from the top left: where its author
    * clicked, on the board, or on the video's frame at its instant.
