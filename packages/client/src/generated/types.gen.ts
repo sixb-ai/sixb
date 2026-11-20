@@ -16434,7 +16434,7 @@ export type EditAgentThreadMessageResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string

@@ -48613,7 +48613,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["step_limit_reached", "output_limit_reached"]
+                                "enum": [
+                                  "step_limit_reached",
+                                  "output_limit_reached",
+                                  "workspace_not_saved"
+                                ]
                               },
                               "severity": {
                                 "type": "string",
