@@ -766,16 +766,22 @@ function Failure({
 
 /**
  * Whether the controls show: while the video plays, until the pointer rests a moment; while it is
- * paused, until the pointer leaves it or a finger hides them, so a paused frame reads whole. Either
- * way they stay while the pointer is over them or the focus is in them.
+ * paused, while a mouse is over it, or until a finger hides them, so a paused frame reads whole.
+ * Either way they stay while the pointer is over them or the focus is in them.
+ *
+ * A mouse brings them by coming over the video: until it does, as when the video opens or pauses at
+ * a key or a comment, the frame shows whole. A finger has no hover, so they show until it hides
+ * them.
  */
 function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boolean) {
-  const [active, setActive] = useState(true)
+  const [active, setActive] = useState(() => !hovers())
   const [held, setHeld] = useState(false)
   const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const moving = useRef(playing)
   moving.current = playing
+  // Whether a mouse is over the video.
+  const over = useRef(false)
 
   const wake = useCallback(() => {
     setActive(true)
@@ -791,7 +797,7 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
       return
     }
     clearTimeout(timer.current)
-    setActive(true)
+    setActive(over.current || !hovers())
   }, [playing, wake])
 
   // A key moves focus into them, and keeps them.
@@ -822,16 +828,24 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
       }
     },
     onPointerMove: (event: ReactPointerEvent) => {
-      if (event.pointerType === "mouse") wake()
+      if (event.pointerType !== "mouse") return
+      over.current = true
+      wake()
     },
     onPointerLeave: (event: ReactPointerEvent) => {
       if (event.pointerType !== "mouse") return
+      over.current = false
       clearTimeout(timer.current)
       setActive(false)
     },
     hold: () => setHeld(true),
     release: () => setHeld(false),
   }
+}
+
+/** Whether the device's main pointer hovers, as a mouse does and a finger does not. */
+function hovers(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(hover: hover)").matches
 }
 
 /**

@@ -560,6 +560,28 @@ describe("the player", () => {
     expect(screen.hasAttribute("data-controls")).toBe(true)
   })
 
+  test("with a mouse, opens and pauses on a whole frame until the pointer comes over it", async () => {
+    // Reproduce by setting `active` to true on a pause in `useControlsShown`, whatever the pointer:
+    // a desktop opening the video, or pausing it at a key with the pointer elsewhere, then shows
+    // the bar over the frame's captions.
+    const global = globalThis as { matchMedia?: unknown }
+    global.matchMedia = (query: string) => ({ matches: query === "(hover: hover)" })
+    try {
+      const { screen, runtime } = await openPlayer()
+      expect(screen.hasAttribute("data-controls")).toBe(false)
+
+      fireEvent.pointerMove(screen, { pointerType: "mouse" })
+      expect(screen.hasAttribute("data-controls")).toBe(true)
+      fireEvent.pointerLeave(screen, { pointerType: "mouse" })
+
+      await runtime({ ...RUNTIME, type: "state", currentTime: 2, isPlaying: true })
+      await runtime({ ...RUNTIME, type: "state", currentTime: 3, isPlaying: false })
+      expect(screen.hasAttribute("data-controls")).toBe(false)
+    } finally {
+      delete global.matchMedia
+    }
+  })
+
   test("leaves the picture clean once the reader moved the playhead, before any play", async () => {
     // Reproduce by dropping `setBegun(true)` from `goTo` in player.tsx.
     const { screen, view } = await openPlayer()
