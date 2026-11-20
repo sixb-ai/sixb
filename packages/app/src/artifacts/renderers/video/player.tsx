@@ -40,8 +40,8 @@ import { usePlayback } from "./playback"
 import { Scrubber } from "./scrubber"
 
 // Watching a video: its frame, played by HyperFrames' runtime at the composition's own size and
-// scaled to the screen, letterboxed on the video's shade; the app's controls over its foot; its
-// chapters and comments beside it, or in sheets on a phone.
+// scaled to the screen, letterboxed on the video's shade; the app's controls over its foot as it
+// plays, and under it while paused; its chapters and comments beside it, or in sheets on a phone.
 //
 // The frame takes no click of its own: what the reader clicks lands on the app's layer over it,
 // which plays, pauses, or places a comment. So the player's keys, its controls and its comments
@@ -62,6 +62,10 @@ const CONTROLS_IDLE_MS = 2_500
 
 /** The widest player that is laid out as on a phone. */
 const COMPACT_WIDTH = 640
+
+/** How the picture and the layer over it move to make room for the bar, in step. */
+const GLIDE =
+  "transition-[left,top,width,height,transform] duration-300 ease-out motion-reduce:transition-none"
 
 export function VideoPlayer({
   version,
@@ -130,7 +134,8 @@ export function VideoPlayer({
   const width = useWidth(root)
   const compact = width > 0 && width < COMPACT_WIDTH
   const box = useSize(picture)
-  const scale = Math.min(box.width / outline.width, box.height / outline.height) || 0
+  const bar = useRef<HTMLDivElement | null>(null)
+  const barHeight = useSize(bar).height
 
   // Commenting, on the latest version only, as the API places comments on it.
   const commenting = useVideoCommenting({
@@ -170,6 +175,28 @@ export function VideoPlayer({
   const filling = fullscreen.on || fullscreen.pseudo
   const [announcement, setAnnouncement] = useState("")
   const controls = useControlsShown(screen, playback.playing && !commenting.commenting)
+
+  // Paused, the bar shows for good, and the picture makes room for it: it sits under the picture
+  // rather than on the film's own captions, the words a reader pauses on and comments on, wherever
+  // the pointer is. Playing, the bar comes over the picture. On a phone the bar is docked under the
+  // picture for good: the screen is as much taller, so the picture never shrinks and nothing moves.
+  // Filling a phone, the bar takes only the room left above and below the picture.
+  const docked = compact && !filling
+  const paused = !playback.playing && !broken
+  const fitted = Math.min(box.width / outline.width, box.height / outline.height)
+  const spare = Math.max(0, box.height - outline.height * fitted)
+
+  let room = 0
+  if (docked) room = barHeight
+  else if (paused) room = compact ? Math.min(barHeight, spare) : barHeight
+  const scale =
+    Math.max(0, Math.min(box.width / outline.width, (box.height - room) / outline.height)) || 0
+  const stage = {
+    left: (box.width - outline.width * scale) / 2,
+    top: (box.height - room - outline.height * scale) / 2,
+  }
+  // It glides there as the video plays or pauses, and follows a resize at once.
+  const glide = useSettled(box, barHeight)
 
   const chapter = chapterAt(outline, playback.time)
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
@@ -219,7 +246,9 @@ export function VideoPlayer({
       commenting.cancelDraft()
       return
     }
-    if (event.pointerType === "touch" && begun) {
+    // A tap shows or hides the bar over a playing picture; where the bar shows for good, docked
+    // under the picture or paused, it plays or pauses, as a click does.
+    if (event.pointerType === "touch" && begun && !docked && playback.playing) {
       controls.toggle()
       return
     }
@@ -325,18 +354,24 @@ export function VideoPlayer({
         filling
           ? undefined
           : compact
-            ? { aspectRatio: String(ratio), maxHeight: "70vh" }
+            ? {
+                aspectRatio: String(ratio),
+                maxHeight: "70vh",
+                // The picture keeps its ratio, and the bar docks under it.
+                boxSizing: "content-box",
+                paddingBottom: barHeight,
+              }
             : { aspectRatio: String(ratio), width: `min(100cqw, 100cqh * ${ratio})` }
       }
     >
       <div ref={picture} className="absolute inset-0 overflow-hidden rounded-[inherit]">
         <div
-          className="absolute"
+          className={cn("absolute", glide && GLIDE)}
           style={{
             width: outline.width,
             height: outline.height,
-            left: (box.width - outline.width * scale) / 2,
-            top: (box.height - outline.height * scale) / 2,
+            left: stage.left,
+            top: stage.top,
             transform: `scale(${scale})`,
             transformOrigin: "0 0",
             visibility: scale > 0 ? undefined : "hidden",
@@ -361,13 +396,13 @@ export function VideoPlayer({
 
       {/* The app's layer over the frame: it takes every click, and holds the comments' pins. */}
       <div
-        className="absolute"
+        className={cn("absolute", glide && GLIDE)}
         data-video-picture=""
         style={{
           width: outline.width * scale,
           height: outline.height * scale,
-          left: (box.width - outline.width * scale) / 2,
-          top: (box.height - outline.height * scale) / 2,
+          left: stage.left,
+          top: stage.top,
         }}
       >
         <div
@@ -393,13 +428,12 @@ export function VideoPlayer({
             outline={outline}
             time={playback.time}
             width={outline.width * scale}
-            height={outline.height * scale}
             onOpen={openThread}
           />
         ) : null}
       </div>
 
-      {showLoading ? <Loading /> : null}
+      {showLoading ? <Loading dock={room} /> : null}
       {broken ? (
         <Failure
           unsupported={playback.phase === "failed"}
@@ -409,6 +443,7 @@ export function VideoPlayer({
 
       {!loading && !broken && (!begun || playback.ended) && !commenting.commenting ? (
         <BigPlay
+          dock={room}
           label={playback.ended ? messages.replay : messages.play}
           replay={playback.ended}
           onClick={() => {
@@ -465,14 +500,20 @@ export function VideoPlayer({
       <div
         className={cn(
           // A short, dense shade: the bar reads on a light frame, and leaves the rest of it be.
+          // Under the picture, on the screen's own black, it needs none above it.
           "pointer-events-none absolute inset-x-0 bottom-0 z-20 rounded-b-[inherit] bg-gradient-to-t from-black/80 via-black/50 via-45% to-transparent transition-opacity duration-300 motion-reduce:transition-none",
-          compact && !filling ? "pt-5" : "pt-10",
-          controls.shown && !broken && !commenting.draft
+          room > 0 ? null : compact && !filling ? "pt-5" : "pt-10",
+          (controls.shown || docked) && !broken && !commenting.draft
             ? "opacity-100 *:pointer-events-auto"
             : "opacity-0"
         )}
       >
-        <div onPointerEnter={controls.hold} onPointerLeave={controls.release}>
+        <div
+          ref={bar}
+          data-video-bar=""
+          onPointerEnter={controls.hold}
+          onPointerLeave={controls.release}
+        >
           <ControlBar
             playback={playback}
             chapter={many && chapter ? chapterName(chapter) : undefined}
@@ -687,19 +728,27 @@ function CompactBar({
   )
 }
 
-/** The large play mark before the video first plays, and to play it again at its end. */
+/**
+ * The large play mark before the video first plays, and to play it again at its end: on the
+ * picture, above the bar under it, `dock` pixels high.
+ */
 function BigPlay({
+  dock,
   label,
   replay,
   onClick,
 }: {
+  readonly dock: number
   readonly label: string
   readonly replay: boolean
   readonly onClick: () => void
 }) {
   return (
     // A soft shade under the mark, so it reads on the frame's own words.
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[radial-gradient(circle_at_center,rgb(0_0_0/0.45),rgb(0_0_0/0.22)_30%,rgb(0_0_0/0.16))] motion-safe:animate-in motion-safe:fade-in-0">
+    <div
+      style={{ bottom: dock }}
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[radial-gradient(circle_at_center,rgb(0_0_0/0.45),rgb(0_0_0/0.22)_30%,rgb(0_0_0/0.16))] motion-safe:animate-in motion-safe:fade-in-0"
+    >
       <button
         type="button"
         aria-label={label}
@@ -718,12 +767,14 @@ function BigPlay({
   )
 }
 
-function Loading() {
+/** The spinner while the video loads, on the picture as `BigPlay` is. */
+function Loading({ dock }: { readonly dock: number }) {
   const messages = useArtifactMessages().video
   return (
     <div
       role="status"
       aria-label={messages.loading}
+      style={{ bottom: dock }}
       className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
     >
       <Spinner className="size-7 text-white/70" />
@@ -767,23 +818,17 @@ function Failure({
 }
 
 /**
- * Whether the controls show: while the video plays, until the pointer rests a moment; while it is
- * paused, while a mouse is over it, or until a finger hides them, so a paused frame reads whole.
- * Either way they stay while the pointer is over them or the focus is in them.
- *
- * A mouse brings them by coming over the video: until it does, as when the video opens or pauses at
- * a key or a comment, the frame shows whole. A finger has no hover, so they show until it hides
- * them.
+ * Whether the controls show: always while the video is paused, under its picture, which then reads
+ * whole; while it plays, over the picture until the pointer rests a moment or leaves, or a finger
+ * hides them. Either way they stay while the pointer is over them or the focus is in them.
  */
 function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boolean) {
-  const [active, setActive] = useState(() => !hovers())
+  const [active, setActive] = useState(true)
   const [held, setHeld] = useState(false)
   const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const moving = useRef(playing)
   moving.current = playing
-  // Whether a mouse is over the video.
-  const over = useRef(false)
 
   const wake = useCallback(() => {
     setActive(true)
@@ -792,14 +837,10 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
   }, [])
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  // Once it plays, they go after a moment unless the reader moves; paused, they come back.
+  // Once it plays, they go after a moment unless the reader moves; paused, they stay.
   useEffect(() => {
-    if (playing) {
-      wake()
-      return
-    }
-    clearTimeout(timer.current)
-    setActive(over.current || !hovers())
+    if (playing) wake()
+    else clearTimeout(timer.current)
   }, [playing, wake])
 
   // A key moves focus into them, and keeps them.
@@ -819,7 +860,7 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
   }, [screen])
 
   return {
-    shown: active || held || focused,
+    shown: !playing || active || held || focused,
     wake,
     toggle: () => {
       if (active) {
@@ -830,24 +871,16 @@ function useControlsShown(screen: RefObject<HTMLDivElement | null>, playing: boo
       }
     },
     onPointerMove: (event: ReactPointerEvent) => {
-      if (event.pointerType !== "mouse") return
-      over.current = true
-      wake()
+      if (event.pointerType === "mouse") wake()
     },
     onPointerLeave: (event: ReactPointerEvent) => {
       if (event.pointerType !== "mouse") return
-      over.current = false
       clearTimeout(timer.current)
       setActive(false)
     },
     hold: () => setHeld(true),
     release: () => setHeld(false),
   }
-}
-
-/** Whether the device's main pointer hovers, as a mouse does and a finger does not. */
-function hovers(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(hover: hover)").matches
 }
 
 /**
@@ -963,6 +996,19 @@ function useSize(element: RefObject<HTMLElement | null>): { width: number; heigh
     return () => observer.disconnect()
   }, [element])
   return size
+}
+
+/**
+ * Whether the sizes the picture is laid out in held since the last render: a change of room then
+ * glides, while a resize, the first measure included, lands at once.
+ */
+function useSettled(box: { width: number; height: number }, bar: number): boolean {
+  const last = useRef({ box, bar })
+  const settled = last.current.box === box && last.current.bar === bar
+  useEffect(() => {
+    last.current = { box, bar }
+  })
+  return settled
 }
 
 /** `value`, once it has held for `ms`; false at once. */
