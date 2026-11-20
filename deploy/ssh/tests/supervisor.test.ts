@@ -364,226 +364,6 @@ describe("supervisor", () => {
     expect(unknown.stderr).toContain("No service named 'sentinel'")
   }, 10_000)
 
-  test("stages a green slot, swaps singletons on activate, and drains blue in the background", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-blue-green-"))
-    const blueDir = join(root, "releases", "blue")
-    const greenDir = join(root, "releases", "green")
-    await writeFile(join(root, "events.log"), "")
-    await Bun.write(join(blueDir, ".keep"), "")
-    await Bun.write(join(greenDir, ".keep"), "")
-    const eventsPath = join(root, "events.log")
-    const releaseDrainFile = join(root, "release-blue-worker")
-
-    const childScript = (startTag: string, stopTag?: string, waitForFile?: string) =>
-      [
-        'import { appendFileSync, existsSync } from "node:fs"',
-        `appendFileSync(${JSON.stringify(eventsPath)}, ${JSON.stringify(`${startTag}\n`)})`,
-        stopTag
-          ? waitForFile
-            ? `process.on("SIGTERM", () => { const poll = setInterval(() => { if (existsSync(${JSON.stringify(waitForFile)})) { clearInterval(poll); appendFileSync(${JSON.stringify(eventsPath)}, ${JSON.stringify(`${stopTag}\n`)}); process.exit(0) } }, 20) })`
-            : `process.on("SIGTERM", () => { appendFileSync(${JSON.stringify(eventsPath)}, ${JSON.stringify(`${stopTag}\n`)}); process.exit(0) })`
-          : "",
-        "setInterval(() => {}, 1000)",
-      ]
-        .filter(Boolean)
-        .join("; ")
-
-    const makeService = (name: string, kind: "http" | "singleton" | "workers", script: string) => ({
-      name,
-      kind,
-      processName: `northline-${name}`,
-      command: process.execPath,
-      args: ["-e", script],
-      env: {},
-      instances: 1,
-      killTimeoutMs: 2_000,
-      restartDelayMs: 100,
-    })
-
-    const blueManifest: ProcessManifest = {
-      version: 1,
-      name: "northline",
-      slot: "blue",
-      cwd: blueDir,
-      runDir: join(root, "run"),
-      logDir: join(root, "run", "logs"),
-      releasePath: join(root, "release.json"),
-      services: [
-        makeService("api", "http", childScript("blue-api-start", "blue-api-stop")),
-        makeService(
-          "workers",
-          "workers",
-          childScript("blue-worker-start", "blue-worker-drained", releaseDrainFile)
-        ),
-        makeService("orchestrator", "singleton", childScript("blue-orch-start", "blue-orch-stop")),
-      ],
-    }
-
-    const greenManifest: ProcessManifest = {
-      ...blueManifest,
-      slot: "green",
-      cwd: greenDir,
-      services: [
-        makeService("api", "http", childScript("green-api-start")),
-        makeService("workers", "workers", childScript("green-worker-start")),
-        makeService("orchestrator", "singleton", childScript("green-orch-start")),
-      ],
-    }
-
-    const manifestPath = join(root, "processes.json")
-    const candidatePath = join(root, "candidate.json")
-    await writeFile(manifestPath, JSON.stringify(blueManifest))
-    await writeFile(candidatePath, JSON.stringify(greenManifest))
-
-    const supervisor = Bun.spawn(
-      [process.execPath, helper, "supervise", "--manifest", manifestPath],
-      {
-        stdout: "ignore",
-        stderr: "ignore",
-      }
-    )
-    cleanups.push(async () => {
-      await killSupervisor(supervisor)
-      await rm(root, { recursive: true, force: true })
-    })
-
-    await until(async () => {
-      const log = await readFile(eventsPath, "utf8")
-      return (
-        log.includes("blue-api-start") &&
-        log.includes("blue-worker-start") &&
-        log.includes("blue-orch-start")
-      )
-    }, Boolean)
-
-    // Stage green: overlap-safe services start, while green's singleton waits.
-    const staged = await ctl(manifestPath, "stage", candidatePath)
-    expect(staged.exitCode).toBe(0)
-    await until(
-      async () => (await ctl(manifestPath, "status", "--check", "--candidate")).exitCode === 0,
-      Boolean
-    )
-    await until(async () => {
-      const log = await readFile(eventsPath, "utf8")
-      return log.includes("green-api-start") && log.includes("green-worker-start")
-    }, Boolean)
-
-    const beforeActivate = (await readFile(eventsPath, "utf8")).trim().split("\n")
-    expect(beforeActivate).toContain("green-api-start")
-    expect(beforeActivate).toContain("green-worker-start")
-    expect(beforeActivate).not.toContain("green-orch-start")
-
-    // Activate green: blue's orchestrator stops before green's starts, and blue's worker drains in
-    // the background without blocking activate.
-    await writeFile(manifestPath, JSON.stringify(greenManifest))
-    const activated = await ctl(manifestPath, "activate")
-    expect(activated.exitCode).toBe(0)
-
-    const stateWhileDraining = JSON.parse(
-      await readFile(join(root, "run", "state.json"), "utf8")
-    ) as { slot?: string; retiringCwds?: string[] }
-    expect(stateWhileDraining.slot).toBe("green")
-    expect(stateWhileDraining.retiringCwds).toEqual([blueDir])
-
-    await until(
-      async () => (await readFile(eventsPath, "utf8")).includes("green-orch-start"),
-      Boolean
-    )
-    const afterActivate = (await readFile(eventsPath, "utf8")).trim().split("\n")
-    expect(afterActivate.indexOf("blue-orch-stop")).toBeLessThan(
-      afterActivate.indexOf("green-orch-start")
-    )
-    expect(afterActivate).not.toContain("blue-worker-drained")
-
-    // Finish blue's in-flight worker job; retiringCwds clears once it exits.
-    await writeFile(releaseDrainFile, "")
-    await until(
-      async () => (await readFile(eventsPath, "utf8")).includes("blue-worker-drained"),
-      Boolean
-    )
-    await until(async () => {
-      const current = JSON.parse(await readFile(join(root, "run", "state.json"), "utf8")) as {
-        retiringCwds?: string[]
-      }
-      return !current.retiringCwds
-    }, Boolean)
-  }, 15_000)
-
-  test("discard stops a staged candidate while leaving the live release running", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-discard-"))
-    const bluePidFile = join(root, "blue.pid")
-    const greenPidFile = join(root, "green.pid")
-
-    const makeManifest = (slot: "blue" | "green", pidFile: string): ProcessManifest => ({
-      version: 1,
-      name: "northline",
-      slot,
-      cwd: root,
-      runDir: join(root, "run"),
-      logDir: join(root, "run", "logs"),
-      releasePath: join(root, "release.json"),
-      services: [
-        {
-          name: "api",
-          kind: "http",
-          processName: "northline-api",
-          command: process.execPath,
-          args: [
-            "-e",
-            `await Bun.write(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`,
-          ],
-          env: {},
-          instances: 1,
-          killTimeoutMs: 2_000,
-          restartDelayMs: 100,
-        },
-      ],
-    })
-
-    const manifestPath = join(root, "processes.json")
-    const candidatePath = join(root, "candidate.json")
-    await writeFile(manifestPath, JSON.stringify(makeManifest("blue", bluePidFile)))
-    await writeFile(candidatePath, JSON.stringify(makeManifest("green", greenPidFile)))
-
-    const supervisor = Bun.spawn(
-      [process.execPath, helper, "supervise", "--manifest", manifestPath],
-      {
-        stdout: "ignore",
-        stderr: "ignore",
-      }
-    )
-    cleanups.push(async () => {
-      await killSupervisor(supervisor)
-      await rm(root, { recursive: true, force: true })
-    })
-
-    const isAlive = (pid: number) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
-
-    const bluePid = await until(
-      async () => Number(await readFile(bluePidFile, "utf8")),
-      (value) => value > 0
-    )
-    expect((await ctl(manifestPath, "stage", candidatePath)).exitCode).toBe(0)
-    const greenPid = await until(
-      async () => Number(await readFile(greenPidFile, "utf8")),
-      (value) => value > 0
-    )
-    expect(isAlive(greenPid)).toBe(true)
-
-    expect((await ctl(manifestPath, "discard")).exitCode).toBe(0)
-    expect(isAlive(greenPid)).toBe(false)
-    expect(isAlive(bluePid)).toBe(true)
-  }, 15_000)
-
-  // Reproduce: answer only the requests that parse; a command newer than the supervisor then gets
-  // no response, and its client waits out the timeout instead of failing at once.
   test("answers a command it does not know, so its client fails at once", async () => {
     const { manifestPath } = await startSupervisor()
     await until(
@@ -601,55 +381,35 @@ describe("supervisor", () => {
 
   // Reproduce: let the restart timer use the cohort the instance had when it exited; it then
   // looks for the candidate manifest that activation cleared, and green's API never comes back.
-  test("a candidate that exits just before activate restarts as part of the live release", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-activate-restart-"))
-    const crashedOnce = join(root, "green-crashed-once")
-    const greenPidFile = join(root, "green.pid")
-
-    // Green's API exits on its first start, and its restart waits long enough for activate to
-    // land first, even on a slow runner: a restart before activate would pass without the fix.
-    const makeManifest = (slot: "blue" | "green", script: string): ProcessManifest => ({
+  // A deploy starts the new slot beside the live one, which still runs the singletons. Reproduce:
+  // drop the `holdExclusive` check in `run`; two orchestrators then run at once.
+  test("holds the singletons of a slot that isn't live yet until it is told to start them", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-hold-"))
+    const keepRunning = ["-e", "setInterval(() => {}, 1_000)"]
+    const service = (name: string, kind: "http" | "singleton") => ({
+      name,
+      kind,
+      processName: `northline-${name}`,
+      command: process.execPath,
+      args: keepRunning,
+      env: {},
+      instances: 1,
+      killTimeoutMs: 2_000,
+      restartDelayMs: 100,
+    })
+    const manifest: ProcessManifest = {
       version: 1,
       name: "northline",
-      slot,
+      slot: "green",
+      holdExclusive: true,
       cwd: root,
       runDir: join(root, "run"),
       logDir: join(root, "run", "logs"),
       releasePath: join(root, "release.json"),
-      services: [
-        {
-          name: "api",
-          kind: "http",
-          processName: "northline-api",
-          command: process.execPath,
-          args: ["-e", script],
-          env: {},
-          instances: 1,
-          killTimeoutMs: 2_000,
-          restartDelayMs: slot === "green" ? 5_000 : 100,
-        },
-      ],
-    })
-
-    const blueManifest = makeManifest("blue", "setInterval(() => {}, 1000)")
-    const greenManifest = makeManifest(
-      "green",
-      [
-        `const crashedOnce = ${JSON.stringify(crashedOnce)}`,
-        "if (!(await Bun.file(crashedOnce).exists())) {",
-        '  await Bun.write(crashedOnce, "")',
-        "  process.exit(1)",
-        "}",
-        `await Bun.write(${JSON.stringify(greenPidFile)}, String(process.pid))`,
-        "setInterval(() => {}, 1000)",
-      ].join("\n")
-    )
-
-    const manifestPath = join(root, "processes.json")
-    const candidatePath = join(root, "candidate.json")
-    await writeFile(manifestPath, JSON.stringify(blueManifest))
-    await writeFile(candidatePath, JSON.stringify(greenManifest))
-
+      services: [service("api", "http"), service("orchestrator", "singleton")],
+    }
+    const manifestPath = join(root, "green.json")
+    await writeFile(manifestPath, JSON.stringify(manifest))
     const supervisor = Bun.spawn(
       [process.execPath, helper, "supervise", "--manifest", manifestPath],
       {
@@ -662,29 +422,19 @@ describe("supervisor", () => {
       await rm(root, { recursive: true, force: true })
     })
 
-    await until(
+    const held = await until(
       () => status(manifestPath),
-      (current) => current.processes.some((entry) => entry.status === "running")
+      (report) => report.processes.some((process) => process.status === "running")
     )
-    expect((await ctl(manifestPath, "stage", candidatePath)).exitCode).toBe(0)
+    expect(held.processes.map((process) => `${process.service} ${process.status}`)).toEqual([
+      "api running",
+      "orchestrator stopped",
+    ])
 
-    // `status --json` lists the live release only; the candidate check sees green's exit.
-    await until(() => Bun.file(crashedOnce).exists(), Boolean)
-    await until(
-      async () => (await ctl(manifestPath, "status", "--check", "--candidate")).exitCode !== 0,
-      Boolean
-    )
-
-    await writeFile(manifestPath, JSON.stringify(greenManifest))
-    expect((await ctl(manifestPath, "activate")).exitCode).toBe(0)
-
-    const greenPid = await until(
-      async () => Number(await readFile(greenPidFile, "utf8")),
-      (value) => value > 0,
-      400
-    )
-    expect(greenPid).toBeGreaterThan(0)
-  }, 20_000)
+    await sendSupervisorCommand(manifest, "start", { service: "orchestrator" })
+    const started = await status(manifestPath)
+    expect(started.processes.every((process) => process.status === "running")).toBe(true)
+  })
 })
 
 describe("log lines", () => {

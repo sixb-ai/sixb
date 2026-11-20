@@ -11,10 +11,6 @@ export interface ProcessState {
   readonly updatedAt: string
   readonly slot?: DeploySlot
   readonly instances: readonly ProcessInstanceState[]
-  /** Overlap-safe instances of a candidate release waiting to cut over. */
-  readonly staged?: readonly ProcessInstanceState[]
-  /** Release `cwd`s still held by background-draining processes after a cutover. */
-  readonly retiringCwds?: readonly string[]
 }
 
 export interface ProcessInstanceState {
@@ -72,7 +68,7 @@ export function parseProcessState(value: unknown, source = "process state"): Pro
   if (!state || state.version !== 1 || !Array.isArray(state.instances)) {
     throw new Error(`[SshTarget] ${source} is not a supervisor state file`)
   }
-  for (const instance of [...state.instances, ...(state.staged ?? [])]) {
+  for (const instance of state.instances) {
     if (!STATUSES.includes(instance.status)) {
       throw new Error(`[SshTarget] ${source} has an instance with status '${instance.status}'`)
     }
