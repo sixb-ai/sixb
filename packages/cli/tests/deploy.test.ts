@@ -399,7 +399,7 @@ export default {
       return [
         { id: "ssh", label: "SSH", status: "ok", detail: "sixb@test-server" },
         ...(process.env.DEPLOY_BLOCK
-          ? [{ id: "project.env", label: ".env", status: "manual", detail: ".env does not exist", remedy: "Create it." }]
+          ? [{ id: "settings", label: "Settings", status: "fail", detail: "no .env on the server", remedy: "Create it." }]
           : []),
       ]
     },
@@ -598,7 +598,7 @@ export default {
 
     const blocked = await deploy(env, () => runDeploy({ cwd: root }))
     expect(blocked.exitCode).toBe(1)
-    expect(blocked.output).toContain(".env does not exist")
+    expect(blocked.output).toContain("no .env on the server")
     // Only the checks ran: nothing was uploaded.
     expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
   })

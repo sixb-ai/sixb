@@ -15,6 +15,7 @@ import {
   packSource,
   projectPathOf,
   resolveBunVersion,
+  usesChromium,
 } from "../lib/deploy-source"
 import { ENV_CONFIG_FILE, loadEnvConfig } from "../lib/env-config"
 import { SixbCliError } from "../lib/errors"
@@ -72,6 +73,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     const checks = await config.target.check(release, {
       name: config.name,
       projectPath: source.projectPath,
+      chromium: await usesChromium(cwd),
     })
     return { source, release, checks }
   })
@@ -117,9 +119,13 @@ export async function runDeployCheck(options: { readonly json?: boolean; readonl
     bunVersion: await resolveBunVersion(cwd),
     envFromSource: Boolean((await loadEnvConfig(cwd))?.source),
   })
-  const projectPath = await projectPathOf(cwd)
+  const context = {
+    name: config.name,
+    projectPath: await projectPathOf(cwd),
+    chromium: await usesChromium(cwd),
+  }
   const targetChecks = await withTask("deploy check", `Checking ${location(config)}`, () =>
-    config.target.check(release, { name: config.name, projectPath })
+    config.target.check(release, context)
   )
   const checks = [...targetChecks, ...lakeWorkChecks(config)]
   if (options.json) writeJson(checks)
@@ -133,7 +139,7 @@ function configWarnings(config: DeployConfig): readonly string[] {
 }
 
 function blocksDeploy(check: DeployCheck): boolean {
-  return check.status === "fixable" || check.status === "manual"
+  return check.status === "fail"
 }
 
 function location(config: DeployConfig): string {
