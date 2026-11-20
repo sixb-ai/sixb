@@ -32,7 +32,7 @@ import { formatClock, MEDIA_FRAME } from "../../playback"
 import type { ArtifactVersion } from "../../queries"
 import { artifactLink } from "../../target"
 import { useArtifactView } from "../../view-context"
-import { ChaptersPanel, chapterAt, chapterName } from "./chapters"
+import { ChaptersPanel, chapterAt, chapterName, chapterStart } from "./chapters"
 import { ThreadInstant, useVideoCommenting, VideoCommentPins } from "./comments"
 import { ControlBar } from "./controls"
 import { playerKeyAction, typesItself } from "./keys"
@@ -182,7 +182,7 @@ export function VideoPlayer({
   }
   // The focus goes to the video, so Space plays the chapter rather than pressing it again.
   const goToChapter = (scene: VideoOutlineScene) => {
-    goTo(scene.startMs / 1000, messages.chapterAnnounced(chapterName(scene)))
+    goTo(chapterStart(scene, outline.fps), messages.chapterAnnounced(chapterName(scene)))
     screen.current?.focus({ preventScroll: true, focusVisible: false })
   }
 

@@ -14,6 +14,15 @@ export function chapterAt(outline: VideoOutline, seconds: number): VideoOutlineS
   return outline.scenes.filter((scene) => scene.startMs <= ms).at(-1) ?? outline.scenes[0]
 }
 
+/**
+ * Where going to a scene lands, in seconds: its first frame. A scene may start between two frames,
+ * and the runtime shows the frame at or before the instant it is sent to, which is still the
+ * scene before: its first frame is the next one.
+ */
+export function chapterStart(scene: Pick<VideoOutlineScene, "startMs">, fps: number): number {
+  return Math.ceil((scene.startMs * fps) / 1000) / fps
+}
+
 /** A scene as the reader reads it: its label, else its id. */
 export function chapterName(scene: VideoOutlineScene): string {
   return scene.label ?? scene.id
