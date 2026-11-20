@@ -523,7 +523,10 @@ export const en = {
       `Rendering · ${number(ready)} of ${number(total)} parts`,
     renderingLabel: (ready: number, total: number) =>
       `Rendering the MP4, ${number(ready)} of ${number(total)} parts done`,
+    renderingWord: "Rendering",
+    renderingCount: (ready: number, total: number) => `${number(ready)}/${number(total)}`,
     assembling: "Putting it together",
+    assemblingShort: "Finishing",
     renderingHint: "You can keep watching; it renders on its own.",
     exportFailed: "The MP4 could not be rendered",
     exportFailedDetail: "Something went wrong while rendering it.",
@@ -1334,7 +1337,10 @@ export const fr: Translation<ArtifactMessages> = {
     rendering: (ready, total) => `Rendu · ${numberFr(ready)} sur ${numberFr(total)} parties`,
     renderingLabel: (ready, total) =>
       `Rendu du MP4, ${numberFr(ready)} parties sur ${numberFr(total)}`,
+    renderingWord: "Rendu",
+    renderingCount: (ready, total) => `${numberFr(ready)}/${numberFr(total)}`,
     assembling: "Assemblage",
+    assemblingShort: "Finalisation",
     renderingHint: "Vous pouvez continuer à regarder : le rendu se fait seul.",
     exportFailed: "Le MP4 n’a pas pu être rendu",
     exportFailedDetail: "Un problème est survenu pendant le rendu.",
