@@ -118,7 +118,8 @@ rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are
 distinct. The control, the same box animated in the root, differs on all 60 frames.
 
 So trimming a scene re-renders it and the scene it fades into, and those after it only when the
-root moves on its own. An image, a stylesheet, a font, a script, or a nested composition
+root moves on its own, or when the trim moves them by part of a frame, which the editor's cuts
+never do (see Editing). An image, a stylesheet, a font, a script, or a nested composition
 is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
 video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
 the scene's segment. So a recording a script plays is named in HTML too, by a `<video>` or an
@@ -264,6 +265,14 @@ What moves with what:
   is shortened; a clip with nothing left goes; the scene ends as much sooner. A marked range
   across scenes cuts from each its share, from its start up to the next scene's, so a crossfade
   is cut once, and removes a scene it covers whole.
+- A cut and a scene's new length go by frame steps, the shortest stretch that is whole frames and
+  whole milliseconds: 100 ms at 30 fps, a frame at 25. Each stretch cut from a scene grows to the
+  whole steps that cover it, so nothing marked to go is heard again: into its `room` first, the
+  pauses up to the words kept either side of a transcript's cut, then as much on each side. A
+  scene's length is the nearest number of steps (`videoSceneLength`), which its field shows. The
+  scenes after then move by whole frames, show the same frames, and keep their segments: an
+  export renders only the edited scene again. Removing a whole scene moves them by its length,
+  whatever it is.
 - A clip whose `data-start` names another clip follows it, and a ripple does not move it. Once
   that clip is split, it follows the last part; once it is removed or cut, it starts at the time
   it did, which the ripple then moves as any other's.

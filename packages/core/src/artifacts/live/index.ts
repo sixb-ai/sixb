@@ -29,12 +29,14 @@ export {
   setVideoText,
   splitClip,
   trimClip,
+  type VideoCut,
   type VideoEdit,
   type VideoEditResult,
   type VideoImportKind,
   type VideoRange,
   type VideoSources,
   type VideoTarget,
+  videoSceneLength,
   videoTarget,
 } from "../video/edit"
 export type {

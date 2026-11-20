@@ -1,4 +1,4 @@
-import type { VideoRange } from "@sixb/core/artifacts/live"
+import type { VideoCut, VideoRange } from "@sixb/core/artifacts/live"
 
 // Editing a recording by what is said in it: the stretches of its file that words, pauses and
 // fillers take, which the editor cuts out. Times are milliseconds into the recording's file.
@@ -112,7 +112,7 @@ export function wordsCut(
   to: number,
   bounds: VideoRange,
   cuts: readonly number[] = []
-): VideoRange | null {
+): VideoCut | null {
   const first = words[from]
   const last = words[to]
   if (!first || !last || to < from) return null
@@ -135,14 +135,21 @@ export function wordsCut(
 
   startMs = Math.max(startMs, bounds.startMs)
   endMs = Math.min(endMs, bounds.endMs)
-  return endMs > startMs ? { startMs: Math.round(startMs), endMs: Math.round(endMs) } : null
+  if (endMs <= startMs) return null
+
+  // Growing to whole frames, the cut may take the rest of the pauses, never a word kept.
+  const room = {
+    startMs: Math.max(bounds.startMs, before ? before.endMs : bounds.startMs),
+    endMs: Math.min(bounds.endMs, after ? after.startMs : bounds.endMs),
+  }
+  return { startMs: Math.round(startMs), endMs: Math.round(endMs), room }
 }
 
 /**
  * The pauses longer than {@link SILENCE_MS}, between words and at either end of `bounds`, each
  * shortened to the air either side of it.
  */
-export function silences(words: readonly TranscriptWord[], bounds: VideoRange): VideoRange[] {
+export function silences(words: readonly TranscriptWord[], bounds: VideoRange): VideoCut[] {
   const inside = words.filter((word) => word.endMs > bounds.startMs && word.startMs < bounds.endMs)
   const edges = [
     bounds.startMs - AIR_MS,
@@ -150,13 +157,17 @@ export function silences(words: readonly TranscriptWord[], bounds: VideoRange): 
     bounds.endMs + AIR_MS,
   ]
 
-  const cut: VideoRange[] = []
+  const cut: VideoCut[] = []
   for (let index = 0; index + 1 < edges.length; index += 2) {
     const quiet = { startMs: edges[index] ?? 0, endMs: edges[index + 1] ?? 0 }
     if (quiet.endMs - quiet.startMs < SILENCE_MS) continue
     cut.push({
       startMs: Math.max(bounds.startMs, quiet.startMs + AIR_MS),
       endMs: Math.min(bounds.endMs, quiet.endMs - AIR_MS),
+      room: {
+        startMs: Math.max(bounds.startMs, quiet.startMs),
+        endMs: Math.min(bounds.endMs, quiet.endMs),
+      },
     })
   }
   return cut.filter((range) => range.endMs > range.startMs)
@@ -167,7 +178,7 @@ export function fillers(
   words: readonly TranscriptWord[],
   bounds: VideoRange,
   cuts: readonly number[] = []
-): VideoRange[] {
+): VideoCut[] {
   return words.flatMap((word, index) => {
     if (!isFiller(word.text) || word.endMs <= bounds.startMs || word.startMs >= bounds.endMs) {
       return []
