@@ -91,6 +91,11 @@ export interface VideoComposition {
   /** The root composition's element. */
   readonly root: VideoSceneHost
   /**
+   * Each `<audio>` `index.html` plays beside its scenes, as the span of its whole element: heard,
+   * never seen, since a page shows no `<audio>` without `controls`.
+   */
+  readonly sounds: readonly VideoSourceSpan[]
+  /**
    * Whether `index.html` plays or animates anything beside its scenes, as its own text says: a
    * timed element, a video or a sound, an inline script, which may build a timeline, or a CSS
    * animation or transition. What a scene shows then depends on when it plays. A script loaded by
@@ -292,6 +297,7 @@ function readRoot(html: string): VideoRoot {
     scenes,
     media: mediaOf(document.childNodes),
     root: hostSource(root),
+    sounds: rootSounds(document.childNodes, hosts),
     rootTimeline: playsOnItsOwn(document.childNodes, root, hosts),
     links: rootLinks(document.childNodes, hosts),
   }
@@ -370,6 +376,18 @@ function playsOnItsOwn(nodes: readonly Node[], root: Element, hosts: readonly El
       (element.tagName === "style" && cssMoves(textOf(element))) ||
       cssMoves(attribute(element, "style") ?? "")
     )
+  })
+}
+
+/** The `<audio>` elements `index.html` plays beside its scenes, which show nothing. */
+function rootSounds(nodes: readonly Node[], hosts: readonly Element[]): VideoSourceSpan[] {
+  const hosted = hostedBy(hosts)
+  return elements(nodes).flatMap((element) => {
+    const at = element.sourceCodeLocation
+    if (element.tagName !== "audio" || hosted.has(element) || has(element, "controls") || !at) {
+      return []
+    }
+    return [{ start: at.startOffset, end: at.endOffset }]
   })
 }
 

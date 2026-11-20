@@ -599,6 +599,37 @@ describe("publishing a video", () => {
     })
   })
 
+  // Removal proof: let sceneRenderKeys keep the root's `<audio>` elements in `root` (drop
+  // `composition.sounds` from its cut), and the intro renders again with the shorter music; let
+  // it cut them without the space before, and the soundtrack moved onto the line above changes
+  // every key; let rootSounds take an `<audio controls>`, and the player keeps every key.
+  test("renders no scene again for a soundtrack trimmed with the video or played louder", async () => {
+    const { publish } = setup()
+    const scored = LAUNCH["index.html"] ?? ""
+    const keys = async (root: string) =>
+      keysOf((await publish({ ...LAUNCH, "index.html": root })).version.outline)
+    const before = await keys(scored)
+
+    // Half a second cut from the demo: the music, which ran to the end, ends with the video.
+    const trimmed = scored
+      .replace('data-duration="3"', 'data-duration="2.5"')
+      .replaceAll('data-duration="7"', 'data-duration="6.5"')
+    expect(await keys(trimmed)).toEqual({
+      intro: before.intro,
+      demo: expect.not.stringMatching(before.demo ?? ""),
+      outro: expect.not.stringMatching(before.outro ?? ""),
+    })
+
+    // How loud it plays, and on a line of its own or not, shows in no frame.
+    const louder = scored.replace(MUSIC, MUSIC.replace("<audio", '<audio data-volume="0.4"'))
+    expect(await keys(louder)).toEqual(before)
+    expect(await keys(scored.replace(`\n${MUSIC}`, MUSIC))).toEqual(before)
+
+    // A player with controls shows on every frame.
+    const shown = await keys(scored.replace(MUSIC, MUSIC.replace("<audio", "<audio controls")))
+    for (const id of ["intro", "demo", "outro"]) expect(shown[id]).not.toBe(before[id])
+  })
+
   // Removal proof: let linksMove return false, and the moving stylesheet, the stylesheet from
   // elsewhere, and the timeline script leave the outro's key as it was; let it return true, and the
   // libraries and the still stylesheets change it.

@@ -24,8 +24,8 @@ const HOST_PLACE = "<!-- scene -->"
  * Each scene's render key, by its id: a SHA-256 of what its frames are made of. That is
  *
  * - the frame's kit and runtime;
- * - `index.html` without its scene hosts and the root's own length: the frame's size, the root's
- *   styles, and what it shows itself;
+ * - `index.html` without its scene hosts, the root's own length, and the sounds it plays: the
+ *   frame's size, the root's styles, and what it shows itself;
  * - the scene's host, and those of the scenes on screen with it, as one fades into the next: each
  *   with what it writes, its length, and its start from the scene's, in the order `index.html`
  *   lists them, which stacks them;
@@ -61,10 +61,14 @@ export function sceneRenderKeys(input: {
   const { index, composition, files, rootLoads, rootTimeline, loads } = input
   const { scenes } = composition
 
+  // A sound shows in no frame: the root's `<audio>` elements are left out, each with the space
+  // before it, so a soundtrack added, moved, or trimmed with the video leaves the root's text as
+  // it was.
   const durationAt = composition.root.attributes["data-duration"]
   const root = cut(index, [
     ...scenes.map((scene) => ({ ...scene.host.element, with: HOST_PLACE })),
     ...(durationAt ? [{ ...durationAt, with: "" }] : []),
+    ...composition.sounds.map((sound) => ({ ...withSpaceBefore(index, sound), with: "" })),
   ])
 
   const sceneFiles = new Set(scenes.map((scene) => scene.src))
@@ -119,6 +123,13 @@ export function sceneRenderKeys(input: {
 /** Whether two scenes are on screen at once, for a moment at least. */
 function playTogether(a: VideoScene, b: VideoScene): boolean {
   return a.startMs < b.startMs + b.durationMs && b.startMs < a.startMs + a.durationMs
+}
+
+/** The span, with the spaces and line breaks right before it. */
+function withSpaceBefore(text: string, span: VideoSourceSpan): VideoSourceSpan {
+  let start = span.start
+  while (start > 0 && /\s/.test(text[start - 1] ?? "")) start--
+  return { start, end: span.end }
 }
 
 /** The text with each span replaced by its `with`; the spans do not overlap. */
