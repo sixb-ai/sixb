@@ -1,39 +1,71 @@
 # Deploy from GitHub Actions
 
-Deploy on every push to a branch. Once the server is [set up](servers.md#set-up-the-server), run this from the project, logged in to the [GitHub CLI](https://cli.github.com) as someone who can change the repository's settings:
+A workflow deploys on every push the same way you do from your laptop: it checks out the commit and runs `sixb deploy`. What it needs is a way to reach the server as `sixb` over SSH.
 
-```bash
-bun sixb deploy ci
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time: a push during a deploy waits for it.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # The job only reads sixb.deploy.ts and sends the commit; the server runs install scripts.
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Reach the server
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      - run: bun sixb deploy
 ```
 
-It uses that login even when the project's `.env` sets `GITHUB_TOKEN`, for example for a connector. To run it with another token, set `GH_TOKEN`.
+Store two secrets in the repository's `production` environment:
 
-It:
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_SSH_KEY` | The private half of a key made for this workflow (`ssh-keygen -t ed25519 -N "" -f deploy`), whose public half is in `sixb`'s `authorized_keys` on the server |
+| `DEPLOY_KNOWN_HOSTS` | The server's host keys, from a connection you have checked: `ssh-keygen -F <host>` on your machine |
 
-1. Creates an SSH key for the repository's deploys and authorizes it on the server. The key can run commands and nothing else: no port forwarding and no terminal. Its private half goes straight to GitHub and is never saved on your machine.
-2. Stores the key, with the server's host keys, as secrets of the repository's `production` environment. The host keys come from your own connection, which SSH has already verified, so the workflow deploys to your server and refuses anything else that answers at its address.
-3. Revokes the keys it made for this repository before, once GitHub holds the new one.
-4. Writes `.github/workflows/deploy-<name>.yml`.
+Pinning the host keys means the workflow deploys to your server and refuses anything else that answers at its address. To require an approval before each deploy, add required reviewers to the `production` environment.
 
-Commit the workflow and push. Every push to the default branch then deploys; `--branch <name>` picks another branch. `sixb deploy status` shows each deploy as made by the GitHub user who pushed, through GitHub Actions.
+## Over Tailscale
 
-The workflow can read the repository and nothing else, runs one deploy at a time (a push during a deploy waits for it), and pins each action to an exact commit. It installs dependencies without their install scripts, since it only reads `sixb.deploy.ts` and sends the commit; the server runs them in its own install. To require an approval before each deploy, add required reviewers to the `production` environment in the repository's settings. An existing `production` environment keeps its rules.
+When the server is reachable only over a tailnet, the job joins it instead of holding a key, and `host` in `sixb.deploy.ts` is the server's Tailscale name. With [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) allowing the job's tag to log in as `sixb`, replace the "Reach the server" step:
 
-## Rotate the key
-
-Run `sixb deploy ci` again. It stores a new key before revoking the old one.
-
-An existing workflow file is kept as it is, with your edits. To get a fresh one, for example after the server's address changes, delete the file and run the command again.
-
-## Private submodules
-
-The workflow checks out submodules at their recorded commits. When one is private, the workflow's own token cannot read it, and `sixb deploy ci` names the repositories that need a token. Create a fine-grained personal access token with read access to their contents, then store it:
-
-```bash
-gh secret set SIXB_GITHUB_TOKEN --env production
+```yaml
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Trust the server
+        run: |
+          install -d -m 700 ~/.ssh
+          printf 'Host *.ts.net\n  StrictHostKeyChecking accept-new\n' >> ~/.ssh/config
 ```
-
-Without that secret, the workflow stops at its first step and says which secret to set.
 
 ## The project's own variables
 
@@ -41,7 +73,7 @@ The workflow needs no secrets for them. With [a source](environment-variables.md
 
 ## Environment variables in `sixb.deploy.ts`
 
-The workflow connects to the server directly, so `host` must be an address GitHub's runners can reach, not a server behind a jump host. When `sixb.deploy.ts` reads environment variables, set them for the job in the workflow:
+When `sixb.deploy.ts` reads environment variables, set them for the job:
 
 ```yaml
 jobs:
@@ -49,3 +81,5 @@ jobs:
     env:
       SHOP_DEPLOY_HOST: 203.0.113.10
 ```
+
+`sixb deploy status` shows each deploy as made by the GitHub user who pushed, through GitHub Actions.
