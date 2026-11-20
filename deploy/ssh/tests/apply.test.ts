@@ -54,7 +54,6 @@ describe("preparing a release directory", () => {
     const home = await tempDir()
     const layout = deploymentLayout({
       home,
-      user: "sixb",
       name: "northline",
       projectPath: ".",
       bunVersion: "1.4.2",
@@ -88,7 +87,6 @@ describe("preparing a release directory", () => {
     const home = await tempDir()
     const layout = deploymentLayout({
       home,
-      user: "sixb",
       name: "northline",
       projectPath: "apps/web",
       bunVersion: "1.4.2",
@@ -112,7 +110,6 @@ describe("preparing a release directory", () => {
     const home = await tempDir()
     const layout = deploymentLayout({
       home,
-      user: "sixb",
       name: "northline",
       projectPath: ".",
       bunVersion: "1.4.2",
@@ -176,7 +173,6 @@ describe("uploading the source", () => {
     const incoming = lines[1] ?? ""
     const layout = deploymentLayout({
       home,
-      user: "sixb",
       name: "northline",
       projectPath: ".",
       bunVersion: "1.4.2",

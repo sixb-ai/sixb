@@ -25,7 +25,6 @@ const NOT_DEPLOYED = "__SIXB_NOT_DEPLOYED__"
 /** Uploads the source, then runs the release on the server as one locked script. */
 export async function deployRelease(
   shell: RemoteShell,
-  user: string,
   release: DeployRelease,
   source: DeploySource,
   context: DeployContext,
@@ -39,7 +38,6 @@ export async function deployRelease(
 
   const layout = deploymentLayout({
     home,
-    user,
     name: release.name,
     projectPath: source.projectPath,
     bunVersion: release.bunVersion,

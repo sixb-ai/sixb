@@ -2,30 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { SshTarget, type SshTargetOptions } from "@sixb/deploy-ssh"
 
 describe("SshTarget", () => {
-  test("deploys as sixb, with primary and standby loopback ports", () => {
+  test("deploys as sixb, with the live slot on fixed loopback ports", () => {
     const target = new SshTarget({ host: "203.0.113.10" })
 
     expect(target.kind).toBe("ssh")
     expect(target.location).toBe("sixb@203.0.113.10")
     expect(target.listenAddress("app")).toEqual({ host: "127.0.0.1", port: 3001 })
     expect(target.listenAddress("api")).toEqual({ host: "127.0.0.1", port: 3002 })
-    expect(target.standbyListenAddress("app")).toEqual({ host: "127.0.0.1", port: 3011 })
-    expect(target.standbyListenAddress("api")).toEqual({ host: "127.0.0.1", port: 3012 })
-  })
-
-  test("takes a walled-off user and custom ports for a shared server", () => {
-    const target = new SshTarget({
-      host: "ops.example.com",
-      user: "sixb-eastcoast",
-      ports: { api: 3032 },
-      standbyPorts: { app: 3041, api: 3042 },
-    })
-
-    expect(target.location).toBe("sixb-eastcoast@ops.example.com")
-    expect(target.listenAddress("api").port).toBe(3032)
-    expect(target.listenAddress("app").port).toBe(3001)
-    expect(target.standbyListenAddress("app").port).toBe(3041)
-    expect(target.standbyListenAddress("api").port).toBe(3042)
   })
 
   test("accepts an IPv6 address", () => {
@@ -33,7 +16,6 @@ describe("SshTarget", () => {
   })
 
   test.each([
-    ["never deploys as root", { user: "root" }, "Deployments never run as root"],
     ["keeps the user out of host", { host: "deploy@203.0.113.10" }, "includes a user"],
     ["keeps the SSH port out of host", { host: "203.0.113.10:2222" }, "includes a port"],
     [
@@ -41,19 +23,8 @@ describe("SshTarget", () => {
       { host: "-oProxyCommand=touch /tmp/pwned" },
       "is not a hostname or IP address",
     ],
-    ["checks user names", { user: "Sixb" }, "is not a Linux user name"],
-    ["checks port ranges", { ports: { api: 80 } }, "ports.api must be a port from 1024"],
-    [
-      "checks standby port ranges",
-      { standbyPorts: { app: 80 } },
-      "standbyPorts.app must be a port from 1024",
-    ],
-    ["checks port services", { ports: { docs: 4000 } }, "ports.docs is not an HTTP service"],
-    [
-      "refuses colliding ports across slots",
-      { standbyPorts: { api: 3001 } },
-      "conflicts with ports.app",
-    ],
+    ["says why `user` went", { user: "shop" }, "Remove `user`: deployments run as `sixb`"],
+    ["says why `ports` went", { ports: { api: 3012 } }, "Remove `ports`: a server runs one"],
     ["refuses unknown options", { dir: "/srv/northline" }, "Unknown option 'dir'"],
   ])("%s", (_name, options, message) => {
     const invalid: unknown = { host: "203.0.113.10", ...options }

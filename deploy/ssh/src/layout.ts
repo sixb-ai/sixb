@@ -1,4 +1,5 @@
 import { posix } from "node:path"
+import type { DeployHttpServiceName } from "@sixb/core/deploy"
 
 /**
  * Where a deployment lives on its server. Everything but the Bun binaries and the Caddy route
@@ -15,7 +16,16 @@ import { posix } from "node:path"
  */
 export const ENV_TOKEN_FILE = "env-token"
 
+/** The account every deployment runs as. A server runs one deployment. */
+export const DEPLOY_USER = "sixb"
+
 export type DeploySlot = "blue" | "green"
+
+/** The loopback ports each slot's HTTP services listen on. Caddy forwards to the live slot's. */
+export const SLOT_PORTS = {
+  blue: { app: 3001, api: 3002 },
+  green: { app: 3011, api: 3012 },
+} as const satisfies Record<DeploySlot, Record<DeployHttpServiceName, number>>
 
 export interface DeploymentLayout {
   readonly root: string
@@ -54,7 +64,6 @@ export interface ReleaseLayout {
 
 export function deploymentLayout(input: {
   readonly home: string
-  readonly user: string
   readonly name: string
   readonly projectPath: string
   readonly bunVersion: string
@@ -68,7 +77,7 @@ export function deploymentLayout(input: {
   const runDir = posix.join(root, "run")
   const bunDir = posix.join(input.home, ".sixb", "bun", input.bunVersion)
   const unitName = `sixb-${input.name}.service`
-  const caddyDir = posix.join("/etc/caddy/sixb.d", input.user)
+  const caddyDir = posix.join("/etc/caddy/sixb.d", DEPLOY_USER)
 
   return {
     root,
