@@ -235,7 +235,7 @@ describe("VercelSandbox keepalive", () => {
 
     const build = sandbox.runCommand("bun", ["run", "build"], { timeout: 2 * KEEP_ALIVE_IDLE_MS })
     await settle()
-    await pass(2 * KEEP_ALIVE_IDLE_MS / KEEP_ALIVE_INTERVAL_MS)
+    await pass((2 * KEEP_ALIVE_IDLE_MS) / KEEP_ALIVE_INTERVAL_MS)
     await build
 
     // Twenty minutes later, with no other call: still kept alive.
@@ -257,9 +257,8 @@ describe("VercelSandbox keepalive", () => {
     await pass(1)
 
     expect(sandbox.status).toBe("stopped")
-    await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(
-      SandboxNotRunningError
-    )
+    const error = await sandbox.runCommand("echo", ["hi"]).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(SandboxNotRunningError)
     expect(client.commands).toHaveLength(0)
   })
 
@@ -316,7 +315,8 @@ describe("VercelSandbox keepalive", () => {
     const f = fixture()
     f.startSessionsNow()
     const sandbox = await f.factory.create(persistence ? { persistence } : {})
-    const extensions = () => f.requests.filter((request) => request.path.includes("/extend-timeout"))
+    const extensions = () =>
+      f.requests.filter((request) => request.path.includes("/extend-timeout"))
 
     // Vercel's 60-second default session: extended at the first check, then not again.
     await pass(2, 200)

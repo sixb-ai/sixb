@@ -12,7 +12,6 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { AgentToolResult, Sandbox } from "@sixb/core"
-import { cappedCommandTimeout } from "@sixb/core/sandboxes"
 import type { AgentMessage } from "@sixb/core/internal/agents"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type {
@@ -21,6 +20,7 @@ import type {
   ModelMessage,
   ModelTool,
 } from "@sixb/core/models"
+import { cappedCommandTimeout } from "@sixb/core/sandboxes"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import {
   type BackgroundCommandOutput,
