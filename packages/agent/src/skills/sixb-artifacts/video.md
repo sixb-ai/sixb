@@ -71,9 +71,12 @@ work/launch-teaser/
 - **A host per scene** in the root, in play order: `id` and `data-composition-id` both the scene's
   id (a letter, then letters, digits, `-`, `_`), `data-composition-src`, `data-start`,
   `data-duration`, and `data-label`, its chapter's name. The id names the scene in addresses,
-  comments and renders: keep it across versions. Scenes are the video's chapters, one after the
-  other: what runs across several of them, such as captions, a logo or a soundtrack, goes in the
-  root, never in a scene of its own laid over the others, which the editor cannot treat as one.
+  comments and renders: keep it across versions. A later host paints over an earlier one; once a
+  person reorders scenes, hosts stay where they were and a `style="z-index: …"` on them, and on
+  what the root shows over them, keeps a crossfade and a captions bar on top: keep it. Scenes are
+  the video's chapters, one after the other: what runs across several of them, such as captions, a
+  logo or a soundtrack, goes in the root, never in a scene of its own laid over the others, which
+  the editor cannot treat as one.
 - **Starts chain.** `data-start` is seconds, or the scene it follows: `"hook"` starts when `hook`
   ends, `"hook - 0.4"` overlaps it for a crossfade, `"hook + 1"` leaves a gap. Chained, a scene you
   lengthen moves the ones after it. An overlap shows both scenes: keep what each repeats, such as a

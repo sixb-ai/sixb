@@ -233,14 +233,47 @@ describe("editing scenes", () => {
     ])
     // The demo keeps its crossfade into the scene before it.
     expect(files.get("index.html")).toContain('data-start="hook - 0.5"')
-    // Its host moved in index.html, the play order, and nothing else did.
-    const index = files.get("index.html") as string
-    expect(index.indexOf('id="outro"')).toBeLessThan(index.indexOf('id="hook"'))
     expect(composition(files).durationMs).toBe(15_000)
   })
 
-  // Guard proof: read the moved host's new place after removing it from index.html, in
-  // moveScene. The outro, which starts after the demo, then names no scene, and this is refused.
+  // Guard proof: return before writing any layer in restack, in edit.ts. The demo then fades in
+  // under the end card, which comes after it in index.html.
+  test("a scene that fades in over a moved one stacks above it, and moving back undoes it", () => {
+    const moved = applied(moveScene(SOURCES, "outro", 1))
+    expect(times(moved)).toEqual([
+      ["hook", 0, 3000],
+      ["outro", 3000, 4500],
+      ["demo", 7000, 8000],
+    ])
+    expect(moved.get("index.html")).toContain('data-start="outro - 0.5" data-duration="8"')
+    expect(moved.get("index.html")?.match(/<div id="demo"[^>]*>/)?.[0]).toContain(
+      'style="z-index: 1"'
+    )
+
+    const back = applied(moveScene(moved, "outro", 2), moved)
+    expect(back.get("index.html")).toBe(INDEX)
+  })
+
+  // Guard proof: drop the root's own layers from restack. The captions bar, after the hosts in
+  // index.html, then paints under the demo, which now has a layer.
+  test("a root's captions stay over scenes it restacks, and lose their layer with the last", () => {
+    const bar = '<p class="bar" data-start="0" data-duration="15">Fieldwise</p>'
+    const captioned = new Map(SOURCES)
+    captioned.set("index.html", INDEX.replace("  </div>\n</body>", `    ${bar}\n  </div>\n</body>`))
+
+    const moved = applied(moveScene(captioned, "outro", 1), captioned)
+    const index = moved.get("index.html") as string
+    expect(index).toContain(
+      'data-start="outro - 0.5" data-duration="8" data-label="Dispatch in two taps" style="z-index: 1"'
+    )
+    expect(index).toContain('<p class="bar" data-start="0" data-duration="15" style="z-index: 2">')
+
+    const back = applied(moveScene(moved, "outro", 2), moved)
+    expect(back.get("index.html")).toBe(captioned.get("index.html"))
+  })
+
+  // Guard proof: in moveScene, keep the start of every scene that starts after another. The hook
+  // and the outro then both follow the demo, and play over each other.
   test("a scene others follow moves first, and they follow the scene now before them", () => {
     const files = applied(moveScene(SOURCES, "demo", 0))
     expect(times(files)).toEqual([
@@ -296,6 +329,76 @@ describe("editing scenes", () => {
   test("an edit that leaves no video is refused, naming why", () => {
     const result = setSceneLength(SOURCES, "demo", 700_000)
     expect(result).toEqual({ error: "A video lasts at most 600 s." })
+  })
+})
+
+describe("stacking scenes as they move", () => {
+  /** Five 3 s scenes, each crossfading in over the one before for 0.5 s. */
+  const ids = ["a", "b", "c", "d", "e"]
+  const chain = new Map<string, string | null>([
+    [
+      "index.html",
+      `<div data-composition-id="main" data-width="1920" data-height="1080" data-duration="13">
+${ids
+  .map(
+    (id, place) =>
+      `  <div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${place === 0 ? "0" : `${ids[place - 1]} - 0.5`}" data-duration="3"></div>`
+  )
+  .join("\n")}
+</div>
+`,
+    ],
+    ...ids.map(
+      (id) =>
+        [
+          `scenes/${id}.html`,
+          `<template><div data-composition-id="${id}" data-width="1920" data-height="1080"></div></template>\n`,
+        ] as const
+    ),
+  ])
+
+  /** Each pair on screen together whose later scene paints under the earlier: by z-index, then line. */
+  const misstacked = (files: ReadonlyMap<string, string | null>) => {
+    const index = files.get("index.html") as string
+    const scenes = composition(files).scenes
+    const paint = (scene: (typeof scenes)[number]) => {
+      const tag = index.slice(scene.host.tag.start, scene.host.tag.end)
+      return [Number(/z-index:\s*(\d+)/.exec(tag)?.[1] ?? 0), scene.host.element.start] as const
+    }
+    return scenes.flatMap((early, place) =>
+      scenes.slice(place + 1).flatMap((late) => {
+        const overlap = late.startMs < early.startMs + early.durationMs
+        const [ze, le] = paint(early)
+        const [zl, ll] = paint(late)
+        return overlap && (zl < ze || (zl === ze && ll < le))
+          ? [`${late.id} under ${early.id}`]
+          : []
+      })
+    )
+  }
+
+  // Guard proof: in restack, take the stack as it paints, with the moved scene beside its
+  // neighbour, rather than play order. Moving d first, then a last, leaves b under d.
+  test("after any moves, a scene that fades in over another paints above it", () => {
+    let seed = 7
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+      return seed / 2_147_483_648
+    }
+
+    for (let run = 0; run < 60; run += 1) {
+      let files: ReadonlyMap<string, string | null> = chain
+      for (let step = 0; step < 4; step += 1) {
+        const scenes = composition(files).scenes
+        const scene = scenes[Math.floor(random() * scenes.length)]?.id ?? "a"
+        const result = moveScene(files, scene, Math.floor(random() * scenes.length))
+        files = applied(result, files)
+        expect({ run, step, misstacked: misstacked(files) }).toEqual({ run, step, misstacked: [] })
+      }
+    }
+
+    const moved = applied(moveScene(chain, "d", 0), chain)
+    expect(misstacked(applied(moveScene(moved, "a", 4), moved))).toEqual([])
   })
 })
 
@@ -769,20 +872,15 @@ describe("minimal changes", () => {
     ])
   })
 
-  test("a scene moved moves its host's line whole, and rewrites only the starts that change", () => {
+  test("a scene moved rewrites only the starts that change, each host on its own line", () => {
     const result = moveScene(SOURCES, "outro", 0)
-    if ("error" in result) throw new Error(result.error)
-    const [index] = result.edit
-    const changes = index && "changes" in index ? index.changes : []
-    const outroLine = INDEX.split("\n").find((line) => line.includes('id="outro"')) ?? ""
 
-    // The poster, in the outro, goes with it. The outro's line comes first, with the hook's
-    // start, "0", now "outro"; its old line goes.
-    expect(changes).toHaveLength(3)
-    expect(changes[0]?.insert).toBe(' data-poster="1.5"')
-    expect(changes[1]?.insert).toContain('data-composition-src="scenes/outro.html"')
-    expect(changes[1]?.insert.endsWith('data-start="outro')).toBe(true)
-    expect(changes[2]).toMatchObject({ remove: outroLine.length + 1, insert: "" })
+    // The poster, in the outro, goes with it; the outro starts at 0, and the hook after it.
+    expect(inserted(result)).toEqual([
+      ' data-poster="1.5"',
+      ' data-start="outro"',
+      ' data-start="0"',
+    ])
   })
 
   test("an edit undone by its inverse leaves the files as they were", () => {
@@ -922,4 +1020,30 @@ describe("editing live", () => {
     expect(demoClips(files).map((clip) => clip.ref)).toContain("talk-2")
     expect(composition(files).scenes[2]?.label).toBe("Thanks")
   })
+
+  // Guard proof: move the host's line in moveScene, as before. The outro's line is then deleted
+  // whole, the other person's ` data-duration="2"` stays alone between the hosts, and the root,
+  // 12.5 s long, ends before the demo does.
+  for (const order of ["mover first", "trimmer first"] as const) {
+    test(`a scene moved while someone trims it keeps the trim, merged ${order}`, () => {
+      const one = createArtifactDocument("video", live(SOURCES))
+      const two = new Y.Doc()
+      Y.applyUpdate(two, Y.encodeStateAsUpdate(one))
+
+      editDocument(one, moveScene(sourcesOf(one), "outro", 0))
+      editDocument(two, setSceneLength(sourcesOf(two), "outro", 2000))
+      const [first, second] = order === "mover first" ? [one, two] : [two, one]
+      Y.applyUpdate(second, Y.encodeStateAsUpdate(first))
+      Y.applyUpdate(first, Y.encodeStateAsUpdate(second))
+
+      const files = sourcesOf(one)
+      expect(sourcesOf(two)).toEqual(files)
+      expect(times(files)).toEqual([
+        ["outro", 0, 2000],
+        ["hook", 2000, 3000],
+        ["demo", 4500, 8000],
+      ])
+      expect(composition(files).durationMs).toBe(12_500)
+    })
+  }
 })

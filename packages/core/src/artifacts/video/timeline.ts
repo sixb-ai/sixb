@@ -136,6 +136,32 @@ export function readRootTimeline(html: string): VideoFileTimeline | null {
   return root ? timelineOf(root) : null
 }
 
+/**
+ * What `index.html`'s root paints of its own over the scenes before it: each element it holds
+ * after its first scene's host, but the hosts, its sounds, and what shows nothing. HyperFrames
+ * positions the timed ones, so a scene's `z-index` covers them unless theirs is higher. Empty for a
+ * file without a root composition or a scene.
+ */
+export function readRootLayers(html: string): VideoElementSource[] {
+  const document = parse(html, { sourceCodeLocationInfo: true })
+  const compositions = elements(document.childNodes).filter((element) =>
+    has(element, "data-composition-id")
+  )
+  const root =
+    compositions.find((element) => attribute(element, "data-root") === "true") ?? compositions[0]
+  const children = root?.childNodes.filter((node): node is Element => "tagName" in node) ?? []
+
+  const first = children.findIndex((element) => has(element, "data-composition-src"))
+  if (first < 0) return []
+  return children
+    .slice(first + 1)
+    .filter((element) => !has(element, "data-composition-src") && !UNSEEN_TAGS.has(element.tagName))
+    .map(sourceOf)
+}
+
+/** What a composition holds that paints nothing. */
+const UNSEEN_TAGS = new Set(["audio", "script", "style", "template", "link", "meta", "noscript"])
+
 function timelineOf(composition: Element): VideoFileTimeline {
   // A nested composition, or a scene's host, and what it holds are its own.
   const own = elements(composition.childNodes, { stop: nests }).filter((element) => !nests(element))
