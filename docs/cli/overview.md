@@ -128,7 +128,7 @@ Run these from your project root:
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
-| `sixb check` | Validate the project and check provider health. `--migrate` applies storage migrations first and `--lake` checks the lake too, in one load, as a deploy does. |
+| `sixb check` | Validate the project and check provider health. `--migrate` first does what `sixb db migrate` does, and `--lake` checks the lake too, in one load, as a deploy does. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db migrate --check` | Report pending storage migrations without applying them; exits `3` when there are some. |

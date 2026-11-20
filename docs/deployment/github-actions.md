@@ -1,6 +1,6 @@
 # Deploy from GitHub Actions
 
-A workflow deploys on every push the same way you do from your laptop: it checks out the commit and runs `sixb deploy`. What it needs is a way to reach the server over SSH as the deploy account. The job has no SSH config of yours, so `sixb.deploy.ts` names that account with `user`.
+A workflow deploys on every push the same way you do from your laptop: it checks out the commit and runs `sixb deploy`. What it needs is a way to reach the server over SSH as the deploy account (`sixb`, unless `sixb.deploy.ts` sets `user`).
 
 ```yaml
 # .github/workflows/deploy.yml

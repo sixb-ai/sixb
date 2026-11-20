@@ -5,8 +5,8 @@ import type { DeployStatus } from "@sixb/core/deploy"
 /**
  * Deploys Northline to a real server that meets the host requirements, then drives it through the CLI.
  * Runs only when SIXB_DEPLOY_TEST_HOST and SIXB_DEPLOY_TEST_DOMAIN name that server and a domain
- * whose subdomains point at it; SIXB_DEPLOY_TEST_USER names the account, unless your SSH config
- * does. Deploys the committed Northline, so commit first.
+ * whose subdomains point at it; SIXB_DEPLOY_TEST_USER names the account when it isn't `sixb`.
+ * Deploys the committed Northline, so commit first.
  */
 const host = process.env.SIXB_DEPLOY_TEST_HOST
 const domain = process.env.SIXB_DEPLOY_TEST_DOMAIN

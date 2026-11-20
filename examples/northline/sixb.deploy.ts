@@ -2,7 +2,7 @@ import { defineDeploy } from "@sixb/core/deploy"
 import { SshTarget } from "@sixb/deploy-ssh"
 
 // The server and domain come from the environment, so no address lands in this repository. The
-// account is optional: without it, SSH picks the one your SSH config names for the host.
+// account is optional: without it, the deploy runs as `sixb`.
 const host = process.env.NORTHLINE_DEPLOY_HOST
 const user = process.env.NORTHLINE_DEPLOY_USER
 const domain = process.env.NORTHLINE_DEPLOY_DOMAIN

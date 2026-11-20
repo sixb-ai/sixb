@@ -135,4 +135,15 @@ describe("sixb check --migrate", () => {
     expect(result.output).toMatch(/✓ \S+ is healthy/)
     expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
   })
+
+  // Reproduce: return from `migrate` when no migration is pending. A release that only makes a
+  // property unique then deploys with it unprepared, and every write to that type is refused.
+  test("prepares storage even when no migration is pending", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "current"
+      return runCheck({ entry, migrate: true })
+    })
+
+    expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
+  })
 })

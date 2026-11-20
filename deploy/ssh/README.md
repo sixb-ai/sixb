@@ -1,7 +1,7 @@
 # @sixb/deploy-ssh
 
 The SSH target for `sixb deploy`. It runs a Sixb project on a Linux server you reach over SSH, as
-an account you choose, with Caddy serving each domain over HTTPS, and ships each release beside
+the account `sixb` (or the one `user` names), with Caddy serving each domain over HTTPS, and ships each release beside
 the live one.
 
 ```ts
@@ -12,7 +12,7 @@ import { SshTarget } from "@sixb/deploy-ssh"
 export default defineDeploy({
   name: "northline",
   domain: "example.com",
-  target: new SshTarget({ host: "203.0.113.10", user: "deploy" }),
+  target: new SshTarget({ host: "203.0.113.10" }),
 })
 ```
 
