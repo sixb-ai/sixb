@@ -37,6 +37,13 @@ export const KEEP_ALIVE_MARGIN_MS = 5 * 60_000
 /** How much one extension adds to a session. */
 export const KEEP_ALIVE_EXTENSION_MS = 15 * 60_000
 
+/**
+ * A sandbox nothing used for this long, with no command running, is no longer extended until it is
+ * used again: a handle its run lost, or never stopped, ends with its session instead of running to
+ * the plan's maximum. Longer than any model call between two tool calls.
+ */
+export const KEEP_ALIVE_IDLE_MS = 30 * 60_000
+
 /** How long a killed command may take to report its end before the call returns without it. */
 export const KILLED_COMMAND_GRACE_MS = 5_000
 
@@ -100,9 +107,10 @@ export interface VercelSandboxOptions extends SandboxSessionOptions {
 /**
  * Sandbox wrapper around a Vercel Sandbox SDK instance.
  *
- * While it is open, it keeps its session alive: a session with little time left is extended, up to
- * the plan's maximum, so it outlasts the turn that uses it. Stop or destroy it when done. A session
- * Vercel ended anyway stops the handle, and every later call fails at once.
+ * While it is used, it keeps its session alive: a session with little time left is extended, up to
+ * the plan's maximum, so it outlasts the turn that uses it. Left unused for
+ * {@link KEEP_ALIVE_IDLE_MS}, it lets the session end. Stop or destroy it when done. A session
+ * Vercel ended stops the handle, and every later call fails at once.
  */
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
@@ -119,8 +127,15 @@ export class VercelSandbox implements Sandbox {
   private readonly inFlight = new Set<VercelCommandClient>()
   private destroyed = false
   private stopPromise: Promise<void> | undefined
+
+  /**
+   * Whether it keeps its session alive: `idle` once nothing used it for a while, until it is used
+   * again; `off` for good, once it stopped or Vercel will not extend the session further.
+   */
+  private keepAliveState: "on" | "idle" | "off" = "off"
   private keepAliveTimer: ReturnType<typeof setInterval> | undefined
   private extending: Promise<void> | undefined
+  private lastUsedAt = Date.now()
 
   constructor(options: VercelSandboxOptions) {
     this.client = options.client
@@ -130,11 +145,11 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
+
     if (options.client.extendTimeout && options.client.expiresAt !== undefined) {
-      // Never holds the process open: a worker that exits stops extending, and the session ends.
-      this.keepAliveTimer = setInterval(() => void this.keepAlive(), KEEP_ALIVE_INTERVAL_MS)
-      this.keepAliveTimer.unref?.()
+      this.startKeepAlive()
     }
+
     if (options.client.updateNetworkPolicy) {
       const updateNetworkPolicy = options.client.updateNetworkPolicy.bind(options.client)
       const network = options.network
@@ -180,7 +195,7 @@ export class VercelSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.assertRunning("run commands")
-    void this.keepAlive()
+    this.markUsed()
 
     const start = Date.now()
     const timeoutMs = cappedCommandTimeout(
@@ -306,6 +321,7 @@ export class VercelSandbox implements Sandbox {
       }
       options.signal?.removeEventListener("abort", onAbort)
       this.inFlight.delete(commandHandle)
+      this.markUsed()
     }
   }
 
@@ -339,6 +355,7 @@ export class VercelSandbox implements Sandbox {
       content: file.contents,
       ...(file.mode !== undefined ? { mode: file.mode } : {}),
     }))
+    this.markUsed()
 
     try {
       await this.client.writeFiles(mapped)
@@ -347,6 +364,8 @@ export class VercelSandbox implements Sandbox {
       throw new SandboxError(
         `[Sandbox] vercel writeFiles failed for ${this.id}: ${errorMessage(error)}`
       )
+    } finally {
+      this.markUsed()
     }
   }
 
@@ -413,6 +432,14 @@ export class VercelSandbox implements Sandbox {
     )
   }
 
+  /** It was used just now: an idle keepalive starts again, and checks the session at once. */
+  private markUsed(): void {
+    this.lastUsedAt = Date.now()
+    if (this.keepAliveState === "idle" && this.currentStatus === "running") this.startKeepAlive()
+
+    void this.keepAlive()
+  }
+
   /**
    * Extend the session once little of it is left. Never throws: a session Vercel ended stops this
    * handle, so the next call fails at once instead of reaching Vercel; one Vercel will not extend
@@ -420,39 +447,70 @@ export class VercelSandbox implements Sandbox {
    */
   private keepAlive(): Promise<void> {
     if (this.extending) return this.extending
+    if (this.keepAliveState !== "on" || this.currentStatus !== "running") return Promise.resolve()
+
+    const idle = this.inFlight.size === 0 && Date.now() - this.lastUsedAt >= KEEP_ALIVE_IDLE_MS
+    if (idle) {
+      this.pauseKeepAlive()
+      return Promise.resolve()
+    }
+
     const { expiresAt, extendTimeout } = this.client
-    if (
-      this.keepAliveTimer === undefined ||
-      this.currentStatus !== "running" ||
-      !extendTimeout ||
-      !expiresAt ||
-      expiresAt.getTime() - Date.now() > KEEP_ALIVE_MARGIN_MS
-    ) {
+    if (!extendTimeout || !expiresAt || expiresAt.getTime() - Date.now() > KEEP_ALIVE_MARGIN_MS) {
       return Promise.resolve()
     }
 
     this.extending = extendTimeout
       .call(this.client, KEEP_ALIVE_EXTENSION_MS)
-      .catch((error: unknown) => {
-        if (isSessionStopped(error)) {
-          this.sessionStopped()
-          return
-        }
-        const refused = refusal(error)
-        if (refused) this.stopKeepAlive()
-        console.warn(
-          refused
-            ? `[Sandbox] Vercel would not extend the session of ${this.id} (HTTP ${refused.status}${refused.code ? ` ${refused.code}` : ""}); it ends at ${expiresAt.toISOString()}.`
-            : `[Sandbox] The session of ${this.id} could not be extended; trying again in ${KEEP_ALIVE_INTERVAL_MS / 1000} s. ${errorMessage(error)}`
-        )
-      })
+      .catch((error: unknown) => this.extensionFailed(error, expiresAt))
       .finally(() => {
         this.extending = undefined
       })
     return this.extending
   }
 
+  /**
+   * A session Vercel ended stops the handle. One it will not extend further is left to end; a
+   * failure that may pass, a 5xx, a 429 or no answer, is tried again at the next check.
+   */
+  private extensionFailed(error: unknown, expiresAt: Date): void {
+    if (isSessionStopped(error)) {
+      this.sessionStopped()
+      return
+    }
+
+    const refused = refusal(error)
+    if (refused) {
+      this.stopKeepAlive()
+      console.warn(
+        `[Sandbox] Vercel would not extend the session of ${this.id} (HTTP ${refused.status}${refused.code ? ` ${refused.code}` : ""}); it ends at ${expiresAt.toISOString()}.`
+      )
+      return
+    }
+
+    console.warn(
+      `[Sandbox] The session of ${this.id} could not be extended; trying again in ${KEEP_ALIVE_INTERVAL_MS / 1000} s. ${errorMessage(error)}`
+    )
+  }
+
+  /** Never holds the process open: a worker that exits stops extending, and the session ends. */
+  private startKeepAlive(): void {
+    this.keepAliveState = "on"
+    this.keepAliveTimer = setInterval(() => void this.keepAlive(), KEEP_ALIVE_INTERVAL_MS)
+    this.keepAliveTimer.unref?.()
+  }
+
+  private pauseKeepAlive(): void {
+    this.clearKeepAliveTimer()
+    this.keepAliveState = "idle"
+  }
+
   private stopKeepAlive(): void {
+    this.clearKeepAliveTimer()
+    this.keepAliveState = "off"
+  }
+
+  private clearKeepAliveTimer(): void {
     if (this.keepAliveTimer !== undefined) clearInterval(this.keepAliveTimer)
     this.keepAliveTimer = undefined
   }
@@ -496,15 +554,19 @@ function isSessionStopped(error: unknown): boolean {
 }
 
 /**
- * A request Vercel answered with a refusal: a 4xx status, before it did anything. A 408 is not one,
- * as the request may have reached the sandbox before it timed out.
+ * A request Vercel answered with a refusal: a 4xx status, before it did anything.
+ *
+ * Two are not refusals. A 408, as the request may have reached the sandbox before it timed out. A
+ * 429, as it answers the moment, not the request: the SDK retries a 5xx or a dropped connection, so
+ * the 429 that ends those retries says nothing of an earlier attempt that may have run. Any other
+ * 4xx answers the request itself, which an earlier attempt sent unchanged.
  */
 function refusal(
   error: unknown
 ): { readonly status: number; readonly code?: string; readonly message?: string } | undefined {
   if (!(error instanceof APIError)) return undefined
   const { status } = error.response
-  if (status < 400 || status >= 500 || status === 408) return undefined
+  if (status < 400 || status >= 500 || status === 408 || status === 429) return undefined
   const { code, message } = apiErrorBody(error)
   return {
     status,

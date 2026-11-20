@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { SandboxError, SandboxNotRunningError, SandboxRequestRefusedError } from "@sixb/core"
 import { APIError } from "@vercel/sandbox"
 import type {
@@ -10,7 +10,9 @@ import type {
 import {
   COMMAND_MARKER,
   KEEP_ALIVE_EXTENSION_MS,
+  KEEP_ALIVE_IDLE_MS,
   KEEP_ALIVE_INTERVAL_MS,
+  KEEP_ALIVE_MARGIN_MS,
   KILLED_COMMAND_GRACE_MS,
   VERCEL_MAX_COMMAND_TIMEOUT_MS,
   VercelSandbox,
@@ -20,6 +22,7 @@ import {
   type VercelCreateSandbox,
   VercelSandboxFactory,
 } from "../src/vercel-sandbox-factory"
+import { fixture } from "./vercel-sdk-fixture"
 
 /** Let pending promise callbacks run: under fake timers, a command starts before its timer does. */
 async function settle(): Promise<void> {
@@ -142,74 +145,186 @@ class ExpiringClient extends FakeVercelClient {
 // Nothing extended a session while a turn ran: a long turn outlived its VM, and every later
 // command failed. These drive the keepalive with fake timers.
 describe("VercelSandbox keepalive", () => {
-  // Removal proof: drop the interval in the constructor; the session is never extended.
-  test("extends a session that is about to end, for as long as the sandbox is open", async () => {
-    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
-    try {
-      const client = new ExpiringClient(new Date("2026-11-17T19:05:00Z"))
-      const sandbox = new VercelSandbox({ client })
+  const NOW = new Date("2026-11-17T19:00:00Z")
 
+  /** A client whose session ends `minutes` from now. */
+  function expiringIn(minutes: number): ExpiringClient {
+    return new ExpiringClient(new Date(NOW.getTime() + minutes * 60_000))
+  }
+
+  /**
+   * Let `minutes` of checks run, and each extension they started settle. One through the real SDK
+   * takes more callbacks than a fake client: `turns` of them per minute.
+   */
+  async function pass(minutes: number, turns = 20): Promise<void> {
+    for (let minute = 0; minute < minutes; minute++) {
       jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
-      await settle()
-      expect(client.extensions).toEqual([KEEP_ALIVE_EXTENSION_MS])
-
-      // Plenty left: nothing to do.
-      jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
-      await settle()
-      expect(client.extensions).toHaveLength(1)
-
-      await sandbox.stop()
-      jest.advanceTimersByTime(60 * KEEP_ALIVE_INTERVAL_MS)
-      await settle()
-      expect(client.extensions).toHaveLength(1)
-    } finally {
-      jest.useRealTimers()
+      for (let turn = 0; turn < turns; turn++) await Promise.resolve()
     }
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW })
   })
 
-  // Removal proof: drop the isSessionStopped branch in keepAlive; the next command reaches Vercel.
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  // Removal proof: drop startKeepAlive from the constructor; the session is never extended.
+  test("extends a session that is about to end, until the sandbox stops", async () => {
+    const client = expiringIn(5)
+    const sandbox = new VercelSandbox({ client })
+
+    await pass(1)
+    expect(client.extensions).toEqual([KEEP_ALIVE_EXTENSION_MS])
+
+    // Plenty left: nothing to do.
+    await pass(1)
+    expect(client.extensions).toHaveLength(1)
+
+    await sandbox.stop()
+    await pass(60)
+    expect(client.extensions).toHaveLength(1)
+  })
+
+  // A run its worker lost never stops its persistent sandbox: extended for as long as the handle
+  // lived, its VM ran to the plan's maximum, and the thread could not resume it meanwhile.
+  // Removal proof: drop the idle branch in keepAlive; the unused session is extended for hours.
+  test("lets an unused session end, and keeps it alive again once used", async () => {
+    const client = expiringIn(5)
+    const sandbox = new VercelSandbox({ client })
+
+    await pass(3 * 60)
+    const whileIdle = client.extensions.length
+    expect(whileIdle * KEEP_ALIVE_EXTENSION_MS).toBeLessThanOrEqual(KEEP_ALIVE_IDLE_MS)
+
+    // Used again before Vercel ended it: kept alive at once.
+    client.expiresAt = new Date(Date.now() + 60_000)
+    await sandbox.runCommand("echo", ["back"])
+    await settle()
+    expect(client.extensions).toHaveLength(whileIdle + 1)
+  })
+
+  // Removal proof: drop `this.inFlight.size === 0 &&` from keepAlive; the session ends under a
+  // background command that runs for hours without another call.
+  test("keeps the session alive while a command runs, however long", async () => {
+    const client = expiringIn(5)
+    client.nextCommandWaitsForKill = true
+    const sandbox = new VercelSandbox({ client })
+
+    const running = sandbox.runCommand("bun", ["dev"])
+    await settle()
+    await pass(3 * 60)
+
+    // Each extension adds 15 minutes, asked for once fewer than 5 are left.
+    expect(client.extensions.length).toBeGreaterThanOrEqual(12)
+    expect(client.expiresAt.getTime()).toBeGreaterThan(Date.now())
+
+    await sandbox.stop()
+    await running
+  })
+
+  // The model reads a long command's output and thinks before its next call. Removal proof: drop
+  // the markUsed at the end of runCommand; idle counts from the command's start, and the session
+  // ends right after a long build.
+  test("counts a command's end as use", async () => {
+    const client = expiringIn(5)
+    client.nextCommandWaitsForKill = true
+    const sandbox = new VercelSandbox({ client })
+
+    const build = sandbox.runCommand("bun", ["run", "build"], { timeout: 2 * KEEP_ALIVE_IDLE_MS })
+    await settle()
+    await pass(2 * KEEP_ALIVE_IDLE_MS / KEEP_ALIVE_INTERVAL_MS)
+    await build
+
+    // Twenty minutes later, with no other call: still kept alive.
+    const before = client.extensions.length
+    await pass(20)
+    expect(client.extensions.length).toBeGreaterThan(before)
+    expect(client.expiresAt.getTime()).toBeGreaterThan(Date.now())
+  })
+
+  // Removal proof: drop the isSessionStopped branch in extensionFailed; the next command reaches
+  // Vercel.
   test("a session Vercel ended stops the sandbox, so the next call fails at once", async () => {
-    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
-    try {
-      const client = new ExpiringClient(new Date("2026-11-17T19:02:00Z"))
-      client.extendFailure = new APIError(new Response(null, { status: 410 }), {
-        json: { error: { code: "sandbox_stopped" } },
-      })
-      const sandbox = new VercelSandbox({ client })
+    const client = expiringIn(2)
+    client.extendFailure = new APIError(new Response(null, { status: 410 }), {
+      json: { error: { code: "sandbox_stopped" } },
+    })
+    const sandbox = new VercelSandbox({ client })
 
-      jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
-      await settle()
+    await pass(1)
 
-      expect(sandbox.status).toBe("stopped")
-      await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(
-        SandboxNotRunningError
-      )
-      expect(client.commands).toHaveLength(0)
-    } finally {
-      jest.useRealTimers()
-    }
+    expect(sandbox.status).toBe("stopped")
+    await expect(sandbox.runCommand("echo", ["hi"])).rejects.toBeInstanceOf(
+      SandboxNotRunningError
+    )
+    expect(client.commands).toHaveLength(0)
   })
 
   test("stops asking once Vercel will not extend further, and keeps running", async () => {
-    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     try {
-      const client = new ExpiringClient(new Date("2026-11-17T19:02:00Z"))
+      const client = expiringIn(2)
       client.extendFailure = new APIError(new Response(null, { status: 400 }), {
         json: { error: { code: "bad_request", message: "exceeds the plan's maximum" } },
       })
       const sandbox = new VercelSandbox({ client })
 
-      jest.advanceTimersByTime(3 * KEEP_ALIVE_INTERVAL_MS)
-      await settle()
+      await pass(3)
 
       expect(client.extensions).toHaveLength(1)
       expect(sandbox.status).toBe("running")
       expect(String(warn.mock.calls[0]?.[0])).toContain("would not extend the session")
     } finally {
       warn.mockRestore()
-      jest.useRealTimers()
     }
+  })
+
+  // A 429 once read as Vercel's final word: one rate-limited minute and the session expired
+  // mid-turn. Removal proof: treat 429 as a refusal in `refusal`; the 429 case asks once.
+  test.each([
+    ["a server error", 500],
+    ["a rate limit", 429],
+  ])("tries again at the next check after %s", async (_label, status) => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const client = expiringIn(2)
+      client.extendFailure = new APIError(new Response(null, { status }), { json: {} })
+      new VercelSandbox({ client })
+
+      await pass(1)
+      client.extendFailure = undefined
+      await pass(1)
+
+      expect(client.extensions).toHaveLength(2)
+      expect(client.expiresAt.getTime()).toBeGreaterThan(Date.now() + KEEP_ALIVE_MARGIN_MS)
+      expect(String(warn.mock.calls[0]?.[0])).toContain("trying again")
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // The sandboxes a factory creates and resumes reach Vercel's session through the SDK. Removal
+  // proof: drop `expiresAt` from createVercelSandbox or bindPersistentSandbox; that case never
+  // extends.
+  test.each([
+    ["an ephemeral sandbox", undefined],
+    ["a persistent sandbox", { name: "workspace-1" }],
+  ])("%s extends its session through the SDK", async (_label, persistence) => {
+    const f = fixture()
+    f.startSessionsNow()
+    const sandbox = await f.factory.create(persistence ? { persistence } : {})
+    const extensions = () => f.requests.filter((request) => request.path.includes("/extend-timeout"))
+
+    // Vercel's 60-second default session: extended at the first check, then not again.
+    await pass(2, 200)
+
+    expect(extensions()).toHaveLength(1)
+    expect(extensions()[0]?.body).toEqual({ duration: KEEP_ALIVE_EXTENSION_MS })
+
+    await sandbox.stop().catch(() => {})
   })
 })
 
@@ -436,9 +551,13 @@ describe("VercelSandbox", () => {
     expect(sandbox.status).toBe("running")
   })
 
+  // The SDK retries a 5xx or a dropped connection, and a 429 can end those retries after an
+  // attempt that started the command. Removal proof: drop `status === 429` from `refusal`; the
+  // rate-limited start reads as refused, and a persistent workspace saves as if nothing ran.
   test.each([
     ["a server error", 500],
     ["a request timeout", 408],
+    ["a rate limit", 429],
   ])("%s is not a refusal: the command may have started", async (_label, status) => {
     const client = new FakeVercelClient()
     client.failWith = new APIError(new Response(null, { status }), { json: {} })

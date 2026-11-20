@@ -26,6 +26,8 @@ export function fixture(setup?: readonly string[]) {
   let networkFails = false
   let networkMissing = false
   let stopGate: Promise<void> | undefined
+  let sessionCreatedAt = 1
+  let sessionTimeout = 60_000
   const session = () => ({
     id: `session-${generation}`,
     status,
@@ -33,9 +35,9 @@ export function fixture(setup?: readonly string[]) {
     vcpus: 1,
     region: "iad1",
     runtime: "node24",
-    timeout: 60_000,
+    timeout: sessionTimeout,
     requestedAt: 1,
-    createdAt: 1,
+    createdAt: sessionCreatedAt,
     updatedAt: 1,
     cwd: "/vercel/sandbox",
   })
@@ -105,6 +107,10 @@ export function fixture(setup?: readonly string[]) {
               }),
         })
       }
+      if (path.endsWith("/extend-timeout")) {
+        sessionTimeout += Number(body.duration)
+        return Response.json({ session: session() })
+      }
       if (path.endsWith("/fs/write")) return Response.json({})
       if (path.includes("/cmd")) return failure(410, "session_stopped")
       throw new Error(`Unexpected SDK request: ${method} ${path}`)
@@ -156,6 +162,10 @@ export function fixture(setup?: readonly string[]) {
     },
     gateStop: (gate: Promise<void>) => {
       stopGate = gate
+    },
+    /** Sessions start now, by the test's clock, with Vercel's 60-second default. */
+    startSessionsNow: () => {
+      sessionCreatedAt = Date.now()
     },
   }
 }
