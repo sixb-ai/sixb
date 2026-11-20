@@ -909,7 +909,7 @@ describe("the Transcript tab", () => {
     }
   }
 
-  function tab(sceneId: string, timeMs: number) {
+  function tab(sceneId: string, timeMs: number, onSeek: (ms: number) => void = () => {}) {
     const files: LiveFiles = new Map([
       ["index.html", { text: SPOKEN_INDEX }],
       ["scenes/title.html", { text: TITLE }],
@@ -928,7 +928,7 @@ describe("the Transcript tab", () => {
         recordings={heardRecordings(clips, scene, timeMs)}
         selected={undefined}
         timeMs={timeMs}
-        onSeek={() => {}}
+        onSeek={onSeek}
         onRemove={() => {}}
       />
     )
@@ -963,6 +963,27 @@ describe("the Transcript tab", () => {
         fireEvent.click(view.getByRole("menuitem", { name: /narration\.m4a/ }))
       })
       await waitFor(() => view.getByText("boiler"))
+    } finally {
+      restore()
+    }
+  })
+
+  // Reproduce by deciding the click in Words' onPointerUp from the word under the release, its
+  // `event.target`, as the panel did: the release lands on "lunch.", as when the text moved under
+  // the pointer, and the press selects "fixed" instead of going there.
+  test("a click on a word goes there, whichever word the text has moved under its release", async () => {
+    const restore = serve()
+    try {
+      const seeks: number[] = []
+      const view = render(tab("talk", 4000, (ms) => seeks.push(ms)))
+      await waitFor(() => view.getByText("lunch."))
+
+      fireEvent.pointerDown(view.getByText("fixed"), { button: 0, pointerId: 1 })
+      fireEvent.pointerUp(view.getByText("lunch."), { button: 0, pointerId: 1 })
+
+      // The answer plays from 3.5 s, and "fixed" is said 0.4 s into it.
+      expect(seeks).toEqual([3900])
+      expect(view.queryByText(/^Cut \d+ words?$/)).toBeNull()
     } finally {
       restore()
     }

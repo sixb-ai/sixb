@@ -344,7 +344,10 @@ function Words({
     readonly anchor: number
     readonly focus: number
   } | null>(null)
-  const pressing = useRef(false)
+  // The word a press started on, and the anchor of what it selects once it drags to another:
+  // none while it stays on its word, which is then a click. Never the word under its release,
+  // which the text may have moved under the pointer since.
+  const press = useRef<{ readonly word: number; anchor: number | null } | null>(null)
   const [query, setQuery] = useState("")
   const [match, setMatch] = useState(0)
   const [proposal, setProposal] = useState<Proposal | null>(null)
@@ -503,34 +506,54 @@ function Words({
               </Button>
             ) : null}
           </div>
-        ) : selection ? (
-          <div className="flex items-center gap-2">
-            <Button size="sm" className="h-7" onClick={cutSelection}>
-              <Scissors />
-              {phrases ? messages.cutPhrases(to - from + 1) : messages.cutWords(to - from + 1)}
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7" onClick={() => setSelection(null)}>
-              {messages.cancel}
-            </Button>
-          </div>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" variant="outline" className="h-7" onClick={() => propose("silences")}>
-              <WandSparkles />
-              {messages.removeSilences}
-            </Button>
-            {/* A filler is a word: a phrase cannot say where one is inside it. */}
-            {phrases ? null : (
+          // A selection's actions take the cleanups' place, which keeps its height while hidden:
+          // the words below never move under a pointer selecting them.
+          <div className="grid">
+            <div
+              className={cn(
+                "col-start-1 row-start-1 flex flex-wrap gap-1.5",
+                selection && "invisible"
+              )}
+            >
               <Button
                 size="sm"
                 variant="outline"
                 className="h-7"
-                onClick={() => propose("fillers")}
+                onClick={() => propose("silences")}
               >
                 <WandSparkles />
-                {messages.removeFillers}
+                {messages.removeSilences}
               </Button>
-            )}
+              {/* A filler is a word: a phrase cannot say where one is inside it. */}
+              {phrases ? null : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  onClick={() => propose("fillers")}
+                >
+                  <WandSparkles />
+                  {messages.removeFillers}
+                </Button>
+              )}
+            </div>
+            {selection ? (
+              <div className="col-start-1 row-start-1 flex items-start gap-2">
+                <Button size="sm" className="h-7" onClick={cutSelection}>
+                  <Scissors />
+                  {phrases ? messages.cutPhrases(to - from + 1) : messages.cutWords(to - from + 1)}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7"
+                  onClick={() => setSelection(null)}
+                >
+                  {messages.cancel}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -567,36 +590,35 @@ function Words({
         onPointerDown={(event) => {
           const index = wordIndex(event.target)
           if (index === null || event.button !== 0) return
-          pressing.current = true
-          setSelection((last) =>
-            event.shiftKey && last
-              ? { anchor: last.anchor, focus: index }
-              : { anchor: index, focus: index }
-          )
+          event.currentTarget.setPointerCapture?.(event.pointerId)
+
+          // Shift extends the selection to the word; a press alone selects once it drags.
+          const anchor = event.shiftKey ? (selection?.anchor ?? index) : null
+          press.current = { word: index, anchor }
+          if (anchor !== null) setSelection({ anchor, focus: index })
         }}
         onPointerMove={(event) => {
-          if (!pressing.current) return
+          const pressed = press.current
+          if (!pressed) return
           const index = wordIndex(document.elementFromPoint(event.clientX, event.clientY))
-          if (index !== null)
-            setSelection((last) => (last ? { anchor: last.anchor, focus: index } : last))
+          if (index === null || (pressed.anchor === null && index === pressed.word)) return
+
+          pressed.anchor ??= pressed.word
+          setSelection({ anchor: pressed.anchor, focus: index })
         }}
-        onPointerUp={(event) => {
-          if (!pressing.current) return
-          pressing.current = false
-          const index = wordIndex(event.target)
+        onPointerUp={() => {
+          const pressed = press.current
+          press.current = null
+          if (!pressed || pressed.anchor !== null) return
+
           // A click on one word goes there, and selects nothing.
-          if (
-            index !== null &&
-            selection &&
-            selection.anchor === index &&
-            selection.focus === index &&
-            !event.shiftKey
-          ) {
-            setSelection(null)
-            const word = words[index]
-            const played = word ? playedAt(word.startMs) : undefined
-            if (word && played) onSeek(played.laid.startMs + word.startMs - played.range.startMs)
-          }
+          setSelection(null)
+          const word = words[pressed.word]
+          const played = word ? playedAt(word.startMs) : undefined
+          if (word && played) onSeek(played.laid.startMs + word.startMs - played.range.startMs)
+        }}
+        onPointerCancel={() => {
+          press.current = null
         }}
       >
         <p id="sixb-transcript-hint" className="sr-only">
