@@ -30,6 +30,11 @@ if ! flock -n 9; then
 fi
 
 event "Prepare release" "running"
+# Unpacking replaces the folder, so it must never be the one that serves.
+if [ "$(readlink "$root/current" 2> /dev/null)" = "releases/$release_id" ]; then
+  echo "Release $release_id is the live one. Deploy again to make a new release." >&2
+  exit 1
+fi
 rm -rf "$release"
 mkdir -p "$release" "$root/shared"
 (cd "$incoming" && tar -c -f - --exclude=.env .) | (cd "$release" && tar -x -f -)
@@ -80,7 +85,7 @@ for package in @sixb/cli:sixb @sixb/deploy-ssh:sixb-deploy-ssh; do
   fi
 done
 if [ ! -e node_modules/@sixb/deploy-ssh/src/server/release.ts ]; then
-  echo "This commit's @sixb/deploy-ssh predates 0.3.0, which this deploy needs. Upgrade it, or deploy the commit with its own sixb." >&2
+  echo "This commit's @sixb/deploy-ssh is older than this sixb, which needs its release runner. Upgrade it, or deploy the commit with its own sixb." >&2
   exit 1
 fi
 event "Install dependencies" "done"

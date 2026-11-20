@@ -53,9 +53,9 @@ export function commandLabel(command: DeployCommand): string {
   return [command.program, ...command.args].join(" ")
 }
 
-/** A release folder's name: when, then which commit. */
+/** A release folder's name: when, to the millisecond, then which commit. */
 export function deriveReleaseId(record: DeployRecord): string {
-  const stamp = record.deployedAt.replace(/[-:.]/g, "").slice(0, 15)
+  const stamp = record.deployedAt.replace(/[-:.]/g, "").slice(0, 18)
   const sha = record.commit.slice(0, 12).replace(/[^a-zA-Z0-9_-]/g, "")
   return `${stamp}Z-${sha || "release"}`
 }
