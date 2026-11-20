@@ -26,12 +26,13 @@ back certificates, so `names` and `read` skip both.
 
 Every call goes straight to Key Vault's REST API. A token comes from, in order:
 
-1. The token the caller passes: a server's credential. It's either a JSON object with `tenant`,
+1. On a server (`read(env, { server: true, token })`), the token from its token file. It's either a JSON object with `tenant`,
    `clientId` and `clientSecret`, traded for an access token with Microsoft Entra ID, or
    `{ "identity": "managed" }` (with an optional `clientId`), which asks the VM's instance
    metadata service at `169.254.169.254` for a token of its managed identity. When `server` is set,
-   the server reads with that identity whatever the token holds: moving a server to a managed
-   identity is a commit, and a token naming one keeps working after a rollback past it.
+   the server reads with that identity, with no token file at all (`serverNeedsToken` is false),
+   or whatever the file holds: moving a server to a managed identity is a commit, and a token
+   naming one keeps working after a rollback past it.
 2. `az account get-access-token`: a person signed in with `az login`, or a CI job after
    `azure/login`. In a terminal, a person who isn't signed in is sent through `az login` first.
 
@@ -57,7 +58,7 @@ A server reads with the credential in its token file (`~/<name>/env-token`), wri
 provisions it: a service principal that can read the prod vault, as
 `{"tenant":"…","clientId":"…","clientSecret":"…"}`, or `{"identity":"managed"}` (with a
 `clientId` for a user-assigned identity) to read with the VM's managed identity. A project that
-sets `server: { identity: "managed" }` reads that way whatever the file holds.
+sets `server: { identity: "managed" }` reads that way and needs no token file.
 
 A managed identity is granted the vault by whoever can, so the server's errors name the command for
 them: Key Vault's 403 says `ForbiddenByRbac` on a vault using Azure RBAC and `AccessDenied` on one

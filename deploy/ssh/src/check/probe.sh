@@ -39,7 +39,6 @@ fact caddy.routes "$routes"
 fact caddy.routes-writable "$(yes_no test -d "$routes" -a -w "$routes")"
 fact caddy.routes-imported "$(yes_no grep -qsF "import $routes/*.caddy" "/etc/caddy/sixb.d/$USER.caddy")"
 fact caddy.caddyfile-imports "$(yes_no grep -qsF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile)"
-fact caddy.admin-on-localhost "$(yes_no sh -c "ss -ltnH | grep -qE '(127\\.0\\.0\\.1|\\[::1\\]):2019 '")"
 
 # Deployments on this server, by their systemd units: a server runs one
 others="$(

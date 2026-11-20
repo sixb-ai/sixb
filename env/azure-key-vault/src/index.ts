@@ -282,9 +282,20 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
       return names.map(variableName)
     },
 
+    serverNeedsToken: server === undefined,
+
     async read(env, readOptions) {
       const credential =
-        readOptions?.token === undefined ? undefined : serverCredential(readOptions.token)
+        readOptions?.token !== undefined
+          ? serverCredential(readOptions.token)
+          : readOptions?.server
+            ? server
+            : undefined
+      if (readOptions?.server && credential === undefined) {
+        throw new Error(
+          '[AzureKeyVault] A server reads with the credential in its token file, or with its managed identity when `server` is { identity: "managed" }.'
+        )
+      }
 
       if (credential !== undefined && isManagedIdentity(credential)) {
         const token = await managedIdentityToken(credential)

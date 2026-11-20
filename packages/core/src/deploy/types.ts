@@ -158,6 +158,8 @@ export interface DeployCheckContext extends DeployOperationContext {
   readonly projectPath: string
   /** The project prints with Chromium through Playwright, so the target needs its libraries. */
   readonly chromium: boolean
+  /** The project's env source reads on the server with a token file, not an identity of its own. */
+  readonly envToken: boolean
 }
 
 export interface DeployListenAddress {

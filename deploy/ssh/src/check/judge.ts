@@ -9,8 +9,11 @@ export type HostFacts = ReadonlyMap<string, string>
 export interface JudgeInput {
   /** The loopback ports the deployment's slots listen on. */
   readonly ports: readonly number[]
-  /** A deploy writes `.env` from the project's source, so the server needs its token instead. */
-  readonly envFromSource: boolean
+  /**
+   * Where the server's settings come from: the project's source, read with the env token or with
+   * the server's own identity, or the `.env` kept on the server.
+   */
+  readonly settings: "env-token" | "identity" | "env-file"
   /** The project prints with Chromium, so the server needs Chromium's libraries. */
   readonly chromium: boolean
 }
@@ -37,8 +40,7 @@ export function judge(facts: HostFacts, input: JudgeInput): DeployCheck[] {
     deployments(facts),
     linger(facts),
     caddy(facts),
-    adminApi(facts),
-    settings(facts, input.envFromSource),
+    settings(facts, input.settings),
     ports(facts, input.ports),
     ...(input.chromium ? [chromium(facts)] : []),
     disk(facts),
@@ -107,20 +109,11 @@ function caddy(facts: HostFacts): DeployCheck {
     : fail("caddy", "Caddy", problems.join("; "))
 }
 
-function adminApi(facts: HostFacts): DeployCheck {
-  return facts.get("caddy.admin-on-localhost") === "yes"
-    ? {
-        id: "caddy.admin-api",
-        label: "Caddy admin API",
-        status: "warning",
-        detail: "listens on localhost:2019, where any process on the server can change the routes",
-        remedy: "Set `admin unix//var/lib/caddy/admin.sock` in the Caddyfile's global options.",
-      }
-    : ok("caddy.admin-api", "Caddy admin API", "not on localhost:2019")
-}
-
-function settings(facts: HostFacts, envFromSource: boolean): DeployCheck {
-  if (envFromSource) {
+function settings(facts: HostFacts, source: JudgeInput["settings"]): DeployCheck {
+  if (source === "identity") {
+    return ok("settings", "Settings", "the source reads with the server's own identity")
+  }
+  if (source === "env-token") {
     const token = fileFact(facts.get("file.env-token"))
     if (!token || token.size === 0) {
       return fail("settings", "Settings", "no env token: the deploy can't pull .env")

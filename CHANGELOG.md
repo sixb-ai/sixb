@@ -65,9 +65,12 @@ Sixb packages are versioned independently. Each release entry names the packages
   `@sixb/cli` and `@sixb/deploy-ssh` upgrade together: a commit whose `@sixb/deploy-ssh` is older
   can't be deployed with `--ref` by the new CLI.
 - An env source no longer creates server tokens (`createServerToken` left the `EnvSource`
-  contract). Put the token on the server when you provision it.
+  contract). Put the token on the server when you provision it. A server reads with
+  `read(env, { server: true, token })`, and a source that reads with the server's own identity sets
+  `serverNeedsToken: false`, so the server needs no token file: Azure Key Vault does with
+  `server: { identity: "managed" }`.
 - `DeployTarget` loses `setup`, `access` and `ci`, a check's status is `ok`, `fail` or `warning`,
-  and `DeployCheckContext` gains `chromium`.
+  and `DeployCheckContext` gains `chromium` and `envToken`.
 
 ## 2026-11-19 — Sixb 0.2.6
 

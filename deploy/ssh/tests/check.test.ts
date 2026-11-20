@@ -12,7 +12,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-const input: JudgeInput = { ports: [3001, 3002], envFromSource: true, chromium: false }
+const input: JudgeInput = { ports: [3001, 3002], settings: "env-token", chromium: false }
 
 /** What a cell from the infra template reports. */
 const healthy: Record<string, string> = {
@@ -31,7 +31,6 @@ const healthy: Record<string, string> = {
   "caddy.routes-writable": "yes",
   "caddy.routes-imported": "yes",
   "caddy.caddyfile-imports": "yes",
-  "caddy.admin-on-localhost": "no",
   "file.env-token": "600 54",
   "file.shared-env": "600 2048",
   "file.legacy-env": "missing",
@@ -90,7 +89,7 @@ describe("judging the host", () => {
   })
 
   test("a project without a source needs .env instead, here or in the old code folder", () => {
-    const noSource = { envFromSource: false }
+    const noSource = { settings: "env-file" } as const
     expect(statusOf("settings", { "file.env-token": "missing" }, noSource)).toStartWith("ok")
     expect(
       statusOf("settings", { "file.shared-env": "missing", "file.legacy-env": "600 10" }, noSource)
@@ -112,10 +111,16 @@ describe("judging the host", () => {
     expect(statusOf("chromium", { "chromium.missing": "" }, { chromium: true })).toStartWith("ok")
   })
 
-  test("warns about Caddy's admin API on localhost and about a nearly full disk", () => {
-    expect(statusOf("caddy.admin-api", { "caddy.admin-on-localhost": "yes" })).toStartWith(
-      "warning"
+  // Reproduce: judge "identity" as "env-token"; a server reading with its managed identity then
+  // fails the check for a file it never uses.
+  test("needs no env token when the source reads with the server's own identity", () => {
+    const nothing = { "file.env-token": "missing", "file.shared-env": "missing" }
+    expect(statusOf("settings", nothing, { settings: "identity" })).toBe(
+      "ok: the source reads with the server's own identity"
     )
+  })
+
+  test("warns about a nearly full disk", () => {
     expect(statusOf("disk", { "disk.free-kb": "1048576" })).toBe("warning: 1024 MB free")
   })
 })

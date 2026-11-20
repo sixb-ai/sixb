@@ -123,7 +123,12 @@ export class SshTarget implements DeployTarget {
           name: context.name,
           projectPath: context.projectPath,
           ports: [...Object.values(SLOT_PORTS.blue), ...Object.values(SLOT_PORTS.green)],
-          envFromSource: release.steps.env !== undefined,
+          settings:
+            release.steps.env === undefined
+              ? "env-file"
+              : context.envToken
+                ? "env-token"
+                : "identity",
           chromium: context.chromium,
         })),
       ])
