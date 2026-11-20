@@ -31,6 +31,8 @@ export function createReleaseHost(): ReleaseHost {
     systemctl: (...args) => run(["systemctl", "--user", ...args]),
     // Not `is-active`, which fails for a unit that is still stopping: a draining slot holds its
     // ports, and a legacy service reads its files, until it reaches `inactive` or `failed`.
+    isEnabled: async (unit) =>
+      (await quiet(["systemctl", "--user", "is-enabled", "--quiet", unit])).code === 0,
     isActive: async (unit) => {
       const { output } = await quiet([
         "systemctl",

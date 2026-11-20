@@ -57,6 +57,8 @@ class FakeServer implements ReleaseHost {
   readonly calls: string[] = []
   readonly printed: string[] = []
   readonly active = new Set<string>()
+  /** Units that start at boot. */
+  readonly enabled = new Set<string>()
   readonly states = new Map<string, ProcessState>()
   readonly crashes = new Set<string>()
   /** Calls that throw, as `calls` records them. */
@@ -91,11 +93,17 @@ class FakeServer implements ReleaseHost {
     if (args[0] === "stop" && !(args[1] === "--no-block" && this.drains.has(unit))) {
       this.active.delete(unit)
     }
+    if (args[0] === "enable") this.enabled.add(unit)
+    if (args[0] === "disable") this.enabled.delete(unit)
     return 0
   }
 
   async isActive(unit: string) {
     return this.active.has(unit)
+  }
+
+  async isEnabled(unit: string) {
+    return this.enabled.has(unit)
   }
 
   async readRoutes() {
@@ -216,6 +224,7 @@ async function liveInBlue(server: FakeServer): Promise<void> {
   })
   await writeFile(blue.manifest, JSON.stringify(manifest))
   server.active.add(blue.unit)
+  server.enabled.add(blue.unit)
   server.routes = "example.com {\n\treverse_proxy 127.0.0.1:3001 {"
   await server.systemctl("start", blue.unit)
   server.calls.length = 0
@@ -245,6 +254,7 @@ async function legacyInGreen(server: FakeServer): Promise<void> {
     })
   )
   server.active.add(legacy.unit)
+  server.enabled.add(legacy.unit)
   server.routes = "example.com {\n\treverse_proxy 127.0.0.1:3011 {"
 }
 
@@ -479,6 +489,34 @@ describe("a deploy beside the live release", () => {
     expect(await readFile(layout.liveSlotFile, "utf8")).toBe("blue\n")
   })
 
+  // Reproduce: disable only the live slot's unit in makeLive; blue, stopped but still enabled, then
+  // boots beside green with a second orchestrator.
+  test("disables a stopped slot that would otherwise start at boot beside the new one", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    // The OOM killer took blue's supervisor: nothing serves, but blue still starts at boot.
+    server.active.delete("sixb-northline@blue.service")
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    expect(server.enabled).toEqual(new Set(["sixb-northline@green.service"]))
+  })
+
+  test("a project with a source, deploying a commit from before it, keeps the live values", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await writeFile(layout.envToken, "token")
+    await mkdir(join(layout.root, "shared"), { recursive: true })
+    await writeFile(layout.sharedEnv, "A=stale\n")
+    await writeFile(join(layout.code, PROJECT, ".env"), "A=live\n")
+    const { env: _pull, ...steps } = release.steps
+
+    await runRelease(plan({ release: { ...release, steps } }), server, { home, user: "deploy" })
+
+    expect(await readFile(join(layout.releasesDir, "r2", PROJECT, ".env"), "utf8")).toBe("A=live\n")
+  })
+
   test("a failure stopping blue after green is live says green serves", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
@@ -625,6 +663,38 @@ describe("the first slot deploy on a server from before slots", () => {
     await runRelease(plan(), server, { home, user: "deploy" })
 
     expect((await readdir(layout.releasesDir)).sort()).toEqual(["legacy", "r2", "x"])
+  })
+
+  // Reproduce: retire the old service in "Start new release"; a release that then fails leaves no
+  // unit or manifest to bring the old deployment back with.
+  test("leaves a failed old service as it was when the new release fails", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    const legacy = legacyLayout(layout)
+    await legacyInGreen(server)
+    server.active.delete(legacy.unit)
+    server.ready = false
+
+    await runRelease(plan(), server, { home, user: "deploy" }).catch(() => {})
+
+    expect(await Bun.file(legacy.unitPath).exists()).toBe(true)
+    expect(await Bun.file(legacy.manifest).exists()).toBe(true)
+  })
+
+  // Reproduce: read the old service's slot from `manifest.slot` alone; one on the green ports
+  // without it then has the new release start on the ports it holds.
+  test("takes the slot whose ports the old service does not listen on", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, user: "deploy", name: "northline" })
+    await legacyInGreen(server)
+    const { slot: _slot, ...withoutSlot } = JSON.parse(
+      await readFile(legacyLayout(layout).manifest, "utf8")
+    )
+    await writeFile(legacyLayout(layout).manifest, JSON.stringify(withoutSlot))
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    expect(server.calls).toContain("systemctl start sixb-northline@blue.service")
   })
 
   test("with migrations pending, still retires the service it stopped", async () => {
