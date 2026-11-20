@@ -166,11 +166,6 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Replace a hand-written .env, losing what the source doesn't have",
     kind: "boolean",
   },
-  branch: {
-    syntax: "--branch <name>",
-    summary: "Branch whose pushes deploy (default: the repository's default branch)",
-    kind: "string",
-  },
   tail: {
     syntax: "--tail <lines>",
     summary: "Recent log lines to print (default: 100)",
@@ -248,10 +243,6 @@ export type LocalCommandId =
   | "deploy:start"
   | "deploy:stop"
   | "deploy:check"
-  | "deploy:ci"
-  | "deploy:access:list"
-  | "deploy:access:add"
-  | "deploy:access:remove"
   | "env:init"
   | "env:pull"
   | "env:set"
@@ -615,10 +606,6 @@ const commandTree: readonly CommandNode[] = [
         path: ["deploy", "check"],
         options: ["json"],
       }),
-      command("deploy:ci", "Deploy from GitHub Actions on every push", {
-        path: ["deploy", "ci"],
-        options: ["branch"],
-      }),
       command("deploy:status", "Show what the deployment runs, and which commit", {
         path: ["deploy", "status"],
         options: ["json"],
@@ -636,29 +623,6 @@ const commandTree: readonly CommandNode[] = [
           maximumPositionals: 1,
         })
       ),
-      {
-        name: "access",
-        summary: "Manage the keys that may deploy and operate the deployment",
-        usage: "sixb deploy access <list|add|remove>",
-        children: [
-          command("deploy:access:list", "List the authorized keys", {
-            path: ["deploy", "access", "list"],
-            options: ["json"],
-          }),
-          command("deploy:access:add", "Authorize a key: a .pub file, its text, or github:<user>", {
-            path: ["deploy", "access", "add"],
-            usage: "sixb deploy access add <key>",
-            minimumPositionals: 1,
-            maximumPositionals: 1,
-          }),
-          command("deploy:access:remove", "Revoke the keys with this fingerprint or comment", {
-            path: ["deploy", "access", "remove"],
-            usage: "sixb deploy access remove <fingerprint|comment>",
-            minimumPositionals: 1,
-            maximumPositionals: 1,
-          }),
-        ],
-      },
     ],
   },
   {
