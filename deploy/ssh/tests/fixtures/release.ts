@@ -3,7 +3,7 @@ import type { DeployRelease } from "@sixb/core/deploy"
 /** A release with an API, an app, a singleton and a project script. */
 export const release: DeployRelease = {
   name: "northline",
-  target: { kind: "ssh", location: "sixb@203.0.113.10" },
+  target: { kind: "ssh", location: "deploy@203.0.113.10" },
   bunVersion: "1.4.2",
   env: { NODE_ENV: "production" },
   steps: {

@@ -22,10 +22,12 @@ const healthy: Record<string, string> = {
   "os.systemd": "yes",
   "os.arch": "x86_64",
   "os.missing": "",
+  "account.name": "deploy",
+  "account.uid": "1000",
   linger: "yes",
   "caddy.version": "2.10.2",
   "caddy.reload": "yes",
-  "caddy.routes": "/etc/caddy/sixb.d/sixb",
+  "caddy.routes": "/etc/caddy/sixb.d/deploy",
   "caddy.routes-writable": "yes",
   "caddy.routes-imported": "yes",
   "caddy.caddyfile-imports": "yes",
@@ -68,6 +70,7 @@ describe("judging the host", () => {
     ["an env token others can read", "settings", { "file.env-token": "644 54" }],
     ["a port another program holds", "ports", { "port.3002": "other" }],
     ["another deployment", "deployments", { "deployments.others": "blog" }],
+    ["an account that is root", "account", { "account.name": "root", "account.uid": "0" }],
   ])("fails on %s", (_name, id, overrides) => {
     expect(statusOf(id, overrides)).toStartWith("fail")
   })
@@ -135,7 +138,7 @@ describe("the probe", () => {
     }
 
     const lines: string[] = []
-    const shell = new LocalShell({ HOME: home, USER: "sixb" })
+    const shell = new LocalShell({ HOME: home, USER: "deploy" })
     const probe = renderProbe({
       name: "northline",
       projectPath: "apps/northline",
@@ -150,7 +153,8 @@ describe("the probe", () => {
     expect(facts.get("file.shared-env")).not.toBe("missing")
     expect(facts.get("file.legacy-env")).not.toBe("missing")
     expect(facts.get("deployments.others")).toBe("blog")
-    expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/sixb")
+    expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/deploy")
+    expect(facts.get("account.uid")).toMatch(/^\d+$/)
     expect(facts.has("port.3001")).toBe(true)
     expect(facts.get("chromium.checked")).toBe("system libraries")
   })

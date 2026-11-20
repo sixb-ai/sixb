@@ -1,6 +1,6 @@
 # Deploy from GitHub Actions
 
-A workflow deploys on every push the same way you do from your laptop: it checks out the commit and runs `sixb deploy`. What it needs is a way to reach the server as `sixb` over SSH.
+A workflow deploys on every push the same way you do from your laptop: it checks out the commit and runs `sixb deploy`. What it needs is a way to reach the server over SSH as the deploy account. The job has no SSH config of yours, so `sixb.deploy.ts` names that account with `user`.
 
 ```yaml
 # .github/workflows/deploy.yml
@@ -46,14 +46,14 @@ Store two secrets in the repository's `production` environment:
 
 | Secret | Value |
 | --- | --- |
-| `DEPLOY_SSH_KEY` | The private half of a key made for this workflow (`ssh-keygen -t ed25519 -N "" -f deploy`), whose public half is in `sixb`'s `authorized_keys` on the server |
+| `DEPLOY_SSH_KEY` | The private half of a key made for this workflow (`ssh-keygen -t ed25519 -N "" -f deploy`), whose public half is in the deploy account's `authorized_keys` on the server |
 | `DEPLOY_KNOWN_HOSTS` | The server's host keys, from a connection you have checked: `ssh-keygen -F <host>` on your machine |
 
 Pinning the host keys means the workflow deploys to your server and refuses anything else that answers at its address. To require an approval before each deploy, add required reviewers to the `production` environment.
 
 ## Over Tailscale
 
-When the server is reachable only over a tailnet, the job joins it instead of holding a key, and `host` in `sixb.deploy.ts` is the server's Tailscale name. With [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) allowing the job's tag to log in as `sixb`, replace the "Reach the server" step:
+When the server is reachable only over a tailnet, the job joins it instead of holding a key, and `host` in `sixb.deploy.ts` is the server's Tailscale name. With [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) allowing the job's tag to log in as the deploy account, replace the "Reach the server" step:
 
 ```yaml
       - uses: tailscale/github-action@v3

@@ -1,9 +1,6 @@
 import { posix } from "node:path"
 import type { DeployHttpServiceName } from "@sixb/core/deploy"
 
-/** The account every deployment runs as. A server runs one deployment. */
-export const DEPLOY_USER = "sixb"
-
 /** The read-only token a deploy pulls `.env` with, for a project with a source. */
 export const ENV_TOKEN_FILE = "env-token"
 
@@ -80,11 +77,17 @@ export interface LegacyLayout {
   readonly manifest: string
 }
 
-export function deploymentLayout(input: { readonly home: string; readonly name: string }) {
+/** Where a deployment lives: under the home of the account it runs as, whichever that is. */
+export function deploymentLayout(input: {
+  readonly home: string
+  readonly user: string
+  readonly name: string
+}) {
   const root = posix.join(input.home, input.name)
   const deployDir = posix.join(root, "deploy")
   const unitDir = posix.join(input.home, ".config", "systemd", "user")
-  const caddyDir = posix.join("/etc/caddy/sixb.d", DEPLOY_USER)
+  // Each account writes routes only in its own folder, which the server's Caddyfile imports.
+  const caddyDir = posix.join("/etc/caddy/sixb.d", input.user)
   return {
     name: input.name,
     home: input.home,

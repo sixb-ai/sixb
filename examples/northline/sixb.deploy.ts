@@ -1,8 +1,10 @@
 import { defineDeploy } from "@sixb/core/deploy"
 import { SshTarget } from "@sixb/deploy-ssh"
 
-// The server and domain come from the environment, so no address lands in this repository.
+// The server and domain come from the environment, so no address lands in this repository. The
+// account is optional: without it, SSH picks the one your SSH config names for the host.
 const host = process.env.NORTHLINE_DEPLOY_HOST
+const user = process.env.NORTHLINE_DEPLOY_USER
 const domain = process.env.NORTHLINE_DEPLOY_DOMAIN
 if (!host || !domain) {
   throw new Error(
@@ -13,5 +15,5 @@ if (!host || !domain) {
 export default defineDeploy({
   name: "northline",
   domain,
-  target: new SshTarget({ host }),
+  target: new SshTarget({ host, ...(user ? { user } : {}) }),
 })

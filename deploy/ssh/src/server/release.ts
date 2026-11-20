@@ -92,9 +92,13 @@ type Live =
  * Moving the routes is the commit point: `live-slot` names the new slot from then on, so a deploy
  * that dies before it retires the previous release never leads the next one to stop what serves.
  */
-export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: string) {
+export async function runRelease(
+  plan: ReleasePlan,
+  host: ReleaseHost,
+  account: { readonly home: string; readonly user: string }
+) {
   const { release } = plan
-  const layout = deploymentLayout({ home, name: release.name })
+  const layout = deploymentLayout({ ...account, name: release.name })
   const next = releaseLayout(layout, {
     id: plan.releaseId,
     projectPath: plan.projectPath,

@@ -1,8 +1,8 @@
 # @sixb/deploy-ssh
 
 The SSH target for `sixb deploy`. It runs a Sixb project on a Linux server you reach over SSH, as
-the account `sixb`, with Caddy serving each domain over HTTPS, and ships each release without
-downtime.
+an account you choose, with Caddy serving each domain over HTTPS, and ships each release beside
+the live one.
 
 ```ts
 // sixb.deploy.ts
@@ -12,7 +12,7 @@ import { SshTarget } from "@sixb/deploy-ssh"
 export default defineDeploy({
   name: "northline",
   domain: "example.com",
-  target: new SshTarget({ host: "203.0.113.10" }),
+  target: new SshTarget({ host: "203.0.113.10", user: "deploy" }),
 })
 ```
 
@@ -47,7 +47,7 @@ the host requirements (`src/check/`) and ships releases.
 - **The supervisor** restarts a process that exits, waiting `restartDelayMs` times its restart
   count up to a cap, restarts one past `maxMemory`, and rotates logs at 20 MB. A manifest with
   `holdExclusive` leaves the singletons and project scripts stopped until a deploy starts them.
-- **Routes.** Each deployment writes `/etc/caddy/sixb.d/sixb/<name>.caddy`, which the root
+- **Routes.** Each deployment writes `/etc/caddy/sixb.d/<account>/<name>.caddy`, which the root
   Caddyfile imports. A deploy validates the whole configuration before
   `sudo systemctl reload caddy`, and puts the previous routes back when Caddy rejects the new ones.
   The app answers 502, 503 and 504 with the update page in `src/update-page.ts`. Caddy compresses

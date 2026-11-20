@@ -16,8 +16,8 @@ class FakeShell implements RemoteShell {
     this.scripts.push(script)
     const say = (line: string) => options.onLine?.(line, "stdout")
     if (script.includes("mktemp -d")) {
-      say("/home/sixb")
-      say("/home/sixb/northline/deploy/incoming/r.abc")
+      say("/home/deploy")
+      say("/home/deploy/northline/deploy/incoming/r.abc")
     } else if (script.startsWith("umask 077 && cat > ")) {
       const path = script.slice("umask 077 && cat > ".length).replaceAll("'", "")
       this.uploads.set(path, options.stdin ? await new Response(options.stdin).text() : "")
@@ -73,7 +73,7 @@ describe("deploying from the laptop", () => {
     ])
     const [planPath, planText] = [...shell.uploads].find(([path]) => path.endsWith(".json")) ?? []
     const plan = JSON.parse(planText ?? "{}") as ReleasePlan
-    expect(planPath).toStartWith("/home/sixb/northline/deploy/runs/")
+    expect(planPath).toStartWith("/home/deploy/northline/deploy/runs/")
     expect(plan).toMatchObject({ projectPath: "examples/northline" })
     expect(plan.record).toMatchObject({ commit: "c2c2c2c2c2c2c2", ref: "main", deployedBy: "ci" })
     expect([...shell.uploads.keys()].some((path) => path.endsWith(".sh"))).toBe(true)
@@ -99,6 +99,6 @@ describe("deploying from the laptop", () => {
     const { error } = await deploy(new FakeShell(new RemoteScriptError("Connection closed", 255)))
 
     expect(String(error)).toContain("carries on on the server")
-    expect(String(error)).toContain("/home/sixb/northline/deploy/runs/")
+    expect(String(error)).toContain("/home/deploy/northline/deploy/runs/")
   })
 })

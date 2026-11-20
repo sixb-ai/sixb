@@ -6,7 +6,7 @@
 
 You need:
 
-- **A server** that meets the [host requirements](host-requirements.md): Ubuntu or Debian with systemd, Caddy, and an account named `sixb` you can reach over SSH. The page has a cloud-init script that sets a new server up.
+- **A server** that meets the [host requirements](host-requirements.md): Ubuntu or Debian with systemd, Caddy, and an account you can reach over SSH. The page has a cloud-init script that sets a new server up.
 - **A domain** whose DNS you control. Each service gets its own name under it, so one wildcard record such as `*.example.com` pointing at the server covers them all. Ports 80 and 443 must be open; the server gets an HTTPS certificate for each name automatically.
 - **Production providers.** The services run as separate processes, so they need storage, a broker, and queues they can share, such as PostgreSQL and Redis, and [authentication](../auth/authentication.md) configured for production. See [Prepare your configuration](overview.md#prepare-your-configuration). The databases can run on the server or anywhere it can reach.
 
@@ -30,7 +30,7 @@ import { SshTarget } from "@sixb/deploy-ssh"
 export default defineDeploy({
   name: "shop",
   domain: "example.com",
-  target: new SshTarget({ host: "203.0.113.10" }),
+  target: new SshTarget({ host: "203.0.113.10", user: "deploy" }),
 })
 ```
 
@@ -57,7 +57,12 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 
 ### The SSH target
 
-`host` is the server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. The deployment runs as `sixb`, one per server.
+| Option | Purpose |
+| --- | --- |
+| `host` | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
+| `user` | The account the deployment logs in and runs as, never `root`. Leave it out and SSH decides, as `ssh <host>` would: the `User` your SSH config sets for the host, or your own login name. |
+
+A server runs one deployment.
 
 ### Services
 
@@ -113,11 +118,11 @@ It checks every [host requirement](host-requirements.md) and where each domain p
 
 To keep them in one place across your team and servers, use [environment variables from Doppler](environment-variables.md#deploy). A deploy then writes the server's `.env` for you, and you can skip the rest of this section.
 
-Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in `~/<name>/shared/.env` on the server. Create it readable only by `sixb`, then edit it:
+Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in `~/<name>/shared/.env` on the server. Create it readable only by the deploy account, then edit it:
 
 ```bash
-ssh sixb@203.0.113.10 'mkdir -p ~/shop/shared && install -m 600 /dev/null ~/shop/shared/.env'
-ssh -t sixb@203.0.113.10 'nano ~/shop/shared/.env'
+ssh deploy@203.0.113.10 'mkdir -p ~/shop/shared && install -m 600 /dev/null ~/shop/shared/.env'
+ssh -t deploy@203.0.113.10 'nano ~/shop/shared/.env'
 ```
 
 Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces it, even when the repository has a `.env`.

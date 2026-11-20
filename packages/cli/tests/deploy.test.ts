@@ -631,7 +631,7 @@ export default {
 
     expect(result.error).toBeUndefined()
     const built = JSON.parse(result.output) as DeployRelease
-    expect(built.target).toEqual({ kind: "ssh", location: "sixb@203.0.113.10" })
+    expect(built.target).toEqual({ kind: "ssh", location: "203.0.113.10" })
     expect(built.services.map((entry) => entry.name)).toEqual([
       "api",
       "app",
@@ -673,7 +673,7 @@ export default {
 
     expect(result.error).toBeUndefined()
     expect(result.output).toContain("sixb deploy --dry-run  northline")
-    expect(result.output).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
+    expect(result.output).toContain("ssh 203.0.113.10 · sixb.deploy.ts")
     expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3002 --no-migrate")
     expect(result.output).toContain("Nothing was deployed")
   })
