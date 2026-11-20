@@ -7,7 +7,7 @@
 | Ubuntu or Debian with systemd, on x64 or arm64, with `curl`, `unzip`, `tar`, `flock`, `setsid`, `sha256sum`, `ss` and GNU `stat` | Bun runs there, and the deploy uses those tools. |
 | An account you can reach over SSH, not `root`, with lingering on (`loginctl enable-linger <account>`) | The deployment runs as that account, and lingering starts its services at boot. Name it anything; these examples call it `deploy`. |
 | [Caddy](https://caddyserver.com) 2.7 or later, as described below | Caddy routes each domain to its service and gets its HTTPS certificate. |
-| The project's settings: an [env token](environment-variables.md#deploy) at `~/<name>/env-token`, or a `.env` at `~/<name>/shared/.env`, readable only by the account (mode 600) | A deploy pulls `.env` with the token, or links the `.env` you keep on the server. `<name>` is the deployment's `name`. |
+| The project's settings: an [env token](environment-variables.md#deploy) at `~/<name>/env-token` (none for a source that reads with the server's own identity, such as a [Key Vault managed identity](environment-variables.md#read-with-the-servers-managed-identity)), or a `.env` at `~/<name>/shared/.env`, readable only by the account (mode 600) | A deploy pulls `.env` with the token, or links the `.env` you keep on the server. `<name>` is the deployment's `name`. |
 | Outbound HTTPS to GitHub, the npm registry and your env source | A deploy downloads Bun and the dependencies. |
 | Ports 80 and 443 open | Caddy answers on them, and Let's Encrypt checks them. |
 | For a project that uses Playwright: Chromium's system libraries (`npx playwright install-deps chromium`, as root) | Playwright downloads its own browser, but not the libraries it needs. |
@@ -16,7 +16,7 @@ A server runs one deployment. Its services listen on loopback ports, 3001 and 30
 
 ## Caddy
 
-The Caddyfile imports the routes each deploy writes, and keeps Caddy's admin API off `localhost:2019`, where any process on the server could change every route:
+The Caddyfile imports the routes each deploy writes. We recommend keeping Caddy's admin API off `localhost:2019`, where any process on the server could change every route; the deploy doesn't use it:
 
 ```caddyfile
 # /etc/caddy/Caddyfile

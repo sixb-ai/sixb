@@ -65,12 +65,18 @@ export async function runEnvPull(options: {
   }
 
   const { config, source } = await requireSource(cwd)
-  const token = options.tokenFile === undefined ? undefined : await readToken(options.tokenFile)
+  // A server: it reads with its token file, unless the source reads with the server's identity.
+  const server = options.tokenFile !== undefined
+  const token =
+    options.tokenFile !== undefined && source.serverNeedsToken !== false
+      ? await readToken(options.tokenFile)
+      : undefined
   const pulled = await pullEnv({
     cwd,
     config,
     source,
     env,
+    server,
     ...(token === undefined ? {} : { token }),
     force: options.force === true,
   })
@@ -91,19 +97,23 @@ async function pullEnv(input: {
   readonly config: EnvConfig
   readonly source: EnvSource
   readonly env: EnvName
+  readonly server: boolean
   readonly token?: string
   readonly force?: boolean
 }): Promise<PullResult> {
-  const { config, source, env, token } = input
+  const { config, source, env, server, token } = input
   const path = join(input.cwd, ".env")
 
   let values: Readonly<Record<string, string>>
   try {
-    values = await source.read(env, token === undefined ? {} : { token })
+    values = await source.read(
+      env,
+      server ? { server, ...(token === undefined ? {} : { token }) } : {}
+    )
   } catch (error) {
     // A server riding out an outage, so it can still take a hotfix. A refusal never reaches this:
     // a revoked token must stop the deploy.
-    const riding = token !== undefined && error instanceof EnvSourceUnreachableError
+    const riding = server && error instanceof EnvSourceUnreachableError
     if (riding && (await isCompleteGeneratedEnv(path, config, env))) {
       return { kept: true, reason: errorMessage(error) }
     }
@@ -192,7 +202,7 @@ export async function pullIntoThisProcess(
   config: EnvConfig,
   source: EnvSource
 ): Promise<void> {
-  const pulled = await pullEnv({ cwd, config, source, env: "dev" })
+  const pulled = await pullEnv({ cwd, config, source, env: "dev", server: false })
   if (pulled.kept) return
 
   const localPath = join(cwd, ".env.local")

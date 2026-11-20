@@ -14,13 +14,21 @@ export type EnvVarRule = "required" | "prod" | "optional"
 export interface EnvSource {
   /** The names `env` has values for, without reading the values. */
   names(env: EnvName): Promise<readonly string[]>
-  /** Every value `env` has. `token` overrides how the source would otherwise authenticate. */
+  /**
+   * Every value `env` has. `server` reads as a server does, never signing a person in, with
+   * `token`, the credential from its token file, when the source needs one.
+   */
   read(
     env: EnvName,
-    options?: { readonly token?: string }
+    options?: { readonly server?: boolean; readonly token?: string }
   ): Promise<Readonly<Record<string, string>>>
   /** Creates or updates these values, and leaves the rest alone. */
   write(env: EnvName, values: Readonly<Record<string, string>>): Promise<void>
+  /**
+   * Whether a server reads with a credential in its token file. False for a source that reads
+   * with the server's own identity, such as an Azure managed identity. Defaults to true.
+   */
+  readonly serverNeedsToken?: boolean
 }
 
 /** The source could not answer: an outage, not a refusal. A retry may succeed unchanged. */

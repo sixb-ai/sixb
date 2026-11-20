@@ -42,7 +42,8 @@ export interface DeployOptions {
 export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd()
   const { path, config } = await loadDeployConfig(cwd)
-  const envFromSource = Boolean((await loadEnvConfig(cwd))?.source)
+  const envSource = (await loadEnvConfig(cwd))?.source
+  const envFromSource = Boolean(envSource)
 
   if (options.dryRun) {
     const release = buildDeployRelease(config, {
@@ -74,6 +75,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
       name: config.name,
       projectPath: source.projectPath,
       chromium: await usesChromium(cwd),
+      envToken: envSource?.serverNeedsToken !== false,
     })
     return { source, release, checks }
   })
@@ -115,14 +117,16 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
 export async function runDeployCheck(options: { readonly json?: boolean; readonly cwd?: string }) {
   const cwd = options.cwd ?? process.cwd()
   const { config } = await loadDeployConfig(cwd)
+  const envSource = (await loadEnvConfig(cwd))?.source
   const release = buildDeployRelease(config, {
     bunVersion: await resolveBunVersion(cwd),
-    envFromSource: Boolean((await loadEnvConfig(cwd))?.source),
+    envFromSource: Boolean(envSource),
   })
   const context = {
     name: config.name,
     projectPath: await projectPathOf(cwd),
     chromium: await usesChromium(cwd),
+    envToken: envSource?.serverNeedsToken !== false,
   }
   const targetChecks = await withTask("deploy check", `Checking ${location(config)}`, () =>
     config.target.check(release, context)

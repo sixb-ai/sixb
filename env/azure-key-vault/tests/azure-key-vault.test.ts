@@ -513,6 +513,25 @@ describe("azureKeyVault", () => {
       expect(await calls(log)).toEqual([])
     })
 
+    // Reproduce: leave `serverNeedsToken` true, or ignore `server` in read; a server reading with
+    // its managed identity then needs a token file it never uses.
+    test("needs no token file: a server reads with the identity alone", async () => {
+      const sent = fakeAzure(metadataService(vault("shop-prod", { A: "1" })))
+
+      expect(managed().serverNeedsToken).toBe(false)
+      expect(source().serverNeedsToken).toBe(true)
+      expect(await managed().read("prod", { server: true })).toEqual({ A: "1" })
+      expect(sent[0]?.url.hostname).toBe("169.254.169.254")
+    })
+
+    test("a server without a token or an identity says what it needs", async () => {
+      const error = await source()
+        .read("prod", { server: true })
+        .catch((failure: unknown) => failure)
+
+      expect(String(error)).toContain("reads with the credential in its token file")
+    })
+
     test("asks for a user-assigned identity by its client ID", async () => {
       const sent = fakeAzure(metadataService(vault("shop-prod", {})))
 
