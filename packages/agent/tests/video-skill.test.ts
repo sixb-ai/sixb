@@ -17,16 +17,23 @@ const videoGuide = () => guideFile("video.md")
 const oneLine = (html: string) => html.replace(/\s+/g, " ")
 
 describe("the video guide", () => {
-  // Guard proof: drop the instant from quoteArtifactComment; the guide's example no longer matches
+  // Guard proof: drop the instant from quoteArtifactComment; the guide's examples no longer match
   // what the app sends, and the Agent cannot tell which moment a comment is about.
-  test("shows a comment at an instant as the app quotes it", () => {
-    const quoted = quoteArtifactComment({
+  test("shows a comment at an instant, and one whose scene is gone, as the app quotes them", () => {
+    const comment = {
       id: "cmt_4k2a9c0d1e",
       authorName: "Ava Martin",
-      anchor: { at: 6_000, scene: "outro", revision: 3 },
+      anchor: { scene: "outro", offset: 1_500, label: "Thanks", revision: 3 },
       body: "Make this title bigger.",
-    })
-    expect(videoGuide()).toContain(quoted)
+    }
+    const scene = { id: "outro", startMs: 4_500, durationMs: 3_000, renderKey: "k" }
+    const video = { kind: "video", width: 1920, height: 1080, fps: 30, durationMs: 7_500 } as const
+
+    const placed = quoteArtifactComment({ ...comment, outline: { ...video, scenes: [scene] } })
+    const gone = quoteArtifactComment({ ...comment, outline: { ...video, scenes: [] } })
+
+    expect(videoGuide()).toContain(placed)
+    expect(videoGuide()).toContain(gone)
   })
 
   test("acts only on the comments a message carries, and tells a guest from a member", () => {
