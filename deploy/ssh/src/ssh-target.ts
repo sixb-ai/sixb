@@ -51,7 +51,7 @@ const LISTEN_HOST = "127.0.0.1"
 export class SshTarget implements DeployTarget {
   readonly kind = "ssh"
   readonly host: string
-  /** The account the options name; without one, SSH picks it. */
+  /** The account the deployment logs in and runs as. */
   readonly user: string
   readonly location: string
 

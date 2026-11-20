@@ -58,6 +58,8 @@ export interface ReleaseHost {
   systemctl(...args: string[]): Promise<number>
   /** Whether a unit runs anything: started, starting, or still stopping while it drains. */
   isActive(unit: string): Promise<boolean>
+  /** Whether a unit starts at boot. */
+  isEnabled(unit: string): Promise<boolean>
   readRoutes(path: string): Promise<string | null>
   /** Writes the deployment's routes, or removes them with null. */
   writeRoutes(path: string, routes: string | null): Promise<void>
@@ -142,6 +144,10 @@ export async function runRelease(
       await copyIfPresent(join(layout.code, plan.projectPath, ".env"), join(next.project, ".env"))
       await mustRun({ ...pull, args: [...pull.args, "--token-file", layout.envToken] })
     })
+  } else if (await exists(layout.envToken)) {
+    // A project with a source, deploying a commit from before it had one: the values the live
+    // release has, not an older `shared/.env`.
+    await copyIfPresent(join(layout.code, plan.projectPath, ".env"), join(next.project, ".env"))
   } else if (await exists(layout.sharedEnv)) {
     await symlink(layout.sharedEnv, join(next.project, ".env")).catch(ignoreExisting)
   }
@@ -182,7 +188,9 @@ export async function runRelease(
 
     await step("Start new release", async () => {
       await stopDraining(slot.unit, host)
-      if (live?.kind !== "legacy") await retireLegacy(layout, host, { drain: false })
+      // An adopted service an earlier deploy left draining may hold this slot's ports. Retiring it
+      // for good waits for the commit, so a release that fails here leaves it as it was.
+      if (live?.kind !== "legacy") await stopDraining(legacyLayout(layout).unit, host)
       await writeServiceFiles(layout, slot, next, release, holdExclusive)
       await host.systemctl("daemon-reload")
       // A supervisor that was killed leaves its state and unanswered requests behind.
@@ -242,7 +250,7 @@ export async function runRelease(
     })
 
     await step("Retire previous release", async () => {
-      await makeLive({ layout, slot, next, release, plan, previous: live, host, undo })
+      await makeLive({ layout, slot, next, release, plan, host, undo })
       committed = true
       await cleanUp({ layout, slot, next, previous: live, host })
     })
@@ -280,9 +288,22 @@ async function findLive(layout: DeploymentLayout, host: ReleaseHost): Promise<Li
   const legacy = legacyLayout(layout)
   if (await host.isActive(legacy.unit)) {
     const manifest = await loadProcessManifest(legacy.manifest)
-    return { kind: "legacy", slot: manifest.slot ?? "blue", manifest }
+    return { kind: "legacy", slot: manifest.slot ?? slotOfPorts(manifest), manifest }
   }
   return null
+}
+
+/**
+ * The slot whose ports a deployment from before slots listens on, from its services' `--port`, so
+ * the new release takes the other pair. One on ports of its own leaves both slots free.
+ */
+function slotOfPorts(manifest: ProcessManifest): DeploySlot {
+  const green = new Set<string>(Object.values(SLOT_PORTS.green).map(String))
+  const ports = manifest.services.flatMap((service) => {
+    const at = service.args.indexOf("--port")
+    return at >= 0 && service.args[at + 1] ? [service.args[at + 1]] : []
+  })
+  return ports.some((port) => green.has(port ?? "")) ? "green" : "blue"
 }
 
 /** With nothing live, the slot after the last one used, so a stopped deployment alternates too. */
@@ -470,12 +491,10 @@ async function makeLive(input: {
   readonly next: ReleaseLayout
   readonly release: DeployRelease
   readonly plan: ReleasePlan
-  /** What was live when the deploy began, whether or not a migration stopped it since. */
-  readonly previous: Live | null
   readonly host: ReleaseHost
   readonly undo: Undo[]
 }): Promise<void> {
-  const { layout, slot, next, release, plan, previous, host, undo } = input
+  const { layout, slot, next, release, plan, host, undo } = input
 
   // Restarted by systemd, the slot runs everything: it is live now.
   const manifest = renderProcessManifest(releaseForSlot(release, SLOT_PORTS[slot.slot]), {
@@ -486,15 +505,12 @@ async function makeLive(input: {
   })
   await writeFileAtomically(slot.manifest, `${JSON.stringify(manifest, null, 2)}\n`)
 
-  const previousUnit =
-    previous?.kind === "legacy"
-      ? legacyLayout(layout).unit
-      : previous?.kind === "slot"
-        ? slotLayout(layout, previous.slot).unit
-        : null
-  if (previousUnit) {
-    undo.push(() => systemctlOrThrow(host, "enable", previousUnit))
-    await systemctlOrThrow(host, "disable", previousUnit)
+  // Anything else that starts at boot goes, live or not: a slot or service that had stopped would
+  // otherwise come back at the next boot beside this one, with its own singletons.
+  for (const unit of [slotLayout(layout, otherSlot(slot.slot)).unit, legacyLayout(layout).unit]) {
+    if (!(await host.isEnabled(unit))) continue
+    undo.push(() => systemctlOrThrow(host, "enable", unit))
+    await systemctlOrThrow(host, "disable", unit)
   }
   undo.push(() => systemctlOrThrow(host, "disable", slot.unit))
   await systemctlOrThrow(host, "enable", slot.unit)
@@ -539,7 +555,13 @@ async function cleanUp(input: {
   const { layout, slot, next, previous, host } = input
   if (previous?.kind === "slot") {
     await host.systemctl("stop", "--no-block", slotLayout(layout, previous.slot).unit)
-  } else if (previous?.kind === "legacy") {
+  }
+  const legacy = legacyLayout(layout)
+  if (
+    previous?.kind === "legacy" ||
+    (await exists(legacy.unitPath)) ||
+    (await exists(legacy.manifest))
+  ) {
     await retireLegacy(layout, host, { drain: true })
   }
 

@@ -194,7 +194,7 @@ function settings(
         remedy: `Put a read-only token for the project's prod values at ${folder}/env-token, mode 600. See ${ENV_TOKEN_DOCS}.`,
       })
     }
-    return token.mode === "600"
+    return privateMode(token.mode)
       ? ok("settings", "Settings", "env token in place")
       : fail("settings", "Settings", `the env token is readable by others (mode ${token.mode})`, {
           commands: root ? [`chmod 600 ${root}/env-token`] : [],
@@ -208,7 +208,7 @@ function settings(
       remedy: `Create ${folder}/shared/.env, mode 600, with the project's settings.`,
     })
   }
-  return env.mode === "600"
+  return privateMode(env.mode)
     ? ok("settings", "Settings", ".env in place")
     : fail("settings", "Settings", `.env is readable by others (mode ${env.mode})`, {
         commands: shared && root ? [`chmod 600 ${root}/shared/.env`] : [],
@@ -274,6 +274,12 @@ function fail(
 /** A name or path that pastes into a shell as it is, or nothing when it would need quoting. */
 function pasteable(value: string | undefined): string | null {
   return value && /^[A-Za-z0-9._/-]+$/.test(value) ? value : null
+}
+
+/** Readable by its owner alone: no group or other bits, as 600 or 400. */
+function privateMode(mode: string): boolean {
+  const bits = Number.parseInt(mode, 8)
+  return Number.isInteger(bits) && (bits & 0o077) === 0
 }
 
 /** `mode size` from the probe, or nothing when the file is missing. */

@@ -33,7 +33,7 @@ Sixb packages are versioned independently. Each release entry names the packages
 - `sixb deploy setup`, `sixb deploy access` and `sixb deploy ci` are gone: a server comes from your
   own provisioning and meets the [host requirements](docs/deployment/host-requirements.md), and
   [CI deploys](docs/deployment/github-actions.md) with a key or Tailscale you give it. A server set
-  up before keeps working as it is.
+  up before, running one deployment, keeps working as it is.
 - `SshTarget` keeps `host` and `user` (still `"sixb"` by default): one deployment per server, on
   fixed ports. Remove `ports` and `standbyPorts` from `sixb.deploy.ts`.
 - The first deploy after upgrading adopts the running deployment as its live slot, with no downtime.

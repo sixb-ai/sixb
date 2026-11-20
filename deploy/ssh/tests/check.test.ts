@@ -73,6 +73,7 @@ describe("judging the host", () => {
     ["no env token", "settings", { "file.env-token": "missing" }],
     ["an empty env token", "settings", { "file.env-token": "600 0" }],
     ["an env token others can read", "settings", { "file.env-token": "644 54" }],
+    ["an env token its group can read", "settings", { "file.env-token": "640 54" }],
     ["a port another program holds", "ports", { "port.3002": "other" }],
     ["another deployment", "deployments", { "deployments.others": "blog" }],
     ["an account that is root", "account", { "account.name": "root", "account.uid": "0" }],
@@ -183,6 +184,10 @@ describe("judging the host", () => {
     expect(loose?.commands).toEqual(["chmod 600 /home/deploy/shop/env-token"])
     const missing = checks({ "file.env-token": "missing" }).find((c) => c.id === "settings")
     expect(missing?.remedy).toContain("/home/deploy/shop/env-token, mode 600")
+  })
+
+  test("takes a settings file only its owner can read, writable or not", () => {
+    expect(statusOf("settings", { "file.env-token": "400 54" })).toStartWith("ok")
   })
 
   test("warns about a nearly full disk", () => {
