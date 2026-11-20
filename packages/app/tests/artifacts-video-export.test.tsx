@@ -183,6 +183,8 @@ describe("a video's MP4 in its header", () => {
   })
 
   // Reproduce by asking with render in the first read of useVideoExport: opening a video renders it.
+  // Reproduce the count by dropping RenderingCount from the trigger: a desktop header then shows
+  // a bare ring, and how far it is only once its menu is opened.
   test("exports when asked, then shows how far it has rendered", async () => {
     let started = false
     const asked = serve((_version, query) =>
@@ -214,9 +216,10 @@ describe("a video's MP4 in its header", () => {
       expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
     )
     expect(asked).toContain("POST /api/artifacts/art_v1de0f17m0/versions/3/video")
-    expect(
-      view.container.querySelector("[data-video-export='rendering']")?.getAttribute("aria-label")
-    ).toBe("Rendering the MP4, 1 of 3 parts done")
+    const button = view.container.querySelector("[data-video-export='rendering']")
+    expect(button?.getAttribute("aria-label")).toBe("Rendering the MP4, 1 of 3 parts done")
+    // On the button, at a glance; a wide header puts Rendering before it.
+    expect(button?.textContent).toBe("Rendering 1/3")
   })
 
   // Reproduce by reading a failed answer as failed in videoExportView whether or not it was asked
