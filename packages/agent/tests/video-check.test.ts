@@ -4,6 +4,7 @@ import {
   craftWarnings,
   hiddenMediaWarnings,
   type MediaSight,
+  mediaInstants,
   videoInstants,
   videoWarnings,
 } from "../src/artifacts/layout-check/video-check"
@@ -235,7 +236,7 @@ describe("a video's check", () => {
         code: "video_media_hidden",
         part: "s1",
         message:
-          "At 0.4 s, 2 s and 3.75 s, in scene 's1': the <video> media/phone.mp4 never shows while it plays: its opacity, or a parent's, is 0. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.",
+          "From 0.4 s to 3.75 s, in scene 's1': the <video> media/phone.mp4 never shows while it plays: its opacity, or a parent's, is 0. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.",
       },
     ])
   })
@@ -263,5 +264,107 @@ describe("a video's check", () => {
         { time: 3.75, sights: [clip("display"), late] },
       ])
     ).toEqual([])
+  })
+
+  // Guard proof: return no boxes from hiddenMediaWarnings (skip its `framed` looks); the card
+  // whose clip ends at 2 s then stays empty on screen until 6 s, and the check passes it, since
+  // the frame keeps its caption and the chapter's index.
+  test("names a box left on screen empty once its clip has ended, from when to when", () => {
+    const film = outline([6_000])
+    const card = (time: number): MediaSight => ({
+      scene: "s1",
+      index: 0,
+      tag: "video",
+      file: "media/card.mp4",
+      start: 0,
+      duration: 2,
+      ...(time >= 2 ? { hidden: "visibility" } : {}),
+      box: { index: 0 },
+    })
+
+    const warnings = hiddenMediaWarnings(
+      film,
+      [0.4, 1, 2, 3, 4, 5, 5.75].map((time) => ({ time, sights: [card(time)] }))
+    )
+    expect(warnings).toEqual([
+      {
+        code: "video_media_box_empty",
+        part: "s1",
+        message:
+          "From 2 s to 5.75 s, in scene 's1': the box that frames the <video> media/card.mp4 is on screen with nothing in it: it stopped playing at 2 s. Viewers see an empty frame. Play it for as long as its box shows, by its data-start and data-duration, or take the box out with it.",
+      },
+    ])
+  })
+
+  // Guard proof: name every medium never shown again (drop `named` in hiddenMediaWarnings); the
+  // phone that stays black is then reported twice, once for its box and once for itself.
+  test("names a phone that frames footage at opacity 0 once, by its box", () => {
+    const film = outline([4_000])
+    const phone: MediaSight = {
+      scene: "s1",
+      index: 0,
+      tag: "video",
+      file: "media/phone.mp4",
+      start: 0,
+      hidden: "opacity",
+      box: { index: 0 },
+    }
+
+    const warnings = hiddenMediaWarnings(
+      film,
+      [0.4, 1, 2, 3, 3.75].map((time) => ({ time, sights: [phone] }))
+    )
+    expect(warnings.map((warning) => warning.code)).toEqual(["video_media_box_empty"])
+    expect(warnings[0]?.message).toContain(
+      "From 0.4 s to 3.75 s, in scene 's1': the box that frames the <video> media/phone.mp4 is on screen with nothing in it: its opacity, or a parent's, is 0."
+    )
+  })
+
+  // Guard proof: judge a box by its first medium alone, or at a single look (`run.length >= 1`
+  // in emptyRun); the frame whose second clip follows the first, or the card whose clip ends a
+  // frame before it leaves, then reads as empty.
+  test("leaves alone a box that a second clip fills, one that leaves with its clip, or one hidden", () => {
+    const film = outline([6_000])
+    const shot = (index: number, start: number, time: number, box = {}): MediaSight => ({
+      scene: "s1",
+      index,
+      tag: "video",
+      file: `media/shot-${index}.mp4`,
+      start,
+      duration: 3,
+      ...(time < start || time >= start + 3 ? { hidden: "visibility" } : {}),
+      box: { index: 0, ...box },
+    })
+    const times = [0.4, 1, 2, 3, 4, 5, 5.75]
+
+    // Two clips in a row in the same frame.
+    expect(
+      hiddenMediaWarnings(
+        film,
+        times.map((time) => ({ time, sights: [shot(0, 0, time), shot(1, 3, time)] }))
+      )
+    ).toEqual([])
+    // A clip that ends at 3 s, seen empty once before its box fades out.
+    expect(
+      hiddenMediaWarnings(
+        film,
+        times.map((time) => ({
+          time,
+          sights: [shot(0, 0, time, time > 3 ? { hidden: "opacity" } : {})],
+        }))
+      )
+    ).toEqual([])
+  })
+
+  // Guard proof: look only at the snapshot's instants (return the frames' alone from
+  // mediaInstants); a card left empty between a scene's middle and its end then goes unseen.
+  test("looks at the media every second between snapshots, and as often for a long video", () => {
+    const short = outline([4_000])
+    expect(mediaInstants(short, videoInstants(short))).toEqual([0, 400, 1_000, 2_000, 3_000, 3_750])
+
+    const long = outline(Array.from({ length: 60 }, () => 10_000))
+    const looks = mediaInstants(long, videoInstants(long))
+    expect(looks.length).toBeLessThanOrEqual(240 + 24)
+    expect(looks[1]).toBe(2_500)
   })
 })

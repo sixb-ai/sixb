@@ -27,6 +27,13 @@ const MAX_FRAMES = 24
 const ARRIVED_MS = 400
 /** The most a check reports of HyperFrames' findings; the contact sheet shows the rest. */
 const MAX_WARNINGS = 12
+/**
+ * How often the check looks at the media between its snapshots, and the most looks it takes: a
+ * box left empty for two seconds is seen empty twice, in a long video for a little longer. A look
+ * is a seek and a few computed styles, a fraction of a snapshot.
+ */
+const LOOK_EVERY_MS = 1_000
+const MAX_LOOKS = 240
 
 /**
  * The craft rules of the guide a check measures, so that no model can read past them: an end card
@@ -129,6 +136,11 @@ export interface MediaSight {
   readonly duration?: number
   /** Why it cannot be seen; absent when it can. */
   readonly hidden?: MediaHidden
+  /**
+   * What frames it, such as a phone or a card, when its parent paints a ground or a border: its
+   * place among the scene's boxes, and why it cannot be seen, absent when it can.
+   */
+  readonly box?: { readonly index: number; readonly hidden?: MediaHidden }
 }
 
 /** What the probe saw at an instant of the check, in seconds. */
@@ -140,10 +152,11 @@ export interface MediaSample {
 /**
  * Checks a published video in the sandbox with HyperFrames, the release its export renders with,
  * on the files the export renders: `hyperframes check` for what breaks, overflows, reads poorly or
- * sounds wrong, `mediaProbe` at the snapshot's instants, in the root as the app's frame plays it,
- * for footage never seen while it plays, and `hyperframes snapshot` for a contact sheet of each
- * scene's start, middle and end. A sandbox without HyperFrames skips it; so does a check that
- * fails, which never costs the Agent its publish.
+ * sounds wrong, `mediaProbe` at the snapshot's instants and every second between, in the root as
+ * the app's frame plays it, for footage never seen while it plays and boxes left empty, and
+ * `hyperframes snapshot` for a contact sheet of each scene's start, middle and end. A sandbox
+ * without HyperFrames skips it; so does a check that fails, which never costs the Agent its
+ * publish.
  */
 export async function checkVideo(input: {
   readonly handle: AgentSandboxHandle
@@ -224,6 +237,15 @@ export async function checkVideo(input: {
         frames.map((frame) => ({
           at: frame.atMs / 1000,
           scenes: scenesAt(input.outline, frame.atMs).map((scene) => scene.id),
+        }))
+      ),
+    },
+    {
+      path: posix.join(output, "looks.json"),
+      contents: JSON.stringify(
+        mediaInstants(input.outline, frames).map((atMs) => ({
+          at: atMs / 1000,
+          scenes: scenesAt(input.outline, atMs).map((scene) => scene.id),
         }))
       ),
     },
@@ -359,6 +381,20 @@ function sceneInstants(outline: VideoOutline, most: number): Omit<VideoFrame, "p
 }
 
 /**
+ * The instants the check looks at the media: each it snapshots, and one every `LOOK_EVERY_MS`
+ * between, spread wider past `MAX_LOOKS`.
+ */
+export function mediaInstants(
+  outline: VideoOutline,
+  frames: readonly Omit<VideoFrame, "path">[]
+): number[] {
+  const every = Math.max(LOOK_EVERY_MS, outline.durationMs / MAX_LOOKS)
+  const looks = new Set(frames.map((frame) => frame.atMs))
+  for (let atMs = every; atMs < outline.durationMs; atMs += every) looks.add(Math.round(atMs))
+  return [...looks].sort((a, b) => a - b)
+}
+
+/**
  * What the check measures of the guide's craft: a frame with nothing on it, a scene that flashes
  * by, an end card that lingers, a teaser that runs long. Each names its scene and when.
  */
@@ -423,10 +459,14 @@ const HIDDEN: Record<MediaHidden, string> = {
 }
 
 /**
- * A video or an image that is never seen while it plays: at every instant the check sampled while
- * it plays, it was hidden, as `mediaProbe` computed it. A viewer sees what is behind it instead,
- * such as a black phone where the footage should be; the tween that was to bring it in never ran.
- * Each names its scene, its file and when.
+ * What the media the check looked at leave unseen, each named by its scene, its file and when:
+ *
+ * - a box that frames footage, such as a phone or a card, on screen empty at two looks in a row,
+ *   a second or more apart: nothing it frames plays, or shows. Its clip ended before the box left,
+ *   or the tween that was to bring the footage in never ran.
+ * - a video or an image never seen while it plays: hidden at every instant the check looked at it
+ *   then. A viewer sees what is behind it instead, such as a black phone where the footage should
+ *   be. One already named by its empty box is not named again.
  */
 export function hiddenMediaWarnings(
   outline: VideoOutline,
@@ -438,9 +478,20 @@ export function hiddenMediaWarnings(
     string,
     { sight: MediaSight; seen: { atMs: number; hidden?: MediaHidden }[] }
   >()
+  // Each box, by its scene and place, with what it framed at each instant it was looked at: why
+  // it was empty, if it showed and nothing in it did.
+  const boxes = new Map<
+    string,
+    { sights: MediaSight[]; looks: { atMs: number; empty?: Empty }[] }
+  >()
 
-  for (const sample of samples) {
+  for (const sample of [...samples].sort((a, b) => a.time - b.time)) {
     const atMs = Math.round(sample.time * 1000)
+    // The boxes looked at in this instant: whether each shows, and why each medium in it does not.
+    const framed = new Map<
+      string,
+      { away: boolean; sights: MediaSight[]; unseen: (Empty | undefined)[] }
+    >()
 
     for (const sight of sample.sights) {
       const scene = scenes.get(sight.scene)
@@ -449,29 +500,96 @@ export function hiddenMediaWarnings(
       // When it plays, within its scene: an instant outside it does not judge it.
       const from = scene.startMs + sight.start * 1000
       const sceneEnd = scene.startMs + scene.durationMs
-      const to = sight.duration === undefined ? sceneEnd : from + sight.duration * 1000
-      if (atMs < from || atMs >= Math.min(to, sceneEnd)) continue
+      const to = Math.min(
+        sight.duration === undefined ? sceneEnd : from + sight.duration * 1000,
+        sceneEnd
+      )
+      const playing = atMs >= from && atMs < to
 
       const key = `${sight.scene}\0${sight.index}\0${sight.file}`
-      const each = media.get(key) ?? { sight, seen: [] }
-      each.seen.push({ atMs, ...(sight.hidden ? { hidden: sight.hidden } : {}) })
-      media.set(key, each)
+      if (playing) {
+        const each = media.get(key) ?? { sight, seen: [] }
+        each.seen.push({ atMs, ...(sight.hidden ? { hidden: sight.hidden } : {}) })
+        media.set(key, each)
+      }
+
+      if (!sight.box || atMs < scene.startMs || atMs >= sceneEnd) continue
+      const boxKey = `${sight.scene}\0${sight.box.index}`
+      const box = framed.get(boxKey) ?? { away: false, sights: [], unseen: [] }
+      box.away ||= sight.box.hidden !== undefined
+      box.sights.push(sight)
+      box.unseen.push(
+        atMs < from
+          ? { why: `it starts playing at ${seconds(from)}`, timed: true }
+          : atMs >= to
+            ? { why: `it stopped playing at ${seconds(to)}`, timed: true }
+            : sight.hidden
+              ? { why: HIDDEN[sight.hidden], timed: false }
+              : undefined
+      )
+      framed.set(boxKey, box)
+    }
+
+    for (const [key, box] of framed) {
+      const each = boxes.get(key) ?? { sights: box.sights, looks: [] }
+      const [empty] = box.unseen
+      const shows = box.away || box.unseen.some((why) => why === undefined)
+      each.looks.push({ atMs, ...(!shows && empty ? { empty } : {}) })
+      boxes.set(key, each)
     }
   }
 
   const warnings: LayoutWarning[] = []
-  for (const { sight, seen } of media.values()) {
-    if (seen.length === 0 || seen.some((at) => at.hidden === undefined)) continue
+  const named = new Set<string>()
 
-    const when = list(seen.map((at) => seconds(at.atMs)))
+  for (const { sights, looks } of boxes.values()) {
+    const run = emptyRun(looks)
+    const [first] = sights
+    const empty = run?.[0]?.empty
+    if (!run || !first || !empty) continue
+
+    for (const sight of sights) named.add(`${sight.scene}\0${sight.index}\0${sight.file}`)
+    const fix = empty.timed
+      ? "Play it for as long as its box shows, by its data-start and data-duration"
+      : "Make sure what brings it in runs while its box shows and targets it"
+    warnings.push({
+      code: "video_media_box_empty",
+      part: first.scene,
+      message: `${span(run.map((look) => look.atMs))}, in scene '${first.scene}': the box that frames the <${first.tag}> ${first.file} is on screen with nothing in it: ${empty.why}. Viewers see an empty frame. ${fix}, or take the box out with it.`,
+    })
+  }
+
+  for (const [key, { sight, seen }] of media) {
+    if (named.has(key) || seen.length === 0 || seen.some((at) => at.hidden === undefined)) continue
+
     const why = [...new Set(seen.map((at) => HIDDEN[at.hidden ?? "opacity"]))].join(", then ")
     warnings.push({
       code: "video_media_hidden",
       part: sight.scene,
-      message: `At ${when}, in scene '${sight.scene}': the <${sight.tag}> ${sight.file} never shows while it plays: ${why}. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.`,
+      message: `${span(seen.map((at) => at.atMs))}, in scene '${sight.scene}': the <${sight.tag}> ${sight.file} never shows while it plays: ${why}. Viewers see what is behind it instead. Make sure what brings it in runs within the scene and targets it, or remove it if it is not meant to show.`,
     })
   }
   return warnings.slice(0, MAX_WARNINGS)
+}
+
+/** Why a box shows empty: what its first medium says, and whether that is its clip's times. */
+interface Empty {
+  readonly why: string
+  readonly timed: boolean
+}
+
+/** The first looks in a row at a box that each found it empty, when there are two or more. */
+function emptyRun<Look extends { readonly empty?: Empty }>(
+  looks: readonly Look[]
+): Look[] | undefined {
+  let run: Look[] = []
+  for (const look of looks) {
+    if (look.empty === undefined) {
+      if (run.length >= 2) return run
+      run = []
+    } else run.push(look)
+  }
+  return run.length >= 2 ? run : undefined
 }
 
 /**
@@ -491,6 +609,49 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
   const root = document.querySelector("[data-composition-id]")
   if (!root) return []
   const frame = root.getBoundingClientRect()
+
+  /** Why an element cannot be seen at this instant, if it cannot. */
+  const unseen = (element: Element): MediaHidden | undefined => {
+    let opacity = 1
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node)
+      if (style.display === "none") return "display"
+      opacity *= Number(style.opacity)
+    }
+
+    const box = element.getBoundingClientRect()
+    const outside =
+      box.right <= frame.left ||
+      box.left >= frame.right ||
+      box.bottom <= frame.top ||
+      box.top >= frame.bottom
+    return getComputedStyle(element).visibility !== "visible"
+      ? "visibility"
+      : opacity < MIN_OPACITY
+        ? "opacity"
+        : box.width < 1 || box.height < 1
+          ? "size"
+          : outside
+            ? "outside"
+            : undefined
+  }
+
+  /** Whether an element paints something of its own: a ground, a picture or a border. */
+  const paints = (style: CSSStyleDeclaration): boolean => {
+    // `rgba(0, 0, 0, 0)` as Chrome computes a clear one, or `/ 0)` in the newer notations.
+    const clear = /^transparent$|^rgba\([^)]*,\s*0\)$|\/\s*0\)$/
+    return (
+      style.backgroundImage !== "none" ||
+      !clear.test(style.backgroundColor) ||
+      (["Top", "Right", "Bottom", "Left"] as const).some(
+        (side) =>
+          Number.parseFloat(style[`border${side}Width`]) > 0 &&
+          style[`border${side}Style`] !== "none" &&
+          !clear.test(style[`border${side}Color`])
+      )
+    )
+  }
+
   const sights: MediaSight[] = []
 
   for (const host of Array.from(root.querySelectorAll("[data-composition-src]"))) {
@@ -501,6 +662,8 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
       ...Array.from(host.querySelectorAll("video")),
       ...Array.from(host.querySelectorAll("img")),
     ].slice(0, MOST)
+    // The boxes that frame the scene's media, each by its place: the same box at every instant.
+    const boxes = new Map<Element, number>()
 
     media.forEach((element, index) => {
       // When it plays: while it and each clip it is in play, each timed from its composition's
@@ -525,33 +688,18 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
       }
       if (end <= start) return
 
-      let hidden: MediaHidden | undefined
-      let opacity = 1
-      for (let node: Element | null = element; node; node = node.parentElement) {
-        const style = getComputedStyle(node)
-        if (style.display === "none") {
-          hidden = "display"
-          break
-        }
-        opacity *= Number(style.opacity)
-      }
+      const hidden = unseen(element)
 
-      const box = element.getBoundingClientRect()
-      const outside =
-        box.right <= frame.left ||
-        box.left >= frame.right ||
-        box.bottom <= frame.top ||
-        box.top >= frame.bottom
-      hidden ??=
-        getComputedStyle(element).visibility !== "visible"
-          ? "visibility"
-          : opacity < MIN_OPACITY
-            ? "opacity"
-            : box.width < 1 || box.height < 1
-              ? "size"
-              : outside
-                ? "outside"
-                : undefined
+      // What frames it, such as a phone or a card: its parent, when that paints a ground or a
+      // border of its own. On screen while nothing it frames shows, it is an empty box.
+      const parent = element.parentElement
+      let box: MediaSight["box"]
+      if (parent && parent !== host && paints(getComputedStyle(parent))) {
+        const place = boxes.get(parent) ?? boxes.size
+        boxes.set(parent, place)
+        const away = unseen(parent)
+        box = { index: place, ...(away ? { hidden: away } : {}) }
+      }
 
       const src =
         element.getAttribute("src") ?? element.querySelector("source")?.getAttribute("src") ?? ""
@@ -563,6 +711,7 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
         start,
         ...(Number.isFinite(end) ? { duration: end - start } : {}),
         ...(hidden ? { hidden } : {}),
+        ...(box ? { box } : {}),
       })
     })
   }
@@ -660,11 +809,11 @@ function seconds(ms: number): string {
   return `${Number((ms / 1000).toFixed(2))} s`
 }
 
-/** `0.4 s, 2 s and 3.75 s`. */
-function list(items: readonly string[]): string {
-  return items.length < 2
-    ? (items[0] ?? "")
-    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
+/** `At 2 s`, or `From 0.4 s to 3.75 s` over instants in order. */
+function span(atMs: readonly number[]): string {
+  const first = atMs[0] ?? 0
+  const last = atMs.at(-1) ?? first
+  return first === last ? `At ${seconds(first)}` : `From ${seconds(first)} to ${seconds(last)}`
 }
 
 function oneLine(text: string): string {

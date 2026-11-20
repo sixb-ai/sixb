@@ -6,19 +6,19 @@
 //
 // Then `hyperframes check` (lint, runtime, layout, motion, contrast, craft, sound); a look at the
 // media of the scenes playing at each instant the worker chose, in the root as the app's frame
-// plays it, sought there with Playwright; and `hyperframes snapshot` at those instants, which
-// writes the frames and a contact sheet. It writes one line of JSON:
+// plays it, sought there with Playwright; and `hyperframes snapshot` at the instants it chose for
+// frames, which writes them and a contact sheet. It writes one line of JSON:
 // { layout: "video", findings, sheets, frames, missing, media?, stopped? } or { skipped }.
 //
 //   node video.cjs <output directory> <deadline in ms>
 //
 // The output directory holds project/, links.json, the files to link by their path in the version
 // and where each is, fetches.json, the `sixb` arguments that fetch each remote recording,
-// frame.html, the root with the frame's runtimes, and instants.json, the seconds to snapshot with
-// the scenes playing at each. Beside this script are the frame's runtimes, video.js and
-// hyperframes.js, and media.js, the probe. Each HyperFrames command runs in a process group of its
-// own, killed with its browser once the deadline passes, and the look at the media is bounded: the
-// check then reports what it found.
+// frame.html, the root with the frame's runtimes, instants.json, the seconds to snapshot with the
+// scenes playing at each, and looks.json, the seconds to look at the media, the same way. Beside
+// this script are the frame's runtimes, video.js and hyperframes.js, and media.js, the probe. Each
+// HyperFrames command runs in a process group of its own, killed with its browser once the
+// deadline passes, and the look at the media is bounded: the check then reports what it found.
 "use strict"
 
 const { spawn } = require("node:child_process")
@@ -256,9 +256,9 @@ function loadPlaywright() {
 /**
  * What the scenes playing at each instant show of their media, as the probe sees them: the root is
  * opened as the app's frame plays it, sought to each instant with HyperFrames' player, and probed
- * there. Undefined when that cannot be told within `ms`: no Playwright, no frame, a page that does
- * not start, or a script that fails to load, such as GSAP in a sandbox without the CDNs, where
- * what brings media in would not run, here only.
+ * there; past `ms`, the instants looked at so far. Undefined when that cannot be told: no
+ * Playwright, no frame, a page that does not start, or a script that fails to load, such as GSAP
+ * in a sandbox without the CDNs, where what brings media in would not run, here only.
  */
 async function mediaSights(instants, ms) {
   if (ms < MEDIA_MS.min || !fs.existsSync(path.join(out, "frame.html"))) return undefined
@@ -270,6 +270,9 @@ async function mediaSights(instants, ms) {
   let browser
   let timer
   let over = false
+  let started = false
+  let failed = false
+  const samples = []
   // A page that never yields keeps its browser busy: node's exit takes it with it.
   const close = () => {
     server?.close()
@@ -288,7 +291,6 @@ async function mediaSights(instants, ms) {
       return undefined
     }
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
-    let failed = false
     page.on("requestfailed", (request) => {
       if (request.resourceType() === "script") failed = true
     })
@@ -301,7 +303,7 @@ async function mediaSights(instants, ms) {
       const player = window.__player
       return typeof window.__hfStartupError === "string" || typeof player?.seek === "function"
     })
-    const started = await page.evaluate(() => typeof window.__hfStartupError !== "string")
+    started = await page.evaluate(() => typeof window.__hfStartupError !== "string")
     if (!started || failed) return undefined
 
     const size = await page.evaluate(() => {
@@ -313,8 +315,8 @@ async function mediaSights(instants, ms) {
     })
     await page.setViewportSize(size)
 
-    const samples = []
     for (const { at, scenes } of instants) {
+      if (over) break
       if (scenes.length === 0) continue
       await page.evaluate((time) => {
         const player = window.__player
@@ -337,9 +339,10 @@ async function mediaSights(instants, ms) {
 
   try {
     return await Promise.race([
-      look(),
+      // A look cut short by the time fails once its browser closes, which nothing waits for.
+      look().catch(() => undefined),
       new Promise((resolve) => {
-        timer = setTimeout(() => resolve(undefined), ms)
+        timer = setTimeout(() => resolve(started && !failed ? [...samples] : undefined), ms)
       }),
     ])
   } catch {
@@ -407,7 +410,10 @@ async function main() {
 
   const instants = read("instants.json")
   // It leaves the snapshot its time.
-  const media = await mediaSights(instants, Math.min(MEDIA_MS.max, left() - SNAPSHOT_RESERVE_MS))
+  const media = await mediaSights(
+    read("looks.json"),
+    Math.min(MEDIA_MS.max, left() - SNAPSHOT_RESERVE_MS)
+  )
 
   // A browser that starts badly, such as one racing another for the machine, takes no frame: the
   // snapshot is taken again once while there is time for it.
