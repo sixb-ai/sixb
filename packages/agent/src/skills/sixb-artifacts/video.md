@@ -225,8 +225,8 @@ sandbox with HyperFrames, on the files the export renders, and the result names 
 its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings.
 HyperFrames finds text off the frame, text under 28 px (what a phone reads at 1080p), low
 contrast and a silent clip; the check measures a frame with nearly nothing on it, footage or an
-image never seen while it plays, a scene under a second, an end card past 4.5 s and a teaser past
-45 s. Each names its scene and when.
+image never seen while it plays, a box framing it left empty, a scene under a second, an end card
+past 4.5 s and a teaser past 45 s. Each names its scene and when.
 
 A sandbox without the CDNs checks without them, and says so: its frames show no GSAP motion and
 fallback fonts, which the app and the export do load. Keep the scripts and fonts as they are.
