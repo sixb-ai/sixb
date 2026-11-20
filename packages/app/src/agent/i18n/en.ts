@@ -936,10 +936,11 @@ export const en = {
     resumeHint: "Its files are kept, but its last change may be unfinished.",
     resumeFailed:
       "Couldn't pick up where it left off. Reload the page and try again, or start over without the files.",
-    answeredTitle: "Choose how to go on",
-    answeredDescription: "The answer above is complete, but the files it worked on weren't saved.",
+    answeredTitle: "What to do with the files",
+    answeredDescription:
+      "The answer above is complete. Go on with the files as they are, or start over without them.",
     keepFiles: "Go on with these files",
-    keepingFiles: "Restoring…",
+    keepingFiles: "Going on…",
   },
   /** A command the agent runs in the background, as its card and its calls read. */
   background: {

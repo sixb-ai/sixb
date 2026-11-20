@@ -150,7 +150,7 @@ export interface Sandbox {
    * The longest timeout a command can have here, in milliseconds: the provider's own limit, or
    * the longest a JavaScript timer holds (`MAX_TIMER_DELAY_MS`). `runCommand` caps a longer one to it
    * rather than fail, and a command that runs that long ends `timedOut`, as at any timeout. Every
-   * provider should declare it; a caller that needs a bound treats its absence as that timer limit.
+   * provider should declare it. A caller asks for the timeout it wants and lets the provider cap it.
    */
   readonly maxCommandTimeout?: number
 

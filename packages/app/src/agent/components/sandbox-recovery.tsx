@@ -73,7 +73,7 @@ export function SandboxRecovery({
       <p className="text-muted-foreground">
         {answered ? messages.answeredDescription : messages.description}
       </p>
-      {restore && <p className="text-muted-foreground">{messages.resumeHint}</p>}
+      {restore && !answered && <p className="text-muted-foreground">{messages.resumeHint}</p>}
       {restore?.error && <p role="alert">{messages.resumeFailed}</p>}
       {error && <p role="alert">{messages.recreateFailed}</p>}
       <div className="mt-2 flex flex-wrap gap-2">

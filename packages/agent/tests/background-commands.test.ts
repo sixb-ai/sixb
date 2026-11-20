@@ -258,14 +258,13 @@ describe("background commands", () => {
 
   // On Vercel a command runs five hours at most: the provider caps the held call there, as every
   // provider caps a timeout past its own. Removal proof: drop `entry.timedOut ||` from the status
-  // in BackgroundCommands' #end; the command reads `exited`, and its notice says nothing of a limit.
+  // in BackgroundCommands' #end; the command reads `exited`.
   test("end at the sandbox's longest command timeout, and say so", async () => {
     const limited: Sandbox = {
       id: sandbox.id,
       provider: sandbox.provider,
       status: sandbox.status,
       workingDirectory: sandbox.workingDirectory,
-      maxCommandTimeout: 2_000,
       runCommand: (command, args, options) =>
         sandbox.runCommand(command, args, {
           ...options,

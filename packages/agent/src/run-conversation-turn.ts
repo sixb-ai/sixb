@@ -208,19 +208,19 @@ export async function runConversationTurn(input: {
         await environment.beforeFinalize()
       } catch (saveError) {
         if (saveError instanceof AgentExecutionLostError) return
-        if (saveError instanceof AgentEnvironmentSaveError) {
-          environmentSaveFailed = true
-          // A workspace its provider stopped cannot be cleaned and saved: it waits for its owner,
-          // and the run still says why it ended.
-          const stop = sandboxStopOf(error)
-          if (stop) error = sandboxStoppedError(stop, SANDBOX_STOPPED_UNSAVED_MESSAGE)
-        } else
+        if (saveError instanceof AgentEnvironmentSaveError) environmentSaveFailed = true
+        else
           console.error(
             `[SixbAgent] Agent run '${run.id}' could not finalize its environment:`,
             saveError
           )
       }
     }
+
+    // A workspace its provider stopped cannot be cleaned and saved: it waits for its owner, and
+    // the run says why it ended and what to do.
+    const stop = environmentSaveFailed ? sandboxStopOf(error) : undefined
+    if (stop) error = sandboxStoppedError(stop, SANDBOX_STOPPED_UNSAVED_MESSAGE)
     // A user cancel is read off its own signal, so it records `cancelled` however the aborted
     // stream surfaced. `recordFate` retries a blip, and throws AgentFinalizationError past it.
     const aborted =

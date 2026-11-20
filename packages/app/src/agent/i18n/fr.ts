@@ -974,11 +974,11 @@ export const fr: Translation<AgentMessages> = {
     resumeHint: "Ses fichiers sont conservés, mais sa dernière modification peut être inachevée.",
     resumeFailed:
       "Impossible de reprendre où il s’était arrêté. Rechargez la page et réessayez, ou repartez sans les fichiers.",
-    answeredTitle: "Choisissez comment continuer",
+    answeredTitle: "Que faire des fichiers",
     answeredDescription:
-      "La réponse ci-dessus est complète, mais les fichiers sur lesquels il a travaillé n’ont pas été enregistrés.",
+      "La réponse ci-dessus est complète. Continuez avec les fichiers tels quels, ou repartez sans eux.",
     keepFiles: "Continuer avec ces fichiers",
-    keepingFiles: "Restauration…",
+    keepingFiles: "Reprise…",
   },
   background: {
     card: (command) => `Commande en arrière-plan : ${command}`,
