@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseEvent } from "../src/plan"
@@ -113,6 +113,23 @@ describe("the bootstrap", () => {
     expect(run.lines).toContain(
       "@sixb/deploy-ssh is not installed. Add it to the project's dependencies."
     )
+  })
+
+  // Reproduce: drop the check on `current`; a redeploy that derives the same release id then
+  // deletes the folder the live release runs from.
+  test("refuses to unpack over the live release", async () => {
+    const run = await runBootstrap(async (home) => {
+      await withDeployDir(home)
+      await mkdir(join(home, "northline", "releases", "r2", "app"), { recursive: true })
+      await writeFile(join(home, "northline", "releases", "r2", "app", "package.json"), "live")
+      await symlink("releases/r2", join(home, "northline", "current"))
+    })
+
+    expect(run.exitCode).toBe(1)
+    expect(run.lines).toContain("Release r2 is the live one. Deploy again to make a new release.")
+    expect(
+      await readFile(join(run.home, "northline", "releases", "r2", "app", "package.json"), "utf8")
+    ).toBe("live")
   })
 
   // Reproduce: drop the copy into shared/.env; the first slot deploy of a project without a
