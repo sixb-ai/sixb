@@ -33,6 +33,7 @@ export function parseFacts(lines: readonly string[]): HostFacts {
 export function judge(facts: HostFacts, input: JudgeInput): DeployCheck[] {
   return [
     server(facts),
+    deployments(facts),
     linger(facts),
     caddy(facts),
     adminApi(facts),
@@ -57,6 +58,17 @@ function server(facts: HostFacts): DeployCheck {
   return problems.length === 0
     ? ok("server", "Server", `${name}, ${arch}`)
     : fail("server", "Server", problems.join("; "))
+}
+
+function deployments(facts: HostFacts): DeployCheck {
+  const others = (facts.get("deployments.others") ?? "").split(" ").filter(Boolean)
+  return others.length === 0
+    ? ok("deployments", "Deployments", "none other on this server")
+    : fail(
+        "deployments",
+        "Deployments",
+        `this server already runs ${others.join(", ")}: a server runs one deployment`
+      )
 }
 
 function linger(facts: HostFacts): DeployCheck {
@@ -108,8 +120,8 @@ function settings(facts: HostFacts, envFromSource: boolean): DeployCheck {
       ? ok("settings", "Settings", "env token in place")
       : fail("settings", "Settings", `the env token is readable by others (mode ${token.mode})`)
   }
-  // A deployment from before `shared/.env` keeps its settings in the code folder.
-  const env = fileFact(facts.get("file.shared/.env")) ?? fileFact(facts.get("file.code/.env"))
+  // A deployment from before releases keeps its settings in its code folder.
+  const env = fileFact(facts.get("file.shared-env")) ?? fileFact(facts.get("file.legacy-env"))
   if (!env) return fail("settings", "Settings", "no .env on the server")
   return env.mode === "600"
     ? ok("settings", "Settings", ".env in place")
