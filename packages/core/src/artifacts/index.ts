@@ -42,6 +42,7 @@ export {
   canvasShapeFontSize,
   SMALL_BOARD_PREVIEW_WIDTH,
 } from "./canvas-display"
+export { placeVideoComment, type VideoCommentPlace, videoSceneAt } from "./comment-place"
 export { quoteArtifactComment } from "./comment-text"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {

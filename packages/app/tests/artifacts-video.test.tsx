@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, jest, mock, test } from "bun:test"
+import { client } from "@sixb/client"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -7,11 +8,15 @@ import { type ReactNode, useLayoutEffect } from "react"
 import { versionSummary } from "../src/artifacts/card-details"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { CommentModeHint } from "../src/artifacts/comments/commenting"
-import type { CommentThread } from "../src/artifacts/comments/comments"
+import type { ArtifactComment, CommentThread } from "../src/artifacts/comments/comments"
 import { frameLinkKey } from "../src/artifacts/frame"
 import { en, fr } from "../src/artifacts/messages"
 import { chapterAt, chapterStart } from "../src/artifacts/renderers/video/chapters"
-import { type VideoCommenting, VideoCommentPins } from "../src/artifacts/renderers/video/comments"
+import {
+  draftAnchor,
+  type VideoCommenting,
+  VideoCommentPins,
+} from "../src/artifacts/renderers/video/comments"
 import {
   controlMessage,
   HYPERFRAMES_PROTOCOL_VERSION,
@@ -690,24 +695,90 @@ describe("a video's comments", () => {
 
   test("say a new comment is at its instant, in its scene", () => {
     // Reproduce by passing the instant as the card's `anchor` in `VideoCommentPins`: "On 0:02".
-    const commenting = {
-      marked: [],
-      active: null,
-      draft: { at: 2500, point: { x: 0.5, y: 0.5 } },
-    } as unknown as VideoCommenting
-    const view = render(
-      <Wrap cache={new QueryClient()}>
-        <VideoCommentPins
-          commenting={commenting}
-          outline={OUTLINE}
-          time={2.5}
-          width={640}
-          height={360}
-          onOpen={() => {}}
-        />
-      </Wrap>
-    )
-    expect(view.getByRole("dialog").textContent).toContain("At 0:02 · demo")
+    const heading = (at: number) => {
+      const commenting = {
+        marked: [],
+        active: null,
+        draft: { at, point: { x: 0.5, y: 0.5 } },
+      } as unknown as VideoCommenting
+      const view = render(
+        <Wrap cache={new QueryClient()}>
+          <VideoCommentPins
+            commenting={commenting}
+            outline={OUTLINE}
+            time={at / 1000}
+            width={640}
+            height={360}
+            onOpen={() => {}}
+          />
+        </Wrap>
+      )
+      const text = view.getByRole("dialog").querySelector("p, h2, h3, span")?.textContent
+      view.unmount()
+      return text
+    }
+    expect(heading(2500)).toBe("At 0:02 · demo")
+    // Between the demo and the outro, no scene plays.
+    expect(heading(5200)).toBe("At 0:05")
+  })
+
+  // Guard proof: name `chapterAt(outline, draft.at / 1000)` in draftAnchor, as the player once
+  // did: the instant between the demo and the outro names the demo, and the API refuses it.
+  test("name the scene playing at their instant, and none between two scenes", () => {
+    const point = { x: 0.5, y: 0.5 }
+    expect(draftAnchor(OUTLINE, { at: 5200, point })).toEqual({ at: 5200, point })
+    expect(draftAnchor(OUTLINE, { at: 2500, point })).toEqual({ at: 2500, scene: "demo", point })
+  })
+
+  // Guard proof: go to `anchor.at` in openThread in player.tsx, or show it in ThreadInstant: the
+  // comment kept 1 s into the outro has no instant to go to, and its card names the scene alone.
+  test("go to their instant in the version shown, its scene's start and their offset", async () => {
+    const comment = (id: string, anchor: ArtifactComment["anchor"]): ArtifactComment => ({
+      artifactId: FILM.artifactId,
+      id,
+      anchor,
+      body: "Hold the logo longer",
+      author: { type: "user", id: "alice" },
+      authorName: "Alice",
+      createdAt: "2026-11-18T12:00:00.000Z",
+    })
+    const comments = [
+      comment("cmt_gone", { scene: "credits", label: "Credits", offset: 0, revision: 1 }),
+      comment("cmt_outro", { scene: "outro", label: "Thanks", offset: 1000, revision: 1 }),
+    ]
+    const config = client.getConfig()
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(async () => Response.json({ comments }), {
+        preconnect: globalThis.fetch.preconnect,
+      }) as unknown as typeof fetch,
+    })
+    try {
+      const { view, posted } = await openPlayer(undefined, {
+        access: "owner",
+        latestVersion: FILM.version,
+        revision: FILM.revision,
+      })
+      fireEvent.click(await view.findByRole("button", { name: "Comments, 2 open" }))
+      const panel = view.getByRole("complementary", { name: "Comments" })
+      const [outro, gone] = within(panel)
+        .getAllByRole("article")
+        .map((card) => card.querySelector("button"))
+
+      // The outro starts at 5.5 s in this version: the comment 1 s into it is at 6.5 s.
+      expect(outro?.textContent).toBe("0:06Thanks")
+      posted.length = 0
+      fireEvent.click(outro as HTMLElement)
+      expect(posted.at(-1)).toMatchObject({ action: "seek", timeSeconds: 6.5 })
+
+      // One on a scene this version no longer has goes nowhere, and says so.
+      expect(gone?.textContent).toBe("“Credits”No longer in the video")
+      posted.length = 0
+      fireEvent.click(gone as HTMLElement)
+      expect(posted.filter((message) => message.action === "seek")).toEqual([])
+    } finally {
+      client.setConfig({ baseUrl: config.baseUrl, fetch: config.fetch })
+    }
   })
 
   // Reproduce by showing the open comment's pin at any instant in `VideoCommentPins`.

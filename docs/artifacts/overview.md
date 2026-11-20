@@ -277,7 +277,9 @@ into it, as when the reader picks what to comment on.
 
 Whoever reads an artifact reads its comments and adds their own. A comment on a canvas can be about
 a board, or an element of one; a comment on a video, about an instant (`at`, in milliseconds), its
-scene, and a `point` on the frame. Its author, or anyone who may change the artifact, resolves or
+scene, and a `point` on the frame. Within a scene, the instant is kept as an `offset` into it, so
+the comment follows the scene when a later version moves it; `placeVideoComment` places it in a
+version. Its author, or anyone who may change the artifact, resolves or
 deletes it. Replies go one level deep. A copy of the artifact, such as a forked conversation's,
 keeps no comments.
 
@@ -824,7 +826,9 @@ The app plays a video as HyperFrames does, in a sandboxed frame, with the runtim
 agent image renders with (0.9.68):
 
 - Its scenes are its chapters, on the timeline and beside the player.
-- A comment is placed on the paused frame: it keeps its instant, its scene, and the point clicked.
+- A comment is placed on the paused frame, at any instant: it keeps its scene, how far into it,
+  and the point clicked. Once a scene is cut or moved, its comments move with it; one on a scene
+  that is gone says so.
 - Keys: Space or K, J and L (10 s), ← and → (5 s, a frame with Shift while paused), `,` and `.`
   (a frame), Home, End, M (mute), F (fullscreen), C (comment).
 - Settings › Copy link gives a link that opens the video at the instant shown.

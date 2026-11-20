@@ -1,5 +1,5 @@
 import { type AgentContextInput, MAX_AGENT_APP_STATE_ENTRY_BYTES } from "@sixb/core/agents/context"
-import { quoteArtifactComment } from "@sixb/core/artifacts"
+import { quoteArtifactComment, type VideoOutline } from "@sixb/core/artifacts"
 
 // The comments a reader sends the Agent, as context of their message: a chip that names how many
 // and on what, and that shows their words; for the Agent, each comment quoted with where it is,
@@ -54,6 +54,8 @@ export function commentsContext(input: {
     readonly comment: SentComment
     readonly replies: readonly SentComment[]
   }[]
+  /** The video's version the reader sees, where each comment's instant is quoted. */
+  readonly outline?: VideoOutline
 }): { readonly context: AgentContextInput; readonly sent: number } {
   const comments: ContextComment[] = []
   let bytes = 0
@@ -61,7 +63,12 @@ export function commentsContext(input: {
     const body = cut(comment.body)
     const entry: ContextComment = {
       id: comment.id,
-      quote: quoteArtifactComment({ ...comment, body, guest: comment.author?.type === "guest" }),
+      quote: quoteArtifactComment({
+        ...comment,
+        body,
+        guest: comment.author?.type === "guest",
+        ...(input.outline ? { outline: input.outline } : {}),
+      }),
       author: comment.authorName ?? null,
       body,
       replies: replies.map((reply) => cut(reply.body)),

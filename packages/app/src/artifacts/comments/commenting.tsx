@@ -1,3 +1,4 @@
+import type { VideoOutline } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { MessageSquare, MessageSquarePlus, X } from "lucide-react"
@@ -30,12 +31,15 @@ export function useArtifactCommenting({
   kind,
   title,
   revision,
+  outline,
 }: {
   /** The artifact commented on; null where its comments are not shown, as on an older version. */
   readonly artifactId: string | null
   readonly kind: "canvas" | "video"
   readonly title: string
   readonly revision: number
+  /** The video's version shown, which places each comment's instant as the Agent reads it. */
+  readonly outline?: VideoOutline
 }) {
   const messages = useArtifactMessages().comments
   const queries = useQueryClient()
@@ -105,11 +109,12 @@ export function useArtifactCommenting({
               title,
               label: (count) => messages.contextLabel(count, title),
               threads: chosen,
+              ...(outline ? { outline } : {}),
             })
             agentDraft({ text: messages.askAgent, context })
           }
         : null,
-    [agentDraft, messages, title, artifactId, kind]
+    [agentDraft, messages, title, artifactId, kind, outline]
   )
 
   const access = view?.access ?? "read"
