@@ -605,6 +605,8 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
   const MOST = 6
   /** Under this opacity, its own times its parents', it cannot be seen. */
   const MIN_OPACITY = 0.01
+  /** The most of the picture's area a box that frames media covers: a phone, a card, a window. */
+  const MAX_INSET = 0.8
 
   const root = document.querySelector("[data-composition-id]")
   if (!root) return []
@@ -634,6 +636,12 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
           : outside
             ? "outside"
             : undefined
+  }
+
+  /** Whether an element is a frame within the picture: under `MAX_INSET` of its area. */
+  const inset = (element: Element): boolean => {
+    const { width, height } = element.getBoundingClientRect()
+    return width * height < MAX_INSET * frame.width * frame.height
   }
 
   /** Whether an element paints something of its own: a ground, a picture or a border. */
@@ -691,10 +699,12 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
       const hidden = unseen(element)
 
       // What frames it, such as a phone or a card: its parent, when that paints a ground or a
-      // border of its own. On screen while nothing it frames shows, it is an empty box.
+      // border of its own within the picture. On screen while nothing it frames shows, it is an
+      // empty box. A scene's own ground is not one: a title over it before the footage comes in
+      // is a designed frame, and a bare one is the empty-frame check's.
       const parent = element.parentElement
       let box: MediaSight["box"]
-      if (parent && parent !== host && paints(getComputedStyle(parent))) {
+      if (parent && parent !== host && inset(parent) && paints(getComputedStyle(parent))) {
         const place = boxes.get(parent) ?? boxes.size
         boxes.set(parent, place)
         const away = unseen(parent)
