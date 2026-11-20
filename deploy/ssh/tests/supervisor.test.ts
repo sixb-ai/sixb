@@ -388,7 +388,7 @@ describe("supervisor", () => {
 })
 
 describe("log lines", () => {
-  const path = "/home/sixb/northline/run/logs/northline-workers-0.log"
+  const path = "/home/deploy/northline/run/logs/northline-workers-0.log"
   const render = (line: string) =>
     renderProcessLogLine({ path, line }, { label: "workers", labelWidth: 8 })
 

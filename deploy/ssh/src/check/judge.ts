@@ -33,6 +33,7 @@ export function parseFacts(lines: readonly string[]): HostFacts {
 export function judge(facts: HostFacts, input: JudgeInput): DeployCheck[] {
   return [
     server(facts),
+    account(facts),
     deployments(facts),
     linger(facts),
     caddy(facts),
@@ -58,6 +59,14 @@ function server(facts: HostFacts): DeployCheck {
   return problems.length === 0
     ? ok("server", "Server", `${name}, ${arch}`)
     : fail("server", "Server", problems.join("; "))
+}
+
+/** SSH may pick the account, so the check is where `root` is turned away. */
+function account(facts: HostFacts): DeployCheck {
+  const name = facts.get("account.name") || "an unknown account"
+  return facts.get("account.uid") === "0"
+    ? fail("account", "Account", `${name} is root: deploy as an account without root access`)
+    : ok("account", "Account", name)
 }
 
 function deployments(facts: HostFacts): DeployCheck {

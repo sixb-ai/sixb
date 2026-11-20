@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { readFile } from "node:fs/promises"
-import { homedir } from "node:os"
+import { homedir, userInfo } from "node:os"
 import type { DeployRecord, DeployStatus } from "@sixb/core/deploy"
 import type { ReleasePlan } from "../plan"
 import { followLogFiles, type LogLine, readRecentLogLines, renderProcessLogLine } from "./logs"
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     const planPath = argv[1]
     if (!planPath) throw new Error("[SshTarget] Usage: release <plan>")
     const plan = JSON.parse(await readFile(planPath, "utf8")) as ReleasePlan
-    await runRelease(plan, createReleaseHost(), homedir())
+    await runRelease(plan, createReleaseHost(), { home: homedir(), user: userInfo().username })
     return process.exit(0)
   }
 

@@ -11,7 +11,7 @@ import {
 } from "../src/render"
 import { release } from "./fixtures/release"
 
-const layout = deploymentLayout({ home: "/home/sixb", name: "northline" })
+const layout = deploymentLayout({ home: "/home/deploy", user: "deploy", name: "northline" })
 const green = slotLayout(layout, "green")
 const next = releaseLayout(layout, {
   id: "r1",
@@ -30,19 +30,19 @@ function manifestFor(candidate: DeployRelease, holdExclusive = false) {
 
 describe("deployment files", () => {
   test("keep a deployment in one folder, each slot's state in its own, and Bun per version", () => {
-    expect(next.project).toBe("/home/sixb/northline/releases/r1/examples/northline")
-    expect(next.bun).toBe("/home/sixb/.sixb/bun/1.4.2/bun")
-    expect(layout.currentLink).toBe("/home/sixb/northline/current")
-    expect(layout.sharedEnv).toBe("/home/sixb/northline/shared/.env")
-    expect(layout.unitTemplate).toBe("/home/sixb/.config/systemd/user/sixb-northline@.service")
-    expect(layout.caddySnippet).toBe("/etc/caddy/sixb.d/sixb/northline.caddy")
+    expect(next.project).toBe("/home/deploy/northline/releases/r1/examples/northline")
+    expect(next.bun).toBe("/home/deploy/.sixb/bun/1.4.2/bun")
+    expect(layout.currentLink).toBe("/home/deploy/northline/current")
+    expect(layout.sharedEnv).toBe("/home/deploy/northline/shared/.env")
+    expect(layout.unitTemplate).toBe("/home/deploy/.config/systemd/user/sixb-northline@.service")
+    expect(layout.caddySnippet).toBe("/etc/caddy/sixb.d/deploy/northline.caddy")
     expect(green).toEqual({
       slot: "green",
       unit: "sixb-northline@green.service",
-      manifest: "/home/sixb/northline/deploy/green.json",
-      launcher: "/home/sixb/northline/deploy/green",
-      runDir: "/home/sixb/northline/run/green",
-      logDir: "/home/sixb/northline/run/green/logs",
+      manifest: "/home/deploy/northline/deploy/green.json",
+      launcher: "/home/deploy/northline/deploy/green",
+      runDir: "/home/deploy/northline/run/green",
+      logDir: "/home/deploy/northline/run/green/logs",
     })
   })
 
@@ -94,7 +94,7 @@ describe("deployment files", () => {
     const unit = renderSlotUnit(release, layout)
 
     expect(unit).toContain("Description=Sixb deployment northline, %i slot")
-    expect(unit).toContain("ExecStart=/home/sixb/northline/deploy/%i")
+    expect(unit).toContain("ExecStart=/home/deploy/northline/deploy/%i")
     expect(unit).toContain("KillMode=mixed")
     expect(unit).toContain("TimeoutStopSec=315")
     expect(unit).toContain("WantedBy=default.target")
@@ -102,12 +102,12 @@ describe("deployment files", () => {
 
   test("run the release's own server half, with its Bun first on PATH", () => {
     expect(renderLauncher(next, green)).toContain(
-      `exec '/home/sixb/.sixb/bun/1.4.2/bun' '${next.project}/node_modules/.bin/sixb-deploy-ssh' 'supervise' --manifest '${green.manifest}'`
+      `exec '/home/deploy/.sixb/bun/1.4.2/bun' '${next.project}/node_modules/.bin/sixb-deploy-ssh' 'supervise' --manifest '${green.manifest}'`
     )
     expect(renderCtl(next, green)).toContain(
-      `exec '/home/sixb/.sixb/bun/1.4.2/bun' '${next.project}/node_modules/.bin/sixb-deploy-ssh' "$@" --manifest '${green.manifest}'`
+      `exec '/home/deploy/.sixb/bun/1.4.2/bun' '${next.project}/node_modules/.bin/sixb-deploy-ssh' "$@" --manifest '${green.manifest}'`
     )
-    expect(renderCtl(next, green)).toContain("PATH='/home/sixb/.sixb/bun/1.4.2':\"$PATH\"")
+    expect(renderCtl(next, green)).toContain("PATH='/home/deploy/.sixb/bun/1.4.2':\"$PATH\"")
   })
 
   test("route each domain with upstream dial retries, and the update page for the app only", () => {

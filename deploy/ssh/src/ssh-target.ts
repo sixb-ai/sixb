@@ -15,7 +15,7 @@ import type {
   DeployTarget,
 } from "@sixb/core/deploy"
 import { checkDns, checkHost } from "./check"
-import { DEPLOY_USER, SLOT_PORTS } from "./layout"
+import { SLOT_PORTS } from "./layout"
 import {
   controlServices,
   deployRelease,
@@ -29,22 +29,31 @@ import { type RemoteShell, SshShell } from "./transport"
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
   readonly host: string
+  /**
+   * The account the deployment logs in and runs as, never `root`. Without it, SSH decides, as
+   * `ssh <host>` would: the `User` your SSH config sets for the host, or your own login name.
+   */
+  readonly user?: string
 }
 
 /** Options earlier versions took, and why they went. */
 const REMOVED_OPTIONS: Readonly<Record<string, string>> = {
-  user: "deployments run as `sixb`",
   ports: "a server runs one deployment, on fixed ports",
   standbyPorts: "a server runs one deployment, on fixed ports",
 }
 
+/** A Linux account name `useradd` accepts. */
+const USER_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/
+
 /** Services listen on loopback only: Caddy on the same server is their one way in. */
 const LISTEN_HOST = "127.0.0.1"
 
-/** A server reached over SSH as `sixb`, where Caddy routes each domain to its service. */
+/** A server reached over SSH, where Caddy routes each domain to its service. */
 export class SshTarget implements DeployTarget {
   readonly kind = "ssh"
   readonly host: string
+  /** The account the options name; without one, SSH picks it. */
+  readonly user: string | undefined
   readonly location: string
 
   constructor(options: SshTargetOptions) {
@@ -56,11 +65,14 @@ export class SshTarget implements DeployTarget {
     for (const key of Object.keys(options)) {
       const removed = REMOVED_OPTIONS[key]
       if (removed) throw new Error(`[SshTarget] Remove \`${key}\`: ${removed}.`)
-      if (key !== "host") throw new Error(`[SshTarget] Unknown option '${key}'. Available: host.`)
+      if (key !== "host" && key !== "user") {
+        throw new Error(`[SshTarget] Unknown option '${key}'. Available: host, user.`)
+      }
     }
 
     this.host = validateHost(options.host)
-    this.location = `${DEPLOY_USER}@${this.host}`
+    this.user = options.user === undefined ? undefined : validateUser(options.user)
+    this.location = this.user === undefined ? this.host : `${this.user}@${this.host}`
   }
 
   listenAddress(service: DeployHttpServiceName): DeployListenAddress {
@@ -94,12 +106,19 @@ export class SshTarget implements DeployTarget {
   }
 
   async check(release: DeployRelease, context: DeployCheckContext): Promise<DeployCheck[]> {
-    const { hostname } = await resolveSshConfig(this.location)
-    const dns = checkDns(release, hostname)
+    const ssh = await resolveSshConfig(this.location)
+    const dns = checkDns(release, ssh.hostname)
+    // Without `user`, the account is SSH's choice, which the check spells out.
+    const chosen = this.user === undefined ? ssh.user : undefined
     let server: DeployCheck[]
     try {
       server = await this.#connected(async (shell) => [
-        { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
+        {
+          id: "ssh",
+          label: "SSH",
+          status: "ok" as const,
+          detail: chosen ? `${chosen}@${this.host}` : this.location,
+        },
         ...(await checkHost(shell, {
           name: context.name,
           projectPath: context.projectPath,
@@ -109,7 +128,7 @@ export class SshTarget implements DeployTarget {
         })),
       ])
     } catch (error) {
-      server = [sshCheck(this.location, error)]
+      server = [sshCheck(this.location, error, chosen)]
     }
     return [...server, ...(await dns)]
   }
@@ -124,6 +143,19 @@ export class SshTarget implements DeployTarget {
   }
 }
 
+function validateUser(value: unknown): string {
+  if (value === "root") {
+    throw new Error("[SshTarget] Deployments never run as root. Use an account without sudo.")
+  }
+  if (typeof value !== "string" || !USER_PATTERN.test(value)) {
+    throw new Error(
+      `[SshTarget] user ${JSON.stringify(value)} is not a Linux account name. Use lowercase ` +
+        "letters, digits, underscores and hyphens, starting with a letter or underscore."
+    )
+  }
+  return value
+}
+
 function validateHost(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error("[SshTarget] host must be the server's hostname or IP address.")
@@ -131,7 +163,7 @@ function validateHost(value: unknown): string {
   const host = value.trim()
   if (host.includes("@")) {
     throw new Error(
-      `[SshTarget] host '${host}' includes a user. Set the host alone: deploys connect as \`sixb\`.`
+      `[SshTarget] host '${host}' includes a user. Set the host alone, and the account with \`user\`.`
     )
   }
   // `ssh` reads an argument that starts with `-` as an option, not a host.
@@ -148,12 +180,15 @@ function validateHost(value: unknown): string {
 }
 
 /** A failed connection, as the check that stops a deploy. */
-function sshCheck(location: string, error: unknown): DeployCheck {
+function sshCheck(location: string, error: unknown, chosen: string | undefined): DeployCheck {
   const [message = ""] = (error instanceof Error ? error.message : String(error)).split("\n")
+  const detail = message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`
   return {
     id: "ssh",
     label: "SSH",
     status: "fail",
-    detail: message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`,
+    detail: chosen
+      ? `${detail} SSH logged in as ${chosen}: set \`user\` to deploy as another account.`
+      : detail,
   }
 }

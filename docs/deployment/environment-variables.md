@@ -78,7 +78,7 @@ With `source` set, each [deploy to a server](servers.md) writes that release's `
 
 ```bash
 doppler configs tokens create sixb-shop --project shop --config prd --access read --plain |
-  ssh sixb@203.0.113.10 'mkdir -p ~/shop && umask 077 && cat > ~/shop/env-token'
+  ssh deploy@203.0.113.10 'mkdir -p ~/shop && umask 077 && cat > ~/shop/env-token'
 ```
 
 To replace it, revoke it in Doppler and write the new one over it.
@@ -94,7 +94,7 @@ A deploy pulls before it builds, while the live release keeps serving, so a pull
 
 Your app reads only `.env`, so a running service or a restart never depends on Doppler. Changing a value in Doppler reaches the server at the next deploy. Each release keeps the `.env` it was deployed with; rolling back with `--ref` pulls the current values, so a key you revoked doesn't come back.
 
-Anyone who can sign in to the server as `sixb` can read `.env` and the token, and so can a [CI job](github-actions.md) that deploys. Limit that access to people you'd trust with production.
+Anyone who can sign in to the server as the deploy account can read `.env` and the token, and so can a [CI job](github-actions.md) that deploys. Limit that access to people you'd trust with production.
 
 ## Tests in CI
 
