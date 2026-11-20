@@ -256,6 +256,22 @@ export function runSandboxesContractSuite(
         }
       })
 
+      // A timeout past a provider's limit was refused (Vercel's 400) or, past a timer's, fired at
+      // once. Removal proof: drop cappedCommandTimeout from a provider's runCommand.
+      test("declares its longest command timeout, and runs a command asked for longer", async () => {
+        const sandbox = await factory.create()
+        try {
+          expect(sandbox.maxCommandTimeout).toBeGreaterThan(0)
+          const result = await sandbox.runCommand("sh", ["-c", "sleep 0.2; echo ran"], {
+            timeout: Number.MAX_SAFE_INTEGER,
+          })
+          expect(result).toMatchObject({ exitCode: 0, stdout: "ran\n" })
+          expect(result.timedOut).toBeUndefined()
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
       test("abort signal aborts an in-flight command", async () => {
         const sandbox = await factory.create()
         try {

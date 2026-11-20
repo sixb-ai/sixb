@@ -1,6 +1,7 @@
 import {
   type CommandResult,
   guestCredentialedUrl,
+  MAX_TIMER_DELAY_MS,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
@@ -19,6 +20,8 @@ import { installAzureCredentials } from "./request-credentials"
 /** Internal session handle. A closed handle can never attach to a later session. */
 export class AzureSandbox implements Sandbox {
   readonly provider = "azure"
+  /** The guest supervisor takes a 32-bit timeout. */
+  readonly maxCommandTimeout = MAX_TIMER_DELAY_MS
   readonly workingDirectory: string
   private currentStatus: SandboxStatus = "running"
   private stopPromise: Promise<void> | undefined

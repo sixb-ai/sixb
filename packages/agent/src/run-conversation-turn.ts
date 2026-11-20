@@ -19,7 +19,12 @@ import type {
 } from "@sixb/core/storage"
 import { createAskUserTool } from "./ask-tool"
 import { prepareAgentModel } from "./context-budget"
-import { AgentEnvironmentSaveError, AgentRequesterLeftThreadError, isLostExecution } from "./errors"
+import {
+  AgentEnvironmentSaveError,
+  AgentRequesterLeftThreadError,
+  isLostExecution,
+  WORKSPACE_NOT_SAVED_DIAGNOSTIC,
+} from "./errors"
 import { resolveRunPlan } from "./execution-plan"
 import type { AgentRunFailure } from "./failure"
 import type { FamilyMailbox } from "./family-mailbox"
@@ -188,7 +193,12 @@ export async function runConversationTurn(input: {
     })
   } catch (caughtError) {
     let error = caughtError
+    // A workspace that could not be saved leaves the turn's own error standing, when it had one:
+    // the run says what went wrong, and a diagnostic says the workspace waits for recovery.
     let environmentSaveFailed = error instanceof AgentEnvironmentSaveError
+    if (error instanceof AgentEnvironmentSaveError && error.turnError !== undefined) {
+      error = error.turnError
+    }
     // Its runner lost the run: touch nothing; whoever holds it now ends it.
     if (isLostExecution(error, signal)) return
     // It ended, but its end could not be recorded (storage down): its runner tries again.
@@ -198,18 +208,24 @@ export async function runConversationTurn(input: {
         await environment.beforeFinalize()
       } catch (saveError) {
         if (saveError instanceof AgentExecutionLostError) return
-        // A workspace its provider stopped cannot be cleaned and saved: it waits for its owner, and
-        // the run still says why it ended.
-        const stop = sandboxStopOf(error)
-        error = stop ? sandboxStoppedError(stop, SANDBOX_STOPPED_UNSAVED_MESSAGE) : saveError
-        environmentSaveFailed = true
+        if (saveError instanceof AgentEnvironmentSaveError) environmentSaveFailed = true
+        else
+          console.error(
+            `[SixbAgent] Agent run '${run.id}' could not finalize its environment:`,
+            saveError
+          )
       }
     }
+
+    // A workspace its provider stopped cannot be cleaned and saved: it waits for its owner, and
+    // the run says why it ended and what to do.
+    const stop = environmentSaveFailed ? sandboxStopOf(error) : undefined
+    if (stop) error = sandboxStoppedError(stop, SANDBOX_STOPPED_UNSAVED_MESSAGE)
     // A user cancel is read off its own signal, so it records `cancelled` however the aborted
     // stream surfaced. `recordFate` retries a blip, and throws AgentFinalizationError past it.
     const aborted =
       error instanceof AgentRequesterLeftThreadError ||
-      (!environmentSaveFailed &&
+      (!(error instanceof AgentEnvironmentSaveError) &&
         !(error instanceof ModelUsageRecordingError) &&
         (signal.aborted || session.cancelled.aborted || isAbortError(error)))
     // A runner that stops, unlike a user cancel, leaves the user something to resume.
@@ -218,7 +234,8 @@ export async function runConversationTurn(input: {
       session,
       aborted ? "cancelled" : "failed",
       interrupted ? new AgentTurnInterruptedError(run.id) : error,
-      !aborted && work && work.length > 0 ? work : undefined
+      !aborted && work && work.length > 0 ? work : undefined,
+      environmentSaveFailed ? [WORKSPACE_NOT_SAVED_DIAGNOSTIC] : []
     )
     if (finalized) {
       if (finalized.run.status === "failed") {

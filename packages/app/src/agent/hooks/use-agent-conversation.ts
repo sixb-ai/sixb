@@ -1722,6 +1722,13 @@ export function useAgentConversation({
               },
             }
           : {}),
+        // A turn paused for an approval, or cut short by a limit, also succeeds: it has no answer.
+        answered:
+          latestRun?.status === "succeeded" &&
+          latestRun.finishReason === "stop" &&
+          (latestRun.diagnostics ?? []).some(
+            (diagnostic) => diagnostic.code === "workspace_not_saved"
+          ),
         canRecreate: access === "owner",
         owner: thread ? personName(threadOwner(thread)) : "",
       }

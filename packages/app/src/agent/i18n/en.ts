@@ -305,6 +305,7 @@ export const en = {
       "I reached the step limit before producing a final answer. Ask me to continue and I can use the work above as context.",
     output_limit_reached:
       "I ran out of room before finishing this answer. Ask me to continue, or lower the reasoning level.",
+    workspace_not_saved: "The files couldn’t be saved when this response ended.",
     unknown: "Something went wrong during this response.",
   } satisfies Record<AgentRunDiagnosticCode | "unknown", string>,
   activity: {
@@ -935,6 +936,11 @@ export const en = {
     resumeHint: "Its files are kept, but its last change may be unfinished.",
     resumeFailed:
       "Couldn't pick up where it left off. Reload the page and try again, or start over without the files.",
+    answeredTitle: "What to do with the files",
+    answeredDescription:
+      "The answer above is complete. Go on with the files as they are, or start over without them.",
+    keepFiles: "Go on with these files",
+    keepingFiles: "Going on…",
   },
   /** A command the agent runs in the background, as its card and its calls read. */
   background: {

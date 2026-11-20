@@ -3,7 +3,11 @@ import {
   type AgentRunSession,
   AgentTurnInterruptedError,
 } from "@sixb/core/internal/agents"
-import type { AgentRunRecord, AppendAgentMessageInput } from "@sixb/core/storage"
+import type {
+  AgentRunDiagnostic,
+  AgentRunRecord,
+  AppendAgentMessageInput,
+} from "@sixb/core/storage"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 
 /**
@@ -15,7 +19,8 @@ export async function recordFate(
   session: AgentRunSession,
   status: "failed" | "cancelled",
   error: unknown,
-  messages?: readonly AppendAgentMessageInput[]
+  messages?: readonly AppendAgentMessageInput[],
+  diagnostics: readonly AgentRunDiagnostic[] = []
 ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
   const { run } = session
   const completedAt = new Date()
@@ -30,6 +35,7 @@ export async function recordFate(
         status,
         error: failure,
         completedAt,
+        ...(diagnostics.length === 0 ? {} : { diagnostics }),
         ...(error instanceof AgentTurnInterruptedError
           ? { finishReason: "interrupted" as const }
           : {}),

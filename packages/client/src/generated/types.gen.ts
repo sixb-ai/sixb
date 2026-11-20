@@ -14465,7 +14465,7 @@ export type ListAgentThreadMessagesResponses = {
           }
       >
       annotations: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -14737,7 +14737,7 @@ export type PostAgentThreadMessageResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -16434,7 +16434,7 @@ export type EditAgentThreadMessageResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -17002,7 +17002,7 @@ export type CancelAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -17210,7 +17210,7 @@ export type RetryAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -17478,7 +17478,7 @@ export type ListAgentThreadRunsResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -17650,7 +17650,7 @@ export type GetAgentRunResponses = {
       unvaluedCallCount: number
     }
     diagnostics?: Array<{
-      code: "step_limit_reached" | "output_limit_reached"
+      code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
       severity: "warning" | "error"
       scope: "run"
       message: string
@@ -17834,7 +17834,7 @@ export type CancelAgentRunByIdResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -19409,7 +19409,7 @@ export type DecideAgentApprovalResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -20235,7 +20235,7 @@ export type ListObservedAgentThreadMessagesResponses = {
           }
       >
       annotations: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -20469,7 +20469,7 @@ export type ListObservedAgentThreadRunsResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached" | "output_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached" | "workspace_not_saved"
         severity: "warning" | "error"
         scope: "run"
         message: string

@@ -30,12 +30,15 @@ By default, each agent run gets a fresh environment that is removed when the run
 Files returned as agent attachments are saved separately.
 
 Each command the agent runs has 2 minutes, and up to 10 when the agent expects a longer build or
-test suite. A command that times out or is stopped ends with everything it started. The
-provider's session lifetime still applies: on Vercel, set `sessionTimeoutMs` to cover your longest
-run, since Vercel's default session lasts 5 minutes. If the session ends mid-run, the run ends
-there with "The sandbox stopped" instead of retrying in it. A conversation goes on with a new
-message; one that keeps its files waits for its owner to
-[resume or start fresh](#keep-files-across-conversation-runs).
+test suite. A command that times out or is stopped ends with everything it started. Background
+commands run up to the provider's limit: five hours on Vercel.
+
+On Vercel, a sandbox extends its session while the agent uses it, up to your plan's maximum, so
+`sessionTimeoutMs` can stay short. If the session ends anyway, the run stops with "The sandbox
+stopped" and keeps its work. A conversation goes on with a new message; one that keeps its files
+waits for its owner to [resume or start fresh](#keep-files-across-conversation-runs).
+
+A command the provider refuses to start is a tool error: the agent reads why and goes on.
 
 ## Providers
 
@@ -216,8 +219,9 @@ sandbox, repeats setup and tells the agent its earlier local files were not reco
 Conversation history and published attachments remain available.
 
 Uncertain state or failed recovery blocks further runs, such as a save that fails because the
-provider stopped the VM at the end of its session. The thread's owner chooses how to go on, from
-the chat recovery control or the SDK:
+provider stopped the VM at the end of its session, or a command whose request got no answer. The
+run keeps its answer, with a `workspace_not_saved` diagnostic. The thread's owner chooses how to go
+on, from the chat recovery control or the SDK:
 
 | Choice | Call | Files |
 |---|---|---|

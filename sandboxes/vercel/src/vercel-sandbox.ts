@@ -7,9 +7,11 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  SandboxRequestRefusedError,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
+import { cappedCommandTimeout } from "@sixb/core/sandboxes"
 import { APIError, type NetworkPolicy } from "@vercel/sandbox"
 import { withRequestCredentials } from "./network"
 
@@ -22,6 +24,26 @@ const KILLED_EXIT_CODE = 137
  * Vercel reports no end until that output closes. A timeout or a stop kills them all by this.
  */
 export const COMMAND_MARKER = "SIXB_SANDBOX_COMMAND"
+
+/** Vercel's limit on a command's timeout: it refuses a longer one, before the command starts. */
+export const VERCEL_MAX_COMMAND_TIMEOUT_MS = 5 * 60 * 60 * 1000
+
+/** How often an open sandbox checks how long its session has left. */
+export const KEEP_ALIVE_INTERVAL_MS = 60_000
+
+/** A session with less than this left is extended. */
+export const KEEP_ALIVE_MARGIN_MS = 5 * 60_000
+
+/** How much one extension adds to a session. */
+export const KEEP_ALIVE_EXTENSION_MS = 15 * 60_000
+
+/**
+ * A persistent sandbox nothing used for this long, with no command running, is no longer extended
+ * until it is used again. It outlives its run, and a run its worker lost never stops it: it ends
+ * with its session instead of running to the plan's maximum. The sub-agents a turn starts work in
+ * the same sandbox, so a turn that waits for them still uses it.
+ */
+export const KEEP_ALIVE_IDLE_MS = 30 * 60_000
 
 /** How long a killed command may take to report its end before the call returns without it. */
 export const KILLED_COMMAND_GRACE_MS = 5_000
@@ -61,6 +83,10 @@ export interface VercelSandboxClient {
   readonly name: string
   readonly cwd?: string
   readonly status?: string
+  /** When the session ends unless it is extended; read again after each extension. */
+  readonly expiresAt?: Date
+  /** Add `durationMs` to the session's lifetime, up to the plan's maximum. */
+  readonly extendTimeout?: (durationMs: number) => Promise<void>
   runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient>
   writeFiles(
     files: readonly {
@@ -77,23 +103,47 @@ export interface VercelSandboxClient {
 export interface VercelSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly client: VercelSandboxClient
+  /**
+   * Stop keeping the session alive once nothing used the sandbox for this long, until it is used
+   * again: {@link KEEP_ALIVE_IDLE_MS} for a persistent sandbox. Absent, it is kept alive while
+   * open, as an ephemeral sandbox, which its run always destroys.
+   */
+  readonly keepAliveIdleMs?: number
 }
 
-/** Sandbox wrapper around a Vercel Sandbox SDK instance. */
+/**
+ * Sandbox wrapper around a Vercel Sandbox SDK instance.
+ *
+ * While it is open, it keeps its session alive: a session with little time left is extended, up to
+ * the plan's maximum, so it outlasts the turn that uses it. A persistent one left unused lets its
+ * session end ({@link VercelSandboxOptions.keepAliveIdleMs}). Stop or destroy it when done. A
+ * session Vercel ended stops the handle, and every later call fails at once.
+ */
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
   readonly credentialedUrl?: Sandbox["credentialedUrl"]
   readonly id: string
   readonly provider = "vercel"
   readonly workingDirectory: string
+  readonly maxCommandTimeout = VERCEL_MAX_COMMAND_TIMEOUT_MS
 
   private currentStatus: SandboxStatus = "running"
   private readonly client: VercelSandboxClient
   private readonly sandboxEnv: Readonly<Record<string, string>>
   private readonly defaultTimeoutMs: number | undefined
+  private readonly keepAliveIdleMs: number | undefined
   private readonly inFlight = new Set<VercelCommandClient>()
   private destroyed = false
   private stopPromise: Promise<void> | undefined
+
+  /**
+   * Whether it keeps its session alive: `idle` once nothing used it for a while, until it is used
+   * again; `off` for good, once it stopped or Vercel will not extend the session further.
+   */
+  private keepAliveState: "on" | "idle" | "off" = "off"
+  private keepAliveTimer: ReturnType<typeof setInterval> | undefined
+  private extending: Promise<void> | undefined
+  private lastUsedAt = Date.now()
 
   constructor(options: VercelSandboxOptions) {
     this.client = options.client
@@ -103,6 +153,12 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
+    this.keepAliveIdleMs = options.keepAliveIdleMs
+
+    if (options.client.extendTimeout && options.client.expiresAt !== undefined) {
+      this.startKeepAlive()
+    }
+
     if (options.client.updateNetworkPolicy) {
       const updateNetworkPolicy = options.client.updateNetworkPolicy.bind(options.client)
       const network = options.network
@@ -148,9 +204,13 @@ export class VercelSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.assertRunning("run commands")
+    this.markUsed()
 
     const start = Date.now()
-    const timeoutMs = options.timeout ?? this.defaultTimeoutMs
+    const timeoutMs = cappedCommandTimeout(
+      options.timeout ?? this.defaultTimeoutMs,
+      this.maxCommandTimeout
+    )
     const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
     const cwd = posix.resolve(this.workingDirectory, options.cwd ?? ".")
 
@@ -175,6 +235,13 @@ export class VercelSandbox implements Sandbox {
       })
     } catch (error) {
       if (isSessionStopped(error)) throw this.sessionStopped()
+      // A refused start ran nothing, unlike a request that got no answer.
+      const refused = refusal(error)
+      if (refused) {
+        throw new SandboxRequestRefusedError(
+          `[Sandbox] Vercel refused the command (HTTP ${refused.status}${refused.code ? ` ${refused.code}` : ""})${refused.message ? `: ${refused.message}` : "."}`
+        )
+      }
       throw new SandboxError(
         `[Sandbox] vercel runCommand failed for ${this.id}: ${errorMessage(error)}`
       )
@@ -263,6 +330,7 @@ export class VercelSandbox implements Sandbox {
       }
       options.signal?.removeEventListener("abort", onAbort)
       this.inFlight.delete(commandHandle)
+      this.markUsed()
     }
   }
 
@@ -296,6 +364,7 @@ export class VercelSandbox implements Sandbox {
       content: file.contents,
       ...(file.mode !== undefined ? { mode: file.mode } : {}),
     }))
+    this.markUsed()
 
     try {
       await this.client.writeFiles(mapped)
@@ -304,6 +373,8 @@ export class VercelSandbox implements Sandbox {
       throw new SandboxError(
         `[Sandbox] vercel writeFiles failed for ${this.id}: ${errorMessage(error)}`
       )
+    } finally {
+      this.markUsed()
     }
   }
 
@@ -314,6 +385,7 @@ export class VercelSandbox implements Sandbox {
       return
     }
     this.currentStatus = "stopped"
+    this.stopKeepAlive()
     this.stopPromise = this.stopRemote()
     return this.stopPromise
   }
@@ -335,6 +407,7 @@ export class VercelSandbox implements Sandbox {
     if (this.destroyed) {
       return
     }
+    this.stopKeepAlive()
 
     if (this.currentStatus === "running") {
       try {
@@ -361,10 +434,97 @@ export class VercelSandbox implements Sandbox {
    */
   private sessionStopped(): SandboxNotRunningError {
     this.currentStatus = "stopped"
+    this.stopKeepAlive()
     this.inFlight.clear()
     return new SandboxNotRunningError(
       `[Sandbox] sandbox ${this.id} stopped: Vercel ended its session.`
     )
+  }
+
+  /** It was used just now: an idle keepalive starts again, and checks the session at once. */
+  private markUsed(): void {
+    this.lastUsedAt = Date.now()
+    if (this.keepAliveState === "idle" && this.currentStatus === "running") this.startKeepAlive()
+
+    void this.keepAlive()
+  }
+
+  /**
+   * Extend the session once little of it is left. Never throws: a session Vercel ended stops this
+   * handle, so the next call fails at once instead of reaching Vercel; one Vercel will not extend
+   * further, at the plan's maximum for one, ends when it says.
+   */
+  private keepAlive(): Promise<void> {
+    if (this.extending) return this.extending
+    if (this.keepAliveState !== "on" || this.currentStatus !== "running") return Promise.resolve()
+
+    const idle =
+      this.keepAliveIdleMs !== undefined &&
+      this.inFlight.size === 0 &&
+      Date.now() - this.lastUsedAt >= this.keepAliveIdleMs
+    if (idle) {
+      this.pauseKeepAlive()
+      return Promise.resolve()
+    }
+
+    const { expiresAt, extendTimeout } = this.client
+    if (!extendTimeout || !expiresAt || expiresAt.getTime() - Date.now() > KEEP_ALIVE_MARGIN_MS) {
+      return Promise.resolve()
+    }
+
+    this.extending = extendTimeout
+      .call(this.client, KEEP_ALIVE_EXTENSION_MS)
+      .catch((error: unknown) => this.extensionFailed(error, expiresAt))
+      .finally(() => {
+        this.extending = undefined
+      })
+    return this.extending
+  }
+
+  /**
+   * A session Vercel ended stops the handle. One it will not extend further is left to end; a
+   * failure that may pass, a 5xx, a 429 or no answer, is tried again at the next check.
+   */
+  private extensionFailed(error: unknown, expiresAt: Date): void {
+    if (isSessionStopped(error)) {
+      this.sessionStopped()
+      return
+    }
+
+    const refused = refusal(error)
+    if (refused) {
+      this.stopKeepAlive()
+      console.warn(
+        `[Sandbox] Vercel would not extend the session of ${this.id} (HTTP ${refused.status}${refused.code ? ` ${refused.code}` : ""}); it ends at ${expiresAt.toISOString()}.`
+      )
+      return
+    }
+
+    console.warn(
+      `[Sandbox] The session of ${this.id} could not be extended; trying again in ${KEEP_ALIVE_INTERVAL_MS / 1000} s. ${errorMessage(error)}`
+    )
+  }
+
+  /** Never holds the process open: a worker that exits stops extending, and the session ends. */
+  private startKeepAlive(): void {
+    this.keepAliveState = "on"
+    this.keepAliveTimer = setInterval(() => void this.keepAlive(), KEEP_ALIVE_INTERVAL_MS)
+    this.keepAliveTimer.unref?.()
+  }
+
+  private pauseKeepAlive(): void {
+    this.clearKeepAliveTimer()
+    this.keepAliveState = "idle"
+  }
+
+  private stopKeepAlive(): void {
+    this.clearKeepAliveTimer()
+    this.keepAliveState = "off"
+  }
+
+  private clearKeepAliveTimer(): void {
+    if (this.keepAliveTimer !== undefined) clearInterval(this.keepAliveTimer)
+    this.keepAliveTimer = undefined
   }
 
   private assertRunning(action: string): void {
@@ -379,7 +539,7 @@ export class VercelSandbox implements Sandbox {
   private resolveWithinWorkingDirectory(path: string): string {
     const target = posix.resolve(this.workingDirectory, path)
     if (target !== this.workingDirectory && !target.startsWith(`${this.workingDirectory}/`)) {
-      throw new Error(
+      throw new SandboxRequestRefusedError(
         `[Sandbox] writeFiles path '${path}' escapes the sandbox working directory ${this.workingDirectory}`
       )
     }
@@ -393,20 +553,55 @@ function normalizeWorkingDirectory(value: string | undefined): string {
 
 const GIVEN_UP = Symbol("given up")
 
+/** The longest part of Vercel's own reason for a refusal that an error message keeps. */
+const REFUSAL_MESSAGE_CHARS = 500
+
 /** Vercel's answer once a sandbox's session has ended: HTTP 410 with code `sandbox_stopped`. */
 function isSessionStopped(error: unknown): boolean {
-  if (!(error instanceof APIError) || error.response.status !== 410) return false
+  return (
+    error instanceof APIError &&
+    error.response.status === 410 &&
+    apiErrorBody(error).code === "sandbox_stopped"
+  )
+}
+
+/**
+ * A request Vercel answered with a refusal: a 4xx status, before it did anything.
+ *
+ * Two are not refusals. A 408, as the request may have reached the sandbox before it timed out. A
+ * 429, as it answers the moment, not the request: the SDK retries a 5xx or a dropped connection, so
+ * the 429 that ends those retries says nothing of an earlier attempt that may have run. Any other
+ * 4xx answers the request itself, which an earlier attempt sent unchanged.
+ */
+function refusal(
+  error: unknown
+): { readonly status: number; readonly code?: string; readonly message?: string } | undefined {
+  if (!(error instanceof APIError)) return undefined
+  const { status } = error.response
+  if (status < 400 || status >= 500 || status === 408 || status === 429) return undefined
+  const { code, message } = apiErrorBody(error)
+  return {
+    status,
+    ...(code === undefined ? {} : { code }),
+    ...(message === undefined ? {} : { message: message.slice(0, REFUSAL_MESSAGE_CHARS) }),
+  }
+}
+
+/** The `{ error: { code, message } }` Vercel answers an error with. */
+function apiErrorBody(error: APIError<unknown>): {
+  readonly code?: string
+  readonly message?: string
+} {
   const data: unknown = error.json
-  const code =
-    typeof data === "object" &&
-    data !== null &&
-    "error" in data &&
-    typeof data.error === "object" &&
-    data.error !== null &&
-    "code" in data.error
-      ? data.error.code
-      : undefined
-  return code === "sandbox_stopped"
+  if (typeof data !== "object" || data === null || !("error" in data)) return {}
+  const body: unknown = data.error
+  if (typeof body !== "object" || body === null) return {}
+  const code = "code" in body && typeof body.code === "string" ? body.code : undefined
+  const message = "message" in body && typeof body.message === "string" ? body.message : undefined
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(message === undefined ? {} : { message }),
+  }
 }
 
 function normalizeExitCode(exitCode: number | null | undefined, killed: boolean): number {

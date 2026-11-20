@@ -20,6 +20,7 @@ import type {
   ModelMessage,
   ModelTool,
 } from "@sixb/core/models"
+import { cappedCommandTimeout } from "@sixb/core/sandboxes"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import {
   type BackgroundCommandOutput,
@@ -253,6 +254,43 @@ describe("background commands", () => {
     expect(read).toMatchObject({ status: "exited", exitCode: 1 })
     expect(read.output).toContain(`cd: ${join(root, "missing")}: No such file or directory`)
     expect(read.output).not.toContain("ran")
+  })
+
+  // On Vercel a command runs five hours at most: the provider caps the held call there, as every
+  // provider caps a timeout past its own. Removal proof: drop `entry.timedOut ||` from the status
+  // in BackgroundCommands' #end; the command reads `exited`.
+  test("end at the sandbox's longest command timeout, and say so", async () => {
+    const limited: Sandbox = {
+      id: sandbox.id,
+      provider: sandbox.provider,
+      status: sandbox.status,
+      workingDirectory: sandbox.workingDirectory,
+      runCommand: (command, args, options) =>
+        sandbox.runCommand(command, args, {
+          ...options,
+          timeout: cappedCommandTimeout(options?.timeout, 2_000),
+        }),
+      writeFiles: (files) => sandbox.writeFiles(files),
+      stop: () => sandbox.stop(),
+      destroy: () => sandbox.destroy(),
+    }
+    const notices = new BackgroundNotices(commands)
+    notices.take()
+    // The limit's timer starts with the command: fake from the start, turned with the real loop.
+    jest.useFakeTimers()
+    let started: BackgroundCommandState | undefined
+    void commands
+      .start({ handle: { ...handle, sandbox: limited }, command: "sleep 30" })
+      .then((state) => {
+        started = state
+      })
+    // Its start waits on real I/O alone: no fake time passes until it returned.
+    for (let turn = 0; started === undefined && turn < 1_000_000; turn += 1) await loopTurn()
+    const { id } = started as BackgroundCommandState
+    await until(() => commands.get(id).status !== "running", 500)
+
+    expect(commands.get(id)).toMatchObject({ status: "stopped", timedOut: true })
+    expect(notices.take()).toContain("(`sleep 30`) was stopped at the sandbox's time limit after")
   })
 
   test("run in the directory named, relative to the workspace", async () => {

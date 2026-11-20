@@ -22,7 +22,12 @@ import {
 import { stepAskedUser } from "./ask-tool"
 import { createAgentContextGuard } from "./context-guard"
 import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
-import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"
+import {
+  AgentContextCompactionError,
+  AgentEnvironmentSaveError,
+  throwIfExecutionLost,
+  WORKSPACE_NOT_SAVED_DIAGNOSTIC,
+} from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import type { ConversationAgentExecutionEnvironment } from "./run-environment"
@@ -377,7 +382,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const interruptedBeforeCommit = await finalizeIfInterrupted()
     if (interruptedBeforeCommit) return interruptedBeforeCommit
 
-    await context.beforeFinalize?.()
+    const unsaved = await saveWorkspace(context)
+    if (unsaved) diagnostics.push(unsaved)
     const finalizedRun = await input.session.finish(
       {
         status: "succeeded",
@@ -402,6 +408,21 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
  * waiting, or decided and not reported to the model yet, its children's included.
  */
+
+/**
+ * Save the turn's workspace before its terminal write. One that could not be saved waits for
+ * recovery, and the turn ends as it would have, with a diagnostic that says so: the answer, or the
+ * stop, is what happened.
+ */
+async function saveWorkspace(context: AgentTurnContext): Promise<AgentRunDiagnostic | undefined> {
+  try {
+    await context.beforeFinalize?.()
+    return undefined
+  } catch (error) {
+    if (error instanceof AgentEnvironmentSaveError) return WORKSPACE_NOT_SAVED_DIAGNOSTIC
+    throw error
+  }
+}
 
 /**
  * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:
@@ -452,12 +473,13 @@ async function finalizeInterruptedTurn(input: {
   const { session, context, run, modelId, finishReason } = input
   const messages = input.messages && input.messages.length > 0 ? input.messages : undefined
 
-  await context.beforeFinalize?.()
+  const unsaved = await saveWorkspace(context)
 
   const outcome = {
     status: "cancelled" as const,
     ...(modelId === undefined ? {} : { modelId }),
     ...(finishReason === undefined ? {} : { finishReason }),
+    ...(unsaved === undefined ? {} : { diagnostics: [unsaved] }),
   }
   if (!messages) {
     const finalizedRun = await session.finish(outcome)

@@ -23,7 +23,10 @@ export interface RunCommandOptions {
   readonly cwd?: string
   /** Merged on top of sandbox-level env. Per-call wins on collision. */
   readonly env?: Readonly<Record<string, string>>
-  /** Overrides the sandbox-level timeout, in milliseconds. */
+  /**
+   * Overrides the sandbox-level timeout, in milliseconds. One above the sandbox's
+   * {@link Sandbox.maxCommandTimeout} is capped to it.
+   */
   readonly timeout?: number
   /** Per-call only; there is no sandbox-level equivalent. */
   readonly signal?: AbortSignal
@@ -143,6 +146,13 @@ export interface Sandbox {
   readonly provider: string
   readonly status: SandboxStatus
   readonly workingDirectory: string
+  /**
+   * The longest timeout a command can have here, in milliseconds: the provider's own limit, or
+   * the longest a JavaScript timer holds (`MAX_TIMER_DELAY_MS`). `runCommand` caps a longer one to it
+   * rather than fail, and a command that runs that long ends `timedOut`, as at any timeout. Every
+   * provider should declare it. A caller asks for the timeout it wants and lets the provider cap it.
+   */
+  readonly maxCommandTimeout?: number
 
   /** Optional secure injection capability. Replaces all credentials on this session only.
    * An empty list removes injection. Guest commands must never be able to read a secret.
@@ -162,6 +172,10 @@ export interface Sandbox {
    */
   readonly credentialedUrl?: (url: string) => string
 
+  /**
+   * Run a command and gather its result. A request the provider refused before anything ran
+   * rejects with {@link SandboxRequestRefusedError}; any other rejection may have run it.
+   */
   runCommand(
     command: string,
     args?: readonly string[],

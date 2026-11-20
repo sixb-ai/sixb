@@ -6,12 +6,14 @@ import {
 } from "@sixb/core/sandboxes"
 import { APIError, type Session, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { withRequestCredentials } from "./network"
-import { VercelSandbox, type VercelSandboxClient } from "./vercel-sandbox"
+import { KEEP_ALIVE_IDLE_MS, VercelSandbox, type VercelSandboxClient } from "./vercel-sandbox"
+import { sessionExpiry } from "./vercel-session"
 
 type PersistentSession = Pick<
   Session,
   "sessionId" | "status" | "cwd" | "runCommand" | "writeFiles" | "stop" | "update"
->
+> &
+  Partial<Pick<Session, "createdAt" | "timeout" | "extendTimeout">>
 
 export interface VercelPersistentClient {
   readonly name: string
@@ -112,6 +114,10 @@ export async function bindPersistentSandbox(
     get status() {
       return session.status
     },
+    get expiresAt() {
+      return sessionExpiry(session)
+    },
+    ...(session.extendTimeout ? { extendTimeout: session.extendTimeout.bind(session) } : {}),
     runCommand: (params) => session.runCommand({ ...params, args: [...(params.args ?? [])] }),
     writeFiles: (files) =>
       session.writeFiles(
@@ -146,5 +152,5 @@ export async function bindPersistentSandbox(
     },
     delete: () => client.delete(),
   }
-  return new VercelSandbox({ client: pinned, ...options })
+  return new VercelSandbox({ client: pinned, ...options, keepAliveIdleMs: KEEP_ALIVE_IDLE_MS })
 }

@@ -635,6 +635,7 @@ export {
   SandboxError,
   SandboxIsolationUnavailableError,
   SandboxNotRunningError,
+  SandboxRequestRefusedError,
   SandboxTimeoutError,
 } from "./sandboxes"
 
