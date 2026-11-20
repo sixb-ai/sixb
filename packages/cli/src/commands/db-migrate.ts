@@ -10,8 +10,6 @@ import { dbMigrateCheckView, dbMigrateView, renderStatic, withTask } from "../ui
  * every command uses for a usage error, such as an option an older `sixb` does not know.
  */
 const MIGRATIONS_PENDING_EXIT_CODE = 3
-/** …and with this one when a pending migration breaks the release before it. */
-const INCOMPATIBLE_MIGRATIONS_EXIT_CODE = 4
 
 export interface DbMigrateOptions {
   entry?: string
@@ -30,12 +28,8 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
       )
       await renderStatic(dbMigrateCheckView({ projectId: sixb.id, pending }))
 
-      // A deploy reads the code: only an incompatible migration needs the services stopped.
-      if (pending.some((status) => status.state !== "current" && status.incompatible)) {
-        process.exitCode = INCOMPATIBLE_MIGRATIONS_EXIT_CODE
-      } else if (pending.length > 0) {
-        process.exitCode = MIGRATIONS_PENDING_EXIT_CODE
-      }
+      // A deploy reads the code: the release it is about to start needs the services stopped.
+      if (pending.length > 0) process.exitCode = MIGRATIONS_PENDING_EXIT_CODE
     } finally {
       await stopSixbProviders(sixb)
     }

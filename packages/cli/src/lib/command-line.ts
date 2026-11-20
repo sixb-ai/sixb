@@ -145,19 +145,9 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Bring the storage schema up to date first, as a deploy does",
     kind: "boolean",
   },
-  "allow-incompatible": {
-    syntax: "--allow-incompatible",
-    summary: "With --migrate, run a migration that breaks the release before it",
-    kind: "boolean",
-  },
   lake: {
     syntax: "--lake",
     summary: "Check the lake's dataset definitions too",
-    kind: "boolean",
-  },
-  "accept-downtime": {
-    syntax: "--accept-downtime",
-    summary: "Let a migration that breaks the live release stop the services while it runs",
     kind: "boolean",
   },
   follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
@@ -548,7 +538,7 @@ const commandTree: readonly CommandNode[] = [
     rootHelpLabel: "worker-group [types...]",
   }),
   command("check", "Validate project configuration and health", {
-    options: ["entry", "migrate", "allow-incompatible", "lake"],
+    options: ["entry", "migrate", "lake"],
   }),
   command("run", "Run a script against the project, here or in production", {
     usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
@@ -619,8 +609,8 @@ const commandTree: readonly CommandNode[] = [
   },
   {
     ...command("deploy", "Deploy the project described in sixb.deploy.ts", {
-      usage: "sixb deploy [--dry-run] [--ref <ref>] [--accept-downtime] [--json]",
-      options: ["dry-run", "ref", "accept-downtime", "json"],
+      usage: "sixb deploy [--dry-run] [--ref <ref>] [--json]",
+      options: ["dry-run", "ref", "json"],
       rootHelpLabel: "deploy ...",
     }),
     children: [

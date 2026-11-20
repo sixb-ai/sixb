@@ -36,7 +36,6 @@ export interface DeployOptions {
   readonly dryRun?: boolean
   readonly json?: boolean
   readonly ref?: string
-  readonly acceptDowntime?: boolean
   readonly cwd?: string
 }
 
@@ -91,7 +90,6 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     await config.target.deploy(release, source, {
       name: config.name,
       deployedBy: await deployer(cwd),
-      ...(options.acceptDowntime ? { acceptDowntime: true } : {}),
       report: progress.report,
     })
   } catch (error) {

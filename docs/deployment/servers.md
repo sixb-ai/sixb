@@ -137,14 +137,14 @@ A deploy:
 1. Checks the server.
 2. Unpacks the commit into its own `releases/<id>` folder, then installs the pinned Bun and the dependencies.
 3. [Writes `.env`](environment-variables.md#deploy) into the release if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward, so open tabs never `404`).
-4. Runs `sixb check --migrate --lake` from the new release while the live one keeps serving: it brings the storage schema up to date, checks every provider, and checks the lake's datasets.
+4. Runs `sixb check --migrate --lake` from the new release: it brings the storage schema up to date, checks every provider, and checks the lake's datasets.
 5. Starts the new release beside the live one, on its own ports, without its singletons (`orchestrator`, `rules` and your processes). It waits for the API's `/ready`, and fails if a process exits in its first seconds.
 6. Moves Caddy's routes to the new release, then moves the singletons, and checks again.
 7. Lets the previous release finish its requests and agent turns for up to five minutes, then stops it. A deploy within those minutes gives it ten more seconds.
 
 Any failure before the routes move leaves the live release serving; a failure after it moves the routes and singletons back. Either way, the deploy says what failed. The server runs the deploy, so closing your laptop or losing the connection doesn't stop it: `sixb deploy status` shows the release once it ends. Two deploys of the same project never overlap; the second waits for the first.
 
-Migrations work alongside the release before them, which is still serving while they run. A rare migration that can't (it removes something that release reads) stops the deploy before anything changes, and `--accept-downtime` deploys it anyway: the services stop while it runs.
+A release with storage migrations is the exception: the live release was built for the schema before them, so it stops while they run, and the new release starts cold once they're done. The cutover takes as long as the migrations and the new release's start, usually seconds. A failure after the services stopped starts the previous release again.
 
 ## Operate the deployment
 

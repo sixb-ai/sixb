@@ -65,7 +65,6 @@ export async function deployRelease(
     record,
     releaseId,
     projectPath: source.projectPath,
-    acceptDowntime: context.acceptDowntime === true,
   }
   const files = { plan: `${runs}/${releaseId}.json`, script: `${runs}/${releaseId}.sh` }
   await upload(shell, files.plan, JSON.stringify(plan))

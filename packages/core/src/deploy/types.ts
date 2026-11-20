@@ -250,11 +250,6 @@ export interface DeployOperationContext {
 export interface DeployContext extends DeployOperationContext {
   /** Who deployed, recorded with the release. */
   readonly deployedBy: string
-  /**
-   * A storage migration that breaks the live release may stop the services while it runs.
-   * Without it, such a release stops before anything changes.
-   */
-  readonly acceptDowntime?: boolean
   report(event: DeployEvent): void
 }
 

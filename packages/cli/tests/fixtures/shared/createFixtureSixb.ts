@@ -49,16 +49,6 @@ function createFixtureStorage(logStorageMigrate: boolean, logStoragePrepare: boo
         return { adapterId: "FixtureStorage", latestVersion: 1, appliedVersion: 1, state }
       }
 
-      if (state === "incompatible-pending") {
-        return {
-          adapterId: "FixtureStorage",
-          latestVersion: 1,
-          appliedVersion: 0,
-          state: "pending",
-          reason: "The fixture is pending.",
-          incompatible: ["001-fixture"],
-        }
-      }
       if (state !== "pending" && state !== "dirty") {
         throw new Error(`Unknown SIXB_CLI_TEST_MIGRATION_STATE: ${state}`)
       }
