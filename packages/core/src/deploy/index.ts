@@ -29,7 +29,6 @@ export type {
   DeployScript,
   DeployServiceName,
   DeployServicesConfig,
-  DeploySetupContext,
   DeploySingletonServiceConfig,
   DeploySingletonServiceName,
   DeploySource,

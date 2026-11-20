@@ -147,40 +147,6 @@ export async function runDeployCheck(options: { readonly json?: boolean; readonl
   if (checks.some(blocksDeploy)) process.exitCode = 1
 }
 
-export async function runDeploySetup(options: {
-  readonly admin?: string
-  readonly key?: string
-  readonly cwd?: string
-}) {
-  const cwd = options.cwd ?? process.cwd()
-  const { config } = await loadDeployConfig(cwd)
-  const source = (await loadEnvConfig(cwd))?.source
-  const release = buildDeployRelease(config, {
-    bunVersion: await resolveBunVersion(cwd),
-    envFromSource: Boolean(source),
-  })
-  const context = { name: config.name, projectPath: await projectPathOf(cwd) }
-
-  if (!config.target.setup) {
-    console.log(`A ${config.target.kind} target needs no setup.`)
-  } else {
-    await config.target.setup(release, {
-      ...context,
-      ...(options.admin ? { admin: options.admin } : {}),
-      ...(options.key ? { key: options.key } : {}),
-      ...(source
-        ? {
-            createEnvToken: () =>
-              source.createServerToken("prod", `sixb-${config.name}-${new Date().toISOString()}`),
-          }
-        : {}),
-      write: (line) => console.log(line),
-    })
-  }
-  const checks = await config.target.check(release, context)
-  await renderStatic(deployChecksView({ name: config.name, location: location(config), checks }))
-}
-
 export async function runDeployAccess(options: {
   readonly action: "list" | "add" | "remove"
   readonly value?: string

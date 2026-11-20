@@ -11,7 +11,6 @@ import {
   runDeployCi,
   runDeployControl,
   runDeployLogs,
-  runDeploySetup,
   runDeployStatus,
 } from "../src/commands/deploy"
 import { parseCliArgs } from "../src/lib/command-line"
@@ -406,10 +405,6 @@ export default {
           : []),
       ]
     },
-    async setup(release, context) {
-      record({ setup: context.name, admin: context.admin ?? null, key: context.key ?? null, envToken: await context.createEnvToken?.() })
-      context.write("setting up the test server")
-    },
     access: {
       async list() {
         return [{ type: "ssh-ed25519", fingerprint: "SHA256:abc", comment: "dev@laptop", restricted: false }]
@@ -543,7 +538,6 @@ export default {
         names: async () => [],
         read: async () => ({}),
         write: async () => {},
-        createServerToken: async (env, label) => env + " token: " + label,
       }
       export default { source, vars: {} }
     `
@@ -614,22 +608,6 @@ export default {
 
       expect(result.error).toBeUndefined()
       expect((await records(recordPath))[1]?.envStep).toBeUndefined()
-    })
-
-    test("setup can create the server's read-only prod token", async () => {
-      const { root, recordPath } = await projectWithSource()
-
-      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
-
-      expect((await records(recordPath))[0]?.envToken).toStartWith("prod token: sixb-northline-")
-    })
-
-    test("a project without a source has no token to create", async () => {
-      const { root, recordPath } = await readOnlyProject()
-
-      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
-
-      expect((await records(recordPath))[0]?.envToken).toBeUndefined()
     })
   })
 
@@ -707,22 +685,6 @@ export default {
     const deployed = await deploy(env, () => runDeploy({ cwd: root }))
     expect(deployed.output).toContain("northline deployed")
     expect(deployed.output).toContain("Lake retention: Not deployed")
-  })
-
-  test("sets the target up, then shows what is left", async () => {
-    const { root, recordPath } = await readOnlyProject()
-    const result = await deploy({ DEPLOY_RECORD: recordPath }, () =>
-      runDeploySetup({ admin: "ademattos", key: "~/.ssh/id.pub", cwd: root })
-    )
-
-    expect(result.error).toBeUndefined()
-    expect(result.output).toContain("setting up the test server")
-    expect(result.output).toContain("northline is ready to deploy")
-    expect((await records(recordPath))[0]).toEqual({
-      setup: "northline",
-      admin: "ademattos",
-      key: "~/.ssh/id.pub",
-    })
   })
 
   test("sets up GitHub Actions, storing the new key before revoking the old", async () => {
@@ -888,10 +850,6 @@ describe("deploy command line", () => {
       id: "deploy:logs",
       positionals: ["api"],
       options: { follow: true },
-    })
-    expect(parseCliArgs(["deploy", "setup", "--admin", "root"])).toMatchObject({
-      id: "deploy:setup",
-      options: { admin: "root" },
     })
     expect(parseCliArgs(["deploy", "access", "add", "github:quentin"])).toMatchObject({
       id: "deploy:access:add",

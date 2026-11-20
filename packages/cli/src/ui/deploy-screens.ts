@@ -212,11 +212,7 @@ export function deployChecksView({
 }): string {
   const blocking = checks.filter((check) => check.status === "fixable" || check.status === "manual")
   const warnings = checks.filter((check) => check.status === "warning")
-  const next = blocking.some((check) => check.status === "fixable")
-    ? "sixb deploy setup"
-    : blocking.length > 0
-      ? "the steps above, then sixb deploy check"
-      : "sixb deploy"
+  const next = blocking.length > 0 ? "the steps above, then sixb deploy check" : "sixb deploy"
 
   return screen(
     header("deploy check", location),

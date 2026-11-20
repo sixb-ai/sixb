@@ -13,6 +13,8 @@ const TOOLS = ["git", "curl", "unzip", "tar", "flock", "sha256sum", "caddy"]
 
 export const ENV_TOKEN_CHECK = "project.env-token"
 
+const HOST_REQUIREMENTS = "See https://docs.sixb.ai/deployment/host-requirements."
+
 type Status = DeployCheck["status"]
 
 /**
@@ -200,7 +202,7 @@ function describe(
     LABELS[id] ?? (id.startsWith("project.port.") ? `${id.slice(13).replace(/-/g, " ")} port` : id)
   const check = { id, label, status, detail }
   if (status === "ok") return check
-  if (status === "fixable") return { ...check, remedy: "Run `sixb deploy setup`." }
+  if (status === "fixable") return { ...check, remedy: HOST_REQUIREMENTS }
   if (id === "server.os") return { ...check, remedy: "Deploy to an Ubuntu or Debian server." }
   if (id === "project.env") {
     const path = detail.replace(/ does not exist$/, "")
