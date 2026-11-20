@@ -1,6 +1,7 @@
 import { resolveArtifactAddress, type VideoOutline } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import type { ArtifactVersion } from "../../queries"
+import { chapterStart } from "./chapters"
 import { VideoPlayer } from "./player"
 
 // A video, played in the app: its player opens at the scene or the instant an address names, or
@@ -51,8 +52,8 @@ export function VideoScenesBar({
 }
 
 /**
- * Where an address's part opens the video, in seconds: the start of the scene it names, or the
- * instant it names; its start for any other.
+ * Where an address's part opens the video, in seconds: the first frame of the scene it names, or
+ * the instant it names; its start for any other.
  */
 export function startOf(
   version: ArtifactVersion,
@@ -68,7 +69,7 @@ export function startOf(
   if (!("part" in resolved)) return 0
 
   const found = resolved.part
-  if (found.type === "scene") return found.startMs / 1000
+  if (found.type === "scene") return chapterStart(found, outline.fps)
   if (found.type === "time") return found.ms / 1000
   return 0
 }

@@ -10,7 +10,7 @@ import { CommentModeHint } from "../src/artifacts/comments/commenting"
 import type { CommentThread } from "../src/artifacts/comments/comments"
 import { frameLinkKey } from "../src/artifacts/frame"
 import { en, fr } from "../src/artifacts/messages"
-import { chapterAt } from "../src/artifacts/renderers/video/chapters"
+import { chapterAt, chapterStart } from "../src/artifacts/renderers/video/chapters"
 import { type VideoCommenting, VideoCommentPins } from "../src/artifacts/renderers/video/comments"
 import {
   controlMessage,
@@ -93,6 +93,17 @@ const FILM = artifactVersion({
 })
 const OUTLINE = FILM.outline.kind === "video" ? FILM.outline : null
 if (!OUTLINE) throw new Error("Expected a video.")
+
+/** The same film, its last scene starting between two of its frames, as a scene often does. */
+const BETWEEN_FRAMES = artifactVersion({
+  ...FILM,
+  outline: {
+    ...OUTLINE,
+    scenes: OUTLINE.scenes.map((scene) =>
+      scene.id === "outro" ? { ...scene, startMs: 5510, durationMs: 1490 } : scene
+    ),
+  },
+})
 
 /** What a runtime of this release says beside every report. */
 const RUNTIME = {
@@ -250,6 +261,22 @@ describe("a video's chapters and addresses", () => {
     expect(chapterAt(OUTLINE, 6)?.id).toBe("outro")
   })
 
+  // Guard proof: return `scene.startMs / 1000` from `chapterStart` in chapters.tsx; the runtime
+  // shows the frame at or before 5.51 s, the demo's last, and the chapter reads as the demo.
+  test("goes to a chapter's first frame, the next one when it starts between two", () => {
+    const outline = BETWEEN_FRAMES.outline.kind === "video" ? BETWEEN_FRAMES.outline : OUTLINE
+    const outro = outline.scenes[2]
+    if (!outro) throw new Error("Expected the outro.")
+
+    expect(chapterStart(outro, 30)).toBe(166 / 30)
+    expect(chapterAt(outline, Math.floor(5.51 * 30) / 30)?.id).toBe("demo")
+    expect(chapterAt(outline, chapterStart(outro, 30))?.id).toBe("outro")
+    expect(startOf(BETWEEN_FRAMES, outline, "outro")).toBe(166 / 30)
+
+    // A scene starting on a frame starts there.
+    expect(chapterStart({ ...outro, startMs: 5500 }, 30)).toBe(5.5)
+  })
+
   test("opens at the scene or the instant an address names", () => {
     expect(startOf(FILM, OUTLINE, "demo")).toBe(2)
     expect(startOf(FILM, OUTLINE, "t=6.5")).toBe(6.5)
@@ -277,8 +304,8 @@ function frameCache(): QueryClient {
 }
 
 /** The player rendered, its frame loaded, and a way to speak as the runtime in it. */
-async function openPlayer(part?: string, viewer?: ArtifactViewContext) {
-  const player = <VideoRenderer version={FILM} {...(part ? { part } : {})} />
+async function openPlayer(part?: string, viewer?: ArtifactViewContext, version = FILM) {
+  const player = <VideoRenderer version={version} {...(part ? { part } : {})} />
   const view = render(
     <Wrap cache={frameCache()}>
       {viewer ? <ArtifactViewProvider value={viewer}>{player}</ArtifactViewProvider> : player}
@@ -364,6 +391,24 @@ describe("the player", () => {
     const chapters = view.getByRole("complementary", { name: "Chapters" })
     fireEvent.click(within(chapters).getByText("Thanks"))
     expect(posted.at(-1)).toMatchObject({ action: "seek", timeSeconds: 5.5 })
+  })
+
+  // Guard proof: go to `scene.startMs / 1000` in `goToChapter` in player.tsx; the seek asks for
+  // 5.51 s, which the runtime shows as the demo's last frame.
+  test("lands on the first frame of a chapter that starts between two", async () => {
+    const { view, posted, runtime } = await openPlayer(undefined, undefined, BETWEEN_FRAMES)
+    if (!view.queryByRole("complementary", { name: "Chapters" })) {
+      fireEvent.click(view.getByRole("button", { name: "Chapters" }))
+    }
+    fireEvent.click(
+      within(view.getByRole("complementary", { name: "Chapters" })).getByText("Thanks")
+    )
+    expect(posted.at(-1)).toMatchObject({ action: "seek", timeSeconds: 166 / 30, frame: 166 })
+
+    await runtime({ ...RUNTIME, type: "state", currentTime: 166 / 30, isPlaying: false })
+    expect(view.getByRole("slider", { name: "Position" }).getAttribute("aria-valuetext")).toBe(
+      "0:05 of 0:07, Thanks"
+    )
   })
 
   test("plays the chapter just picked on Space, rather than picking it again", async () => {
