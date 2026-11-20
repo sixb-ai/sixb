@@ -13,6 +13,12 @@ Sixb packages are versioned independently. Each release entry names the packages
   "Go ahead" after a plan for a large change stays on the plan's tier instead of reading like a
   thank-you. Each tier's model description now steers the choice too, so a project can say what it
   uses each tier for, such as code changes across a repository on `heavy`.
+- `sixb deploy` only checks the server and ships releases, and every release is zero downtime. A
+  release starts in its own slot beside the live one, takes traffic once it is healthy, and moves
+  the routes and singletons back if it fails after the switch. The server runs the deploy, so a
+  dropped connection doesn't stop it, and a deploy loads the project once to migrate and check it.
+  `sixb deploy check` checks a short list of [host requirements](docs/deployment/host-requirements.md),
+  Chromium's libraries for projects that use Playwright among them.
 
 ### Upgrade notes
 
@@ -23,6 +29,22 @@ Sixb packages are versioned independently. Each release entry names the packages
   `SIXB.md`, as a new project's [does](packages/create-sixb/template/SIXB.md). It now always says
   what it checked and what it could not, and in a repository conversation it commits and pushes
   when the project's `SIXB.md` asks it to, not only when the user does.
+- `sixb deploy setup`, `sixb deploy access` and `sixb deploy ci` are gone: a server comes from your
+  own provisioning and meets the [host requirements](docs/deployment/host-requirements.md), and
+  [CI deploys](docs/deployment/github-actions.md) with a key or Tailscale you give it. A server set
+  up before keeps working as it is.
+- `SshTarget` takes `host` alone: deployments run as `sixb`, one per server, on fixed ports. Remove
+  `user`, `ports` and `standbyPorts` from `sixb.deploy.ts`.
+- The first deploy after upgrading adopts the running deployment as its live slot, with no downtime.
+  `@sixb/cli` and `@sixb/deploy-ssh` upgrade together: a commit whose `@sixb/deploy-ssh` is older
+  can't be deployed with `--ref` by the new CLI.
+- A migration that breaks the release before it, which is still serving while a deploy migrates,
+  stops the deploy before anything changes; `sixb deploy --accept-downtime` runs it with the
+  services stopped. Migrations are written to work alongside the release before them.
+- An env source no longer creates server tokens (`createServerToken` left the `EnvSource`
+  contract). Put the token on the server when you provision it.
+- `DeployTarget` loses `setup`, `access` and `ci`, a check's status is `ok`, `fail` or `warning`,
+  and `DeployCheckContext` gains `chromium`.
 
 ## 2026-11-19 — Sixb 0.2.6
 

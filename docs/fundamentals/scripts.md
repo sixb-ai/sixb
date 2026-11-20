@@ -78,7 +78,7 @@ since the script runs in a terminal there: that is how Ctrl-C reaches it.
   against the deployed code. A file it imports that isn't deployed fails to load. If the deployed
   project already has a file at that path with different contents, the run is refused: rename your
   copy, or deploy it.
-- Anyone who can [operate the deployment](../deployment/server-access.md) can run scripts on it.
+- Anyone who can reach the server as `sixb`, and so [operate the deployment](../deployment/servers.md#operate-the-deployment), can run scripts on it.
 - A deploy and a script never overlap, so neither replaces the code or migrates storage under the
   other. Each waits for the other up to 10 minutes, then fails: run long scripts when nobody is
   deploying, or a deploy started meanwhile, from CI too, fails.
