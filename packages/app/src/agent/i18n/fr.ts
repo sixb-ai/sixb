@@ -292,7 +292,7 @@ export const fr: Translation<AgentMessages> = {
     output_limit_reached:
       "J’ai manqué de place pour terminer cette réponse. Il suffit de me demander de continuer, ou de baisser le niveau de raisonnement.",
     workspace_not_saved:
-      "L’espace de travail n’a pas pu être enregistré à la fin de cette réponse.",
+      "Les fichiers n’ont pas pu être enregistrés à la fin de cette réponse.",
     unknown: "Un problème est survenu pendant cette réponse.",
   },
   activity: {
@@ -975,6 +975,11 @@ export const fr: Translation<AgentMessages> = {
     resumeHint: "Ses fichiers sont conservés, mais sa dernière modification peut être inachevée.",
     resumeFailed:
       "Impossible de reprendre où il s’était arrêté. Rechargez la page et réessayez, ou repartez sans les fichiers.",
+    answeredTitle: "Choisissez comment continuer",
+    answeredDescription:
+      "La réponse ci-dessus est complète, mais les fichiers sur lesquels il a travaillé n’ont pas été enregistrés.",
+    keepFiles: "Continuer avec ces fichiers",
+    keepingFiles: "Restauration…",
   },
   background: {
     card: (command) => `Commande en arrière-plan : ${command}`,

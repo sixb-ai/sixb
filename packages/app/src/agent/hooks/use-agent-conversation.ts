@@ -1722,6 +1722,11 @@ export function useAgentConversation({
               },
             }
           : {}),
+        answered:
+          latestRun?.status === "succeeded" &&
+          (latestRun.diagnostics ?? []).some(
+            (diagnostic) => diagnostic.code === "workspace_not_saved"
+          ),
         canRecreate: access === "owner",
         owner: thread ? personName(threadOwner(thread)) : "",
       }
