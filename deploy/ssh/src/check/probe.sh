@@ -28,6 +28,7 @@ done
 stat -c %a "$HOME" > /dev/null 2>&1 || missing="$missing stat"
 fact os.missing "${missing# }"
 fact account.name "$(id -un)"
+fact account.home "$HOME"
 fact account.uid "$(id -u)"
 fact linger "$(yes_no test -e "/var/lib/systemd/linger/$USER")"
 

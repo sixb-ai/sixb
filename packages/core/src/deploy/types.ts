@@ -151,6 +151,8 @@ export interface DeployCheck {
   readonly detail: string
   /** What to do about it, when the status is not `ok`. */
   readonly remedy?: string
+  /** Shell commands that fix it, for someone with administrator rights on the target to run once. */
+  readonly commands?: readonly string[]
 }
 
 export interface DeployCheckContext extends DeployOperationContext {

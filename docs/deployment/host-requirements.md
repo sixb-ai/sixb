@@ -84,4 +84,4 @@ Then put the project's settings on the server: its env token, or its `.env`. In 
 bun sixb deploy check
 ```
 
-It checks each requirement as the deploy account, changes nothing, and names what is missing. It also says where each domain points. `sixb deploy` runs the same checks first, and stops before uploading anything when one fails.
+It checks each requirement as the deploy account, changes nothing, and names what is missing. For what a command fixes, such as the Caddy folder, the sudoers line or lingering, it prints the commands to run once on the server as root, filled in for this account and deployment. It also says where each domain points. `sixb deploy` runs the same checks first, and stops before uploading anything when one fails.

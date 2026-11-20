@@ -47,7 +47,8 @@ Sixb packages are versioned independently. Each release entry names the packages
   `serverNeedsToken: false`, so the server needs no token file: Azure Key Vault does with
   `server: { identity: "managed" }`.
 - `DeployTarget` loses `setup`, `access` and `ci`, a check's status is `ok`, `fail` or `warning`,
-  and `DeployCheckContext` gains `chromium` and `envToken`.
+  and `DeployCheckContext` gains `chromium` and `envToken`. A check can carry `commands` that fix
+  it, which `sixb deploy check` prints for someone with root to run on the server.
 
 ## 2026-11-19 — Sixb 0.2.6
 

@@ -12,7 +12,12 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-const input: JudgeInput = { ports: [3001, 3002], settings: "env-token", chromium: false }
+const input: JudgeInput = {
+  name: "shop",
+  ports: [3001, 3002],
+  settings: "env-token",
+  chromium: false,
+}
 
 /** What a cell from the infra template reports. */
 const healthy: Record<string, string> = {
@@ -23,6 +28,7 @@ const healthy: Record<string, string> = {
   "os.arch": "x86_64",
   "os.missing": "",
   "account.name": "deploy",
+  "account.home": "/home/deploy",
   "account.uid": "1000",
   linger: "yes",
   "caddy.version": "2.10.2",
@@ -120,6 +126,49 @@ describe("judging the host", () => {
     )
   })
 
+  test("hands a server with nothing set up the commands that set it up, for its account", () => {
+    const unset = checks({
+      "os.missing": "flock ss",
+      linger: "no",
+      "caddy.version": "",
+      "caddy.caddyfile-imports": "no",
+      "caddy.routes-imported": "no",
+      "caddy.routes-writable": "no",
+      "caddy.reload": "no",
+    })
+    const commandsOf = (id: string) => unset.find((check) => check.id === id)?.commands
+
+    expect(commandsOf("server")).toEqual(["apt-get install -y util-linux iproute2"])
+    expect(commandsOf("linger")).toEqual(["loginctl enable-linger deploy"])
+    expect(commandsOf("caddy")?.slice(3)).toEqual([
+      "grep -qxF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile || echo 'import /etc/caddy/sixb.d/*.caddy' >> /etc/caddy/Caddyfile",
+      "install -d -m 0755 /etc/caddy/sixb.d",
+      "echo 'import /etc/caddy/sixb.d/deploy/*.caddy' > /etc/caddy/sixb.d/deploy.caddy",
+      "install -d -m 0755 -o deploy -g deploy /etc/caddy/sixb.d/deploy",
+      "echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/deploy",
+      "chmod 440 /etc/sudoers.d/deploy",
+      "systemctl reload caddy",
+    ])
+    expect(commandsOf("caddy")?.[2]).toBe("apt-get update && apt-get install -y caddy")
+  })
+
+  test("fixes only what is missing", () => {
+    const caddy = checks({ "caddy.reload": "no" }).find((check) => check.id === "caddy")
+    expect(caddy?.commands).toEqual([
+      "echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/deploy",
+      "chmod 440 /etc/sudoers.d/deploy",
+      "systemctl reload caddy",
+    ])
+    expect(checks({}).some((check) => check.commands)).toBe(false)
+  })
+
+  test("names the deployment's files in what fixes its settings", () => {
+    const loose = checks({ "file.env-token": "644 54" }).find((check) => check.id === "settings")
+    expect(loose?.commands).toEqual(["chmod 600 /home/deploy/shop/env-token"])
+    const missing = checks({ "file.env-token": "missing" }).find((c) => c.id === "settings")
+    expect(missing?.remedy).toContain("/home/deploy/shop/env-token, mode 600")
+  })
+
   test("warns about a nearly full disk", () => {
     expect(statusOf("disk", { "disk.free-kb": "1048576" })).toBe("warning: 1024 MB free")
   })
@@ -160,6 +209,7 @@ describe("the probe", () => {
     expect(facts.get("deployments.others")).toBe("blog")
     expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/deploy")
     expect(facts.get("account.uid")).toMatch(/^\d+$/)
+    expect(facts.get("account.home")).toBe(home)
     expect(facts.has("port.3001")).toBe(true)
     expect(facts.get("chromium.checked")).toBe("system libraries")
   })
