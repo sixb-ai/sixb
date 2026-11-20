@@ -193,7 +193,7 @@ describe("VercelSandbox keepalive", () => {
   // Removal proof: drop the idle branch in keepAlive; the unused session is extended for hours.
   test("lets an unused session end, and keeps it alive again once used", async () => {
     const client = expiringIn(5)
-    const sandbox = new VercelSandbox({ client })
+    const sandbox = new VercelSandbox({ client, keepAliveIdleMs: KEEP_ALIVE_IDLE_MS })
 
     await pass(3 * 60)
     const whileIdle = client.extensions.length
@@ -206,12 +206,24 @@ describe("VercelSandbox keepalive", () => {
     expect(client.extensions).toHaveLength(whileIdle + 1)
   })
 
+  // An ephemeral sandbox is destroyed by its run, which may wait an hour on sub-agents working in
+  // sandboxes of their own. Removal proof: apply the idle bound when `keepAliveIdleMs` is absent;
+  // the waiting run's session ends under it.
+  test("keeps an ephemeral sandbox's session alive while it is open, however long unused", async () => {
+    const client = expiringIn(5)
+    new VercelSandbox({ client })
+
+    await pass(3 * 60)
+
+    expect(client.expiresAt.getTime()).toBeGreaterThan(Date.now())
+  })
+
   // Removal proof: drop `this.inFlight.size === 0 &&` from keepAlive; the session ends under a
   // background command that runs for hours without another call.
   test("keeps the session alive while a command runs, however long", async () => {
     const client = expiringIn(5)
     client.nextCommandWaitsForKill = true
-    const sandbox = new VercelSandbox({ client })
+    const sandbox = new VercelSandbox({ client, keepAliveIdleMs: KEEP_ALIVE_IDLE_MS })
 
     const running = sandbox.runCommand("bun", ["dev"])
     await settle()
@@ -231,7 +243,7 @@ describe("VercelSandbox keepalive", () => {
   test("counts a command's end as use", async () => {
     const client = expiringIn(5)
     client.nextCommandWaitsForKill = true
-    const sandbox = new VercelSandbox({ client })
+    const sandbox = new VercelSandbox({ client, keepAliveIdleMs: KEEP_ALIVE_IDLE_MS })
 
     const build = sandbox.runCommand("bun", ["run", "build"], { timeout: 2 * KEEP_ALIVE_IDLE_MS })
     await settle()
@@ -323,6 +335,25 @@ describe("VercelSandbox keepalive", () => {
 
     expect(extensions()).toHaveLength(1)
     expect(extensions()[0]?.body).toEqual({ duration: KEEP_ALIVE_EXTENSION_MS })
+
+    await sandbox.stop().catch(() => {})
+  })
+
+  // Removal proof: drop `keepAliveIdleMs` from bindPersistentSandbox; the unused persistent
+  // session is extended for as long as the handle lives.
+  test("a persistent sandbox left unused lets its session end", async () => {
+    const f = fixture()
+    f.startSessionsNow()
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
+    const extensions = () =>
+      f.requests.filter((request) => request.path.includes("/extend-timeout"))
+
+    await pass(3 * 60, 200)
+
+    // Kept alive through its first half hour, then left to end.
+    expect(extensions().length * KEEP_ALIVE_EXTENSION_MS).toBeLessThanOrEqual(
+      KEEP_ALIVE_IDLE_MS + KEEP_ALIVE_EXTENSION_MS
+    )
 
     await sandbox.stop().catch(() => {})
   })

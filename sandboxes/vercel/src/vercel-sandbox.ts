@@ -38,9 +38,10 @@ export const KEEP_ALIVE_MARGIN_MS = 5 * 60_000
 export const KEEP_ALIVE_EXTENSION_MS = 15 * 60_000
 
 /**
- * A sandbox nothing used for this long, with no command running, is no longer extended until it is
- * used again: a handle its run lost, or never stopped, ends with its session instead of running to
- * the plan's maximum. Longer than any model call between two tool calls.
+ * A persistent sandbox nothing used for this long, with no command running, is no longer extended
+ * until it is used again. It outlives its run, and a run its worker lost never stops it: it ends
+ * with its session instead of running to the plan's maximum. The sub-agents a turn starts work in
+ * the same sandbox, so a turn that waits for them still uses it.
  */
 export const KEEP_ALIVE_IDLE_MS = 30 * 60_000
 
@@ -102,15 +103,21 @@ export interface VercelSandboxClient {
 export interface VercelSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly client: VercelSandboxClient
+  /**
+   * Stop keeping the session alive once nothing used the sandbox for this long, until it is used
+   * again: {@link KEEP_ALIVE_IDLE_MS} for a persistent sandbox. Absent, it is kept alive while
+   * open, as an ephemeral sandbox, which its run always destroys.
+   */
+  readonly keepAliveIdleMs?: number
 }
 
 /**
  * Sandbox wrapper around a Vercel Sandbox SDK instance.
  *
- * While it is used, it keeps its session alive: a session with little time left is extended, up to
- * the plan's maximum, so it outlasts the turn that uses it. Left unused for
- * {@link KEEP_ALIVE_IDLE_MS}, it lets the session end. Stop or destroy it when done. A session
- * Vercel ended stops the handle, and every later call fails at once.
+ * While it is open, it keeps its session alive: a session with little time left is extended, up to
+ * the plan's maximum, so it outlasts the turn that uses it. A persistent one left unused lets its
+ * session end ({@link VercelSandboxOptions.keepAliveIdleMs}). Stop or destroy it when done. A
+ * session Vercel ended stops the handle, and every later call fails at once.
  */
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
@@ -124,6 +131,7 @@ export class VercelSandbox implements Sandbox {
   private readonly client: VercelSandboxClient
   private readonly sandboxEnv: Readonly<Record<string, string>>
   private readonly defaultTimeoutMs: number | undefined
+  private readonly keepAliveIdleMs: number | undefined
   private readonly inFlight = new Set<VercelCommandClient>()
   private destroyed = false
   private stopPromise: Promise<void> | undefined
@@ -145,6 +153,7 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
+    this.keepAliveIdleMs = options.keepAliveIdleMs
 
     if (options.client.extendTimeout && options.client.expiresAt !== undefined) {
       this.startKeepAlive()
@@ -449,7 +458,10 @@ export class VercelSandbox implements Sandbox {
     if (this.extending) return this.extending
     if (this.keepAliveState !== "on" || this.currentStatus !== "running") return Promise.resolve()
 
-    const idle = this.inFlight.size === 0 && Date.now() - this.lastUsedAt >= KEEP_ALIVE_IDLE_MS
+    const idle =
+      this.keepAliveIdleMs !== undefined &&
+      this.inFlight.size === 0 &&
+      Date.now() - this.lastUsedAt >= this.keepAliveIdleMs
     if (idle) {
       this.pauseKeepAlive()
       return Promise.resolve()

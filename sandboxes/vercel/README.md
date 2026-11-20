@@ -158,7 +158,7 @@ new VercelSandboxFactory({
 | `source` | — | Common Sixb HTTPS Git source; credentials and provider-specific clone options are not accepted. |
 | `resources` | Vercel default | `{ vcpus }`; memory is 2048 MB per vCPU. |
 | `ports` | `[]` | Ports to expose through Vercel sandbox domains. |
-| `sessionTimeoutMs` | Vercel default | Sandbox session lifetime at creation; separate from Sixb's per-command timeout. A sandbox in use extends its session by 15 minutes whenever less than 5 are left, up to your plan's maximum. After 30 minutes unused, it lets the session end. |
+| `sessionTimeoutMs` | Vercel default | Sandbox session lifetime at creation; separate from Sixb's per-command timeout. An open sandbox extends its session by 15 minutes whenever less than 5 are left, up to your plan's maximum. A persistent one unused for 30 minutes lets its session end. |
 | `timeout` | — | Default Sixb per-command timeout, in ms, capped at Vercel's 5 hours (`maxCommandTimeout`). A timed-out or aborted command is killed with everything it started, found by its `SIXB_SANDBOX_COMMAND` environment variable; the call returns at most 5 seconds later. |
 | `setupTimeoutMs` | `30_000` | Timeout for provider setup commands like creating a custom working directory. |
 | `snapshotExpiration` | Vercel default | Snapshot TTL in ms for named persistent creation. Does not enable persistence. |
