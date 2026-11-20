@@ -68,7 +68,7 @@ export class SshTarget implements DeployTarget {
   }
 
   deploy(release: DeployRelease, source: DeploySource, context: DeployContext): Promise<void> {
-    return this.#connected((shell) => deployRelease(shell, release, source, context, SLOT_PORTS))
+    return this.#connected((shell) => deployRelease(shell, release, source, context))
   }
 
   status(context: DeployOperationContext): Promise<DeployStatus> {

@@ -1,4 +1,4 @@
-/// <reference path="./sh.d.ts" />
+/// <reference path="../sh.d.ts" />
 import { resolve4, resolve6 } from "node:dns/promises"
 import { isIP } from "node:net"
 import type { DeployCheck, DeployRelease } from "@sixb/core/deploy"

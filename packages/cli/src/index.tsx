@@ -445,7 +445,12 @@ async function main(): Promise<void> {
 
     case "deploy": {
       const { runDeploy } = await import("./commands/deploy")
-      await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json"), ref: getFlag("ref") })
+      await runDeploy({
+        dryRun: hasFlag("dry-run"),
+        json: hasFlag("json"),
+        ref: getFlag("ref"),
+        acceptDowntime: hasFlag("accept-downtime"),
+      })
       break
     }
 

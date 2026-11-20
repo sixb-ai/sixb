@@ -1,3 +1,4 @@
+/// <reference path="./sh.d.ts" />
 import { randomUUID } from "node:crypto"
 import type {
   DeployContext,
@@ -8,94 +9,134 @@ import type {
   DeploySource,
   DeployStatus,
 } from "@sixb/core/deploy"
-import { deploymentLayout } from "./layout"
-import type { SlotPorts } from "./render"
-import {
-  renderDeployScript,
-  renderPrepareScript,
-  renderReceiveScript,
-  STEP_MARKER,
-} from "./scripts"
+import bootstrap from "./bootstrap.sh" with { type: "text" }
+import { deriveReleaseId, parseEvent, type ReleasePlan, releaseStepLabels } from "./plan"
 import { stripTerminalControl } from "./server/logs"
 import { shellQuote } from "./shell"
 import { RemoteScriptError, type RemoteShell } from "./transport"
 
 const NOT_DEPLOYED = "__SIXB_NOT_DEPLOYED__"
 
-/** Uploads the source, then runs the release on the server as one locked script. */
+/**
+ * Uploads the source and the plan, starts the release on the server detached from this
+ * connection, and follows its log until it ends. A dropped connection leaves the deploy running.
+ */
 export async function deployRelease(
   shell: RemoteShell,
   release: DeployRelease,
   source: DeploySource,
-  context: DeployContext,
-  slotPorts?: SlotPorts
-): Promise<void> {
-  const prepared = await capture(shell, renderPrepareScript(release.name, source.commit))
-  const [home, incoming] = prepared
-  if (!home || !incoming) {
-    throw new Error("[SshTarget] The server did not report its home directory.")
-  }
-
-  const layout = deploymentLayout({
-    home,
-    name: release.name,
-    projectPath: source.projectPath,
-    bunVersion: release.bunVersion,
-  })
-  const { labels, script } = renderDeployScript({
-    release,
-    layout,
-    incoming,
-    ...(slotPorts ? { slotPorts } : {}),
-    record: {
-      commit: source.commit,
-      ref: source.ref,
-      deployedAt: new Date().toISOString(),
-      deployedBy: context.deployedBy,
-    },
-  })
-  context.report({ type: "steps", labels: ["Upload source", ...labels] })
-
-  context.report({ type: "step", index: 0, status: "running" })
-  for (const archive of source.archives) {
-    await shell.run(renderReceiveScript(incoming, archive.path), { stdin: archive.open() })
-  }
-  context.report({ type: "step", index: 0, status: "done" })
-
-  await runReportingSteps(shell, script, context)
-}
-
-/** Runs the deploy script, turning its step markers into progress and the rest into output. */
-async function runReportingSteps(
-  shell: RemoteShell,
-  script: string,
   context: DeployContext
 ): Promise<void> {
-  const run = shell.run(script, {
-    onLine: (line) => {
-      const [marker, index, status] = line.split("\t")
-      if (marker === STEP_MARKER && (status === "start" || status === "done")) {
-        const step = Number(index) + 1
-        context.report({
-          type: "step",
-          index: step,
-          status: status === "start" ? "running" : "done",
-        })
-      } else {
-        const output = stripTerminalControl(line)
-        if (output.trim()) context.report({ type: "output", line: output })
-      }
-    },
-  })
-  try {
-    await run
-  } catch (error) {
-    // The step's output already reached `report`; repeating it here would print it twice.
-    if (error instanceof RemoteScriptError && error.exitCode !== 255) {
-      throw new Error(`[SshTarget] The step exited with code ${error.exitCode}.`)
-    }
-    throw error
+  const record = {
+    commit: source.commit,
+    ref: source.ref,
+    deployedAt: new Date().toISOString(),
+    deployedBy: context.deployedBy,
   }
+  const releaseId = deriveReleaseId(record)
+  const [home, incoming] = await capture(
+    shell,
+    [
+      `root="$HOME"/${shellQuote(release.name)}`,
+      'mkdir -p "$root/deploy/incoming" "$root/deploy/runs"',
+      `incoming="$(mktemp -d "$root/deploy/incoming/${releaseId}.XXXXXX")"`,
+      // `mktemp` makes it 0700, and tar passes the mode of the upload's `.` on to the release.
+      'chmod 755 "$incoming"',
+      `printf '%s\n%s\n' "$HOME" "$incoming"`,
+    ].join("\n")
+  )
+  if (!home || !incoming)
+    throw new Error("[SshTarget] The server did not report its home directory.")
+
+  const labels = releaseStepLabels(release)
+  context.report({ type: "steps", labels })
+  context.report({ type: "step", index: 0, status: "running" })
+  for (const archive of source.archives) {
+    const directory = archive.path === "." ? incoming : `${incoming}/${archive.path}`
+    await shell.run(
+      `mkdir -p ${shellQuote(directory)} && tar -x -f - -C ${shellQuote(directory)}`,
+      { stdin: archive.open() }
+    )
+  }
+  const runs = `${home}/${release.name}/deploy/runs`
+  const plan: ReleasePlan = {
+    version: 1,
+    release,
+    record,
+    releaseId,
+    projectPath: source.projectPath,
+    acceptDowntime: context.acceptDowntime === true,
+  }
+  const files = { plan: `${runs}/${releaseId}.json`, script: `${runs}/${releaseId}.sh` }
+  await upload(shell, files.plan, JSON.stringify(plan))
+  await upload(shell, files.script, bootstrap)
+  context.report({ type: "step", index: 0, status: "done" })
+
+  const log = `${runs}/${releaseId}.log`
+  const args = [
+    release.name,
+    releaseId,
+    source.projectPath,
+    release.bunVersion,
+    incoming,
+    files.plan,
+  ]
+  const [pid] = await capture(
+    shell,
+    `setsid nohup bash ${[files.script, ...args].map(shellQuote).join(" ")} > ${shellQuote(log)} 2>&1 < /dev/null & echo $!`
+  )
+  await follow(shell, { pid: pid ?? "", log, labels, context })
+}
+
+/** Reads the release's log as it grows, until the release ends, and reports its progress. */
+async function follow(
+  shell: RemoteShell,
+  input: {
+    readonly pid: string
+    readonly log: string
+    readonly labels: readonly string[]
+    readonly context: DeployContext
+  }
+): Promise<void> {
+  const { context, labels } = input
+  let exit: number | null = null
+  let failure: string | null = null
+  try {
+    await shell.run(
+      `tail -n +1 -F --pid=${shellQuote(input.pid)} ${shellQuote(input.log)} 2> /dev/null`,
+      {
+        onLine: (line, stream) => {
+          if (stream !== "stdout") return
+          const event = parseEvent(line)
+          if (event && "exit" in event) {
+            exit = event.exit
+          } else if (event) {
+            const index = labels.indexOf(event.step)
+            if (index === -1) context.report({ type: "output", line: event.step })
+            else context.report({ type: "step", index, status: event.status })
+          } else {
+            const output = stripTerminalControl(line)
+            if (output.startsWith("[SshTarget] ")) failure = output
+            if (output.trim()) context.report({ type: "output", line: output })
+          }
+        },
+      }
+    )
+  } catch (error) {
+    throw new Error(
+      `[SshTarget] Lost the connection while following the deploy, which carries on on the server. \`sixb deploy status\` shows the release once it ends; its log is ${input.log}.`,
+      { cause: error }
+    )
+  }
+  if (exit === 0) return
+  // The step's output already reached `report`; the error repeats only its conclusion.
+  throw new Error(failure ?? `[SshTarget] The deploy ended with code ${exit ?? "unknown"}.`)
+}
+
+async function upload(shell: RemoteShell, path: string, content: string): Promise<void> {
+  await shell.run(`umask 077 && cat > ${shellQuote(path)}`, {
+    stdin: new Blob([content]).stream(),
+  })
 }
 
 export async function readStatus(shell: RemoteShell, name: string): Promise<DeployStatus> {

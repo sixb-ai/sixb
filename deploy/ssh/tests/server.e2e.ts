@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import type { DeployStatus } from "@sixb/core/deploy"
 
 /**
- * Deploys Northline to a real server prepared for `sixb deploy`, then drives it through the CLI.
+ * Deploys Northline to a real server that meets the host requirements, then drives it through the CLI.
  * Runs only when SIXB_DEPLOY_TEST_HOST and SIXB_DEPLOY_TEST_DOMAIN name that server and a domain
  * whose subdomains point at it. Deploys the committed Northline, so commit first.
  */

@@ -140,6 +140,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Branch, tag, or commit to deploy (default: HEAD)",
     kind: "string",
   },
+  "accept-downtime": {
+    syntax: "--accept-downtime",
+    summary: "Let a migration that breaks the live release stop the services while it runs",
+    kind: "boolean",
+  },
   follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
   env: {
     syntax: "--env <dev|prod>",
@@ -597,8 +602,8 @@ const commandTree: readonly CommandNode[] = [
   },
   {
     ...command("deploy", "Deploy the project described in sixb.deploy.ts", {
-      usage: "sixb deploy [--dry-run] [--ref <ref>] [--json]",
-      options: ["dry-run", "ref", "json"],
+      usage: "sixb deploy [--dry-run] [--ref <ref>] [--accept-downtime] [--json]",
+      options: ["dry-run", "ref", "accept-downtime", "json"],
       rootHelpLabel: "deploy ...",
     }),
     children: [

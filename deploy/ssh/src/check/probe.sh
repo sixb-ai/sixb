@@ -20,7 +20,7 @@ fi
 fact os.systemd "$(yes_no command -v systemctl)"
 fact os.arch "$(uname -m)"
 missing=""
-for tool in curl unzip tar flock sha256sum; do
+for tool in curl unzip tar flock setsid sha256sum; do
   command -v "$tool" > /dev/null || missing="$missing $tool"
 done
 fact os.missing "${missing# }"

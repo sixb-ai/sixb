@@ -1,25 +1,19 @@
 import { posix } from "node:path"
 import type { DeployHttpServiceName } from "@sixb/core/deploy"
 
-/**
- * Where a deployment lives on its server. Everything but the Bun binaries and the Caddy route
- * sits in one directory in the deploy user's home, so projects under one user never share files.
- *
- *   ~/<name>/releases/<id>  immutable release directories (code, node_modules, .sixb/dist)
- *   ~/<name>/current        symlink to the active release directory
- *   ~/<name>/code           symlink to `current` (migrated in place from single-folder deploys)
- *   ~/<name>/shared/.env    shared project `.env`, linked from each release
- *   ~/<name>/env-token      the read-only token a deploy pulls `.env` with, if it has a source
- *   ~/<name>/deploy         lock, uploads, manifests, release record, ctl
- *   ~/<name>/run            supervisor state, control requests, and logs
- *   ~/.sixb/bun/<v>         Bun, shared by the user's projects that pin the same version
- */
-export const ENV_TOKEN_FILE = "env-token"
-
 /** The account every deployment runs as. A server runs one deployment. */
 export const DEPLOY_USER = "sixb"
 
+/** The read-only token a deploy pulls `.env` with, for a project with a source. */
+export const ENV_TOKEN_FILE = "env-token"
+
+/**
+ * A deployment runs in one of two slots. A release starts in the idle one, beside the live one,
+ * and takes traffic once it is healthy.
+ */
 export type DeploySlot = "blue" | "green"
+
+export const SLOTS: readonly DeploySlot[] = ["blue", "green"]
 
 /** The loopback ports each slot's HTTP services listen on. Caddy forwards to the live slot's. */
 export const SLOT_PORTS = {
@@ -27,92 +21,134 @@ export const SLOT_PORTS = {
   green: { app: 3011, api: 3012 },
 } as const satisfies Record<DeploySlot, Record<DeployHttpServiceName, number>>
 
+export function otherSlot(slot: DeploySlot): DeploySlot {
+  return slot === "blue" ? "green" : "blue"
+}
+
+/**
+ * Where a deployment lives on its server: one folder in the deploy account's home, plus Bun, the
+ * slot service and the Caddy routes.
+ *
+ *   ~/<name>/releases/<id>      immutable releases: code, node_modules, .sixb/dist, .env
+ *   ~/<name>/current            the live release
+ *   ~/<name>/code               `current`, for scripts and older tools that look here
+ *   ~/<name>/shared/.env        the `.env` kept on the server, for a project without a source
+ *   ~/<name>/env-token          the token a deploy pulls `.env` with, for a project with one
+ *   ~/<name>/deploy/            lock, uploads, release record, live slot, slot launchers, ctl
+ *   ~/<name>/run/<slot>/        each slot's supervisor state, control requests and logs
+ *   ~/.sixb/bun/<version>/      Bun, shared by releases on the same version
+ */
 export interface DeploymentLayout {
+  readonly name: string
+  readonly home: string
   readonly root: string
   readonly releasesDir: string
   readonly currentLink: string
   readonly code: string
-  readonly sharedDir: string
   readonly sharedEnv: string
   readonly envToken: string
-  readonly project: string
-  readonly projectPath: string
   readonly deployDir: string
   readonly incomingDir: string
+  readonly runsDir: string
   readonly lock: string
-  readonly fileList: string
-  readonly manifest: string
-  readonly candidateManifest: string
   readonly releaseRecord: string
-  /** Runs the server half of this package with the project's Bun and manifest. */
+  /** Names the live slot. */
+  readonly liveSlotFile: string
+  /** What `status`, `logs` and the other operations run: the live release's server half. */
   readonly ctl: string
-  readonly runDir: string
-  readonly logDir: string
-  readonly bunDir: string
-  readonly bun: string
-  readonly unitName: string
-  readonly unit: string
+  readonly unitDir: string
+  /** The slot service's template, instantiated as `sixb-<name>@blue` and `sixb-<name>@green`. */
+  readonly unitTemplate: string
   readonly caddyDir: string
   readonly caddySnippet: string
+}
+
+export interface SlotLayout {
+  readonly slot: DeploySlot
+  readonly unit: string
+  readonly manifest: string
+  /** What the slot's service runs: its release's supervisor, with its Bun. */
+  readonly launcher: string
+  readonly runDir: string
+  readonly logDir: string
+}
+
+/** A deployment from before slots: one service, one manifest. Adopted by its first slot deploy. */
+export interface LegacyLayout {
+  readonly unit: string
+  readonly unitPath: string
+  readonly manifest: string
+}
+
+export function deploymentLayout(input: { readonly home: string; readonly name: string }) {
+  const root = posix.join(input.home, input.name)
+  const deployDir = posix.join(root, "deploy")
+  const unitDir = posix.join(input.home, ".config", "systemd", "user")
+  const caddyDir = posix.join("/etc/caddy/sixb.d", DEPLOY_USER)
+  return {
+    name: input.name,
+    home: input.home,
+    root,
+    releasesDir: posix.join(root, "releases"),
+    currentLink: posix.join(root, "current"),
+    code: posix.join(root, "code"),
+    sharedEnv: posix.join(root, "shared", ".env"),
+    envToken: posix.join(root, ENV_TOKEN_FILE),
+    deployDir,
+    incomingDir: posix.join(deployDir, "incoming"),
+    runsDir: posix.join(deployDir, "runs"),
+    lock: posix.join(deployDir, "lock"),
+    releaseRecord: posix.join(deployDir, "release.json"),
+    liveSlotFile: posix.join(deployDir, "live-slot"),
+    ctl: posix.join(deployDir, "ctl"),
+    unitDir,
+    unitTemplate: posix.join(unitDir, `sixb-${input.name}@.service`),
+    caddyDir,
+    caddySnippet: posix.join(caddyDir, `${input.name}.caddy`),
+  } satisfies DeploymentLayout
+}
+
+export function slotLayout(layout: DeploymentLayout, slot: DeploySlot): SlotLayout {
+  const runDir = posix.join(layout.root, "run", slot)
+  return {
+    slot,
+    unit: `sixb-${layout.name}@${slot}.service`,
+    manifest: posix.join(layout.deployDir, `${slot}.json`),
+    launcher: posix.join(layout.deployDir, slot),
+    runDir,
+    logDir: posix.join(runDir, "logs"),
+  }
+}
+
+export function legacyLayout(layout: DeploymentLayout): LegacyLayout {
+  const unit = `sixb-${layout.name}.service`
+  return {
+    unit,
+    unitPath: posix.join(layout.unitDir, unit),
+    manifest: posix.join(layout.deployDir, "processes.json"),
+  }
 }
 
 export interface ReleaseLayout {
   readonly id: string
   readonly root: string
+  /** The project inside the release: its root, or a folder of a monorepo. */
   readonly project: string
+  readonly bunDir: string
+  readonly bun: string
 }
 
-export function deploymentLayout(input: {
-  readonly home: string
-  readonly name: string
-  readonly projectPath: string
-  readonly bunVersion: string
-}): DeploymentLayout {
-  const root = posix.join(input.home, input.name)
-  const releasesDir = posix.join(root, "releases")
-  const currentLink = posix.join(root, "current")
-  const code = posix.join(root, "code")
-  const sharedDir = posix.join(root, "shared")
-  const deployDir = posix.join(root, "deploy")
-  const runDir = posix.join(root, "run")
-  const bunDir = posix.join(input.home, ".sixb", "bun", input.bunVersion)
-  const unitName = `sixb-${input.name}.service`
-  const caddyDir = posix.join("/etc/caddy/sixb.d", DEPLOY_USER)
-
+export function releaseLayout(
+  layout: DeploymentLayout,
+  input: { readonly id: string; readonly projectPath: string; readonly bunVersion: string }
+): ReleaseLayout {
+  const root = posix.join(layout.releasesDir, input.id)
+  const bunDir = posix.join(layout.home, ".sixb", "bun", input.bunVersion)
   return {
+    id: input.id,
     root,
-    releasesDir,
-    currentLink,
-    code,
-    sharedDir,
-    sharedEnv: posix.join(sharedDir, ".env"),
-    envToken: posix.join(root, ENV_TOKEN_FILE),
-    project: posix.join(code, input.projectPath),
-    projectPath: input.projectPath,
-    deployDir,
-    incomingDir: posix.join(deployDir, "incoming"),
-    lock: posix.join(deployDir, "lock"),
-    fileList: posix.join(deployDir, "files.txt"),
-    manifest: posix.join(deployDir, "processes.json"),
-    candidateManifest: posix.join(deployDir, "candidate.json"),
-    releaseRecord: posix.join(deployDir, "release.json"),
-    ctl: posix.join(deployDir, "ctl"),
-    runDir,
-    logDir: posix.join(runDir, "logs"),
+    project: posix.join(root, input.projectPath),
     bunDir,
     bun: posix.join(bunDir, "bun"),
-    unitName,
-    unit: posix.join(input.home, ".config", "systemd", "user", unitName),
-    caddyDir,
-    caddySnippet: posix.join(caddyDir, `${input.name}.caddy`),
-  }
-}
-
-export function releaseLayout(layout: DeploymentLayout, releaseId: string): ReleaseLayout {
-  const root = posix.join(layout.releasesDir, releaseId)
-  return {
-    id: releaseId,
-    root,
-    project: posix.join(root, layout.projectPath),
   }
 }

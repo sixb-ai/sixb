@@ -3,11 +3,10 @@ import type { WriteStream } from "node:fs"
 import { mkdir, readdir, readFile, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { Readable } from "node:stream"
-import type { DeploySlot } from "../layout"
 import { openProcessLog, processLogPath, rotateLogIfLarge } from "./logs"
 import {
   controlDir,
-  isOverlapSafeService,
+  isExclusiveService,
   loadProcessManifest,
   type ProcessManifest,
   type ProcessServiceManifest,
@@ -25,27 +24,26 @@ import {
   writeProcessState,
 } from "./state"
 
-export type SupervisorCommand = "restart" | "start" | "stop" | "stage" | "activate" | "discard"
+export type SupervisorCommand = "restart" | "start" | "stop"
 
 const LINUX_CLOCK_TICKS_PER_SECOND = 100
 /** How often memory, CPU, and log sizes are checked. */
 const SAMPLE_INTERVAL_MS = 5_000
 const MAX_RESTART_DELAY_MS = 30_000
-/** How long old `api` and `workers` may drain in the background after a blue-green cutover. */
-const RETIRING_KILL_TIMEOUT_MS = 300_000
+/** How long a retiring slot's `api` and `workers` may finish their work once its service stops. */
+const DRAIN_TIMEOUT_MS = 300_000
 /** SIGINT comes this long before SIGKILL, so a draining role can still record its partial work. */
 export const INTERRUPT_LEAD_MS = 10_000
 
-/** A retiring process gets the cutover's drain window, or its own kill timeout when longer. */
-export function retiringKillTimeoutMs(killTimeoutMs: number): number {
-  return Math.max(killTimeoutMs, RETIRING_KILL_TIMEOUT_MS)
+/** A draining process gets the drain window, or its own kill timeout when longer. */
+export function drainKillTimeoutMs(killTimeoutMs: number): number {
+  return Math.max(killTimeoutMs, DRAIN_TIMEOUT_MS)
 }
 
 interface SupervisorRequest {
   readonly id: string
   readonly type: SupervisorCommand
   readonly service?: string
-  readonly manifestPath?: string
 }
 
 interface SupervisorResponse {
@@ -54,17 +52,12 @@ interface SupervisorResponse {
   readonly message?: string
 }
 
-type InstanceCohort = "active" | "staged" | "retiring"
-
 interface ManagedInstance {
   readonly key: string
-  readonly cwd: string
-  readonly slot?: DeploySlot
   readonly service: ProcessServiceManifest
   readonly instance: number
   readonly child: ChildProcess
   readonly logPath: string
-  cohort: InstanceCohort
   log: WriteStream
   startedAt: string
   stoppedAt?: string
@@ -78,7 +71,6 @@ interface ManagedInstance {
   cpuSample?: CpuSample
   memoryBytes?: number
   restartTimer?: ReturnType<typeof setTimeout>
-  cancelRetire?: () => void
   lastExitCode?: number | null
   lastSignal?: NodeJS.Signals | null
   lastError?: string
@@ -90,27 +82,23 @@ interface CpuSample {
 }
 
 /**
- * Runs every process a deployment's manifest lists, restarting any that exit, and answers
- * control requests. One per deployment, started by the deployment's `systemd --user` unit.
+ * Runs every process one slot's manifest lists, restarting any that exit, and answers control
+ * requests. One per slot, started by the slot's `systemd --user` service; stopping that service
+ * lets the HTTP services and workers finish their work for up to five minutes.
  *
  * Requests arrive as files in `run/control` followed by `SIGUSR2`, so a caller needs nothing but
  * the file system and the supervisor's pid from `run/state.json`. The supervisor answers in
  * `run/responses`.
  */
 export async function runSupervisor(manifestPath: string): Promise<void> {
-  const supervisor = new Supervisor(manifestPath, await loadProcessManifest(manifestPath))
-  await supervisor.run()
+  await new Supervisor(await loadProcessManifest(manifestPath)).run()
 }
 
-/** Asks the running supervisor to control services or cut over a staged release. */
+/** Asks a slot's running supervisor to restart, start or stop services. */
 export async function sendSupervisorCommand(
-  manifest: ProcessManifest,
+  manifest: Pick<ProcessManifest, "runDir">,
   type: SupervisorCommand,
-  options: {
-    readonly service?: string
-    readonly manifestPath?: string
-    readonly timeoutMs?: number
-  } = {}
+  options: { readonly service?: string; readonly timeoutMs?: number } = {}
 ): Promise<string> {
   const state = await readProcessState(statePath(manifest))
   if (!state || !isPidRunning(state.supervisorPid)) {
@@ -125,7 +113,6 @@ export async function sendSupervisorCommand(
       id,
       type,
       ...(options.service ? { service: options.service } : {}),
-      ...(options.manifestPath ? { manifestPath: options.manifestPath } : {}),
     })}\n`
   )
   process.kill(state.supervisorPid, "SIGUSR2")
@@ -139,24 +126,14 @@ export async function sendSupervisorCommand(
 }
 
 class Supervisor {
-  private manifest: ProcessManifest
-  private candidate: ProcessManifest | null = null
   private readonly managed = new Map<string, ManagedInstance>()
-  private readonly staged = new Map<string, ManagedInstance>()
-  private readonly retiring = new Set<ManagedInstance>()
   private readonly restartCounts = new Map<string, number>()
-  private readonly stagedRestartCounts = new Map<string, number>()
   private shuttingDown = false
   private sampleTimer: ReturnType<typeof setInterval> | null = null
   private resolveStopped: (() => void) | null = null
   private stateWrites: Promise<void> = Promise.resolve()
 
-  constructor(
-    private readonly manifestPath: string,
-    manifest: ProcessManifest
-  ) {
-    this.manifest = manifest
-  }
+  constructor(private readonly manifest: ProcessManifest) {}
 
   async run(): Promise<void> {
     await mkdir(this.manifest.logDir, { recursive: true })
@@ -167,7 +144,8 @@ class Supervisor {
     process.on("SIGUSR2", () => void this.handleControlRequests())
 
     for (const desired of desiredInstances(this.manifest)) {
-      await this.startInstance(this.manifest, desired.service, desired.instance, "active")
+      if (this.manifest.holdExclusive && isExclusiveService(desired.service)) continue
+      await this.startInstance(desired.service, desired.instance)
     }
     // Requests written while the supervisor was starting would otherwise wait for a signal.
     await this.handleControlRequests()
@@ -178,46 +156,36 @@ class Supervisor {
     })
   }
 
-  private async startInstance(
-    manifest: ProcessManifest,
-    service: ProcessServiceManifest,
-    instance: number,
-    cohort: "active" | "staged"
-  ): Promise<void> {
+  private async startInstance(service: ProcessServiceManifest, instance: number): Promise<void> {
     const key = instanceKey(service.processName, instance)
-    const logPath = processLogPath(manifest, service.processName, instance)
+    const logPath = processLogPath(this.manifest, service.processName, instance)
     const log = await openProcessLog(logPath)
     // A restart already under way when shutdown began must not leave a process behind.
     if (this.shuttingDown) {
       log.end()
       return
     }
-    const counts = cohort === "active" ? this.restartCounts : this.stagedRestartCounts
-    const targetMap = cohort === "active" ? this.managed : this.staged
     const child = spawn(service.command, [...service.args], {
-      cwd: manifest.cwd,
+      cwd: this.manifest.cwd,
       env: { ...process.env, ...service.env },
       stdio: ["ignore", "pipe", "pipe"],
     })
     const managed: ManagedInstance = {
       key,
-      cwd: manifest.cwd,
-      ...(manifest.slot ? { slot: manifest.slot } : {}),
       service,
       instance,
-      cohort,
       child,
       log,
       logPath,
       startedAt: new Date().toISOString(),
       status: "running",
-      restarts: counts.get(key) ?? 0,
+      restarts: this.restartCounts.get(key) ?? 0,
       stopping: false,
       exited: false,
       closed: false,
     }
 
-    targetMap.set(key, managed)
+    this.managed.set(key, managed)
     log.write(
       `[${managed.startedAt}] start ${service.processName}#${instance} pid=${child.pid ?? "unknown"}\n`
     )
@@ -253,39 +221,21 @@ class Supervisor {
     )
     void endLog(managed)
 
-    if (managed.cohort === "retiring") {
-      this.retiring.delete(managed)
-      await this.writeState()
-      return
-    }
-
-    const cohort = managed.cohort
-    const ownerMap = cohort === "active" ? this.managed : this.staged
-    const counts = cohort === "active" ? this.restartCounts : this.stagedRestartCounts
-
     if (this.shuttingDown || managed.stopping) {
-      if (ownerMap.get(managed.key) === managed) ownerMap.delete(managed.key)
+      if (this.managed.get(managed.key) === managed) this.managed.delete(managed.key)
       await this.writeState()
       return
     }
 
     // Back off a process that keeps exiting: each restart waits one delay longer, up to 30s.
-    const restarts = (counts.get(managed.key) ?? 0) + 1
-    counts.set(managed.key, restarts)
+    const restarts = (this.restartCounts.get(managed.key) ?? 0) + 1
+    this.restartCounts.set(managed.key, restarts)
     managed.restarts = restarts
     const delay = Math.min(managed.service.restartDelayMs * restarts, MAX_RESTART_DELAY_MS)
     managed.restartTimer = setTimeout(() => {
-      // Read where the instance belongs now: `activate` can make a waiting candidate active.
-      const cohortNow = managed.cohort
-      if (cohortNow === "retiring") return
-
-      const ownerNow = cohortNow === "active" ? this.managed : this.staged
-      if (ownerNow.get(managed.key) !== managed) return
-      ownerNow.delete(managed.key)
-
-      const currentManifest = cohortNow === "active" ? this.manifest : this.candidate
-      if (!currentManifest || currentManifest.cwd !== managed.cwd) return
-      void this.startInstance(currentManifest, managed.service, managed.instance, cohortNow)
+      if (this.managed.get(managed.key) !== managed) return
+      this.managed.delete(managed.key)
+      void this.startInstance(managed.service, managed.instance)
     }, delay)
     await this.writeState()
   }
@@ -295,19 +245,15 @@ class Supervisor {
     timeoutMs = managed.service.killTimeoutMs
   ): Promise<void> {
     if (managed.restartTimer) clearTimeout(managed.restartTimer)
-    managed.cancelRetire?.()
-    managed.cancelRetire = undefined
     managed.stopping = true
 
-    const removeFromOwner = () => {
+    const remove = () => {
       if (this.managed.get(managed.key) === managed) this.managed.delete(managed.key)
-      if (this.staged.get(managed.key) === managed) this.staged.delete(managed.key)
-      this.retiring.delete(managed)
     }
 
     // Tracked here rather than read from `child.exitCode`, which Bun does not always set.
     if (managed.exited) {
-      removeFromOwner()
+      remove()
       await this.writeState()
       return
     }
@@ -316,7 +262,6 @@ class Supervisor {
     await this.writeState()
     await new Promise<void>((resolveStop) => {
       // The child can exit during the state write above, and its `exit` has then already fired.
-      // systemd signals every process in the unit at once, so a deploy's stop often lands here.
       if (managed.exited) {
         resolveStop()
         return
@@ -342,49 +287,10 @@ class Supervisor {
       managed.child.once("exit", done)
       managed.child.kill("SIGTERM")
     })
-    removeFromOwner()
+    remove()
     // The exit listener queues its state write asynchronously. Publish the final state before
     // the control request can acknowledge the stop, including when the exit event never arrives.
     await this.writeState()
-  }
-
-  private retireManaged(managed: ManagedInstance): void {
-    if (managed.restartTimer) clearTimeout(managed.restartTimer)
-    managed.cohort = "retiring"
-    managed.stopping = true
-    managed.status = "stopping"
-
-    if (managed.exited) {
-      this.retiring.delete(managed)
-      return
-    }
-
-    this.retiring.add(managed)
-    const timeoutMs = retiringKillTimeoutMs(managed.service.killTimeoutMs)
-    const interruptTimer = setTimeout(
-      () => {
-        if (!managed.exited) managed.child.kill("SIGINT")
-      },
-      Math.max(timeoutMs - INTERRUPT_LEAD_MS, 1_000)
-    )
-    const killTimer = setTimeout(() => {
-      if (!managed.exited) managed.child.kill("SIGKILL")
-    }, timeoutMs)
-    const giveUp = setTimeout(() => {
-      cleanup()
-      this.retiring.delete(managed)
-      void this.writeState()
-    }, timeoutMs + 2_000)
-
-    const cleanup = () => {
-      clearTimeout(interruptTimer)
-      clearTimeout(killTimer)
-      clearTimeout(giveUp)
-      managed.cancelRetire = undefined
-    }
-    managed.cancelRetire = cleanup
-    managed.child.once("exit", cleanup)
-    managed.child.kill("SIGTERM")
   }
 
   private async handleControlRequests(): Promise<void> {
@@ -417,20 +323,6 @@ class Supervisor {
   }
 
   private async handleRequest(request: SupervisorRequest): Promise<string> {
-    if (request.type === "stage") {
-      if (!request.manifestPath) {
-        throw new Error("[SshTarget] stage requires a candidate manifest path.")
-      }
-      return this.stageCandidate(await loadProcessManifest(request.manifestPath))
-    }
-    if (request.type === "discard") {
-      await this.discardStaged()
-      return "discarded candidate"
-    }
-    if (request.type === "activate") {
-      return this.activateCandidate()
-    }
-
     const services = this.manifest.services.filter(
       (service) => !request.service || service.name === request.service
     )
@@ -450,85 +342,10 @@ class Supervisor {
       for (const desired of desiredInstances(this.manifest)) {
         if (!names.has(desired.service.name) || this.managed.has(desired.key)) continue
         this.restartCounts.delete(desired.key)
-        await this.startInstance(this.manifest, desired.service, desired.instance, "active")
+        await this.startInstance(desired.service, desired.instance)
       }
     }
     return `${request.type === "stop" ? "stopped" : `${request.type}ed`} ${[...names].join(", ")}`
-  }
-
-  private async stageCandidate(candidate: ProcessManifest): Promise<string> {
-    await this.discardStaged()
-
-    // Ensure no retiring HTTP server still holds the candidate slot's loopback ports.
-    const sameSlotHttp = [...this.retiring].filter(
-      (managed) =>
-        managed.service.kind === "http" &&
-        (candidate.slot === undefined || managed.slot === candidate.slot)
-    )
-    if (sameSlotHttp.length > 0) {
-      await Promise.all(sameSlotHttp.map((managed) => this.stopManaged(managed, 5_000)))
-    }
-
-    this.candidate = candidate
-    this.stagedRestartCounts.clear()
-    const started: string[] = []
-    for (const desired of desiredInstances(candidate)) {
-      if (!isOverlapSafeService(desired.service)) continue
-      await this.startInstance(candidate, desired.service, desired.instance, "staged")
-      if (!started.includes(desired.service.name)) started.push(desired.service.name)
-    }
-    await this.writeState()
-    return `staged ${started.join(", ") || "candidate"}`
-  }
-
-  private async discardStaged(): Promise<void> {
-    const staged = [...this.staged.values()]
-    this.candidate = null
-    this.stagedRestartCounts.clear()
-    if (staged.length > 0) {
-      await Promise.all(staged.map((managed) => this.stopManaged(managed)))
-    }
-    await this.writeState()
-  }
-
-  private async activateCandidate(): Promise<string> {
-    const nextManifest = this.candidate ?? (await loadProcessManifest(this.manifestPath))
-    const activeInstances = [...this.managed.values()]
-    const exclusiveOld = activeInstances.filter((managed) => !isOverlapSafeService(managed.service))
-    const overlapOld = activeInstances.filter((managed) => isOverlapSafeService(managed.service))
-
-    // Stop singletons and custom scripts before starting the new release's copies.
-    if (exclusiveOld.length > 0) {
-      await Promise.all(exclusiveOld.map((managed) => this.stopManaged(managed)))
-    }
-
-    // Drain old HTTP and worker instances in the background while green serves traffic.
-    for (const managed of overlapOld) {
-      this.managed.delete(managed.key)
-      this.retireManaged(managed)
-    }
-
-    this.manifest = nextManifest
-    this.candidate = null
-    this.restartCounts.clear()
-    for (const [key, count] of this.stagedRestartCounts) {
-      this.restartCounts.set(key, count)
-    }
-    this.stagedRestartCounts.clear()
-
-    for (const [key, staged] of this.staged) {
-      staged.cohort = "active"
-      this.managed.set(key, staged)
-    }
-    this.staged.clear()
-
-    for (const desired of desiredInstances(nextManifest)) {
-      if (this.managed.has(desired.key)) continue
-      await this.startInstance(nextManifest, desired.service, desired.instance, "active")
-    }
-
-    await this.writeState()
-    return `activated ${nextManifest.services.map((service) => service.name).join(", ")}`
   }
 
   private async writeResponse(id: string, ok: boolean, message: string): Promise<void> {
@@ -559,7 +376,7 @@ class Supervisor {
         managed.log.write(`[${new Date().toISOString()}] ${managed.lastError}\n`)
         await this.stopManaged(managed)
         this.restartCounts.set(managed.key, managed.restarts + 1)
-        await this.startInstance(this.manifest, managed.service, managed.instance, "active")
+        await this.startInstance(managed.service, managed.instance)
       }
     }
     await this.writeState()
@@ -577,8 +394,17 @@ class Supervisor {
     this.shuttingDown = true
     if (this.sampleTimer) clearInterval(this.sampleTimer)
 
-    const all = [...this.managed.values(), ...this.staged.values(), ...this.retiring]
-    await Promise.all(all.map((managed) => this.stopManaged(managed)))
+    // A slot stops when it retires: its HTTP services and workers finish what they are doing.
+    await Promise.all(
+      [...this.managed.values()].map((managed) =>
+        this.stopManaged(
+          managed,
+          isExclusiveService(managed.service)
+            ? managed.service.killTimeoutMs
+            : drainKillTimeoutMs(managed.service.killTimeoutMs)
+        )
+      )
+    )
     await this.writeState()
     this.resolveStopped?.()
   }
@@ -595,15 +421,6 @@ class Supervisor {
   }
 
   private snapshotState(): ProcessState {
-    const staged = this.candidate
-      ? desiredInstances(this.candidate)
-          .filter((desired) => isOverlapSafeService(desired.service))
-          .map((desired) =>
-            snapshotDesired(this.candidate!, desired, this.staged, this.stagedRestartCounts)
-          )
-      : undefined
-    const retiringCwds = [...new Set([...this.retiring].map((managed) => managed.cwd))]
-
     return {
       version: 1,
       name: this.manifest.name,
@@ -613,8 +430,6 @@ class Supervisor {
       instances: desiredInstances(this.manifest).map((desired) =>
         snapshotDesired(this.manifest, desired, this.managed, this.restartCounts)
       ),
-      ...(staged ? { staged } : {}),
-      ...(retiringCwds.length > 0 ? { retiringCwds } : {}),
     }
   }
 
@@ -722,14 +537,7 @@ async function waitForResponse(path: string, timeoutMs: number): Promise<Supervi
   throw new Error("[SshTarget] Timed out waiting for the supervisor to answer.")
 }
 
-const VALID_COMMANDS: readonly SupervisorCommand[] = [
-  "restart",
-  "start",
-  "stop",
-  "stage",
-  "activate",
-  "discard",
-]
+const VALID_COMMANDS: readonly SupervisorCommand[] = ["restart", "start", "stop"]
 
 function requestId(value: unknown): string | null {
   const id = (value as { readonly id?: unknown } | null)?.id
@@ -752,7 +560,6 @@ function parseRequest(value: unknown): SupervisorRequest {
     id: request.id,
     type: request.type as SupervisorCommand,
     ...(typeof request.service === "string" ? { service: request.service } : {}),
-    ...(typeof request.manifestPath === "string" ? { manifestPath: request.manifestPath } : {}),
   }
 }
 
