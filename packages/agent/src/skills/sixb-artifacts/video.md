@@ -289,6 +289,14 @@ it:
 ```
 
 The instant, the scene playing then, the revision they saw, the comment's id, and who wrote it.
+A comment follows its scene: once a version moves or trims the scenes before it, its instant is
+read in the version you are given. A comment between two scenes names none. One whose scene a
+later version removed says so, with the scene's label:
+
+```
+[outro · "Thanks" · no longer in the video · revision 3 · comment cmt_4k2a9c0d1e · from Ava Martin] Make this title bigger.
+```
+
 The person reads none of this: they see a chip with the comments' words. Speak of a comment by its
 words and its moment, never by its id.
 
