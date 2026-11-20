@@ -4430,9 +4430,6 @@ describe("AgentWorker", () => {
   // still ends with its answer, its workspace saved as `ready`. A failure that may have reached the
   // VM still blocks it: see "blocks a workspace whose VM the provider stopped".
   describe("a sandbox that refuses a request before anything runs", () => {
-    /** Vercel's limit, which its provider declares. */
-    const MAX_COMMAND_TIMEOUT_MS = 5 * 60 * 60 * 1000
-
     /** As the Vercel provider reports Vercel's 400. */
     function refusal(reason: string): SandboxRequestRefusedError {
       return new SandboxRequestRefusedError(
@@ -4451,7 +4448,6 @@ describe("AgentWorker", () => {
     ) {
       const sandbox = Object.assign(new BackgroundSandbox("refusing", []), {
         setRequestCredentials: async () => {},
-        maxCommandTimeout: MAX_COMMAND_TIMEOUT_MS,
       })
       const runCommand = sandbox.runCommand.bind(sandbox)
       sandbox.runCommand = async (command, args = [], options = {}) => {
@@ -4513,29 +4509,6 @@ describe("AgentWorker", () => {
         toolOutput: toolOutputs.join(""),
       }
     }
-
-    // Prod, Nov 15–17: every background command asked Vercel for a 7-day timeout, and every one
-    // was refused. Removal proof: hold the call for HELD_TIMEOUT_MS alone in
-    // BackgroundCommands.start; the sandbox refuses it, and the command never runs.
-    test("starts a background command within the sandbox's longest command timeout", async () => {
-      const sandbox = refusingSandbox((args, options) =>
-        isHeldCall(args) && (options.timeout ?? 0) > MAX_COMMAND_TIMEOUT_MS
-          ? "timeout must be less than or equal to 18000000"
-          : undefined
-      )
-
-      const { run, workspace, toolOutput } = await runTurn(sandbox, {
-        command: "bun dev",
-        run_in_background: true,
-      })
-
-      expect(run).toMatchObject({ status: "succeeded" })
-      expect(run?.diagnostics).toBeUndefined()
-      expect(workspace?.status).toBe("ready")
-      expect(toolOutput).toContain('"status":"running"')
-      const held = sandbox.commands.find((call) => isHeldCall(call.args))
-      expect(held?.options.timeout).toBe(MAX_COMMAND_TIMEOUT_MS)
-    })
 
     // The model once read `status: "stopped"` and an empty log, and went on as if the command ran.
     // Removal proof: leave a rejected held call without its failure in BackgroundCommands' #end;

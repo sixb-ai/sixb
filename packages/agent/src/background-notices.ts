@@ -138,7 +138,7 @@ function endedLine(command: BackgroundCommandState): string {
     new Date(command.endedAt ?? command.startedAt).getTime() - new Date(command.startedAt).getTime()
   )
   const how = command.timedOut
-    ? `was stopped at its time limit of ${formatDuration(command.timeoutMs ?? 0)}`
+    ? "was stopped at the sandbox's time limit"
     : command.status === "stopped"
       ? "was stopped"
       : `exited with code ${command.exitCode ?? "unknown"}`

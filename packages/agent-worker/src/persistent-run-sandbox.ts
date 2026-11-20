@@ -400,9 +400,6 @@ class PersistentSandboxSession {
         return session.status
       },
       workingDirectory: session.workingDirectory,
-      ...(session.maxCommandTimeout === undefined
-        ? {}
-        : { maxCommandTimeout: session.maxCommandTimeout }),
       ...(session.credentialedUrl
         ? { credentialedUrl: session.credentialedUrl.bind(session) }
         : {}),

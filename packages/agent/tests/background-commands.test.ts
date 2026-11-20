@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { AgentToolResult, Sandbox } from "@sixb/core"
+import { cappedCommandTimeout } from "@sixb/core/sandboxes"
 import type { AgentMessage } from "@sixb/core/internal/agents"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type {
@@ -255,8 +256,9 @@ describe("background commands", () => {
     expect(read.output).not.toContain("ran")
   })
 
-  // On Vercel a command runs five hours at most. Removal proof: hold the call for HELD_TIMEOUT_MS
-  // alone in BackgroundCommands.start; it outlives the sandbox's limit and never ends here.
+  // On Vercel a command runs five hours at most: the provider caps the held call there, as every
+  // provider caps a timeout past its own. Removal proof: drop `entry.timedOut ||` from the status
+  // in BackgroundCommands' #end; the command reads `exited`, and its notice says nothing of a limit.
   test("end at the sandbox's longest command timeout, and say so", async () => {
     const limited: Sandbox = {
       id: sandbox.id,
@@ -264,7 +266,11 @@ describe("background commands", () => {
       status: sandbox.status,
       workingDirectory: sandbox.workingDirectory,
       maxCommandTimeout: 2_000,
-      runCommand: (command, args, options) => sandbox.runCommand(command, args, options),
+      runCommand: (command, args, options) =>
+        sandbox.runCommand(command, args, {
+          ...options,
+          timeout: cappedCommandTimeout(options?.timeout, 2_000),
+        }),
       writeFiles: (files) => sandbox.writeFiles(files),
       stop: () => sandbox.stop(),
       destroy: () => sandbox.destroy(),
@@ -284,12 +290,8 @@ describe("background commands", () => {
     const { id } = started as BackgroundCommandState
     await until(() => commands.get(id).status !== "running", 500)
 
-    expect(commands.get(id)).toMatchObject({
-      status: "stopped",
-      timedOut: true,
-      timeoutMs: 2_000,
-    })
-    expect(notices.take()).toContain("was stopped at its time limit of 2s")
+    expect(commands.get(id)).toMatchObject({ status: "stopped", timedOut: true })
+    expect(notices.take()).toContain("(`sleep 30`) was stopped at the sandbox's time limit after")
   })
 
   test("run in the directory named, relative to the workspace", async () => {

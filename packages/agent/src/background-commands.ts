@@ -29,8 +29,9 @@ const MAX_RUNNING = 16
 const OUTPUT_MAX_BYTES = 20_000
 
 /**
- * The held call's own bound, or the sandbox's longest command timeout where that is shorter (five
- * hours on Vercel): a command that runs that long is stopped there, and says so.
+ * The held call's own bound, under every timer's limit. Its provider caps it to its own longest
+ * command timeout (five hours on Vercel): a command that runs that long is stopped there, and the
+ * model is told so.
  */
 const HELD_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -55,8 +56,6 @@ export interface BackgroundCommandState {
   readonly exitCode?: number
   /** It ran until its time limit, the longest a command runs in its sandbox, and was stopped. */
   readonly timedOut?: true
-  /** Its time limit, in milliseconds, once it reached it. */
-  readonly timeoutMs?: number
   /** ISO timestamps. */
   readonly startedAt: string
   readonly endedAt?: string
@@ -76,8 +75,6 @@ interface BackgroundCommand {
   readonly id: string
   readonly command: string
   readonly startedAt: Date
-  /** The held call's timeout: its time limit. */
-  readonly timeoutMs: number
   readonly paths: { readonly output: string; readonly pid: string; readonly exit: string }
   /** The sandbox it runs in, which signals it: a later run may have another. */
   readonly sandbox: Sandbox
@@ -161,7 +158,6 @@ export class BackgroundCommands {
     // The pid file names the start that wrote it: a file an earlier start left is never read.
     const nonce = randomBytes(8).toString("hex")
     const abort = new AbortController()
-    const timeoutMs = Math.min(HELD_TIMEOUT_MS, sandbox.maxCommandTimeout ?? HELD_TIMEOUT_MS)
 
     const held = sandbox.runCommand(
       "bash",
@@ -178,7 +174,7 @@ export class BackgroundCommands {
       ],
       {
         ...(handle.env === undefined ? {} : { env: handle.env }),
-        timeout: timeoutMs,
+        timeout: HELD_TIMEOUT_MS,
         signal: abort.signal,
       }
     )
@@ -201,7 +197,6 @@ export class BackgroundCommands {
       id,
       command: input.command,
       startedAt: new Date(),
-      timeoutMs,
       paths,
       sandbox,
       abort,
@@ -458,7 +453,7 @@ function state(entry: BackgroundCommand): BackgroundCommandState {
     command: entry.command,
     status: entry.status,
     ...(entry.exitCode === undefined ? {} : { exitCode: entry.exitCode }),
-    ...(entry.timedOut ? { timedOut: true as const, timeoutMs: entry.timeoutMs } : {}),
+    ...(entry.timedOut ? { timedOut: true as const } : {}),
     startedAt: entry.startedAt.toISOString(),
     ...(entry.endedAt === undefined ? {} : { endedAt: entry.endedAt.toISOString() }),
     outputPath: entry.paths.output,
