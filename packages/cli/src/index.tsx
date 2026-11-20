@@ -471,24 +471,6 @@ async function main(): Promise<void> {
       break
     }
 
-    case "deploy:ci": {
-      const { runDeployCi } = await import("./commands/deploy")
-      await runDeployCi({ branch: getFlag("branch") })
-      break
-    }
-
-    case "deploy:access:list":
-    case "deploy:access:add":
-    case "deploy:access:remove": {
-      const { runDeployAccess } = await import("./commands/deploy")
-      await runDeployAccess({
-        action: parsed.id.slice("deploy:access:".length) as "list" | "add" | "remove",
-        value: positionals[0],
-        json: hasFlag("json"),
-      })
-      break
-    }
-
     case "deploy:restart":
     case "deploy:start":
     case "deploy:stop": {
