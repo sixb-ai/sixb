@@ -43,6 +43,7 @@ export async function validateVideo(
   }
   refuseFrameAssetPaths(files, "the video")
   refuseTooManyRecordings(files)
+  refuseLargePages(files)
 
   const read = (file: ArtifactFile) =>
     readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxSceneBytes)
@@ -253,6 +254,17 @@ function played(input: {
   }
 
   return paths
+}
+
+/** Every HTML file is read whole, the ones no scene names too: by the frame, and by an export. */
+function refuseLargePages(files: readonly ArtifactFile[]): void {
+  const limit = ARTIFACT_LIMITS.maxSceneBytes
+  const large = files.find(({ path, file }) => /\.html?$/i.test(path) && file.sizeBytes > limit)
+  if (large) {
+    throw invalidArtifact(
+      `'${large.path}' is ${large.file.sizeBytes} bytes: each of a video's HTML files holds at most ${limit}.`
+    )
+  }
 }
 
 /** Each recording a version holds is probed and proxied for the player: a video has a few dozen. */

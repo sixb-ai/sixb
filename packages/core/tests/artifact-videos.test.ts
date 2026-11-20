@@ -831,7 +831,7 @@ describe("publishing a video", () => {
     [
       "a scene past its size",
       { "scenes/intro.html": scene("intro", "x".repeat(ARTIFACT_LIMITS.maxSceneBytes)) },
-      `; it may be at most ${ARTIFACT_LIMITS.maxSceneBytes}`,
+      `each of a video's HTML files holds at most ${ARTIFACT_LIMITS.maxSceneBytes}`,
     ],
   ] satisfies [
     string,
@@ -856,6 +856,17 @@ describe("publishing a video", () => {
     // The launch film plays one clip and one soundtrack already: two more than enough.
     expect(await refusal(publish({ ...LAUNCH, ...clips }))).toContain(
       "A video holds at most 50 video and sound files; this one has 52"
+    )
+  })
+
+  // Guard proof: drop refuseLargePages from validateVideo; a page no scene names is never read,
+  // and the version publishes.
+  test(`refuses an HTML file over ${ARTIFACT_LIMITS.maxSceneBytes} bytes that no scene names`, async () => {
+    const { publish } = setup()
+    const notes = "x".repeat(ARTIFACT_LIMITS.maxSceneBytes + 1)
+
+    expect(await refusal(publish({ ...LAUNCH, "notes/transcript.htm": notes }))).toContain(
+      `'notes/transcript.htm' is ${ARTIFACT_LIMITS.maxSceneBytes + 1} bytes: each of a video's HTML files holds at most ${ARTIFACT_LIMITS.maxSceneBytes}.`
     )
   })
 })
