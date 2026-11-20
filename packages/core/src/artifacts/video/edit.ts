@@ -9,6 +9,7 @@ import {
   type VideoStart,
 } from "./composition"
 import {
+  readRootLayers,
   readRootTimeline,
   readSceneTimeline,
   type VideoClip,
@@ -122,9 +123,10 @@ export function setSceneLabel(
 }
 
 /**
- * Moves a scene to `to` in play order. Its host moves in `index.html`, beside the scene it now
- * follows, and each scene that follows another than before starts when that one ends, keeping
- * its own overlap or gap.
+ * Moves a scene to `to` in play order: each scene that follows another than before starts when
+ * that one ends, keeping its own overlap or gap. Hosts keep their lines in `index.html`, so a move
+ * is attribute values written again, which merge with someone else's edit of the same host. Scenes
+ * on screen together then stack in play order, the later on top (`restack`).
  */
 export function moveScene(sources: VideoSources, scene: string, to: number): VideoEditResult {
   return run(sources, (work) => {
@@ -140,22 +142,6 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
     if (!moved) return
     order.splice(target, 0, moved)
 
-    // The host moves beside its new neighbour: after the scene it follows, or before the first.
-    // Both places are read before either changes: without its host, a scene chained to the moved
-    // one names no scene.
-    const neighbour = target > 0 ? order[target - 1] : order[1]
-    if (neighbour) {
-      const index = work.text(VIDEO_ENTRY)
-      const block = lineBlock(index, hostOf(work, moved.id).host.element)
-      const beside = lineBlock(index, hostOf(work, neighbour.id).host.element)
-      const text = index.slice(block.start, block.end)
-
-      let at = target > 0 ? beside.end : beside.start
-      if (at > block.start) at -= block.end - block.start
-      work.replace(VIDEO_ENTRY, block.start, block.end, "")
-      work.replace(VIDEO_ENTRY, at, at, text)
-    }
-
     // Each scene whose predecessor changed starts after its new one, and so, from there on, does
     // each that starts at a number of seconds: its predecessor's place changed.
     const was = new Map(before.scenes.map((each, index) => [each.id, before.scenes[index - 1]?.id]))
@@ -168,6 +154,8 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
       const start = after ? chainedStart(after.id, gapBefore(before.scenes, each)) : "0"
       setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, { "data-start": start })
     })
+
+    restack(work)
   })
 }
 
@@ -972,6 +960,93 @@ function chainedStart(after: string, offset: number): string {
   const amount = Math.round(Math.abs(offset) * 1000) / 1000
   if (amount === 0) return after
   return `${after} ${offset < 0 ? "-" : "+"} ${amount}`
+}
+
+/**
+ * Stacks the scenes on screen together in play order, the later on top, as a crossfade shows it.
+ * HyperFrames positions each host and paints them in the file's order unless a `z-index` says
+ * otherwise. A host never moves its line, which someone else may be editing at once; each host that
+ * must sit above one later in the file writes the least `z-index` that puts it there, and drops one
+ * it no longer needs. Scenes never on screen together cover nothing, so their order does not count.
+ *
+ * What the root paints of its own over the scenes, a captions bar, stays over them: once a scene
+ * has a layer, each writes one above the highest, and drops it with the last.
+ */
+function restack(work: Working): void {
+  const text = work.text(VIDEO_ENTRY)
+  const play = rootOf(work).scenes
+  const line = new Map(
+    [...play]
+      .sort((a, b) => a.host.element.start - b.host.element.start)
+      .map((scene, index) => [scene.id, index])
+  )
+
+  // From the first to start, each scene's least layer above every scene on screen with it before.
+  const wanted = new Map<string, number>()
+  play.forEach((each, index) => {
+    let least = 0
+    for (const below of play.slice(0, index)) {
+      if (!together(below, each)) continue
+      const under = wanted.get(below.id) ?? 0
+      const later = (line.get(each.id) ?? 0) > (line.get(below.id) ?? 0)
+      least = Math.max(least, later ? under : under + 1)
+    }
+    wanted.set(each.id, least)
+  })
+
+  const writes: { readonly source: VideoElementSource; readonly layer: number }[] = []
+  for (const scene of play) {
+    const layer = wanted.get(scene.id) ?? 0
+    if (layer !== layerOf(text, scene.host)) writes.push({ source: scene.host, layer })
+  }
+
+  // The root's own layer is one above the highest scene's, so one it wrote is that, and one
+  // written higher is someone's own, kept.
+  const was = Math.max(0, ...play.map((scene) => layerOf(text, scene.host)))
+  const top = Math.max(0, ...wanted.values())
+  for (const source of readRootLayers(text)) {
+    const layer = layerOf(text, source)
+    const own = was > 0 && layer === was + 1
+    if (top === 0 && own) writes.push({ source, layer: 0 })
+    else if (top > 0 && layer !== top + 1 && (own || layer <= top)) {
+      writes.push({ source, layer: top + 1 })
+    }
+  }
+
+  // From the last in the file, so each span read still names what it named.
+  for (const { source, layer } of writes.sort((a, b) => b.source.tag.start - a.source.tag.start)) {
+    const style = source.attributes.style
+    setAttributes(work, VIDEO_ENTRY, source, {
+      style: withLayer(style ? attributeValue(text, style) : undefined, layer),
+    })
+  }
+}
+
+type Stacked = VideoRoot["scenes"][number]
+
+/** Whether two scenes are on screen together, for longer than a rounding. */
+function together(a: Stacked, b: Stacked): boolean {
+  return (
+    a.startMs < b.startMs + b.durationMs - SAME_MS && b.startMs < a.startMs + a.durationMs - SAME_MS
+  )
+}
+
+/** An element's `z-index`, as its `style` writes it: 0 for none. */
+function layerOf(text: string, source: Pick<VideoElementSource, "attributes">): number {
+  const at = source.attributes.style
+  const style = at ? attributeValue(text, at) : undefined
+  const written = style && /(?:^|;)\s*z-index\s*:\s*(-?\d+)\s*(?:;|$)/i.exec(style)
+  return written ? Number(written[1]) : 0
+}
+
+/** A `style` whose `z-index` is `layer`, or has none at 0: null once nothing else is left. */
+function withLayer(style: string | undefined, layer: number): string | null {
+  const rest = (style ?? "")
+    .split(";")
+    .map((each) => each.trim())
+    .filter((each) => each !== "" && !/^z-index\s*:/i.test(each))
+  if (layer > 0) rest.push(`z-index: ${layer}`)
+  return rest.length > 0 ? rest.join("; ") : null
 }
 
 /**
