@@ -146,11 +146,8 @@ export interface DeployCheck {
   readonly id: string
   /** What was checked, such as `"SSH"` or `"api DNS"`. */
   readonly label: string
-  /**
-   * `fixable`: the server lacks something its provisioning provides. `manual`: only you can fix
-   * it, as `remedy` says. Both stop a deploy; a `warning` does not.
-   */
-  readonly status: "ok" | "fixable" | "manual" | "warning"
+  /** `fail` stops a deploy until `remedy` is done; a `warning` does not. */
+  readonly status: "ok" | "fail" | "warning"
   readonly detail: string
   /** What to do about it, when the status is not `ok`. */
   readonly remedy?: string
@@ -159,6 +156,8 @@ export interface DeployCheck {
 export interface DeployCheckContext extends DeployOperationContext {
   /** The project's directory inside its repository: `.` at the root. */
   readonly projectPath: string
+  /** The project prints with Chromium through Playwright, so the target needs its libraries. */
+  readonly chromium: boolean
 }
 
 export interface DeployListenAddress {

@@ -190,8 +190,7 @@ export function deployStatusView({
 
 const CHECK_STATUS = {
   ok: "ok",
-  fixable: "warn",
-  manual: "idle",
+  fail: "idle",
   warning: "warn",
 } as const satisfies Record<DeployCheck["status"], Status>
 
@@ -204,7 +203,7 @@ export function deployChecksView({
   location: string
   checks: readonly DeployCheck[]
 }): string {
-  const blocking = checks.filter((check) => check.status === "fixable" || check.status === "manual")
+  const blocking = checks.filter((check) => check.status === "fail")
   const warnings = checks.filter((check) => check.status === "warning")
   const next = blocking.length > 0 ? "the steps above, then sixb deploy check" : "sixb deploy"
 

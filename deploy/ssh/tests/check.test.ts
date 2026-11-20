@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { blocksDeploy, CHECK_MARKER, parseCheckOutput, renderCheckScript } from "../src/check"
+import { isPrivateAddress, renderProbe } from "../src/check"
+import { type JudgeInput, judge, parseFacts } from "../src/check/judge"
 import { LocalShell } from "../src/transport"
 
 const tempDirs: string[] = []
@@ -11,141 +12,145 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function syntaxErrors(script: string): Promise<string> {
-  const child = Bun.spawn(["bash", "-n"], { stdin: new Blob([script]), stderr: "pipe" })
-  await child.exited
-  return new Response(child.stderr).text()
+const input: JudgeInput = { ports: [3001, 3002], envFromSource: true, chromium: false }
+
+/** What a cell from the infra template reports. */
+const healthy: Record<string, string> = {
+  "os.id": "ubuntu",
+  "os.like": "debian",
+  "os.name": "Ubuntu 24.04.3 LTS",
+  "os.systemd": "yes",
+  "os.arch": "x86_64",
+  "os.missing": "",
+  linger: "yes",
+  "caddy.version": "2.10.2",
+  "caddy.reload": "yes",
+  "caddy.routes": "/etc/caddy/sixb.d/sixb",
+  "caddy.routes-writable": "yes",
+  "caddy.routes-imported": "yes",
+  "caddy.caddyfile-imports": "yes",
+  "caddy.admin-on-localhost": "no",
+  "file.env-token": "600 54",
+  "file.shared/.env": "600 2048",
+  "file.code/.env": "missing",
+  "port.3001": "own",
+  "port.3002": "free",
+  "disk.free-kb": "70000000",
 }
 
-const context = { name: "northline", location: "sixb@203.0.113.10" }
-const line = (id: string, status: string, detail: string) =>
-  [CHECK_MARKER, id, status, detail].join("\t")
+function checks(overrides: Record<string, string>, options: Partial<JudgeInput> = {}) {
+  return judge(new Map(Object.entries({ ...healthy, ...overrides })), { ...input, ...options })
+}
 
-describe("server checks", () => {
-  test("render as a script bash accepts", async () => {
-    const script = renderCheckScript({
-      name: "northline",
-      projectPath: "examples/northline",
-      ports: [
-        { service: "api", port: 3002 },
-        { service: "app", port: 3001 },
-      ],
-    })
-    expect(await syntaxErrors(script)).toBe("")
-    expect(script).toContain("project=\"$HOME\"/'northline/code/examples/northline'")
+function statusOf(id: string, overrides: Record<string, string>, options?: Partial<JudgeInput>) {
+  const check = checks(overrides, options).find((candidate) => candidate.id === id)
+  return check && `${check.status}: ${check.detail}`
+}
+
+describe("judging the host", () => {
+  test("a server from the infra template passes every check", () => {
+    expect(checks({}).filter((check) => check.status !== "ok")).toEqual([])
   })
 
-  // Reproduce: drop the version check; on Ubuntu's Caddy 2.6 every deploy then passes the checks
-  // and fails at "Update routes", where `caddy validate` rejects `stream_close_delay`.
-  test("stop a deploy on a Caddy older than 2.7, and compare versions as numbers", async () => {
-    const caddyCheck = async (version: string) => {
-      const home = await mkdtemp(join(tmpdir(), "sixb-check-caddy-"))
-      tempDirs.push(home)
-      const tools = join(home, "tools")
-      await mkdir(tools)
-      await writeFile(join(tools, "caddy"), `#!/bin/sh\necho "v${version} h1:abc="\n`, {
-        mode: 0o755,
-      })
+  test.each([
+    ["not Debian-like", "server", { "os.id": "fedora", "os.like": "", "os.name": "Fedora 41" }],
+    ["no systemd", "server", { "os.systemd": "no" }],
+    ["a CPU Bun has no build for", "server", { "os.arch": "riscv64" }],
+    ["a missing tool", "server", { "os.missing": "flock unzip" }],
+    ["lingering off", "linger", { linger: "no" }],
+    ["no Caddy", "caddy", { "caddy.version": "" }],
+    ["Caddy before 2.7, compared as numbers", "caddy", { "caddy.version": "2.6.10" }],
+    ["routes not imported", "caddy", { "caddy.caddyfile-imports": "no" }],
+    ["no reload rights", "caddy", { "caddy.reload": "no" }],
+    ["no env token", "settings", { "file.env-token": "missing" }],
+    ["an empty env token", "settings", { "file.env-token": "600 0" }],
+    ["an env token others can read", "settings", { "file.env-token": "644 54" }],
+    ["a port another program holds", "ports", { "port.3002": "other" }],
+  ])("fails on %s", (_name, id, overrides) => {
+    expect(statusOf(id, overrides)).toStartWith("fail")
+  })
 
-      const child = Bun.spawn(
-        ["bash", "-c", renderCheckScript({ ...context, projectPath: ".", ports: [] })],
-        {
-          env: { HOME: home, USER: "sixb", PATH: `${tools}:/usr/bin:/bin` },
-          stdout: "pipe",
-          stderr: "ignore",
-        }
-      )
-      const output = await new Response(child.stdout).text()
-      await child.exited
+  test("names each problem, and points every failure at the host requirements", () => {
+    const caddy = checks({ "caddy.version": "2.6.2", "caddy.reload": "no" }).find(
+      (check) => check.id === "caddy"
+    )
+    expect(caddy?.detail).toBe(
+      "Caddy 2.6.2 is older than 2.7; sudo systemctl reload caddy is not allowed"
+    )
+    expect(caddy?.remedy).toBe("See https://docs.sixb.ai/deployment/host-requirements.")
+  })
 
-      const [check] = parseCheckOutput(output.split("\n"), context).filter(
-        (entry) => entry.id === "server.caddy"
-      )
-      return check
+  test("Caddy 2.10 is newer than 2.7", () => {
+    expect(statusOf("caddy", { "caddy.version": "2.10.0" })).toStartWith("ok")
+  })
+
+  test("a project without a source needs .env instead, here or in the old code folder", () => {
+    const noSource = { envFromSource: false }
+    expect(statusOf("settings", { "file.env-token": "missing" }, noSource)).toStartWith("ok")
+    expect(
+      statusOf("settings", { "file.shared/.env": "missing", "file.code/.env": "600 10" }, noSource)
+    ).toStartWith("ok")
+    expect(statusOf("settings", { "file.shared/.env": "missing" }, noSource)).toBe(
+      "fail: no .env on the server"
+    )
+  })
+
+  test("checks Chromium only for a project that prints with it", () => {
+    const missing = {
+      "chromium.checked": "system libraries",
+      "chromium.missing": "libatk-1.0.so.0",
     }
-
-    expect(await caddyCheck("2.10.2")).toMatchObject({ label: "Caddy version", status: "ok" })
-
-    const old = await caddyCheck("2.6.2")
-    expect(old).toMatchObject({ status: "manual", detail: "2.6.2 is older than 2.7" })
-    expect(old && blocksDeploy(old)).toBe(true)
-    expect(old?.remedy).toContain("caddyserver.com/docs/install")
+    expect(statusOf("chromium", missing)).toBeUndefined()
+    expect(statusOf("chromium", missing, { chromium: true })).toBe(
+      "fail: missing libatk-1.0.so.0 (system libraries)"
+    )
+    expect(statusOf("chromium", { "chromium.missing": "" }, { chromium: true })).toStartWith("ok")
   })
 
-  test("read back with labels, and with what to do about each", () => {
-    const checks = parseCheckOutput(
-      [
-        "Welcome to Ubuntu",
-        line("server.os", "ok", "Ubuntu 24.04.4 LTS"),
-        line("server.routes", "fixable", "/etc/caddy/sixb.d/sixb is missing or not writable"),
-        line("project.env", "manual", "/home/sixb/northline/code/.env does not exist"),
-        line("project.port.api", "manual", "3002 is in use by another program"),
-        line("server.admin-api", "warning", "Caddy's admin API listens on localhost:2019"),
-      ],
-      context
+  test("warns about Caddy's admin API on localhost and about a nearly full disk", () => {
+    expect(statusOf("caddy.admin-api", { "caddy.admin-on-localhost": "yes" })).toStartWith(
+      "warning"
     )
-
-    expect(checks.map((check) => [check.label, check.status])).toEqual([
-      ["Server", "ok"],
-      ["Caddy routes", "fixable"],
-      [".env", "manual"],
-      ["api port", "manual"],
-      ["Caddy admin API", "warning"],
-    ])
-    expect(checks[1]?.remedy).toBe("See https://docs.sixb.ai/deployment/host-requirements.")
-    expect(checks[2]?.remedy).toContain(
-      "ssh sixb@203.0.113.10 'install -m 600 /dev/null /home/sixb/northline/code/.env'"
-    )
-    expect(checks.filter(blocksDeploy).map((check) => check.id)).toEqual([
-      "server.routes",
-      "project.env",
-      "project.port.api",
-    ])
+    expect(statusOf("disk", { "disk.free-kb": "1048576" })).toBe("warning: 1024 MB free")
   })
 })
 
-describe("a project with a source", () => {
-  async function checkWithHome(home: string, envFromSource: boolean): Promise<string[]> {
-    const lines: string[] = []
-    const script = renderCheckScript({
-      name: "northline",
-      projectPath: ".",
-      ports: [],
-      envFromSource,
-    })
-    // Other checks fail on a machine that isn't a server, which says nothing about these two.
-    await new LocalShell({ HOME: home }).run(script, {
-      onLine: (line, stream) => {
-        if (stream === "stdout") lines.push(line)
-      },
-    })
-    return lines
-      .map((text) => text.split("\t"))
-      .filter(([marker, id]) => marker === CHECK_MARKER && id?.includes("env"))
-      .map(([, id, status]) => `${id} ${status}`)
-  }
-
-  // Reproduce: remove the `envFromSource` branch in renderCheckScript. A first deploy then stops on
-  // a missing .env that the deploy itself is about to write.
-  test("needs the token instead of .env", async () => {
-    const home = await mkdtemp(join(tmpdir(), "sixb-check-"))
+describe("the probe", () => {
+  // Reproduce: source /etc/os-release outside its subshell. On Linux its NAME replaces the
+  // deployment's, and the settings facts then read another folder.
+  test("reports facts the judge reads, as the deploy account, changing nothing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "sixb-probe-"))
     tempDirs.push(home)
+    await mkdir(join(home, "northline", "shared"), { recursive: true })
+    await writeFile(join(home, "northline", "shared", ".env"), "A=1\n")
 
-    expect(await checkWithHome(home, true)).toEqual(["project.env-token fixable"])
-    expect(await checkWithHome(home, false)).toEqual(["project.env manual"])
-  })
-
-  test("reads a missing token back as a problem to fix", () => {
-    const [check] = parseCheckOutput(
-      [line("project.env-token", "fixable", "/home/sixb/northline/env-token has no token")],
-      context
-    )
-
-    expect(check).toMatchObject({
-      label: "Source token",
-      status: "fixable",
-      remedy: "See https://docs.sixb.ai/deployment/host-requirements.",
+    const lines: string[] = []
+    const shell = new LocalShell({ HOME: home, USER: "sixb" })
+    await shell.run(renderProbe({ name: "northline", ports: [3001, 3002], chromium: true }), {
+      onLine: (line, stream) => stream === "stdout" && lines.push(line),
     })
-    expect(check && blocksDeploy(check)).toBe(true)
+    const facts = parseFacts(lines)
+
+    expect(facts.get("os.arch")).toBeTruthy()
+    expect(facts.get("file.env-token")).toBe("missing")
+    expect(facts.get("file.shared/.env")).not.toBe("missing")
+    expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/sixb")
+    expect(facts.has("port.3001")).toBe(true)
+    expect(facts.get("chromium.checked")).toBe("system libraries")
+  })
+})
+
+describe("DNS", () => {
+  test.each([
+    ["100.109.12.127", true],
+    ["10.108.0.5", true],
+    ["172.16.4.1", true],
+    ["192.168.1.10", true],
+    ["fd7a:115c:a1e0::1", true],
+    ["159.89.254.216", false],
+    ["172.32.0.1", false],
+    ["2604:a880:400::1", false],
+  ])("%s is private: %p", (address, expected) => {
+    expect(isPrivateAddress(address)).toBe(expected)
   })
 })

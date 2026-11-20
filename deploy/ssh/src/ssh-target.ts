@@ -14,7 +14,7 @@ import type {
   DeployStatus,
   DeployTarget,
 } from "@sixb/core/deploy"
-import { checkDns, runChecks } from "./check"
+import { checkDns, checkHost } from "./check"
 import { DEPLOY_USER, SLOT_PORTS } from "./layout"
 import {
   controlServices,
@@ -24,7 +24,7 @@ import {
   streamLogs,
 } from "./operations"
 import { resolveSshConfig } from "./ssh-config"
-import { RemoteScriptError, type RemoteShell, SshShell } from "./transport"
+import { type RemoteShell, SshShell } from "./transport"
 
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
@@ -100,18 +100,11 @@ export class SshTarget implements DeployTarget {
     try {
       server = await this.#connected(async (shell) => [
         { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
-        ...(await runChecks(shell, {
+        ...(await checkHost(shell, {
           name: context.name,
-          projectPath: context.projectPath,
-          ports: release.services.flatMap((service) => {
-            if (!service.http || (service.name !== "api" && service.name !== "app")) return []
-            return [
-              { service: service.name, port: SLOT_PORTS.blue[service.name] },
-              { service: `${service.name}-standby`, port: SLOT_PORTS.green[service.name] },
-            ]
-          }),
+          ports: [...Object.values(SLOT_PORTS.blue), ...Object.values(SLOT_PORTS.green)],
           envFromSource: release.steps.env !== undefined,
-          location: this.location,
+          chromium: context.chromium,
         })),
       ])
     } catch (error) {
@@ -153,25 +146,13 @@ function validateHost(value: unknown): string {
   return host
 }
 
-/** What a failed connection means for a deploy. */
+/** A failed connection, as the check that stops a deploy. */
 function sshCheck(location: string, error: unknown): DeployCheck {
-  const message =
-    (error instanceof Error ? error.message : String(error))
-      .split("\n")[0]
-      ?.replace(/^\[SshTarget\] /, "") ?? ""
-  if (error instanceof RemoteScriptError && /refused your SSH key/.test(message)) {
-    return {
-      id: "ssh",
-      label: "SSH",
-      status: "fixable",
-      detail: message,
-      remedy: "Give your key access to the server's deploy account.",
-    }
-  }
+  const [message = ""] = (error instanceof Error ? error.message : String(error)).split("\n")
   return {
     id: "ssh",
     label: "SSH",
-    status: "manual",
-    detail: message || `Cannot reach ${location}.`,
+    status: "fail",
+    detail: message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`,
   }
 }
