@@ -30,18 +30,15 @@ By default, each agent run gets a fresh environment that is removed when the run
 Files returned as agent attachments are saved separately.
 
 Each command the agent runs has 2 minutes, and up to 10 when the agent expects a longer build or
-test suite. A command that times out or is stopped ends with everything it started. A background
-command has no timeout of its own, but no command outlasts its provider's limit: five hours on
-Vercel, where it is stopped and the agent is told so.
+test suite. A command that times out or is stopped ends with everything it started. Background
+commands run up to the provider's limit: five hours on Vercel.
 
-On Vercel, a sandbox extends its session while a run uses it, up to your plan's maximum, so
-`sessionTimeoutMs` only needs to cover the first minutes. If the session ends anyway, the run ends
-there with "The sandbox stopped", keeping what it did so far, instead of retrying in it. A conversation goes on with a new
-message; one that keeps its files waits for its owner to
-[resume or start fresh](#keep-files-across-conversation-runs).
+On Vercel, a sandbox extends its session while the agent uses it, up to your plan's maximum, so
+`sessionTimeoutMs` can stay short. If the session ends anyway, the run stops with "The sandbox
+stopped" and keeps its work. A conversation goes on with a new message; one that keeps its files
+waits for its owner to [resume or start fresh](#keep-files-across-conversation-runs).
 
-A request the provider refuses before running anything, such as a command it will not start, is
-an ordinary tool error: the agent reads the provider's reason and the run goes on.
+A command the provider refuses to start is a tool error: the agent reads why and goes on.
 
 ## Providers
 
@@ -222,10 +219,9 @@ sandbox, repeats setup and tells the agent its earlier local files were not reco
 Conversation history and published attachments remain available.
 
 Uncertain state or failed recovery blocks further runs, such as a save that fails because the
-provider stopped the VM at the end of its session, or a command whose request got no answer. A run
-whose save fails still ends as it would have: a finished answer stays an answer, a failed run keeps
-its own error, and the run carries a `workspace_not_saved` diagnostic. The thread's owner chooses
-how to go on, from the chat recovery control or the SDK:
+provider stopped the VM at the end of its session, or a command whose request got no answer. The
+run keeps its answer, with a `workspace_not_saved` diagnostic. The thread's owner chooses how to go
+on, from the chat recovery control or the SDK:
 
 | Choice | Call | Files |
 |---|---|---|

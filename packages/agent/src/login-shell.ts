@@ -17,8 +17,8 @@ export const LOGIN_SHELL_SCRIPT = 'exec "$BASH" -c "$1" bash'
 /**
  * {@link LOGIN_SHELL_SCRIPT}, in a directory the shell changes to itself. A directory that does not
  * exist fails the command with bash's own message, which the model can read and correct. Given
- * to the sandbox instead, it would refuse to start the command, and a refused command leaves the
- * workspace unconfirmed. Falling off the end, unlike `exit`, does not run `~/.bash_logout`.
+ * to the provider instead, a missing one fails the call itself, not the command. Falling off the
+ * end, unlike `exit`, does not run `~/.bash_logout`.
  *
  * Arguments: the directory, then the script.
  */
