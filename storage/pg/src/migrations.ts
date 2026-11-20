@@ -132,12 +132,8 @@ export interface PostgresMigrationContext {
 
 export const POSTGRES_STORAGE_ADAPTER_ID = "SixbPostgresStorage"
 
-export function pgSql(
-  id: string,
-  sqlText: string,
-  options: Pick<MigrationStepOptions, "incompatible"> = {}
-): MigrationStep<PostgresMigrationContext> {
-  return pgStep(id, (context) => context.exec(sqlText), { ...options, checksum: checksum(sqlText) })
+export function pgSql(id: string, sqlText: string): MigrationStep<PostgresMigrationContext> {
+  return pgStep(id, (context) => context.exec(sqlText), { checksum: checksum(sqlText) })
 }
 
 export function pgStep(
@@ -469,11 +465,9 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("092-run-recovery", runRecoverySql),
     pgSql("093-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
     pgSql("094-artifact-board-previews", artifactBoardPreviewsSql),
-    // Adds NOT NULL columns without defaults, which the release before it doesn't write.
-    pgSql("095-artifact-open-versions", artifactOpenVersionsSql, { incompatible: true }),
+    pgSql("095-artifact-open-versions", artifactOpenVersionsSql),
     pgSql("096-artifact-documents", artifactDocumentsSql),
-    // Drops a column the release before it writes.
-    pgSql("097-artifact-frame-files", artifactFrameFilesSql, { incompatible: true }),
+    pgSql("097-artifact-frame-files", artifactFrameFilesSql),
     pgSql("098-artifact-comments", artifactCommentsSql),
     pgSql("099-object-artifact-refs", objectArtifactRefsSql),
     pgSql("100-shared-link-guests", sharedLinkGuestsSql),

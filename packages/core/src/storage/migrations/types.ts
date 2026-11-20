@@ -8,12 +8,6 @@ export interface MigrationStepInfo {
   readonly version: number
   readonly name: string
   readonly checksum?: string
-  /**
-   * Breaks the release before it, which is still serving while a deploy migrates: it drops or
-   * renames what that release reads, or adds a column it can't write. A deploy stops the services
-   * for it, and only when asked to.
-   */
-  readonly incompatible?: boolean
 }
 
 /** One forward-only schema change owned by a durable adapter. */
@@ -23,8 +17,6 @@ export interface MigrationStep<TContext> extends MigrationStepInfo {
 
 export interface MigrationStepOptions {
   readonly checksum?: string
-  /** See `MigrationStepInfo.incompatible`. */
-  readonly incompatible?: boolean
 }
 
 export interface MigrationSet<TContext> {
@@ -111,8 +103,6 @@ export type MigrationStatus =
       readonly state: Exclude<MigrationState, "current">
       /** What an operator has to do about it. */
       readonly reason: string
-      /** For `pending`: the ids of the pending migrations that break the release before them. */
-      readonly incompatible?: readonly string[]
     })
 
 export interface StorageMigrator {

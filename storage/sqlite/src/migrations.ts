@@ -323,12 +323,9 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("089-run-recovery", runRecoverySql),
     sqliteSql("090-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
     sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
-    // The release before it writes versions without `frozen_at`, so its second one for an
-    // artifact breaks the new unique index on open versions.
-    sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql, { incompatible: true }),
+    sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql),
     sqliteSql("093-artifact-documents", artifactDocumentsSql),
-    // Drops a column the release before it writes.
-    sqliteSql("094-artifact-frame-files", artifactFrameFilesSql, { incompatible: true }),
+    sqliteSql("094-artifact-frame-files", artifactFrameFilesSql),
     sqliteSql("095-artifact-comments", artifactCommentsSql),
     sqliteSql("096-object-artifact-refs", objectArtifactRefsSql),
     sqliteSql("097-shared-link-guests", sharedLinkGuestsSql),
@@ -348,17 +345,13 @@ export function sqliteStoragePath(basePath: string): string {
   return `${basePath}/${SQLITE_STORAGE_FILE}`
 }
 
-export function sqliteSql(
-  id: string,
-  sqlText: string,
-  options: Pick<MigrationStepOptions, "incompatible"> = {}
-): MigrationStep<Database> {
+export function sqliteSql(id: string, sqlText: string): MigrationStep<Database> {
   return sqliteStep(
     id,
     (db) => {
       db.run(sqlText)
     },
-    { ...options, checksum: checksum(sqlText) }
+    { checksum: checksum(sqlText) }
   )
 }
 

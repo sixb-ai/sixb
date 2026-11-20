@@ -39,12 +39,6 @@ applied step fails startup instead of silently rewriting migration history. Befo
 breaking migration may still require recreating the database. `dropSchema()` exists for exactly
 that, and for test teardown — it deletes every Sixb table and the schema itself.
 
-A deploy migrates while the release before it keeps serving, so each migration works alongside
-that release: it adds tables, and columns that are nullable or have a default. Dropping, renaming or
-tightening waits for the release after the last code that uses the old shape. A migration that
-can't wait is listed with `{ incompatible: true }`; a deploy stops the services while it runs, and
-only when told it may.
-
 ## Vector profiles
 
 Named `search.vectors` profiles persist by default after the standard migrations. Embeddings

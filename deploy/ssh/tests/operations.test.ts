@@ -41,12 +41,11 @@ const source = {
   archives: [{ path: ".", open: () => new Blob(["tar"]).stream() }],
 }
 
-async function deploy(shell: FakeShell, acceptDowntime = false) {
+async function deploy(shell: FakeShell) {
   const events: DeployEvent[] = []
   const error = await deployRelease(shell, release, source, {
     name: "northline",
     deployedBy: "ci",
-    ...(acceptDowntime ? { acceptDowntime } : {}),
     report: (reported) => events.push(reported),
   }).catch((failure: unknown) => failure)
   return { events, error }
@@ -61,7 +60,7 @@ describe("deploying from the laptop", () => {
       event({ exit: 0 }),
     ])
 
-    const { events, error } = await deploy(shell, true)
+    const { events, error } = await deploy(shell)
 
     expect(error).toBeUndefined()
     expect(events[0]).toMatchObject({ type: "steps" })
@@ -75,7 +74,7 @@ describe("deploying from the laptop", () => {
     const [planPath, planText] = [...shell.uploads].find(([path]) => path.endsWith(".json")) ?? []
     const plan = JSON.parse(planText ?? "{}") as ReleasePlan
     expect(planPath).toStartWith("/home/sixb/northline/deploy/runs/")
-    expect(plan).toMatchObject({ projectPath: "examples/northline", acceptDowntime: true })
+    expect(plan).toMatchObject({ projectPath: "examples/northline" })
     expect(plan.record).toMatchObject({ commit: "c2c2c2c2c2c2c2", ref: "main", deployedBy: "ci" })
     expect([...shell.uploads.keys()].some((path) => path.endsWith(".sh"))).toBe(true)
     // Detached from this connection: a dropped laptop never leaves half a deploy.

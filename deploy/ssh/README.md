@@ -64,10 +64,11 @@ the host requirements (`src/check/`) and ships releases.
    laptop follows its log with `tail --pid` until the RFC 7464 event that carries its exit code.
 2. **Bootstrap** (`src/bootstrap.sh`): takes `deploy/lock`, unpacks the release, installs the
    pinned Bun and the dependencies, then runs the release's own runner, which inherits the lock.
-3. **Runner** (`src/server/release.ts`): pulls `.env`, builds, runs `sixb check --migrate --lake`,
-   starts the idle slot, waits until it is healthy, moves the routes, moves the singletons, checks
+3. **Runner** (`src/server/release.ts`): pulls `.env`, builds, runs `sixb check --migrate --lake`
+   (stopping the live release first when `sixb db migrate --check` finds migrations pending), starts
+   the idle slot, waits until it is healthy, moves the routes, moves the singletons, checks
    again, then makes the slot live and stops the other one. Each step that changes what serves
-   records an undo; a failure runs them in reverse, so the live release serves throughout. The
+   records an undo; a failure runs them in reverse, which leaves the previous release serving. The
    runner reaches systemd, Caddy and the supervisors through `ReleaseHost`, which the tests fake.
 
 A server from before slots runs one unit, `sixb-<name>.service`. The first slot deploy adopts it as

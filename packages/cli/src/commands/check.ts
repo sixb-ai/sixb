@@ -14,30 +14,15 @@ import {
 } from "../lib/runtime"
 import { findPendingMigrations } from "../lib/storage-migration"
 import { generateProjectTypes } from "../lib/typegen"
-import {
-  checkView,
-  dbMigrateCheckView,
-  dbMigrateView,
-  lakeCheckView,
-  renderStatic,
-  withTask,
-} from "../ui"
+import { checkView, dbMigrateView, lakeCheckView, renderStatic, withTask } from "../ui"
 
 export interface CheckOptions {
   entry?: string
-  /**
-   * Brings the storage schema up to date first, in the same project load, as a deploy does. A
-   * pending migration that breaks the release before it stops the check with exit code 4.
-   */
+  /** Brings the storage schema up to date first, in the same project load, as a deploy does. */
   migrate?: boolean
-  /** Runs that migration even so: the services it would break have stopped. */
-  allowIncompatible?: boolean
   /** Checks the lake's dataset definitions too, as `sixb lake check` does. */
   lake?: boolean
 }
-
-/** The release before this one can't run against what a pending migration does. */
-const INCOMPATIBLE_MIGRATIONS_EXIT_CODE = 4
 
 export async function runCheck(options: CheckOptions = {}) {
   const entry = resolve(options.entry ?? "sixb.config.ts")
@@ -51,11 +36,8 @@ export async function runCheck(options: CheckOptions = {}) {
   })
 
   try {
-    if (options.migrate && !(await migrate(sixb, options.allowIncompatible === true))) {
-      process.exitCode = INCOMPATIBLE_MIGRATIONS_EXIT_CODE
-    } else {
-      await probe(sixb, entry, options.lake === true)
-    }
+    if (options.migrate) await migrate(sixb)
+    await probe(sixb, entry, options.lake === true)
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the
     // process can exit instead of hanging on open connections. Mirrors lake-check.
@@ -129,20 +111,12 @@ async function probe(sixb: LoadedSixbHost, entry: string, lake: boolean): Promis
 
 const CLOSE_TIMEOUT_MS = 10_000
 
-/**
- * Migrates before anything is probed, since the probes read the schema. Resolves false, having
- * migrated nothing, when a pending migration breaks the release before it and that isn't allowed.
- */
-async function migrate(sixb: LoadedSixbHost, allowIncompatible: boolean): Promise<boolean> {
+/** Migrates before anything is probed, since the probes read the schema. */
+async function migrate(sixb: LoadedSixbHost): Promise<void> {
   const pending = await withTask("check", "Reading the storage schema", () =>
     findPendingMigrations(sixb.storage)
   )
-  const incompatible = pending.some((status) => status.state !== "current" && status.incompatible)
-  if (incompatible && !allowIncompatible) {
-    await renderStatic(dbMigrateCheckView({ projectId: sixb.id, pending }))
-    return false
-  }
-  if (pending.length === 0) return true
+  if (pending.length === 0) return
 
   const result = await withTask("check", "Migrating storage", () =>
     migrateStorage(sixb.storage, {
@@ -158,7 +132,6 @@ async function migrate(sixb: LoadedSixbHost, allowIncompatible: boolean): Promis
       applied: result.reports.flatMap((report) => report.applied),
     })
   )
-  return true
 }
 
 /**

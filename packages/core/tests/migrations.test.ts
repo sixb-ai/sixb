@@ -550,27 +550,4 @@ describe("describeMigrationHistory", () => {
       })
     ).toMatchObject({ state: "incompatible", reason: explained })
   })
-
-  // A deploy keeps the live release serving while it migrates, unless a pending migration breaks
-  // it. Reproduce: drop `incompatible` from the pending status; the deploy then never stops for it.
-  test("names the pending migrations that break the release before them", () => {
-    const withBreaking = defineMigrations({
-      adapterId: "SixbFakeStorage",
-      steps: [
-        step<FakeStorageDb>("001-first", () => {}, { checksum: "a" }),
-        step<FakeStorageDb>("002-drop", () => {}, { checksum: "b", incompatible: true }),
-        step<FakeStorageDb>("003-add", () => {}, { checksum: "c" }),
-      ],
-    })
-
-    expect(
-      describeMigrationHistory({ migrations: withBreaking, rows: [applied(1, "001-first", "a")] })
-    ).toMatchObject({ state: "pending", incompatible: ["002-drop"] })
-    expect(
-      describeMigrationHistory({
-        migrations: withBreaking,
-        rows: [applied(1, "001-first", "a"), applied(2, "002-drop", "b")],
-      })
-    ).not.toHaveProperty("incompatible")
-  })
 })

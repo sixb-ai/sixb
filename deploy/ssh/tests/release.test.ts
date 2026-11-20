@@ -45,7 +45,6 @@ function plan(overrides: Partial<ReleasePlan> = {}): ReleasePlan {
     record: { commit: "c2", ref: "main", deployedAt: "2026-11-20T12:00:00.000Z", deployedBy: "ci" },
     releaseId: "r2",
     projectPath: PROJECT,
-    acceptDowntime: false,
     ...overrides,
   }
 }
@@ -67,8 +66,8 @@ class FakeServer implements ReleaseHost {
   routes: string | null = null
   ready = true
   caddyAccepts = true
-  /** What `sixb check --migrate` exits with: 4 when a pending migration breaks the live release. */
-  migrationCheck = 0
+  /** Whether `sixb db migrate --check` finds migrations pending. */
+  pendingMigrations = false
 
   async run(command: readonly string[]) {
     const words = command.map((word) =>
@@ -76,7 +75,7 @@ class FakeServer implements ReleaseHost {
     )
     this.calls.push(words.join(" "))
     const line = words.join(" ")
-    if (line.endsWith("check --migrate --lake")) return this.migrationCheck
+    if (line.endsWith("db migrate --check")) return this.pendingMigrations ? 3 : 0
     return 0
   }
 
@@ -262,8 +261,8 @@ describe("a first deploy", () => {
     await runRelease(plan(), server, home)
 
     const layout = deploymentLayout({ home, name: "northline" })
-    // Nothing is live, so nothing a migration does can break it.
-    expect(server.calls[1]).toBe("bun sixb check --migrate --lake --allow-incompatible")
+    // Nothing is live, so nothing needs to stop while the schema migrates.
+    expect(server.calls[1]).toBe("bun sixb check --migrate --lake")
     expect(server.calls).toContain("systemctl start sixb-northline@blue.service")
     expect(server.calls).toContain("ready http://127.0.0.1:3002/ready")
     expect(server.routedPort()).toBe("3001")
@@ -297,6 +296,7 @@ describe("a deploy beside the live release", () => {
 
     expect(server.calls).toEqual([
       "bun sixb build",
+      "bun sixb db migrate --check",
       "bun sixb check --migrate --lake",
       "systemctl daemon-reload",
       "systemctl start sixb-northline@green.service",
@@ -449,27 +449,18 @@ describe("a deploy beside the live release", () => {
   })
 })
 
-describe("a migration that breaks the live release", () => {
-  test("stops the deploy before anything changes, unless downtime is accepted", async () => {
+describe("a release with storage migrations", () => {
+  // Reproduce: run the migrations with blue serving; blue then runs against a schema it was
+  // never built for.
+  test("stops blue while they run, then starts green cold", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrationCheck = 4
+    server.pendingMigrations = true
 
-    const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
+    await runRelease(plan(), server, home)
 
-    expect(String(error)).toContain("Deploy again with --accept-downtime")
-    expect(server.calls).not.toContain("bun sixb check --migrate --lake --allow-incompatible")
-    expect(server.active).toEqual(new Set(["sixb-northline@blue.service"]))
-  })
-
-  test("with downtime accepted, stops blue for the migration, then starts green cold", async () => {
-    const server = new FakeServer()
-    await liveInBlue(server)
-    server.migrationCheck = 4
-
-    await runRelease(plan({ acceptDowntime: true }), server, home)
-
-    const migrate = server.calls.indexOf("bun sixb check --migrate --lake --allow-incompatible")
+    const migrate = server.calls.indexOf("bun sixb check --migrate --lake")
+    expect(server.calls.indexOf("systemctl stop sixb-northline@blue.service")).toBeGreaterThan(-1)
     expect(server.calls.indexOf("systemctl stop sixb-northline@blue.service")).toBeLessThan(migrate)
     // Nothing else runs the singletons, so green starts them at once.
     const green = slotLayout(deploymentLayout({ home, name: "northline" }), "green")
@@ -481,24 +472,24 @@ describe("a migration that breaks the live release", () => {
     expect(server.routedPort()).toBe("3011")
   })
 
-  test("a failure after blue stopped for the migration says nothing serves", async () => {
+  // Reproduce: drop the undo that starts blue again; a release that fails after migrating then
+  // leaves nothing serving.
+  test("starts blue again when the release fails after they ran", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrationCheck = 4
+    server.pendingMigrations = true
     server.ready = false
 
-    const error = await runRelease(plan({ acceptDowntime: true }), server, home).catch(
-      (failure: unknown) => failure
-    )
+    const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
 
-    expect(String(error)).toContain("Nothing is serving")
-    expect(String(error)).not.toContain("still serving")
+    expect(String(error)).toContain("The previous release, stopped for the migration, has started")
+    expect(server.active).toEqual(new Set(["sixb-northline@blue.service"]))
+    expect(server.routedPort()).toBe("3001")
   })
 
-  test("compatible migrations run while blue keeps serving", async () => {
+  test("without any, blue keeps serving throughout", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
-    server.migrationCheck = 0
 
     await runRelease(plan(), server, home)
 
@@ -533,14 +524,14 @@ describe("the first slot deploy on a server from before slots", () => {
 
   // Reproduce: pass retire what still serves instead of what was live; the old service stays
   // enabled and starts beside the slot at the next boot.
-  test("with downtime accepted, still retires the service it stopped", async () => {
+  test("with migrations pending, still retires the service it stopped", async () => {
     const server = new FakeServer()
     const layout = deploymentLayout({ home, name: "northline" })
     const legacy = legacyLayout(layout)
     await legacyInGreen(server)
-    server.migrationCheck = 4
+    server.pendingMigrations = true
 
-    await runRelease(plan({ acceptDowntime: true }), server, home)
+    await runRelease(plan(), server, home)
 
     expect(server.calls).toContain("systemctl disable sixb-northline.service")
     expect(await Bun.file(legacy.unitPath).exists()).toBe(false)

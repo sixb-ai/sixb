@@ -336,7 +336,6 @@ async function main(): Promise<void> {
       await runCheck({
         entry: getFlag("entry"),
         migrate: hasFlag("migrate"),
-        allowIncompatible: hasFlag("allow-incompatible"),
         lake: hasFlag("lake"),
       })
       break
@@ -454,7 +453,6 @@ async function main(): Promise<void> {
         dryRun: hasFlag("dry-run"),
         json: hasFlag("json"),
         ref: getFlag("ref"),
-        acceptDowntime: hasFlag("accept-downtime"),
       })
       break
     }

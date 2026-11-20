@@ -7,8 +7,6 @@ export interface ReleasePlan {
   readonly record: DeployRecord
   readonly releaseId: string
   readonly projectPath: string
-  /** A migration that breaks the live release may stop the services while it runs. */
-  readonly acceptDowntime: boolean
 }
 
 /** Starts every progress line, so the laptop tells events from a command's output (RFC 7464). */

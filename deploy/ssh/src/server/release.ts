@@ -121,8 +121,8 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
       throw new Error(`[SshTarget] ${commandLabel(command)} exited with code ${code}.`)
   }
 
-  // What was live when the deploy began, and what still serves: nothing, once a migration that
-  // breaks it has stopped it.
+  // What was live when the deploy began, and what still serves: nothing, once it has stopped for
+  // a storage migration.
   const live = await findLive(layout, host)
   let serving = live
   const slot = slotLayout(layout, live ? otherSlot(live.slot) : await idleSlot(layout))
@@ -148,33 +148,31 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
     })
   }
 
-  for (const command of release.steps.beforeStart) {
-    await step(commandLabel(command), async () => {
-      if (!migrates(command)) return mustRun(command)
-      const anyway = { ...command, args: [...command.args, "--allow-incompatible"] }
-      // With nothing live, there is nothing a migration could break.
-      if (!serving) return mustRun(anyway)
-      const code = await sixb(command.args)
-      if (code === 0) return
-      if (code !== INCOMPATIBLE_MIGRATION) {
-        throw new Error(`[SshTarget] ${commandLabel(command)} exited with code ${code}.`)
-      }
-      if (!plan.acceptDowntime) {
-        throw new Error(
-          "[SshTarget] A migration in this release breaks the live release. Deploy again with --accept-downtime to stop the services while it runs."
-        )
-      }
-      host.print("Stopping the services: a migration in this release breaks the live release.")
-      await stopLive(layout, serving, host)
-      serving = null
-      await mustRun(anyway)
-    })
+  const pendingMigrations = async (): Promise<boolean> => {
+    const code = await sixb(["db", "migrate", "--check"])
+    if (code === 0 || code === MIGRATIONS_PENDING) return code === MIGRATIONS_PENDING
+    throw new Error(`[SshTarget] sixb db migrate --check exited with code ${code}.`)
   }
 
-  const exclusive = release.services.filter((service) => isExclusive(service.kind))
-  const holdExclusive = serving !== null
-
   try {
+    for (const command of release.steps.beforeStart) {
+      await step(commandLabel(command), async () => {
+        // The live release was built for the schema before this one's migrations, so it stops
+        // while they run, and the new release starts cold. A deploy without any keeps serving.
+        if (migrates(command) && serving && (await pendingMigrations())) {
+          const stopped = serving
+          host.print("Stopping the services while the storage schema migrates.")
+          undo.push(() => startLive(layout, stopped, host))
+          await stopLive(layout, stopped, host)
+          serving = null
+        }
+        await mustRun(command)
+      })
+    }
+
+    const exclusive = release.services.filter((service) => isExclusive(service.kind))
+    const holdExclusive = serving !== null
+
     await step("Start new release", async () => {
       await stopDraining(slot.unit, host)
       if (live?.kind !== "legacy") await retireLegacy(layout, host, { drain: false })
@@ -256,7 +254,7 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
 /** What serves once a failed deploy has been undone. */
 function afterRollback(live: Live | null, serving: Live | null): string {
   if (serving) return "\nThe previous release is still serving."
-  if (live) return "\nNothing is serving: the previous release was stopped for the migration."
+  if (live) return "\nThe previous release, stopped for the migration, has started again."
   return ""
 }
 
@@ -428,7 +426,7 @@ async function controlLive(
   }
 }
 
-/** For a migration that breaks the live release: its services stop before it runs. */
+/** For a storage migration: the live release's services stop before it runs. */
 async function stopLive(layout: DeploymentLayout, live: Live, host: ReleaseHost): Promise<void> {
   if (live.kind === "legacy") {
     await host.systemctl("stop", legacyLayout(layout).unit)
@@ -439,6 +437,15 @@ async function stopLive(layout: DeploymentLayout, live: Live, host: ReleaseHost)
     await host.supervise(slot.runDir, "stop", service.name).catch(() => {})
   }
   await host.systemctl("stop", slot.unit)
+}
+
+/** Undoes `stopLive` when the deploy fails after it. */
+async function startLive(layout: DeploymentLayout, live: Live, host: ReleaseHost): Promise<void> {
+  const unit =
+    live.kind === "legacy" ? legacyLayout(layout).unit : slotLayout(layout, live.slot).unit
+  if ((await host.systemctl("start", unit)) !== 0) {
+    throw new Error(`[SshTarget] systemd did not start the previous release, ${unit}.`)
+  }
 }
 
 /**
@@ -544,8 +551,8 @@ const LEGACY_FILES = [
   "run/responses",
 ]
 
-/** `sixb check --migrate` exits with this when a pending migration breaks the live release. */
-const INCOMPATIBLE_MIGRATION = 4
+/** `sixb db migrate --check` exits with this when migrations are pending. */
+const MIGRATIONS_PENDING = 3
 
 function migrates(command: DeployCommand): boolean {
   return command.program === "sixb" && command.args.includes("--migrate")
