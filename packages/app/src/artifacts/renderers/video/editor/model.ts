@@ -4,6 +4,7 @@ import type {
   VideoFileTimeline,
   VideoTrack,
 } from "@sixb/core/artifacts/live"
+import { chapterStart } from "../chapters"
 
 // The timeline's arithmetic, apart from what draws it: where an instant is on screen at a zoom,
 // what an edge snaps to, which row a clip lies on, and the edit points the arrows jump between.
@@ -193,6 +194,20 @@ export function sceneAt<T extends { readonly startMs: number; readonly durationM
     if (scene.startMs <= ms && ms < scene.startMs + scene.durationMs) found = scene
   }
   return found ?? scenes.at(-1)
+}
+
+/**
+ * Where opening a scene moves the playhead: to its first frame, unless it is in the scene already,
+ * where the reader keeps their place.
+ */
+export function openingSeek(
+  scene: { readonly startMs: number; readonly durationMs: number },
+  timeMs: number,
+  fps: number
+): number | undefined {
+  const firstMs = chapterStart(scene, fps) * 1000
+  if (timeMs >= firstMs && timeMs < scene.startMs + scene.durationMs) return undefined
+  return firstMs
 }
 
 /**

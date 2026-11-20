@@ -6,6 +6,7 @@ import {
   setSceneLength,
   splitClip,
 } from "@sixb/core/artifacts/live"
+import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
@@ -32,6 +33,7 @@ import {
   editPoints,
   layClips,
   nextEditPoint,
+  openingSeek,
   rulerSteps,
   sceneSpans,
   snapMove,
@@ -227,6 +229,17 @@ describe("the timeline's arithmetic", () => {
     expect(nextEditPoint(points, 0, 1)).toBe(3000)
     expect(nextEditPoint(points, 3000, -1)).toBe(0)
     expect(nextEditPoint(points, 10_000, 1)).toBeUndefined()
+  })
+
+  // Guard proof: seek to `scene.startMs` in `openingSeek` (model.ts); a scene starting between two
+  // frames opens on the frame before it, the scene before's last.
+  test("opening a scene goes to its first frame, unless the playhead is in it already", () => {
+    const scene = { startMs: 5510, durationMs: 1490 }
+
+    expect(openingSeek(scene, 0, 30)).toBe((166 / 30) * 1000)
+    expect(openingSeek(scene, (165 / 30) * 1000, 30)).toBe((166 / 30) * 1000)
+    expect(openingSeek(scene, 7000, 30)).toBe((166 / 30) * 1000)
+    expect(openingSeek(scene, 6000, 30)).toBeUndefined()
   })
 
   test("the ruler leaves room for its labels at every zoom", () => {
@@ -449,7 +462,9 @@ function typeIn(field: HTMLElement, value: string) {
 function wrap(children: ReactNode) {
   return (
     <QueryClientProvider client={new QueryClient()}>
-      <LocaleProvider>{children}</LocaleProvider>
+      <LocaleProvider>
+        <TooltipProvider>{children}</TooltipProvider>
+      </LocaleProvider>
     </QueryClientProvider>
   )
 }
@@ -505,6 +520,56 @@ describe("the editor's pieces", () => {
     fireEvent.change(field, { target: { value: "In their words" } })
     fireEvent.keyDown(field, { key: "Enter" })
     expect(renamed).toEqual(["talk: In their words"])
+  })
+
+  // Guard proof: drop `narrow` from SceneBlock in scenes.tsx: a short scene keeps room for its
+  // menu, and shows nothing of its name.
+  test("a scene too short for its name shows its number, and its name in a tooltip", async () => {
+    const talk = composition().scenes[1]
+    if (!talk) throw new Error("No interview scene.")
+    // Laid out 30 pixels wide, as a 4 s scene is at a long video's fit.
+    const measured = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 30,
+    })
+
+    try {
+      const view = render(
+        wrap(
+          <SceneBlock
+            scene={talk}
+            index={1}
+            count={2}
+            timeline={undefined}
+            target={{ artifactId: "art_video", version: 1, files: [] }}
+            open={false}
+            agent={false}
+            people={[]}
+            dragging={false}
+            length="7 s"
+            onPress={() => {}}
+            actions={{
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            }}
+          />
+        )
+      )
+
+      const block = view.getByRole("button", { name: "Scene 2, Interview, 7 s" })
+      expect(block.textContent).toBe("2")
+      expect(block.getAttribute("title")).toBeNull()
+
+      fireEvent.focus(block)
+      await waitFor(() => expect(view.getAllByText("2. Interview").length).toBeGreaterThan(0))
+    } finally {
+      if (measured) Object.defineProperty(HTMLElement.prototype, "clientWidth", measured)
+      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+    }
   })
 
   // Guard proof: compare the field's words with the current `value` on leaving, as before, in
@@ -944,7 +1009,6 @@ describe("the timeline", () => {
         edits={{
           seek: () => {},
           select: () => {},
-          open: () => {},
           moveClip: () => {},
           trimClip: () => {},
           sceneLength: () => {},
@@ -960,6 +1024,50 @@ describe("the timeline", () => {
       />
     )
   }
+
+  // Guard proof: open the scene with something else than `edits.scene.select` on a tap in
+  // timeline.tsx, as it was: a click left the playhead, and the picture, in another scene.
+  test("a tap on a scene opens it as Enter does, which moves the playhead to it", () => {
+    const opened: string[] = []
+    const view = render(
+      timeline({
+        timeMs: 0,
+        edits: {
+          seek: () => {},
+          select: () => {},
+          moveClip: () => {},
+          trimClip: () => {},
+          sceneLength: () => {},
+          scene: {
+            select: (scene) => opened.push(scene.id),
+            move: () => {},
+            duplicate: () => {},
+            remove: () => {},
+            rename: () => {},
+          },
+        },
+      })
+    )
+
+    const block = view.getByRole("button", { name: /^Scene 2, Interview/ })
+    fireEvent.pointerDown(block, { button: 0, clientX: 300, pointerId: 1 })
+    fireEvent.pointerUp(window, { button: 0, clientX: 300, pointerId: 1 })
+    expect(opened).toEqual(["talk"])
+  })
+
+  // Guard proof: drop the knob's room from the ruler's labels in timeline.tsx (`left-1`, as it
+  // was): the playhead resting on 0:00 hides its first digit.
+  test("the time under the playhead's knob stays readable, 0:00 first", () => {
+    const view = render(timeline({ timeMs: 0 }))
+    const label = [...view.container.querySelectorAll<HTMLElement>("span")].find(
+      (span) => span.childElementCount === 0 && span.textContent === "0:00"
+    )
+    const knob = view.container.querySelector<HTMLElement>(".bg-red-500 > span")
+    if (!label || !knob) throw new Error("No ruler label or playhead knob.")
+
+    const knobRight = Number.parseFloat(knob.style.left) + Number.parseFloat(knob.style.width)
+    expect(Number.parseFloat(label.style.left)).toBeGreaterThan(knobRight)
+  })
 
   // Reproduce by giving the follow-the-playhead effect no dependency list, as it had: any render,
   // such as a selection, scrolls the timeline back to the paused playhead.
