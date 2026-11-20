@@ -75,7 +75,7 @@ import { InPlaceEditor, type InPlaceText } from "./in-place"
 import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
-import { editPoints, type LaidClip, nextEditPoint, sceneAt } from "./model"
+import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt } from "./model"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
   type EditorSelection,
@@ -220,12 +220,11 @@ export default function VideoEditor({
   const seek = (ms: number, mode: "drag" | "commit" = "commit") =>
     playback.seek(Math.max(0, ms) / 1000, mode)
 
-  const openScene = (scene: VideoScene, at = true) => {
+  const openScene = (scene: VideoScene) => {
     setOpenId(scene.id)
     setSelection({ type: "scene", scene: scene.id })
-    if (at && (timeMs < scene.startMs || timeMs >= scene.startMs + scene.durationMs)) {
-      seek(scene.startMs)
-    }
+    const at = openingSeek(scene, timeMs, composition?.fps ?? outline.fps)
+    if (at !== undefined) seek(at)
   }
 
   const sceneActions = {
@@ -744,7 +743,6 @@ export default function VideoEditor({
           edits={{
             seek,
             select: setSelection,
-            open: (scene) => openScene(scene, false),
             moveClip: (laid, startMs) =>
               edit((sources) =>
                 moveClip(sources, laid.file, videoTarget(laid.clip), startMs - offsetOf(laid.file))

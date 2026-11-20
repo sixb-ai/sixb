@@ -808,6 +808,8 @@ export const en = {
     scenes: "Scenes",
     sceneLabel: (index: number, name: string, length: string) =>
       `Scene ${number(index)}, ${name}, ${length}`,
+    /** A scene too short on the timeline for its name, in its tooltip. */
+    sceneTitle: (index: number, name: string) => `${number(index)}. ${name}`,
     sceneOptions: (name: string) => `Options for ${name}`,
     rename: "Rename",
     duplicate: "Duplicate",
@@ -1782,6 +1784,7 @@ export const fr: Translation<ArtifactMessages> = {
     offlinePicture: "Hors ligne — l’aperçu se met à jour à la reconnexion",
     scenes: "Scènes",
     sceneLabel: (index, name, length) => `Scène ${numberFr(index)}, ${name}, ${length}`,
+    sceneTitle: (index, name) => `${numberFr(index)}. ${name}`,
     sceneOptions: (name) => `Options de ${name}`,
     rename: "Renommer",
     duplicate: "Dupliquer",
