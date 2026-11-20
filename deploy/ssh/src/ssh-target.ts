@@ -102,6 +102,7 @@ export class SshTarget implements DeployTarget {
         { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
         ...(await checkHost(shell, {
           name: context.name,
+          projectPath: context.projectPath,
           ports: [...Object.values(SLOT_PORTS.blue), ...Object.values(SLOT_PORTS.green)],
           envFromSource: release.steps.env !== undefined,
           chromium: context.chromium,

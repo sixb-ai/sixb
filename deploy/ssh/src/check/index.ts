@@ -12,7 +12,7 @@ export { HOST_REQUIREMENTS } from "./judge"
 /** Runs the read-only probe as the deploy account, and judges what it reports. */
 export async function checkHost(
   shell: RemoteShell,
-  input: JudgeInput & { readonly name: string }
+  input: JudgeInput & { readonly name: string; readonly projectPath: string }
 ): Promise<DeployCheck[]> {
   const lines: string[] = []
   await shell.run(renderProbe(input), {
@@ -26,11 +26,13 @@ export async function checkHost(
 /** The probe, with what it needs to know set above it. */
 export function renderProbe(input: {
   readonly name: string
+  readonly projectPath: string
   readonly ports: readonly number[]
   readonly chromium: boolean
 }): string {
   return [
     `SIXB_NAME=${shellQuote(input.name)}`,
+    `SIXB_PROJECT=${shellQuote(input.projectPath)}`,
     `SIXB_PORTS=${shellQuote(input.ports.join(" "))}`,
     `SIXB_CHROMIUM=${input.chromium ? 1 : 0}`,
     probe,

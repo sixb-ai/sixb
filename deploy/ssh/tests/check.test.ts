@@ -31,8 +31,9 @@ const healthy: Record<string, string> = {
   "caddy.caddyfile-imports": "yes",
   "caddy.admin-on-localhost": "no",
   "file.env-token": "600 54",
-  "file.shared/.env": "600 2048",
-  "file.code/.env": "missing",
+  "file.shared-env": "600 2048",
+  "file.legacy-env": "missing",
+  "deployments.others": "",
   "port.3001": "own",
   "port.3002": "free",
   "disk.free-kb": "70000000",
@@ -66,6 +67,7 @@ describe("judging the host", () => {
     ["an empty env token", "settings", { "file.env-token": "600 0" }],
     ["an env token others can read", "settings", { "file.env-token": "644 54" }],
     ["a port another program holds", "ports", { "port.3002": "other" }],
+    ["another deployment", "deployments", { "deployments.others": "blog" }],
   ])("fails on %s", (_name, id, overrides) => {
     expect(statusOf(id, overrides)).toStartWith("fail")
   })
@@ -88,9 +90,9 @@ describe("judging the host", () => {
     const noSource = { envFromSource: false }
     expect(statusOf("settings", { "file.env-token": "missing" }, noSource)).toStartWith("ok")
     expect(
-      statusOf("settings", { "file.shared/.env": "missing", "file.code/.env": "600 10" }, noSource)
+      statusOf("settings", { "file.shared-env": "missing", "file.legacy-env": "600 10" }, noSource)
     ).toStartWith("ok")
-    expect(statusOf("settings", { "file.shared/.env": "missing" }, noSource)).toBe(
+    expect(statusOf("settings", { "file.shared-env": "missing" }, noSource)).toBe(
       "fail: no .env on the server"
     )
   })
@@ -123,17 +125,31 @@ describe("the probe", () => {
     tempDirs.push(home)
     await mkdir(join(home, "northline", "shared"), { recursive: true })
     await writeFile(join(home, "northline", "shared", ".env"), "A=1\n")
+    // A deployment from before releases, in a monorepo: its .env sits in the project's folder.
+    await mkdir(join(home, "northline", "code", "apps", "northline"), { recursive: true })
+    await writeFile(join(home, "northline", "code", "apps", "northline", ".env"), "A=1\n")
+    const units = join(home, ".config", "systemd", "user")
+    await mkdir(units, { recursive: true })
+    for (const unit of ["sixb-northline@.service", "sixb-blog.service", "sixb-blog@.service"]) {
+      await writeFile(join(units, unit), "")
+    }
 
     const lines: string[] = []
     const shell = new LocalShell({ HOME: home, USER: "sixb" })
-    await shell.run(renderProbe({ name: "northline", ports: [3001, 3002], chromium: true }), {
-      onLine: (line, stream) => stream === "stdout" && lines.push(line),
+    const probe = renderProbe({
+      name: "northline",
+      projectPath: "apps/northline",
+      ports: [3001, 3002],
+      chromium: true,
     })
+    await shell.run(probe, { onLine: (line, stream) => stream === "stdout" && lines.push(line) })
     const facts = parseFacts(lines)
 
     expect(facts.get("os.arch")).toBeTruthy()
     expect(facts.get("file.env-token")).toBe("missing")
-    expect(facts.get("file.shared/.env")).not.toBe("missing")
+    expect(facts.get("file.shared-env")).not.toBe("missing")
+    expect(facts.get("file.legacy-env")).not.toBe("missing")
+    expect(facts.get("deployments.others")).toBe("blog")
     expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/sixb")
     expect(facts.has("port.3001")).toBe(true)
     expect(facts.get("chromium.checked")).toBe("system libraries")
