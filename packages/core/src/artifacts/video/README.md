@@ -85,8 +85,9 @@ so a change stays one small text edit, in the live document and in the Agent's d
 `publish/video.ts` names each scene by `sceneRenderKeys`, a hash of what its frames are made of:
 
 - the frame kit;
-- `index.html` without its scene hosts and the root's `data-duration`: the frame, the root's
-  styles, and what it shows itself;
+- `index.html` without its scene hosts, the root's `data-duration`, and its `<audio>` elements,
+  which show nothing: the frame, the root's styles, and what it shows itself. A soundtrack
+  trimmed with the video spares the scenes before the cut;
 - the scene's host and those of the scenes on screen with it, as one fades into the next, with
   their times resolved and their order in `index.html`, which stacks them;
 - the scene's start in the video, only when the root plays or animates something of its own: a
