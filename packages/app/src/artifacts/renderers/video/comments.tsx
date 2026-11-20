@@ -1,16 +1,23 @@
-import type { VideoOutline } from "@sixb/core/artifacts"
+import {
+  placeVideoComment,
+  type VideoCommentPlace,
+  type VideoOutline,
+  videoSceneAt,
+} from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { type CSSProperties, useCallback, useMemo, useState } from "react"
-import { listed, useArtifactCommenting } from "../../comments/commenting"
+import { type CommentPlace, listed, useArtifactCommenting } from "../../comments/commenting"
 import type { CommentThread } from "../../comments/comments"
 import { CommentPin, cardPlace, DraftCard } from "../../comments/composer"
 import { useArtifactMessages } from "../../messages"
 import { formatClock } from "../../playback"
-import { chapterAt, chapterName } from "./chapters"
+import { chapterName } from "./chapters"
 
-// Comments at an instant of a video: placed by a click on the paused frame, each keeps its instant,
-// the scene playing then, and the point clicked. Its pin shows on the frame while the playhead is
-// at that instant, its mark sits on the track, and the panel lists them in the order they come.
+// Comments at an instant of a video: placed by a click on the paused frame, each keeps the scene
+// playing then, how far into it, and the point clicked. Each is placed in the version shown as
+// core places it: its pin shows on the frame while the playhead is at its instant, its mark sits on
+// the track, and the panel lists them in the order they come. One on a scene the version no longer
+// has keeps its place in the panel, with no instant to go to.
 
 /** How long after its instant a comment's pin stays on the frame as the video plays on. */
 const PIN_SECONDS = 1.5
@@ -54,29 +61,44 @@ export function useVideoCommenting({
   readonly revision: number
   readonly outline: VideoOutline
 }) {
-  const commenting = useArtifactCommenting({ artifactId, kind: "video", title, revision })
+  const commenting = useArtifactCommenting({ artifactId, kind: "video", title, revision, outline })
   const { add, setCommenting, filter, pinLabel } = commenting
   const [draft, setDraft] = useState<VideoCommentDraft | null>(null)
 
-  // Numbered in the order they come in the video, as the panel lists them; those on the whole video
+  // Each thread placed once in the version shown.
+  const places = useMemo(
+    () =>
+      new Map(
+        commenting.threads.map(
+          (thread) =>
+            [thread.comment.id, placeVideoComment(thread.comment.anchor, outline)] as const
+        )
+      ),
+    [commenting.threads, outline]
+  )
+  const placeOf = useCallback(
+    (thread: CommentThread): VideoCommentPlace => places.get(thread.comment.id) ?? {},
+    [places]
+  )
+
+  // Numbered in the order they come in the video, as the panel lists them; those with no instant
   // last, in the order they were written.
   const threads = useMemo(
     () =>
       [...commenting.threads]
         .sort(
           (a, b) =>
-            (a.comment.anchor.at ?? Number.POSITIVE_INFINITY) -
-              (b.comment.anchor.at ?? Number.POSITIVE_INFINITY) || a.number - b.number
+            (placeOf(a).ms ?? Number.POSITIVE_INFINITY) -
+              (placeOf(b).ms ?? Number.POSITIVE_INFINITY) || a.number - b.number
         )
         .map((thread, index) => ({ ...thread, number: index + 1 })),
-    [commenting.threads]
+    [commenting.threads, placeOf]
   )
 
   const submitDraft = useCallback(
     async (body: string) => {
       if (!draft) return
-      const scene = chapterAt(outline, draft.at / 1000)
-      await add({ at: draft.at, ...(scene ? { scene: scene.id } : {}), point: draft.point }, body)
+      await add(draftAnchor(outline, draft), body)
       setDraft(null)
       setCommenting(false)
     },
@@ -87,16 +109,17 @@ export function useVideoCommenting({
   const marked = useMemo(
     () =>
       threads.flatMap((thread) => {
-        const at = thread.comment.anchor.at
-        if (at === undefined || !listed(thread, filter)) return []
-        return [{ thread, seconds: at / 1000, label: pinLabel(thread), excerpt: excerpt(thread) }]
+        const { ms } = placeOf(thread)
+        if (ms === undefined || !listed(thread, filter)) return []
+        return [{ thread, seconds: ms / 1000, label: pinLabel(thread), excerpt: excerpt(thread) }]
       }),
-    [threads, filter, pinLabel]
+    [threads, filter, pinLabel, placeOf]
   )
 
   return {
     ...commenting,
     threads,
+    placeOf,
     marked,
     draft,
     place: (seconds: number, point: FramePoint) =>
@@ -112,33 +135,50 @@ export function useVideoCommenting({
 
 export type VideoCommenting = ReturnType<typeof useVideoCommenting>
 
-/** Where a thread is on the video: its instant and its scene, or the whole video. */
+/**
+ * Where a thread is on the video: its instant and its scene, a whole scene, or the whole video. One
+ * on a scene the version no longer has names it struck through, and says so.
+ */
 export function ThreadInstant({
   thread,
+  place,
   outline,
 }: {
   readonly thread: CommentThread
+  /** Where it is in the version shown, as `placeVideoComment` places it. */
+  readonly place: VideoCommentPlace
   readonly outline: VideoOutline
 }) {
   const messages = useArtifactMessages().video
-  const { at, scene } = thread.comment.anchor
-  if (at === undefined) {
-    const named = outline.scenes.find((each) => each.id === scene)
+  if (place.gone) {
+    const { label, scene } = thread.comment.anchor
     return (
-      <span className="font-medium text-foreground/80">
-        {named ? chapterName(named) : messages.wholeVideo}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
+        <span className="min-w-0 truncate line-through decoration-1">
+          {label ? `“${label}”` : scene}
+        </span>
+        <span className="rounded-sm bg-muted px-1 text-[10.5px] text-muted-foreground">
+          {messages.sceneGone}
+        </span>
       </span>
     )
   }
 
-  const named = outline.scenes.find((each) => each.id === scene) ?? chapterAt(outline, at / 1000)
+  if (place.ms === undefined) {
+    return (
+      <span className="font-medium text-foreground/80">
+        {place.scene ? chapterName(place.scene) : messages.wholeVideo}
+      </span>
+    )
+  }
+
   return (
     <span className="flex min-w-0 items-center gap-1">
       <span className="rounded-md bg-muted px-1.5 font-medium text-foreground tabular-nums">
-        {formatClock(at / 1000)}
+        {formatClock(place.ms / 1000)}
       </span>
-      {named && outline.scenes.length > 1 ? (
-        <span className="min-w-0 truncate">{chapterName(named)}</span>
+      {place.scene && outline.scenes.length > 1 ? (
+        <span className="min-w-0 truncate">{chapterName(place.scene)}</span>
       ) : null}
     </span>
   )
@@ -223,6 +263,15 @@ export function VideoCommentPins({
   )
 }
 
+/**
+ * What a new comment is about: its instant, the scene playing then, and the point clicked. Between
+ * two scenes, or past the last, it names none: no scene plays there.
+ */
+export function draftAnchor(outline: VideoOutline, draft: VideoCommentDraft): CommentPlace {
+  const scene = videoSceneAt(outline, draft.at)
+  return { at: draft.at, ...(scene ? { scene: scene.id } : {}), point: draft.point }
+}
+
 /** A comment's first words, on one line. */
 function excerpt(thread: CommentThread): string {
   const words = thread.comment.body.replace(/\s+/g, " ").trim()
@@ -235,6 +284,6 @@ function excerpt(thread: CommentThread): string {
  */
 function draftPlace(outline: VideoOutline, ms: number, at: (time: string) => string): string {
   const time = at(formatClock(ms / 1000))
-  const scene = outline.scenes.length > 1 ? chapterAt(outline, ms / 1000) : undefined
+  const scene = outline.scenes.length > 1 ? videoSceneAt(outline, ms) : undefined
   return scene ? `${time} · ${chapterName(scene)}` : time
 }

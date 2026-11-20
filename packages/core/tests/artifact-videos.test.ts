@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
-import { quoteArtifactComment } from "../src/artifacts"
+import { placeVideoComment, quoteArtifactComment } from "../src/artifacts"
 import { parseArtifactAddress } from "../src/artifacts/address"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import type { VideoOutline } from "../src/artifacts/outline"
@@ -9,6 +9,7 @@ import { resolveArtifactAddress } from "../src/artifacts/resolve"
 import { readVideoComposition, videoFilePath } from "../src/artifacts/video/composition"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { inferFileMediaType } from "../src/blob-storage/internal"
+import type { ArtifactCommentAnchor } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -496,7 +497,7 @@ function setup() {
     kind: "video" | "document" | "page" = "video"
   ) => sixb.artifacts.create({ kind, title: "Launch film", files: await files(contents) })
 
-  return { sixb, publish }
+  return { sixb, publish, files }
 }
 
 async function refusal(promise: Promise<unknown>): Promise<string> {
@@ -934,29 +935,112 @@ describe("an address into a video", () => {
 })
 
 describe("comments on a video", () => {
+  /** A comment as a quote names it, without its id. */
+  const quoted = ({ anchor, body }: { anchor: ArtifactCommentAnchor; body: string }) => ({
+    anchor,
+    body,
+  })
+
   test("are about an instant, the scene it plays, and a point on the frame", async () => {
     const { sixb, publish } = setup()
-    const { artifact } = await publish(LAUNCH)
+    const { artifact, version } = await publish(LAUNCH)
 
     const comment = await sixb.artifacts.addComment(artifact.id, {
       body: "Hold the logo longer",
       anchor: { at: 6200, scene: "outro", point: { x: 0.5, y: 0.4 } },
     })
     expect(comment.anchor).toEqual({
-      at: 6200,
       scene: "outro",
+      label: "Thanks",
+      offset: 700,
       point: { x: 0.5, y: 0.4 },
       revision: 1,
     })
-    expect(quoteArtifactComment({ anchor: comment.anchor, body: comment.body })).toBe(
-      "[0:06 · outro · revision 1] Hold the logo longer"
-    )
+    expect(
+      quoteArtifactComment({ ...quoted(comment), outline: version.outline as VideoOutline })
+    ).toBe("[0:06 · outro · revision 1] Hold the logo longer")
+
+    // An instant that names no scene is kept in the one playing then.
+    const unnamed = await sixb.artifacts.addComment(artifact.id, {
+      body: "Slower",
+      anchor: { at: 3000 },
+    })
+    expect(unnamed.anchor).toEqual({ scene: "demo", offset: 1000, revision: 1 })
 
     const scene = await sixb.artifacts.addComment(artifact.id, {
       body: "Too fast",
       anchor: { scene: "demo" },
     })
     expect(scene.anchor).toEqual({ scene: "demo", revision: 1 })
+  })
+
+  // Guard proof: give a comment the scene that started last before its instant in checkScenePlace
+  // (`outline.scenes.filter((each) => each.startMs <= at).at(-1)`), as the player once did, and
+  // the one between the demo and the outro is kept 3.2 s into the 3 s demo.
+  test("are about any instant, one between two scenes in none", async () => {
+    const { sixb, publish } = setup()
+    const { artifact, version } = await publish(LAUNCH)
+
+    // The demo ends at 5 s, and the outro starts half a second later.
+    const gap = await sixb.artifacts.addComment(artifact.id, { body: "Hold", anchor: { at: 5200 } })
+    expect(gap.anchor).toEqual({ at: 5200, revision: 1 })
+    expect(quoteArtifactComment({ ...quoted(gap), outline: version.outline as VideoOutline })).toBe(
+      "[0:05 · revision 1] Hold"
+    )
+  })
+
+  // Guard proof: keep `at` as it is sent in checkScenePlace (`{ at, scene }`), and the comment
+  // stays at 30.5 s once the demo is cut, 13 s into the outro.
+  test("follow their scene when a later version moves it, and say when it is gone", async () => {
+    const { sixb, publish, files } = setup()
+    const film = (demo: number, outro = "15") => ({
+      ...LAUNCH,
+      "index.html": index([
+        host("intro", "0", "2"),
+        host("demo", "intro", String(demo)),
+        host("outro", "demo + 0.5", outro, ' data-label="Thanks"'),
+      ]),
+    })
+    const { artifact } = await publish(film(18))
+    const comment = await sixb.artifacts.addComment(artifact.id, {
+      body: "Hold the logo longer",
+      anchor: { at: 30_500, scene: "outro" },
+    })
+    const update = async (contents: Readonly<Record<string, string>>) => {
+      const { version } = await sixb.artifacts.update(artifact.id, {
+        kind: "video",
+        title: "Launch film",
+        files: await files(contents),
+      })
+      return version.outline as VideoOutline
+    }
+    const [kept] = (await sixb.artifacts.listComments(artifact.id)) ?? []
+    expect(kept?.anchor).toEqual(comment.anchor)
+
+    // Three seconds cut from the demo: the outro starts at 17.5 s, and the comment 10 s into it.
+    const cut = await update(film(15))
+    expect(placeVideoComment(comment.anchor, cut)).toMatchObject({
+      ms: 27_500,
+      scene: { id: "outro" },
+    })
+    expect(quoteArtifactComment({ ...quoted(comment), outline: cut })).toBe(
+      "[0:27 · outro · revision 1] Hold the logo longer"
+    )
+
+    // An outro shorter than the comment's offset holds it at its end.
+    expect(placeVideoComment(comment.anchor, await update(film(15, "4")))).toMatchObject({
+      ms: 21_500,
+    })
+
+    // Without the outro, it has no instant, and its label names the scene it was in.
+    const gone = await update({ ...film(15), "index.html": index([host("intro", "0", "2")]) })
+    expect(placeVideoComment(comment.anchor, gone)).toEqual({ gone: true })
+    expect(quoteArtifactComment({ ...quoted(comment), outline: gone })).toBe(
+      '[outro · "Thanks" · no longer in the video · revision 1] Hold the logo longer'
+    )
+    expect(quoteArtifactComment(quoted(comment))).toBe(
+      "[0:10 into outro · revision 1] Hold the logo longer"
+    )
   })
 
   // Guard proof: return `{ ...anchor }` from checkScenePlace in comments.ts, and each is kept.
@@ -967,7 +1051,7 @@ describe("comments on a video", () => {
     [{ at: 1.5 }, "`at` is 0 to 7000 milliseconds"],
     [{ point: { x: 0.5, y: 0.5 } }, "A comment's point is on the frame at its instant"],
     [{ at: 1000, point: { x: 1.5, y: 0.5 } }, "x and y from 0 to 1"],
-    [{ at: 1000, scene: "outro" }, "Scene 'outro' plays from 5500 to 7000 milliseconds"],
+    [{ at: 5200, scene: "demo" }, "Scene 'demo' plays from 2000 to 5000 milliseconds"],
     [{ board: "intro" }, "A comment on a video is about an instant or a scene, not a board."],
   ])("refuses an anchor %o", async (anchor, message) => {
     const { sixb, publish } = setup()

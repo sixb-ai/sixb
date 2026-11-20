@@ -192,11 +192,11 @@ export function VideoPlayer({
     commenting.toggleCommenting()
   }
   const openThread = (thread: CommentThread) => {
-    const at = thread.comment.anchor.at
-    if (at !== undefined) {
+    const { ms } = commenting.placeOf(thread)
+    if (ms !== undefined) {
       setBegun(true)
       playback.pause()
-      playback.seek(at / 1000)
+      playback.seek(ms / 1000)
     }
     commenting.setActive(thread.comment.id)
     showComments(true)
@@ -550,7 +550,9 @@ export function VideoPlayer({
         failed={commenting.failed}
         filter={commenting.filter}
         active={commenting.active}
-        where={(thread) => <ThreadInstant thread={thread} outline={outline} />}
+        where={(thread) => (
+          <ThreadInstant thread={thread} place={commenting.placeOf(thread)} outline={outline} />
+        )}
         emptyHint={messages.commentsEmptyHint}
         nameOf={commenting.nameOf}
         canManage={commenting.canManage}

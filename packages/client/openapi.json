@@ -66983,17 +66983,22 @@
                               "label": {
                                 "type": "string",
                                 "maxLength": 1000,
-                                "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                                "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                               },
                               "at": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "description": "The video's instant it is about, in milliseconds from its start"
+                                "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                               },
                               "scene": {
                                 "type": "string",
                                 "maxLength": 200,
                                 "description": "The id of the video's scene it is about"
+                              },
+                              "offset": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter"
                               },
                               "point": {
                                 "type": "object",
@@ -67363,12 +67368,12 @@
                       "label": {
                         "type": "string",
                         "maxLength": 1000,
-                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                        "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                       },
                       "at": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "The video's instant it is about, in milliseconds from its start"
+                        "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                       },
                       "scene": {
                         "type": "string",
@@ -67401,7 +67406,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant in its latest version and the scene playing then, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67440,12 +67445,12 @@
                       "label": {
                         "type": "string",
                         "maxLength": 1000,
-                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                        "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                       },
                       "at": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "The video's instant it is about, in milliseconds from its start"
+                        "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                       },
                       "scene": {
                         "type": "string",
@@ -67478,7 +67483,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant in its latest version and the scene playing then, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67517,12 +67522,12 @@
                       "label": {
                         "type": "string",
                         "maxLength": 1000,
-                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                        "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                       },
                       "at": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "The video's instant it is about, in milliseconds from its start"
+                        "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                       },
                       "scene": {
                         "type": "string",
@@ -67555,7 +67560,7 @@
                       }
                     },
                     "additionalProperties": false,
-                    "description": "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                    "description": "What it is about: a board, an element of the board, a video's instant in its latest version and the scene playing then, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
                   },
                   "parentId": {
                     "type": "string",
@@ -67604,17 +67609,22 @@
                         "label": {
                           "type": "string",
                           "maxLength": 1000,
-                          "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                          "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                         },
                         "at": {
                           "type": "integer",
                           "minimum": 0,
-                          "description": "The video's instant it is about, in milliseconds from its start"
+                          "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                         },
                         "scene": {
                           "type": "string",
                           "maxLength": 200,
                           "description": "The id of the video's scene it is about"
+                        },
+                        "offset": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter"
                         },
                         "point": {
                           "type": "object",
@@ -68165,17 +68175,22 @@
                         "label": {
                           "type": "string",
                           "maxLength": 1000,
-                          "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                          "description": "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
                         },
                         "at": {
                           "type": "integer",
                           "minimum": 0,
-                          "description": "The video's instant it is about, in milliseconds from its start"
+                          "description": "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
                         },
                         "scene": {
                           "type": "string",
                           "maxLength": 200,
                           "description": "The id of the video's scene it is about"
+                        },
+                        "offset": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter"
                         },
                         "point": {
                           "type": "object",
