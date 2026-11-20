@@ -421,7 +421,8 @@ async function retire(input: {
     await host.systemctl("stop", "--no-block", legacy.unit)
     await host.systemctl("disable", legacy.unit)
     await rm(legacy.unitPath, { force: true })
-    await rm(legacy.manifest, { force: true })
+    for (const leftover of LEGACY_FILES)
+      await rm(join(layout.root, leftover), { force: true, recursive: true })
     await host.systemctl("daemon-reload")
   }
 
@@ -464,6 +465,24 @@ export async function carryAssets(previousProject: string, nextProject: string):
 }
 
 const CARRIED_ASSET = /^(chunk-|asset-|app-.+\.|shared-app-.+\.|auth-.+\.)/
+
+/** What a deployment from before slots kept beside its manifest. Its logs stay, in `run/logs`. */
+const LEGACY_FILES = [
+  "deploy/processes.json",
+  "deploy/candidate.json",
+  "deploy/manifest.blue.json",
+  "deploy/manifest.green.json",
+  "deploy/Caddyfile",
+  "deploy/Caddyfile.blue",
+  "deploy/Caddyfile.green",
+  "deploy/Caddyfile.previous",
+  "deploy/caddy-validate.log",
+  "deploy/ports.txt",
+  "deploy/files.txt",
+  "run/state.json",
+  "run/control",
+  "run/responses",
+]
 
 /** `sixb check --migrate` exits with this when a pending migration breaks the live release. */
 const INCOMPATIBLE_MIGRATION = 4

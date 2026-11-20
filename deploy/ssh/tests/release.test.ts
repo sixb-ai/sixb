@@ -415,6 +415,7 @@ describe("the first slot deploy on a server from before slots", () => {
     await mkdir(layout.deployDir, { recursive: true })
     await mkdir(layout.unitDir, { recursive: true })
     await writeFile(legacy.unitPath, "[Service]\n")
+    await writeFile(join(layout.deployDir, "ports.txt"), "3011\n")
     await writeFile(
       legacy.manifest,
       JSON.stringify({
@@ -442,6 +443,7 @@ describe("the first slot deploy on a server from before slots", () => {
       await readFile(join(layout.releasesDir, "legacy", PROJECT, "package.json"), "utf8")
     ).toBe("{}")
     expect(await Bun.file(legacy.unitPath).exists()).toBe(false)
+    expect(await Bun.file(join(layout.deployDir, "ports.txt")).exists()).toBe(false)
   })
 })
 
