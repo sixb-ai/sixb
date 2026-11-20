@@ -2,11 +2,14 @@ import type { DeployCheck } from "@sixb/core/deploy"
 
 /** Where every remedy points: the list of what a server provides. */
 export const HOST_REQUIREMENTS = "https://docs.sixb.ai/deployment/host-requirements"
+const ENV_TOKEN_DOCS = "https://docs.sixb.ai/deployment/environment-variables#deploy"
 
 /** What the probe reported, by key. */
 export type HostFacts = ReadonlyMap<string, string>
 
 export interface JudgeInput {
+  /** The deployment's `name`: its folder in the account's home. */
+  readonly name: string
   /** The loopback ports the deployment's slots listen on. */
   readonly ports: readonly number[]
   /**
@@ -17,6 +20,25 @@ export interface JudgeInput {
   /** The project prints with Chromium, so the server needs Chromium's libraries. */
   readonly chromium: boolean
 }
+
+/** The Debian package each tool the deploy uses comes in. */
+const TOOL_PACKAGES: Readonly<Record<string, string>> = {
+  curl: "curl",
+  unzip: "unzip",
+  tar: "tar",
+  flock: "util-linux",
+  setsid: "util-linux",
+  sha256sum: "coreutils",
+  stat: "coreutils",
+  ss: "iproute2",
+}
+
+/** Caddy from its own apt repository, as its documentation installs it. */
+const INSTALL_CADDY = [
+  "curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
+  "curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list",
+  "apt-get update && apt-get install -y caddy",
+]
 
 const MIN_CADDY = [2, 7] as const
 const MIN_FREE_KB = 2 * 1024 * 1024
@@ -34,13 +56,16 @@ export function parseFacts(lines: readonly string[]): HostFacts {
 
 /** What the facts mean for a deploy, one check per host requirement. */
 export function judge(facts: HostFacts, input: JudgeInput): DeployCheck[] {
+  // The fixes name the account the probe ran as; a probe that didn't say leaves a placeholder.
+  const user = facts.get("account.name") || "<account>"
+  const root = `${facts.get("account.home") || "~"}/${input.name}`
   return [
     server(facts),
     account(facts),
     deployments(facts),
-    linger(facts),
-    caddy(facts),
-    settings(facts, input.settings),
+    linger(facts, user),
+    caddy(facts, user),
+    settings(facts, input.settings, root),
     ports(facts, input.ports),
     ...(input.chromium ? [chromium(facts)] : []),
     disk(facts),
@@ -58,9 +83,12 @@ function server(facts: HostFacts): DeployCheck {
     ARCHITECTURES.has(arch) ? "" : `Bun has no build for ${arch || "this CPU"}`,
     missing ? `missing ${missing.split(" ").join(", ")}` : "",
   ].filter(Boolean)
+  const packages = [...new Set(missing.split(" ").flatMap((tool) => TOOL_PACKAGES[tool] ?? []))]
   return problems.length === 0
     ? ok("server", "Server", `${name}, ${arch}`)
-    : fail("server", "Server", problems.join("; "))
+    : fail("server", "Server", problems.join("; "), {
+        commands: packages.length > 0 ? [`apt-get install -y ${packages.join(" ")}`] : [],
+      })
 }
 
 /** SSH may pick the account, so the check is where `root` is turned away. */
@@ -82,13 +110,15 @@ function deployments(facts: HostFacts): DeployCheck {
       )
 }
 
-function linger(facts: HostFacts): DeployCheck {
+function linger(facts: HostFacts, user: string): DeployCheck {
   return facts.get("linger") === "yes"
     ? ok("linger", "Services at boot", "lingering is on")
-    : fail("linger", "Services at boot", "lingering is off: the services would stop at logout")
+    : fail("linger", "Services at boot", "lingering is off: the services would stop at logout", {
+        commands: [`loginctl enable-linger ${user}`],
+      })
 }
 
-function caddy(facts: HostFacts): DeployCheck {
+function caddy(facts: HostFacts, user: string): DeployCheck {
   const version = facts.get("caddy.version") ?? ""
   const routes = facts.get("caddy.routes") ?? "the routes folder"
   const problems = [
@@ -104,30 +134,76 @@ function caddy(facts: HostFacts): DeployCheck {
     facts.get("caddy.routes-writable") === "yes" ? "" : `${routes} is missing or not writable`,
     facts.get("caddy.reload") === "yes" ? "" : "sudo systemctl reload caddy is not allowed",
   ].filter(Boolean)
-  return problems.length === 0
-    ? ok("caddy", "Caddy", `${version}, routes in ${routes}`)
-    : fail("caddy", "Caddy", problems.join("; "))
+  if (problems.length === 0) return ok("caddy", "Caddy", `${version}, routes in ${routes}`)
+
+  const folder = `/etc/caddy/sixb.d/${user}`
+  const configure = [
+    ...(facts.get("caddy.caddyfile-imports") === "yes"
+      ? []
+      : [
+          // Safe to paste twice: a second import of the same files is an error Caddy won't reload.
+          "grep -qxF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile || echo 'import /etc/caddy/sixb.d/*.caddy' >> /etc/caddy/Caddyfile",
+        ]),
+    ...(facts.get("caddy.routes-imported") === "yes"
+      ? []
+      : [
+          "install -d -m 0755 /etc/caddy/sixb.d",
+          `echo 'import ${folder}/*.caddy' > ${folder}.caddy`,
+        ]),
+    ...(facts.get("caddy.routes-writable") === "yes"
+      ? []
+      : [`install -d -m 0755 -o ${user} -g ${user} ${folder}`]),
+    ...(facts.get("caddy.reload") === "yes"
+      ? []
+      : [
+          `echo '${user} ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/${user}`,
+          `chmod 440 /etc/sudoers.d/${user}`,
+        ]),
+  ]
+  const install = !version
+    ? INSTALL_CADDY
+    : atLeast(version, MIN_CADDY)
+      ? []
+      : ["apt-get update && apt-get install -y --only-upgrade caddy"]
+  return fail("caddy", "Caddy", problems.join("; "), {
+    commands: [
+      ...install,
+      ...configure,
+      ...(configure.length > 0 ? ["systemctl reload caddy"] : []),
+    ],
+  })
 }
 
-function settings(facts: HostFacts, source: JudgeInput["settings"]): DeployCheck {
+function settings(facts: HostFacts, source: JudgeInput["settings"], root: string): DeployCheck {
   if (source === "identity") {
     return ok("settings", "Settings", "the source reads with the server's own identity")
   }
   if (source === "env-token") {
     const token = fileFact(facts.get("file.env-token"))
     if (!token || token.size === 0) {
-      return fail("settings", "Settings", "no env token: the deploy can't pull .env")
+      return fail("settings", "Settings", "no env token: the deploy can't pull .env", {
+        remedy: `Put a read-only token for the project's prod values at ${root}/env-token, mode 600. See ${ENV_TOKEN_DOCS}.`,
+      })
     }
     return token.mode === "600"
       ? ok("settings", "Settings", "env token in place")
-      : fail("settings", "Settings", `the env token is readable by others (mode ${token.mode})`)
+      : fail("settings", "Settings", `the env token is readable by others (mode ${token.mode})`, {
+          commands: [`chmod 600 ${root}/env-token`],
+        })
   }
   // A deployment from before releases keeps its settings in its code folder.
-  const env = fileFact(facts.get("file.shared-env")) ?? fileFact(facts.get("file.legacy-env"))
-  if (!env) return fail("settings", "Settings", "no .env on the server")
+  const shared = fileFact(facts.get("file.shared-env"))
+  const env = shared ?? fileFact(facts.get("file.legacy-env"))
+  if (!env) {
+    return fail("settings", "Settings", "no .env on the server", {
+      remedy: `Create ${root}/shared/.env, mode 600, with the project's settings.`,
+    })
+  }
   return env.mode === "600"
     ? ok("settings", "Settings", ".env in place")
-    : fail("settings", "Settings", `.env is readable by others (mode ${env.mode})`)
+    : fail("settings", "Settings", `.env is readable by others (mode ${env.mode})`, {
+        ...(shared ? { commands: [`chmod 600 ${root}/shared/.env`] } : {}),
+      })
 }
 
 function ports(facts: HostFacts, wanted: readonly number[]): DeployCheck {
@@ -145,7 +221,9 @@ function chromium(facts: HostFacts): DeployCheck {
   const missing = facts.get("chromium.missing") ?? ""
   const checked = facts.get("chromium.checked") ?? "system libraries"
   return missing
-    ? fail("chromium", "Chromium", `missing ${missing.split(" ").join(", ")} (${checked})`)
+    ? fail("chromium", "Chromium", `missing ${missing.split(" ").join(", ")} (${checked})`, {
+        remedy: "Install them as root, such as with `npx playwright install-deps chromium`.",
+      })
     : ok("chromium", "Chromium", "its libraries are installed")
 }
 
@@ -166,8 +244,22 @@ function ok(id: string, label: string, detail: string): DeployCheck {
   return { id, label, status: "ok", detail }
 }
 
-function fail(id: string, label: string, detail: string): DeployCheck {
-  return { id, label, status: "fail", detail, remedy: `See ${HOST_REQUIREMENTS}.` }
+/** A failed requirement, with what fixes it: commands to run as root, when there are some. */
+function fail(
+  id: string,
+  label: string,
+  detail: string,
+  fix: { readonly remedy?: string; readonly commands?: readonly string[] } = {}
+): DeployCheck {
+  const commands = fix.commands ?? []
+  return {
+    id,
+    label,
+    status: "fail",
+    detail,
+    remedy: fix.remedy ?? `See ${HOST_REQUIREMENTS}.`,
+    ...(commands.length > 0 ? { commands } : {}),
+  }
 }
 
 /** `mode size` from the probe, or nothing when the file is missing. */

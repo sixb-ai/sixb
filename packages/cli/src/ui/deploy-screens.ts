@@ -206,6 +206,12 @@ export function deployChecksView({
   const blocking = checks.filter((check) => check.status === "fail")
   const warnings = checks.filter((check) => check.status === "warning")
   const next = blocking.length > 0 ? "the steps above, then sixb deploy check" : "sixb deploy"
+  // Unwrapped and together, so they paste into a root shell on the server as they are.
+  const fixes = [
+    ...new Set(
+      checks.filter((check) => check.status !== "ok").flatMap((check) => check.commands ?? [])
+    ),
+  ]
 
   return screen(
     header("deploy check", location),
@@ -226,6 +232,7 @@ export function deployChecksView({
           `${name} is ready to deploy`,
           warnings.length > 0 ? `${warnings.length} to look at` : undefined
         ),
+    fixes.length > 0 ? section("Run once on the server, as root", commands(fixes)) : undefined,
     nextStep(next)
   )
 }

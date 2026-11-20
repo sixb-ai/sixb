@@ -395,7 +395,7 @@ export default {
       return [
         { id: "ssh", label: "SSH", status: "ok", detail: "sixb@test-server" },
         ...(process.env.DEPLOY_BLOCK
-          ? [{ id: "settings", label: "Settings", status: "fail", detail: "no .env on the server", remedy: "Create it." }]
+          ? [{ id: "settings", label: "Settings", status: "fail", detail: "no .env on the server", remedy: "Create it.", commands: ["loginctl enable-linger deploy"] }]
           : []),
       ]
     },
@@ -591,6 +591,9 @@ export default {
     expect(check.exitCode).toBe(1)
     expect(check.output).toContain("northline · 1 to fix before deploying")
     expect(check.output).toContain("Create it.")
+    // Reproduce: leave `fixes` out of deployChecksView; the commands then never reach a terminal.
+    expect(check.output).toContain("Run once on the server, as root")
+    expect(check.output).toContain("$ loginctl enable-linger deploy")
 
     const blocked = await deploy(env, () => runDeploy({ cwd: root }))
     expect(blocked.exitCode).toBe(1)
