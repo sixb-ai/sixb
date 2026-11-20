@@ -427,7 +427,11 @@ export function dbMigrateCheckView({
 }: {
   projectId: string
   /** The storage adapters with migrations to apply. */
-  pending: readonly { readonly adapterId: string; readonly reason?: string }[]
+  pending: readonly {
+    readonly adapterId: string
+    readonly reason?: string
+    readonly incompatible?: readonly string[]
+  }[]
 }): string {
   if (pending.length === 0) {
     return screen(headline("ok", "No database migrations pending", projectId))
@@ -436,10 +440,13 @@ export function dbMigrateCheckView({
   return screen(
     stack(
       headline("warn", "Database migrations pending", projectId),
-      ...pending.map(
-        (status) =>
-          `  ${tone.faint(glyph.rule)} ${tone.muted(`${status.adapterId}: ${status.reason ?? ""}`)}`
-      )
+      ...pending.flatMap((status) => [
+        `  ${tone.faint(glyph.rule)} ${tone.muted(`${status.adapterId}: ${status.reason ?? ""}`)}`,
+        ...(status.incompatible ?? []).map(
+          (id) =>
+            `  ${tone.faint(glyph.rule)} ${tone.warn(`${id} breaks the release before it: a deploy stops the services for it`)}`
+        ),
+      ])
     )
   )
 }

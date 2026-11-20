@@ -32,6 +32,7 @@ export function step<TContext>(
     version,
     name,
     checksum: options.checksum,
+    ...(options.incompatible ? { incompatible: true } : {}),
     up,
   }
 }
@@ -239,12 +240,14 @@ export function describeMigrationHistory<TContext>(params: {
         }
   }
 
-  const pendingCount = migrations.steps.length - applied.length
-  if (pendingCount > 0) {
+  const pending = migrations.steps.slice(applied.length)
+  if (pending.length > 0) {
+    const incompatible = pending.filter((step) => step.incompatible).map((step) => step.id)
     return {
       ...found,
       state: "pending",
-      reason: `${pendingCount} migration(s) are not applied. Run \`sixb db migrate\`.`,
+      reason: `${pending.length} migration(s) are not applied. Run \`sixb db migrate\`.`,
+      ...(incompatible.length > 0 ? { incompatible } : {}),
     }
   }
 

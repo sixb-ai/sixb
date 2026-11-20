@@ -69,6 +69,17 @@ describe("sixb db", () => {
     expect(result.logEntries).toEqual([])
   })
 
+  test("--check exits 4 when a pending migration breaks the release before it", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "incompatible-pending"
+      return runDbMigrate({ entry, check: true })
+    })
+
+    expect(result.exitCode).toBe(4)
+    expect(result.output).toContain("001-fixture breaks the release before it")
+    expect(result.logEntries).toEqual([])
+  })
+
   test("--check exits 0 when the schema is current", async () => {
     const result = await runLogged(() => runDbMigrate({ entry, check: true }))
 

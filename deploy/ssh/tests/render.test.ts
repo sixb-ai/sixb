@@ -499,9 +499,9 @@ describe("a release with storage migrations", () => {
   // Reproduce: drop the stop from "Check storage migrations"; the live release then keeps serving
   // while `sixb db migrate` drops columns it still writes.
   test(
-    "stops the live release before migrating, so it never runs against the new schema",
+    "stops the live release before an incompatible migration",
     async () => {
-      const { exitCode, calls } = await migrationCheck(3)
+      const { exitCode, calls } = await migrationCheck(4)
 
       expect(exitCode).toBe(0)
       expect(calls).toEqual([
@@ -528,10 +528,10 @@ describe("a release with storage migrations", () => {
     STEP_RUN_TIMEOUT_MS
   )
 
-  test(
-    "keeps the live release serving when the schema does not change",
-    async () => {
-      const { exitCode, calls } = await migrationCheck(0)
+  test.each([0, 3])(
+    "keeps the live release serving when the schema is current or every migration is compatible (%i)",
+    async (code) => {
+      const { exitCode, calls } = await migrationCheck(code)
 
       expect(exitCode).toBe(0)
       expect(calls).toEqual(["bun sixb db", "deploy_mode=none"])
