@@ -60,6 +60,10 @@ class FakeServer implements ReleaseHost {
   readonly active = new Set<string>()
   readonly states = new Map<string, ProcessState>()
   readonly crashes = new Set<string>()
+  /** Calls that throw, as `calls` records them. */
+  readonly refuses = new Set<string>()
+  /** Units that keep running after `stop --no-block`, as a draining service does. */
+  readonly drains = new Set<string>()
   routes: string | null = null
   ready = true
   caddyAccepts = true
@@ -77,13 +81,17 @@ class FakeServer implements ReleaseHost {
   }
 
   async systemctl(...args: string[]) {
-    this.calls.push(`systemctl ${args.join(" ")}`)
+    const call = `systemctl ${args.join(" ")}`
+    this.calls.push(call)
+    if (this.refuses.has(call)) throw new Error(`refused: ${call}`)
     const unit = args.at(-1) ?? ""
     if (args[0] === "start") {
       this.active.add(unit)
       await this.startSlot(unit)
     }
-    if (args[0] === "stop") this.active.delete(unit)
+    if (args[0] === "stop" && !(args[1] === "--no-block" && this.drains.has(unit))) {
+      this.active.delete(unit)
+    }
     return 0
   }
 
@@ -114,7 +122,9 @@ class FakeServer implements ReleaseHost {
   }
 
   async supervise(runDir: string, command: string, service: string) {
-    this.calls.push(`${runDir.split("/").at(-1)} ${command} ${service}`)
+    const call = `${runDir.split("/").at(-1)} ${command} ${service}`
+    this.calls.push(call)
+    if (this.refuses.has(call)) throw new Error(`refused: ${call}`)
     const state = this.states.get(runDir)
     if (!state) throw new Error("not running")
     this.states.set(runDir, {
@@ -210,6 +220,33 @@ async function liveInBlue(server: FakeServer): Promise<void> {
   server.routes = "example.com {\n\treverse_proxy 127.0.0.1:3001 {"
   await server.systemctl("start", blue.unit)
   server.calls.length = 0
+}
+
+/** A server whose one service from before slots serves from `code/`, on the green ports. */
+async function legacyInGreen(server: FakeServer): Promise<void> {
+  const layout = deploymentLayout({ home, name: "northline" })
+  const legacy = legacyLayout(layout)
+  await mkdir(join(layout.code, PROJECT), { recursive: true })
+  await writeFile(join(layout.code, PROJECT, "package.json"), "{}")
+  await mkdir(join(layout.releasesDir, "r2", PROJECT), { recursive: true })
+  await mkdir(layout.deployDir, { recursive: true })
+  await mkdir(layout.unitDir, { recursive: true })
+  await writeFile(legacy.unitPath, "[Service]\n")
+  await writeFile(join(layout.deployDir, "ports.txt"), "3011\n")
+  await writeFile(
+    legacy.manifest,
+    JSON.stringify({
+      ...renderProcessManifest(releaseForSlot(release, SLOT_PORTS.green), {
+        layout,
+        slot: slotLayout(layout, "green"),
+        release: releaseLayout(layout, { id: "x", projectPath: PROJECT, bunVersion: "1.4.2" }),
+        holdExclusive: false,
+      }),
+      slot: "green",
+    })
+  )
+  server.active.add(legacy.unit)
+  server.routes = "example.com {\n\treverse_proxy 127.0.0.1:3011 {"
 }
 
 /** Releases a later deploy drained and the next one prunes. */
@@ -336,8 +373,8 @@ describe("a deploy beside the live release", () => {
     expect(server.active.has("sixb-northline@green.service")).toBe(false)
   })
 
-  // Reproduce: leave out the undo that starts blue's singletons again; after this rollback no
-  // orchestrator runs anywhere.
+  // Reproduce: leave out the undo that stops green's singletons, or push it before blue's; blue's
+  // orchestrator then starts while green's still runs.
   test("a singleton that fails after the switch rolls everything back to blue", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
@@ -346,15 +383,69 @@ describe("a deploy beside the live release", () => {
     const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
 
     expect(String(error)).toContain("orchestrator did not stay up")
+    expect(String(error)).toContain("The previous release is still serving.")
     expect(server.routedPort()).toBe("3001")
-    // Undone in reverse: blue's singletons, the routes, then green.
-    expect(server.calls.slice(-4)).toEqual([
+    // Undone in reverse: green's singletons stop before blue's start, then the routes, then green.
+    expect(server.calls.slice(-6)).toEqual([
+      "green stop orchestrator",
+      "green stop watcher",
       "blue start orchestrator",
       "blue start watcher",
       "reload caddy -> 3001",
       "systemctl stop sixb-northline@green.service",
     ])
     expect(await readFile(join(home, "northline", "deploy", "live-slot"), "utf8")).toBe("blue\n")
+  })
+
+  // Reproduce: push the undo that starts blue's singletons after the loop that stops them; the
+  // orchestrator blue stopped before the failure then stays stopped.
+  test("a singleton blue fails to stop is undone with the ones it did stop", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.refuses.add("blue stop watcher")
+
+    const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
+
+    expect(String(error)).toContain("refused: blue stop watcher")
+    expect(server.calls.slice(server.calls.indexOf("blue stop watcher"))).toEqual([
+      "blue stop watcher",
+      "blue start orchestrator",
+      "blue start watcher",
+      "reload caddy -> 3001",
+      "systemctl stop sixb-northline@green.service",
+    ])
+  })
+
+  // Reproduce: write `live-slot` in retire instead of after the routes move; it still names blue
+  // while green serves, and a deploy that dies there makes the next one stop green.
+  test("names green live as soon as the routes move", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    const layout = deploymentLayout({ home, name: "northline" })
+    let recordedAtSwitch = ""
+    const supervise = server.supervise.bind(server)
+    server.supervise = async (runDir, command, service) => {
+      if (command === "stop" && !recordedAtSwitch) {
+        recordedAtSwitch = await readFile(layout.liveSlotFile, "utf8")
+      }
+      return supervise(runDir, command, service)
+    }
+
+    await runRelease(plan(), server, home)
+
+    expect(recordedAtSwitch).toBe("green\n")
+  })
+
+  test("a failure while retiring blue says green serves", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.refuses.add("systemctl enable sixb-northline@green.service")
+
+    const error = await runRelease(plan(), server, home).catch((failure: unknown) => failure)
+
+    expect(String(error)).toContain("The new release is serving; cleaning up after the previous")
+    expect(server.routedPort()).toBe("3011")
+    expect(await readFile(join(home, "northline", "deploy", "live-slot"), "utf8")).toBe("green\n")
   })
 })
 
@@ -390,6 +481,20 @@ describe("a migration that breaks the live release", () => {
     expect(server.routedPort()).toBe("3011")
   })
 
+  test("a failure after blue stopped for the migration says nothing serves", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.migrationCheck = 4
+    server.ready = false
+
+    const error = await runRelease(plan({ acceptDowntime: true }), server, home).catch(
+      (failure: unknown) => failure
+    )
+
+    expect(String(error)).toContain("Nothing is serving")
+    expect(String(error)).not.toContain("still serving")
+  })
+
   test("compatible migrations run while blue keeps serving", async () => {
     const server = new FakeServer()
     await liveInBlue(server)
@@ -409,27 +514,7 @@ describe("the first slot deploy on a server from before slots", () => {
     const server = new FakeServer()
     const layout = deploymentLayout({ home, name: "northline" })
     const legacy = legacyLayout(layout)
-    // Its code lived in `code/` itself, its last release on the green ports.
-    await mkdir(join(layout.code, PROJECT), { recursive: true })
-    await writeFile(join(layout.code, PROJECT, "package.json"), "{}")
-    await mkdir(layout.deployDir, { recursive: true })
-    await mkdir(layout.unitDir, { recursive: true })
-    await writeFile(legacy.unitPath, "[Service]\n")
-    await writeFile(join(layout.deployDir, "ports.txt"), "3011\n")
-    await writeFile(
-      legacy.manifest,
-      JSON.stringify({
-        ...renderProcessManifest(releaseForSlot(release, SLOT_PORTS.green), {
-          layout,
-          slot: slotLayout(layout, "green"),
-          release: releaseLayout(layout, { id: "x", projectPath: PROJECT, bunVersion: "1.4.2" }),
-          holdExclusive: false,
-        }),
-        slot: "green",
-      })
-    )
-    server.active.add(legacy.unit)
-    server.routes = "example.com {\n\treverse_proxy 127.0.0.1:3011 {"
+    await legacyInGreen(server)
 
     await runRelease(plan(), server, home)
 
@@ -444,6 +529,49 @@ describe("the first slot deploy on a server from before slots", () => {
     ).toBe("{}")
     expect(await Bun.file(legacy.unitPath).exists()).toBe(false)
     expect(await Bun.file(join(layout.deployDir, "ports.txt")).exists()).toBe(false)
+  })
+
+  // Reproduce: pass retire what still serves instead of what was live; the old service stays
+  // enabled and starts beside the slot at the next boot.
+  test("with downtime accepted, still retires the service it stopped", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, name: "northline" })
+    const legacy = legacyLayout(layout)
+    await legacyInGreen(server)
+    server.migrationCheck = 4
+
+    await runRelease(plan({ acceptDowntime: true }), server, home)
+
+    expect(server.calls).toContain("systemctl disable sixb-northline.service")
+    expect(await Bun.file(legacy.unitPath).exists()).toBe(false)
+    expect(await Bun.file(join(layout.deployDir, "ports.txt")).exists()).toBe(false)
+  })
+
+  // Reproduce: drop the `retireLegacy` call from "Start new release"; the next deploy then starts
+  // green on the ports the old service still drains on.
+  test("keeps its files while it drains, and the next deploy stops it first", async () => {
+    const server = new FakeServer()
+    const layout = deploymentLayout({ home, name: "northline" })
+    const legacy = legacyLayout(layout)
+    const ports = join(layout.deployDir, "ports.txt")
+    await legacyInGreen(server)
+    server.drains.add(legacy.unit)
+
+    await runRelease(plan(), server, home)
+
+    expect(server.active.has(legacy.unit)).toBe(true)
+    expect(await Bun.file(legacy.unitPath).exists()).toBe(false)
+    expect(await Bun.file(ports).exists()).toBe(true)
+
+    await mkdir(join(layout.releasesDir, "r3", PROJECT), { recursive: true })
+    server.calls.length = 0
+    await runRelease(plan({ releaseId: "r3" }), server, home)
+
+    const startGreen = server.calls.indexOf("systemctl start sixb-northline@green.service")
+    expect(server.calls.indexOf(`systemctl stop ${legacy.unit}`)).toBeGreaterThan(-1)
+    expect(server.calls.indexOf(`systemctl stop ${legacy.unit}`)).toBeLessThan(startGreen)
+    expect(server.active.has(legacy.unit)).toBe(false)
+    expect(await Bun.file(ports).exists()).toBe(false)
   })
 })
 

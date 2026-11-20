@@ -12,6 +12,7 @@ import {
   rm,
   stat,
   symlink,
+  writeFile,
 } from "node:fs/promises"
 import { dirname, join, posix, relative } from "node:path"
 import type { DeployCommand, DeployRelease } from "@sixb/core/deploy"
@@ -36,7 +37,14 @@ import {
   renderProcessManifest,
   renderSlotUnit,
 } from "../render"
-import { isExclusiveService, loadProcessManifest, type ProcessManifest } from "./manifest"
+import {
+  controlDir,
+  isExclusiveService,
+  loadProcessManifest,
+  type ProcessManifest,
+  responseDir,
+  statePath,
+} from "./manifest"
 import { isMissing, isPidRunning, type ProcessState, writeFileAtomically } from "./state"
 import type { SupervisorCommand } from "./supervisor"
 
@@ -68,7 +76,7 @@ const READY_ATTEMPTS = 90
 /** A process that exits in its first seconds fails the check: services that start must stay up. */
 const QUIET_MS = 5_000
 const SUPERVISOR_START_MS = 15_000
-/** How long a slot left draining by an earlier deploy gets before it is killed for this one. */
+/** How long a service left draining by an earlier deploy gets before it is killed for this one. */
 const LEFTOVER_STOP_MS = 10_000
 
 /** The live release: a slot, a deployment from before slots, or nothing running. */
@@ -80,6 +88,9 @@ type Live =
  * Rolls a release out beside the live one, under the deploy lock the bootstrap holds. The live
  * release keeps serving until the new one has passed its checks after the routes move; any
  * failure before that leaves it serving, and one after it moves the routes back.
+ *
+ * Moving the routes is the commit point: `live-slot` names the new slot from then on, so a deploy
+ * that dies before it retires the previous release never leads the next one to stop what serves.
  */
 export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: string) {
   const { release } = plan
@@ -95,21 +106,25 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
     host.print(event({ step: label, status: "done" }))
     return result
   }
+  const env = { ...release.env, PATH: `${next.bunDir}:${process.env.PATH ?? ""}` }
   const sixb = (args: readonly string[]) =>
     host.run([next.bun, `${next.project}/node_modules/.bin/sixb`, ...args], {
       cwd: next.project,
-      env: { ...release.env, PATH: `${next.bunDir}:${process.env.PATH ?? ""}` },
+      env,
     })
   const mustRun = async (command: DeployCommand) => {
     const code =
       command.program === "sixb"
         ? await sixb(command.args)
-        : await host.run([next.bun, ...command.args], { cwd: next.project, env: release.env })
+        : await host.run([next.bun, ...command.args], { cwd: next.project, env })
     if (code !== 0)
       throw new Error(`[SshTarget] ${commandLabel(command)} exited with code ${code}.`)
   }
 
-  let live = await findLive(layout, host)
+  // What was live when the deploy began, and what still serves: nothing, once a migration that
+  // breaks it has stopped it.
+  const live = await findLive(layout, host)
+  let serving = live
   const slot = slotLayout(layout, live ? otherSlot(live.slot) : await idleSlot(layout))
   const undo: (() => Promise<void>)[] = []
 
@@ -138,7 +153,7 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
       if (!migrates(command)) return mustRun(command)
       const anyway = { ...command, args: [...command.args, "--allow-incompatible"] }
       // With nothing live, there is nothing a migration could break.
-      if (!live) return mustRun(anyway)
+      if (!serving) return mustRun(anyway)
       const code = await sixb(command.args)
       if (code === 0) return
       if (code !== INCOMPATIBLE_MIGRATION) {
@@ -150,21 +165,25 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
         )
       }
       host.print("Stopping the services: a migration in this release breaks the live release.")
-      await stopLive(layout, live, host)
-      live = null
+      await stopLive(layout, serving, host)
+      serving = null
       await mustRun(anyway)
     })
   }
 
   const exclusive = release.services.filter((service) => isExclusive(service.kind))
-  const holdExclusive = live !== null
+  const holdExclusive = serving !== null
 
   try {
     await step("Start new release", async () => {
-      await stopLeftover(slot, host)
+      await stopDraining(slot.unit, host)
+      if (live?.kind !== "legacy") await retireLegacy(layout, host, { drain: false })
       await writeServiceFiles(layout, slot, next, release, holdExclusive)
       await host.systemctl("daemon-reload")
-      await rm(join(slot.runDir, "state.json"), { force: true })
+      // A supervisor that was killed leaves its state and unanswered requests behind.
+      await rm(statePath(slot), { force: true })
+      await rm(controlDir(slot), { recursive: true, force: true })
+      await rm(responseDir(slot), { recursive: true, force: true })
       undo.push(() => host.systemctl("stop", slot.unit).then(() => undefined))
       if ((await host.systemctl("start", slot.unit)) !== 0) {
         throw new Error(`[SshTarget] systemd did not start ${slot.unit}.`)
@@ -188,17 +207,29 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
           host.print("Caddy did not reload the previous routes: run sudo systemctl reload caddy.")
         }
       })
+      const recorded = await readText(layout.liveSlotFile)
+      await writeFileAtomically(layout.liveSlotFile, `${slot.slot}\n`)
+      undo.push(() =>
+        recorded === null
+          ? rm(layout.liveSlotFile, { force: true })
+          : writeFileAtomically(layout.liveSlotFile, recorded)
+      )
     })
 
     await step("Move singletons", async () => {
-      if (!live) return
-      const previous = live
+      if (!serving) return
+      const previous = serving
       const running = previous.manifest.services.filter(isExclusiveService)
-      for (const service of running) await controlLive(previous, layout, "stop", service.name, host)
+      // Each undo is in place before the work it reverses, so a failure halfway is undone too:
+      // the new slot's singletons stop before the previous release's start again.
       undo.push(async () => {
         for (const service of running) {
           await controlLive(previous, layout, "start", service.name, host)
         }
+      })
+      for (const service of running) await controlLive(previous, layout, "stop", service.name, host)
+      undo.push(async () => {
+        for (const service of exclusive) await host.supervise(slot.runDir, "stop", service.name)
       })
       for (const service of exclusive) await host.supervise(slot.runDir, "start", service.name)
       if (exclusive.length > 0) await host.sleep(2_000)
@@ -208,14 +239,25 @@ export async function runRelease(plan: ReleasePlan, host: ReleaseHost, home: str
     for (const back of undo.reverse()) {
       await back().catch((failure: unknown) => host.print(errorMessage(failure)))
     }
-    throw new Error(
-      live ? `${errorMessage(error)}\nThe previous release is still serving.` : errorMessage(error)
-    )
+    throw new Error(`${errorMessage(error)}${afterRollback(live, serving)}`)
   }
 
   await step("Retire previous release", async () => {
-    await retire({ layout, slot, next, release, plan, live, host })
+    await retire({ layout, slot, next, release, plan, previous: live, host }).catch(
+      (error: unknown) => {
+        throw new Error(
+          `${errorMessage(error)}\nThe new release is serving; cleaning up after the previous one failed.`
+        )
+      }
+    )
   })
+}
+
+/** What serves once a failed deploy has been undone. */
+function afterRollback(live: Live | null, serving: Live | null): string {
+  if (serving) return "\nThe previous release is still serving."
+  if (live) return "\nNothing is serving: the previous release was stopped for the migration."
+  return ""
 }
 
 /** Reads the live release from the services that run, not from files a crash could leave. */
@@ -241,17 +283,41 @@ async function idleSlot(layout: DeploymentLayout): Promise<DeploySlot> {
   return recorded === "blue" ? "green" : "blue"
 }
 
-/** A slot an earlier deploy left draining gets a few seconds, then goes, for this release. */
-async function stopLeftover(slot: SlotLayout, host: ReleaseHost): Promise<void> {
-  if (!(await host.isActive(slot.unit))) return
-  host.print(`Stopping what an earlier release left draining in the ${slot.slot} slot.`)
-  await host.systemctl("stop", "--no-block", slot.unit)
+/** A service an earlier deploy left draining gets a few seconds, then goes, for this release. */
+async function stopDraining(unit: string, host: ReleaseHost): Promise<void> {
+  if (!(await host.isActive(unit))) return
+  host.print(`Stopping ${unit}, which an earlier release left draining.`)
+  await host.systemctl("stop", "--no-block", unit)
   for (let waited = 0; waited < LEFTOVER_STOP_MS; waited += 500) {
-    if (!(await host.isActive(slot.unit))) return
+    if (!(await host.isActive(unit))) return
     await host.sleep(500)
   }
-  await host.systemctl("kill", "--signal=SIGKILL", slot.unit)
-  await host.systemctl("stop", slot.unit)
+  await host.systemctl("kill", "--signal=SIGKILL", unit)
+  await host.systemctl("stop", unit)
+}
+
+/**
+ * Retires a deployment from before slots so it never starts again: its unit goes at once, and its
+ * files once it has stopped, since it reads them while it drains. A deploy beside it lets it
+ * drain; any later deploy stops it, since its ports may be the ones that deploy takes.
+ */
+async function retireLegacy(
+  layout: DeploymentLayout,
+  host: ReleaseHost,
+  { drain }: { readonly drain: boolean }
+): Promise<void> {
+  const legacy = legacyLayout(layout)
+  if (drain) await host.systemctl("stop", "--no-block", legacy.unit)
+  else await stopDraining(legacy.unit, host)
+  if (await exists(legacy.unitPath)) {
+    await host.systemctl("disable", legacy.unit)
+    await rm(legacy.unitPath, { force: true })
+    await host.systemctl("daemon-reload")
+  }
+  if (await host.isActive(legacy.unit)) return
+  for (const leftover of LEGACY_FILES) {
+    await rm(join(layout.root, leftover), { force: true, recursive: true })
+  }
 }
 
 async function writeServiceFiles(
@@ -385,10 +451,11 @@ async function retire(input: {
   readonly next: ReleaseLayout
   readonly release: DeployRelease
   readonly plan: ReleasePlan
-  readonly live: Live | null
+  /** What was live when the deploy began, whether or not a migration stopped it since. */
+  readonly previous: Live | null
   readonly host: ReleaseHost
 }): Promise<void> {
-  const { layout, slot, next, release, plan, live, host } = input
+  const { layout, slot, next, release, plan, previous, host } = input
   const previousRelease = await currentReleaseId(layout)
 
   // Restarted by systemd, the slot runs everything: it is live now.
@@ -409,25 +476,18 @@ async function retire(input: {
   await replaceLink(layout.currentLink, posix.join("releases", next.id))
   await replaceLink(layout.code, "current")
   await writeFileAtomically(layout.releaseRecord, `${JSON.stringify(plan.record)}\n`)
-  await writeFileAtomically(layout.liveSlotFile, `${slot.slot}\n`)
   await writeExecutable(layout.ctl, renderCtl(next, slot))
 
   await host.systemctl("enable", slot.unit)
   await host.systemctl("disable", slotLayout(layout, otherSlot(slot.slot)).unit)
-  if (live?.kind === "slot") {
-    await host.systemctl("stop", "--no-block", slotLayout(layout, live.slot).unit)
-  } else if (live?.kind === "legacy") {
-    const legacy = legacyLayout(layout)
-    await host.systemctl("stop", "--no-block", legacy.unit)
-    await host.systemctl("disable", legacy.unit)
-    await rm(legacy.unitPath, { force: true })
-    for (const leftover of LEGACY_FILES)
-      await rm(join(layout.root, leftover), { force: true, recursive: true })
-    await host.systemctl("daemon-reload")
+  if (previous?.kind === "slot") {
+    await host.systemctl("stop", "--no-block", slotLayout(layout, previous.slot).unit)
+  } else if (previous?.kind === "legacy") {
+    await retireLegacy(layout, host, { drain: true })
   }
 
   // The previous release drains for a few minutes, and the next deploy may roll back to it.
-  const keep = new Set([next.id, previousRelease, live?.kind === "legacy" ? "legacy" : null])
+  const keep = new Set([next.id, previousRelease, previous?.kind === "legacy" ? "legacy" : null])
   for (const entry of await readdir(layout.releasesDir).catch(() => [])) {
     if (!keep.has(entry))
       await rm(join(layout.releasesDir, entry), { recursive: true, force: true })
@@ -514,9 +574,12 @@ async function replaceLink(path: string, target: string): Promise<void> {
   await rename(temporary, path)
 }
 
+/** Like `writeFileAtomically`, executable before it takes the path, so nothing runs it half-made. */
 async function writeExecutable(path: string, content: string): Promise<void> {
-  await writeFileAtomically(path, content)
-  await chmod(path, 0o755)
+  const temporary = `${path}.${process.pid}.tmp`
+  await writeFile(temporary, content, "utf8")
+  await chmod(temporary, 0o755)
+  await rename(temporary, path)
 }
 
 async function copyIfPresent(from: string, to: string): Promise<void> {
