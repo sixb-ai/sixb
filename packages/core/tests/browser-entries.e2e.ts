@@ -14,6 +14,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
+/** The absolute path of a module of `src`, as an import specifier in an entry's source. */
+function srcModule(module: string): string {
+  return JSON.stringify(join(packageRoot, "src", module))
+}
+
 /**
  * Bundles a module of `src` for the browser in a child process, and says why it could not. Bun
  * fills in Node's modules for a browser bundle, so they stay out of it, as imports `bundle`, its
@@ -22,15 +27,19 @@ afterEach(async () => {
 async function bundleForBrowser(
   module: string
 ): Promise<{ exitCode: number; stderr: string; bundle: string }> {
+  return bundleEntryForBrowser(`import * as module from ${srcModule(module)}
+console.log(Object.keys(module).length)
+`)
+}
+
+/** Bundles an entry written from `source` for the browser, as `bundleForBrowser` does. */
+async function bundleEntryForBrowser(
+  source: string
+): Promise<{ exitCode: number; stderr: string; bundle: string }> {
   const root = await mkdtemp(join(tmpdir(), "sixb-core-browser-"))
   roots.push(root)
   const entry = join(root, "entry.ts")
-  await writeFile(
-    entry,
-    `import * as module from ${JSON.stringify(join(packageRoot, "src", module))}
-console.log(Object.keys(module).length)
-`
-  )
+  await writeFile(entry, source)
   const script = join(root, "build.ts")
   const output = join(root, "bundle.js")
   await writeFile(
@@ -75,6 +84,32 @@ describe("@sixb/core/security in the browser", () => {
   // imports the runtime's Node modules.
   test("bundles for the browser", async () => {
     const { exitCode, stderr, bundle } = await bundleForBrowser("security/public.ts")
+    expect(exitCode, stderr).toBe(0)
+    expect(bundle.match(SERVER_IMPORT)?.[0]).toBeUndefined()
+  }, 90_000)
+
+  // An ontology that marks a property imports the project's marking files, and the app imports the
+  // ontology. Regression proof: drop `defineMarking` from src/security/public.ts and the build
+  // fails on the missing export, which leaves the root `@sixb/core` as the only place to take it.
+  test("bundles an ontology that marks a property", async () => {
+    const source = `import { defineMarking } from ${srcModule("security/public.ts")}
+import { defineObjectType, prop } from ${srcModule("ontology/index.ts")}
+
+const financial = defineMarking("financial", { label: "Financial" })
+
+export const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "decimal", { markings: [financial] }),
+  ],
+})
+
+console.log(Invoice.id)
+`
+
+    const { exitCode, stderr, bundle } = await bundleEntryForBrowser(source)
     expect(exitCode, stderr).toBe(0)
     expect(bundle.match(SERVER_IMPORT)?.[0]).toBeUndefined()
   }, 90_000)
