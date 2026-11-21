@@ -477,3 +477,137 @@ describe("fileDigest", () => {
     }
   })
 })
+
+/** A browser's XHR, sending at once and saying it sent the body in three steps. */
+class SendingXhr {
+  static sent: SendingXhr[] = []
+  method = ""
+  url = ""
+  withCredentials = false
+  responseType = ""
+  readonly headers = new Map<string, string>()
+  body: unknown
+  status = 0
+  statusText = ""
+  response: Blob | null = null
+  readonly upload: { onprogress: ((event: { loaded: number }) => void) | null } = {
+    onprogress: null,
+  }
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onabort: (() => void) | null = null
+
+  open(method: string, url: string) {
+    this.method = method
+    this.url = url
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.headers.set(name, value)
+  }
+
+  getAllResponseHeaders() {
+    return "content-type: application/json\r\n"
+  }
+
+  abort() {
+    this.onabort?.()
+  }
+
+  send(body: unknown) {
+    SendingXhr.sent.push(this)
+    this.body = body
+    for (const loaded of [4, 8, 12]) this.upload.onprogress?.({ loaded })
+    this.status = 200
+    this.statusText = "OK"
+    this.response = new Blob([JSON.stringify({ success: true })], { type: "application/json" })
+    this.onload?.()
+  }
+}
+
+/** Runs `work` in a browser that has XHR, the API answering its other requests through fetch. */
+async function inBrowser<T>(work: () => Promise<T>): Promise<T> {
+  const xhr = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest")
+  const originalFetch = globalThis.fetch
+  SendingXhr.sent = []
+  Object.defineProperty(globalThis, "XMLHttpRequest", {
+    configurable: true,
+    writable: true,
+    value: SendingXhr,
+  })
+  globalThis.fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const request = input instanceof Request && !init ? input : new Request(input, init)
+      if (request.url === "http://sixb.test/api/files/uploads") {
+        return Response.json(
+          {
+            strategy: "server",
+            uploadId: "upload_1",
+            method: "PUT",
+            url: "/api/files/uploads/upload_1/content",
+            expiresAt: "2026-06-30T20:00:00.000Z",
+          },
+          { status: 201 }
+        )
+      }
+      return Response.json({
+        blobId: "blob_staged",
+        digest: "sha256:staged",
+        sizeBytes: 12,
+        fileName: "large.txt",
+      })
+    },
+    { preconnect: originalFetch.preconnect }
+  )
+
+  try {
+    return await work()
+  } finally {
+    globalThis.fetch = originalFetch
+    if (xhr) Object.defineProperty(globalThis, "XMLHttpRequest", xhr)
+    else Reflect.deleteProperty(globalThis, "XMLHttpRequest")
+  }
+}
+
+describe("uploadFile in a browser", () => {
+  // Guard proof: return `undefined` first in progressTransport (`src/file.ts`); the file is sent
+  // through fetch, and its progress goes from none of it to all of it.
+  test("counts a file the API receives as it is sent, with the client's credentials", async () => {
+    const client = createSixbClient({
+      baseUrl: "http://sixb.test/api",
+      auth: { kind: "cookie", csrfToken: () => "csrf_file_1" },
+    })
+    const progress: FileUploadProgress[] = []
+    const file = new Blob(["hello staged"], { type: "text/plain" })
+
+    await inBrowser(() =>
+      uploadFile(file, {
+        client,
+        stagedUploadThresholdBytes: 0,
+        onProgress: (step) => progress.push(step),
+      })
+    )
+
+    expect(
+      progress.filter((step) => step.stage === "upload").map((step) => step.loadedBytes)
+    ).toEqual([0, 4, 8, 12, 12])
+    const [sent] = SendingXhr.sent
+    expect(sent?.method).toBe("PUT")
+    expect(sent?.url).toBe("http://sixb.test/api/files/uploads/upload_1/content")
+    expect(sent?.withCredentials).toBe(true)
+    expect(sent?.headers.get("x-sixb-csrf")).toBe("csrf_file_1")
+    expect(sent?.body).toBe(file)
+  })
+
+  // Guard proof: drop the configured-fetch check from progressTransport; a shared link's client
+  // sends the file without the grant its fetch stamps.
+  test("keeps a client's own fetch, where a shared link or a session stamps its credential", async () => {
+    const { client } = createStagedUploadClient()
+
+    await inBrowser(() =>
+      uploadFile(new Blob(["hello staged"]), { client, stagedUploadThresholdBytes: 0 })
+    )
+
+    expect(SendingXhr.sent).toEqual([])
+  })
+})
