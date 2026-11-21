@@ -28,6 +28,12 @@ and changing limits on the **Limits** tab requires `can.manage(agent.usage)`.
 Usage and cost depend on what the provider reports and the available pricing. Missing values
 remain unknown rather than being counted as zero.
 
+When a call is interrupted, its connection dropped, its provider overloaded or failing mid-answer, or
+its stream cut short, Sixb makes it again as a new call, up to four times within 15 seconds. A call
+interrupted while it streamed stays in usage with its usage unknown, since the provider may have
+billed it. Under a limit, that unknown
+usage blocks the calls after it, as any call that fails mid-stream does.
+
 Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
 from temporary storage failures. `sixb dev` and automatic `sixb worker-group` selection
 include the required worker. If you select worker types explicitly, include `agent`, even

@@ -8,10 +8,12 @@ export class ModelCatalogUnavailableError extends Error {
 
 /**
  * Why a provider rejected a request, when the provider says so in terms Sixb acts on:
- * `context-window-exceeded` means the request was too long for the model's context window, and a
- * shorter one may succeed.
+ * - `context-window-exceeded`: the request was too long for the model's context window, and a
+ *   shorter one may succeed.
+ * - `interrupted`: the response broke off once it had started, overloaded, rate limited, failing
+ *   on the provider's side or closed before its end, and the same request may succeed again.
  */
-export type ModelProviderErrorReason = "context-window-exceeded"
+export type ModelProviderErrorReason = "context-window-exceeded" | "interrupted"
 
 /** A provider or provider protocol rejected a model request. */
 export class ModelProviderError extends Error {

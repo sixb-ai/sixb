@@ -24,6 +24,13 @@ The model records each call itself, whoever reads its stream: the Agent's loop, 
 or a server that streams it to a remote runner. A call whose record cannot be written fails before
 its reader sees it finish, and the record goes to recovery.
 
+Bindings retry an HTTP refusal (429, 5xx) inside the call: nothing was billed, so it stays one
+call. An interrupted call is ambiguous: a dropped connection, or a response its provider broke off
+(an overloaded or server error event, a stream closed before its end, which the protocols mark
+`interrupted`). The model loop (`../../agents/model-loop.ts`) makes it again as a new call,
+admitted and recorded on its own. What the lost call cost stays unknown:
+its reservation is kept, and a call that had started streaming is recorded with its usage unknown.
+
 ## Embedding flow
 
 ```text

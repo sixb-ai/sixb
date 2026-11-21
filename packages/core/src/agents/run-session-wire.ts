@@ -1,8 +1,10 @@
 import { ArtifactRequestError } from "../artifacts/errors"
 import { createSixbError, isSixbError } from "../errors/internal"
+import { ModelProviderError } from "../models/errors"
 import { ModelUsageRecordingError } from "../models/execution/errors"
 import { AgentStorageError } from "../storage/agents/errors"
 import { AgentToolPublicError, AgentToolResultValidationError } from "./errors"
+import { lostConnectionCode } from "./model-call-retry"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { AgentFinalizationError } from "./run-session"
 
@@ -126,15 +128,45 @@ export function encodeWireError(error: unknown): WireError {
   if (error instanceof Error && error.name === "AbortError") {
     return { kind: "AbortError", message: error.message }
   }
+
   // Anything else stays on the server: the runner learns only that the operation failed.
   console.error("[Sixb] A run session operation failed.", error)
   return { kind: "Error", message: "[Sixb] The run session operation failed on the server." }
+}
+
+/**
+ * A model call's failure as it crosses. An interrupted call crosses as one, so the runner's model
+ * loop makes it again as it would in process. Only the call's own failures are read this way: any
+ * other operation that loses a connection, to storage say, fails as {@link encodeWireError} says.
+ */
+export function encodeModelCallError(error: unknown): WireError {
+  if (error instanceof ModelProviderError && error.reason === "interrupted") {
+    return {
+      kind: "ModelProviderError",
+      message: error.message,
+      reason: error.reason,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      details: { providerId: error.providerId, modelId: error.modelId },
+    }
+  }
+
+  const lostConnection = lostConnectionCode(error)
+  if (lostConnection !== undefined) {
+    return {
+      kind: "ModelConnectionLost",
+      message: "[SixbModels] The connection to the model's provider was lost.",
+      code: lostConnection,
+    }
+  }
+
+  return encodeWireError(error)
 }
 
 /** The HTTP status an error answers with. */
 export function wireErrorStatus(error: WireError): number {
   if (error.kind === "AgentExecutionLostError") return 409
   if (error.kind === "AbortError") return 499
+  if (error.kind === "ModelConnectionLost" || error.kind === "ModelProviderError") return 502
   if (error.kind === "Error" || error.kind === "AgentFinalizationError") return 500
   return 400
 }
@@ -183,6 +215,19 @@ export function decodeWireError(error: WireError): Error {
       )
     case "AbortError":
       return new DOMException(error.message, "AbortError")
+    case "ModelConnectionLost":
+      // As fetch throws it in process.
+      return Object.assign(new TypeError(error.message), { code: error.code })
+    case "ModelProviderError": {
+      const { providerId = "", modelId = "" } = (error.details ?? {}) as {
+        readonly providerId?: string
+        readonly modelId?: string
+      }
+      return new ModelProviderError(error.message, providerId, modelId, {
+        ...(error.code === undefined ? {} : { code: error.code }),
+        reason: "interrupted",
+      })
+    }
     default:
       return new Error(error.message)
   }
