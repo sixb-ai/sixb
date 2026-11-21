@@ -18,6 +18,7 @@ import {
   type BlobStorage,
   defineMarking,
   defineObjectType,
+  type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -38,9 +39,11 @@ import {
   storeLiveFiles,
   writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
+import { videoFilesPlayed } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import * as Y from "yjs"
 import {
@@ -49,6 +52,7 @@ import {
   materializeThreadArtifacts,
 } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
+import { prepareAgentAttachments } from "../src/attachments"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 import { AgentFileBudget } from "../src/tools/tool-files"
@@ -259,6 +263,8 @@ type ToolOptions = {
   readonly blobStorage?: BlobStorage
   /** The run's environment in its sandbox, as `sixb` reads it. */
   readonly env?: Readonly<Record<string, string>>
+  /** The run's attachments, as `$SIXB_ATTACHMENTS` lists them; none when omitted. */
+  readonly attachments?: Awaited<ReturnType<typeof prepareAgentAttachments>>["entries"]
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -283,14 +289,15 @@ function install(
 }
 
 /**
- * The run's sandbox: a real bash in the directory, without the agent image's browser, so a deck's
- * layout check skips at once on any host. layout-check.test.ts runs the check itself.
+ * The run's sandbox: a real bash in the directory, without the agent image's browser or
+ * HyperFrames, so a layout or a video check skips at once on any host. layout-check.test.ts runs
+ * the layout check itself.
  */
 function sandbox(check: Check = skippedCheck): LocalBashSandbox {
   const local = new LocalBashSandbox(root)
   const run = local.runCommand.bind(local)
   local.runCommand = async (command, args, options) =>
-    options?.env?.SIXB_CHECK_DECK === undefined
+    options?.env?.SIXB_CHECK_OUT === undefined
       ? run(command, args, options)
       : {
           exitCode: 0,
@@ -338,6 +345,7 @@ function tools(options: ToolOptions = {}) {
       ...(options.env ? { env: options.env } : {}),
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
+    ...(options.attachments ? { attachments: options.attachments } : {}),
   })
   // One tool: `version` is it, called with an id.
   return { create, version: create, open }
@@ -1714,7 +1722,7 @@ describe("publish_artifact", () => {
   test("refuses input outside its schema", () => {
     const { create } = tools()
     expect(() => create.parseInput({ path: "a", kind: "map", title: "A" })).toThrow(
-      "kind must be one of document, sheet, slides, page, canvas, file"
+      "kind must be one of document, sheet, slides, page, canvas, video, file"
     )
     expect(() => create.parseInput({ path: "a", kind: "file", title: "A", version: 2 })).toThrow(
       "unknown property 'version'"
@@ -1906,6 +1914,20 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/page/collections-desk",
       "examples/canvas/onboarding-flow",
       "examples/canvas/retro",
+      "examples/video/launch-teaser",
+    ])
+    // A video's example leaves out its recordings: a stand-in for each one it plays.
+    const teaser = "examples/video/launch-teaser"
+    const held = new Set(examples.map((file) => file.path.slice(teaser.length + 1)))
+    const played = videoFilesPlayed(
+      read(`${teaser}/index.html`),
+      (path) => (held.has(path) ? read(`${teaser}/${path}`) : undefined),
+      (path) => held.has(path)
+    )
+    for (const path of played) if (!held.has(path)) write(`${teaser}/${path}`, "a recording")
+    expect([...played].filter((path) => !held.has(path)).sort()).toEqual([
+      "media/dispatch.mp4",
+      "media/music.m4a",
     ])
     // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
     const decks = examples.filter(
@@ -1916,7 +1938,13 @@ describe("the sixb-artifacts skill's examples", () => {
       expect(String(deck.contents)).not.toMatch(/<style|style="(?!--swatch:)/)
     }
     for (const directory of directories) {
-      const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page" | "canvas"
+      const kind = directory.split("/")[1] as
+        | "document"
+        | "sheet"
+        | "slides"
+        | "page"
+        | "canvas"
+        | "video"
       // A live sheet's query is run as the requester, who reads the invoices and their amounts.
       expect(
         await publish(
@@ -2194,57 +2222,6 @@ describe("materializeThreadArtifacts", () => {
     ])
   })
 
-  // Guard proof: let PUBLISHABLE_KINDS (publish-tool.ts) take "video", and the Agent starts one
-  // without the guide it needs.
-  test("lists a video's scenes, a video the Agent revises but does not start", async () => {
-    const scene = (id: string) =>
-      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"></div></template>`
-    const film = (demo: string) =>
-      `<div data-composition-id="main" data-width="1280" data-height="720">
-        <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
-        <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="${demo}"></div>
-      </div>`
-    write("film/index.html", film("3"))
-    write("film/scenes/intro.html", scene("intro"))
-    write("film/scenes/demo.html", scene("demo"))
-
-    expect(() =>
-      tools().create.parseInput({ path: "film", kind: "video", title: "Launch film" })
-    ).toThrow("kind must be one of document, sheet, slides, page, canvas, file")
-
-    // Someone made the video in this conversation; the Agent lengthens its demo.
-    const stored = async (path: string) => {
-      const body = new TextEncoder().encode(readFileSync(join(root, "film", path), "utf8"))
-      return { path, file: await blobStorage.put({ body, expectedSizeBytes: body.byteLength }) }
-    }
-    const artifactId = "art_v1de0f17m0"
-    await storage.artifacts.create({
-      projectId,
-      id: artifactId,
-      kind: "video",
-      owner,
-      version: {
-        title: "Launch film",
-        entry: "index.html",
-        files: await Promise.all(
-          ["index.html", "scenes/intro.html", "scenes/demo.html"].map(stored)
-        ),
-        outline: { kind: "video", width: 1280, height: 720, fps: 30, durationMs: 5000, scenes: [] },
-        references: [],
-        author: owner,
-        origin: { threadId: run.threadId, runId: "run_person" },
-        updatedAt: new Date(),
-      },
-    })
-    write("film/index.html", film("4"))
-    await publishVersion({ id: artifactId, path: "film", title: "Launch film" })
-
-    expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
-      { address: `artifact:${artifactId}#intro`, name: "Scene intro, 0s to 2s: Opening" },
-      { address: `artifact:${artifactId}#demo`, name: "Scene demo, 2s to 6s" },
-    ])
-  })
-
   test("lists an artifact whose files cannot be read without them, and installs the rest", async () => {
     write("a/document.md", "# First\n\nOne.\n")
     write("b/document.md", "# Second\n\nTwo.\n")
@@ -2506,5 +2483,506 @@ describe("a version's queries", () => {
     expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
       error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'.",
     })
+  })
+})
+
+describe("a video", () => {
+  const scene = (id: string, body = "") =>
+    `<template><div data-composition-id="${id}" data-width="1280" data-height="720">${body}</div></template>`
+  const film = (demo = 3) =>
+    `<div data-composition-id="main" data-width="1280" data-height="720">
+      <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2" data-label="Opening"></div>
+      <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="${demo}"></div>
+    </div>`
+  const clip = '<video src="media/clip.mp4" muted></video>'
+
+  /** A film whose demo plays a clip: its index, its scenes, its footage and its logo. */
+  function writeFilm(folder: string, demo = scene("demo", clip)) {
+    write(`${folder}/index.html`, film())
+    write(`${folder}/scenes/intro.html`, scene("intro", '<img src="media/logo.svg" alt="">'))
+    write(`${folder}/scenes/demo.html`, demo)
+    write(`${folder}/media/logo.svg`, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    write(`${folder}/media/clip.mp4`, "the footage")
+  }
+
+  /** What is derived of a file: its probe, proxy, cuts and transcript ready. */
+  async function derive(digest: string) {
+    const transcript = new TextEncoder().encode(
+      JSON.stringify({ text: "Hello there", words: [{ text: "Hello", startMs: 0, endMs: 400 }] })
+    )
+    const stored = await blobStorage.put({
+      body: transcript,
+      expectedSizeBytes: transcript.byteLength,
+    })
+    await storage.artifacts.putMedia({
+      projectId,
+      digest,
+      parts: {
+        probe: {
+          status: "ready",
+          durationMs: 12_000,
+          container: "mov,mp4,m4a,3gp,3g2,mj2",
+          video: { codec: "h264", width: 1920, height: 1080, rotation: 0, fps: 30 },
+          audio: { codec: "aac" },
+        },
+        proxy: { status: "ready", file: stored },
+        poster: { status: "pending" },
+        filmstrip: { status: "failed", reason: "FFmpeg stopped." },
+        waveform: { status: "pending" },
+        cuts: { status: "ready", atMs: [4_200, 8_000] },
+        transcript: { status: "ready", file: stored },
+      },
+      attempts: 1,
+      updatedAt: new Date(),
+    })
+  }
+
+  /** A video's check as HyperFrames runs it: a finding, and each instant snapshotted. */
+  const videoCheck: Check = (output) => {
+    const instants = JSON.parse(readFileSync(join(output, "instants.json"), "utf8")) as {
+      at: number
+    }[]
+    mkdirSync(join(output, "frames"), { recursive: true })
+    writeFileSync(join(output, "frames", "contact-sheet.jpg"), "the sheet")
+    return {
+      layout: "video",
+      findings: [
+        {
+          pass: "layout",
+          code: "canvas_overflow",
+          severity: "warning",
+          message: "Text extends outside the composition canvas.",
+          text: "Ship faster",
+          time: 2.4,
+          fixHint: "Move the text inward, or reduce its size.",
+        },
+        { pass: "audio", code: "audio_none", severity: "info", message: "The film has no sound." },
+      ],
+      sheets: [join(output, "frames", "contact-sheet.jpg")],
+      frames: instants.map(({ at: time }, index) => ({
+        path: join(output, "frames", `frame-${String(index).padStart(2, "0")}-at-${time}s.png`),
+        time,
+      })),
+      missing: [],
+    }
+  }
+
+  test("is published, checked on the files its export renders, and shown as a contact sheet", async () => {
+    write("shot/a.png", "a picture")
+    const shot = (await publish({ path: "shot/a.png", kind: "file", title: "Shot" })) as {
+      artifactId: string
+    }
+    writeFilm("film")
+    write(
+      "film/scenes/intro.html",
+      scene("intro", `<img src="artifact:${shot.artifactId}/a.png" alt="">`)
+    )
+    const published = (await publish(
+      { path: "film", kind: "video", title: "Launch film" },
+      { check: videoCheck }
+    )) as { artifactId: string; layoutCheck: { frames: unknown[] } }
+
+    const checks = join(root, `.sixb/agent/checks/${published.artifactId}-r1`)
+    // Its HTML as a frame serves it, an address pointed at the file it lends, fetched as the
+    // export fetches it; every other file linked from where the Agent wrote it.
+    // Guard proof: give checkVideo no lent files or targets (publish-tool.ts); the picture from
+    // the other artifact is dropped from the check's frames, which the export shows.
+    const intro = read(`.sixb/agent/checks/${published.artifactId}-r1/project/scenes/intro.html`)
+    expect(intro).not.toContain("artifact:")
+    expect(intro).toContain(`__sixb/ref/${shot.artifactId}@latest/a.png`)
+    expect(JSON.parse(readFileSync(join(checks, "fetches.json"), "utf8"))).toEqual([
+      {
+        path: `__sixb/ref/${shot.artifactId}@latest/a.png`,
+        args: ["files", "download", "artifact", shot.artifactId, "1", "--path", "a.png"],
+      },
+    ])
+    expect(JSON.parse(readFileSync(join(checks, "links.json"), "utf8"))).toEqual({
+      "media/clip.mp4": join(root, "film/media/clip.mp4"),
+      "media/logo.svg": join(root, "film/media/logo.svg"),
+    })
+    // The first frame, then each scene 0.4 s in, at its middle and at its end, with the scenes
+    // playing at each, whose media the check looks at.
+    expect(JSON.parse(readFileSync(join(checks, "instants.json"), "utf8"))).toEqual(
+      [0, 0.4, 1, 1.8, 2.4, 3.5, 4.75].map((at) => ({ at, scenes: [at < 2 ? "intro" : "demo"] }))
+    )
+    expect(published.layoutCheck.frames).toHaveLength(7)
+
+    const { create } = tools()
+    const summary = create.toModelOutput?.(published as unknown as JsonValue, context)
+    const text = summary && "value" in summary ? String(summary.value) : ""
+    expect(text).toContain(
+      `Warning (demo): At 2.4 s, in scene 'demo': Text extends outside the composition canvas. (“Ship faster”) Move the text inward, or reduce its size.`
+    )
+    expect(text).not.toContain("The film has no sound")
+    expect(text).toContain(
+      `Its contact sheet is .sixb/agent/checks/${published.artifactId}-r1/frames/contact-sheet.jpg (1–4 intro, 5–7 demo): 7 frames`
+    )
+    expect(text).not.toContain("slide")
+  })
+
+  // Guard proof: number the frames across sheets in videoShots (publish-tool.ts), as before; the
+  // second sheet's legend then names frames 10 to 13, which no sheet shows.
+  test("names the scenes of each contact sheet, as each numbers its frames from 1", async () => {
+    const ids = ["intro", "demo", "detail", "outro"]
+    write(
+      "film/index.html",
+      `<div data-composition-id="main" data-width="1280" data-height="720">${ids
+        .map(
+          (id, index) =>
+            `<div data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${index * 2}" data-duration="2"></div>`
+        )
+        .join("")}</div>`
+    )
+    for (const id of ids) write(`film/scenes/${id}.html`, scene(id, "<h1>A line</h1>"))
+
+    // HyperFrames pages its sheet by nine frames.
+    const paged: Check = (output) => {
+      const report = videoCheck(output)
+      writeFileSync(join(output, "frames", "contact-sheet-2.jpg"), "the second sheet")
+      const sheets = ["contact-sheet-1.jpg", "contact-sheet-2.jpg"]
+      return { ...report, sheets: sheets.map((sheet) => join(output, "frames", sheet)) }
+    }
+    const published = (await publish(
+      { path: "film", kind: "video", title: "Launch film" },
+      { check: paged }
+    )) as { artifactId: string }
+
+    const { create } = tools()
+    const summary = create.toModelOutput?.(published as unknown as JsonValue, context)
+    const text = summary && "value" in summary ? String(summary.value) : ""
+    const frames = `.sixb/agent/checks/${published.artifactId}-r1/frames`
+    expect(text).toContain(
+      `Its contact sheets are ${frames}/contact-sheet-1.jpg (1–4 intro, 5–7 demo, 8–9 detail); ${frames}/contact-sheet-2.jpg (1 detail, 2–4 outro): 13 frames`
+    )
+  })
+
+  // Guard proof: install a video's recordings as any other file (remotePaths in materialize.ts
+  // returning nothing); the copy then holds the footage, and no transcript or cuts beside it.
+  test("is installed without its recordings, each listed with what is derived of it", async () => {
+    writeFilm("film")
+    const { artifactId } = (await publish({
+      path: "film",
+      kind: "video",
+      title: "Launch film",
+    })) as {
+      artifactId: string
+    }
+    const version = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    const footage = version?.files.find((file) => file.path === "media/clip.mp4")
+    await derive(footage?.file.digest ?? "")
+
+    const installed = await install()
+    const [entry] = JSON.parse(installed.manifestJson).artifacts
+    const directory = `.sixb/agent/artifacts/${artifactId}`
+    expect(entry.parts).toEqual([
+      { address: `artifact:${artifactId}#intro`, name: "Scene intro, 0s to 2s: Opening" },
+      { address: `artifact:${artifactId}#demo`, name: "Scene demo, 2s to 5s" },
+    ])
+    expect(entry.media).toEqual([
+      {
+        path: "media/clip.mp4",
+        sizeBytes: "the footage".length,
+        durationMs: 12_000,
+        video: { width: 1920, height: 1080, fps: 30 },
+        audio: true,
+        transcript: `${directory}/.derived/media/clip.mp4/transcript.json`,
+        cuts: `${directory}/.derived/media/clip.mp4/cuts.json`,
+        parts: {
+          probe: "ready",
+          proxy: "ready",
+          poster: "pending",
+          filmstrip: "failed: FFmpeg stopped.",
+          waveform: "pending",
+          cuts: "ready",
+          transcript: "ready",
+        },
+      },
+    ])
+
+    const paths = installed.files.map((file) => file.path).sort()
+    expect(paths).toEqual([
+      `${directory}/.derived/media/clip.mp4/cuts.json`,
+      `${directory}/.derived/media/clip.mp4/transcript.json`,
+      `${directory}/index.html`,
+      `${directory}/media/logo.svg`,
+      `${directory}/scenes/demo.html`,
+      `${directory}/scenes/intro.html`,
+    ])
+    const written = (path: string) =>
+      new TextDecoder().decode(
+        installed.files.find((file) => file.path === `${directory}/${path}`)?.contents as Uint8Array
+      )
+    expect(JSON.parse(written(".derived/media/clip.mp4/cuts.json"))).toEqual({
+      atMs: [4_200, 8_000],
+    })
+    expect(JSON.parse(written(".derived/media/clip.mp4/transcript.json")).text).toBe("Hello there")
+  })
+
+  test("counts only what its copy holds against the install budget", async () => {
+    writeFilm("film")
+    write("film/media/clip.mp4", "f".repeat(64 * 1024))
+    await publish({ path: "film", kind: "video", title: "Launch film" })
+
+    const installed = await install({ maxBytes: 16 * 1024 })
+    expect(JSON.parse(installed.manifestJson).artifacts[0].directory).toBeDefined()
+  })
+
+  // Guard proof: drop keptRecordings from publish (publish-tool.ts); the update from the copy then
+  // plays a file it does not hold, and publishing refuses it.
+  test("updated from its copy, keeps the recordings its scenes still play, fetched for its check", async () => {
+    writeFilm("film")
+    const { artifactId } = (await publish({
+      path: "film",
+      kind: "video",
+      title: "Launch film",
+    })) as {
+      artifactId: string
+    }
+    const first = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    const footage = first?.files.find((file) => file.path === "media/clip.mp4")
+    await derive(footage?.file.digest ?? "")
+
+    // A later turn edits the copy, which holds no footage.
+    const installed = install()
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    for (const file of (await installed).files)
+      write(file.path, new TextDecoder().decode(file.contents as Uint8Array))
+    rmSync(join(root, "film"), { recursive: true })
+    write(`${copy}/index.html`, film(4))
+
+    const updated = (await publishVersion(
+      { id: artifactId, path: copy, title: "Launch film" },
+      { installed, check: videoCheck }
+    )) as { revision: number }
+    const second = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    expect(second?.files.find((file) => file.path === "media/clip.mp4")?.file).toEqual(
+      footage?.file
+    )
+    expect(existsSync(join(root, copy, "media/clip.mp4"))).toBe(false)
+
+    // The check fetches its proxy, as the export renders it from the original.
+    const fetches = JSON.parse(
+      read(`.sixb/agent/checks/${artifactId}-r${updated.revision}/fetches.json`)
+    )
+    expect(fetches).toEqual([
+      {
+        path: "media/clip.mp4",
+        args: [
+          "artifacts",
+          "media",
+          artifactId,
+          "--version",
+          "1",
+          "--path",
+          "media/clip.mp4",
+          "--part",
+          "proxy",
+        ],
+      },
+    ])
+
+    // A scene that no longer plays it leaves it out.
+    write(`${copy}/scenes/demo.html`, scene("demo", "<h1>Ship faster</h1>"))
+    await publishVersion({ id: artifactId, path: copy, title: "Launch film" }, { installed })
+    const third = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    expect(third?.files.map((file) => file.path).sort()).toEqual([
+      "index.html",
+      "media/logo.svg",
+      "scenes/demo.html",
+      "scenes/intro.html",
+    ])
+  })
+
+  // Guard proof: upload every large file again (drop storedAlready from publish, publish-tool.ts);
+  // the update from the same folder then posts the recording a second time.
+  test("never uploads again a recording the version holds, while its folder keeps it", async () => {
+    writeFilm("film")
+    const recording = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)
+    writeFileSync(join(root, "film/media/clip.mp4"), recording)
+    const api = startSandboxApi()
+    try {
+      const env = await installSandboxCli(api.baseUrl)
+      const installed = install()
+      const { artifactId } = (await publish(
+        { path: "film", kind: "video", title: "Launch film" },
+        { installed, env }
+      )) as { artifactId: string }
+      expect(api.requests).toEqual(["POST /api/files"])
+      const clip = async () =>
+        (await storage.artifacts.getVersion({ projectId, artifactId, version: 1 }))?.files.find(
+          (file) => file.path === "media/clip.mp4"
+        )?.file
+      const footage = await clip()
+
+      write("film/scenes/intro.html", scene("intro", "<h1>Ship faster</h1>"))
+      await publishVersion(
+        { id: artifactId, path: "film", title: "Launch film" },
+        { installed, env }
+      )
+
+      expect(api.requests).toEqual(["POST /api/files"])
+      expect(await clip()).toEqual(footage)
+
+      // Other bytes at its path are another recording.
+      recording[0] = 7
+      writeFileSync(join(root, "film/media/clip.mp4"), recording)
+      await publishVersion(
+        { id: artifactId, path: "film", title: "Launch film" },
+        { installed, env }
+      )
+
+      expect(api.requests).toEqual(["POST /api/files", "POST /api/files"])
+      expect((await clip())?.digest).not.toBe(footage?.digest)
+    } finally {
+      api.close()
+    }
+  })
+
+  /** The conversation's attachments as a run lists them: a user's message in `threadId`. */
+  async function attachmentsOf(threadId: string, messageId: string, file: FileRef) {
+    const message: AgentMessageRecord = {
+      id: messageId,
+      projectId,
+      threadId,
+      runId: null,
+      role: "user",
+      seq: 1,
+      parts: [
+        { type: "text", text: "Here is the talk." },
+        { type: "file", fileRef: file },
+      ],
+      contentVersion: 2,
+      createdAt: new Date(0),
+    }
+    const { entries } = await prepareAgentAttachments({
+      projectId,
+      threadId,
+      messages: [message],
+      blobStorage,
+      apiBaseUrl: "http://sixb.test",
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      inlineImages: false,
+    })
+    return entries
+  }
+
+  /** A user's recording, stored as they attached it. */
+  function talk(contents = "the talk") {
+    const body = new TextEncoder().encode(contents)
+    return blobStorage.put({ body, fileName: "IMG_0042.MOV", mediaType: "video/quicktime" })
+  }
+
+  /** A film whose demo plays the user's talk, which its folder does not hold. */
+  function writeTalkFilm(folder: string) {
+    writeFilm(folder, scene("demo", '<video src="media/talk.mov" muted></video>'))
+    rmSync(join(root, folder, "media/clip.mp4"))
+  }
+
+  // Guard proof: leave the attachments out of the version (attachedFiles in publish-tool.ts); its
+  // demo then plays a file it does not hold, and publishing refuses it. Warn only of what the
+  // sandbox reports missing (checkVideo, video-check.ts), and the first check goes without the
+  // recording silently.
+  test("holds an attachment as it is stored, never reading it, and keeps it on later updates", async () => {
+    const recording = await talk()
+    const attachments = await attachmentsOf(run.threadId, "msg_talk", recording)
+    writeTalkFilm("film")
+    // Neither the tool nor the install reads the recording's bytes.
+    const refusing = refusingToOpen([recording.blobId])
+    const installed = install({ blobStorage: refusing })
+
+    const published = (await publish(
+      {
+        path: "film",
+        kind: "video",
+        title: "Talk",
+        attachments: [{ path: "media/talk.mov", key: attachments[0]?.key }],
+      },
+      { installed, blobStorage: refusing, attachments, check: videoCheck }
+    )) as { artifactId: string; warnings: unknown[] }
+    const { artifactId } = published
+    const held = async () =>
+      (await storage.artifacts.getVersion({ projectId, artifactId, version: 1 }))?.files.find(
+        (file) => file.path === "media/talk.mov"
+      )?.file
+
+    expect(await held()).toEqual(recording)
+    expect(existsSync(join(root, "film/media/talk.mov"))).toBe(false)
+    // It has no proxy yet: the check says it went without it.
+    expect(published.warnings).toContainEqual({
+      code: "video_unchecked_media",
+      message: expect.stringMatching(
+        /^media\/talk\.mov was not checked, and its frames show without it: it has no proxy: [^.]+\.$/
+      ),
+    })
+
+    // An update from the folder keeps it, and the check fetches its proxy once it is ready.
+    await derive(recording.digest)
+    write("film/index.html", film(4))
+    const updated = (await publishVersion(
+      { id: artifactId, path: "film", title: "Talk" },
+      { installed, blobStorage: refusing, check: videoCheck }
+    )) as { revision: number }
+
+    expect(await held()).toEqual(recording)
+    const fetches = JSON.parse(
+      read(`.sixb/agent/checks/${artifactId}-r${updated.revision}/fetches.json`)
+    )
+    expect(fetches).toEqual([
+      {
+        path: "media/talk.mov",
+        args: [
+          "artifacts",
+          "media",
+          artifactId,
+          "--version",
+          "1",
+          "--path",
+          "media/talk.mov",
+          "--part",
+          "proxy",
+        ],
+      },
+    ])
+  })
+
+  /** Why publishing the talk film with this attachment key is refused. */
+  async function attachmentRefusal(
+    key: string,
+    attachments: Awaited<ReturnType<typeof attachmentsOf>>
+  ): Promise<string> {
+    writeTalkFilm("film")
+    const { create } = tools({ attachments })
+    const input = {
+      path: "film",
+      kind: "video",
+      title: "Talk",
+      attachments: [{ path: "media/talk.mov", key }],
+    }
+
+    const error = await create.execute(create.parseInput(input), context).catch((each) => each)
+    expect(error).toBeInstanceOf(AgentToolPublicError)
+    expect((await storage.artifacts.list({ projectId })).artifacts).toEqual([])
+    return create.errorText(error)
+  }
+
+  // Guard proof: drop the refusal of a key the run does not list (attachedFiles in
+  // publish-tool.ts); the publish then fails reading a file of nothing, which the Agent cannot act
+  // on.
+  test("refuses an attachment key the conversation does not list, saying where keys are", async () => {
+    const attachments = await attachmentsOf(run.threadId, "msg_talk", await talk())
+
+    expect(await attachmentRefusal("msg_nope:1", attachments)).toBe(
+      "[SixbAgent] publish_artifact refused: 'msg_nope:1' is not an attachment of this conversation: pass a key $SIXB_ATTACHMENTS lists."
+    )
+  })
+
+  test("refuses another conversation's attachment", async () => {
+    await startRun("thr_2", owner)
+    const ours = await attachmentsOf(run.threadId, "msg_talk", await talk())
+    const theirs = await attachmentsOf("thr_2", "msg_theirs", await talk("their talk"))
+    const key = theirs[0]?.key ?? ""
+
+    expect(key).not.toBe(ours[0]?.key)
+    expect(await attachmentRefusal(key, ours)).toContain(`'${key}' is not an attachment`)
   })
 })

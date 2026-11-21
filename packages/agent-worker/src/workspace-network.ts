@@ -1,10 +1,14 @@
+import { FRAME_CDN_TARGETS } from "@sixb/core/internal/artifacts/frames"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy, SandboxNetworkTarget } from "@sixb/core/sandboxes"
 
 /**
  * The network of an agent run sandbox. Sixb always adds what the run needs: its API, the
  * repository the agent clones, fetches and pushes, and the origins source auth issues credentials
- * for. A restricted policy lists only what the project adds on top; `all` already covers them.
+ * for. Without a policy, the run also reaches the frame CDNs, so that what it checks in its
+ * sandbox, a video's motion and a deck's fonts, is what the app and the export show; a restricted
+ * policy lists only what the project adds on top, and leaves them out unless it lists them; `all`
+ * already covers them.
  */
 export function workspaceNetwork(
   policy: SandboxNetworkPolicy | undefined,
@@ -28,7 +32,7 @@ export function workspaceNetwork(
   ]
 
   // Project targets come first: an origin the project already lists keeps the project's name.
-  const allow = [...(policy?.allow ?? []), ...required]
+  const allow = policy ? [...policy.allow, ...required] : [...required, ...FRAME_CDN_TARGETS]
 
   return {
     mode: "restricted",

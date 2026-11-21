@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Fieldwise: every job, one screen</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&display=block">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  </head>
+  <body>
+    <div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30"
+         data-duration="15" data-poster="13" data-no-timeline>
+      <audio id="music" src="media/music.m4a" data-start="0" data-duration="15"
+             data-volume="0.5" data-fade-in="0.4" data-fade-out="2"></audio>
+
+      <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html"
+           data-start="0" data-duration="3" data-label="Every job, one screen"></div>
+      <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html"
+           data-start="hook - 0.4" data-duration="8.4" data-label="Dispatch in two taps"></div>
+      <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html"
+           data-start="demo" data-duration="4" data-label="End card"></div>
+    </div>
+  </body>
+</html>

@@ -1032,6 +1032,7 @@ async function startAgentEnvironment(
       budget: fileBudget,
       resolveSandbox,
       installed: installedArtifacts,
+      attachments: attachmentContext.entries,
     })
     for (const tool of publishTools) appendBuiltInTool(tools, tool)
   }

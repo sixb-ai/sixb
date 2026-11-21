@@ -1,5 +1,5 @@
 import type { BlobStorage, FileRef, Sandbox, SandboxNetworkPolicy, Storage } from "@sixb/core"
-import { FRAME_ASSETS, FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
+import { FRAME_ASSETS, FRAME_CDN_TARGETS } from "@sixb/core/internal/artifacts/frames"
 import {
   createFileDownloadUrl,
   type FileDownloadUrlContext,
@@ -18,7 +18,7 @@ import sharedScript from "./shared.cjs" with { type: "text" }
 /** What a render may reach: the libraries, stylesheets and fonts a frame may load. */
 export const RENDER_NETWORK: SandboxNetworkPolicy = {
   mode: "restricted",
-  allow: FRAME_CDN_ALLOWLIST.map((origin) => ({ name: new URL(origin).hostname, origin })),
+  allow: FRAME_CDN_TARGETS,
 }
 
 /** {@link RENDER_NETWORK}, with `origins` beside the CDNs. */

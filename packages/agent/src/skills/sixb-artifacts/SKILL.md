@@ -1,6 +1,6 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it by publishing it again with its id.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, a deck, a video, or a file they asked for, as an artifact, and revise it by publishing it again with its id. Read it before you start making one, since each kind has its own format and tools; for a reel from the user's clips, before touching them.
 ---
 
 # Artifacts
@@ -20,6 +20,7 @@ the question, answer in the chat.
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
 | `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
 | `canvas` | Work seen more than read, laid out in two dimensions: screens or frames side by side (a flow, a storyboard, variants, a moodboard), a brainstorm or retro of notes, a diagram | `canvas.md` |
+| `video` | Moving pictures with sound: a teaser, a product demo, an explainer, a social clip, a reel or a short cut from the user's clips, a cut of an interview | `video.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
 To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
@@ -45,14 +46,16 @@ go beside each picture.
    cannot, tell the user the deliverable could not be published; never describe it as ready.
 4. Fix what each warning names and update the artifact when it matters to the reader. A
    deck also comes back with a screenshot of each slide, a page with one at a laptop's width and
-   one at a phone's, a designed document with one of each page, and a canvas with one of each
-   board: look at them (`slides.md`, `page.md`, `document.md`, `canvas.md`, Check).
+   one at a phone's, a designed document with one of each page, a canvas with one of each
+   board, and a video with a contact sheet of its scenes: look at them (`slides.md`, `page.md`,
+   `document.md`, `canvas.md`, `video.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
    of it in place, use its address (`references.md`). A figure you cite from live data is the one
    you read, and what the artifact shows moves on as the objects change, even at a created version:
    date it with when you read it, in the user's time zone ("As of Oct 23, 10:42, three invoices
-   are overdue.").
+   are overdue."). Say only what you did: never that you tried, compared or heard something you
+   did not.
 
 ## Revise
 
@@ -110,7 +113,7 @@ may edit the object may change it.
 ## Rules
 
 - A version holds at most 500 files, 25 MB per file, and 250 MB in all. A `file` artifact's one
-  file may be up to 2 GB.
+  file may be up to 2 GB, and so may each recording of a `video`, which holds up to 8 GB.
 - A title is plain text of at most 200 characters that names the deliverable ("Q3 operations
   review"), not the request.
 - Files and folders whose names start with a dot are not published.

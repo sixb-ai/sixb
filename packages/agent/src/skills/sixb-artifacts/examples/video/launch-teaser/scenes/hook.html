@@ -1,0 +1,29 @@
+<template>
+  <div data-composition-id="hook" data-width="1920" data-height="1080" class="scene">
+    <div class="hook-copy">
+      <p class="eyebrow">Fieldwise</p>
+      <h1 class="display">
+        <span class="line">Every job.</span>
+        <span class="line">One screen.</span>
+      </h1>
+    </div>
+
+    <style>
+      .hook-copy { position: absolute; left: 160px; top: 50%; transform: translateY(-50%); }
+      .hook-copy .eyebrow { margin-bottom: 36px; }
+    </style>
+
+    <script>
+      const hook = gsap.timeline({ paused: true })
+      const scene = '[data-composition-id="hook"]'
+
+      // Frame 0 is the thumbnail: the promise is on screen from the start, and settles. The
+      // second line answers it, eased out, never spun.
+      hook.from(`${scene} .line:first-child`, { y: 24, duration: 0.8, ease: "power3.out" }, 0)
+      hook.from(`${scene} .line:last-child`, { y: 64, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.6)
+
+      window.__timelines = window.__timelines || {}
+      window.__timelines["hook"] = hook
+    </script>
+  </div>
+</template>

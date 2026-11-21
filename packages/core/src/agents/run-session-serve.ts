@@ -108,6 +108,8 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     ),
   "artifacts.query": (session, args) =>
     session.artifacts.query(...(args as Parameters<AgentRunSession["artifacts"]["query"]>)),
+  "artifacts.media": (session, args) =>
+    session.artifacts.media(...(args as Parameters<AgentRunSession["artifacts"]["media"]>)),
   "artifacts.updatable": (session, [artifactId]) =>
     session.artifacts.updatable(artifactId as string),
   "artifacts.publish": (session, [input]) =>

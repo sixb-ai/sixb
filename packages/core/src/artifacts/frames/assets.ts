@@ -1,3 +1,4 @@
+import type { SandboxNetworkTarget } from "../../sandboxes/sandbox"
 import type {
   ArtifactFile,
   ArtifactFrameTarget,
@@ -29,6 +30,14 @@ export const FRAME_CDN_ALLOWLIST = [
   "https://fonts.googleapis.com",
   "https://fonts.gstatic.com",
 ] as const
+
+/**
+ * {@link FRAME_CDN_ALLOWLIST} as a sandbox's network names it, each CDN by its host: what a render
+ * reaches, and what an agent run reaches by default, so both lay a frame out as the app does.
+ */
+export const FRAME_CDN_TARGETS: readonly SandboxNetworkTarget[] = FRAME_CDN_ALLOWLIST.map(
+  (origin) => ({ name: new URL(origin).hostname, origin })
+)
 
 /**
  * The files a frame gets besides the version's own, under `__sixb/`, which a version may not use:

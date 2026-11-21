@@ -733,7 +733,10 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "POST",
     path: "/api/artifacts/:artifactId/versions/:version/video",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+    // Rendering changes no artifact: its MP4 and segments are kept under what they are made of,
+    // shared by every reader who asks, as a canvas's previews are.
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -741,7 +744,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/video",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
     sharedSession: true,
   },
   {
@@ -805,7 +808,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/media",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
     sharedSession: true,
   },
   {
@@ -813,7 +816,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/media/content",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
     sharedSession: true,
   },
   {

@@ -217,3 +217,126 @@ describe("sixb artifacts export", () => {
     expect((await exportWith([], ["art_v1", "--version", "two"])).error).toBeInstanceOf(CliError)
   })
 })
+
+describe("sixb artifacts media", () => {
+  const PROXY_URL =
+    "/api/artifacts/art_1/versions/3/media/content?path=media%2Fdemo.mp4&part=proxy&v=0123456789abcdef"
+
+  /** The media route, answering with `parts`, and the proxy's bytes at its URL. */
+  function startMediaApi(parts: Record<string, unknown>) {
+    const requests: string[] = []
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url)
+        requests.push(`${url.pathname}${url.search}`)
+        if (url.pathname.endsWith("/media/content")) return new Response("the proxy")
+        return Response.json({ path: "media/demo.mp4", version: 3, parts })
+      },
+    })
+    const api = createInstanceApiClient({
+      kind: "local",
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      token: "sixb_pat_test.secret",
+      profile: "test",
+    })
+    return { api, requests }
+  }
+
+  async function mediaWith(parts: Record<string, unknown>, args: readonly string[]) {
+    const { api, requests } = startMediaApi(parts)
+    const stdout = spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const error = await artifacts(api, ["media", ...args]).then(
+        () => undefined,
+        (failure: unknown) => failure
+      )
+      return { error, requests, output: stdout.mock.calls.map(([chunk]) => String(chunk)).join("") }
+    } finally {
+      stdout.mockRestore()
+    }
+  }
+
+  test("prints what is derived of a media, asking again for what failed with --retry", async () => {
+    const parts = { proxy: { status: "pending" }, cuts: { status: "ready", atMs: [4200] } }
+    const read = await mediaWith(parts, ["art_1", "--path", "media/demo.mp4"])
+    expect(read.requests).toEqual([
+      "/api/artifacts/art_1/versions/latest/media?path=media%2Fdemo.mp4",
+    ])
+    expect(JSON.parse(read.output).parts).toEqual(parts)
+
+    const retried = await mediaWith(parts, [
+      "art_1",
+      "--path",
+      "media/demo.mp4",
+      "--version",
+      "3",
+      "--retry",
+    ])
+    expect(retried.requests).toEqual([
+      "/api/artifacts/art_1/versions/3/media?path=media%2Fdemo.mp4&retry=true",
+    ])
+  })
+
+  test("downloads a part from the URL the API names", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "sixb-media-"))
+    try {
+      const output = join(directory, "demo-proxy.mp4")
+      const { error, requests } = await mediaWith(
+        { proxy: { status: "ready", url: PROXY_URL, mediaType: "video/mp4", sizeBytes: 9 } },
+        ["art_1", "--path", "media/demo.mp4", "--part", "proxy", "--output", output]
+      )
+
+      expect(error).toBeUndefined()
+      expect(requests[1]).toBe(PROXY_URL)
+      expect(readFileSync(output, "utf8")).toBe("the proxy")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  // Guard proof: drop the status checks in media(); a pending part is fetched, and the API's 404
+  // reads as a missing file instead of saying when to ask again.
+  test("says when a part is still being made, or why it will not come, before downloading", async () => {
+    const pending = await mediaWith({ transcript: { status: "pending" } }, [
+      "art_1",
+      "--path",
+      "media/demo.mp4",
+      "--part",
+      "transcript",
+      "--output",
+      "transcript.json",
+    ])
+    expect(pending.error).toBeInstanceOf(CliError)
+    expect((pending.error as CliError).message).toBe(
+      "The transcript of media/demo.mp4 is still being made."
+    )
+    expect(pending.requests).toHaveLength(1)
+
+    const failed = await mediaWith(
+      { proxy: { status: "failed", reason: "FFmpeg could not read the file." } },
+      ["art_1", "--path", "media/demo.mp4", "--part", "proxy", "--output", "proxy.mp4"]
+    )
+    expect((failed.error as CliError).message).toBe(
+      "media/demo.mp4 has no proxy: FFmpeg could not read the file."
+    )
+    expect(failed.requests).toHaveLength(1)
+  })
+
+  test("refuses what it cannot send before any request", async () => {
+    const cases: readonly (readonly string[])[] = [
+      ["art_1"],
+      ["art_1", "--path", "media/demo.mp4", "--version", "first"],
+      ["art_1", "--path", "media/demo.mp4", "--part", "cuts", "--output", "cuts.json"],
+      ["art_1", "--path", "media/demo.mp4", "--part", "proxy"],
+    ]
+
+    for (const args of cases) {
+      const { error, requests } = await mediaWith({}, args)
+      expect(error, args.join(" ")).toBeInstanceOf(CliError)
+      expect(requests).toEqual([])
+      server?.stop(true)
+    }
+  })
+})

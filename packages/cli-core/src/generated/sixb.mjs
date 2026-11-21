@@ -241,10 +241,14 @@ Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
 
-Artifact comments:
+Artifacts:
   sixb artifacts comments list <artifact-id>
                                       Open comments, as threads with where each is
   sixb artifacts comments resolve|reply ...
+  sixb artifacts media <artifact-id> --path <file-path> ...
+                                      A video's or sound's proxy, poster, cuts, transcript
+  sixb artifacts export <artifact-id> --output <path.mp4>
+                                      A video's MP4, rendered, then downloaded
 
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
@@ -460,6 +464,8 @@ exact email, ignoring case, and finds suspended members too. Each member is
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
   sixb artifacts export <artifact-id> [--version <n|latest>] [--retry] [--output <path.mp4>]
+  sixb artifacts media <artifact-id> --path <file-path> [--version <n|latest>] [--retry]
+  sixb artifacts media <artifact-id> --path <file-path> --part <part> --output <local-path>
 
 \`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
 address and label on a canvas; at, in milliseconds, and scene on a video; revision), its body,
@@ -471,7 +477,13 @@ change it or being the comment's author.
 \`export\` asks for a video's MP4 and prints {"status"}: ready, rendering with {"progress"} (its
 segments ready of all of them), or failed with its reason; --retry renders what failed anew.
 With --output it waits while the video renders, then downloads the MP4 there. Each scene renders
-once and is kept, so a version that changes one scene renders only that one again.`,
+once and is kept, so a version that changes one scene renders only that one again.
+
+\`media\` prints what is derived of a video or a sound in the version: {"parts"}, each ready,
+pending, unavailable or failed with its reason: probe, proxy, poster, filmstrip, waveform, cuts
+and transcript. --retry derives each failed part anew. --part proxy|poster|filmstrip|waveform|
+transcript downloads that part's file once it is ready: a proxy is a 720p H.264 copy to look at
+footage with, never to publish in the original's place.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
@@ -491,7 +503,8 @@ kind's default answers. \`list\` shows each model's kind, default, description a
 adds the sizes, voices and other options a request can use. Prices are in USD.
 
 \`text\` also takes a tier (light, standard or heavy) for --model, and reads a long prompt from
---file: a path, or - for standard input.
+--file: a path, or - for standard input. \`transcribe\` prints the text, and its words and segments,
+each timed in milliseconds, when the model times them.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
@@ -717,6 +730,8 @@ async function artifacts(api, args) {
     return writeText(GROUP_HELP.artifacts);
   if (group === "export")
     return exportVideo(api, args.slice(1));
+  if (group === "media")
+    return media(api, args.slice(1));
   if (group !== "comments")
     fail(`Unknown artifacts command '${group}'.`);
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -802,6 +817,46 @@ function exportProgress() {
         process.stderr.write("\r\x1B[2K");
     }
   };
+}
+var MEDIA_FILES = ["proxy", "poster", "filmstrip", "waveform", "transcript"];
+async function media(api, args) {
+  if (requestsHelp(args))
+    return writeText(GROUP_HELP.artifacts);
+  const { positionals, options } = parseCommandArgs(args, {
+    "--path": "string",
+    "--version": "string",
+    "--part": "string",
+    "--output": "string",
+    "--retry": "boolean"
+  }, "artifacts media", 1);
+  const path = options["--path"]?.trim();
+  if (!path)
+    fail("artifacts media requires --path <file-path>, the video or sound in the version.");
+  const version = options["--version"]?.trim() || "latest";
+  if (!/^(latest|[1-9]\d*)$/.test(version)) {
+    fail('artifacts media --version is a version number, or "latest".');
+  }
+  const part = options["--part"] && enumValue("--part", options["--part"], MEDIA_FILES);
+  const output = options["--output"];
+  if (part && !output)
+    fail("artifacts media --part requires --output <local-path>.");
+  const route = `/api/artifacts/${idSegment(positionals[0]?.trim())}/versions/${version}/media`;
+  const derived = await api.get(route, {
+    path,
+    ...options["--retry"] === true ? { retry: "true" } : {}
+  });
+  if (!part || !output)
+    return writeJson(derived);
+  const wanted = derived.parts?.[part];
+  if (wanted?.status === "pending") {
+    fail(`The ${part} of ${path} is still being made.`, "media_pending", "Ask again in a few seconds.");
+  }
+  if (wanted?.status !== "ready" || !wanted.url) {
+    fail(`${path} has no ${part}: ${wanted?.reason ?? "it was not derived"}`, "media_unavailable", wanted?.status === "failed" ? "Run the command again with --retry to derive it anew." : undefined);
+  }
+  const url = new URL(wanted.url, "http://sixb.invalid");
+  await api.download(url.pathname, output, Object.fromEntries(url.searchParams));
+  return writeJson({ downloaded: true, part, output });
 }
 function commentsOf(page) {
   const comments = typeof page === "object" && page !== null && "comments" in page ? page.comments : [];
@@ -1286,10 +1341,14 @@ async function transcribe(api, args) {
     ...model,
     audio
   });
+  const { words, segments, language } = result;
   writeJson({
     callId: result.callId,
     model: result.model.modelId,
     text: result.text,
+    ...language === undefined ? {} : { language },
+    ...words === undefined ? {} : { words },
+    ...segments === undefined ? {} : { segments },
     cost: describeCost(result.cost)
   });
 }

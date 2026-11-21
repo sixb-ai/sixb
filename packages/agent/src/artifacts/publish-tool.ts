@@ -14,6 +14,7 @@ import {
   ARTIFACT_THEME_FILE,
   CANVAS_FILE,
   type Canvas,
+  parseArtifactAddress,
   parseArtifactTheme,
   parseCanvas,
 } from "@sixb/core/artifacts"
@@ -23,7 +24,7 @@ import {
   type AgentRunArtifacts,
   type AgentRunFileStore,
 } from "@sixb/core/internal/agents"
-import { frameLayout } from "@sixb/core/internal/artifacts/frames"
+import { FRAME_REFERENCE_PREFIX, frameLayout } from "@sixb/core/internal/artifacts/frames"
 import { isLiveTextPath } from "@sixb/core/internal/artifacts/live"
 import {
   ARTIFACT_LIMITS,
@@ -32,6 +33,9 @@ import {
   DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
+  resolveVideoMedia,
+  VIDEO_ENTRY,
+  videoFilesPlayed,
 } from "@sixb/core/internal/artifacts/publish"
 import {
   inferFileMediaType,
@@ -39,9 +43,11 @@ import {
   UNTYPED_MEDIA_TYPE,
 } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
-import type { ArtifactFile, ArtifactRecord } from "@sixb/core/storage"
+import type { ArtifactFile, ArtifactFrameTarget, ArtifactRecord } from "@sixb/core/storage"
+import type { PreparedAgentAttachment } from "../attachments"
 import { agentToolErrorText } from "../model-adapters"
 import {
+  digestSandboxFile,
   listSandboxFiles,
   readSandboxFile,
   resolveSandboxPath,
@@ -58,6 +64,7 @@ import {
   type LayoutCheck,
   type LayoutWarning,
 } from "./layout-check/layout-check"
+import { checkVideo, VIDEO_SHEET_FRAMES, type VideoCheckFile } from "./layout-check/video-check"
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
@@ -69,15 +76,8 @@ const CREATE_TOOL = "publish_artifact"
 const OPEN_TOOL = "open_artifact"
 type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
-/** A file of up to 2 GB, uploaded from the sandbox through the API. */
+/** A file of up to 2 GB, uploaded from the sandbox through the API, or hashed there. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
-/**
- * The kinds the Agent can create today; each lands with its validator, renderer, and skill. A
- * video waits for its guide: until then the Agent revises one someone else made, by its id, but
- * does not start one.
- */
-type PublishableKind = Exclude<ArtifactKind, "video">
-const PUBLISHABLE_KINDS = ARTIFACT_KINDS.filter((kind): kind is PublishableKind => kind !== "video")
 
 // One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
 // kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
@@ -107,12 +107,29 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
       title: TITLE_PROPERTY,
       kind: {
         type: "string",
-        enum: [...PUBLISHABLE_KINDS],
+        enum: [...ARTIFACT_KINDS],
         description: "A new artifact's kind. With an id it is ignored: an update keeps its kind.",
       },
       id: {
         type: "string",
         description: "The artifact to update, such as art_k3m9q2x7tp. Leave it out to create one.",
+      },
+      attachments: {
+        type: "array",
+        description:
+          "This conversation's files to add as stored, by their key in $SIXB_ATTACHMENTS, such as a user's recording, without downloading them.",
+        items: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Such as media/talk.mov.",
+            },
+            key: { type: "string", description: "Its key in $SIXB_ATTACHMENTS." },
+          },
+          required: ["path", "key"],
+          additionalProperties: false,
+        },
       },
     },
     required: ["path", "title"],
@@ -155,6 +172,8 @@ interface PublishToolsInput {
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   /** The conversation's artifacts in the sandbox, which each publish keeps current. */
   readonly installed: Promise<InstalledArtifacts>
+  /** The run's attachments, as `$SIXB_ATTACHMENTS` lists them: a version holds one by its key. */
+  readonly attachments?: readonly Pick<PreparedAgentAttachment, "key" | "fileRef">[]
 }
 
 /**
@@ -200,7 +219,9 @@ interface PublishRequest {
   readonly path: string
   readonly title: string
   /** A new artifact of this kind, or this artifact's latest version. */
-  readonly target: { readonly kind: PublishableKind } | { readonly artifactId: string }
+  readonly target: { readonly kind: ArtifactKind } | { readonly artifactId: string }
+  /** The run's attachments the version holds, each at its path, by its key. */
+  readonly attachments?: readonly { readonly path: string; readonly key: string }[]
 }
 
 async function publish(
@@ -234,6 +255,7 @@ async function publish(
 
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
+  const attached = await attachedFiles(input, request, sources)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
   // drop whatever was written since. A canvas or a document is merged instead, from the copy's files.
@@ -256,10 +278,13 @@ async function publish(
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
-      // A large file is uploaded by the sandbox itself. It is never one the layout check reads:
-      // an entry, a board or a theme is at most 2 MB.
+      // A large file is uploaded by the sandbox itself, unless the version it updates holds it
+      // already. It is never one the layout check reads: an entry, a board or a theme is at most
+      // 2 MB.
       if (!source.bytes && source.sizeBytes > SANDBOX_INLINE_BYTES) {
-        const file = await uploadSource(input, handle, kind, source, reservation, signal)
+        const file =
+          (await storedAlready(handle, source, base?.files, signal)) ??
+          (await uploadSource(input, handle, kind, source, reservation, signal))
         files.push({ path: source.path, file })
         contents.push({
           path: source.path,
@@ -295,6 +320,20 @@ async function publish(
       })
       files.push({ path: source.path, file: fileRef })
       contents.push({ path: source.path, bytes })
+    }
+
+    // An attachment is stored already: the run stores nothing of it.
+    for (const file of attached) {
+      files.push(file)
+      contents.push(file)
+    }
+
+    // A video's copy leaves its recordings in the API: an update keeps those its scenes still play.
+    if ("artifactId" in request.target) {
+      for (const kept of keptRecordings(installed.remoteOf(request.target.artifactId), contents)) {
+        files.push(kept)
+        contents.push({ path: kept.path, file: kept.file })
+      }
     }
     signal.throwIfAborted()
 
@@ -416,7 +455,15 @@ async function publish(
         : null
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
-  if (
+  if (outline.kind === "video" && checked) {
+    try {
+      check = await checkPublishedVideo(input, { handle, published, checked, sources, signal })
+    } catch (error) {
+      if (signal.aborted) throw error
+      console.warn("[SixbAgent] The video check failed:", error)
+      check = { status: "skipped", reason: "the check failed in the sandbox" }
+    }
+  } else if (
     checked &&
     checkDirectory &&
     pages &&
@@ -474,10 +521,79 @@ async function publish(
                   screenshots: [...check.screenshots],
                   ...(check.pages ? { pages: check.pages } : {}),
                   ...(check.overview ? { overview: check.overview } : {}),
+                  ...(check.frames
+                    ? {
+                        frames: check.frames.map(({ path, atMs, scene }) => ({
+                          path,
+                          atMs,
+                          scene,
+                        })),
+                      }
+                    : {}),
                 }
               : { skipped: check.reason },
         }),
   }
+}
+
+/**
+ * The stored file a large source is, when the version an update starts from holds the same bytes
+ * at its path: hashed in the sandbox, it is never uploaded again. A recording downloaded into a
+ * video's folder once costs nothing on its later publishes.
+ */
+async function storedAlready(
+  handle: AgentSandboxHandle,
+  source: PublishSource,
+  base: readonly ArtifactFile[] | undefined,
+  signal: AbortSignal
+): Promise<FileRef | undefined> {
+  const stored = base?.find((file) => file.path === source.path)?.file
+  if (!stored || stored.sizeBytes !== source.sizeBytes) return undefined
+
+  const { sizeBytes, digest } = await digestSandboxFile(handle, {
+    path: source.absolutePath,
+    signal,
+    timeoutMs: SANDBOX_UPLOAD_TIMEOUT_MS,
+  }).catch((error: unknown) => {
+    throw toPublishError(error, CREATE_TOOL, source.path)
+  })
+  return sizeBytes === stored.sizeBytes && digest === stored.digest ? stored : undefined
+}
+
+/**
+ * The run's attachments the version holds, each at the path the Agent names: the stored file as
+ * it is, whose bytes never pass through the sandbox. Only a key `$SIXB_ATTACHMENTS` lists
+ * resolves, so a version never takes another conversation's file.
+ */
+async function attachedFiles(
+  input: PublishToolsInput,
+  request: PublishRequest,
+  sources: readonly PublishSource[]
+): Promise<ArtifactFile[]> {
+  const tool = CREATE_TOOL
+  const inFolder = new Set(sources.map((source) => source.path))
+  const files: ArtifactFile[] = []
+  for (const { path, key } of request.attachments ?? []) {
+    const attachment = input.attachments?.find((each) => each.key === key)
+    if (!attachment) {
+      throw publishError(
+        tool,
+        `'${key}' is not an attachment of this conversation: pass a key $SIXB_ATTACHMENTS lists`
+      )
+    }
+    if (inFolder.has(path)) {
+      throw publishError(
+        tool,
+        `'${path}' is both a file of '${request.path}' and attachment '${key}': remove one of them`
+      )
+    }
+    if (!(await statFileRef(input.blobStorage, attachment.fileRef))) {
+      throw publishError(tool, `attachment '${key}' is no longer stored`)
+    }
+
+    files.push({ path, file: attachment.fileRef })
+  }
+  return files
 }
 
 /**
@@ -546,6 +662,198 @@ async function mergedFiles(
       error
     )
     return undefined
+  }
+}
+
+/**
+ * The recordings an update from a video's copy keeps: those the copy left in the API, which its
+ * folder does not hold, that its scenes still play. One they no longer play is left out, as a
+ * video holds only what it plays.
+ */
+function keptRecordings(
+  remote: readonly ArtifactFile[],
+  written: readonly PublishedArtifactFile[]
+): ArtifactFile[] {
+  if (remote.length === 0) return []
+
+  const own = new Set(written.map((file) => file.path))
+  const held = new Set([...own, ...remote.map((file) => file.path)])
+  const decoder = new TextDecoder()
+  const html = new Map(
+    written.flatMap((file) =>
+      "bytes" in file && /\.html?$/i.test(file.path)
+        ? [[file.path, decoder.decode(file.bytes)] as const]
+        : []
+    )
+  )
+  const index = html.get(VIDEO_ENTRY)
+  if (index === undefined) return []
+
+  const played = videoFilesPlayed(
+    index,
+    (path) => html.get(path),
+    (path) => held.has(path)
+  )
+  return remote.filter((file) => !own.has(file.path) && played.has(file.path))
+}
+
+/** The most a sound the check fetches whole weighs, when it has no proxy: a podcast's length. */
+const CHECKED_SOUND_BYTES = 64 * 1024 * 1024
+
+/**
+ * Checks a published video with HyperFrames on the files its export renders: its HTML as a frame
+ * serves it, every other file where the Agent published it, and each recording it keeps in the
+ * API fetched in, its proxy, or a sound whole when browsers play it as it is.
+ */
+async function checkPublishedVideo(
+  input: PublishToolsInput,
+  {
+    handle,
+    published,
+    checked,
+    sources,
+    signal,
+  }: {
+    readonly handle: AgentSandboxHandle
+    readonly published: PublishedArtifact
+    readonly checked: readonly PublishedArtifactFile[]
+    readonly sources: readonly PublishSource[]
+    readonly signal: AbortSignal
+  }
+): Promise<LayoutCheck> {
+  const { artifact, version } = published
+  if (version.outline.kind !== "video") throw new Error("[SixbAgent] Only a video is checked so.")
+
+  const where = new Map(sources.map((source) => [source.path, source.absolutePath]))
+  const files: VideoCheckFile[] = []
+  for (const file of checked) {
+    const { path } = file
+    if ("bytes" in file && /\.html?$/i.test(path)) {
+      files.push({ path, html: file.bytes })
+      continue
+    }
+    if ("sandboxPath" in file) {
+      files.push({ path, at: file.sandboxPath })
+      continue
+    }
+    const at = where.get(path)
+    if (at && !("file" in file)) {
+      files.push({ path, at })
+      continue
+    }
+    if ("file" in file) files.push(await remoteRecording(input, published, file, signal))
+  }
+
+  const lent = await lentFiles(input, published)
+  return checkVideo({
+    handle,
+    files: [...files, ...lent.files],
+    targets: lent.targets,
+    outline: version.outline,
+    name: `${artifact.id}-r${version.revision}`,
+    signal,
+  })
+}
+
+/**
+ * What a video embeds from other artifacts, by `artifact:` address, as its export lends it: each
+ * file fetched under `__sixb/ref/`, where its HTML is pointed, read as the Agent's requester reads
+ * it. An address it cannot read is left out, and its HTML loses the file, as a frame shows it.
+ */
+async function lentFiles(
+  input: PublishToolsInput,
+  { version }: PublishedArtifact
+): Promise<{ readonly targets: ArtifactFrameTarget[]; readonly files: VideoCheckFile[] }> {
+  // Each artifact's version as read, to fetch the very file the address resolved to.
+  const read = new Map<string, number>()
+  const media = await resolveVideoMedia(version, async (artifactId, number) => {
+    const found = await input.artifacts.getVersion(artifactId, number)
+    if (found) read.set(`${artifactId}@${number}`, found.version)
+    return found
+  })
+
+  const targets: ArtifactFrameTarget[] = []
+  const files: VideoCheckFile[] = []
+  for (const { address, file } of media) {
+    const parsed = parseArtifactAddress(address)
+    if (!file || !parsed?.path) continue
+
+    const target = {
+      address,
+      artifactId: parsed.artifactId,
+      version: parsed.version ?? ("latest" as const),
+    }
+    const number = read.get(`${target.artifactId}@${target.version}`)
+    if (number === undefined) continue
+
+    targets.push(target)
+    files.push({
+      path: `${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${parsed.path}`,
+      fetch: [
+        "files",
+        "download",
+        "artifact",
+        target.artifactId,
+        String(number),
+        "--path",
+        parsed.path,
+      ],
+    })
+  }
+  return { targets, files }
+}
+
+/** How the check fetches a recording the version keeps in the API: its proxy, or a sound whole. */
+async function remoteRecording(
+  input: PublishToolsInput,
+  { artifact, version }: PublishedArtifact,
+  { path, file }: { readonly path: string; readonly file: FileRef },
+  signal: AbortSignal
+): Promise<VideoCheckFile> {
+  const media = await input.artifacts.media(artifact.id, {
+    version: version.version,
+    path,
+    derive: false,
+  })
+  signal.throwIfAborted()
+
+  const proxy = media?.parts.proxy
+  if (proxy?.status === "ready") {
+    return {
+      path,
+      fetch: [
+        "artifacts",
+        "media",
+        artifact.id,
+        "--version",
+        String(version.version),
+        "--path",
+        path,
+        "--part",
+        "proxy",
+      ],
+    }
+  }
+  if (file.mediaType?.startsWith("audio/") && file.sizeBytes <= CHECKED_SOUND_BYTES) {
+    return {
+      path,
+      fetch: [
+        "files",
+        "download",
+        "artifact",
+        artifact.id,
+        String(version.version),
+        "--path",
+        path,
+      ],
+    }
+  }
+  return {
+    path,
+    missing:
+      proxy === undefined || proxy.status === "pending"
+        ? "its proxy is still being made"
+        : `it has no proxy: ${proxy.reason}`,
   }
 }
 
@@ -925,7 +1233,11 @@ function publishSummary(output: JsonValue): string {
   if (typeof check === "object" && check !== null && !Array.isArray(check)) {
     const screenshots = Array.isArray(check.screenshots) ? check.screenshots.map(String) : []
     const kind = output.kind
-    if (typeof check.skipped === "string") {
+    if (typeof check.skipped === "string" && kind === "video") {
+      lines.push(
+        `The video check did not run: ${check.skipped}. Check it yourself before you reply: run hyperframes check and hyperframes snapshot on its folder, and look at the contact sheet (video.md, Check).`
+      )
+    } else if (typeof check.skipped === "string") {
       lines.push(
         `The layout check did not run: ${check.skipped}. ${
           kind === "page"
@@ -936,6 +1248,12 @@ function publishSummary(output: JsonValue): string {
                 ? "Read document.html and its stylesheets closely: what fits the paper, and where each page breaks."
                 : "Read index.html slide by slide."
         }`
+      )
+    } else if (kind === "video") {
+      lines.push(
+        screenshots.length > 0
+          ? videoShots(screenshots, Array.isArray(check.frames) ? check.frames : [])
+          : "The video check took no frames. Look at it yourself before you reply: run hyperframes snapshot on its folder, with a timeoutMs of a few minutes, and read the contact sheet (video.md, Check)."
       )
     } else if (screenshots.length > 0) {
       const directory = posix.dirname(screenshots[0] ?? "")
@@ -962,10 +1280,10 @@ function publishSummary(output: JsonValue): string {
 }
 
 function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
-  const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id"])
+  const input = inputObject(value, CREATE_TOOL, ["path", "title", "kind", "id", "attachments"])
   const kind = input.kind === undefined || input.kind === null ? undefined : input.kind
-  if (kind !== undefined && !PUBLISHABLE_KINDS.includes(kind as PublishableKind)) {
-    throw publishError(CREATE_TOOL, `kind must be one of ${PUBLISHABLE_KINDS.join(", ")}`)
+  if (kind !== undefined && !ARTIFACT_KINDS.includes(kind as ArtifactKind)) {
+    throw publishError(CREATE_TOOL, `kind must be one of ${ARTIFACT_KINDS.join(", ")}`)
   }
   if (input.id !== undefined && input.id !== null && typeof input.id !== "string") {
     throw publishError(CREATE_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
@@ -987,11 +1305,35 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   }
   const path = pathInput(input.path, CREATE_TOOL)
   const title = titleInput(input.title, CREATE_TOOL)
+  const attachments = attachmentsInput(input.attachments)
   // With an id, a kind is ignored: an update keeps the artifact's, and a model that sends every
   // field, as strict mode has it, fills one in.
-  return noId
-    ? { path, title, target: { kind: kind as PublishableKind } }
-    : { path, title, target: { artifactId: id } }
+  return {
+    path,
+    title,
+    target: noId ? { kind: kind as ArtifactKind } : { artifactId: id },
+    ...(attachments.length === 0 ? {} : { attachments }),
+  }
+}
+
+function attachmentsInput(value: unknown): { readonly path: string; readonly key: string }[] {
+  if (value === undefined || value === null) return []
+
+  const invalid = () =>
+    publishError(
+      CREATE_TOOL,
+      "attachments must be a list of { path, key }: its path in the artifact, and its key in $SIXB_ATTACHMENTS"
+    )
+  if (!Array.isArray(value)) throw invalid()
+  return value.map((item: unknown) => {
+    if (typeof item !== "object" || item === null) throw invalid()
+
+    const { path, key } = item as Record<string, unknown>
+    if (typeof path !== "string" || !path.trim() || typeof key !== "string" || !key.trim()) {
+      throw invalid()
+    }
+    return { path, key }
+  })
 }
 
 function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
@@ -1046,6 +1388,38 @@ function toPublishError(error: unknown, tool: ArtifactToolName, path?: string): 
 function publishError(tool: ArtifactToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
   return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
+}
+
+/**
+ * Where a video's contact sheets are, and which scene each of their frames shows: `1–3 intro,
+ * 4–6 demo`, as each sheet numbers its own frames from 1.
+ */
+function videoShots(sheets: readonly string[], frames: readonly JsonValue[]): string {
+  const scenes = frames.map((frame) =>
+    typeof frame === "object" && frame !== null && !Array.isArray(frame) ? String(frame.scene) : ""
+  )
+
+  const legends = sheets.map((sheet, page) => {
+    const shown = scenes.slice(page * VIDEO_SHEET_FRAMES, (page + 1) * VIDEO_SHEET_FRAMES)
+    const runs: { scene: string; first: number; last: number }[] = []
+    shown.forEach((scene, index) => {
+      const run = runs.at(-1)
+      if (run?.scene === scene) run.last = index + 1
+      else runs.push({ scene, first: index + 1, last: index + 1 })
+    })
+
+    const legend = runs
+      .map(({ scene, first, last }) => `${first === last ? first : `${first}–${last}`} ${scene}`)
+      .join(", ")
+    return `${sheet} (${legend})`
+  })
+
+  const directory = posix.dirname(sheets[0] ?? "")
+  const where =
+    sheets.length === 1
+      ? `Its contact sheet is ${legends[0]}`
+      : `Its contact sheets are ${legends.join("; ")}`
+  return `Video check: HyperFrames checked the files its export renders. ${where}: ${frames.length} frames, numbered by scene on each sheet, each also a PNG at full size in ${directory}/. Open each contact sheet with read and look at every frame as a viewer would, fix what the warnings name and what you see, and update the artifact.`
 }
 
 /**

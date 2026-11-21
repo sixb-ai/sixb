@@ -64,10 +64,14 @@ Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
 
-Artifact comments:
+Artifacts:
   sixb artifacts comments list <artifact-id>
                                       Open comments, as threads with where each is
   sixb artifacts comments resolve|reply ...
+  sixb artifacts media <artifact-id> --path <file-path> ...
+                                      A video's or sound's proxy, poster, cuts, transcript
+  sixb artifacts export <artifact-id> --output <path.mp4>
+                                      A video's MP4, rendered, then downloaded
 
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
@@ -291,6 +295,8 @@ exact email, ignoring case, and finds suspended members too. Each member is
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
   sixb artifacts export <artifact-id> [--version <n|latest>] [--retry] [--output <path.mp4>]
+  sixb artifacts media <artifact-id> --path <file-path> [--version <n|latest>] [--retry]
+  sixb artifacts media <artifact-id> --path <file-path> --part <part> --output <local-path>
 
 \`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
 address and label on a canvas; at, in milliseconds, and scene on a video; revision), its body,
@@ -302,7 +308,13 @@ change it or being the comment's author.
 \`export\` asks for a video's MP4 and prints {"status"}: ready, rendering with {"progress"} (its
 segments ready of all of them), or failed with its reason; --retry renders what failed anew.
 With --output it waits while the video renders, then downloads the MP4 there. Each scene renders
-once and is kept, so a version that changes one scene renders only that one again.`,
+once and is kept, so a version that changes one scene renders only that one again.
+
+\`media\` prints what is derived of a video or a sound in the version: {"parts"}, each ready,
+pending, unavailable or failed with its reason: probe, proxy, poster, filmstrip, waveform, cuts
+and transcript. --retry derives each failed part anew. --part proxy|poster|filmstrip|waveform|
+transcript downloads that part's file once it is ready: a proxy is a 720p H.264 copy to look at
+footage with, never to publish in the original's place.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
@@ -322,7 +334,8 @@ kind's default answers. \`list\` shows each model's kind, default, description a
 adds the sizes, voices and other options a request can use. Prices are in USD.
 
 \`text\` also takes a tier (light, standard or heavy) for --model, and reads a long prompt from
---file: a path, or - for standard input.
+--file: a path, or - for standard input. \`transcribe\` prints the text, and its words and segments,
+each timed in milliseconds, when the model times them.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a

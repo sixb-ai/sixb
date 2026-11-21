@@ -6,7 +6,11 @@ import { parseArtifactAddress } from "../src/artifacts/address"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import type { VideoOutline } from "../src/artifacts/outline"
 import { resolveArtifactAddress } from "../src/artifacts/resolve"
-import { readVideoComposition, videoFilePath } from "../src/artifacts/video/composition"
+import {
+  readVideoComposition,
+  videoFilePath,
+  videoFilesPlayed,
+} from "../src/artifacts/video/composition"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { inferFileMediaType } from "../src/blob-storage/internal"
 import type { ArtifactCommentAnchor } from "../src/storage"
@@ -470,6 +474,45 @@ describe("the file a video's reference names", () => {
     ]) {
       expect(videoFilePath("scenes/demo.html", value, exists)).toBeUndefined()
     }
+  })
+})
+
+describe("the files a video plays", () => {
+  // Guard proof: drop the visit of nested compositions in videoFilesPlayed; the lower third's
+  // logo is no longer played, and an update from a copy without it would lose it.
+  test("are named by its root, each scene, and what each nests, all the way down", () => {
+    const files: Record<string, string> = {
+      "scenes/intro.html": scene(
+        "intro",
+        '<video src="../media/clip.mp4" muted></video><div data-composition-src="parts/third.html"></div>'
+      ),
+      "scenes/outro.html": scene("outro", "<h1>Thanks</h1>"),
+      "parts/third.html": scene(
+        "third",
+        '<img src="logo.svg"><div data-composition-src="parts/third.html"></div>'
+      ),
+    }
+    const held = new Set(["media/clip.mp4", "media/music.m4a", "parts/logo.svg", "media/old.mp4"])
+
+    const played = videoFilesPlayed(
+      index(
+        [MUSIC, host("intro", "0", "4"), host("outro", "intro", "3")],
+        'data-width="1920" data-height="1080" data-duration="7"'
+      ),
+      (path) => files[path],
+      (path) => held.has(path) || path in files
+    )
+    expect([...played].sort()).toEqual(["media/clip.mp4", "media/music.m4a", "parts/logo.svg"])
+  })
+
+  test("are none when its root cannot be read, for publishing to say why", () => {
+    expect(
+      videoFilesPlayed(
+        "<p>no video</p>",
+        () => undefined,
+        () => true
+      ).size
+    ).toBe(0)
   })
 })
 

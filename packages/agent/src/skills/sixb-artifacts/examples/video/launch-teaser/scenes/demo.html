@@ -1,0 +1,45 @@
+<template>
+  <div data-composition-id="demo" data-width="1920" data-height="1080" class="scene">
+    <div class="demo-window">
+      <!-- A 1920×1080 Playwright recording of the dispatch board, zoomed 1.75 times, from 4.2 s. -->
+      <video id="dispatch" src="media/dispatch.mp4" data-start="0" data-duration="8.4"
+             data-media-start="4.2" muted playsinline data-layout-allow-overflow></video>
+    </div>
+    <p class="callout">Assign the nearest tech in two taps</p>
+
+    <style>
+      .demo-window {
+        position: absolute;
+        left: 160px;
+        top: 72px;
+        width: 1600px;
+        height: 900px;
+        border-radius: var(--radius);
+        overflow: hidden;
+        box-shadow: 0 40px 120px rgb(0 0 0 / 0.45);
+      }
+      .demo-window video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform-origin: 22% 22%;
+      }
+      [data-composition-id="demo"] .callout { left: 200px; bottom: 140px; }
+    </style>
+
+    <script>
+      const demo = gsap.timeline({ paused: true })
+      const scene = '[data-composition-id="demo"]'
+
+      // It comes in over the hook's last 0.4 s, then pushes in on the cards being assigned, so the
+      // interface reads on a phone; the callout names the one thing to see, then leaves first.
+      demo.from(`${scene} .demo-window`, { opacity: 0, y: 40, duration: 0.6, ease: "power2.out" }, 0)
+      demo.to(`${scene} video`, { scale: 1.45, duration: 2.2, ease: "power2.inOut" }, 1.4)
+      demo.from(`${scene} .callout`, { y: 24, opacity: 0, duration: 0.5, ease: "power3.out" }, 2.2)
+      demo.to(`${scene} .callout`, { opacity: 0, duration: 0.3, ease: "power1.in" }, 7.4)
+
+      window.__timelines = window.__timelines || {}
+      window.__timelines["demo"] = demo
+    </script>
+  </div>
+</template>

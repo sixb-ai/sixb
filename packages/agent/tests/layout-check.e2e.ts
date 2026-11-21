@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
 import { type CheckedQuery, checkLayout } from "../src/artifacts/layout-check/layout-check"
+import { checkVideo } from "../src/artifacts/layout-check/video-check"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { LocalBashSandbox } from "./helpers"
 
@@ -577,6 +578,128 @@ article { max-width: 600px; padding: 2rem } div { position: static; padding: 12p
       expect(result.warnings.find((warning) => warning.part === "phone")?.message).toContain(
         "On a phone (390px): table"
       )
+    },
+    { timeout: 120_000 }
+  )
+})
+
+/**
+ * A video of four scenes, each a phone's footage: the first stays at opacity 0, as when the tween
+ * that was to bring it in never runs; the second fades in, driven by a CSS animation, which
+ * HyperFrames seeks as it does a GSAP timeline, and which needs no CDN; the third plays in a card
+ * that stays on screen four seconds after its clip ends; the fourth opens on a title over the
+ * scene's own ground, and its footage comes in two seconds later.
+ */
+const VIDEO = {
+  "index.html": `<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body { margin: 0; background: #000 }
+  video { position: absolute; left: 560px; top: 140px; width: 800px; height: 800px; background: #345 }
+  @keyframes arrive { from { opacity: 0 } }
+  .arrives { animation: arrive 0.5s ease-out 0.2s both }
+  .card { position: absolute; left: 560px; top: 140px; width: 800px; height: 800px; background: #0d0f12 }
+  .card video { left: 0; top: 0; width: 100%; height: 100% }
+</style></head>
+<body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="18" data-no-timeline>
+    <div id="stuck" data-composition-id="stuck" data-composition-src="scenes/stuck.html" data-start="0" data-duration="4"></div>
+    <div id="fades" data-composition-id="fades" data-composition-src="scenes/fades.html" data-start="stuck" data-duration="4"></div>
+    <div id="ends" data-composition-id="ends" data-composition-src="scenes/ends.html" data-start="fades" data-duration="6"></div>
+    <div id="titled" data-composition-id="titled" data-composition-src="scenes/titled.html" data-start="ends" data-duration="4"></div>
+  </div>
+</body></html>`,
+  "scenes/stuck.html": `<template><div data-composition-id="stuck" data-width="1920" data-height="1080">
+  <video id="stuck-phone" src="media/phone.mp4" style="opacity: 0" data-start="0" data-duration="4" muted playsinline></video>
+</div></template>`,
+  "scenes/fades.html": `<template><div data-composition-id="fades" data-width="1920" data-height="1080">
+  <video id="fades-phone" class="arrives" src="media/phone.mp4" data-start="0" data-duration="4" muted playsinline></video>
+</div></template>`,
+  "scenes/ends.html": `<template><div data-composition-id="ends" data-width="1920" data-height="1080">
+  <div class="card"><video id="ends-card" src="media/phone.mp4" data-start="0" data-duration="2" muted playsinline></video></div>
+</div></template>`,
+  "scenes/titled.html": `<template><div data-composition-id="titled" data-width="1920" data-height="1080">
+  <div style="position: absolute; inset: 0; background: #0b0b0f">
+    <h1 style="color: #fff; font-size: 96px; margin: 120px">Spring launch</h1>
+    <video id="titled-phone" src="media/phone.mp4" data-start="2" data-duration="2" muted playsinline></video>
+  </div>
+</div></template>`,
+}
+
+/** HyperFrames' CLI as a sandbox without it would have one: it finds nothing and takes no frame. */
+const NO_HYPERFRAMES = `#!/bin/bash
+case "$1" in
+  check) echo '{"lint":{"findings":[]}}' ;;
+  snapshot) echo '{"frames":[],"contactSheets":[]}' ;;
+esac
+`
+
+describe.skipIf(!playwright)("a video's check in a browser", () => {
+  let root: string
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-video-e2e-")))
+    mkdirSync(join(root, "tmp"))
+    mkdirSync(join(root, "bin"))
+    writeFileSync(join(root, "bin/hyperframes"), NO_HYPERFRAMES, { mode: 0o755 })
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  // Reproduce by returning undefined first in video.cjs's mediaSights: the first scene's footage
+  // then stays black on every frame, and the card of the third empty, and the check passes both.
+  // Seek nowhere (drop the seek in mediaSights) and the second scene's, which fades in, reads as
+  // never shown too. Take no box in mediaProbe (`paints` always false) and the card goes unseen;
+  // take the scene's own ground for one (drop `inset`) and its title, before its footage comes in,
+  // reads as an empty box.
+  test(
+    "names footage never shown while it plays and a box left empty, not footage that fades in or a scene's own ground",
+    async () => {
+      const result = await checkVideo({
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: {
+            SIXB_PLAYWRIGHT: playwright,
+            TMPDIR: join(root, "tmp"),
+            PATH: `${join(root, "bin")}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+          },
+        },
+        files: [
+          ...Object.entries(VIDEO).map(([path, html]) => ({
+            path,
+            html: new TextEncoder().encode(html),
+          })),
+          { path: "media/phone.mp4", missing: "a recording this test does not need" },
+        ],
+        outline: {
+          kind: "video",
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          durationMs: 18_000,
+          scenes: [
+            { id: "stuck", startMs: 0, durationMs: 4_000, renderKey: "" },
+            { id: "fades", startMs: 4_000, durationMs: 4_000, renderKey: "" },
+            { id: "ends", startMs: 8_000, durationMs: 6_000, renderKey: "" },
+            { id: "titled", startMs: 14_000, durationMs: 4_000, renderKey: "" },
+          ],
+        },
+        name: "video",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      const hidden = result.warnings.filter((warning) => warning.code === "video_media_hidden")
+      expect(hidden.map((warning) => warning.part)).toEqual(["stuck"])
+      expect(hidden[0]?.message).toStartWith(
+        "From 0 s to 3.75 s, in scene 'stuck': the <video> media/phone.mp4 never shows while it plays: its opacity, or a parent's, is 0."
+      )
+      const empty = result.warnings.filter((warning) => warning.code === "video_media_box_empty")
+      expect(empty.map((warning) => warning.part)).toEqual(["ends"])
+      expect(empty[0]?.message).toStartWith(
+        "From 10 s to 13.75 s, in scene 'ends': the box that frames the <video> media/phone.mp4 is on screen with nothing in it: it stopped playing at 10 s."
+      )
+      expect(await browsers(root)).toEqual(new Set())
     },
     { timeout: 120_000 }
   )

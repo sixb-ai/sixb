@@ -20,7 +20,9 @@ export {
 } from "../media/media"
 export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
 export { artifactThemeModes } from "../theme"
+export { VIDEO_ENTRY, videoFilesPlayed } from "../video/composition"
 export {
+  resolveVideoMedia,
   VIDEO_ENGINE,
   VIDEO_EXPORT_JOB,
   VIDEO_SEGMENT_JOB,

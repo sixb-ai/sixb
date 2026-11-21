@@ -379,6 +379,27 @@ describe("models generation", () => {
     expect(received.find((request) => request.path === "/api/files")?.type).toBe("audio/mpeg")
   })
 
+  // Removal proof: print only the text, as transcribe did; the words a video is cut by are lost.
+  test("transcribe prints the words and segments the model timed", async () => {
+    const directory = await temporary()
+    const audio = join(directory, "talk.m4a")
+    await Bun.write(audio, AUDIO)
+    const words = [
+      { text: "Hello", startMs: 120, endMs: 480 },
+      { text: "there.", startMs: 520, endMs: 900 },
+    ]
+    const segments = [{ text: "Hello there.", startMs: 120, endMs: 900 }]
+    routes["POST /api/models/audio/transcriptions"] = () =>
+      Response.json(call({ text: "Hello there.", language: "en", words, segments }))
+
+    expect(await run(["transcribe", audio])).toMatchObject({
+      text: "Hello there.",
+      language: "en",
+      words,
+      segments,
+    })
+  })
+
   test("text takes a tier for --model, and the server picks the tier's model", async () => {
     // Removal proof: look every --model up in the catalog; 'light' names no model and fails.
     routes["POST /api/models/language/generations"] = () => Response.json(call({ text: "Fine." }))
