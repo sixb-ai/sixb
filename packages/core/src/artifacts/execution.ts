@@ -19,6 +19,7 @@ import type {
   ArtifactRestorePointRecord,
   ArtifactStorage,
   ArtifactVersionRecord,
+  ArtifactVideoRenderLack,
   ListArtifactsResult,
   ListArtifactVersionsResult,
   PublishedArtifactVersion,
@@ -49,7 +50,7 @@ import {
   unmadeMediaParts,
 } from "./media/media"
 import type { DocumentHolder } from "./outline"
-import { invalidArtifact, readArtifactText } from "./publish/files"
+import { invalidArtifact, readArtifactText, titleFileName } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
 import { documentPdfKey, requestDocumentPdf } from "./publish/pdf"
 import {
@@ -77,6 +78,16 @@ import {
   parseArtifactQuery,
 } from "./queries"
 import { runArtifactQuery } from "./run-query"
+import {
+  requestVideoExport,
+  resolveVideoMedia,
+  type VideoExportProgress,
+  videoExportKeys,
+  videoExportPlan,
+  videoExportProgress,
+  videoExportStatus,
+} from "./video/export"
+import { requestVideoStills } from "./video/stills"
 
 /** A version's content: what its kind renders from, and what it is called. */
 export interface ArtifactContentInput {
@@ -254,6 +265,24 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
     }
   ): Promise<ArtifactMedia | null>
   /**
+   * A video version's MP4: `ready` with its file once rendered, named after the version's title,
+   * else `rendering` with how far it has come, having asked the render worker for it;
+   * `render: false` reads it without asking. It renders scene by scene in sandboxes of the
+   * project, about as long as the video itself for a light one, and keeps each scene's segment, so a version that changes one scene renders only
+   * that scene again. Its `artifact:` files are those the caller reads. `failed` with why when it
+   * could not be rendered; `retry` asks again instead. Whoever reads the artifact may ask. `null`
+   * when the caller cannot read the artifact or it has no such version. Throws `invalid_artifact`
+   * for a version that is not a video, and `video_unavailable` in a project without sandboxes.
+   */
+  video(
+    artifactId: string,
+    options?: {
+      readonly version?: number | "latest"
+      readonly retry?: boolean
+      readonly render?: boolean
+    }
+  ): Promise<ArtifactVideoExport | null>
+  /**
    * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
    * cannot view refuses it, and a marked property they are not cleared for is left out of each
    * row. Whoever reads the artifact runs its queries, an observer too. `null` when the caller
@@ -314,6 +343,30 @@ export type ArtifactPdf = (
   /** The values a document that shows live data prints, to ask for that PDF again with. */
   readonly key?: string
 }
+
+/** A video version's MP4: its file once rendered, how far it has come, or why it could not be. */
+export type ArtifactVideoExport =
+  | {
+      readonly status: "ready"
+      readonly file: FileRef
+      readonly durationMs: number
+      readonly sizeBytes: number
+    }
+  | {
+      readonly status: "rendering"
+      /** Its segments rendered, of all of them, then the MP4 being joined from them. */
+      readonly progress: VideoExportProgress
+    }
+  | {
+      readonly status: "failed"
+      /** Why, as a developer reads it: the scene, the sound, or what the project lacks. */
+      readonly reason: string
+      /**
+       * What the project lacks to render it, when the video is not why: asking again with
+       * `retry` renders it once the project has it, and fails the same until then.
+       */
+      readonly lacks?: ArtifactVideoRenderLack
+    }
 
 /** What Sixb derives of a video or a sound of a version. */
 export interface ArtifactMedia {
@@ -708,6 +761,17 @@ export function createArtifactsRuntime(
       ...version,
       files: [...version.files, ...borrowed],
     })
+
+    // A video's scenes, each at its middle, with what it plays from other artifacts as whoever
+    // published it reads them.
+    await requestVideoStills(
+      {
+        storage,
+        queue: runtime.queues.renders,
+        read: (id, number) => artifacts.getVersion(id, number),
+      },
+      version
+    )
 
     // Its queries are answered as whoever published it, who is this runtime's caller.
     await requestBoardPreviews(
@@ -1183,6 +1247,59 @@ export function createArtifactsRuntime(
       // Published before media were derived, or asked for when its job could not be: ask now.
       if (mediaOptions.derive !== false) await requestArtifactMedia(context, version)
       return { ...media, parts: unmadeMediaParts(() => ({ status: "pending" })) }
+    },
+
+    async video(artifactId, videoOptions = {}) {
+      const read = await readVersion(artifactId, videoOptions.version ?? "latest")
+      if (!read) return null
+
+      const { version } = read
+      const { outline } = version
+      if (outline.kind !== "video") {
+        throw invalidArtifact(
+          `Version ${version.version} of '${artifactId}' is not a video, which alone renders to MP4.`
+        )
+      }
+
+      // What it plays from other artifacts, as the caller reads them, is in its keys.
+      const media = await resolveVideoMedia(version, (id, number) =>
+        artifacts.getVersion(id, number)
+      )
+      const source = { outline, files: version.files, references: version.references, media }
+      const plan = videoExportPlan(source)
+      const storage = requireStorage()
+      const kept = await storage.listVideoRenders({
+        projectId: runtime.projectId,
+        keys: videoExportKeys(plan),
+      })
+      const status = videoExportStatus(plan, kept)
+      // How far it has come, what failed asked for again.
+      const progress = () => videoExportProgress(plan, kept)
+      if (status.status === "ready") {
+        // Kept for every version made the same, it downloads named after this one's title.
+        const fileName = `${titleFileName(version.title, "Video")}.mp4`
+        return {
+          status: "ready",
+          file: { ...status.file, fileName },
+          durationMs: outline.durationMs,
+          sizeBytes: status.file.sizeBytes,
+        }
+      }
+      if (status.status === "failed" && !videoOptions.retry) return status
+      if (videoOptions.render === false) return { status: "rendering", progress: progress() }
+      if (!options.rendersInSandboxes) {
+        throw new ArtifactRequestError(
+          "video_unavailable",
+          "[Sixb] A video renders to MP4 in sandboxes, and this project has no sandbox provider."
+        )
+      }
+
+      const retry = status.status === "failed"
+      await requestVideoExport({ storage, queue: runtime.queues.renders }, version, source, {
+        plan,
+        retry,
+      })
+      return { status: "rendering", progress: progress() }
     },
 
     async query(artifactId, name, options = {}) {

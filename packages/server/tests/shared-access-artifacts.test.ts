@@ -20,6 +20,11 @@ import {
 } from "@sixb/core"
 import { CANVAS_FILE } from "@sixb/core/artifacts"
 import { decodeLiveData, encodeLiveData } from "@sixb/core/artifacts/live"
+import {
+  documentPdfKey,
+  videoExportPlan,
+  videoSceneStills,
+} from "@sixb/core/internal/artifacts/publish"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
@@ -409,6 +414,114 @@ describe("a shared link's guest", () => {
     )
     expect(refused.status).toBe(404)
     expect(await refused.json()).toMatchObject({ code: "preview_not_found" })
+  })
+
+  // A designed document's PDF downloads by a link. Guard proof: drop `/pdf` from LOADED_BY_TAGS
+  // (auth/shared-access.ts); the guest's download is then refused.
+  test("downloads a document's PDF the way a link does", async () => {
+    const { app, storage, blobStorage, marie, put, meetings, visit } = await setup()
+    const proposal = await marie.artifacts.create({
+      kind: "document",
+      title: "Proposal",
+      files: await put({
+        "document.html": "<!doctype html><html><body><h1>Proposal</h1></body></html>",
+      }),
+    })
+    await meetings.upsert({ properties: { id: "m1", board: artifactRef(proposal.artifact.id) } })
+    const guest = await visit()
+
+    // The worker printed it.
+    await storage.artifacts.putPdf({
+      projectId,
+      renderKey: documentPdfKey(proposal.version) ?? "",
+      file: await blobStorage.put({
+        body: new TextEncoder().encode("%PDF-1.7 proposal"),
+        fileName: "Proposal.pdf",
+        mediaType: "application/pdf",
+      }),
+      pages: 1,
+      createdAt: new Date(),
+    })
+
+    const downloaded = await app.fetch(
+      new Request(
+        `http://api.localhost/api/artifacts/${proposal.artifact.id}/versions/1/pdf?shareGrant=${guest.grantId}`,
+        { headers: { cookie: guest.cookie } }
+      )
+    )
+    expect(downloaded.status).toBe(200)
+    expect(await downloaded.text()).toBe("%PDF-1.7 proposal")
+  })
+
+  // A video's poster, its chapters' stills and its MP4 load as an `<img>` and a download link do,
+  // and a still shows what its scenes play from other artifacts as Marie reads them. Guard proof:
+  // drop `/still`, `/poster` and `/video` from LOADED_BY_TAGS (auth/shared-access.ts), and each
+  // load is refused; return true from seesVideoStill (routes/artifacts.ts), and the guest loads the
+  // stills that show Marie's logo; check the still's scene alone there, and the guest loads the
+  // credits', which fade in over it.
+  test("loads a video's poster, its stills and its MP4 the way a browser's tags do", async () => {
+    const { app, storage, blobStorage, marie, put, meetings, visit } = await setup()
+
+    const logo = await marie.artifacts.create({
+      kind: "file",
+      title: "Logo",
+      files: await put({ "logo.png": "logo" }),
+    })
+    const scene = (id: string, body = "") =>
+      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"><h1>${id}</h1>${body}</div></template>`
+    const host = (id: string, start: string) =>
+      `<div data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="2"></div>`
+    const video = await marie.artifacts.create({
+      kind: "video",
+      title: "Recap",
+      files: await put({
+        "index.html": `<html><body><div data-composition-id="main" data-width="1280" data-height="720">${host("intro", "0")}${host("outro", "intro")}${host("credits", "outro - 0.5")}</div></body></html>`,
+        "scenes/intro.html": scene("intro"),
+        "scenes/outro.html": scene("outro", `<img src="artifact:${logo.artifact.id}/logo.png">`),
+        "scenes/credits.html": scene("credits"),
+      }),
+    })
+    await meetings.upsert({ properties: { id: "m1", board: artifactRef(video.artifact.id) } })
+    const guest = await visit()
+
+    // The worker snapshotted every scene and joined the MP4 the guest's export names: the logo,
+    // which the link does not grant, resolves to nothing for them.
+    const { version } = video
+    if (version.outline.kind !== "video") throw new Error("Expected a video.")
+    const keep = async (key: string, body: string) =>
+      storage.artifacts.putVideoRender({
+        projectId,
+        key,
+        file: await blobStorage.put({ body: new TextEncoder().encode(body), fileName: "still" }),
+        createdAt: new Date(),
+      })
+    for (const each of videoSceneStills(version.outline)) await keep(each.key, each.scene)
+    const plan = videoExportPlan({
+      outline: version.outline,
+      files: version.files,
+      references: version.references,
+      media: [{ address: `artifact:${logo.artifact.id}/logo.png` }],
+    })
+    await keep(plan.key, "mp4")
+
+    const base = `http://api.localhost/api/artifacts/${video.artifact.id}/versions/1`
+    const load = (path: string) =>
+      app.fetch(
+        new Request(`${base}${path}?shareGrant=${guest.grantId}`, {
+          headers: { cookie: guest.cookie },
+        })
+      )
+
+    expect(await (await load("/poster")).text()).toBe("intro")
+    expect(await (await load("/scenes/intro/still")).text()).toBe("intro")
+    expect(await (await load("/video")).text()).toBe("mp4")
+
+    // The outro shows the logo, and so may the credits, which fade in over it.
+    for (const id of ["outro", "credits"]) {
+      const refused = await load(`/scenes/${id}/still`)
+      expect(refused.status, id).toBe(404)
+      expect(await refused.json()).toMatchObject({ code: "still_not_found" })
+    }
   })
 
   // Guard proof: opt any of these routes into `sharedSession` in core's api-routes.ts; the

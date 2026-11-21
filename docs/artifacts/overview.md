@@ -812,14 +812,15 @@ media/<name>        the footage, sound, and images the scenes play
   length, and `data-label` its name as a chapter.
 - A root that plays something itself, such as a soundtrack, gives its own `data-duration`. No
   scene ends a frame or more after a root's `data-duration`.
-- The root's `data-poster="2.5"` names the instant, in seconds, the video shows before it plays.
-  Without one, it shows a moment late in its first scene.
+- The root's `data-poster="2.5"` names the instant, in seconds, the video shows before it plays,
+  on its card and in the player. Without one, it shows the middle of its first scene, before the
+  next one comes in.
 - A scene file's composition has its host's `data-composition-id`, the scene's id in addresses
   and comments. Every file a scene plays or nests is one of the version's; one it plays may also
   be another artifact's, by its address.
 - `artifact:…#demo` opens the video at a scene, and `artifact:…#t=12.5` at an instant.
 - A video holds at most 200 scenes and plays at most 10 minutes. Its frame is at most 3,840 pixels
-  a side, in even numbers, at 24, 25, 30, 50, or 60 frames a second, 30 by default. Each HTML file
+  a side, in even numbers, at 24, 25, 30, or 60 frames a second, 30 by default. Each HTML file
   is at most 1 MiB, and a version holds at most 50 video and sound files.
 
 The app plays a video as HyperFrames does, in a sandboxed frame, with the runtime release the
@@ -834,6 +835,44 @@ agent image renders with (0.9.68):
 - Settings › Copy link gives a link that opens the video at the instant shown.
 
 The Agent revises a video someone made, and does not start one.
+
+### Export a video
+
+A video downloads as an MP4, H.264 and AAC, rendered in the project's sandboxes:
+
+```ts
+const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", progress }, then:
+// { status: "ready", file: FileRef, durationMs: 20000, sizeBytes: 31457280 }
+```
+
+- The first ask renders it: ask again every few seconds until it is `ready`. `progress` says how
+  many of its segments are done, one per scene and one for the sound, then that they are being
+  joined. Over HTTP, `POST /api/artifacts/{id}/versions/{version}/video` answers the same, and
+  `GET` on the same path downloads it. From a terminal:
+  `sixb artifacts export <id> --output film.mp4`.
+- Each scene renders on its own and is kept: a version that changes one scene renders that scene
+  again, and the scenes it overlaps, and reuses the others. The sound is mixed once for the whole
+  video, so music that runs across a cut plays on unbroken.
+- How long it takes depends on what the scenes show. 20 seconds of 1080p footage under blurred
+  halos, glass cards and moving particles, in four scenes, take about 22 seconds with each scene
+  in its own 4-vCPU sandbox, and 87 seconds one scene after the other; editing one scene then
+  takes about 21 seconds. A scene of titles takes a few seconds more than it lasts.
+- Blur and `backdrop-filter` cost the most: Chromium draws them without a GPU.
+- A scene that fades in over the one before renders about twice slower than one that starts on a
+  cut, as it renders with the end of the scene before.
+- The [`render` worker](../cli/overview.md) renders it in sandboxes whose image has HyperFrames and
+  FFmpeg, as the Sixb agent image has them, with at least 3 GB of memory for its fast capture.
+  Each worker renders two segments at once; more workers render more.
+- When it could not be rendered, asking answers `{ status: "failed", reason }`, which names the
+  scene, until you ask with `{ retry: true }` (`?retry=true`), which renders what failed again.
+  With `lacks: "sandbox_tools"`, the sandboxes have no HyperFrames, or another release: a retry
+  fails the same until their image has it. The app then says export is not available.
+- A project without a [sandbox provider](../sandboxes/overview.md) renders nothing: asking fails
+  with `video_unavailable`.
+- Each scene also gets a still, a picture of its chapter's middle, a few seconds after the video is
+  published: `GET /api/artifacts/{id}/versions/{version}/scenes/{scene}/still`. The video's poster,
+  `GET …/versions/{version}/poster`, is the instant its root's `data-poster` names, or the first
+  scene's still: the frame the player opens on.
 
 ## Declare a query
 

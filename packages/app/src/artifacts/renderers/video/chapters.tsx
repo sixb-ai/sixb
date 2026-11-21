@@ -1,6 +1,6 @@
 import type { VideoOutline, VideoOutlineScene } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useArtifactMessages } from "../../messages"
 import { formatClock } from "../../playback"
 import { SidePanel } from "../../side-panel"
@@ -34,12 +34,18 @@ export function chapterName(scene: VideoOutlineScene): string {
  */
 export function ChaptersPanel({
   outline,
+  still,
+  poster,
   current,
   onSeek,
   onClose,
   inline = false,
 }: {
   readonly outline: VideoOutline
+  /** Where a scene's still is, a picture of its chapter's middle, which shows once snapshotted. */
+  readonly still?: (scene: VideoOutlineScene) => string
+  /** What a chapter shows until its still is snapshotted: its first recording's poster. */
+  readonly poster?: string
   /** The scene playing, by its id. */
   readonly current: string | undefined
   readonly onSeek: (scene: VideoOutlineScene) => void
@@ -81,17 +87,12 @@ export function ChaptersPanel({
                   playing ? "bg-muted" : "hover:bg-muted/60"
                 )}
               >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums transition-colors",
-                    playing
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground group-hover:text-foreground"
-                  )}
-                >
-                  {index + 1}
-                </span>
+                <ChapterMark
+                  number={index + 1}
+                  playing={playing}
+                  still={still?.(scene)}
+                  poster={poster}
+                />
                 <span className="min-w-0 flex-1">
                   <span
                     className="block truncate text-sm font-medium text-foreground"
@@ -112,5 +113,68 @@ export function ChaptersPanel({
         })}
       </ol>
     </SidePanel>
+  )
+}
+
+/**
+ * A chapter's number, on its still once it has loaded: a picture of the chapter's middle, at the
+ * video's shape, the number in its corner; on `poster` while the still is not snapshotted. Until
+ * either has loaded, or without one, the number alone, so a picture coming moves nothing.
+ */
+function ChapterMark({
+  number,
+  playing,
+  still: snapshot,
+  poster,
+}: {
+  readonly number: number
+  readonly playing: boolean
+  readonly still: string | undefined
+  readonly poster: string | undefined
+}) {
+  const [missing, setMissing] = useState<string | null>(null)
+  const still = snapshot && snapshot !== missing ? snapshot : poster
+  const [loaded, setLoaded] = useState<string | null>(null)
+  const badge = cn(
+    "flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums transition-colors",
+    playing
+      ? "bg-primary text-primary-foreground"
+      : "bg-muted text-muted-foreground group-hover:text-foreground"
+  )
+
+  if (!still || loaded !== still) {
+    return (
+      <span aria-hidden="true" className={cn(badge, "size-6 text-[11px]")}>
+        {number}
+        {still ? (
+          // Loaded out of sight, eagerly, as a hidden lazy image never loads: it takes the
+          // badge's place once it has.
+          <img
+            key={still}
+            src={still}
+            alt=""
+            onLoad={() => setLoaded(still)}
+            onError={() => setMissing(snapshot ?? null)}
+            className="hidden"
+          />
+        ) : null}
+      </span>
+    )
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative aspect-video w-[4.5rem] shrink-0 overflow-hidden rounded-md bg-neutral-900 ring-1 ring-black/5 dark:ring-white/10",
+        playing && "ring-2 ring-primary dark:ring-primary"
+      )}
+    >
+      <img src={still} alt="" className="sixb-media-in size-full object-cover" />
+      <span
+        className={cn(badge, "absolute bottom-1 left-1 h-4 min-w-4 px-1 text-[10px] shadow-sm")}
+      >
+        {number}
+      </span>
+    </span>
   )
 }

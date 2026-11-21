@@ -20,6 +20,7 @@ export type ArtifactRequestErrorCode =
   | "read_only"
   | "restore_point_not_found"
   | "storage_unavailable"
+  | "video_unavailable"
 
 /**
  * Error for an artifact request the caller can correct or must be told about. Callers branch on

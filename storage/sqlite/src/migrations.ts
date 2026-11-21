@@ -340,6 +340,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("106-sync-run-connections", syncRunConnectionsSql),
     sqliteSql("107-video-artifacts", videoArtifactsSql),
     sqliteSql("108-artifact-media", artifactMediaSql),
+    sqliteSql("109-artifact-video-renders", artifactVideoRendersSql),
   ],
 })
 
@@ -785,3 +786,6 @@ import agentThreadReadsSql from "./migrations/105-agent-thread-reads.sql" with {
 import syncRunConnectionsSql from "./migrations/106-sync-run-connections.sql" with { type: "text" }
 import videoArtifactsSql from "./migrations/107-video-artifacts.sql" with { type: "text" }
 import artifactMediaSql from "./migrations/108-artifact-media.sql" with { type: "text" }
+import artifactVideoRendersSql from "./migrations/109-artifact-video-renders.sql" with {
+  type: "text",
+}

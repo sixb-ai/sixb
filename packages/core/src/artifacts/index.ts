@@ -138,6 +138,7 @@ export {
   parseArtifactTheme,
 } from "./theme"
 export { ARTIFACT_TONES, type ArtifactTone } from "./tones"
+export { videoPosterMs } from "./video/project"
 export {
   type LiveSheetColumnSource,
   type LiveSheetSource,

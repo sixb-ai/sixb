@@ -13,8 +13,12 @@ type Element = DefaultTreeAdapterTypes.Element
 /** The file a video plays from: its root composition, which hosts the scenes. */
 export const VIDEO_ENTRY = "index.html"
 
-/** The frame rates a video plays at; a root composition without `data-fps` plays at 30. */
-export const VIDEO_FRAME_RATES = [24, 25, 30, 50, 60] as const
+/**
+ * The frame rates a video plays at; a root composition without `data-fps` plays at 30. They are
+ * the ones HyperFrames renders a range of a film at, as an export renders a scene that overlaps
+ * another: it refuses 50.
+ */
+export const VIDEO_FRAME_RATES = [24, 25, 30, 60] as const
 
 const DEFAULT_FPS = 30
 
@@ -41,6 +45,11 @@ export interface VideoMediaReference {
   readonly value: string
   /** The attribute, name and value, where its file writes it. */
   readonly at: VideoSourceSpan
+  /**
+   * The file of a video that is never heard, its `src` or one of its `<source>`s': it writes
+   * `muted`, or a `data-has-audio` other than "true", as HyperFrames reads them.
+   */
+  readonly muted?: true
 }
 
 /**
@@ -101,11 +110,11 @@ export interface VideoComposition {
    */
   readonly sounds: readonly VideoSourceSpan[]
   /**
-   * Whether `index.html` plays or animates anything beside its scenes, as its own text says: a
-   * timed element, a video or a sound, an inline script, which may build a timeline, or a CSS
-   * animation or transition. What a scene shows then depends on when it plays. A script loaded by
-   * its `src` only loads a library; it and the stylesheets the root links are in `links`, for
-   * whoever reads the version's files.
+   * Whether `index.html` shows anything that moves beside its scenes, as its own text says: a
+   * timed element, a video, an inline script, which may build a timeline, or a CSS animation or
+   * transition. What a scene shows then depends on when it plays. A sound shows nothing, so a
+   * soundtrack does not count. A script loaded by its `src` only loads a library; it and the
+   * stylesheets the root links are in `links`, for whoever reads the version's files.
    */
   readonly rootTimeline: boolean
   /** The scripts and stylesheets `index.html` loads beside its scenes, by `src` and `href`. */
@@ -370,13 +379,13 @@ export function cssMoves(css: string): boolean {
 }
 
 /**
- * Whether `index.html` plays or animates anything beside its scenes, anywhere in it: what
- * `VideoComposition.rootTimeline` says.
+ * Whether `index.html` shows anything that moves beside its scenes, anywhere in it: what
+ * `VideoComposition.rootTimeline` says. A sound is heard, never seen.
  */
 function playsOnItsOwn(nodes: readonly Node[], root: Element, hosts: readonly Element[]): boolean {
   const hosted = hostedBy(hosts)
   return elements(nodes).some((element) => {
-    if (hosted.has(element) || element === root) return false
+    if (hosted.has(element) || element === root || element.tagName === "audio") return false
 
     const inline = element.tagName === "script" && !has(element, "src")
     return (
@@ -706,6 +715,16 @@ function readSeconds(element: Element, name: string, what: string): number {
   return ms
 }
 
+/**
+ * Every file a page of a video plays and shows, inside its templates too, in source order:
+ * `index.html`, a scene file, or a composition one nests, whether it reads as one or not.
+ */
+export function videoPageMedia(path: string, html: string): VideoMediaReference[] {
+  const options = { sourceCodeLocationInfo: true }
+  const page = path === VIDEO_ENTRY ? parse(html, options) : parseFragment(html, options)
+  return mediaOf(page.childNodes)
+}
+
 /** Every file reference among the nodes, inside templates too, in source order. */
 function mediaOf(nodes: readonly Node[]): VideoMediaReference[] {
   return elements(nodes, { templates: true }).flatMap((element) =>
@@ -714,16 +733,31 @@ function mediaOf(nodes: readonly Node[]): VideoMediaReference[] {
       const value = attribute(element, name)
       const at = element.sourceCodeLocation?.attrs?.[name]
       if (value === undefined || !at) return []
+
+      const video = tag === "source" ? element.parentNode : element
+      const muted = name === "src" && video && "tagName" in video && neverHeard(video)
       return [
         {
           element: tag,
           attribute: name,
           value,
           at: { start: at.startOffset, end: at.endOffset },
+          ...(muted ? { muted: true as const } : {}),
         },
       ]
     })
   )
+}
+
+/**
+ * Whether an element is a video HyperFrames never mixes into the sound: one that writes `muted`,
+ * or `data-has-audio` other than "true", as its `isAudibleVideoElement` reads them.
+ */
+function neverHeard(element: Element): boolean {
+  if (element.tagName !== "video") return false
+
+  const declared = attribute(element, "data-has-audio")
+  return has(element, "muted") || (declared !== undefined && declared !== "true")
 }
 
 function hostSource(host: Element): VideoSceneHost {

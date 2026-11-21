@@ -206,6 +206,12 @@ export const ArtifactVersionSchema = z.object({
     .describe(
       "true for a designed document in a project that prints to PDF: POST to its pdf route to print it, with the values whoever asks reads"
     ),
+  exportable: z
+    .boolean()
+    .optional()
+    .describe(
+      "true for a video in a project that renders it to MP4: POST to its video route to render it"
+    ),
 })
 
 const ArtifactPdfKeySchema = z
@@ -238,6 +244,49 @@ export const ArtifactPdfQuerySchema = z.object({
 })
 
 export const ArtifactPdfDownloadQuerySchema = z.object({ key: ArtifactPdfKeySchema.optional() })
+
+export const ArtifactVideoExportResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    durationMs: z.number().int().min(0).describe("How long it plays"),
+    sizeBytes: z.number().int().min(0).describe("How large the MP4 is"),
+  }),
+  z.object({
+    status: z.literal("rendering"),
+    progress: z
+      .object({
+        ready: z.number().int().min(0).describe("Its segments rendered"),
+        total: z.number().int().min(0).describe("All its segments: one per scene, and its sound"),
+        assembling: z
+          .boolean()
+          .describe("Every segment is rendered, and the MP4 is being joined from them"),
+      })
+      .describe("How far it has come"),
+  }),
+  z.object({
+    status: z.literal("failed"),
+    reason: z
+      .string()
+      .describe("Why it could not be rendered: which scene, the sound, or what the project lacks"),
+    lacks: z
+      .enum(["sandboxes", "sandbox_tools"])
+      .optional()
+      .describe(
+        "What the project lacks to render it, when the video is not why: retry=true renders it once the project has it"
+      ),
+  }),
+])
+
+export const ArtifactVideoExportQuerySchema = z.object({
+  retry: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("true asks again for an MP4 that could not be rendered, instead of hearing why"),
+  render: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("false reads where the MP4 stands without asking for it"),
+})
 
 /** The parts of a media served as files, by the media content route. */
 export const ARTIFACT_MEDIA_FILE_PARTS = [
@@ -376,6 +425,10 @@ export const ArtifactVersionParamsSchema = ArtifactParamsSchema.extend({
     .string()
     .regex(/^(?:latest|[1-9]\d*)$/)
     .describe('A version number, or "latest"'),
+})
+
+export const ArtifactVideoStillParamsSchema = ArtifactVersionParamsSchema.extend({
+  scene: z.string().min(1).describe("The scene's id in the video"),
 })
 
 export const ArtifactBoardPreviewParamsSchema = ArtifactVersionParamsSchema.extend({
@@ -600,7 +653,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({

@@ -26,6 +26,10 @@ import {
   boardPreviews,
   boardsReadLiveData,
   documentPdfKey,
+  playTogether,
+  type VideoStill,
+  videoPoster,
+  videoSceneStills,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
   ArtifactCommentRecord,
@@ -72,6 +76,9 @@ import {
   ArtifactStateResponseSchema,
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
+  ArtifactVideoExportQuerySchema,
+  ArtifactVideoExportResponseSchema,
+  ArtifactVideoStillParamsSchema,
   ClearArtifactStateResponseSchema,
   DeleteArtifactCommentResponseSchema,
   DeleteArtifactResponseSchema,
@@ -216,6 +223,8 @@ async function versionResponse(
     ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
     // A designed document prints to PDF when asked, in a project that has sandboxes.
     ...(host.sandboxes && documentPdfKey(version) ? { printable: true } : {}),
+    // A video renders to MP4 when asked, in a project that has sandboxes.
+    ...(host.sandboxes && version.outline.kind === "video" ? { exportable: true } : {}),
   }
 }
 
@@ -373,6 +382,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         break
       case "pdf_unavailable":
       case "storage_unavailable":
+      case "video_unavailable":
         set.status = 501
         break
     }
@@ -632,6 +642,106 @@ async function artifactPdfResponse(
   }
 }
 
+/** A video's MP4 as a download, once rendered; 404 `video_not_found` until then. */
+async function artifactVideoResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: { readonly artifactId: string; readonly version: string }
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  }
+) {
+  try {
+    const { artifactId } = context.params
+    const number = versionParam(context.params.version)
+    const sixb = requireRequestSixb(context)
+    const version = await sixb.artifacts.getVersion(artifactId, number)
+    if (!version) return await refusal(context, artifactId, context.set)
+
+    // As the caller reads it: what its addresses resolve to is theirs.
+    const video = await sixb.artifacts.video(artifactId, { version: number, render: false })
+    const response =
+      video?.status === "ready" &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: video.file,
+        request: context.request,
+        disposition: "attachment",
+      }))
+    if (!response) {
+      context.set.status = 404
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Video not found", code: "video_not_found" as const }
+    }
+    // What its files resolve to may change, as another artifact it plays does: it is revalidated.
+    response.headers.set("cache-control", "private, no-cache")
+    return response
+  } catch (error) {
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/**
+ * A still of a video, once snapshotted: a scene's chapter's middle, or, without `scene`, its poster; 404
+ * `still_not_found` until then.
+ */
+async function artifactVideoStillResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: {
+      readonly artifactId: string
+      readonly version: string
+      readonly scene?: string
+    }
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  }
+) {
+  try {
+    const { artifactId, scene: id } = context.params
+    const number = versionParam(context.params.version)
+    const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
+    if (!version) return await refusal(context, artifactId, context.set)
+
+    const { outline } = version
+    let wanted: Pick<VideoStill, "key" | "scene"> | undefined
+    if (outline.kind === "video" && id === undefined) wanted = videoPoster(outline)
+    if (outline.kind === "video" && id !== undefined) {
+      wanted = videoSceneStills(outline).find((still) => still.scene === id)
+    }
+    const storage = host.storage.artifacts
+    const [still] =
+      wanted && storage && seesVideoStill(context, version, wanted.scene)
+        ? await storage.listVideoRenders({ projectId: host.id, keys: [wanted.key] })
+        : []
+    const response =
+      still &&
+      !("failure" in still) &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: still.file,
+        request: context.request,
+      }))
+    if (!response) {
+      context.set.status = 404
+      // It may be snapshotted in a moment: nothing may keep this answer.
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Still not found", code: "still_not_found" as const }
+    }
+
+    // A frozen version never changes, nor its scenes' stills; an open one does at each write.
+    response.headers.set(
+      "cache-control",
+      number !== "latest" && version.frozenAt
+        ? "private, max-age=31536000, immutable"
+        : "private, no-cache"
+    )
+    return response
+  } catch (error) {
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
 /**
  * What is derived of a media, as clients read it: each part's file as the URL that serves it,
  * which names the original's bytes, so what it serves never changes.
@@ -738,6 +848,25 @@ async function artifactMediaContentResponse(
  */
 function seesBoardPreviews(context: unknown, version: ArtifactVersionRecord): boolean {
   return !requestAuthState(context).sharedSession || !boardsReadLiveData(version)
+}
+
+/**
+ * A still shows what the scenes on screen play from other artifacts as the version's publisher
+ * reads it: a guest of a shared link sees one only when neither its root, its scene, nor a scene
+ * on screen with it, as one fades into the next, plays any.
+ */
+function seesVideoStill(context: unknown, version: ArtifactVersionRecord, scene: string): boolean {
+  if (!requestAuthState(context).sharedSession) return true
+  if (version.outline.kind !== "video") return false
+
+  const shown = version.outline.scenes.find((each) => each.id === scene)
+  const onScreen = new Set([
+    "",
+    ...version.outline.scenes
+      .filter((each) => shown && playTogether(shown, each))
+      .map((each) => each.id),
+  ])
+  return !version.references.some((reference) => onScreen.has(reference.at))
 }
 
 /** The render key a canvas version's outline gives one of its boards. */
@@ -1549,6 +1678,121 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
               content: { "application/pdf": { schema: { type: "string", format: "binary" } } },
             },
             304: { description: "The PDF is unchanged; reuse the privately cached one" },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+          },
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/versions/:version/video",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const video = await requireRequestSixb(context).artifacts.video(artifactId, {
+            version: versionParam(context.params.version),
+            retry: context.query.retry === "true",
+            render: context.query.render !== "false",
+          })
+          if (!video) return await refusal(context, artifactId, context.set)
+          if (video.status !== "ready") return video
+          const { file: _file, ...ready } = video
+          return ready
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactVersionParamsSchema,
+        query: ArtifactVideoExportQuerySchema,
+        response: {
+          200: ArtifactVideoExportResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Render a video to MP4",
+          description:
+            "Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again; render=false reads where it stands without asking. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "exportArtifactVideo",
+          security: accessTokenSecurityRequirement("exportArtifactVideo"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/video",
+      async (context) => artifactVideoResponse(host, context),
+      {
+        params: ArtifactVersionParamsSchema,
+        detail: {
+          summary: "Get a video's MP4",
+          description:
+            "The version rendered to MP4, H.264 and AAC, its index first, as a download named after the version's title, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactVideo",
+          security: accessTokenSecurityRequirement("getArtifactVideo"),
+          responses: {
+            200: {
+              description: "The MP4",
+              content: { "video/mp4": { schema: { type: "string", format: "binary" } } },
+            },
+            206: {
+              description: "A range of the MP4",
+              content: { "video/mp4": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The MP4 is unchanged; reuse the privately cached one" },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+            416: { description: "The range asked for is not in the MP4" },
+          },
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/scenes/:scene/still",
+      async (context) => artifactVideoStillResponse(host, context),
+      {
+        params: ArtifactVideoStillParamsSchema,
+        detail: {
+          summary: "Get the still of a video's scene",
+          description:
+            "A JPEG of the scene at the middle of its chapter, until the next scene starts, at most 1280 pixels wide, which a player shows for its chapter; the first scene's is the video's poster. It shows what the scene plays from other artifacts as the version's publisher reads it, so a shared link's guest gets none of a scene that plays any. A frozen version's still never changes, and is cached as such. 404 still_not_found until it is snapshotted, a few seconds after the video is published, or when it never will be.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactVideoStill",
+          security: accessTokenSecurityRequirement("getArtifactVideoStill"),
+          responses: {
+            200: {
+              description: "The still",
+              content: { "image/jpeg": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The still is unchanged; reuse the privately cached one" },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+          },
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/poster",
+      async (context) => artifactVideoStillResponse(host, context),
+      {
+        params: ArtifactVersionParamsSchema,
+        detail: {
+          summary: "Get a video's poster",
+          description:
+            "A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactVideoPoster",
+          security: accessTokenSecurityRequirement("getArtifactVideoPoster"),
+          responses: {
+            200: {
+              description: "The poster",
+              content: { "image/jpeg": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The poster is unchanged; reuse the privately cached one" },
             403: artifactErrorResponse(403),
             404: artifactErrorResponse(404),
           },

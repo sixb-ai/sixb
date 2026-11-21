@@ -63,8 +63,9 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 ## Where it is stricter
 
 - Frames are at most 3,840 pixels a side, in even numbers, as H.264 encodes them, at 24, 25, 30,
-  50, or 60 fps: a frame rate every segment of an export cuts cleanly at. Both are written in
-  digits alone, which HyperFrames' `parseInt` reads as `Number()` does.
+  or 60 fps: the rates HyperFrames renders a range of a film at, as an export renders a scene that
+  overlaps another. Both are written in digits alone, which HyperFrames' `parseInt` reads as
+  `Number()` does.
 - A root that plays something on its own timeline, a soundtrack or any element with `data-start`,
   writes its own `data-duration`. Without one, HyperFrames plays until the last of them ends, and a
   sound without `data-duration` lasts as long as its file: a length the HTML does not say.
@@ -73,7 +74,8 @@ docker run --rm --network none -v "$PWD":/w sixb-agent:1.4.0 \
 - A scene host sits in the root composition itself, never in another composition.
 - The root's `data-poster`, which HyperFrames does not read (its lint passes it), is the instant
   that shows the video before it plays, in seconds from 0 to before its end. The app's player
-  opens on it; without one, 70% into the first scene, where an opening has come in.
+  opens on it, and its card shows it; without one, both show the first scene's still, the middle
+  of its segment, where an opening has come in (`videoPosterMs`).
 - A scene file is one `<template>`, nothing beside it.
 
 ## Source positions
@@ -89,14 +91,19 @@ so a change stays one small text edit, in the live document and in the Agent's d
 
 - the frame kit;
 - `index.html` without its scene hosts, the root's `data-duration` and `data-poster`, and its
-  `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself.
-  A soundtrack trimmed with the video spares the scenes before the cut;
-- the scene's host and those of the scenes on screen with it, as one fades into the next, with
-  their times resolved and their order in `index.html`, which stacks them;
-- the scene's start in the video, only when the root plays or animates something of its own: a
-  timed element, a recording, a script that may build a timeline, or CSS that moves;
-- every other file, but two kinds: the other scenes' HTML, and the videos and sounds neither the
-  root, the scene, nor a scene beside it plays, the heavy files a version mostly changes.
+  `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself;
+- the scene's host and those of the scenes on screen during its segment, from the frame it starts
+  on up to the one the next scene starts on, as one fades into it, with their times resolved and
+  their order in `index.html`, which stacks them. A scene that fades in after the segment ends
+  shows in none of its frames, and is not in its key;
+- the scene's start in the video, only when the root shows something that moves of its own: a
+  timed element, a video, a script that may build a timeline, or CSS that moves;
+- every other file, but three kinds: the other scenes' HTML, the videos neither the root nor a
+  scene on screen during the segment plays, the heavy files a version mostly changes, and every
+  sound.
+
+A segment is pictures alone. The export mixes the whole video's sound once, apart, so a soundtrack
+changed, trimmed or moved renders no scene again (see Export below).
 
 `rootTimeline` reads `index.html` alone; publishing then reads what it links. An inline script
 counts, as it may build the root's timeline, and so does a script of the version that registers
@@ -110,8 +117,8 @@ moved by a 2 s CSS animation, then by a GSAP timeline, placed at 0 s and at 2 s,
 rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are identical, all 60
 distinct. The control, the same box animated in the root, differs on all 60 frames.
 
-So trimming a scene re-renders it and the scenes it overlaps, and those after it only when the
-root has a timeline of its own. An image, a stylesheet, a font, a script, or a nested composition
+So trimming a scene re-renders it and the scene it fades into, and those after it only when the
+root moves on its own. An image, a stylesheet, a font, a script, or a nested composition
 is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
 video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
 the scene's segment. So a recording a script plays is named in HTML too, by a `<video>` or an
@@ -119,5 +126,84 @@ the scene's segment. So a recording a script plays is named in HTML too, by a `<
 
 The key names no artifact: a segment is the scene's frames, rendered from these files alone, so a
 copy shares it. An `artifact:` file a scene plays is in its HTML as an address, which follows its
-target's latest version, so the key does not cover what it resolves to: whatever renders a segment
-of such a scene adds that to the key it keeps the segment under.
+target's latest version, so the key does not cover what it resolves to: the export adds that to
+the key it keeps the segment under (see Export below).
+
+## Export
+
+A version exports to one MP4 joined from segments kept apart from it under keys that hash what
+each is made of (`export.ts`), in `ArtifactStorage`'s video renders, which no artifact owns:
+
+| Segment | Its key holds |
+| --- | --- |
+| A scene's frames, from the frame it starts on up to the one the next scene starts on (the first from frame 0), silent | the scene's render key, where it starts from the scene's start and how many frames, the engine (`VIDEO_ENGINE`), the encoder settings, and what the `artifact:` addresses played by the root and the scenes on screen during it resolve to |
+| The whole video's sound | every file, the frame rate and count, the engine, and what every address resolves to |
+| The MP4 | its segments' keys, in order |
+
+So a version that changes one scene renders that scene's segment again, and the segment of the
+scene it fades into, and mixes the sound again, which takes seconds; a copy shares every segment.
+Scenes that start on one frame render in the first one's segment, and its scene's key covers every
+scene on screen during it (`scenesOnScreen`).
+
+```text
+sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
+  → artifact.video.export.requested   one job per export, carrying the version as it was asked for
+      asks for each missing segment, then for itself again, VIDEO_EXPORT_JOB.recheckMs later
+  → artifact.video.segment.requested  one job per segment key, shared by exports
+      a scene: `index.html` keeping the scenes on screen during it (project.ts), in a sandbox
+      once kept, asks the export that asked for it to look again at once
+      the sound: HyperFrames' own mix, through its distributed plan, which captures no frame,
+      from the version less the footage no unmuted video plays (`videoSoundProject`)
+  → the export, once every segment is kept: joined without encoding again, the sound muxed
+```
+
+- **A scene's project.** `videoSegmentRender` keeps the scenes on screen during the segment
+  and moves them earlier by as many whole frames as none of them starts before, up to the
+  segment's start, so each keeps its place between frames. When nothing starts before the segment
+  and the root does not move, the segment starts at frame 0 of its project, and HyperFrames renders
+  it whole, in parallel browsers. Otherwise, a crossfade from the scene before or a root that moves
+  on its own, it renders the range `--start`/`--end` of the project, which HyperFrames captures in
+  short chunks one after the other, about twice slower.
+- **Joining.** Every segment is H.264 at one quality, `VIDEO_SEGMENT_SETTINGS`, and starts on a
+  keyframe, so the MP4 is the segments as they are, with the sound, index first. Its frame count is
+  checked against the plan's.
+- **The sound** is one mix of the whole video, so music that crosses a cut never breaks: the
+  `audio.m4a` of HyperFrames' distributed plan (`planV2`), the very track its own render muxes,
+  bit for bit (measured on 0.9.68). A video with no sound gets silence, so every MP4 has a track.
+  No package export reaches the plan: `video.cjs` finds the module of the CLI's `dist` that
+  exports `planV2` and the request helpers beside it. That holds only because every key pins
+  `VIDEO_ENGINE`, which a sandbox must run: it names `HYPERFRAMES_VERSION`, which a unit test holds
+  to the agent image's release. When the module is gone, or its manifest moved, the sound fails at
+  once, kept with what changed, and `video-export.e2e.ts`, run against the agent image, fails by
+  name on an image that upgrades HyperFrames.
+- **Waiting** is a job, not a worker: the export looks again a few seconds later in a job it asks
+  for in its own place, asking for nothing then. Each segment it asked for makes it look at once,
+  once kept or failed, carrying the export's payload; the later look is a backstop, for an export
+  whose segment another asked for first. A segment job always keeps its file or why not,
+  so asking again for a segment never strands an export; a retry forgets the failures and asks
+  anew with `replace`, in a job apart from the export's, since a segment that finishes takes the
+  export's place with the payload it was asked with, which asks for nothing. A segment found kept
+  still makes its export look, so the last look carries the latest ask's `askedAt`.
+- **Failures.** A segment that fails after `VIDEO_SEGMENT_JOB.attempts` fails the export, naming
+  the scene by its label, else its id. An export asked for by a Sixb whose keys differ from the
+  worker's, as while a deploy rolls out, tries again until its attempts are spent, then keeps why.
+  A sandbox without HyperFrames, or with another version than `VIDEO_ENGINE`, keeps why at once,
+  with `lacks: "sandbox_tools"`, which the app reads as export not being available rather than
+  offering a retry: rendering there would keep frames under a key that does not name what made
+  them.
+- **Stills** (`stills.ts`): the middle of each scene's segment, what its chapter plays until the
+  next scene starts, snapshotted with `hyperframes snapshot` when a version is published, once it
+  rests, and kept under the scene's key. The poster is the instant the root's `data-poster` names,
+  else the first scene's still.
+
+### What to ask HyperFrames for
+
+The scan goes once HyperFrames exports a way to mix a project's sound alone, which its CLI has
+internally (`processCompositionAudio`, run by `planV2` and by every render). Any of these would do:
+
+- `hyperframes render --audio-only -o mix.m4a`, the render's own delivery mix, no frame captured;
+- an `audio` mode on `hyperframes/api`: `mixAudio(projectDir, { fps, signal }) → { path, durationMs }`;
+- `planV2` and its request helpers on `hyperframes/api`, with the manifest's layout documented.
+
+The first is the one to ask for: a CLI flag keeps the render worker on the same contract as its
+segments, and the sandbox needs nothing else.

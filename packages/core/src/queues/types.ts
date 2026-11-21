@@ -1,3 +1,5 @@
+import type { VideoOutline } from "../artifacts/outline"
+import type { VideoMediaFile, VideoSegment } from "../artifacts/video/export"
 import type { FileRef } from "../blob-storage/types"
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
@@ -8,6 +10,7 @@ import type {
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { AgentRunFailureCode } from "../storage/agents/types"
+import type { ArtifactFile, ArtifactReference } from "../storage/artifacts/types"
 import type { PipelineRunFailureCode } from "../storage/pipeline-runs/types"
 import type { SyncRunFailureCode } from "../storage/sync-runs/types"
 import type { WorkflowRunFailureCode } from "../storage/workflow-runs/types"
@@ -312,11 +315,97 @@ export interface ArtifactMediaRequestedQueueJob
     }
   > {}
 
+/**
+ * Someone asked for a video version's MP4: the render worker assembles it once each of its
+ * segments is rendered, asking for those still missing and looking again a few seconds later. One
+ * job per export, by its key. It carries what the version held when asked, so it renders that
+ * whatever the version holds since.
+ */
+export interface ArtifactVideoExportRequestedQueueJob
+  extends QueueJob<
+    "artifact.video.export.requested",
+    {
+      readonly artifactId: string
+      readonly version: number
+      /** What the export is made of, as `videoExportPlan` hashes it. */
+      readonly key: string
+      readonly outline: VideoOutline
+      readonly files: readonly ArtifactFile[]
+      readonly references: readonly ArtifactReference[]
+      /** What its `artifact:` addresses resolved to, as whoever asked reads them. */
+      readonly media: readonly VideoMediaFile[]
+      /**
+       * When it was asked for, as ISO, or retried since: past `VIDEO_EXPORT_JOB.waitMs`, it gives
+       * up.
+       */
+      readonly askedAt: string
+      /**
+       * Asked again after a failure, in a job apart from the export's: it asks anew for each
+       * segment still missing, then has the export look at once.
+       */
+      readonly retry?: boolean
+      /** Its segments are asked for: it looks again whether they are rendered, asking nothing. */
+      readonly waiting?: boolean
+    }
+  > {}
+
+/**
+ * An export needs one of its segments: the render worker renders a scene's frames alone, or mixes
+ * the whole video's sound, in a blank sandbox of the project. One job per segment, by its key, so
+ * exports that share one render it once.
+ */
+export interface ArtifactVideoSegmentRequestedQueueJob
+  extends QueueJob<
+    "artifact.video.segment.requested",
+    {
+      /** The export's artifact and version, which name it in logs and its download URLs. */
+      readonly artifactId: string
+      readonly version: number
+      readonly key: string
+      readonly segment: VideoSegment
+      /** The video's frame, rate and length, which bound how long it may take. */
+      readonly video: Pick<VideoOutline, "width" | "height" | "fps" | "durationMs">
+      /**
+       * The files it renders from, as the version held them when the export was asked for. A
+       * scene's are those its frames are made of, its `index.html` keeping its scenes alone.
+       */
+      readonly files: readonly ArtifactFile[]
+      readonly media: readonly VideoMediaFile[]
+      /** A scene's frames in that project: from `from`, up to `to`. */
+      readonly frames?: { readonly from: number; readonly to: number }
+      /**
+       * The export that asked for it, as it asked: once the segment is kept, or why it could not
+       * be, that export looks again at once. Others that share the segment look on their own.
+       */
+      readonly waitingExport?: ArtifactVideoExportRequestedQueueJob["payload"]
+    }
+  > {}
+
+/**
+ * A video version's scenes miss their stills: the render worker snapshots each at its middle in a
+ * blank sandbox of the project. One job per artifact, which each write that asks replaces.
+ */
+export interface ArtifactVideoStillsRequestedQueueJob
+  extends QueueJob<
+    "artifact.video.stills.requested",
+    {
+      readonly artifactId: string
+      readonly version: number
+      /** When the version's content was written as asked for: once written again, it renders nothing. */
+      readonly updatedAt: string
+      /** What its `artifact:` addresses resolved to, as its publisher reads them. */
+      readonly media: readonly VideoMediaFile[]
+    }
+  > {}
+
 /** What renders in a sandbox of the project: RenderWorker consumes it. */
 export type RenderQueueJob =
   | ArtifactPdfRequestedQueueJob
   | ArtifactPreviewsRequestedQueueJob
   | ArtifactMediaRequestedQueueJob
+  | ArtifactVideoExportRequestedQueueJob
+  | ArtifactVideoSegmentRequestedQueueJob
+  | ArtifactVideoStillsRequestedQueueJob
 
 export interface Queues {
   readonly vectorIndexing: Queue<
@@ -331,7 +420,8 @@ export interface Queues {
   readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   /**
    * What the framework renders in a sandbox of the project: a designed document's PDF, the
-   * pictures of a canvas's boards, and what is derived of a video or a sound. RenderWorker
+   * pictures of a canvas's boards, what is derived of a video or a sound, and a video's stills and
+   * MP4. RenderWorker
    * consumes this lane, so a render never waits behind an agent's run or takes its slot.
    */
   readonly renders: Queue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">

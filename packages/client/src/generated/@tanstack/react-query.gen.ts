@@ -44,6 +44,7 @@ import {
   exchangeDeviceAuthorization,
   exchangeSharedAccess,
   existsObjects,
+  exportArtifactVideo,
   facetObjects,
   forkAgentThread,
   freezeArtifactVersion,
@@ -81,6 +82,9 @@ import {
   getArtifactRestorePointFileContent,
   getArtifactState,
   getArtifactVersion,
+  getArtifactVideo,
+  getArtifactVideoPoster,
+  getArtifactVideoStill,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
@@ -334,6 +338,9 @@ import type {
   ExistsObjectsData,
   ExistsObjectsError,
   ExistsObjectsResponse,
+  ExportArtifactVideoData,
+  ExportArtifactVideoError,
+  ExportArtifactVideoResponse,
   FacetObjectsData,
   FacetObjectsError,
   FacetObjectsResponse,
@@ -445,6 +452,15 @@ import type {
   GetArtifactVersionData,
   GetArtifactVersionError,
   GetArtifactVersionResponse,
+  GetArtifactVideoData,
+  GetArtifactVideoError,
+  GetArtifactVideoPosterData,
+  GetArtifactVideoPosterError,
+  GetArtifactVideoPosterResponse,
+  GetArtifactVideoResponse,
+  GetArtifactVideoStillData,
+  GetArtifactVideoStillError,
+  GetArtifactVideoStillResponse,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsError,
   GetAuthAccessManagementOptionsResponse,
@@ -7050,6 +7066,116 @@ export const printArtifactPdfMutation = (
   }
   return mutationOptions
 }
+
+export const getArtifactVideoQueryKey = (options: Options<GetArtifactVideoData>) =>
+  createQueryKey("getArtifactVideo", options)
+
+/**
+ * Get a video's MP4
+ *
+ * The version rendered to MP4, H.264 and AAC, its index first, as a download named after the version's title, with the artifact: files it plays as the caller reads them. Ranges are served. 404 video_not_found until it is rendered: ask for it with POST first.
+ */
+export const getArtifactVideoOptions = (options: Options<GetArtifactVideoData>) =>
+  queryOptions<
+    GetArtifactVideoResponse,
+    GetArtifactVideoError,
+    GetArtifactVideoResponse,
+    ReturnType<typeof getArtifactVideoQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactVideo({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactVideoQueryKey(options),
+  })
+
+/**
+ * Render a video to MP4
+ *
+ * Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again; render=false reads where it stands without asking. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.
+ */
+export const exportArtifactVideoMutation = (
+  options?: Partial<Options<ExportArtifactVideoData>>
+): UseMutationOptions<
+  ExportArtifactVideoResponse,
+  ExportArtifactVideoError,
+  Options<ExportArtifactVideoData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ExportArtifactVideoResponse,
+    ExportArtifactVideoError,
+    Options<ExportArtifactVideoData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await exportArtifactVideo({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getArtifactVideoStillQueryKey = (options: Options<GetArtifactVideoStillData>) =>
+  createQueryKey("getArtifactVideoStill", options)
+
+/**
+ * Get the still of a video's scene
+ *
+ * A JPEG of the scene at the middle of its chapter, until the next scene starts, at most 1280 pixels wide, which a player shows for its chapter; the first scene's is the video's poster. It shows what the scene plays from other artifacts as the version's publisher reads it, so a shared link's guest gets none of a scene that plays any. A frozen version's still never changes, and is cached as such. 404 still_not_found until it is snapshotted, a few seconds after the video is published, or when it never will be.
+ */
+export const getArtifactVideoStillOptions = (options: Options<GetArtifactVideoStillData>) =>
+  queryOptions<
+    GetArtifactVideoStillResponse,
+    GetArtifactVideoStillError,
+    GetArtifactVideoStillResponse,
+    ReturnType<typeof getArtifactVideoStillQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactVideoStill({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactVideoStillQueryKey(options),
+  })
+
+export const getArtifactVideoPosterQueryKey = (options: Options<GetArtifactVideoPosterData>) =>
+  createQueryKey("getArtifactVideoPoster", options)
+
+/**
+ * Get a video's poster
+ *
+ * A JPEG of the video before it plays, at most 1280 pixels wide: the instant its root's data-poster names, else its first scene's still. Cached and refused as a scene's still is. 404 still_not_found until it is snapshotted.
+ */
+export const getArtifactVideoPosterOptions = (options: Options<GetArtifactVideoPosterData>) =>
+  queryOptions<
+    GetArtifactVideoPosterResponse,
+    GetArtifactVideoPosterError,
+    GetArtifactVideoPosterResponse,
+    ReturnType<typeof getArtifactVideoPosterQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactVideoPoster({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactVideoPosterQueryKey(options),
+  })
 
 export const getArtifactBoardPreviewQueryKey = (options: Options<GetArtifactBoardPreviewData>) =>
   createQueryKey("getArtifactBoardPreview", options)

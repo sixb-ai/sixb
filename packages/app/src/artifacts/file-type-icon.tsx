@@ -1,6 +1,6 @@
 import { cn } from "@sixb/ui/lib/utils"
 
-export type FileTypeName = "xlsx" | "csv" | "md" | "pdf" | "image" | "file"
+export type FileTypeName = "xlsx" | "csv" | "md" | "pdf" | "image" | "video" | "file"
 
 /**
  * Each type's badge color and the lines drawn on its page: a workbook's grid, a CSV's rows, a
@@ -13,6 +13,7 @@ const FILE_TYPES: Record<FileTypeName, { readonly label: string; readonly color:
   md: { label: "MD", color: "#2563EB" },
   pdf: { label: "PDF", color: "#D93025" },
   image: { label: "IMG", color: "#7C3AED" },
+  video: { label: "MP4", color: "#DB2777" },
   file: { label: "FILE", color: "#64748B" },
 }
 
@@ -24,6 +25,7 @@ export function fileTypeOf(name: string): FileTypeName {
   if (extension === "md" || extension === "markdown") return "md"
   if (extension === "pdf") return "pdf"
   if (["png", "jpg", "jpeg", "gif", "webp", "avif", "svg"].includes(extension)) return "image"
+  if (extension === "mp4") return "video"
   return "file"
 }
 

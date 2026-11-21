@@ -1,4 +1,4 @@
-import type { VideoOutline, VideoOutlineScene } from "@sixb/core/artifacts"
+import { type VideoOutline, type VideoOutlineScene, videoPosterMs } from "@sixb/core/artifacts"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
@@ -26,6 +26,8 @@ import { CommentModeHint } from "../../comments/commenting"
 import type { CommentThread } from "../../comments/comments"
 import { CommentsPanel } from "../../comments/panel"
 import { useCopyFeedback } from "../../copy-feedback"
+import { useVideoRecordingPoster } from "../../derived-media"
+import { videoStillUrl } from "../../file-source"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import { useArtifactMessages } from "../../messages"
 import { formatClock, MEDIA_FRAME } from "../../playback"
@@ -114,7 +116,7 @@ export function VideoPlayer({
     if (playback.phase !== "ready" || started.current === attempt) return
     started.current = attempt
     if (resumeAt.current > 0) playback.seek(resumeAt.current)
-    else if (!begun) playback.cue(posterAt(outline))
+    else if (!begun) playback.cue(videoPosterMs(outline) / 1000)
   }, [playback.phase, playback.seek, playback.cue, attempt, begun, outline])
 
   // A frame that loaded, but whose runtime never built the timeline, failed to start.
@@ -201,6 +203,8 @@ export function VideoPlayer({
   const chapter = chapterAt(outline, playback.time)
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
   const many = outline.scenes.length > 1
+  // What the chapters show until their stills are snapshotted, read once they open.
+  const recordingPoster = useVideoRecordingPoster(version, chaptersOpen && many)
 
   const goTo = (seconds: number, say?: string) => {
     setBegun(true)
@@ -579,6 +583,8 @@ export function VideoPlayer({
     chaptersOpen && many ? (
       <ChaptersPanel
         outline={outline}
+        still={(scene) => videoStillUrl(version, scene.id)}
+        poster={recordingPoster}
         current={chapter?.id}
         onSeek={goToChapter}
         onClose={() => setChaptersOpen(false)}
@@ -1023,21 +1029,6 @@ function useDelayed(value: boolean, ms: number): boolean {
     return () => clearTimeout(timer)
   }, [value, ms])
   return shown
-}
-
-/** How far into its first scene a video without a poster shows before it plays. */
-const POSTER_INTO_FIRST_SCENE = 0.7
-
-/**
- * Where a video shows before it first plays: the instant its root's `data-poster` names, else most
- * of the way into its first scene, where its opening has come in, rather than its first frame,
- * which is often still blank.
- */
-function posterAt(outline: VideoOutline): number {
-  if (outline.posterMs !== undefined) return outline.posterMs / 1000
-
-  const first = outline.scenes[0]
-  return first ? (first.startMs + first.durationMs * POSTER_INTO_FIRST_SCENE) / 1000 : 0
 }
 
 function clamp(value: number): number {

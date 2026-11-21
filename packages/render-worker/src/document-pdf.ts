@@ -5,6 +5,7 @@ import {
   DOCUMENT_PDF_JOB,
   documentPdfKey,
   MAX_DOCUMENT_PDF_BYTES,
+  titleFileName,
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactPdfRequestedQueueJob } from "@sixb/core/queues"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
@@ -180,18 +181,8 @@ async function print(input: {
     body: bytes,
     expectedSizeBytes: bytes.byteLength,
     // The name it downloads as: its title, without what a file name may not hold.
-    fileName: `${pdfName(version.title)}.pdf`,
+    fileName: `${titleFileName(version.title, "Document")}.pdf`,
     mediaType: "application/pdf",
   })
   return { file, pages }
-}
-
-/** A title as a file name: what one may not hold, and each run of spaces, one space. */
-function pdfName(title: string): string {
-  const name = [...title]
-    .map((char) => (char < " " || '\\/:*?"<>|'.includes(char) ? " " : char))
-    .join("")
-    .replace(/\s+/g, " ")
-    .trim()
-  return name || "Document"
 }
