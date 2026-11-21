@@ -15,6 +15,8 @@ export interface DerivedMedia {
   readonly proxy?: string
   /** A picture of a representative moment, not a black first frame. */
   readonly poster?: string
+  /** Its sound's peaks, which a waveform draws: see `usePeaks`. */
+  readonly waveform?: string
 }
 
 const NONE: DerivedMedia = {}
@@ -46,10 +48,11 @@ export function useDerivedMedia(
         throwOnError: true,
         signal,
       })
-      const { proxy, poster } = data.parts
+      const { proxy, poster, waveform } = data.parts
       return {
         ...(proxy.status === "ready" ? { proxy: apiFileUrl(proxy.url) } : {}),
         ...(poster.status === "ready" ? { poster: apiFileUrl(poster.url) } : {}),
+        ...(waveform.status === "ready" ? { waveform: apiFileUrl(waveform.url) } : {}),
       }
     },
     enabled: enabled && file !== undefined,

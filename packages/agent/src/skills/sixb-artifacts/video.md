@@ -66,7 +66,9 @@ work/launch-teaser/
 - **A host per scene** in the root, in play order: `id` and `data-composition-id` both the scene's
   id (a letter, then letters, digits, `-`, `_`), `data-composition-src`, `data-start`,
   `data-duration`, and `data-label`, its chapter's name. The id names the scene in addresses,
-  comments and renders: keep it across versions.
+  comments and renders: keep it across versions. A later host paints over an earlier one; once a
+  person reorders scenes, hosts stay where they were and a `style="z-index: …"` on them, and on
+  what the root shows over them, keeps a crossfade and a captions bar on top: keep it.
 - **Starts chain.** `data-start` is seconds, or the scene it follows: `"hook"` starts when `hook`
   ends, `"hook - 0.4"` overlaps it for a crossfade, `"hook + 1"` leaves a gap. Chained, a scene you
   lengthen moves the ones after it. An overlap shows both scenes: keep what each repeats, such as a
@@ -123,9 +125,11 @@ motion designer would ship.
   fades in and out; alone, half. Bring a voice to -16 LUFS with
   `hyperframes normalize-audio --target <id> --write`. Cut on the beat
   (`hyperframes audio <file> --only beats`) or between sentences, never mid-word. A voice-over is
-  one `sixb models speech` call per line, each its own `<audio>`, so its caption shares its start
-  and length. Music comes from the user or the project's files: the sandbox cannot fetch any from
-  the web, so ask for a track when the video needs one.
+  one `sixb models speech` call per line, each its own `<audio>` in the scene it is said over,
+  beside its caption, timed from the scene's start: it shares the caption's start and length, and
+  moves with its scene when someone trims or reorders it. Only what plays under every scene, the
+  music, sits in `index.html`. Music comes from the user or the project's files: the sandbox
+  cannot fetch any from the web, so ask for a track when the video needs one.
 - **An ending that lands.** The logo or product, one line, one thing to do: an end card of three
   to four seconds in all, still for the last two. Never a frame with nothing on it, at a cut
   either: a scene's last frame still shows its subject.

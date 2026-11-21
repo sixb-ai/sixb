@@ -2,6 +2,7 @@ import * as Y from "yjs"
 import type { FileRef } from "../../blob-storage/types"
 import { CANVAS_FILE, type CanvasItem, formatCanvas, parseCanvas } from "../canvas"
 import type { ArtifactKind } from "../kinds"
+import { VIDEO_ENTRY, videoFilesPlayed } from "../video/composition"
 import {
   blocksFromY,
   blocksToMarkdown,
@@ -38,7 +39,9 @@ import {
 // Markdown document holds `document.md` as the blocks its editor edits, a `Y.XmlFragment`
 // (`./blocks`), so typing in one paragraph and moving another merge as block edits do. A designed
 // document holds `document.html` as a page, its body's blocks a `Y.XmlFragment` too (`./page`),
-// unless its source is not one an editor can hold whole: then it is text.
+// unless its source is not one an editor can hold whole: then it is text. A video holds none: its
+// `index.html` and scenes are texts, which its editor changes attribute by attribute
+// (`../video/edit.ts`), and its recordings are references.
 
 /** One file of an artifact as the live layer reads it: its text, or its stored bytes. */
 export type LiveFile = { readonly text: string } | { readonly file: FileRef }
@@ -296,10 +299,31 @@ export function mergeIntoDocument(
       files.set(path, entryOf(kind, path, file))
     }
 
-    for (const path of base.keys()) {
-      if (!next.has(path)) files.delete(path)
+    // A video's recording goes only once nothing plays it: `next` may stop playing one that
+    // someone else's edit, merged above, has just started playing.
+    const gone = [...base.keys()].filter((path) => !next.has(path))
+    const recording = (path: string) => kind === "video" && "file" in (base.get(path) ?? {})
+    for (const path of gone) {
+      if (!recording(path)) files.delete(path)
+    }
+
+    const played = kind === "video" ? videoRecordingsPlayed(files) : new Set<string>()
+    for (const path of gone) {
+      if (recording(path) && !played.has(path)) files.delete(path)
     }
   }, origin)
+}
+
+/** The files a video's HTML, as the document holds it now, plays. */
+function videoRecordingsPlayed(files: Y.Map<unknown>): ReadonlySet<string> {
+  const index = textOf(files.get(VIDEO_ENTRY))
+  if (index === undefined) return new Set()
+
+  return videoFilesPlayed(
+    index,
+    (path) => textOf(files.get(path)),
+    (path) => files.has(path)
+  )
 }
 
 /**

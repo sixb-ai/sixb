@@ -237,7 +237,12 @@ describe("what is derived of an artifact's media", () => {
               atMs: 1520,
             },
             filmstrip: { status: "pending" },
-            waveform: { status: "pending" },
+            waveform: {
+              status: "ready",
+              url: url("waveform"),
+              mediaType: "application/json",
+              sizeBytes: 9,
+            },
             cuts: { status: "pending" },
             transcript: { status: "unavailable", reason: "No model." },
           },
@@ -254,6 +259,7 @@ describe("what is derived of an artifact's media", () => {
     expect(derived).toEqual({
       proxy: `https://api.sixb.test${url("proxy")}`,
       poster: `https://api.sixb.test${url("poster")}`,
+      waveform: `https://api.sixb.test${url("waveform")}`,
     })
   })
 })
@@ -307,6 +313,42 @@ describe("the sound player", () => {
     fireEvent.keyDown(position, { key: "ArrowLeft" })
     fireEvent.keyDown(position, { key: "ArrowLeft" })
     expect(audio.currentTime).toBe(0)
+  })
+
+  // Reproduce by dropping the Waveform from the sound player: its track stays a plain line, though
+  // Sixb derived where the recording speaks and pauses.
+  test("draws its track as the waveform Sixb derived, played in full ink", () => {
+    const call = source("call.mp3", "audio/mpeg")
+    const peaks = "https://api.sixb.test/peaks"
+    // The track is as wide as a browser lays it out; the test's window lays out nothing.
+    const width = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, "clientWidth")
+    Object.defineProperty(window.HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 300,
+    })
+    try {
+      const view = render(<AudioPlayer source={call} name="call.mp3" />, [
+        [call, { waveform: peaks }],
+      ])
+      act(() => {
+        view.cache.setQueryData(["artifact-media-peaks", peaks], {
+          peaksPerSecond: 10,
+          peaks: Array.from({ length: 600 }, (_, index) => (index % 7) * 10),
+          loudest: 60,
+        })
+      })
+      const audio = view.container.querySelector("audio") as HTMLAudioElement
+      playAs(audio, { duration: 60, header: 60 })
+
+      // A tint for what is to come, and full ink up to the playhead.
+      const waves = view.container.querySelectorAll('svg[preserveAspectRatio="none"]')
+      expect(waves.length).toBe(2)
+      fireEvent.keyDown(view.getByRole("slider"), { key: "PageUp" })
+      const played = waves[1]?.closest("span") as HTMLElement
+      expect(played.style.clipPath).toBe("inset(0 75% 0 0)")
+    } finally {
+      if (width) Object.defineProperty(window.HTMLElement.prototype, "clientWidth", width)
+    }
   })
 })
 

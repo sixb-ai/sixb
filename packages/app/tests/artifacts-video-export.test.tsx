@@ -536,7 +536,11 @@ describe("a video's pictures", () => {
           return Response.json({
             path: url.searchParams.get("path"),
             version: 3,
-            parts: { proxy: { status: "pending" }, poster: { ...ready, atMs: 1200 } },
+            parts: {
+              proxy: { status: "pending" },
+              poster: { ...ready, atMs: 1200 },
+              waveform: { status: "pending" },
+            },
           })
         },
         { preconnect: fetch.preconnect }

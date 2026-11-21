@@ -5,6 +5,13 @@ import type { VideoOutline } from "../src/artifacts/outline"
 import { videoSoundProject } from "../src/artifacts/publish/video"
 import { readVideoComposition } from "../src/artifacts/video/composition"
 import {
+  applyVideoEdit,
+  cutRange,
+  setSceneLength,
+  type VideoEditResult,
+  type VideoSources,
+} from "../src/artifacts/video/edit"
+import {
   type VideoExportSource,
   videoExportJobId,
   videoExportKeys,
@@ -199,6 +206,62 @@ describe("a video's export plan", () => {
 
     // A copy of the video, another artifact, exports to the same MP4.
     expect(videoExportPlan(sourceOf((await publish(LAUNCH, "Copy")).version)).key).toBe(before.key)
+  })
+
+  // Reproduce by keeping the root's <audio> elements in every scene's render key (drop
+  // `composition.sounds` from sceneRenderKeys' cut): the intro renders again with the shorter
+  // music. Or by cutting the 490 ms asked for rather than whole frame steps (rippleRemove's spans
+  // as merged, setSceneLength's `ms` as given): the outro then starts 10 ms into a frame, and
+  // renders again.
+  test("renders again only the scene an edit shortens, and mixes the sound again", async () => {
+    const { publish, withLogo } = setup()
+    const { LAUNCH } = await withLogo()
+    // The outro starts as the demo ends, so the demo's frames are in no segment but its own.
+    const root = index("demo").replaceAll('data-duration="7"', 'data-duration="7.5"')
+    const film: Readonly<Record<string, string>> = { ...LAUNCH, "index.html": root }
+    const sources: VideoSources = new Map(
+      Object.entries(film).map(([path, text]) => [path, path.endsWith(".html") ? text : null])
+    )
+
+    const edited = (result: VideoEditResult) => {
+      if ("error" in result) throw new Error(result.error)
+      const files = [...applyVideoEdit(sources, result.edit)]
+      return Object.fromEntries(files.map(([path, text]) => [path, text ?? film[path] ?? ""]))
+    }
+    const exported = async (files: Readonly<Record<string, string>>) => {
+      const { version } = await publish(files)
+      const scenes = (version.outline as VideoOutline).scenes
+      return {
+        renderKeys: scenes.map((each) => each.renderKey),
+        plan: videoExportPlan(sourceOf(version)),
+      }
+    }
+    const before = await exported(film)
+
+    // 490 ms off the demo, by its length or by a range of it, takes half a second: 15 frames.
+    for (const edit of [
+      setSceneLength(sources, "demo", 2510),
+      cutRange(sources, { startMs: 3000, endMs: 3490 }),
+    ]) {
+      const files = edited(edit)
+      const after = await exported(files)
+
+      // The intro, the demo, the outro, and the sound: the outro, half a second sooner, keeps its
+      // frames.
+      expect(
+        after.plan.segments.map(
+          (segment, index) => segment.key === before.plan.segments[index]?.key
+        )
+      ).toEqual([true, false, true, false])
+      const [intro, , outro] = before.renderKeys
+      expect(after.renderKeys).toEqual([intro, expect.any(String), outro])
+
+      // The music, which ran to the end, ends with the video.
+      expect(after.plan.frames).toBe(210)
+      expect(files["index.html"]).toContain(
+        '<audio id="music" src="media/music.m4a" data-start="0" data-duration="7">'
+      )
+    }
   })
 
   // Reproduce by keying a scene with every scene it ever plays with (sceneRenderKeys) rather than

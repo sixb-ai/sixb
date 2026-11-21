@@ -7,7 +7,7 @@ import { FRAME_ASSETS, injectFrameAssets } from "../src/artifacts/frames/assets"
 import { frameEntries, frameLayout } from "../src/artifacts/frames/entries"
 import { HYPERFRAMES_RUNTIME, HYPERFRAMES_VERSION } from "../src/artifacts/frames/hyperframes"
 import { FRAME_DEFAULT_THEMES } from "../src/artifacts/frames/kit"
-import { FRAME_PROTOCOL } from "../src/artifacts/frames/protocol"
+import { FRAME_PROTOCOL, parseFrameEvent } from "../src/artifacts/frames/protocol"
 import { videoFrameRuntime } from "../src/artifacts/frames/video-runtime"
 import type { VideoOutline } from "../src/artifacts/outline"
 import { frameKitDigest } from "../src/artifacts/publish/previews"
@@ -158,6 +158,40 @@ describe("the frame's runtime in a video", () => {
     page.__hfStartupError = "HyperFrames runtime failed: TypeError"
     window.dispatchEvent(new window.ErrorEvent("error", { message: "TypeError" }))
     expect(posted.at(-1)).toEqual(failed)
+  })
+
+  test("finds the words under a point of the picture, in their scene, for the editor to retype", () => {
+    const { document, posted, send } = videoFrame("Mozilla/5.0 (Macintosh)")
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div data-composition-id="main"><div data-composition-id="outro">
+        <p class="caption">Thank you</p><h2>Thank you</h2>
+        <h2 id="picked">Thank <br>you</h2><h2><span>Not</span> alone</h2>
+      </div></div>`
+    )
+    const picked = document.getElementById("picked")
+    const outro = document.querySelector('[data-composition-id="outro"]')
+    if (!picked || !outro) throw new Error("The scene was not written.")
+    picked.getBoundingClientRect = () => ({ left: 192, top: 540, width: 960, height: 108 }) as never
+    let under: typeof outro = picked
+    document.elementFromPoint = () => under
+
+    send({ protocol: FRAME_PROTOCOL, id: 3, method: "video.pick", params: { x: 0.5, y: 0.55 } })
+    expect(posted.at(-2)).toEqual({ protocol: FRAME_PROTOCOL, id: 3 })
+    expect(posted.at(-1)).toMatchObject({
+      event: "video.picked",
+      params: { target: { scene: "outro", tag: "h2", text: "Thank you", occurrence: 1 } },
+    })
+
+    // Where it shows, in fractions of the picture: its box over the frame's own size.
+    const { rect } = (posted.at(-1)?.params as { target: { rect: Record<string, number> } }).target
+    expect(rect.x / rect.width).toBeCloseTo(0.2, 3)
+    expect(parseFrameEvent(posted.at(-1))).toEqual(posted.at(-1) as never)
+
+    // A composition holds elements, not words alone: nothing to retype there.
+    under = outro
+    send({ protocol: FRAME_PROTOCOL, id: 4, method: "video.pick", params: { x: 0.5, y: 0.6 } })
+    expect(posted.at(-1)).toMatchObject({ event: "video.picked", params: { target: null } })
   })
 
   test("on a phone, starts and stops every recording on the first play, in the reader's tap", () => {

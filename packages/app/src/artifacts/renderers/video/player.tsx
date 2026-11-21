@@ -988,7 +988,7 @@ function useWidth(element: RefObject<HTMLElement | null>): number {
 }
 
 /** An element's size, as it changes. */
-function useSize(element: RefObject<HTMLElement | null>): { width: number; height: number } {
+export function useSize(element: RefObject<HTMLElement | null>): { width: number; height: number } {
   const [size, setSize] = useState({ width: 0, height: 0 })
   // Before the first paint, so a phone never shows the wide layout first.
   useLayoutEffect(() => {

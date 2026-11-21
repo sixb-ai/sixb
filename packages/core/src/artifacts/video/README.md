@@ -94,8 +94,8 @@ so a change stays one small text edit, in the live document and in the Agent's d
   `<audio>` elements, which show nothing: the frame, the root's styles, and what it shows itself;
 - the scene's host and those of the scenes on screen during its segment, from the frame it starts
   on up to the one the next scene starts on, as one fades into it, with their times resolved and
-  their order in `index.html`, which stacks them. A scene that fades in after the segment ends
-  shows in none of its frames, and is not in its key;
+  their order in `index.html` and their `z-index`, which stack them. A scene that fades in after
+  the segment ends shows in none of its frames, and is not in its key;
 - the scene's start in the video, only when the root shows something that moves of its own: a
   timed element, a video, a script that may build a timeline, or CSS that moves;
 - every other file, but three kinds: the other scenes' HTML, the videos neither the root nor a
@@ -118,7 +118,8 @@ rendered with `--crf 0 --workers 1 --start/--end`; the 60 frames' `framemd5` are
 distinct. The control, the same box animated in the root, differs on all 60 frames.
 
 So trimming a scene re-renders it and the scene it fades into, and those after it only when the
-root moves on its own. An image, a stylesheet, a font, a script, or a nested composition
+root moves on its own, or when the trim moves them by part of a frame, which the editor's cuts
+never do (see Editing). An image, a stylesheet, a font, a script, or a nested composition
 is in every key, whatever loads it: CSS `url()`, `srcset`, or a script. The one blind spot is a
 video or a sound a scene loads by script alone, which no HTML attribute names: changing it keeps
 the scene's segment. So a recording a script plays is named in HTML too, by a `<video>` or an
@@ -207,3 +208,83 @@ internally (`processCompositionAudio`, run by `planV2` and by every render). Any
 
 The first is the one to ask for: a CLI flag keeps the render worker on the same contract as its
 segments, and the sandbox needs nothing else.
+
+## Editing
+
+The app's editor changes a video in its live document: `index.html` and each scene file are
+`Y.Text`, each recording a reference. It never writes a file whole. `timeline.ts` reads what an
+editor touches, and `edit.ts` turns each operation into changes to the text.
+
+- **Clips** (`readSceneTimeline`, `readRootTimeline`): the timed elements of one composition,
+  anything with `data-start` and every `<video>` and `<audio>`, with their timing as written and the
+  span of each attribute. A clip is named by its `id`, else by its place among the file's clips
+  (`#2`). Its track follows from what it is: picture, text, or sound.
+- **Targets** (`videoTarget`): how the editor names an element in an operation. One without an id
+  carries its tag, words and file with its place: someone else's edit in between may shift the
+  place, and the operation then takes the one element still alike, or refuses when none or several
+  are. It never edits another element than the one the reader chose.
+- **Texts**: the elements holding words alone, timed or not, which an editor types over.
+- **Operations** take the files as they are and return an edit or a refusal: a scene's length,
+  label, place, copy and removal; a clip's timing, trim, move, split, removal, sound and words; an
+  import; a range cut from the video, each scene it spans losing its share; stretches of a
+  recording cut wherever it plays.
+
+How an operation works:
+
+1. It changes a working copy step by step, reading the files again between steps, so each step
+   finds what the one before left.
+2. A step that moves a scene first gives the root room for any length (`openRoot`), so every
+   step in between reads as a video. The last step writes the root's real length, and moves a
+   soundtrack that ran to the end, what the root plays during a scene, and the poster, with it
+   (`fitRoot`).
+3. The result is read as publishing reads a video (`readVideoComposition`); anything else is
+   refused, with the reason.
+4. The edit is the difference from the files it started from: the live layer's line diff, each
+   line written again narrowed to the attributes and words that changed. Two people changing
+   different values change different text, which Yjs merges, and the Agent's next diff reads as an
+   edit. Two writing one attribute at once leave it twice; the first counts, as in a browser, and
+   the next write keeps it alone. Its changes are `BoardChange`s, applied to a `Y.Text` by
+   `applyBoardEditToText`.
+
+What moves with what:
+
+- Scenes chained by `data-start` follow as HyperFrames moves them. A scene at a number of seconds
+  after the change moves as much. A reorder or a removal chains the scenes whose predecessor
+  changed, each keeping its own overlap or gap.
+- A reorder writes starts, never a host's line: Yjs cannot move text, so a line moved is deleted
+  and copied, and someone's concurrent edit of it would be left as stray text. HyperFrames paints
+  scenes on screen together in `index.html`'s order, unless a `z-index` says otherwise. After a
+  reorder, scenes on screen together stack in play order, the later on top, as a crossfade shows
+  it: a scene that must sit above one later in the file writes the least `z-index` that puts it
+  there, and drops it once the file's order does. What the root paints over the scenes, the
+  elements after its first host such as a captions bar, then writes one above the highest scene's,
+  and drops it with the last.
+- A ripple trim moves what starts after the edge, the scene's end included. A cut (a ripple
+  delete, a marked range, words of a transcript) takes stretches out of a scene: a recording cut
+  through is split around them, each part playing on from where its file was cut; any other clip
+  is shortened; a clip with nothing left goes; the scene ends as much sooner. A marked range
+  across scenes cuts from each its share, from its start up to the next scene's, so a crossfade
+  is cut once, and removes a scene it covers whole.
+- A cut and a scene's new length go by frame steps, the shortest stretch that is whole frames and
+  whole milliseconds: 100 ms at 30 fps, a frame at 25. Each stretch cut from a scene grows to the
+  whole steps that cover it, so nothing marked to go is heard again: into its `room` first, the
+  pauses up to the words kept either side of a transcript's cut, then as much on each side. A
+  scene's length is the nearest number of steps (`videoSceneLength`), which its field shows. The
+  scenes after then move by whole frames, show the same frames, and keep their segments: an
+  export renders only the edited scene again. Removing a whole scene moves them by its length,
+  whatever it is.
+- A clip whose `data-start` names another clip follows it, and a ripple does not move it. Once
+  that clip is split, it follows the last part; once it is removed or cut, it starts at the time
+  it did, which the ripple then moves as any other's.
+- A copied scene's recordings take new ids, and every `#id` naming them in the file follows, as
+  HyperFrames plays each recording by its id.
+- What `index.html` plays during one scene, a line of voice-over at a number of seconds, belongs
+  to the scene it plays most during, when it lasts no longer than that scene: it keeps its time
+  into the scene as the scene moves, and goes with it. A soundtrack under every scene belongs to
+  none. The Agent's guide puts a voice-over in its scene's file, where it moves with no rule.
+- The poster keeps its time into the scene on top at its instant, within that scene's length.
+- A write merged into the live document keeps every recording the merged HTML still plays, even
+  one the writer's copy no longer did: someone else may have just added a clip of it.
+
+Not covered: motion a scene's script writes (`gsap.timeline` positions) keeps its own times, and a
+recording a script plays without an element is not seen.
