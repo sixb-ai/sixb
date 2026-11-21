@@ -2,6 +2,8 @@ import { describe, expect, spyOn, test } from "bun:test"
 import {
   type ActionDefinition,
   ActionDefinitionError,
+  type ActionSubject,
+  ActionValidationError,
   defineAction,
   defineObjectType,
   OntologyValidationError,
@@ -1133,6 +1135,54 @@ describe("requestAction", () => {
     expect(reports).toMatchObject([
       { type: "run.failed", run: { runId: thrown.id }, failure: { code: "action.phase_failed" } },
     ])
+  })
+
+  // Guard proof: drop `withFailureMessage` from the ActionValidationError branch of
+  // `translateActionPhaseError` (`actions/run/normalize.ts`): each refusal then reads "The Action
+  // rejected the request.", as the code's public message.
+  test("shows a refusal thrown from the writeback or the edits, which read state first", async () => {
+    const refuse = (subject: ActionSubject) =>
+      new ActionValidationError("Room 1 is already named.", { actionId: "rename", subject })
+    const rename = defineAction("rename")
+      .on(Room)
+      .params({ name: param("string"), at: param("string") })
+    const inWriteback = rename
+      .writeback(async ({ params, subject, target }) => {
+        if (params.at === "writeback" && target.properties.name === params.name) {
+          throw refuse(subject)
+        }
+      })
+      .edits(async ({ read, objects, params, subject }) => {
+        const room = await read.objects(Room).get(subject.primaryId)
+        if (params.at === "edits" && room?.properties.name === params.name) throw refuse(subject)
+        objects(Room).byId(subject.primaryId).update({ name: params.name })
+      })
+    const sixb = createTestSixb({
+      id: "action-test",
+      ontology: [Room],
+      actions: [actionDefinition(inWriteback)],
+      ...createTestRuntimeDeps(),
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+    const request = (at: string) =>
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        actionId: "rename",
+        params: { name: "Room 1", at },
+      })
+
+    for (const phase of ["writeback", "edits"] as const) {
+      expect(await request(phase)).toMatchObject({
+        status: "failed",
+        error: {
+          code: "action.rejected",
+          message: "Room 1 is already named.",
+          details: { phase },
+        },
+      })
+    }
   })
 
   test("allows inherited actions on subtypes", async () => {

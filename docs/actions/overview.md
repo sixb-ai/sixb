@@ -106,6 +106,22 @@ fails the run as `action.phase_failed`, without its message: the caller gets
 
 Validation checks are read-only. You can attach more than one validator.
 
+A rule that reads other objects first can refuse from `.writeback()` or `.edits()` instead: throw
+an `ActionValidationError` from `@sixb/core`. The caller reads its message, as a validator's:
+
+```ts
+.edits(async ({ objects, read, subject, params }) => {
+  const post = await read.objects(Post).get(subject.primaryId)
+  if (post?.properties.edit) {
+    throw new ActionValidationError("This post already has an edit.", {
+      actionId: "attachEdit",
+      subject,
+    })
+  }
+  objects(Post).byId(subject.primaryId).update({ edit: params.edit })
+})
+```
+
 ## Know who requested the run
 
 Every handler receives `requestedBy`, the principal behind the run: `{ type: "user", id }` or
@@ -243,9 +259,14 @@ it and uploading it again:
 export const useEditAsMedia = defineAction("useEditAsMedia")
   .on(Post)
   .params({ edit: param(ref.artifact()) })
-  .writeback(async ({ sixb, params }) => {
+  .writeback(async ({ sixb, params, subject }) => {
     const mp4 = await sixb.artifacts.video(params.edit.id, { render: false })
-    if (mp4?.status !== "ready") throw new Error("Export the edit first.")
+    if (mp4?.status !== "ready") {
+      throw new ActionValidationError("Export the edit first.", {
+        actionId: "useEditAsMedia",
+        subject,
+      })
+    }
     return { media: mp4.file }
   })
   .edits(({ objects, subject, writeback }) => {
@@ -255,6 +276,8 @@ export const useEditAsMedia = defineAction("useEditAsMedia")
 
 A video renders in about as long as it plays, and a run has 30 seconds: ask for the
 [export](../artifacts/overview.md#export-a-video) first, and request the action once it is ready.
+Requested before, it is refused with `Export the edit first.`, as a
+[validator's refusal](#validate-a-request) is.
 
 The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
 at least `.writeback()` or `.edits()`. The object and link [events](../websockets/overview.md) of the

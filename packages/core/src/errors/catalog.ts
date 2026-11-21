@@ -23,7 +23,8 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Data the Action read changed before its commit.",
     retryable: true,
   },
-  // Not a crash: a validator declined the request, with a message written for the caller.
+  // Not a crash: a validator, or a handler throwing an ActionValidationError, declined the request
+  // with a message written for the caller.
   "action.rejected": {
     publicMessage: "The Action rejected the request.",
     retryable: false,
