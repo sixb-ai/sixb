@@ -12,6 +12,18 @@ export interface ArtifactViewerProps {
   readonly artifactId: string
   /** Sizes the frame; it is 34rem tall unless a class says otherwise. */
   readonly className?: string
+  /**
+   * Opens editing, as its header's Edit does, once the reader may change it: a video on its
+   * timeline. Done leaves editing, and Edit starts it again.
+   */
+  readonly defaultEditing?: boolean
+  /**
+   * Leaves the kind and title out of its header, where the page around it shows them. The header
+   * keeps its actions, and while editing, its undo, redo, save state and Done.
+   */
+  readonly withoutTitle?: boolean
+  /** Shows the viewer itself on a phone too, in place of the artifact's card. */
+  readonly inlineOnPhone?: boolean
 }
 
 /**
@@ -20,9 +32,16 @@ export interface ArtifactViewerProps {
  * page, and an artifact it links to, go to that artifact's page.
  *
  * On a phone it is the artifact's card, opening its page: a canvas panned inside a page that
- * scrolls fights the finger, and the page gives the artifact the whole screen.
+ * scrolls fights the finger, and the page gives the artifact the whole screen. A page made for the
+ * artifact, as an editor built around it is, shows the viewer there too with `inlineOnPhone`.
  */
-export function ArtifactViewer({ artifactId, className }: ArtifactViewerProps) {
+export function ArtifactViewer({
+  artifactId,
+  className,
+  defaultEditing = false,
+  withoutTitle = false,
+  inlineOnPhone = false,
+}: ArtifactViewerProps) {
   const navigate = useNavigate()
   // Asked of the window too: the hook answers only after the first render, too late to keep a
   // phone from opening the live viewer.
@@ -36,7 +55,7 @@ export function ArtifactViewer({ artifactId, className }: ArtifactViewerProps) {
     setTarget({ type: "artifact", artifactId })
   }
 
-  if (mobile) return <HeldArtifactCards artifactIds={[artifactId]} />
+  if (mobile && !inlineOnPhone) return <HeldArtifactCards artifactIds={[artifactId]} />
 
   return (
     <div
@@ -49,7 +68,8 @@ export function ArtifactViewer({ artifactId, className }: ArtifactViewerProps) {
         target={target}
         onTargetChange={setTarget}
         onOpenReference={(next) => navigate(artifactTargetHref(next))}
-        chrome={{ fullPageHref: artifactHref(artifactId) }}
+        chrome={{ fullPageHref: artifactHref(artifactId), withoutTitle }}
+        defaultEditing={defaultEditing}
       />
     </div>
   )
