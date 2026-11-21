@@ -38,6 +38,7 @@ topologicalPublishOrder(packages)
 
 for (const packageInfo of packages) {
   validatePackage(packageInfo)
+  await assertNoShadowedSources(packageInfo)
   await assertImportsAreDeclared(packageInfo)
   await dryRunPack(packageInfo)
 }
@@ -73,6 +74,30 @@ async function assertSourceAliasesMirrorExports(all: PublishablePackage[]): Prom
       "resolves through `exports.import` instead, which puts a second copy of that module in the " +
       "same bundle."
   )
+}
+
+/**
+ * A script shipped beside a module of the same name shadows it for every consumer. `exports.bun`
+ * points at `src`, and Bun resolves `./media` inside `node_modules` to `media.cjs` before
+ * `media.ts`, while the workspace resolves it to `media.ts`: the package works here and fails to
+ * load once installed.
+ */
+async function assertNoShadowedSources(packageInfo: PublishablePackage): Promise<void> {
+  const sources = await Array.fromAsync(
+    new Bun.Glob("src/**/*.{ts,tsx,js,cjs,mjs}").scan({ cwd: packageInfo.dir })
+  )
+  const modules = new Set(
+    sources.filter((path) => /\.tsx?$/.test(path)).map((path) => path.replace(/\.tsx?$/, ""))
+  )
+
+  const shadowing = sources.filter(
+    (path) => /\.[cm]?js$/.test(path) && modules.has(path.replace(/\.[cm]?js$/, ""))
+  )
+  if (shadowing.length > 0) {
+    throw new Error(
+      `[SixbPublish] ${packageName(packageInfo)} ships ${shadowing.join(", ")} beside a TypeScript module of the same name, which it shadows once installed. Rename the script.`
+    )
+  }
 }
 
 function validatePackage(packageInfo: PublishablePackage): void {

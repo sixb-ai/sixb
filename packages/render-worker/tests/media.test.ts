@@ -61,9 +61,9 @@ class DerivingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequ
       },
       runCommand: async (...[command, args, runOptions]: Parameters<Sandbox["runCommand"]>) => {
         const script = args?.at(-1) ?? ""
-        if (!script.includes("media.cjs")) return run(command, args, runOptions)
+        if (!script.includes("derive.cjs")) return run(command, args, runOptions)
 
-        // exec node 'media.cjs' '<original>' '<out>' '<budget>' '<max duration>' '<proxy>' '<parts>'
+        // exec node 'derive.cjs' '<original>' '<out>' '<budget>' '<max duration>' '<proxy>' '<parts>'
         const [, original = "", out = "", budget = "", , proxy = "", wanted = ""] =
           script
             .slice(script.indexOf("exec node"))
