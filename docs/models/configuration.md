@@ -521,10 +521,26 @@ vercelGateway.transcription("microsoft/mai-transcribe-2", {
 })
 ```
 
-A model that times only phrases gives one entry per phrase, so seeking by word still lands on the
-right second and speaker. Sixb passes on what the model sends and never diarizes audio itself, so a
-`speaker` label, such as `speaker_0`, is stable within one transcript only. Text alone cannot say
-who spoke at 12:04, or where a recorded topic starts, which is what these words are for.
+`output.segments` lists the stretches the model timed, such as sentences, with the same `speaker`
+where the model labels voices, and `output.language` the language it heard, when it says.
+
+| Field      | Present when                         | Bounds                             |
+| ---------- | ------------------------------------ | ---------------------------------- |
+| `words`    | The model timed every word           | A word: safe to cut a recording on |
+| `segments` | The model timed sentences or phrases | A phrase: cut only at its edges    |
+
+A phrase is never passed off as a word. A model that times only phrases, like
+`microsoft/mai-transcribe-2` without `timestamps: "word"`, returns `segments` and no `words`, so
+fall back on segments when `words` is absent:
+
+```ts
+// Who is speaking a minute in, whether the model timed words or only phrases.
+const speaker = (output.words ?? output.segments)?.find((at) => at.endMs > 60_000)?.speaker
+```
+
+Sixb passes on what the model sends and never diarizes audio itself, so a `speaker` label, such as
+`speaker_0`, is stable within one transcript only. Text alone cannot say who spoke at 12:04, or
+where a recorded topic starts, which is what these timings are for.
 
 ## Image generation
 

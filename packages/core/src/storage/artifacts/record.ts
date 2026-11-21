@@ -15,6 +15,12 @@ import type {
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
   ArtifactKind,
+  ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
+  ArtifactMediaPart,
+  ArtifactMediaPartName,
+  ArtifactMediaProbe,
+  ArtifactMediaRecord,
   ArtifactPdfRecord,
   ArtifactRecord,
   ArtifactRestorePointRecord,
@@ -248,6 +254,133 @@ export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewReco
     file,
     createdAt: date(row.createdAt, "createdAt", where),
   }
+}
+
+/** What is derived of a media, each part checked as the column it is read from. */
+export function parseArtifactMediaRow(row: Row): ArtifactMediaRecord {
+  const digest = text(row.digest, "digest", "media")
+  const where = `media '${digest}'`
+
+  const parts = json(row.parts, "parts", where)
+  if (!isObject(parts)) throw corrupt(where, "parts is not an object")
+  const part = <T extends object>(name: ArtifactMediaPartName, ready: (part: Row) => T | null) =>
+    mediaPart(parts[name], ready, () => corrupt(where, `${name} is not a media part`))
+
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    digest,
+    parts: {
+      probe: part("probe", parseArtifactMediaProbe),
+      proxy: part("proxy", (ready) => (isFileRef(ready.file) ? { file: ready.file } : null)),
+      poster: part("poster", (ready) =>
+        isFileRef(ready.file) && isCount(ready.atMs) ? { file: ready.file, atMs: ready.atMs } : null
+      ),
+      filmstrip: part("filmstrip", filmstrip),
+      waveform: part("waveform", (ready) => (isFileRef(ready.file) ? { file: ready.file } : null)),
+      cuts: part("cuts", (ready) =>
+        Array.isArray(ready.atMs) && ready.atMs.every(isCount) ? { atMs: ready.atMs } : null
+      ),
+      transcript: part("transcript", (ready) => {
+        const { file, language } = ready
+        if (!isFileRef(file) || (language !== undefined && typeof language !== "string"))
+          return null
+        return { file, ...(language === undefined ? {} : { language }) }
+      }),
+    },
+    attempts: count(row.attempts, "attempts", where),
+    updatedAt: date(row.updatedAt, "updatedAt", where),
+  }
+}
+
+function isMediaLack(value: unknown): value is ArtifactMediaLack {
+  return value === "sandboxes" || value === "sandbox_tools" || value === "transcription_model"
+}
+
+/** A part pending, ready with what `ready` reads of it, or why it is not. */
+function mediaPart<T extends object>(
+  value: unknown,
+  ready: (part: Row) => T | null,
+  corrupted: () => Error
+): ArtifactMediaPart<T> {
+  if (!isObject(value)) throw corrupted()
+
+  const { status } = value
+  if (status === "pending") return { status }
+  if (status === "failed" && typeof value.reason === "string")
+    return { status, reason: value.reason }
+  if (status === "unavailable" && typeof value.reason === "string") {
+    const { lacks } = value
+    if (lacks === undefined) return { status, reason: value.reason }
+    if (!isMediaLack(lacks)) throw corrupted()
+    return { status, reason: value.reason, lacks }
+  }
+  const fields = status === "ready" ? ready(value) : null
+  if (!fields) throw corrupted()
+  return { status: "ready", ...fields }
+}
+
+/** What a media holds, as a probe reports it; null when it is not one. */
+export function parseArtifactMediaProbe(value: unknown): ArtifactMediaProbe | null {
+  if (!isObject(value)) return null
+  const { durationMs, container, bitRate, faststart, video, audio } = value
+  if (!isCount(durationMs) || typeof container !== "string") return null
+  if (bitRate !== undefined && !isCount(bitRate)) return null
+  if (faststart !== undefined && typeof faststart !== "boolean") return null
+
+  const picture = video === undefined ? undefined : mediaVideo(video)
+  const sound = audio === undefined ? undefined : mediaAudio(audio)
+  if (picture === null || sound === null) return null
+
+  return {
+    durationMs,
+    container,
+    ...(bitRate === undefined ? {} : { bitRate }),
+    ...(faststart === undefined ? {} : { faststart }),
+    ...(picture ? { video: picture } : {}),
+    ...(sound ? { audio: sound } : {}),
+  }
+}
+
+function mediaVideo(value: unknown): ArtifactMediaProbe["video"] | null {
+  if (!isObject(value)) return null
+  const { codec, width, height, rotation, fps } = value
+  if (typeof codec !== "string" || !isPositive(width) || !isPositive(height)) return null
+  if (
+    typeof rotation !== "number" ||
+    (fps !== undefined && !(typeof fps === "number" && fps > 0))
+  ) {
+    return null
+  }
+  return { codec, width, height, rotation, ...(fps === undefined ? {} : { fps }) }
+}
+
+function mediaAudio(value: unknown): ArtifactMediaProbe["audio"] | null {
+  if (!isObject(value)) return null
+  const { codec, sampleRate, channels } = value
+  if (typeof codec !== "string") return null
+  if (sampleRate !== undefined && !isPositive(sampleRate)) return null
+  if (channels !== undefined && !isPositive(channels)) return null
+  return {
+    codec,
+    ...(sampleRate === undefined ? {} : { sampleRate }),
+    ...(channels === undefined ? {} : { channels }),
+  }
+}
+
+function filmstrip(part: Row): ArtifactMediaFilmstrip | null {
+  const { file, intervalMs, count, columns, width, height } = part
+  if (!isFileRef(file) || !isPositive(intervalMs) || !isPositive(count)) return null
+  if (!isPositive(columns) || !isPositive(width) || !isPositive(height)) return null
+  return { file, intervalMs, count, columns, width, height }
+}
+
+/** A whole number from 0, such as milliseconds. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function isPositive(value: unknown): value is number {
+  return isCount(value) && value > 0
 }
 
 export function parseArtifactStateRow(row: Row): ArtifactStateEntry {
@@ -530,6 +663,14 @@ function json(value: unknown, column: string, where: string): unknown {
 function text(value: unknown, column: string, where: string): string {
   if (typeof value !== "string" || value.length === 0) throw corrupt(where, `${column} is not text`)
   return value
+}
+
+function count(value: unknown, column: string, where: string): number {
+  const number = typeof value === "bigint" ? Number(value) : value
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0) {
+    throw corrupt(where, `${column} is not a count`)
+  }
+  return number
 }
 
 function positiveInteger(value: unknown, column: string, where: string): number {

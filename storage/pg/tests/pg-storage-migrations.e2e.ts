@@ -149,6 +149,7 @@ const SHIPPED_MIGRATIONS = [
   "108-agent-thread-reads",
   "109-sync-run-connections",
   "110-video-artifacts",
+  "111-artifact-media",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1567,6 +1568,21 @@ describe("Postgres storage migrations", () => {
         const columns = await readTableColumns(sql, table)
         for (const column of retired) expect(columns).not.toContain(column)
       }
+    })
+  })
+
+  test("widens the kernel operation check without validating every execution", async () => {
+    // Removal proof: drop `NOT VALID` from 111's ADD CONSTRAINT; the check is then validated,
+    // which scans `executions` under the migration's ACCESS EXCLUSIVE lock.
+    await withDatabase({}, async ({ sql }) => {
+      const rows = await sql<{ convalidated: boolean }[]>`
+        SELECT convalidated
+        FROM pg_constraint
+        WHERE conrelid = 'executions'::regclass
+          AND conname = 'executions_authority_kernel_operation_check'
+      `
+
+      expect([...rows]).toEqual([{ convalidated: false }])
     })
   })
 

@@ -14,6 +14,7 @@ import {
   createAgentApprovalExecutor,
   registerAgentApprovalExecutor,
 } from "../agents/approval-executor"
+import { createMediaTranscriber, registerMediaTranscriber } from "../artifacts/media/transcriber"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -396,6 +397,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
+    // The render worker transcribes the media it derives through this, on the project's budget.
+    registerMediaTranscriber(this, createMediaTranscriber(this.hostContext, definitions.models))
 
     const lakeRetention = new LakeRetention({
       projectId: this.projectId,

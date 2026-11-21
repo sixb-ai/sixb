@@ -29,6 +29,8 @@ export interface SharedAccessDelegationRef {
 export type KernelOperation =
   | { readonly type: "ontology.recover"; readonly recoveryId: string }
   | { readonly type: "ontology.indexVectors"; readonly indexingId: string }
+  /** Transcribing a video or a sound for what Sixb derives from it, by the digest of its bytes. */
+  | { readonly type: "artifacts.transcribeMedia"; readonly digest: string }
 
 /** Workload currently executing. This is provenance and never grants authority by itself. */
 export type ExecutionExecutor =

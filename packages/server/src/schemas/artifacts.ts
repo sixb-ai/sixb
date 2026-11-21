@@ -234,6 +234,123 @@ export const ArtifactPdfQuerySchema = z.object({
 
 export const ArtifactPdfDownloadQuerySchema = z.object({ key: ArtifactPdfKeySchema.optional() })
 
+/** The parts of a media served as files, by the media content route. */
+export const ARTIFACT_MEDIA_FILE_PARTS = [
+  "proxy",
+  "poster",
+  "filmstrip",
+  "waveform",
+  "transcript",
+] as const
+
+const ArtifactMediaPathQuerySchema = ShareGrantQuerySchema.extend({
+  path: z.string().min(1).describe("The path of a video or a sound among the version's files"),
+})
+
+export const ArtifactMediaQuerySchema = ArtifactMediaPathQuerySchema.extend({
+  retry: z
+    .enum(["true", "false"])
+    .optional()
+    .describe("true derives again each part that failed, instead of hearing why"),
+})
+
+export const ArtifactMediaContentQuerySchema = ArtifactMediaPathQuerySchema.extend({
+  part: z.enum(ARTIFACT_MEDIA_FILE_PARTS).describe("Which part's file to get"),
+  v: z
+    .string()
+    .optional()
+    .describe("The original's bytes it is derived of, as its URL names them: then cached for good"),
+})
+
+/** A part pending, ready with `ready`, or why it will not come. */
+function mediaPart<T extends z.ZodRawShape>(ready: T) {
+  return z.discriminatedUnion("status", [
+    z.object({ status: z.literal("pending") }),
+    z.object({ status: z.literal("ready"), ...ready }),
+    z.object({
+      status: z.literal("unavailable"),
+      reason: z.string().describe("Why it will not come, as a reader hears it"),
+      lacks: z
+        .enum(["sandboxes", "sandbox_tools", "transcription_model"])
+        .optional()
+        .describe(
+          "What the project lacks to make it, when the media is not why: retry=true makes it once the project has it"
+        ),
+    }),
+    z.object({
+      status: z.literal("failed"),
+      reason: z.string().describe("Why it did not come, as a reader hears it"),
+    }),
+  ])
+}
+
+/** A part's file, served by the media content route. */
+const mediaFile = {
+  url: z
+    .string()
+    .describe("Where to get it, on this API: it never changes, and is served with Range"),
+  mediaType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+}
+
+export const ArtifactMediaResponseSchema = z.object({
+  path: z.string(),
+  version: z.number().int().min(1),
+  parts: z.object({
+    probe: mediaPart({
+      durationMs: z.number().int().nonnegative(),
+      container: z.string().describe("As FFmpeg names it, such as mov,mp4,m4a,3gp,3g2,mj2"),
+      bitRate: z.number().int().optional(),
+      faststart: z
+        .boolean()
+        .optional()
+        .describe("An MP4 or a MOV whose index comes first, so it plays before it arrives whole"),
+      video: z
+        .object({
+          codec: z.string(),
+          width: z.number().int().describe("As it shows, once turned"),
+          height: z.number().int(),
+          rotation: z.number().describe("Degrees the picture is turned to show, as the file says"),
+          fps: z.number().optional(),
+        })
+        .optional(),
+      audio: z
+        .object({
+          codec: z.string(),
+          sampleRate: z.number().int().optional(),
+          channels: z.number().int().optional(),
+        })
+        .optional(),
+    }).describe("What the file holds"),
+    proxy: mediaPart(mediaFile).describe(
+      "What plays in its place: H.264 at most 720p with a keyframe every half second, AAC; for a sound, only when browsers cannot play the original"
+    ),
+    poster: mediaPart({
+      ...mediaFile,
+      atMs: z.number().int().nonnegative().describe("The moment it shows"),
+    }).describe("A JPEG of a representative moment"),
+    filmstrip: mediaPart({
+      ...mediaFile,
+      intervalMs: z.number().int().min(1),
+      count: z.number().int().min(1),
+      columns: z.number().int().min(1),
+      width: z.number().int().min(1),
+      height: z.number().int().min(1),
+    }).describe(
+      "Thumbnails width by height at every intervalMs from 0, count of them in rows of columns, in one JPEG"
+    ),
+    waveform: mediaPart(mediaFile).describe(
+      "The sound's peaks as JSON: { peaksPerSecond, peaks }, each from 0 to 100"
+    ),
+    cuts: mediaPart({ atMs: z.array(z.number().int().nonnegative()) }).describe(
+      "Where the picture cuts to another shot"
+    ),
+    transcript: mediaPart({ ...mediaFile, language: z.string().optional() }).describe(
+      "What is said as JSON: { text, language?, words?, segments? }, timed in milliseconds"
+    ),
+  }),
+})
+
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   version: true,
   revision: true,
@@ -478,7 +595,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({

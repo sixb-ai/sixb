@@ -1003,6 +1003,7 @@ export type {
   ArtifactContentInput,
   ArtifactHolderObject,
   ArtifactHolders,
+  ArtifactMedia,
   ArtifactPdf,
   ArtifactQueryInput,
   ArtifactStateRuntime,
@@ -1326,6 +1327,12 @@ export type {
 } from "./storage/agents"
 export type {
   ArtifactFile,
+  ArtifactMediaFilmstrip,
+  ArtifactMediaLack,
+  ArtifactMediaPart,
+  ArtifactMediaPartName,
+  ArtifactMediaParts,
+  ArtifactMediaProbe,
   ArtifactOrigin,
   ArtifactRecord,
   ArtifactVersionRecord,

@@ -1,9 +1,12 @@
 import {
   type ArtifactAccess,
   type ArtifactContentInput,
+  type ArtifactMedia,
+  type ArtifactMediaPart,
   type ArtifactRecord,
   ArtifactRequestError,
   type ArtifactVersionRecord,
+  type FileRef,
   isFileRef,
   type PublishedArtifact,
   type SixbHostView,
@@ -53,6 +56,9 @@ import {
   ArtifactHolderListResponseSchema,
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
+  ArtifactMediaContentQuerySchema,
+  ArtifactMediaQuerySchema,
+  ArtifactMediaResponseSchema,
   ArtifactParamsSchema,
   ArtifactPdfDownloadQuerySchema,
   ArtifactPdfQuerySchema,
@@ -617,6 +623,104 @@ async function artifactPdfResponse(
     response.headers.set(
       "cache-control",
       number !== "latest" && version.frozenAt
+        ? "private, max-age=31536000, immutable"
+        : "private, no-cache"
+    )
+    return response
+  } catch (error) {
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/**
+ * What is derived of a media, as clients read it: each part's file as the URL that serves it,
+ * which names the original's bytes, so what it serves never changes.
+ */
+function mediaBody(artifactId: string, media: ArtifactMedia) {
+  const url = (part: string) => {
+    const query = new URLSearchParams({
+      path: media.path,
+      part,
+      v: media.file.digest.replace(/^sha256:/, "").slice(0, 16),
+    })
+    return `/api/artifacts/${encodeURIComponent(artifactId)}/versions/${media.version}/media/content?${query}`
+  }
+  const served = <T extends { readonly file: FileRef }>(
+    part: string,
+    value: ArtifactMediaPart<T>
+  ) => {
+    if (value.status !== "ready") return value
+    const { file, ...rest } = value
+    return {
+      ...rest,
+      url: url(part),
+      mediaType: file.mediaType ?? "application/octet-stream",
+      sizeBytes: file.sizeBytes,
+    }
+  }
+  const { parts } = media
+  return {
+    path: media.path,
+    version: media.version,
+    parts: {
+      probe: parts.probe,
+      proxy: served("proxy", parts.proxy),
+      poster: served("poster", parts.poster),
+      filmstrip: served("filmstrip", parts.filmstrip),
+      waveform: served("waveform", parts.waveform),
+      cuts: parts.cuts,
+      transcript: served("transcript", parts.transcript),
+    },
+  }
+}
+
+/**
+ * A part of a media as a file, to whoever reads its version: reading what is derived of it as the
+ * caller is the check. 404 `media_not_found` until it is derived, and when it will not be.
+ */
+async function artifactMediaContentResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: { readonly artifactId: string; readonly version: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  },
+  options: { readonly head?: boolean } = {}
+) {
+  try {
+    const query = ArtifactMediaContentQuerySchema.parse(context.query)
+    const { artifactId } = context.params
+    const media = await requireRequestSixb(context).artifacts.media(artifactId, {
+      version: versionParam(context.params.version),
+      path: query.path,
+      derive: false,
+    })
+    if (!media) return await refusal(context, artifactId, context.set)
+
+    const part = media.parts[query.part]
+    const response =
+      part.status === "ready" &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: part.file,
+        disposition: "inline",
+        head: options.head,
+        request: context.request,
+      }))
+    if (!response) {
+      context.set.status = 404
+      // It may be derived in a moment: nothing may keep this answer.
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Media not found", code: "media_not_found" as const }
+    }
+
+    // Asked for by the original's bytes it is derived of, it never changes; an open version's
+    // file may otherwise be replaced at its path.
+    const digest = media.file.digest.replace(/^sha256:/, "")
+    response.headers.set(
+      "cache-control",
+      query.v !== undefined && digest.startsWith(query.v) && query.v.length >= 16
         ? "private, max-age=31536000, immutable"
         : "private, no-cache"
     )
@@ -1560,6 +1664,77 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "headArtifactFileContent",
           security: accessTokenSecurityRequirement("headArtifactFileContent"),
+          responses: fileContentHeadResponses({ optionalStorage: true }),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/media",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const media = await requireRequestSixb(context).artifacts.media(artifactId, {
+            version: versionParam(context.params.version),
+            path: context.query.path,
+            retry: context.query.retry === "true",
+          })
+          if (!media) return await refusal(context, artifactId, context.set)
+
+          // Pending parts are derived in a moment: nothing may keep this answer for long.
+          context.set.headers["cache-control"] = "private, no-cache"
+          return ArtifactMediaResponseSchema.parse(mediaBody(artifactId, media))
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactVersionParamsSchema,
+        query: ArtifactMediaQuerySchema,
+        response: {
+          200: ArtifactMediaResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get what is derived of a video or a sound",
+          description:
+            "What Sixb derives once from a video or a sound among the version's files: what it holds, a proxy that plays and scrubs in its place, a poster, a filmstrip, its peaks, its cuts, and its transcript. Each part is ready, with the URL of its file when it has one, pending, or unavailable or failed with why; retry=true derives each failed part again. A file published since it was last derived from is asked for: ask again after a few seconds. In a project without sandboxes, each part is unavailable. Whoever reads the artifact may ask. 400 invalid_artifact when the version holds no video or sound at path.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactMedia",
+          security: accessTokenSecurityRequirement("getArtifactMedia"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/media/content",
+      async (context) => artifactMediaContentResponse(host, context),
+      {
+        params: ArtifactVersionParamsSchema,
+        query: ArtifactMediaContentQuerySchema,
+        detail: {
+          summary: "Get a part of what is derived of a video or a sound",
+          description:
+            "The file of one part, as its URL in GET .../media names it: served inline, with Range, and cached for good when asked for by that URL. 404 media_not_found until it is derived, and when it will not be.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactMediaContent",
+          security: accessTokenSecurityRequirement("getArtifactMediaContent"),
+          responses: fileContentGetResponses({ optionalStorage: true }),
+        },
+      }
+    )
+    .head(
+      "/api/artifacts/:artifactId/versions/:version/media/content",
+      async (context) => artifactMediaContentResponse(host, context, { head: true }),
+      {
+        params: ArtifactVersionParamsSchema,
+        query: ArtifactMediaContentQuerySchema,
+        detail: {
+          summary: "Head a part of what is derived of a video or a sound",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "headArtifactMediaContent",
+          security: accessTokenSecurityRequirement("headArtifactMediaContent"),
           responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }

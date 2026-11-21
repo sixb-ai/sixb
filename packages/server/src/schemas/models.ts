@@ -261,8 +261,20 @@ export const TranscriptionWordSchema = z.object({
   speaker: z.string().optional(),
 })
 
+/** A stretch of speech the model timed, such as a sentence, and who said it. */
+export const TranscriptionSegmentSchema = z.object({
+  text: z.string(),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().nonnegative(),
+  speaker: z.string().optional(),
+})
+
 export const TranscriptionSchema = GenerationResultBase.extend({
   text: z.string(),
-  /** Absent when the model returns no word timings. */
+  /** Absent when the model times no word, or the words of some phrases only. */
   words: z.array(TranscriptionWordSchema).optional(),
+  /** Absent when the model returns no segments. */
+  segments: z.array(TranscriptionSegmentSchema).optional(),
+  /** The language the model heard, as it names it. */
+  language: z.string().optional(),
 })

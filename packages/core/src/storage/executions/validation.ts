@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util"
 import { normalizeRequesterGroupIds, snapshotRequesterGroupIds } from "../../auth/attribution"
-import { kernelOperationId } from "../../execution/kernel-operation"
+import { isKernelOperationType, kernelOperationId } from "../../execution/kernel-operation"
 import { isScriptPath } from "../../execution/script"
 import type {
   AuthorizablePrincipal,
@@ -458,7 +458,7 @@ function assertPrincipal(principal: AuthorizablePrincipal, label: string): void 
 }
 
 function assertKernelOperation(operation: KernelOperation, label: string): void {
-  if (operation.type !== "ontology.recover" && operation.type !== "ontology.indexVectors") {
+  if (!isKernelOperationType(operation.type)) {
     invalid(`${label} has unsupported type '${String((operation as { type?: unknown }).type)}'.`)
   }
   assertNonBlank(kernelOperationId(operation), `${label} operation id`)

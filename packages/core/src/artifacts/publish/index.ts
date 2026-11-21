@@ -1,12 +1,23 @@
 /**
  * Publishing for this repo's packages: the Agent publishes through the same checks as the API, and
- * the pictures of a canvas's boards are kept beside what it publishes.
+ * the pictures of a canvas's boards, and what is derived of a version's media, are kept beside
+ * what it publishes.
  */
 
 export { BOARD_PREVIEW_JOB } from "../canvas-display"
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS, artifactSizeLimits } from "../limits"
+export {
+  isMediaFile,
+  MAX_MEDIA_DURATION_MS,
+  MEDIA_JOB,
+  MEDIA_PARTS,
+  type MediaJobBudget,
+  mapMediaParts,
+  mediaJobBudget,
+  unmadeMediaParts,
+} from "../media/media"
 export { artifactQueryName, DOCUMENT_HOLDER_QUERY } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {

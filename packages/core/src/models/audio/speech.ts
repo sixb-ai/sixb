@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto"
 import { assertModelAccess } from "../../authorization"
 import type { BlobStorage } from "../../blob-storage/types"
 import type { ExecutionContext } from "../../execution"
-import type { SixbRuntimeContext } from "../../runtime/types"
 import type { ModelCatalog } from "../catalog"
 import type { ModelCallEndEvent } from "../events"
 import type { AiModelCallRecorder } from "../execution/model-call-recorder"
@@ -10,6 +9,7 @@ import type { ModelExecutionSession } from "../execution/session"
 import { estimateModelCall, type ModelMoney } from "../pricing"
 import { assertSpeechModel } from "./catalog"
 import { SpeechModelResponseError } from "./errors"
+import type { AudioRuntimeContext } from "./runtime"
 import type {
   AudioModelsRuntime,
   AudioSpeakInput,
@@ -23,7 +23,7 @@ import type {
 type PreparedRequest = Omit<SpeechModelRequest, "signal">
 
 export function createSpeak(
-  runtime: SixbRuntimeContext,
+  runtime: AudioRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
   session: ModelExecutionSession,

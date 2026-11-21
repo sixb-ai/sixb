@@ -1,8 +1,8 @@
 # @sixb/render-worker
 
-Queue worker for what Sixb renders in a browser: the pictures of a canvas's boards, and a designed
-document's PDF. It consumes the `renders` queue, so a render never waits behind an agent's run or
-takes its slot.
+Queue worker for what Sixb renders in a sandbox: the pictures of a canvas's boards, a designed
+document's PDF, and what is derived of a video or a sound. It consumes the `renders` queue, so a
+render never waits behind an agent's run or takes its slot.
 
 You normally do not import it. `sixb worker render` and `sixb worker-group` construct it for you,
 and `sixb dev` starts it when the project has a sandbox provider.
@@ -41,6 +41,33 @@ still waiting, and it runs once the canvas has rested 15 seconds. One render:
 - Keeps why it could not print instead: at once when the sandbox has no browser, else after its
   second attempt. Whoever waits for the PDF hears it.
 
+`artifact.media.requested`: what is derived of a video or a sound, asked for when a version that
+holds one is published, in any kind of artifact, and when `sixb.artifacts.media()` finds nothing
+yet. One job per digest, so a file published again, anywhere, is derived once. One run:
+
+- Does nothing for the parts already kept: it derives what is still pending, as an attempt cut
+  short left it. It counts the attempt in what is kept before it starts.
+- Opens a blank sandbox of the project that also reaches the API, where it fetches the original by
+  a download URL (see Large files below).
+- Runs `derive.cjs` there with the image's FFmpeg: the probe first, which gives the attempt its
+  time (`mediaJobBudget` in core: the proxy by the pixels it decodes, the rest by the length, two
+  hours at most), then each part on its own, so one that fails costs only itself and is kept failed
+  with why. Media past 30 minutes get their probe alone.
+  - The proxy: H.264, its shorter side at most 720 pixels, at most 30 frames a second, a keyframe
+    every half second, AAC, its index first. A sound gets an AAC proxy only when browsers cannot
+    play it, such as AIFF.
+  - The poster: the first moment from one second on that is neither near-black nor flat.
+  - The filmstrip, 90 pixels high, at the interval that keeps it to 120 thumbnails, and the cuts
+    by scene detection: from the proxy, which seeks at once. The peaks, 50 a second.
+  - The sound for the transcript: mono, 16 kHz MP3, small enough for the model.
+- Streams what it wrote into blob storage and keeps each part, before the sandbox is destroyed.
+- Transcribes the sound outside the sandbox with the project's transcription model, as the kernel
+  operation `artifacts.transcribeMedia`, on the project's model budget, and keeps the transcript.
+  Without a model, the transcript is unavailable, not failed.
+- A sandbox without FFmpeg makes each part unavailable, lacking `sandbox_tools`, until a retry.
+  When the script stops, the job tries again for what is pending; after the third attempt since the
+  media was asked for, counted in what is kept, what is still pending is kept as failed.
+
 Each render's steps are bounded by the time its job has left, and its sandbox is destroyed after,
 waited for at most 30 seconds. What a render wrote in the sandbox comes back a piece at a time,
 at most 720 KiB of it to a command, as some providers keep at most 1 MiB of a command's output.
@@ -62,8 +89,9 @@ The sandbox does not upload its output itself. It holds no credential for the AP
 store's direct upload URLs are on an origin the contract does not name before the upload exists,
 when the sandbox's network is already set. Both would have to change for that.
 
-## The sandbox's browser
+## The sandbox's tools
 
 Renders need a sandbox image with Node.js and Playwright's Chromium, as the Sixb agent image has
-(`/opt/sixb/js/node_modules/playwright`). A local sandbox finds Playwright where
-`SIXB_PLAYWRIGHT` points.
+(`/opt/sixb/js/node_modules/playwright`), and FFmpeg and ffprobe on its path for media. A local
+sandbox finds Playwright where `SIXB_PLAYWRIGHT` points, and FFmpeg on the host's path, as
+`media.e2e.ts` does.

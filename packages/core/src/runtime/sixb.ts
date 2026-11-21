@@ -179,6 +179,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     agent,
     artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage, {
       rendersInSandboxes: dependencies.rendersInSandboxes,
+      transcribesMedia: dependencies.definitions.models?.audio?.transcription !== undefined,
     }),
     models: createModelsRuntime(
       runtime,

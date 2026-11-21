@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useDerivedMedia } from "../derived-media"
 import type { FileSource } from "../file-source"
 import { useArtifactMessages } from "../messages"
 import { useNearScreen } from "../near-screen"
@@ -34,9 +35,9 @@ interface MediaProps {
 const DEFAULT_RATIO = 16 / 9
 
 /**
- * The browser's player, at the video's own shape, its first frame showing until it plays. A file
- * the browser cannot play says so, with its download; one that turns out to hold sound alone gets
- * the sound player.
+ * The browser's player, at the video's own shape, its poster or its first frame showing until it
+ * plays. An artifact's video plays from its proxy once Sixb derived one. A file the browser cannot
+ * play says so, with its download; one that turns out to hold sound alone gets the sound player.
  */
 export function VideoPlayer({ layout, ...props }: MediaProps & { readonly layout: VideoLayout }) {
   // Another file starts over: its shape, and whether it plays, are its own.
@@ -46,6 +47,7 @@ export function VideoPlayer({ layout, ...props }: MediaProps & { readonly layout
 function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLayout }) {
   const [ratio, setRatio] = useState<number | null>(null)
   const [state, setState] = useState<"loading" | "ready" | "soundOnly" | "failed">("loading")
+  const derived = useDerivedMedia(source)
 
   if (state === "failed") return <MediaFailed source={source} name={name} kind="video" />
   if (state === "soundOnly") {
@@ -53,9 +55,19 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
   }
 
   const shape = ratio ?? DEFAULT_RATIO
-  const video = (
+  // Until it is known what plays, the quiet surface it loads on, at the shape most videos have.
+  const video = !derived ? (
+    <div
+      className={cn(
+        "bg-muted",
+        layout === "fill" ? "size-full" : cn("mx-auto rounded-xl", MEDIA_FRAME)
+      )}
+      style={layout === "fill" ? undefined : videoSize(layout, shape)}
+    />
+  ) : (
     <video
-      src={firstFrameUrl(source)}
+      src={derived.proxy ?? firstFrameUrl(source)}
+      poster={derived.poster}
       controls
       playsInline
       preload="metadata"
@@ -93,9 +105,9 @@ function Video({ source, name, layout }: MediaProps & { readonly layout: VideoLa
 }
 
 /**
- * A video's first frame, under a play mark, for a card: once the card nears the screen, the
- * browser reads just enough of the file to draw it. A file it cannot read, or one that holds sound
- * alone, shows `fallback` instead.
+ * A video's poster, under a play mark, for a card: once the card nears the screen, the one Sixb
+ * derived of an artifact's video, else its first frame, of which the browser reads just enough of
+ * the file to draw it. A file it cannot read, or one that holds sound alone, shows `fallback`.
  */
 export function VideoPoster(props: PosterProps) {
   // Another file starts over: whether it has a frame to show is its own.
@@ -112,8 +124,15 @@ function Poster({ source, fallback }: PosterProps) {
   const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined")
   const [state, setState] = useState<"loading" | "ready" | "fallback">("loading")
   useNearScreen(box, "400px 0px", () => setNear(true), !near)
+  const derived = useDerivedMedia(source, near)
 
   if (state === "fallback") return fallback
+
+  const picture = {
+    className: cn("size-full object-cover", state === "ready" ? "sixb-media-in" : "opacity-0"),
+    "aria-hidden": true,
+    onError: () => setState("fallback"),
+  } as const
   return (
     <span
       ref={box}
@@ -122,26 +141,24 @@ function Poster({ source, fallback }: PosterProps) {
         state === "loading" ? "sixb-media-developing" : "bg-black"
       )}
     >
-      {/* Until the card nears the screen, it keeps the surface the frame develops from. */}
-      {near ? (
+      {/* Until the card nears the screen, and what it shows is known, it keeps the surface the
+          picture develops from. */}
+      {!near || !derived ? null : derived.poster ? (
+        <img src={derived.poster} alt="" onLoad={() => setState("ready")} {...picture} />
+      ) : (
         <video
           src={firstFrameUrl(source)}
           muted
           playsInline
           preload="metadata"
           tabIndex={-1}
-          aria-hidden="true"
           onLoadedMetadata={(event) => {
             if (event.currentTarget.videoWidth === 0) setState("fallback")
           }}
           onLoadedData={() => setState("ready")}
-          onError={() => setState("fallback")}
-          className={cn(
-            "size-full object-cover",
-            state === "ready" ? "sixb-media-in" : "opacity-0"
-          )}
+          {...picture}
         />
-      ) : null}
+      )}
       {state === "ready" ? (
         <span className="absolute inset-0 grid place-items-center">
           <span className="grid size-9 place-items-center rounded-full bg-black/45 text-white ring-1 ring-white/25 backdrop-blur-md">
@@ -172,7 +189,8 @@ function videoSize(layout: "stage" | "inline", ratio: number): CSSProperties {
 
 /**
  * A sound file as a compact player: play and pause, where it is, and how long it lasts, under its
- * name. On a stage, it sits in the middle of the viewer.
+ * name. On a stage, it sits in the middle of the viewer. An artifact's sound that browsers cannot
+ * play, such as AIFF, plays from the proxy Sixb derived of it.
  */
 export function AudioPlayer({
   source,
@@ -195,6 +213,7 @@ function Audio({ source, name }: MediaProps) {
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
+  const derived = useDerivedMedia(source)
 
   // The position moves with each frame while it plays, not with the browser's few updates a second.
   useEffect(() => {
@@ -284,7 +303,8 @@ function Audio({ source, name }: MediaProps) {
       </div>
       <audio
         ref={audio}
-        src={source.inlineUrl}
+        // Once it is known what plays: the player shows, its length unknown, until then.
+        src={derived ? (derived.proxy ?? source.inlineUrl) : undefined}
         preload="metadata"
         onLoadedMetadata={(event) => {
           setDuration(event.currentTarget.duration)

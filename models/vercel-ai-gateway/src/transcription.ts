@@ -9,6 +9,7 @@ import {
   type TranscriptionModelRequest,
   TranscriptionModelResponseError,
   type TranscriptionModelResponseMetadata,
+  type TranscriptionSegment,
   type TranscriptionWord,
 } from "@sixb/core/models"
 import { readGatewayJson } from "./json-response"
@@ -156,10 +157,21 @@ export function createGatewayTranscription(
         )
       }
 
-      const words = transcriptionWords(payload.providerMetadata)
+      const timings = providerTimings(payload.providerMetadata)
+      const words = timings.words
+      // The Gateway's own segments name no speaker. A provider's phrases time the same speech and
+      // say who spoke each, so they stand in for them: one list, as the two need not line up.
+      const segments = timings.segments.length ? timings.segments : timedSegments(payload.segments)
+      const language =
+        typeof payload.language === "string" && payload.language ? payload.language : undefined
       return {
         ...responseMetadata,
-        output: { text: payload.text, ...(words ? { words } : {}) },
+        output: {
+          text: payload.text,
+          ...(words.length ? { words } : {}),
+          ...(segments.length ? { segments } : {}),
+          ...(language ? { language } : {}),
+        },
       }
     },
   })
@@ -187,8 +199,14 @@ function assertTranscriptionInput(
   }
 }
 
+/** What the provider timed itself: its words, and its phrases where it times those. */
+interface ProviderTimings {
+  readonly words: TranscriptionWord[]
+  readonly segments: TranscriptionSegment[]
+}
+
 /**
- * The words the provider timed, which the Gateway forwards verbatim under the provider's own
+ * The timings the provider sent, which the Gateway forwards verbatim under the provider's own
  * key. ElevenLabs writes `elevenlabs.words`, `{ text, type, start, end, speaker_id }` in seconds;
  * Azure writes `azure.phrases`, in milliseconds with the speaker on the phrase. They are the
  * part of a transcript that text cannot be rebuilt into, who spoke and when, so they travel on.
@@ -197,18 +215,22 @@ function assertTranscriptionInput(
  * by word has no use for them. Words a provider sends without a type are taken as they are, and
  * one entry Sixb cannot place costs only itself.
  */
-function transcriptionWords(providerMetadata: unknown): TranscriptionWord[] | undefined {
+function providerTimings(providerMetadata: unknown): ProviderTimings {
   const providers = object(providerMetadata)
-  if (!providers) return undefined
+  if (!providers) return { words: [], segments: [] }
 
   for (const [provider, metadata] of Object.entries(providers)) {
     const envelope = object(metadata)
     if (!envelope) continue
-    const words = provider === "azure" ? phraseWords(envelope.phrases) : timedWords(envelope.words)
-    if (words.length) return words
+
+    const timings =
+      provider === "azure"
+        ? phraseTimings(envelope.phrases)
+        : { words: timedWords(envelope.words), segments: [] }
+    if (timings.words.length || timings.segments.length) return timings
   }
 
-  return undefined
+  return { words: [], segments: [] }
 }
 
 /** ElevenLabs' token stream, and any provider that times its own words the same way. */
@@ -233,39 +255,42 @@ function timedWords(value: unknown): TranscriptionWord[] {
 }
 
 /**
- * Azure's phrases, which carry the speaker and their own words. A phrase that times no usable
- * word, because the model was asked for phrases only, still says who spoke when: its text
- * becomes one entry, so a caller seeking by word lands inside it.
+ * Azure's phrases, each with its speaker, and the words inside them. Each phrase Sixb can place
+ * becomes a segment. A model asked for phrases only, such as `mai-transcribe-2` by default,
+ * times no word: a phrase is never handed on as one, since a cut on its bounds falls mid-speech.
+ * Words are kept only when every phrase timed its own, as a phrase without them would read as
+ * silence between the words of the others.
  */
-function phraseWords(value: unknown): TranscriptionWord[] {
-  if (!Array.isArray(value)) return []
+function phraseTimings(value: unknown): ProviderTimings {
+  if (!Array.isArray(value)) return { words: [], segments: [] }
 
   const words: TranscriptionWord[] = []
+  const segments: TranscriptionSegment[] = []
+  let everyPhraseTimed = true
+
   for (const entry of value) {
     const phrase = object(entry)
     if (!phrase) continue
 
     const speaker = speakerLabel(phrase.speaker)
+    const segment = offsetEntry(phrase, speaker)
+    if (segment) segments.push(segment)
+
     const timed: TranscriptionWord[] = []
     for (const item of Array.isArray(phrase.words) ? phrase.words : []) {
-      const word = offsetWord(item, speaker)
+      const word = offsetEntry(item, speaker)
       if (word) timed.push(word)
     }
 
-    if (timed.length) {
-      words.push(...timed)
-      continue
-    }
-
-    const whole = offsetWord(phrase, speaker)
-    if (whole) words.push(whole)
+    if (!timed.length) everyPhraseTimed = false
+    words.push(...timed)
   }
 
-  return words
+  return { words: everyPhraseTimed ? words : [], segments }
 }
 
 /** One entry timed by an offset and a duration, as Azure counts them in milliseconds. */
-function offsetWord(value: unknown, speaker: string | undefined): TranscriptionWord | undefined {
+function offsetEntry(value: unknown, speaker: string | undefined): TranscriptionWord | undefined {
   const entry = object(value)
   if (!entry || typeof entry.text !== "string" || !entry.text) return undefined
 
@@ -277,6 +302,28 @@ function offsetWord(value: unknown, speaker: string | undefined): TranscriptionW
   if (!Number.isSafeInteger(endMs)) return undefined
 
   return { text: entry.text, startMs, endMs, ...(speaker === undefined ? {} : { speaker }) }
+}
+
+/**
+ * The segments the Gateway times itself, `{ text, startSecond, endSecond }` in seconds: sentences
+ * for most providers, and each word for some. One Sixb cannot place costs only itself.
+ */
+function timedSegments(value: unknown): TranscriptionSegment[] {
+  if (!Array.isArray(value)) return []
+
+  const segments: TranscriptionSegment[] = []
+  for (const entry of value) {
+    const segment = object(entry)
+    if (!segment || typeof segment.text !== "string") continue
+
+    const startMs = milliseconds(segment.startSecond)
+    const endMs = milliseconds(segment.endSecond)
+    if (startMs === undefined || endMs === undefined || endMs < startMs) continue
+
+    segments.push({ text: segment.text, startMs, endMs })
+  }
+
+  return segments
 }
 
 /** Azure counts speakers from zero; the label reads as ElevenLabs writes its own. */

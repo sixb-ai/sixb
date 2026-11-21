@@ -105,7 +105,7 @@ export type ObjectQueryFacetsResponse = {
 export type ArtifactErrorResponse = {
   error: string
   /**
-   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
    */
   code?: string
   /**
@@ -4790,6 +4790,13 @@ export type TranscribeAudioResponses = {
       endMs: number
       speaker?: string
     }>
+    segments?: Array<{
+      text: string
+      startMs: number
+      endMs: number
+      speaker?: string
+    }>
+    language?: string
   }
 }
 
@@ -11625,6 +11632,10 @@ export type GetObjectLineageResponses = {
                         type: "ontology.indexVectors"
                         indexingId: string
                       }
+                    | {
+                        type: "artifacts.transcribeMedia"
+                        digest: string
+                      }
                 }
               | {
                   type: "script"
@@ -11683,6 +11694,10 @@ export type GetObjectLineageResponses = {
                     | {
                         type: "ontology.indexVectors"
                         indexingId: string
+                      }
+                    | {
+                        type: "artifacts.transcribeMedia"
+                        digest: string
                       }
                 }
               | {
@@ -20982,7 +20997,7 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21007,7 +21022,7 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21096,7 +21111,7 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21121,7 +21136,7 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21146,7 +21161,7 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21171,7 +21186,7 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21196,7 +21211,7 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21474,7 +21489,7 @@ export type DeleteArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21499,7 +21514,7 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21524,7 +21539,7 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21574,7 +21589,7 @@ export type GetArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21599,7 +21614,7 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21624,7 +21639,7 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21745,7 +21760,7 @@ export type ListArtifactHoldersErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21770,7 +21785,7 @@ export type ListArtifactHoldersErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21795,7 +21810,7 @@ export type ListArtifactHoldersErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21864,7 +21879,7 @@ export type ClearArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21889,7 +21904,7 @@ export type ClearArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21914,7 +21929,7 @@ export type ClearArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21968,7 +21983,7 @@ export type GetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21993,7 +22008,7 @@ export type GetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22018,7 +22033,7 @@ export type GetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22082,7 +22097,7 @@ export type DeleteArtifactStateValueErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22107,7 +22122,7 @@ export type DeleteArtifactStateValueErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22132,7 +22147,7 @@ export type DeleteArtifactStateValueErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22157,7 +22172,7 @@ export type DeleteArtifactStateValueErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22218,7 +22233,7 @@ export type SetArtifactStateErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22243,7 +22258,7 @@ export type SetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22268,7 +22283,7 @@ export type SetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22293,7 +22308,7 @@ export type SetArtifactStateErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22318,7 +22333,7 @@ export type SetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22397,7 +22412,7 @@ export type UpdateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22422,7 +22437,7 @@ export type UpdateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22447,7 +22462,7 @@ export type UpdateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22472,7 +22487,7 @@ export type UpdateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22497,7 +22512,7 @@ export type UpdateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22780,7 +22795,7 @@ export type FreezeArtifactVersionErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22805,7 +22820,7 @@ export type FreezeArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22830,7 +22845,7 @@ export type FreezeArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22855,7 +22870,7 @@ export type FreezeArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -22880,7 +22895,7 @@ export type FreezeArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23155,7 +23170,7 @@ export type ListArtifactCommentsErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23180,7 +23195,7 @@ export type ListArtifactCommentsErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23205,7 +23220,7 @@ export type ListArtifactCommentsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23378,7 +23393,7 @@ export type AddArtifactCommentErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23403,7 +23418,7 @@ export type AddArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23428,7 +23443,7 @@ export type AddArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23453,7 +23468,7 @@ export type AddArtifactCommentErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23478,7 +23493,7 @@ export type AddArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23607,7 +23622,7 @@ export type ResolveArtifactCommentErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23632,7 +23647,7 @@ export type ResolveArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23657,7 +23672,7 @@ export type ResolveArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23682,7 +23697,7 @@ export type ResolveArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23807,7 +23822,7 @@ export type DeleteArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23832,7 +23847,7 @@ export type DeleteArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23857,7 +23872,7 @@ export type DeleteArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23909,7 +23924,7 @@ export type ListArtifactRestorePointsErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23934,7 +23949,7 @@ export type ListArtifactRestorePointsErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -23959,7 +23974,7 @@ export type ListArtifactRestorePointsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24060,7 +24075,7 @@ export type GetArtifactRestorePointErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24085,7 +24100,7 @@ export type GetArtifactRestorePointErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24110,7 +24125,7 @@ export type GetArtifactRestorePointErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24415,7 +24430,7 @@ export type RestoreArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24440,7 +24455,7 @@ export type RestoreArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24465,7 +24480,7 @@ export type RestoreArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24490,7 +24505,7 @@ export type RestoreArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24515,7 +24530,7 @@ export type RestoreArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24792,7 +24807,7 @@ export type CreateArtifactFrameErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24817,7 +24832,7 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24842,7 +24857,7 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24867,7 +24882,7 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24929,7 +24944,7 @@ export type GetArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24954,7 +24969,7 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -24979,7 +24994,7 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -25284,7 +25299,7 @@ export type PrintArtifactPdfErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -25309,7 +25324,7 @@ export type PrintArtifactPdfErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -25334,7 +25349,7 @@ export type PrintArtifactPdfErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -25359,7 +25374,7 @@ export type PrintArtifactPdfErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -25648,6 +25663,545 @@ export type HeadArtifactFileContentError =
   HeadArtifactFileContentErrors[keyof HeadArtifactFileContentErrors]
 
 export type HeadArtifactFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
+export type GetArtifactMediaData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query: {
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
+    /**
+     * The path of a video or a sound among the version's files
+     */
+    path: string
+    /**
+     * true derives again each part that failed, instead of hearing why
+     */
+    retry?: "true" | "false"
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/media"
+}
+
+export type GetArtifactMediaErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type GetArtifactMediaError = GetArtifactMediaErrors[keyof GetArtifactMediaErrors]
+
+export type GetArtifactMediaResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    path: string
+    version: number
+    parts: {
+      /**
+       * What the file holds
+       */
+      probe:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            durationMs: number
+            /**
+             * As FFmpeg names it, such as mov,mp4,m4a,3gp,3g2,mj2
+             */
+            container: string
+            bitRate?: number
+            /**
+             * An MP4 or a MOV whose index comes first, so it plays before it arrives whole
+             */
+            faststart?: boolean
+            video?: {
+              codec: string
+              /**
+               * As it shows, once turned
+               */
+              width: number
+              height: number
+              /**
+               * Degrees the picture is turned to show, as the file says
+               */
+              rotation: number
+              fps?: number
+            }
+            audio?: {
+              codec: string
+              sampleRate?: number
+              channels?: number
+            }
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * What plays in its place: H.264 at most 720p with a keyframe every half second, AAC; for a sound, only when browsers cannot play the original
+       */
+      proxy:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            /**
+             * Where to get it, on this API: it never changes, and is served with Range
+             */
+            url: string
+            mediaType: string
+            sizeBytes: number
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * A JPEG of a representative moment
+       */
+      poster:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            /**
+             * Where to get it, on this API: it never changes, and is served with Range
+             */
+            url: string
+            mediaType: string
+            sizeBytes: number
+            /**
+             * The moment it shows
+             */
+            atMs: number
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * Thumbnails width by height at every intervalMs from 0, count of them in rows of columns, in one JPEG
+       */
+      filmstrip:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            /**
+             * Where to get it, on this API: it never changes, and is served with Range
+             */
+            url: string
+            mediaType: string
+            sizeBytes: number
+            intervalMs: number
+            count: number
+            columns: number
+            width: number
+            height: number
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * The sound's peaks as JSON: { peaksPerSecond, peaks }, each from 0 to 100
+       */
+      waveform:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            /**
+             * Where to get it, on this API: it never changes, and is served with Range
+             */
+            url: string
+            mediaType: string
+            sizeBytes: number
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * Where the picture cuts to another shot
+       */
+      cuts:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            atMs: Array<number>
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+      /**
+       * What is said as JSON: { text, language?, words?, segments? }, timed in milliseconds
+       */
+      transcript:
+        | {
+            status: "pending"
+          }
+        | {
+            status: "ready"
+            /**
+             * Where to get it, on this API: it never changes, and is served with Range
+             */
+            url: string
+            mediaType: string
+            sizeBytes: number
+            language?: string
+          }
+        | {
+            status: "unavailable"
+            /**
+             * Why it will not come, as a reader hears it
+             */
+            reason: string
+            /**
+             * What the project lacks to make it, when the media is not why: retry=true makes it once the project has it
+             */
+            lacks?: "sandboxes" | "sandbox_tools" | "transcription_model"
+          }
+        | {
+            status: "failed"
+            /**
+             * Why it did not come, as a reader hears it
+             */
+            reason: string
+          }
+    }
+  }
+}
+
+export type GetArtifactMediaResponse = GetArtifactMediaResponses[keyof GetArtifactMediaResponses]
+
+export type GetArtifactMediaContentData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query: {
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
+    /**
+     * The path of a video or a sound among the version's files
+     */
+    path: string
+    /**
+     * Which part's file to get
+     */
+    part: "proxy" | "poster" | "filmstrip" | "waveform" | "transcript"
+    /**
+     * The original's bytes it is derived of, as its URL names them: then cached for good
+     */
+    v?: string
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/media/content"
+}
+
+export type GetArtifactMediaContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetArtifactMediaContentError =
+  GetArtifactMediaContentErrors[keyof GetArtifactMediaContentErrors]
+
+export type GetArtifactMediaContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetArtifactMediaContentResponse =
+  GetArtifactMediaContentResponses[keyof GetArtifactMediaContentResponses]
+
+export type HeadArtifactMediaContentData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query: {
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
+    /**
+     * The path of a video or a sound among the version's files
+     */
+    path: string
+    /**
+     * Which part's file to get
+     */
+    part: "proxy" | "poster" | "filmstrip" | "waveform" | "transcript"
+    /**
+     * The original's bytes it is derived of, as its URL names them: then cached for good
+     */
+    v?: string
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/media/content"
+}
+
+export type HeadArtifactMediaContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type HeadArtifactMediaContentError =
+  HeadArtifactMediaContentErrors[keyof HeadArtifactMediaContentErrors]
+
+export type HeadArtifactMediaContentResponses = {
   /**
    * File content headers
    */
@@ -26370,6 +26924,10 @@ export type GetObjectLinkLineageResponses = {
                         type: "ontology.indexVectors"
                         indexingId: string
                       }
+                    | {
+                        type: "artifacts.transcribeMedia"
+                        digest: string
+                      }
                 }
               | {
                   type: "script"
@@ -26428,6 +26986,10 @@ export type GetObjectLinkLineageResponses = {
                     | {
                         type: "ontology.indexVectors"
                         indexingId: string
+                      }
+                    | {
+                        type: "artifacts.transcribeMedia"
+                        digest: string
                       }
                 }
               | {
@@ -26772,6 +27334,10 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
+                    }
               }
             | {
                 type: "script"
@@ -26943,6 +27509,10 @@ export type ListEventsResponses = {
                   | {
                       type: "ontology.indexVectors"
                       indexingId: string
+                    }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
                     }
               }
             | {
@@ -27116,6 +27686,10 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
+                    }
               }
             | {
                 type: "script"
@@ -27277,6 +27851,10 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
+                    }
               }
             | {
                 type: "script"
@@ -27386,6 +27964,10 @@ export type ListEventsResponses = {
                   | {
                       type: "ontology.indexVectors"
                       indexingId: string
+                    }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
                     }
               }
             | {
@@ -27557,6 +28139,10 @@ export type ListEventsResponses = {
                       type: "ontology.indexVectors"
                       indexingId: string
                     }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
+                    }
               }
             | {
                 type: "script"
@@ -27726,6 +28312,10 @@ export type ListEventsResponses = {
                   | {
                       type: "ontology.indexVectors"
                       indexingId: string
+                    }
+                  | {
+                      type: "artifacts.transcribeMedia"
+                      digest: string
                     }
               }
             | {

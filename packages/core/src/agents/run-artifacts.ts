@@ -253,7 +253,7 @@ export function agentRunArtifacts(
       if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
 
       // The render worker pictures what the boards miss, with their queries answered now, as the
-      // requester.
+      // requester, and derives what its media need.
       await artifactPreviewRequester(reader)(stored.version)
 
       return {
