@@ -468,6 +468,14 @@ export interface ArtifactVideoRenderKey {
   readonly key: string
 }
 
+/**
+ * That someone asked for a video's export, kept under the export's key: what is kept under its
+ * other keys may have been rendered for another video, made in part the same.
+ */
+export interface ArtifactVideoExportAskRecord extends ArtifactVideoRenderKey {
+  readonly askedAt: Date
+}
+
 export interface ListArtifactVideoRendersInput {
   readonly projectId: string
   readonly keys: readonly string[]
@@ -787,6 +795,10 @@ export interface ArtifactStorage {
   putVideoRender(input: ArtifactVideoRenderRecord): Promise<void>
   /** Forgets why each render under these keys could not be made. A file kept there stays. */
   clearVideoRenderFailures(input: ListArtifactVideoRendersInput): Promise<void>
+  /** When someone first asked for the export under this key; null when no one has. */
+  getVideoExportAsk(input: ArtifactVideoRenderKey): Promise<ArtifactVideoExportAskRecord | null>
+  /** Keeps that someone asked for the export under its key. The first ask stays. */
+  putVideoExportAsk(input: ArtifactVideoExportAskRecord): Promise<void>
   /** What is derived of the media under these digests, by digest; one without any is left out. */
   listMedia(input: ListArtifactMediaInput): Promise<ArtifactMediaRecord[]>
   /**

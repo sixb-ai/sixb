@@ -150,7 +150,8 @@ Scenes that start on one frame render in the first one's segment, and its scene'
 scene on screen during it (`scenesOnScreen`).
 
 ```text
-sixb.artifacts.video()   keys from the outline alone: what is kept, or ask
+sixb.artifacts.video()   keys from the outline alone: what is kept, or ask, keeping the ask
+                         (`render: false` answers idle without one: segments may be another's)
   → artifact.video.export.requested   one job per export, carrying the version as it was asked for
       asks for each missing segment, then for itself again, VIDEO_EXPORT_JOB.recheckMs later
   → artifact.video.segment.requested  one job per segment key, shared by exports

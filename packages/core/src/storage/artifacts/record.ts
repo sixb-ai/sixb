@@ -27,6 +27,7 @@ import type {
   ArtifactStateEntry,
   ArtifactTurnWriteRecord,
   ArtifactVersionRecord,
+  ArtifactVideoExportAskRecord,
   ArtifactVideoRenderRecord,
 } from "./types"
 
@@ -259,6 +260,16 @@ export function parseArtifactVideoRenderRow(row: Row): ArtifactVideoRenderRecord
   const file = json(row.file, "file", where)
   if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
   return { ...kept, file }
+}
+
+export function parseArtifactVideoExportAskRow(row: Row): ArtifactVideoExportAskRecord {
+  const key = text(row.key, "key", "video export ask")
+  const where = `video export ask '${key}'`
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    key,
+    askedAt: date(row.askedAt, "askedAt", where),
+  }
 }
 
 export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewRecord {

@@ -25958,7 +25958,7 @@ export type ExportArtifactVideoData = {
      */
     retry?: "true" | "false"
     /**
-     * false reads where the MP4 stands without asking for it
+     * false reads where the MP4 stands without asking for it: idle when no one asked for it yet
      */
     render?: "true" | "false"
   }
@@ -26116,6 +26116,9 @@ export type ExportArtifactVideoResponses = {
          * What the project lacks to render it, when the video is not why: retry=true renders it once the project has it
          */
         lacks?: "sandboxes" | "sandbox_tools"
+      }
+    | {
+        status: "idle"
       }
 }
 

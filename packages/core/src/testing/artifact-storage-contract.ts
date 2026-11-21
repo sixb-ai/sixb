@@ -2065,6 +2065,23 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps that a video's export was asked for, the first ask staying", async () => {
+      await withStorage(async (artifacts) => {
+        const [key, other] = ["e", "9"].map((each) => each.repeat(64)) as [string, string]
+        expect(await artifacts.getVideoExportAsk({ projectId, key })).toBeNull()
+
+        await artifacts.putVideoExportAsk({ projectId, key, askedAt: t0 })
+        await artifacts.putVideoExportAsk({ projectId, key, askedAt: at(1) })
+        expect(await artifacts.getVideoExportAsk({ projectId, key })).toEqual({
+          projectId,
+          key,
+          askedAt: t0,
+        })
+        expect(await artifacts.getVideoExportAsk({ projectId, key: other })).toBeNull()
+        expect(await artifacts.getVideoExportAsk({ projectId: otherProjectId, key })).toBeNull()
+      })
+    })
+
     test("keeps what is derived of a media by digest, each part as it was put", async () => {
       await withStorage(async (artifacts) => {
         const clip = fileRef("a", "video/mp4").digest

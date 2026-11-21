@@ -484,6 +484,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("111-artifact-media", artifactMediaSql),
     pgSql("112-artifact-video-renders", artifactVideoRendersSql),
     pgSql("113-video-generation", videoGenerationSql),
+    pgSql("114-artifact-video-export-asks", artifactVideoExportAsksSql),
   ],
 })
 
@@ -599,3 +600,6 @@ import artifactVideoRendersSql from "./migrations/112-artifact-video-renders.sql
   type: "text",
 }
 import videoGenerationSql from "./migrations/113-video-generation.sql" with { type: "text" }
+import artifactVideoExportAsksSql from "./migrations/114-artifact-video-export-asks.sql" with {
+  type: "text",
+}

@@ -237,13 +237,14 @@ export function videoExportKeys(plan: VideoExportPlan): string[] {
 
 /**
  * Asks the render worker to assemble a video version's export, carrying what the version holds
- * now. Asking again while it is asked for asks nothing more; `retry` forgets why the export or its
+ * now, and keeps that it was asked for, which reading it without asking then says. Asking again
+ * while it is asked for asks nothing more; `retry` forgets why the export or its
  * segments could not be made, and asks again for each, in a job of its own: one in the export's
  * place could be taken by a segment that finishes meanwhile, which asks for nothing.
  */
 export async function requestVideoExport(
   context: {
-    readonly storage: Pick<ArtifactStorage, "clearVideoRenderFailures">
+    readonly storage: Pick<ArtifactStorage, "clearVideoRenderFailures" | "putVideoExportAsk">
     readonly queue: Pick<Queue<RenderQueueJob>, "enqueue">
   },
   version: Pick<ArtifactVersionRecord, "projectId" | "artifactId" | "version">,
@@ -281,6 +282,14 @@ export async function requestVideoExport(
         },
       },
     ],
+  })
+
+  // Kept once its job is: an ask that never reached the queue leaves the export idle, to ask
+  // again. One whose job is lost later is asked again by whoever watches it render.
+  await context.storage.putVideoExportAsk({
+    projectId: version.projectId,
+    key: plan.key,
+    askedAt: new Date(),
   })
 }
 

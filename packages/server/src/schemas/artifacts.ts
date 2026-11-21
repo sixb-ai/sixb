@@ -275,6 +275,9 @@ export const ArtifactVideoExportResponseSchema = z.discriminatedUnion("status", 
         "What the project lacks to render it, when the video is not why: retry=true renders it once the project has it"
       ),
   }),
+  z
+    .object({ status: z.literal("idle") })
+    .describe("Read with render=false, no one asked for it yet: asking renders it"),
 ])
 
 export const ArtifactVideoExportQuerySchema = z.object({
@@ -285,7 +288,9 @@ export const ArtifactVideoExportQuerySchema = z.object({
   render: z
     .enum(["true", "false"])
     .optional()
-    .describe("false reads where the MP4 stands without asking for it"),
+    .describe(
+      "false reads where the MP4 stands without asking for it: idle when no one asked for it yet"
+    ),
 })
 
 /** The parts of a media served as files, by the media content route. */

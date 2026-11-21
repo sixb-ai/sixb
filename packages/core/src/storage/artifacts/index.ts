@@ -38,6 +38,7 @@ export type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoExportAskRecord,
   ArtifactVideoRenderKey,
   ArtifactVideoRenderLack,
   ArtifactVideoRenderRecord,

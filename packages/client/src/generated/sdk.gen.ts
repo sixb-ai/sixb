@@ -4569,7 +4569,7 @@ export const getArtifactVideo = <ThrowOnError extends boolean = false>(
 /**
  * Render a video to MP4
  *
- * Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again; render=false reads where it stands without asking. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.
+ * Answers ready once the version is rendered, and rendering with how many of its segments are done until then, having asked for it: ask again every few seconds, then get it. It renders scene by scene in sandboxes of the project, about as long as the video for a light one, and keeps each scene's segment, so a version that changes one scene renders only that scene again. Failed with why when it could not be rendered; retry=true asks again; render=false reads where it stands without asking, idle when no one asked for it yet. The artifact: files it plays are those the caller reads. Whoever reads the artifact may ask. 400 invalid_artifact when the version is not a video; 501 video_unavailable in a project without sandboxes.
  */
 export const exportArtifactVideo = <ThrowOnError extends boolean = false>(
   options: Options<ExportArtifactVideoData, ThrowOnError>

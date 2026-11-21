@@ -5,9 +5,10 @@ import type { ArtifactVersion } from "../../queries"
 
 // A video's MP4, as its header shows it. The server renders it scene by scene when someone asks,
 // and keeps it: the header reads where it stands without asking, asks when the reader exports it,
-// and watches it render until it is ready to download. A version the reader has not exported, of
-// which the version before it was, offers that one's MP4 as out of date. The open version changes
-// under its number at each write: what the header knows of it is the revision's it read.
+// and watches it render until it is ready to download, wherever it was asked for. A version no one
+// exported, of which the version before it was, offers that one's MP4 as out of date. The open
+// version changes under its number at each write: what the header knows of it is the revision's
+// it read.
 //
 // Why an export failed is the reader's to hear once they asked, in words of their own: the
 // server's reason, which names a scene or what the project's sandboxes lack, is a developer's.
@@ -19,7 +20,7 @@ const WATCH_MS = 2_000
 export type VideoExportView =
   /** Not read yet. */
   | { readonly state: "loading" }
-  /** Not asked for here; `earlier` is the version before it, exported. */
+  /** Not asked for; `earlier` is the version before it, exported. */
   | { readonly state: "idle"; readonly earlier?: number }
   | {
       readonly state: "rendering"
@@ -34,10 +35,10 @@ export type VideoExportView =
   | { readonly state: "unavailable" }
 
 /**
- * What the header shows of an answer. The server answers `rendering` for an export nobody asked
- * for as well, its parts rendered for another version counted, as an edit of one scene keeps the
- * others: one not asked for here is idle. Exporting it joins one already rendering. So is one
- * that failed, which the server keeps until someone asks again: exporting it asks anew.
+ * What the header shows of an answer. The server answers `idle` for an export no one asked for,
+ * and `rendering` for one someone asked for, here or on another device: the header shows it
+ * rendering. One that failed, which the server keeps until someone asks again, is idle until the
+ * reader asks here: exporting it asks anew.
  */
 export function videoExportView(
   answer: ExportArtifactVideoResponse | undefined,
@@ -49,7 +50,9 @@ export function videoExportView(
   if (answer.status === "ready") {
     return { state: "ready", durationMs: answer.durationMs, sizeBytes: answer.sizeBytes }
   }
-  if (!asked) return earlier === undefined ? { state: "idle" } : { state: "idle", earlier }
+  if (answer.status === "idle" || (answer.status === "failed" && !asked)) {
+    return earlier === undefined ? { state: "idle" } : { state: "idle", earlier }
+  }
 
   if (answer.status === "failed") return { state: answer.lacks ? "unavailable" : "failed" }
 
@@ -94,15 +97,21 @@ export function useVideoExport(
       })
     ).data
 
+  const currentKey = videoExportQueryKey(version.artifactId, version.version, version.revision)
   const current = useQuery({
-    queryKey: videoExportQueryKey(version.artifactId, version.version, version.revision),
-    // Asked here, a look also asks again, which changes nothing unless its job was lost.
-    queryFn: read(version.version, asked),
-    refetchInterval: (query) =>
-      asked && query.state.data?.status === "rendering" ? WATCH_MS : false,
+    queryKey: currentKey,
+    // Asked here, or watched while it renders wherever it was asked, a look also asks again: that
+    // changes nothing unless its job was lost, which it then asks for anew. Whoever reads the
+    // artifact may ask, as they may read where it stands.
+    queryFn: () => {
+      const watching =
+        cache.getQueryData<ExportArtifactVideoResponse>(currentKey)?.status === "rendering"
+      return read(version.version, asked || watching)()
+    },
+    refetchInterval: (query) => (query.state.data?.status === "rendering" ? WATCH_MS : false),
   })
 
-  const idle = current.data !== undefined && current.data.status !== "ready" && !asked
+  const idle = videoExportView(current.data, asked).state === "idle"
   const previous = version.version - 1
   const earlier = useQuery({
     queryKey: videoExportQueryKey(version.artifactId, previous),

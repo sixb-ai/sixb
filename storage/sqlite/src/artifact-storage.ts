@@ -17,6 +17,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoExportAskRow,
   parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
@@ -40,6 +41,8 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoExportAskRecord,
+  ArtifactVideoRenderKey,
   ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
@@ -852,6 +855,27 @@ export class SqliteArtifactStorage implements ArtifactStorage {
          WHERE project_id = ? AND key IN (SELECT value FROM json_each(?)) AND failure IS NOT NULL`
       )
       .run(input.projectId, JSON.stringify(input.keys))
+  }
+
+  async getVideoExportAsk(
+    input: ArtifactVideoRenderKey
+  ): Promise<ArtifactVideoExportAskRecord | null> {
+    const row = this.db
+      .query(
+        `SELECT project_id AS projectId, key, asked_at AS askedAt FROM artifact_video_export_asks
+         WHERE project_id = ? AND key = ?`
+      )
+      .get(input.projectId, input.key) as Row | null
+    return row ? parseArtifactVideoExportAskRow(row) : null
+  }
+
+  async putVideoExportAsk(input: ArtifactVideoExportAskRecord): Promise<void> {
+    this.db
+      .query(
+        `INSERT INTO artifact_video_export_asks (project_id, key, asked_at) VALUES (?, ?, ?)
+         ON CONFLICT (project_id, key) DO NOTHING`
+      )
+      .run(input.projectId, input.key, input.askedAt.toISOString())
   }
 
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {

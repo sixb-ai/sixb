@@ -53,6 +53,7 @@ export {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoExportAskRow,
   parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
