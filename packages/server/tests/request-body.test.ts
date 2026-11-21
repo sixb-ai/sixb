@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   DEFAULT_REQUEST_BODY_LIMIT_BYTES,
+  declaredBodyTooLarge,
   limitRequestBody,
   RequestBodyTooLargeError,
   readRequestBodyWithLimit,
@@ -106,5 +107,50 @@ describe("limitRequestBody", () => {
 
     const bytes = await readRequestBodyWithLimit(request, 2 * DEFAULT_REQUEST_BODY_LIMIT_BYTES)
     expect(bytes.byteLength).toBe(DEFAULT_REQUEST_BODY_LIMIT_BYTES + 1)
+  })
+})
+
+describe("declaredBodyTooLarge", () => {
+  const declaring = (method: string, path: string, bytes: number) =>
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: { "content-length": String(bytes) },
+    })
+  const past = DEFAULT_REQUEST_BODY_LIMIT_BYTES + 1
+
+  // To check, drop a route from LARGER_BODY_ROUTES: its request is refused before it is read.
+  test("lets through a larger body only where the route reads one", () => {
+    for (const [method, path] of [
+      ["POST", "/api/files"],
+      ["PUT", "/api/files/uploads/upl_1/content"],
+      ["POST", "/api/models/audio/transcriptions"],
+      ["PUT", "/api/webhooks/github/events"],
+      ["POST", "/api/agent-runs/run_1/session/model/stream"],
+    ] as const) {
+      expect(declaredBodyTooLarge(declaring(method, path, past)), `${method} ${path}`).toBe(
+        undefined
+      )
+    }
+
+    for (const [method, path] of [
+      ["POST", "/api/objects/query"],
+      ["GET", "/api/files"],
+      ["POST", "/api/files/uploads"],
+      ["PUT", "/api/files/uploads/upl_1/content/more"],
+      ["POST", "/api/agent-runs/run_1/session"],
+    ] as const) {
+      expect(
+        declaredBodyTooLarge(declaring(method, path, past)),
+        `${method} ${path}`
+      ).toBeInstanceOf(RequestBodyTooLargeError)
+    }
+  })
+
+  test("lets through any body declared within the cap", () => {
+    expect(
+      declaredBodyTooLarge(
+        declaring("POST", "/api/objects/query", DEFAULT_REQUEST_BODY_LIMIT_BYTES)
+      )
+    ).toBe(undefined)
   })
 })

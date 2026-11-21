@@ -328,6 +328,49 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
     agentEffect: "file",
   },
+  // A file past the simple upload's ceiling is uploaded staged, as `sixb files upload` does: its
+  // session is the caller's alone, and its content reaches blob storage without the server
+  // holding it.
+  {
+    operationId: "createFileUpload",
+    method: "POST",
+    path: "/api/files/uploads",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "file",
+  },
+  {
+    operationId: "uploadFileContent",
+    method: "PUT",
+    path: "/api/files/uploads/:uploadId/content",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "file",
+  },
+  {
+    operationId: "signFileUploadPart",
+    method: "POST",
+    path: "/api/files/uploads/:uploadId/parts/:partNumber",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "file",
+  },
+  {
+    operationId: "completeFileUpload",
+    method: "POST",
+    path: "/api/files/uploads/:uploadId/complete",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "file",
+  },
+  {
+    operationId: "abortFileUpload",
+    method: "POST",
+    path: "/api/files/uploads/:uploadId/abort",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "file",
+  },
   {
     operationId: "listActionRuns",
     method: "GET",

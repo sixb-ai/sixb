@@ -61,11 +61,21 @@ Sync, pipeline, and workflow run requests instead answer with a `runId` once the
 
 For paginated reads, use the parameters and continuation fields documented on that endpoint. Object queries return a `nextPageToken`; see [Paginate results](object-queries.md#paginate-results).
 
-A request body can be at most 1 MiB, except for file uploads, which take files up to 25 MiB. A larger request gets a `413` response.
+A request body can be at most 1 MiB, except for file uploads: up to 25 MiB in one request, and up to 2 GiB staged. A larger request gets a `413` response.
 
 ## Files
 
-Upload a small file with `POST /api/files` using multipart form data. Larger uploads can use the `/api/files/uploads` session endpoints described in OpenAPI. A file sent through the API can be at most 25 MiB; with S3 or Azure Blob Storage, these endpoints send larger files straight to storage instead.
+Upload a small file with `POST /api/files` using multipart form data. A file past 25 MiB, up to 2 GiB, goes through the `/api/files/uploads` session endpoints described in OpenAPI:
+
+| Step | Request |
+|---|---|
+| Open | `POST /api/files/uploads` with `fileName`, `sizeBytes` and its `sha256:` `digest` |
+| Send | `PUT` the bytes where the answer says: through the API, or, with S3 or Azure Blob Storage, straight to storage, in parts when it asks |
+| Finish | `POST /api/files/uploads/:uploadId/complete`, which answers the file's reference |
+
+The API streams what it receives to blob storage and checks it against the declared size and digest. `sixb files upload` does all three steps for you, and access tokens can call them.
+
+A file uploaded either way without a media type, or as `application/octet-stream`, is typed by its first bytes, else by its name.
 
 Read a file through the object or run that owns its reference. For example, download the `scan` property from an invoice:
 

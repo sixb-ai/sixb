@@ -103,6 +103,18 @@ export class SixbFileUploadError extends Error {
   }
 }
 
+/**
+ * How far an upload is. A staged upload first reads the file for its digest (`hash`), then sends
+ * it (`upload`). What one request sends is counted once it is sent: fetch reports no progress
+ * within a request, so a file sent whole goes from none of it to all of it at once, and one sent
+ * in parts, part by part.
+ */
+export interface FileUploadProgress {
+  readonly stage: "hash" | "upload"
+  readonly loadedBytes: number
+  readonly totalBytes: number
+}
+
 export interface UploadFileOptions {
   readonly fileName?: string
   readonly logicalPath?: string
@@ -110,6 +122,7 @@ export interface UploadFileOptions {
   readonly fetch?: typeof fetch
   readonly stagedUploadThresholdBytes?: number
   readonly signal?: AbortSignal
+  readonly onProgress?: (progress: FileUploadProgress) => void
 }
 
 export interface UploadFileInput extends UploadFileOptions {
@@ -137,11 +150,14 @@ async function uploadFileSimple(file: File | Blob, options: UploadFileOptions): 
   const data = await runUploadStep("server-put", () =>
     uploadFileRaw({ body, client: options.client, ...callOptions(options.signal) })
   )
+  options.onProgress?.({ stage: "upload", loadedBytes: file.size, totalBytes: file.size })
   return toFileRef(data, "server-put")
 }
 
 async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): Promise<FileRef> {
-  const digest = await hashFile(file)
+  const progress = (stage: FileUploadProgress["stage"], loadedBytes: number) =>
+    options.onProgress?.({ stage, loadedBytes, totalBytes: file.size })
+  const digest = await hashFile(file, (hashedBytes) => progress("hash", hashedBytes))
   const uploadBody = {
     ...(resolveUploadFileName(file, options.fileName) === undefined
       ? {}
@@ -159,6 +175,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
   let parts: Array<{ partNumber: number; etag?: string }> | undefined
   let completed: Omit<FileRef, "digest"> & { readonly digest: string }
   try {
+    progress("upload", 0)
     if (upload.strategy === "server") {
       await runUploadStep("server-put", () =>
         uploadFileContent({
@@ -168,6 +185,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
           ...callOptions(options.signal),
         })
       )
+      progress("upload", file.size)
     } else if (upload.strategy === "direct-put") {
       await putDirectUpload({
         file,
@@ -177,6 +195,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
         url: upload.url,
         signal: options.signal,
       })
+      progress("upload", file.size)
     } else {
       parts = await uploadMultipartFile({
         client: options.client,
@@ -186,6 +205,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
         partReceipt: upload.partReceipt ?? "etag",
         uploadId: upload.uploadId,
         signal: options.signal,
+        onSent: (sentBytes) => progress("upload", sentBytes),
       })
     }
 
@@ -251,6 +271,8 @@ async function uploadMultipartFile(input: {
   readonly partReceipt: "etag" | "none"
   readonly uploadId: string
   readonly signal?: AbortSignal
+  /** Called after each part with how many bytes are sent so far. */
+  readonly onSent?: (sentBytes: number) => void
 }): Promise<Array<{ partNumber: number; etag?: string }>> {
   const fetch = input.fetch
   const parts: Array<{ partNumber: number; etag?: string }> = []
@@ -293,15 +315,19 @@ async function uploadMultipartFile(input: {
     }
 
     parts.push(input.partReceipt === "etag" && etag ? { partNumber, etag } : { partNumber })
+    input.onSent?.(Math.min(input.file.size, offset + input.partSizeBytes))
     partNumber += 1
   }
 
   return parts
 }
 
-async function hashFile(file: File | Blob): Promise<FileRef["digest"]> {
+async function hashFile(
+  file: File | Blob,
+  onBytes: (hashedBytes: number) => void
+): Promise<FileRef["digest"]> {
   try {
-    return await computeStreamingBlobDigest(file)
+    return await computeStreamingBlobDigest(file, { onBytes })
   } catch (error) {
     throw toSixbFileUploadError(error, "hash")
   }

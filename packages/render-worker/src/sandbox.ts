@@ -1,16 +1,36 @@
-import type { BlobStorage, Sandbox, SandboxNetworkPolicy } from "@sixb/core"
+import type { BlobStorage, FileRef, Sandbox, SandboxNetworkPolicy, Storage } from "@sixb/core"
 import { FRAME_ASSETS, FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
+import {
+  createFileDownloadUrl,
+  type FileDownloadUrlContext,
+  revokeFileDownloadUrl,
+} from "@sixb/core/internal/blob-storage"
+import { getApiPublicOrigin } from "@sixb/core/internal/runtime"
 import type { RenderHost } from "./host"
 import readScript from "./read.cjs" with { type: "text" }
 import sharedScript from "./shared.cjs" with { type: "text" }
 
 // What every render does in its blank sandbox: reaches only the CDNs a frame may load from, runs
-// its script with the image's browser, reads back what the script wrote, and is destroyed.
+// its script with the image's browser, reads back what the script wrote, and is destroyed. A render
+// whose files are large fetches them itself, from the API, and streams what it wrote back to blob
+// storage a piece at a time: neither is ever held whole by the worker.
 
 /** What a render may reach: the libraries, stylesheets and fonts a frame may load. */
 export const RENDER_NETWORK: SandboxNetworkPolicy = {
   mode: "restricted",
   allow: FRAME_CDN_ALLOWLIST.map((origin) => ({ name: new URL(origin).hostname, origin })),
+}
+
+/** {@link RENDER_NETWORK}, with `origins` beside the CDNs. */
+export function renderNetwork(origins: readonly string[]): SandboxNetworkPolicy {
+  if (origins.length === 0) return RENDER_NETWORK
+  return {
+    mode: "restricted",
+    allow: [
+      ...(RENDER_NETWORK.mode === "restricted" ? RENDER_NETWORK.allow : []),
+      ...origins.map((origin) => ({ name: new URL(origin).hostname, origin })),
+    ],
+  }
 }
 
 /** A frame's own file, which an entry loads from `__sixb/`. */
@@ -42,17 +62,23 @@ const DESTROY_MS = 30_000
 /**
  * Runs `render` in a blank sandbox of the project, within `timeoutMs`, and destroys the sandbox,
  * waiting for that at most {@link DESTROY_MS}. `left()` is how much of the time is left, which
- * each step bounds itself by.
+ * each step bounds itself by. `reach` opens more origins than the CDNs, such as the API's, for a
+ * render that fetches its files with {@link downloadIntoSandbox}.
  */
 export async function inRenderSandbox<T>(
   host: Required<Pick<RenderHost, "sandboxes">>,
   what: string,
-  options: { readonly timeoutMs: number; readonly signal: AbortSignal },
+  options: {
+    readonly timeoutMs: number
+    readonly signal: AbortSignal
+    readonly reach?: readonly string[]
+  },
   render: (sandbox: Sandbox, left: () => number, signal: AbortSignal) => Promise<T>
 ): Promise<T> {
   const ends = Date.now() + options.timeoutMs
   const signal = AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs)])
-  const sandbox = await host.sandboxes.create({ environment: {}, network: RENDER_NETWORK, signal })
+  const network = renderNetwork(options.reach ?? [])
+  const sandbox = await host.sandboxes.create({ environment: {}, network, signal })
   try {
     return await render(sandbox, () => Math.max(0, ends - Date.now()), signal)
   } finally {
@@ -116,10 +142,14 @@ async function runNode(
 }
 
 /**
- * The most one command reads out of a sandbox. Some providers keep at most 1 MiB of a command's
- * output, and base64 is a third larger than what it holds.
+ * The most one command reads out of a sandbox: as much as fits in 1 MiB of output, which some
+ * providers keep at most (Azure fails a command past it). In base64, a third larger, 720 KiB is
+ * 960 KiB, which leaves room for each piece's line of JSON.
+ *
+ * The contract has no other way out of a sandbox. A streamed read of a file, as `writeFiles` is
+ * its way in, would take a large file back in one request.
  */
-const READ_BYTES = 512 * 1024
+const READ_BYTES = 720 * 1024
 const READ_TIMEOUT_MS = 60_000
 /** How many of those commands run at once. */
 const READS_AT_ONCE = 4
@@ -186,6 +216,183 @@ export async function readSandboxFiles(
   }
   await Promise.all(Array.from({ length: Math.min(READS_AT_ONCE, batches.length) }, reader))
   return read
+}
+
+/** What fetching files by download URL takes from the host: the API's grants and blobs. */
+export interface RenderDownloadHost {
+  readonly id: string
+  readonly storage: Pick<Storage, "fileDownloadGrants">
+  readonly blobStorage: Pick<BlobStorage, "stat">
+}
+
+/**
+ * The API's public origin, where a render's sandbox fetches its files: pass it to
+ * {@link inRenderSandbox} as `reach`. The API records it, and `SIXB_API_PUBLIC_ORIGIN` tells a
+ * worker of its own.
+ */
+export function renderApiOrigin(host: object): string {
+  const origin = getApiPublicOrigin(host)
+  if (!origin) {
+    throw new Error(
+      "[SixbRenderWorker] A render that fetches its files needs the API's public origin. Set SIXB_API_PUBLIC_ORIGIN for the worker."
+    )
+  }
+  return origin
+}
+
+/** How long fetching files may take at most, whatever is left of the render. */
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
+
+/**
+ * Puts each file at its path in the sandbox, which fetches it itself with curl from a download URL
+ * of the API, {@link FETCHES_AT_ONCE} at a time: a large one never passes through the worker, as
+ * `writeFiles` would take it. Each URL lasts as long as the fetch may, and is revoked once it is
+ * over. The sandbox must reach the API: create it with {@link renderApiOrigin} in `reach`.
+ */
+export async function downloadIntoSandbox(
+  host: RenderDownloadHost,
+  sandbox: Sandbox,
+  files: readonly { readonly path: string; readonly file: FileRef }[],
+  options: {
+    readonly timeoutMs: number
+    readonly signal: AbortSignal
+    /** What asked, kept with each URL so an exposure is traced back to it: the render's job. */
+    readonly executionId: string
+  }
+): Promise<void> {
+  if (files.length === 0) return
+
+  const timeoutMs = Math.min(options.timeoutMs, DOWNLOAD_TIMEOUT_MS)
+  const context: FileDownloadUrlContext = {
+    projectId: host.id,
+    storage: host.storage,
+    blobStorage: host.blobStorage,
+    executionId: options.executionId,
+    apiPublicOrigin: renderApiOrigin(host),
+  }
+  const urls: { readonly id: string; readonly url: string }[] = []
+  try {
+    for (const { file } of files) {
+      urls.push(await createFileDownloadUrl(context, file, { expiresInMs: timeoutMs + 60_000 }))
+    }
+
+    const result = await sandbox.runCommand(
+      "bash",
+      [
+        "-c",
+        FETCH_SCRIPT,
+        "fetch",
+        FETCH_FILE_SCRIPT,
+        ...files.flatMap(({ path, file }, index) => [
+          path,
+          urls[index]?.url ?? "",
+          String(file.sizeBytes),
+        ]),
+      ],
+      { timeout: timeoutMs, signal: options.signal }
+    )
+    options.signal.throwIfAborted()
+    if (result.exitCode !== 0 || result.timedOut) {
+      throw new Error(
+        `[SixbRenderWorker] The sandbox could not fetch its files: ${result.stderr.trim().slice(0, 500) || (result.timedOut ? "it ran out of time" : `exit ${result.exitCode}`)}`
+      )
+    }
+  } finally {
+    for (const { id } of urls) {
+      await revokeFileDownloadUrl(context, id).catch((error: unknown) => {
+        console.warn(`[SixbRenderWorker] Could not revoke download URL '${id}':`, error)
+      })
+    }
+  }
+}
+
+/**
+ * How many files a sandbox fetches at once: one connection rarely carries what the API and the
+ * sandbox can, and a version's recordings are many.
+ */
+const FETCHES_AT_ONCE = 4
+
+// Runs FETCH_FILE_SCRIPT for each `<path> <url> <bytes>` that follows it, a few at a time. Once one
+// fails, those still waiting are skipped, and xargs waits for those running: a fetch left running
+// would hold the command's output open past its end on some providers.
+const FETCH_SCRIPT = `set -eu
+command -v curl >/dev/null 2>&1 || { echo "the sandbox has no curl" >&2; exit 3; }
+fetch_file="$1"
+shift
+failed="$(mktemp -d)"
+export FETCH_FAILED="$failed/failed"
+printf '%s\\0' "$@" | xargs -0 -n 3 -P ${FETCHES_AT_ONCE} sh -c "$fetch_file" fetch`
+
+// Fetches one file, and refuses it when it did not arrive whole.
+const FETCH_FILE_SCRIPT = `[ ! -e "$FETCH_FAILED" ] || exit 1
+mkdir -p -- "$(dirname -- "$1")"
+curl --fail --silent --show-error --retry 3 --output "$1" --url "$2" || { touch "$FETCH_FAILED"; exit 1; }
+[ "$(wc -c < "$1" | tr -d ' ')" = "$3" ] || { echo "$1 did not arrive whole" >&2; touch "$FETCH_FAILED"; exit 1; }`
+
+/**
+ * Stores a file a script wrote in the sandbox, `bytes` long as the script said: it streams into
+ * blob storage a piece at a time, read as {@link readSandboxFiles} reads, a few pieces ahead, so
+ * the worker never holds the whole file.
+ *
+ * A sandbox could instead upload it to blob storage itself, as `sixb files upload` does from the
+ * Agent's sandbox. A render's sandbox cannot: it holds no credential for the API, and the URLs a
+ * blob store signs for a direct upload are on an origin its network does not reach, which the
+ * contract does not name before the upload exists, when the sandbox's network is already set.
+ */
+export async function storeSandboxFile(
+  blobStorage: Pick<BlobStorage, "put">,
+  sandbox: Sandbox,
+  file: {
+    readonly path: string
+    readonly bytes: number
+    readonly fileName: string
+    readonly mediaType: string
+  },
+  options: { readonly signal: AbortSignal }
+): Promise<FileRef> {
+  const script = `${sandbox.workingDirectory}/read.cjs`
+  await sandbox.writeFiles([{ path: script, contents: readScript }])
+
+  const pieces = Math.ceil(file.bytes / READ_BYTES)
+  const reading: Promise<Uint8Array>[] = []
+  let next = 0
+  const readPiece = async (index: number): Promise<Uint8Array> => {
+    const start = index * READ_BYTES
+    const length = Math.min(READ_BYTES, file.bytes - start)
+    const result = await runNode(sandbox, [script, file.path, start, length], {
+      timeoutMs: READ_TIMEOUT_MS,
+      signal: options.signal,
+    })
+    const line = parse(result.stdout.trim())
+    const bytes = typeof line?.data === "string" ? Buffer.from(line.data, "base64") : null
+    if (bytes?.byteLength !== length) {
+      throw new Error(`[SixbRenderWorker] ${file.path} could not be read back from the sandbox.`)
+    }
+    return bytes
+  }
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      while (reading.length < READS_AT_ONCE && next < pieces) {
+        const piece = readPiece(next)
+        // Read ahead: a piece that fails before its turn is reported when its turn comes.
+        piece.catch(() => {})
+        reading.push(piece)
+        next += 1
+      }
+      const piece = reading.shift()
+      if (piece) controller.enqueue(await piece)
+      else controller.close()
+    },
+  })
+
+  return blobStorage.put({
+    body,
+    expectedSizeBytes: file.bytes,
+    signal: options.signal,
+    fileName: file.fileName,
+    mediaType: file.mediaType,
+  })
 }
 
 function lastJsonLine(stdout: string): Record<string, unknown> | null {

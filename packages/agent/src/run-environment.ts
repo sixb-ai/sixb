@@ -939,7 +939,8 @@ async function startAgentEnvironment(
       runId,
       callTool: input.callTool,
       contextDirectory: sandbox.contextDirectory,
-      fileBytesLeft: () => fileBudget.maxBytes - fileBudget.reservedBytes,
+      // A file artifact's publish may take the run past its budget, leaving tools nothing.
+      fileBytesLeft: () => Math.max(0, fileBudget.maxBytes - fileBudget.reservedBytes),
       installFiles: ({ toolName, files, signal }) =>
         installAgentToolFiles({
           toolName,
@@ -1116,7 +1117,7 @@ async function startAgentEnvironment(
         installed: await artifacts.installed,
         artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
-        sandbox: (await ready).sandbox,
+        handle: await ready,
         signal,
       })
     },

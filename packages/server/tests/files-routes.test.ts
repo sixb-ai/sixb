@@ -11,6 +11,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import {
   type AbortBlobUploadInput,
   type BlobUploadSession,
@@ -201,6 +202,26 @@ describe("file routes", () => {
 
     const stored = await blobStorage.open(fileRef.blobId)
     expect(await new Response(stored).text()).toBe("hello file")
+  })
+
+  // To check, store the part's type as it came: a file the client did not type, as the CLI sends
+  // one without --media-type, keeps no type at all.
+  test("types a file sent as bytes only by its leading bytes, else its name", async () => {
+    const { app } = createFilesApi()
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const upload = async (fileName: string, body: Uint8Array<ArrayBuffer>) => {
+      const form = new FormData()
+      form.set("file", new File([body], fileName, { type: "application/octet-stream" }))
+      return (await (await app.fetch(uploadRequest(form))).json()) as FileRef
+    }
+
+    expect(await upload("scan", png)).toMatchObject({ fileName: "scan", mediaType: "image/png" })
+    expect(await upload("notes.md", new TextEncoder().encode("# Notes"))).toMatchObject({
+      mediaType: "text/markdown",
+    })
+    expect(await upload("blob", new TextEncoder().encode("plain"))).toMatchObject({
+      mediaType: "application/octet-stream",
+    })
   })
 
   test("rejects uploads without a file field", async () => {
@@ -475,7 +496,94 @@ describe("file routes", () => {
     expect(await contentResponse.json()).toEqual({
       error: `File upload digest mismatch: expected ${expectedDigest}, received ${actualDigest}.`,
     })
-    expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).toBeNull()
+    // The content streamed to blob storage before its digest was known, so its blob is kept, as
+    // a simple upload's is: the session never takes it as its file.
+    expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).not.toBeNull()
+    const completed = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
+    )
+    expect(completed.status).toBe(400)
+    expect(await completed.json()).toEqual({ error: "Upload content has not been received." })
+  })
+
+  // To check, read the content whole with `readRequestBodyWithLimit` again: the route answers 413
+  // past the simple-upload ceiling.
+  test("streams staged server content past the simple-upload ceiling, within its declared size", async () => {
+    const { app, blobStorage } = createFilesApi()
+    const sizeBytes = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 3 * 1024 * 1024
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", { sizeBytes }))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const content = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: chunkedBody(sizeBytes),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+    expect(content.status).toBe(200)
+
+    const completed = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
+    )
+    const fileRef = (await completed.json()) as FileRef
+    expect(fileRef.sizeBytes).toBe(sizeBytes)
+    expect((await blobStorage.stat(fileRef.blobId))?.sizeBytes).toBe(sizeBytes)
+  })
+
+  // To check, complete with the stored reference as it is: a staged upload without a media type
+  // keeps none, where a file the Agent stores is typed by its bytes and its name.
+  test("types a staged upload that declared no media type by its bytes, else its name", async () => {
+    const { app } = createFilesApi()
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const upload = async (fileName: string, body: Uint8Array<ArrayBuffer>) => {
+      // Declared as bytes only, as an untyped Blob is: that says nothing of the file.
+      const created = await app.fetch(
+        jsonRequest("/api/files/uploads", {
+          fileName,
+          sizeBytes: body.byteLength,
+          ...(fileName === "scan" ? { mediaType: "application/octet-stream" } : {}),
+        })
+      )
+      const { uploadId } = (await created.json()) as { uploadId: string }
+      await app.fetch(stagedContentRequest(uploadId, body))
+      const completed = await app.fetch(jsonRequest(`/api/files/uploads/${uploadId}/complete`, {}))
+      return (await completed.json()) as FileRef
+    }
+
+    expect(await upload("scan", png)).toMatchObject({ fileName: "scan", mediaType: "image/png" })
+    expect(await upload("notes.md", new TextEncoder().encode("# Notes"))).toMatchObject({
+      mediaType: "text/markdown",
+    })
+    expect(await upload("blob", new TextEncoder().encode("plain"))).toMatchObject({
+      mediaType: "application/octet-stream",
+    })
+  })
+
+  test("refuses staged server content past the size it declared", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", { sizeBytes: 5 }))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: chunkedBody(6),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({ error: "Request body exceeds the 5 byte limit." })
+  })
+
+  test("refuses a staged upload declared larger than one upload may hold", async () => {
+    const { app } = createFilesApi()
+    const response = await app.fetch(
+      jsonRequest("/api/files/uploads", { sizeBytes: MAX_FILE_UPLOAD_BYTES + 1 })
+    )
+    expect(response.status).toBe(422)
   })
 
   test("returns the cached fileRef when completion is retried", async () => {

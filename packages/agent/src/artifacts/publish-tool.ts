@@ -4,6 +4,7 @@ import {
   AgentToolPublicError,
   type ArtifactKind,
   ArtifactRequestError,
+  type FileRef,
   type JsonValue,
   type Principal,
   principalsEqual,
@@ -16,20 +17,27 @@ import {
   parseArtifactTheme,
   parseCanvas,
 } from "@sixb/core/artifacts"
+import { blobDigestHex } from "@sixb/core/blob-storage"
 import {
   AgentExecutionLostError,
   type AgentRunArtifacts,
   type AgentRunFileStore,
 } from "@sixb/core/internal/agents"
 import { frameLayout } from "@sixb/core/internal/artifacts/frames"
+import { isLiveTextPath } from "@sixb/core/internal/artifacts/live"
 import {
   ARTIFACT_LIMITS,
   answerArtifactQueries,
+  artifactSizeLimits,
   DOCUMENT_HOLDER_QUERY,
   isArtifactId,
   type PublishedArtifact,
 } from "@sixb/core/internal/artifacts/publish"
-import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
+import {
+  inferFileMediaType,
+  statFileRef,
+  UNTYPED_MEDIA_TYPE,
+} from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactRecord } from "@sixb/core/storage"
 import { agentToolErrorText } from "../model-adapters"
@@ -37,10 +45,13 @@ import {
   listSandboxFiles,
   readSandboxFile,
   resolveSandboxPath,
+  SANDBOX_INLINE_BYTES,
   SandboxFileError,
+  statSandboxFile,
+  uploadSandboxFile,
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
-import type { AgentFileBudget } from "../tools/tool-files"
+import type { AgentFileBudget, AgentFileReservation } from "../tools/tool-files"
 import {
   type CheckedQuery,
   checkLayout,
@@ -50,13 +61,16 @@ import {
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
-  readArtifactVersionFiles,
+  readBlob,
+  storedFiles,
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
 const OPEN_TOOL = "open_artifact"
 type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
+/** A file of up to 2 GB, uploaded from the sandbox through the API. */
+const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
 const PUBLISHABLE_KINDS = ARTIFACT_KINDS
 type PublishableKind = ArtifactKind
@@ -224,24 +238,38 @@ async function publish(
   const baseRevision =
     "artifactId" in request.target ? installed.revisionOf(request.target.artifactId) : undefined
 
+  const { maxVersionBytes } = artifactSizeLimits(kind)
   const totalBytes = sources.reduce((sum, source) => sum + source.sizeBytes, 0)
-  if (totalBytes > ARTIFACT_LIMITS.maxVersionBytes) {
+  if (totalBytes > maxVersionBytes) {
     throw publishError(
       tool,
-      `the files hold ${totalBytes} bytes; a version may hold at most ${ARTIFACT_LIMITS.maxVersionBytes}`
+      `the files hold ${totalBytes} bytes; a version of a ${kind} artifact may hold at most ${maxVersionBytes}`
     )
   }
-  const reservation = input.budget.reserve(0, tool)
+  const reservation = input.budget.reserveArtifact(kind, 0, tool)
   const contents: PublishedArtifactFile[] = []
   let published: PublishedArtifact
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
+      // A large file is uploaded by the sandbox itself. It is never one the layout check reads:
+      // an entry, a board or a theme is at most 2 MB.
+      if (!source.bytes && source.sizeBytes > SANDBOX_INLINE_BYTES) {
+        const file = await uploadSource(input, handle, kind, source, reservation, signal)
+        files.push({ path: source.path, file })
+        contents.push({
+          path: source.path,
+          sizeBytes: source.sizeBytes,
+          sandboxPath: source.absolutePath,
+        })
+        continue
+      }
+
       const bytes =
         source.bytes ??
         (await readSandboxFile(handle, {
           path: source.absolutePath,
-          maxBytes: ARTIFACT_LIMITS.maxFileBytes,
+          maxBytes: SANDBOX_INLINE_BYTES,
           signal,
           timeoutMs: SANDBOX_TIMEOUT_MS,
         }).catch((error: unknown) => {
@@ -323,7 +351,7 @@ async function publish(
   let installedRevision = written !== undefined
   if (written) {
     try {
-      await installed.replace(handle.sandbox, published, written, signal)
+      await installed.replace(handle, published, written, signal)
       copy = installed.directoryOf(artifact.id)
     } catch (error) {
       if (signal.aborted) throw error
@@ -344,10 +372,14 @@ async function publish(
   const checkDirectory = published.merged
     ? copy && posix.resolve(handle.sandbox.workingDirectory, copy)
     : root && posix.dirname(root.absolutePath)
-  const bytesOf = (path: string) => checked?.find((file) => file.path === path)?.bytes
-  const themeFile = checked?.find((file) => file.path === ARTIFACT_THEME_FILE)
+  // A file the sandbox uploaded itself is never one the check reads: an entry, a board, a theme.
+  const bytesOf = (path: string) => {
+    const file = checked?.find((each) => each.path === path)
+    return file && "bytes" in file ? file.bytes : undefined
+  }
+  const themeBytes = bytesOf(ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
-  const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
+  const theme = themeBytes ? parseArtifactTheme(new TextDecoder().decode(themeBytes)) : null
   // What the check opens: a canvas's boards, each at its own size, or the entry.
   const pages =
     outline.kind === "canvas"
@@ -443,8 +475,48 @@ async function publish(
 }
 
 /**
- * The files of a version merged with what others wrote, as its bytes; none when they cannot be
- * read, and the copy, the folder and the base of the next update then stay as they were.
+ * Stores a large file from where the sandbox holds it: the sandbox uploads it, and the reference
+ * it answers is taken only once blob storage holds what was listed. The budget holds the file's
+ * size while it uploads, then its content, which a file the run stored already costs nothing.
+ */
+async function uploadSource(
+  input: PublishToolsInput,
+  handle: AgentSandboxHandle,
+  kind: ArtifactKind,
+  source: PublishSource,
+  reservation: AgentFileReservation,
+  signal: AbortSignal
+): Promise<FileRef> {
+  const tool = CREATE_TOOL
+  // A name that says nothing of the type, such as a recording's without an extension, leaves it to
+  // the API, which reads the file's leading bytes.
+  const named = inferFileMediaType(posix.basename(source.path))
+  const uploading = input.budget.reserveArtifact(kind, source.sizeBytes, tool)
+  let file: FileRef
+  try {
+    file = await uploadSandboxFile(handle, {
+      path: source.absolutePath,
+      ...(named === UNTYPED_MEDIA_TYPE ? {} : { mediaType: named }),
+      signal,
+      timeoutMs: SANDBOX_UPLOAD_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      throw toPublishError(error, tool, source.path)
+    })
+  } finally {
+    uploading.release()
+  }
+
+  if (file.sizeBytes !== source.sizeBytes || !(await statFileRef(input.blobStorage, file))) {
+    throw publishError(tool, `'${source.path}' changed while it was being read; publish again`)
+  }
+  reservation.addContent(blobDigestHex(file.digest), file.sizeBytes)
+  return file
+}
+
+/**
+ * The files of a version merged with what others wrote: the text it merges as its bytes, which the
+ * layout check reads, and any other file as stored. None when they cannot be read, and the copy,
+ * the folder and the base of the next update then stay as they were.
  */
 async function mergedFiles(
   input: PublishToolsInput,
@@ -452,7 +524,15 @@ async function mergedFiles(
   signal: AbortSignal
 ): Promise<PublishedArtifactFile[] | undefined> {
   try {
-    return await readArtifactVersionFiles(input.blobStorage, published.version, signal)
+    const files: PublishedArtifactFile[] = []
+    for (const file of storedFiles(published.version)) {
+      files.push(
+        "file" in file && isLiveTextPath(file.path) && file.file.sizeBytes <= SANDBOX_INLINE_BYTES
+          ? { path: file.path, bytes: await readBlob(input.blobStorage, file.file.blobId, signal) }
+          : file
+      )
+    }
+    return files
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -578,10 +658,13 @@ async function artifactMoved(
 
   let folder: string | undefined
   try {
-    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
-    folder = await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
-      edited: latest.origin?.threadId !== input.threadId,
-    })
+    folder = await installed.replace(
+      handle,
+      { artifact, version: latest },
+      storedFiles(latest),
+      signal,
+      { edited: latest.origin?.threadId !== input.threadId }
+    )
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -625,9 +708,8 @@ async function open(
 
   const readOnly = updatable === null
   try {
-    const { sandbox } = await input.resolveSandbox()
-    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
-    await installed.replace(sandbox, { artifact, version: latest }, files, signal, {
+    const handle = await input.resolveSandbox()
+    await installed.replace(handle, { artifact, version: latest }, storedFiles(latest), signal, {
       edited: latest.origin?.threadId !== input.threadId,
       readOnly,
     })
@@ -706,29 +788,38 @@ async function listSources(
 
   if (listing.files.length === 0 && !listing.truncated) {
     if (listing.directory) throw publishError(tool, `'${path}' is an empty directory`)
-    // A missing path lists nothing as well; reading it says which.
+    // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
+    const sourcePath =
+      kind === "document"
+        ? /\.html?$/i.test(absolutePath)
+          ? "document.html"
+          : "document.md"
+        : posix.basename(absolutePath)
+
+    // A missing path lists nothing as well; reading it says which. A small file is read now, once;
+    // a large one is only sized, and uploaded from the sandbox when it is stored.
     const bytes = await readSandboxFile(handle, {
       path: absolutePath,
-      maxBytes: ARTIFACT_LIMITS.maxFileBytes,
+      maxBytes: SANDBOX_INLINE_BYTES,
+      signal,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      if (error instanceof SandboxFileError && error.reason === "too_large") return undefined
+      throw toPublishError(error, tool, path)
+    })
+    if (bytes) {
+      return [{ path: sourcePath, absolutePath, sizeBytes: bytes.byteLength, bytes }]
+    }
+
+    const sizeBytes = await statSandboxFile(handle, {
+      path: absolutePath,
       signal,
       timeoutMs: SANDBOX_TIMEOUT_MS,
     }).catch((error: unknown) => {
       throw toPublishError(error, tool, path)
     })
-    return [
-      {
-        // A document's one file is its entry: HTML when it is designed, Markdown otherwise.
-        path:
-          kind === "document"
-            ? /\.html?$/i.test(absolutePath)
-              ? "document.html"
-              : "document.md"
-            : posix.basename(absolutePath),
-        absolutePath,
-        sizeBytes: bytes.byteLength,
-        bytes,
-      },
-    ]
+    checkFileSize(tool, kind, sourcePath, sizeBytes)
+    return [{ path: sourcePath, absolutePath, sizeBytes }]
   }
 
   const files = listing.files.filter(
@@ -741,19 +832,28 @@ async function listSources(
     )
   }
   if (files.length === 0) throw publishError(tool, `'${path}' holds no files to publish`)
-  for (const file of files) {
-    if (file.sizeBytes > ARTIFACT_LIMITS.maxFileBytes) {
-      throw publishError(
-        tool,
-        `'${file.relativePath}' is ${file.sizeBytes} bytes; a file may be at most ${ARTIFACT_LIMITS.maxFileBytes}`
-      )
-    }
-  }
+  for (const file of files) checkFileSize(tool, kind, file.relativePath, file.sizeBytes)
   return files.map((file) => ({
     path: file.relativePath,
     absolutePath: posix.join(absolutePath, file.relativePath),
     sizeBytes: file.sizeBytes,
   }))
+}
+
+/** Refuses a file larger than one of its kind may be, before any of it is read. */
+function checkFileSize(
+  tool: ArtifactToolName,
+  kind: ArtifactKind,
+  path: string,
+  sizeBytes: number
+): void {
+  const { maxFileBytes } = artifactSizeLimits(kind)
+  if (sizeBytes > maxFileBytes) {
+    throw publishError(
+      tool,
+      `'${path}' is ${sizeBytes} bytes; in a ${kind} artifact, a file may be at most ${maxFileBytes}`
+    )
+  }
 }
 
 /** What the Agent is told of an artifact it opened: where to read it, and whether it may change it. */

@@ -426,10 +426,14 @@ List options:
   --offset <n>                  Non-negative; defaults to 0
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
   files: `Usage:
-  sixb files upload <local-path> [--logical-path <path>]
+  sixb files upload <local-path> [--logical-path <path>] [--media-type <type>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
   sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
-  sixb files download url <content-url> --output <local-path>`,
+  sixb files download artifact <artifact-id> <version> --path <file-path> --output <local-path>
+  sixb files download url <content-url> --output <local-path>
+
+\`upload\` prints the file's reference as JSON. A file past 25 MB, up to 2 GB, is sent in stages
+from disk and checked against its SHA-256; on a terminal, stderr shows how far it is.`,
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
@@ -803,20 +807,182 @@ function columnList(value) {
 }
 
 // src/commands/files.ts
-import { access } from "node:fs/promises";
+import { basename as basename2 } from "node:path";
+
+// src/upload.ts
+import { createHash } from "node:crypto";
+import { createReadStream, openAsBlob } from "node:fs";
+import { stat } from "node:fs/promises";
+import { basename } from "node:path";
+import { Readable } from "node:stream";
+var SIMPLE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+var READ_CHUNK_BYTES = 1024 * 1024;
+async function uploadFile(api, source, options = {}) {
+  const sizeBytes = await regularFileSize(source);
+  if (sizeBytes <= SIMPLE_UPLOAD_MAX_BYTES) {
+    const fileRef = await api.upload("/api/files", source, options.logicalPath, options.mediaType);
+    options.onProgress?.({ stage: "upload", loadedBytes: sizeBytes, totalBytes: sizeBytes });
+    return fileRef;
+  }
+  const progress = (stage, loadedBytes) => options.onProgress?.({ stage, loadedBytes, totalBytes: sizeBytes });
+  const digest = await fileDigest(source, (hashedBytes) => progress("hash", hashedBytes));
+  const upload = stagedUpload(await api.post("/api/files/uploads", {
+    fileName: basename(source),
+    ...options.mediaType ? { mediaType: options.mediaType } : {},
+    sizeBytes,
+    digest,
+    ...options.logicalPath ? { logicalPath: options.logicalPath } : {},
+    ...api.uploadsThroughApi ? { strategy: "server" } : {}
+  }));
+  try {
+    progress("upload", 0);
+    const parts = await sendContent(api, upload, source, sizeBytes, (sentBytes) => progress("upload", sentBytes));
+    return await api.post(`/api/files/uploads/${encodeURIComponent(upload.uploadId)}/complete`, {
+      digest,
+      sizeBytes,
+      ...parts ? { parts } : {}
+    });
+  } catch (error) {
+    await api.post(`/api/files/uploads/${encodeURIComponent(upload.uploadId)}/abort`, {}).catch(() => {});
+    throw error;
+  }
+}
+async function sendContent(api, upload, source, sizeBytes, onSent) {
+  if (upload.strategy === "server") {
+    await api.put(upload.url, fileStream(source, { onBytes: onSent }), sizeBytes);
+    return;
+  }
+  const file = await openAsBlob(source);
+  if (upload.strategy === "direct-put") {
+    await signedPut(upload.url, upload.headers, file);
+    onSent(sizeBytes);
+    return;
+  }
+  const parts = [];
+  for (let offset = 0, partNumber = 1;offset < sizeBytes; partNumber += 1) {
+    const end = Math.min(sizeBytes, offset + upload.partSizeBytes);
+    const signed = signedPart(await api.post(`/api/files/uploads/${encodeURIComponent(upload.uploadId)}/parts/${partNumber}`, {}));
+    const etag = await signedPut(signed.url, signed.headers, file.slice(offset, end));
+    if (upload.partReceipt === "etag" && !etag) {
+      throw uploadFailed(`Part ${partNumber} of the upload returned no ETag.`);
+    }
+    parts.push(upload.partReceipt === "etag" && etag ? { partNumber, etag } : { partNumber });
+    onSent(end);
+    offset = end;
+  }
+  return parts;
+}
+async function signedPut(url, headers, body) {
+  let response;
+  try {
+    response = await fetch(url, { method: "PUT", headers, body });
+  } catch {
+    throw uploadFailed("Blob storage could not be reached to upload the file.");
+  }
+  if (!response.ok) {
+    throw uploadFailed(`Blob storage refused the upload with HTTP ${response.status}.`);
+  }
+  return response.headers.get("etag");
+}
+async function regularFileSize(source) {
+  const info = await stat(source).catch(() => null);
+  if (!info)
+    fail(`Upload file '${source}' does not exist.`);
+  if (!info.isFile())
+    fail(`Upload file '${source}' is not a regular file.`);
+  return info.size;
+}
+async function fileDigest(source, onBytes) {
+  const hash = createHash("sha256");
+  let hashedBytes = 0;
+  for await (const chunk of createReadStream(source, { highWaterMark: READ_CHUNK_BYTES })) {
+    hash.update(chunk);
+    hashedBytes += chunk.byteLength;
+    onBytes(hashedBytes);
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
+function fileStream(source, options) {
+  const stream = Readable.toWeb(createReadStream(source, { highWaterMark: READ_CHUNK_BYTES }));
+  let readBytes = 0;
+  return stream.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      readBytes += chunk.byteLength;
+      options.onBytes(readBytes);
+      controller.enqueue(chunk);
+    }
+  }));
+}
+function stagedUpload(value) {
+  const upload = value;
+  const uploadId = upload?.uploadId;
+  if (typeof uploadId !== "string")
+    throw invalidResponse();
+  if (upload?.strategy === "server" && typeof upload.url === "string") {
+    return { strategy: "server", uploadId, url: upload.url };
+  }
+  if (upload?.strategy === "direct-put" && typeof upload.url === "string") {
+    return {
+      strategy: "direct-put",
+      uploadId,
+      url: upload.url,
+      headers: stringRecord(upload.headers)
+    };
+  }
+  if (upload?.strategy === "multipart" && typeof upload.partSizeBytes === "number" && upload.partSizeBytes > 0) {
+    return {
+      strategy: "multipart",
+      uploadId,
+      partSizeBytes: upload.partSizeBytes,
+      partReceipt: upload.partReceipt === "none" ? "none" : "etag"
+    };
+  }
+  throw invalidResponse();
+}
+function signedPart(value) {
+  const part = value;
+  if (typeof part?.url !== "string")
+    throw invalidResponse();
+  return { url: part.url, headers: stringRecord(part.headers) };
+}
+function stringRecord(value) {
+  if (typeof value !== "object" || value === null)
+    return {};
+  return Object.fromEntries(Object.entries(value).filter((entry) => typeof entry[1] === "string"));
+}
+function invalidResponse() {
+  return new CliError({
+    code: "invalid_api_response",
+    message: "The Sixb API described the upload in a way the CLI does not know."
+  }, EXIT_API);
+}
+function uploadFailed(message) {
+  return new CliError({ code: "upload_failed", message }, EXIT_API);
+}
+
+// src/commands/files.ts
 async function files(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.files);
   if (sub === "upload") {
-    const { positionals, options } = parseCommandArgs(rest, { "--logical-path": "string" }, "files upload", 1);
+    const { positionals, options } = parseCommandArgs(rest, { "--logical-path": "string", "--media-type": "string" }, "files upload", 1);
     const source = positionals[0] ?? "";
+    const logicalPath = options["--logical-path"];
+    const mediaType = options["--media-type"];
+    const progress = process.stderr.isTTY ? progressLine(basename2(source)) : undefined;
     try {
-      await access(source);
-    } catch {
-      fail(`Upload file '${source}' does not exist.`);
+      const fileRef = await uploadFile(api, source, {
+        ...logicalPath ? { logicalPath } : {},
+        ...mediaType ? { mediaType } : {},
+        ...progress ? { onProgress: progress.show } : {}
+      });
+      progress?.clear();
+      return writeJson(fileRef);
+    } catch (error) {
+      progress?.clear();
+      throw error;
     }
-    return writeJson(await api.upload("/api/files", source, options["--logical-path"]));
   }
   if (sub === "download") {
     const { positionals, options } = parseCommandArgs(rest, { "--path": "string", "--output": "string" }, "files download", [2, 3]);
@@ -836,6 +1002,13 @@ async function files(api, args) {
       const type = positionals[1] ?? "";
       const id = positionals[2] ?? "";
       route = `/api/objects/${idSegment(type)}/${idSegment(id)}/files/content`;
+    } else if (context === "artifact") {
+      requireExact(positionals, 3, "files download artifact requires an artifact id and a version.");
+      const id = positionals[1] ?? "";
+      const version = positionals[2] ?? "";
+      if (!/^[1-9]\d*$/.test(version))
+        fail(`'${version}' is not a version number.`);
+      route = `/api/artifacts/${idSegment(id)}/versions/${version}/content`;
     } else if (context === "action-run" || context === "workflow-run") {
       requireExact(positionals, 2, `files download ${context} requires exactly one run id.`);
       const id = positionals[1] ?? "";
@@ -843,14 +1016,35 @@ async function files(api, args) {
     } else
       fail(`Unknown file download context '${context}'.`);
     const path = options["--path"];
-    if (!path)
-      fail("files download requires --path <json-pointer>.");
+    if (!path) {
+      fail(`files download requires --path <${context === "artifact" ? "file-path" : "json-pointer"}>.`);
+    }
     if (!output)
       fail("files download requires --output <local-path>.");
     await api.download(route, output, { path });
     return writeJson({ downloaded: true, output });
   }
   fail(`Unknown files command '${sub}'.`);
+}
+function progressLine(name) {
+  let shown = "";
+  return {
+    show({ stage, loadedBytes, totalBytes }) {
+      const percent = Math.floor(loadedBytes / Math.max(1, totalBytes) * 100);
+      const line = stage === "hash" ? `Checking ${name}… ${percent}%` : `Uploading ${name}… ${percent}% of ${megabytes(totalBytes)}`;
+      if (line === shown)
+        return;
+      shown = line;
+      process.stderr.write(`\r\x1B[2K${line}`);
+    },
+    clear() {
+      if (shown)
+        process.stderr.write("\r\x1B[2K");
+    }
+  };
+}
+function megabytes(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 function parseContentUrl(value) {
   let url;
@@ -866,7 +1060,7 @@ function parseContentUrl(value) {
 }
 
 // src/commands/models.ts
-import { access as access2, mkdir, stat } from "node:fs/promises";
+import { access, mkdir, stat as stat2 } from "node:fs/promises";
 import { dirname, extname, join, parse } from "node:path";
 var MODEL_KINDS = ["language", "image", "speech", "transcription"];
 async function models(api, args) {
@@ -1085,7 +1279,7 @@ function optional(field, value) {
 }
 async function uploadInput(api, path, kind) {
   try {
-    await access2(path);
+    await access(path);
   } catch {
     fail(`Input file '${path}' does not exist.`);
   }
@@ -1106,7 +1300,7 @@ async function savedResult(api, result, output) {
   };
 }
 async function saveFiles(api, callId, files, output) {
-  const directory = output.endsWith("/") || (await stat(output).catch(() => null))?.isDirectory();
+  const directory = output.endsWith("/") || (await stat2(output).catch(() => null))?.isDirectory();
   const paths = files.map((file, index) => {
     const number = files.length > 1 ? `-${index + 1}` : "";
     const extension = (file.mediaType && EXTENSIONS[file.mediaType]) ?? "";
@@ -2163,14 +2357,14 @@ import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writ
 import { dirname as dirname3, join as join3 } from "node:path";
 
 // src/memory.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 var AGENT_MEMORY_MANIFEST = "context/memory.json";
 var AGENT_MEMORY_ENTRY = "MEMORY.md";
 var AGENT_MEMORY_STARTER = `# Memory
 
 `;
 function agentMemoryFileHash(contents) {
-  return createHash("sha256").update(contents).digest("hex");
+  return createHash2("sha256").update(contents).digest("hex");
 }
 
 // src/api-client.ts
@@ -2178,14 +2372,15 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { readFile as readFile2, rename, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { basename, dirname as dirname2, join as join2 } from "node:path";
-import { Readable } from "node:stream";
+import { basename as basename3, dirname as dirname2, join as join2 } from "node:path";
+import { Readable as Readable2 } from "node:stream";
 import { pipeline } from "node:stream/promises";
 var UNIX_BASE_URL_PREFIX = "unix:";
 var RUN_HEADER = "x-sixb-run";
 
 class ApiClient {
   baseUrl;
+  uploadsThroughApi;
   socketPath;
   authorization;
   runId;
@@ -2198,6 +2393,7 @@ class ApiClient {
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
     this.authorization = options.authorization;
     this.runId = options.runId || undefined;
+    this.uploadsThroughApi = options.uploadsThroughApi ?? false;
     this.missingBaseUrlMessage = options.missingBaseUrlMessage;
     this.unavailableMessage = options.unavailableMessage;
     this.unavailableHint = options.unavailableHint;
@@ -2214,19 +2410,30 @@ class ApiClient {
       ...options.signal ? { signal: options.signal } : {}
     });
   }
+  async put(path, body, sizeBytes) {
+    return this.json(this.url(path), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(sizeBytes)
+      },
+      body,
+      duplex: "half"
+    });
+  }
   async upload(path, source, logicalPath, mediaType) {
     const form = new FormData;
     const bytes = new Uint8Array(await readFile2(source));
-    form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename(source));
+    form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename3(source));
     if (logicalPath)
       form.append("logicalPath", logicalPath);
     return this.json(this.url(path), { method: "POST", body: form });
   }
   async download(path, output, query) {
     const response = await this.fetch(this.url(path, query), { method: "GET" });
-    const temporary = join2(dirname2(output), `.${basename(output)}.sixb-${randomUUID3()}.tmp`);
+    const temporary = join2(dirname2(output), `.${basename3(output)}.sixb-${randomUUID3()}.tmp`);
     try {
-      const body = response.body ? Readable.fromWeb(response.body) : Readable.from([]);
+      const body = response.body ? Readable2.fromWeb(response.body) : Readable2.from([]);
       await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
       await rename(temporary, output);
     } catch (error) {
@@ -2330,8 +2537,9 @@ function send(url, init, socketPath) {
 }
 async function sendOverNodeSocket(url, init, socketPath) {
   const outgoing = new Request(url, init);
-  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined;
   const headers = Object.fromEntries(outgoing.headers);
+  const streamed = init.body instanceof ReadableStream;
+  const body = outgoing.body && !streamed ? Buffer.from(await outgoing.arrayBuffer()) : undefined;
   if (body)
     headers["content-length"] = String(body.byteLength);
   return new Promise((resolve, reject) => {
@@ -2357,11 +2565,14 @@ async function sendOverNodeSocket(url, init, socketPath) {
       }));
     });
     request.on("error", reject);
-    request.end(body);
+    if (streamed && outgoing.body) {
+      Readable2.fromWeb(outgoing.body).on("error", (error) => request.destroy(error)).pipe(request);
+    } else
+      request.end(body);
   });
 }
 function nodeBody(response) {
-  return Readable.toWeb(response);
+  return Readable2.toWeb(response);
 }
 
 // src/run.ts
@@ -2374,6 +2585,7 @@ function createInstanceApiClient(mode) {
     baseUrl: mode.baseUrl,
     ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
     ...mode.kind === "sandbox" && mode.runId ? { runId: mode.runId } : {},
+    ...mode.kind === "sandbox" ? { uploadsThroughApi: true } : {},
     missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
     unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
     unavailableHint: mode.kind === "sandbox" ? "Run 'sixb status' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."

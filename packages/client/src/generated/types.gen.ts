@@ -12196,6 +12196,10 @@ export type CreateFileUploadData = {
     sizeBytes?: number
     digest?: string
     logicalPath?: string
+    /**
+     * Send the content through the API even when blob storage takes direct uploads: for a caller that reaches only the API, such as a sandbox
+     */
+    strategy?: "server"
   }
   path?: never
   query?: never

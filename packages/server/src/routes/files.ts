@@ -4,14 +4,17 @@ import {
   type FileRef,
   type SixbHostView,
 } from "@sixb/core"
-import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
-import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
+import { supportsDirectUpload, supportsRangeRead } from "@sixb/core/blob-storage/server"
+import {
+  canonicalMediaType,
+  inferFileMediaType,
+  UNTYPED_MEDIA_TYPE,
+} from "@sixb/core/internal/blob-storage"
 import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requestActor, requireRequestSixb } from "../auth/scope"
-import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -24,7 +27,7 @@ import {
   SignedFileUploadPartSchema,
 } from "../schemas/files"
 import { handleRouteError, unconfiguredStorageResponse } from "../utils/http"
-import { readRequestBodyWithLimit } from "../utils/request-body"
+import { readRequestBodyWithLimit, streamRequestBodyWithLimit } from "../utils/request-body"
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
 // adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
@@ -67,11 +70,19 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             }
           }
 
+          // A part without a type, or typed as bytes only, as a client sends a file it did not
+          // type, is typed by its leading bytes, else its name, as a staged upload is.
+          const declared = declaredMediaType(file.type)
+          const mediaType =
+            declared ??
+            inferFileMediaType(
+              file.name,
+              new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer())
+            )
           const fileRef = await host.blobStorage.put({
             body: file,
             fileName: file.name || undefined,
-            // Bun derives the part's type from the file name; keep it only if it is well-formed.
-            mediaType: canonicalMediaType(file.type) ?? undefined,
+            mediaType,
             logicalPath: logicalPath ?? undefined,
           })
 
@@ -128,6 +139,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
           const providerUpload =
+            parsed.strategy !== "server" &&
             supportsDirectUpload(host.blobStorage) &&
             expectedDigest !== undefined &&
             parsed.sizeBytes !== undefined
@@ -173,7 +185,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Create a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "createFileUpload",
-          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+          security: accessTokenSecurityRequirement("createFileUpload"),
         },
       }
     )
@@ -202,34 +214,32 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             return { error: contentLengthSizeError }
           }
 
-          const uploadBytes = await readRequestBodyWithLimit(
-            request,
-            DEFAULT_SIMPLE_FILE_UPLOAD_BYTES
-          )
-          if (uploadBytes.byteLength === 0) {
+          // The content goes to blob storage as it arrives: a staged upload may be far larger than
+          // the server should hold. The size it declared bounds it, and the simple-upload ceiling
+          // one that declared none. A body of the wrong size fails before blob storage keeps it.
+          const content = checkedUploadContent(request, session.expectedSizeBytes)
+          let fileRef: FileRef
+          try {
+            fileRef = await host.blobStorage.put({
+              body: content.body,
+              ...(session.fileName === undefined ? {} : { fileName: session.fileName }),
+              ...(session.mediaType === undefined ? {} : { mediaType: session.mediaType }),
+              ...(session.logicalPath === undefined ? {} : { logicalPath: session.logicalPath }),
+            })
+          } catch (error) {
+            const refused = content.refused()
+            if (!refused) throw error
             set.status = 400
-            return { error: "Expected upload content body." }
+            return { error: refused }
           }
 
-          const sizeError = expectedSizeBytesError(session, uploadBytes.byteLength)
-          if (sizeError) {
-            set.status = 400
-            return { error: sizeError }
-          }
-
-          const digest = computeBlobDigest(uploadBytes)
-          const digestError = expectedDigestError(session.expectedDigest, digest)
+          // Kept by now, but issued to no one: content that is not what was declared never
+          // becomes the session's file.
+          const digestError = expectedDigestError(session.expectedDigest, fileRef.digest)
           if (digestError) {
             set.status = 400
             return { error: digestError }
           }
-
-          const fileRef = await host.blobStorage.put({
-            body: uploadBytes,
-            ...(session.fileName === undefined ? {} : { fileName: session.fileName }),
-            ...(session.mediaType === undefined ? {} : { mediaType: session.mediaType }),
-            ...(session.logicalPath === undefined ? {} : { logicalPath: session.logicalPath }),
-          })
 
           await uploadSessions.markUploaded(session.id, fileRef)
           return { success: true }
@@ -255,7 +265,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Upload staged file content through Sixb",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileContent",
-          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+          security: accessTokenSecurityRequirement("uploadFileContent"),
           requestBody: {
             required: true,
             content: {
@@ -328,7 +338,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Sign a staged multipart upload part",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "signFileUploadPart",
-          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+          security: accessTokenSecurityRequirement("signFileUploadPart"),
         },
       }
     )
@@ -364,7 +374,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             throw new Error("Direct file uploads require an expected digest and size.")
           }
 
-          const fileRef =
+          const uploaded =
             session.strategy === "server"
               ? completeServerUpload(session)
               : await completeProviderUpload({
@@ -375,11 +385,12 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
                   blobStorage: host.blobStorage,
                 })
 
-          const identityError = expectedFileRefError(expected, fileRef)
+          const identityError = expectedFileRefError(expected, uploaded)
           if (identityError) {
             throw new Error(identityError)
           }
 
+          const fileRef = await withMediaType(host.blobStorage, uploaded)
           await uploadSessions.complete(session.id, fileRef)
           return FileRefSchema.parse(fileRef)
         } catch (error) {
@@ -401,7 +412,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Complete a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "completeFileUpload",
-          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+          security: accessTokenSecurityRequirement("completeFileUpload"),
         },
       }
     )
@@ -459,7 +470,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Abort a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "abortFileUpload",
-          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+          security: accessTokenSecurityRequirement("abortFileUpload"),
         },
       }
     )
@@ -503,6 +514,85 @@ function terminalSessionError(status: "completed" | "aborted"): FileUploadSessio
     status === "completed" ? "already_completed" : "already_aborted",
     `File upload session is already ${status}.`
   )
+}
+
+/**
+ * A server upload's content as it streams in, within its limit, and why it was refused: empty, or
+ * not the size its session declared. The refusal fails the stream, so blob storage drops it.
+ */
+function checkedUploadContent(
+  request: Request,
+  expectedSizeBytes: number | undefined
+): { readonly body: ReadableStream<Uint8Array>; readonly refused: () => string | undefined } {
+  let refused: string | undefined
+  let receivedBytes = 0
+  const refuse = (controller: TransformStreamDefaultController<Uint8Array>, message: string) => {
+    refused = message
+    controller.error(new Error(message))
+  }
+
+  const body = streamRequestBodyWithLimit(
+    request,
+    expectedSizeBytes ?? DEFAULT_SIMPLE_FILE_UPLOAD_BYTES
+  ).pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        receivedBytes += chunk.byteLength
+        controller.enqueue(chunk)
+      },
+      flush(controller) {
+        if (receivedBytes === 0) return refuse(controller, "Expected upload content body.")
+        const sizeError = expectedSizeBytesValueError(expectedSizeBytes, receivedBytes)
+        if (sizeError) refuse(controller, sizeError)
+      },
+    })
+  )
+
+  return { body, refused: () => refused }
+}
+
+/** How many leading bytes tell a file's type by its signature. */
+const SNIFF_BYTES = 64
+
+/** The well-formed type an upload declared, unless it says only "bytes", which tells nothing. */
+function declaredMediaType(mediaType: string | undefined): string | undefined {
+  const canonical = canonicalMediaType(mediaType)
+  return canonical === null || canonical === UNTYPED_MEDIA_TYPE ? undefined : canonical
+}
+
+/**
+ * The file with a media type: the one its upload declared, else the one its leading bytes or its
+ * name tell, as a file the Agent or a tool stores is typed. Read from the stored blob, a few bytes.
+ */
+async function withMediaType(
+  blobStorage: SixbHostView["blobStorage"],
+  fileRef: FileRef
+): Promise<FileRef> {
+  if (declaredMediaType(fileRef.mediaType) !== undefined) return fileRef
+
+  const leading: Uint8Array[] = []
+  if (fileRef.sizeBytes > 0) {
+    const body = supportsRangeRead(blobStorage)
+      ? await blobStorage.openRange(fileRef.blobId, {
+          start: 0,
+          endInclusive: Math.min(fileRef.sizeBytes, SNIFF_BYTES) - 1,
+        })
+      : await blobStorage.open(fileRef.blobId)
+    const reader = body.getReader()
+    try {
+      for (let read = 0; read < SNIFF_BYTES; ) {
+        const { done, value } = await reader.read()
+        if (done) break
+        leading.push(value)
+        read += value.byteLength
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  }
+
+  const bytes = Buffer.concat(leading).subarray(0, SNIFF_BYTES)
+  return { ...fileRef, mediaType: inferFileMediaType(fileRef.fileName ?? "", bytes) }
 }
 
 function completeServerUpload(session: FileUploadSession): FileRef {

@@ -257,10 +257,14 @@ List options:
   --offset <n>                  Non-negative; defaults to 0
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
   files: `Usage:
-  sixb files upload <local-path> [--logical-path <path>]
+  sixb files upload <local-path> [--logical-path <path>] [--media-type <type>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
   sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
-  sixb files download url <content-url> --output <local-path>`,
+  sixb files download artifact <artifact-id> <version> --path <file-path> --output <local-path>
+  sixb files download url <content-url> --output <local-path>
+
+\`upload\` prints the file's reference as JSON. A file past 25 MB, up to 2 GB, is sent in stages
+from disk and checked against its SHA-256; on a terminal, stderr shows how far it is.`,
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>

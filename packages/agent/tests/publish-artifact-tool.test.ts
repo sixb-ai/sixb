@@ -10,6 +10,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { loadSandboxCliAssets } from "@sixb/cli-core"
 import {
   AgentToolPublicError,
   AuthorizationError,
@@ -38,6 +39,7 @@ import {
   writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
+import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import * as Y from "yjs"
@@ -255,6 +257,8 @@ type ToolOptions = {
   readonly reader?: (reader: ReturnType<typeof readerFor>) => void
   /** The blob storage the tools store and read the Agent's files in; the project's when omitted. */
   readonly blobStorage?: BlobStorage
+  /** The run's environment in its sandbox, as `sixb` reads it. */
+  readonly env?: Readonly<Record<string, string>>
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -263,6 +267,8 @@ function install(
     readonly maxBytes?: number
     readonly requester?: Principal
     readonly grants?: Partial<GrantIndex>
+    /** Where the install reads stored files; the project's when omitted. */
+    readonly blobStorage?: BlobStorage
   } = {}
 ): Promise<InstalledArtifacts> {
   const { requester, grants, ...rest } = options
@@ -329,6 +335,7 @@ function tools(options: ToolOptions = {}) {
     resolveSandbox: async () => ({
       sandbox: sandbox(options.check),
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      ...(options.env ? { env: options.env } : {}),
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
@@ -366,6 +373,76 @@ function documentFile(markdown: string) {
     fileName: "document.md",
     mediaType: "text/markdown",
   })
+}
+
+/** The run's `sixb`, installed in the sandbox as a run installs it, reaching `apiBaseUrl`. */
+async function installSandboxCli(apiBaseUrl: string): Promise<Record<string, string>> {
+  const cli = await loadSandboxCliAssets()
+  const bin = join(root, SANDBOX_CONTEXT_DIRECTORY, "bin")
+  const lib = join(root, SANDBOX_CONTEXT_DIRECTORY, "lib")
+  for (const directory of [bin, lib]) mkdirSync(directory, { recursive: true })
+  writeFileSync(join(bin, "sixb"), cli.launcher, { mode: 0o755 })
+  writeFileSync(join(lib, "sixb.mjs"), cli.artifact)
+  return { SIXB_BIN_DIR: bin, SIXB_API_BASE_URL: apiBaseUrl, SIXB_RUN_CONTEXT: "" }
+}
+
+/**
+ * The API as far as the sandbox's `sixb` reaches it: the simple upload, into the project's blobs,
+ * typed as the API types one sent without a type, and a file of an artifact's version, read from
+ * them.
+ */
+function startSandboxApi() {
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    maxRequestBodySize: 64 * 1024 * 1024,
+    async fetch(request) {
+      const url = new URL(request.url)
+      requests.push(`${request.method} ${url.pathname}`)
+
+      const content = /^\/api\/artifacts\/([^/]+)\/versions\/(\d+)\/content$/.exec(url.pathname)
+      if (request.method === "GET" && content) {
+        const version = await storage.artifacts.getVersion({
+          projectId,
+          artifactId: decodeURIComponent(content[1] ?? ""),
+          version: Number(content[2]),
+        })
+        const file = version?.files.find((each) => each.path === url.searchParams.get("path"))
+        return file
+          ? new Response(await blobStorage.open(file.file.blobId))
+          : Response.json({ error: "File not found" }, { status: 404 })
+      }
+
+      const file =
+        request.method === "POST" && url.pathname === "/api/files"
+          ? (await request.formData()).get("file")
+          : null
+      if (!(file instanceof File)) {
+        return Response.json({ error: "Unexpected request" }, { status: 404 })
+      }
+      const leading = new Uint8Array(await file.slice(0, 64).arrayBuffer())
+      const mediaType = file.type || inferFileMediaType(file.name, leading)
+      return Response.json(await blobStorage.put({ body: file, fileName: file.name, mediaType }))
+    },
+  })
+  return {
+    baseUrl: `http://127.0.0.1:${server.port}`,
+    requests,
+    close: () => server.stop(true),
+  }
+}
+
+/** The project's blobs, refusing to open those named: a test proves they are never read. */
+function refusingToOpen(blobIds: readonly string[]): BlobStorage {
+  return {
+    put: (input) => blobStorage.put(input),
+    stat: (blobId) => blobStorage.stat(blobId),
+    open: async (blobId) => {
+      if (blobIds.includes(blobId)) throw new Error(`'${blobId}' was read whole.`)
+      return blobStorage.open(blobId)
+    },
+  }
 }
 
 function read(path: string): string {
@@ -1129,6 +1206,70 @@ describe("publish_artifact", () => {
     expect(read(`${copy}/welcome.html`)).toBe("<main><h1>Hello</h1></main>")
   })
 
+  // Reproduce by reading the whole merged version in `mergedFiles`, as before: the store refuses
+  // the poster, and the merged result is not installed.
+  test("merges a canvas reading only its text, and fetches its large picture into the copy", async () => {
+    const poster = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 239)
+    const posterId = `blob_${new Bun.CryptoHasher("sha256").update(poster).digest("hex")}`
+    const refusing = refusingToOpen([posterId])
+    const items = (note?: string) =>
+      JSON.stringify({
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ...(note ? [{ id: "todo", type: "note", x: 0, y: 900, w: 200, text: note }] : []),
+        ],
+      })
+    write("work/flow/canvas.json", items())
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    writeFileSync(join(root, "work/flow/poster.png"), poster)
+    const api = startSandboxApi()
+    try {
+      const options = { env: await installSandboxCli(api.baseUrl), blobStorage: refusing }
+      const { artifactId } = (await publish(
+        { path: "work/flow", kind: "canvas", title: "Flow" },
+        options
+      )) as { artifactId: string }
+      const installed = install({ blobStorage: refusing })
+      await installed
+
+      // The person adds a note in the app.
+      const latest = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+      if (!latest) throw new Error("Expected version 1.")
+      const body = new TextEncoder().encode(items("Ship it"))
+      const canvas = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+      await storage.artifacts.publish({
+        projectId,
+        artifactId,
+        kind: "canvas",
+        version: {
+          ...latest,
+          files: latest.files.map((entry) =>
+            entry.path === "canvas.json" ? { ...entry, file: canvas } : entry
+          ),
+          updatedAt: new Date(),
+        },
+        baseRevision: 1,
+      })
+
+      write("work/flow/welcome.html", "<main><h1>Hello</h1></main>")
+      expect(
+        await publishVersion(
+          { id: artifactId, path: "work/flow", title: "Flow" },
+          { ...options, installed }
+        )
+      ).toMatchObject({ revision: 3, mergedSince: 1 })
+
+      const copy = `.sixb/agent/artifacts/${artifactId}`
+      expect(
+        JSON.parse(read(`${copy}/canvas.json`)).items.map((item: { id: string }) => item.id)
+      ).toEqual(["welcome", "todo"])
+      expect(readFileSync(join(root, copy, "poster.png"))).toEqual(Buffer.from(poster))
+      expect(api.requests).toContain(`GET /api/artifacts/${artifactId}/versions/1/content`)
+    } finally {
+      api.close()
+    }
+  })
+
   // Reproduce by dropping `syncPublishedFolder` from publish(): the Agent's folder keeps what it
   // wrote, without the words merged in, and its next update, made from that folder, takes them
   // out.
@@ -1441,7 +1582,7 @@ describe("publish_artifact", () => {
       installed: await installed,
       artifacts: runArtifactsFor(),
       blobStorage,
-      sandbox: sandbox(),
+      handle: { sandbox: sandbox(), contextDirectory: SANDBOX_CONTEXT_DIRECTORY },
       signal: new AbortController().signal,
     })
     expect(folders).toEqual(["work/flow"])
@@ -1578,6 +1719,147 @@ describe("publish_artifact", () => {
     expect(() => create.parseInput({ path: "a", kind: "file", title: "A", version: 2 })).toThrow(
       "unknown property 'version'"
     )
+  })
+
+  // Reproduce by raising SANDBOX_INLINE_BYTES past the recording: it is read through stdout, and
+  // the API never sees an upload. Leave it in the copy that `replace` removes, and publishing again
+  // from that copy finds nothing to copy back.
+  test("uploads a large file from the sandbox with its own sixb, never through stdout", async () => {
+    const recording = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)
+    mkdirSync(join(root, "work"), { recursive: true })
+    writeFileSync(join(root, "work/demo.mp4"), recording)
+    const api = startSandboxApi()
+    try {
+      // A file artifact's publish may take the run past its budget; any other file may not.
+      const budget = new AgentFileBudget(1024 * 1024)
+      const installed = install()
+      const env = await installSandboxCli(api.baseUrl)
+
+      const output = (await publish(
+        { path: "work/demo.mp4", kind: "file", title: "Demo" },
+        { budget, installed, env }
+      )) as { artifactId: string }
+
+      // Past the API's simple-upload ceiling, `sixb` uploads staged: its own tests cover that.
+      expect(api.requests).toEqual(["POST /api/files"])
+      const version = await storage.artifacts.getVersion({
+        projectId,
+        artifactId: output.artifactId,
+        version: 1,
+      })
+      const digest = `sha256:${new Bun.CryptoHasher("sha256").update(recording).digest("hex")}`
+      expect(version?.files).toEqual([
+        {
+          path: "demo.mp4",
+          file: expect.objectContaining({
+            digest,
+            sizeBytes: recording.byteLength,
+            mediaType: "video/mp4",
+          }),
+        },
+      ])
+      expect(budget.reservedBytes).toBe(recording.byteLength)
+
+      // The copy is made in the sandbox, from the file it uploaded: also when the Agent publishes
+      // again from that very copy, which the update replaces.
+      const copy = `.sixb/agent/artifacts/${output.artifactId}/demo.mp4`
+      expect(readFileSync(join(root, copy))).toEqual(Buffer.from(recording))
+      await publishVersion(
+        { id: output.artifactId, path: copy, title: "Demo, final" },
+        { budget, installed, env }
+      )
+      expect(readFileSync(join(root, copy))).toEqual(Buffer.from(recording))
+      expect(budget.reservedBytes).toBe(recording.byteLength)
+    } finally {
+      api.close()
+    }
+  })
+
+  // Reproduce by passing whatever type the name gives: the sandbox's sixb is told the recording is
+  // application/octet-stream, and the API never reads its bytes for a better one.
+  test("leaves a large file's type to the API when its name tells none", async () => {
+    const recording = new Uint8Array(9 * 1024 * 1024)
+    recording.set(new TextEncoder().encode("\0\0\0\x18ftypmp42"))
+    mkdirSync(join(root, "work"), { recursive: true })
+    writeFileSync(join(root, "work/recording"), recording)
+    const api = startSandboxApi()
+    try {
+      const env = await installSandboxCli(api.baseUrl)
+      // The run's sixb, noting what it is asked before it runs.
+      const noting = join(root, "noting-bin")
+      mkdirSync(noting)
+      writeFileSync(
+        join(noting, "sixb"),
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' "$@" > "${join(root, "sixb-args")}"`,
+          `exec "${env.SIXB_BIN_DIR}/sixb" "$@"`,
+          "",
+        ].join("\n"),
+        { mode: 0o755 }
+      )
+
+      const { artifactId } = (await publish(
+        { path: "work/recording", kind: "file", title: "Recording" },
+        { env: { ...env, SIXB_BIN_DIR: noting } }
+      )) as { artifactId: string }
+
+      expect(read("sixb-args").trim().split("\n")).toEqual([
+        "files",
+        "upload",
+        join(root, "work/recording"),
+      ])
+      const version = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+      expect(version?.files[0]?.file.mediaType).toBe("video/mp4")
+    } finally {
+      api.close()
+    }
+  })
+
+  // Reproduce by reading every stored file from blob storage as it is installed (`#write` in
+  // materialize.ts): the store refuses the recording, and the API serves nothing.
+  test("installs a large file the sandbox fetches itself, never reading it", async () => {
+    const recording = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 241)
+    const file = await blobStorage.put({ body: recording, fileName: "demo.mp4" })
+    const { artifact } = await readerFor(owner).create({
+      kind: "file",
+      title: "Demo",
+      files: [{ path: "demo.mp4", file }],
+    })
+    const refusing = refusingToOpen([file.blobId])
+    const api = startSandboxApi()
+    try {
+      const env = await installSandboxCli(api.baseUrl)
+      const installed = install({ blobStorage: refusing })
+
+      expect(
+        await openArtifact(artifact.id, { installed, env, blobStorage: refusing })
+      ).toMatchObject({ directory: `.sixb/agent/artifacts/${artifact.id}` })
+
+      expect(api.requests).toEqual([`GET /api/artifacts/${artifact.id}/versions/1/content`])
+      expect(readFileSync(join(root, `.sixb/agent/artifacts/${artifact.id}/demo.mp4`))).toEqual(
+        Buffer.from(recording)
+      )
+    } finally {
+      api.close()
+    }
+  })
+
+  test("lists a version past the install budget without reading or fetching its files", async () => {
+    const recording = new Uint8Array(2048).fill(7)
+    const file = await blobStorage.put({ body: recording, fileName: "demo.mp4" })
+    const { artifact } = await readerFor(owner).create({
+      kind: "file",
+      title: "Demo",
+      files: [{ path: "demo.mp4", file }],
+    })
+    const refusing = refusingToOpen([file.blobId])
+    const installed = install({ blobStorage: refusing, maxBytes: 1024 })
+
+    const opened = await openArtifact(artifact.id, { installed, blobStorage: refusing })
+
+    expect(opened).not.toHaveProperty("directory")
+    expect(existsSync(join(root, `.sixb/agent/artifacts/${artifact.id}`))).toBe(false)
   })
 
   // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;

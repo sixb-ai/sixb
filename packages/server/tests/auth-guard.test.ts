@@ -17,6 +17,7 @@ import {
   type RoleDefinition,
   SixbHost,
 } from "@sixb/core"
+import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { AuthStorageError } from "@sixb/core/storage"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
@@ -1221,12 +1222,38 @@ describe("request body limits", () => {
         [
           "POST /api/files HTTP/1.1",
           `Host: 127.0.0.1:${port}`,
-          `Content-Length: ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1}`,
+          `Content-Length: ${MAX_FILE_UPLOAD_BYTES + 1}`,
           "",
           "",
         ].join("\r\n")
       )
       expect(statusLine).toStartWith("HTTP/1.1 413")
+    })
+  })
+
+  // To check, drop `declaredBodyTooLarge` from `startApiServer`: the query waits for a body that
+  // never comes, and gets no answer.
+  test("refuses a body declared past the cap up front, unless its route reads more", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    await withServer(sixb, async ({ port }) => {
+      // The bound only ends a failure: a refusal answers at once.
+      const declared = (path: string) =>
+        readStatusLine(
+          port,
+          [
+            `POST ${path} HTTP/1.1`,
+            `Host: 127.0.0.1:${port}`,
+            "Content-Type: application/octet-stream",
+            `Content-Length: ${DEFAULT_REQUEST_BODY_LIMIT_BYTES + 1}`,
+            "",
+            "",
+          ].join("\r\n"),
+          { boundMs: 2_000 }
+        )
+
+      expect(await declared("/api/objects/query")).toStartWith("HTTP/1.1 413")
+      // An upload may be larger: it reads its body once it knows the caller, and this one is no one.
+      expect(await declared("/api/files")).toStartWith("HTTP/1.1 401")
     })
   })
 
@@ -1258,7 +1285,12 @@ describe("request body limits", () => {
 })
 
 /** Sends a raw request head and resolves with the response's status line. */
-async function readStatusLine(port: number, head: string): Promise<string> {
+/** The first line the server answers `head` with; past `boundMs`, "no answer" and the socket ends. */
+async function readStatusLine(
+  port: number,
+  head: string,
+  options: { readonly boundMs?: number } = {}
+): Promise<string> {
   return await new Promise<string>((resolvePromise, reject) => {
     let received = ""
     Bun.connect({
@@ -1267,6 +1299,11 @@ async function readStatusLine(port: number, head: string): Promise<string> {
       socket: {
         open(socket) {
           socket.write(head)
+          if (options.boundMs === undefined) return
+          setTimeout(() => {
+            resolvePromise("no answer")
+            socket.end()
+          }, options.boundMs)
         },
         data(socket, data) {
           received += data.toString()

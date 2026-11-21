@@ -152,11 +152,6 @@ describe("OpenAPI docs", () => {
       ["patch", "/api/auth/members/{userId}/groups"],
       ["post", "/api/auth/members/{userId}/suspend"],
       ["post", "/api/auth/members/{userId}/reactivate"],
-      ["post", "/api/files/uploads"],
-      ["put", "/api/files/uploads/{uploadId}/content"],
-      ["post", "/api/files/uploads/{uploadId}/parts/{partNumber}"],
-      ["post", "/api/files/uploads/{uploadId}/complete"],
-      ["post", "/api/files/uploads/{uploadId}/abort"],
       ["post", "/api/syncs/{syncId}/runs"],
       ["post", "/api/pipelines/{pipelineId}/runs"],
       ["post", "/api/workflow-interventions/{interventionId}/submit"],
@@ -170,7 +165,8 @@ describe("OpenAPI docs", () => {
       ["post", "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize"],
       ["delete", "/api/connectors/{connectorId}/connections/{connectionId}"],
       ["post", "/api/connectors/{connectorId}/connections/{connectionId}/revoke"],
-      // The simple file upload and object, link, and telemetry writes are CSRF-*or*-bearer now.
+      // File uploads, simple and staged, and object, link, and telemetry writes are CSRF-*or*-bearer
+      // now.
       // The derived ACCESS_TOKEN_ROUTES loop below covers them.
     ] as const
 

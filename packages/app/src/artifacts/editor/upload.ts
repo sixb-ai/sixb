@@ -1,5 +1,5 @@
 import { uploadFile } from "@sixb/client"
-import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
+import { artifactSizeLimits } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { useCallback } from "react"
@@ -23,11 +23,10 @@ export function useImageUpload(
   return useCallback(
     async (file: File) => {
       if (!live) throw new Error(messages.editor.imageFailed)
-      if (file.size > ARTIFACT_LIMITS.maxFileBytes) {
+      const { maxFileBytes } = artifactSizeLimits(version.outline.kind)
+      if (file.size > maxFileBytes) {
         throw new Error(
-          messages.editor.imageTooLarge(
-            formatFileSize(ARTIFACT_LIMITS.maxFileBytes, locale, messages.files)
-          )
+          messages.editor.imageTooLarge(formatFileSize(maxFileBytes, locale, messages.files))
         )
       }
       const path = imagePath(version.entry, file.name)
@@ -35,6 +34,6 @@ export function useImageUpload(
       live.doc.getMap(LIVE_FILES).set(path, { ...ref })
       return { src: path, alt: file.name.replace(/\.[^.]*$/, "") }
     },
-    [live, version.entry, messages, locale]
+    [live, version.entry, version.outline.kind, messages, locale]
   )
 }

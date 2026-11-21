@@ -1,5 +1,6 @@
 import { posix } from "node:path"
-import type { CommandResult } from "@sixb/core"
+import type { CommandResult, FileRef } from "@sixb/core"
+import { isFileRef } from "@sixb/core/blob-storage"
 import { loginShellArgs } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
@@ -146,26 +147,11 @@ export async function readSandboxFile(
     readonly maxBytes: number
   }
 ): Promise<Uint8Array> {
-  const result = await runScript(handle, READ_SANDBOX_FILE_SCRIPT, input, {
-    SIXB_READ_PATH_B64: Buffer.from(input.path, "utf-8").toString("base64"),
-    SIXB_READ_ROOTS: sandboxRoots(handle).join("\n"),
+  const result = await runCheckedFileScript(handle, READ_SANDBOX_FILE_SCRIPT, input, {
     SIXB_READ_MAX_BYTES: String(input.maxBytes),
   })
-
-  if (result.exitCode === 2) {
-    throw new SandboxFileError(
-      "not_found",
-      "file does not exist, is not a regular file, or is a symbolic link"
-    )
-  }
   if (result.exitCode === 3) {
     throw new SandboxFileError("too_large", `file exceeds the ${input.maxBytes}-byte limit`)
-  }
-  if (result.exitCode === 4) {
-    throw new SandboxFileError(
-      "outside_root",
-      "resolved path escapes the sandbox working directory and the run's context directory"
-    )
   }
   if (result.exitCode !== 0) {
     throw new SandboxFileError(
@@ -185,6 +171,155 @@ export async function readSandboxFile(
   }
   // A view, not a copy: a large file is held once more already, as the base64 it came as.
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+}
+
+/** The size of one regular file, checked as {@link readSandboxFile} checks it, without reading it. */
+export async function statSandboxFile(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    /** An absolute path, as `resolveSandboxPath` returns it. */
+    readonly path: string
+  }
+): Promise<number> {
+  const result = await runCheckedFileScript(handle, STAT_SANDBOX_FILE_SCRIPT, input, {})
+  const sizeBytes = Number(result.stdout.trim())
+  if (result.exitCode !== 0 || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new SandboxFileError(
+      "failed",
+      `file could not be read (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+  return sizeBytes
+}
+
+/**
+ * Upload one regular file, checked as {@link readSandboxFile} checks it, with the run's own `sixb`:
+ * it reaches the API as the run, so the bytes go from the sandbox's disk to blob storage, never
+ * through a command's output or the worker's memory. Resolves to the reference the API issued,
+ * whose digest is the bytes the API received.
+ */
+export async function uploadSandboxFile(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    /** An absolute path, as `resolveSandboxPath` returns it. */
+    readonly path: string
+    /** Without it, the API types the file by its leading bytes, else its name. */
+    readonly mediaType?: string
+  }
+): Promise<FileRef> {
+  const result = await runCheckedFileScript(handle, UPLOAD_SANDBOX_FILE_SCRIPT, input, {
+    ...(input.mediaType === undefined ? {} : { SIXB_UPLOAD_MEDIA_TYPE: input.mediaType }),
+  })
+  if (result.exitCode !== 0) {
+    throw new SandboxFileError(
+      "failed",
+      `file could not be uploaded (${cliErrorMessage(result.stderr) ?? `exit ${result.exitCode}`})`
+    )
+  }
+
+  const fileRef = parseJson(result.stdout.trim().split("\n").at(-1) ?? "")
+  if (!isFileRef(fileRef)) {
+    throw new SandboxFileError("failed", "file was uploaded, but its reference did not parse")
+  }
+  return fileRef
+}
+
+/**
+ * Past this, a file moves between the worker and the sandbox through the API, by the sandbox's own
+ * `sixb`, never through a command's output or `writeFiles`: either holds it whole in the worker's
+ * memory, and a command's output, as base64, must fit what its provider keeps. Below it, a direct
+ * read or write is quicker than an upload's or a download's few requests.
+ */
+export const SANDBOX_INLINE_BYTES = 8 * 1024 * 1024
+
+/**
+ * Puts files of artifact versions in the sandbox, each fetched by the run's own `sixb` from the
+ * API as the run's requester reads it: the bytes never pass through the worker. A file that does
+ * not arrive at its size fails them all.
+ */
+export async function downloadArtifactFiles(
+  handle: AgentSandboxHandle,
+  files: readonly {
+    readonly artifactId: string
+    readonly version: number
+    /** The file's path in the version. */
+    readonly path: string
+    readonly sizeBytes: number
+    /** Absolute, in the sandbox. */
+    readonly to: string
+  }[],
+  options: SandboxCommandOptions
+): Promise<void> {
+  if (files.length === 0) return
+
+  const result = await handle.sandbox.runCommand(
+    "bash",
+    [
+      "-c",
+      DOWNLOAD_ARTIFACT_FILES_SCRIPT,
+      "download",
+      ...files.flatMap((file) => [
+        file.artifactId,
+        String(file.version),
+        file.path,
+        file.to,
+        String(file.sizeBytes),
+      ]),
+    ],
+    { env: { ...(handle.env ?? {}) }, timeout: options.timeoutMs, signal: options.signal }
+  )
+  options.signal.throwIfAborted()
+  if (result.exitCode !== 0 || result.timedOut) {
+    throw new SandboxFileError(
+      "failed",
+      `artifact files could not be fetched (${cliErrorMessage(result.stderr) ?? `exit ${result.exitCode}`})`
+    )
+  }
+}
+
+/**
+ * Runs a script that starts with {@link CHECKED_FILE_PRELUDE} on `input.path`, answering for the
+ * prelude's own refusals.
+ */
+async function runCheckedFileScript(
+  handle: AgentSandboxHandle,
+  script: string,
+  input: SandboxCommandOptions & { readonly path: string },
+  env: Readonly<Record<string, string>>
+): Promise<CommandResult> {
+  const result = await runScript(handle, script, input, {
+    SIXB_READ_PATH_B64: Buffer.from(input.path, "utf-8").toString("base64"),
+    SIXB_READ_ROOTS: sandboxRoots(handle).join("\n"),
+    ...env,
+  })
+  if (result.exitCode === 2) {
+    throw new SandboxFileError(
+      "not_found",
+      "file does not exist, is not a regular file, or is a symbolic link"
+    )
+  }
+  if (result.exitCode === 4) {
+    throw new SandboxFileError(
+      "outside_root",
+      "resolved path escapes the sandbox working directory and the run's context directory"
+    )
+  }
+  return result
+}
+
+/** The message of the JSON error `sixb` prints on stderr, when it printed one. */
+function cliErrorMessage(stderr: string): string | undefined {
+  const printed = parseJson(stderr.trim().split("\n").at(-1) ?? "")
+  const error = (printed as { readonly error?: { readonly message?: unknown } } | null)?.error
+  return typeof error?.message === "string" ? error.message : stderr.trim() || undefined
+}
+
+function parseJson(line: string): unknown {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return null
+  }
 }
 
 /** One file of {@link readSandboxFiles}: its bytes, or why it could not be read. */
@@ -389,11 +524,12 @@ while IFS= read -r encoded; do
   printf '\\n'
 done <<< "\${SIXB_READ_PATHS:?}"`
 
-const READ_SANDBOX_FILE_SCRIPT = `# sixb-read-sandbox-file
-set -euo pipefail
+// Resolves the requested path to a regular file inside one of the roots, as `$resolved`, and its
+// size as `$size`: exits 2 when it is missing, not a regular file, or a link, and 4 when it lies
+// outside every root. The read, stat and upload scripts each start with it.
+const CHECKED_FILE_PRELUDE = `set -euo pipefail
 requested="$(printf '%s' "\${SIXB_READ_PATH_B64:?}" | base64 -d)"
 roots="\${SIXB_READ_ROOTS:?}"
-max_bytes="\${SIXB_READ_MAX_BYTES:?}"
 if [ ! -f "$requested" ] || [ -L "$requested" ]; then
   exit 2
 fi
@@ -405,9 +541,38 @@ while IFS= read -r root; do
   case "$resolved" in "$real_root"/*) inside=1 ;; esac
 done <<< "$roots"
 [ "$inside" = 1 ] || exit 4
-size="$(wc -c < "$resolved" | tr -d ' ')"
+size="$(wc -c < "$resolved" | tr -d ' ')"`
+
+const READ_SANDBOX_FILE_SCRIPT = `# sixb-read-sandbox-file
+${CHECKED_FILE_PRELUDE}
+max_bytes="\${SIXB_READ_MAX_BYTES:?}"
 if [ "$size" -gt "$max_bytes" ]; then
   exit 3
 fi
 printf '%s\\n' "$size"
 head -c "$max_bytes" "$resolved" | base64 | tr -d '\\n'`
+
+const STAT_SANDBOX_FILE_SCRIPT = `# sixb-stat-sandbox-file
+${CHECKED_FILE_PRELUDE}
+printf '%s\\n' "$size"`
+
+// Fetches each \`<artifact> <version> <path> <to> <bytes>\` with the run's own \`sixb\`, which writes
+// it whole or not at all, and refuses one that is not as large as its version says.
+const DOWNLOAD_ARTIFACT_FILES_SCRIPT = `set -eu
+while [ "$#" -gt 0 ]; do
+  mkdir -p -- "$(dirname -- "$4")"
+  "\${SIXB_BIN_DIR:?}/sixb" files download artifact "$1" "$2" --path "$3" --output "$4" >/dev/null
+  [ "$(wc -c < "$4" | tr -d ' ')" = "$5" ] || { echo "$4 did not arrive whole" >&2; exit 1; }
+  shift 5
+done`
+
+// The run's own \`sixb\`, not whichever one PATH finds first: a project's may shadow it. Its own
+// exit codes would read as the prelude's, so a failure exits 5, its error on stderr.
+const UPLOAD_SANDBOX_FILE_SCRIPT = `# sixb-upload-sandbox-file
+${CHECKED_FILE_PRELUDE}
+sixb="\${SIXB_BIN_DIR:?}/sixb"
+if [ -n "\${SIXB_UPLOAD_MEDIA_TYPE:-}" ]; then
+  "$sixb" files upload "$resolved" --media-type "$SIXB_UPLOAD_MEDIA_TYPE" || exit 5
+else
+  "$sixb" files upload "$resolved" || exit 5
+fi`

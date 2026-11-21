@@ -1,3 +1,4 @@
+import type { FileUploadProgress } from "@sixb/client"
 import { useUploadFile } from "@sixb/client/hooks"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import { Button } from "@sixb/ui/components"
@@ -29,6 +30,7 @@ export function FileRefUploadField({
   const onPendingChangeRef = useRef(onPendingChange)
   const [dragging, setDragging] = useState(false)
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(null)
+  const [progress, setProgress] = useState<FileUploadProgress | null>(null)
   const upload = useUploadFile()
   const isBusy = upload.isPending
   const isDisabled = disabled || isBusy
@@ -54,6 +56,7 @@ export function FileRefUploadField({
   async function uploadSelectedFile(file: File) {
     upload.reset()
     setUploadingFileName(file.name)
+    setProgress(null)
 
     try {
       const fileRef = await upload.mutateAsync({
@@ -61,6 +64,9 @@ export function FileRefUploadField({
         logicalPath: logicalPathPrefix
           ? `${logicalPathPrefix.replace(/\/$/, "")}/${file.name}`
           : file.name,
+        onProgress: (next) => {
+          if (activeRef.current) setProgress(next)
+        },
       })
       if (activeRef.current) {
         onChange(fileRef)
@@ -69,6 +75,7 @@ export function FileRefUploadField({
       // The mutation stores the error for rendering below.
     } finally {
       setUploadingFileName(null)
+      setProgress(null)
       setDragging(false)
     }
   }
@@ -114,7 +121,9 @@ export function FileRefUploadField({
   const mediaLabel = value && fileName ? fileMediaLabel(value.mediaType, fileName) : null
 
   return (
-    <div className="w-full min-w-0 space-y-2">
+    // Sized by where it sits, never by its content: a long file name is cut short with an ellipsis
+    // instead of widening a dialog, as `truncate` alone does not prevent.
+    <div className="w-full min-w-0 space-y-2 [contain:inline-size]">
       <input
         ref={inputRef}
         id={inputId}
@@ -176,7 +185,9 @@ export function FileRefUploadField({
             dragging
               ? "border-primary/60 bg-primary/5"
               : "border-border/80 hover:border-border hover:bg-muted/20",
-            isDisabled && "pointer-events-none opacity-70"
+            isDisabled && "pointer-events-none",
+            // An upload under way keeps its progress legible: only a disabled field is dimmed.
+            disabled && "opacity-70"
           )}
         >
           <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -194,9 +205,10 @@ export function FileRefUploadField({
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {isBusy
-                    ? "Keep this dialog open while the upload finishes."
+                    ? uploadStatus(progress)
                     : "Or browse to upload now and store the FileRef on submit."}
                 </p>
+                {isBusy && progress ? <UploadProgressBar progress={progress} /> : null}
               </div>
             </div>
             <Button
@@ -219,6 +231,44 @@ export function FileRefUploadField({
           {errorToMessage(upload.error)}
         </p>
       ) : null}
+    </div>
+  )
+}
+
+/** What a large upload is doing: reading the file for its digest, then sending it. */
+function uploadStatus(progress: FileUploadProgress | null): string {
+  if (!progress) return "Keep this dialog open while the upload finishes."
+  const percent = Math.floor((progress.loadedBytes / Math.max(1, progress.totalBytes)) * 100)
+  if (progress.stage === "hash") return `Preparing · ${percent}%`
+  return progress.loadedBytes > 0
+    ? `${formatFileSize(progress.loadedBytes)} of ${formatFileSize(progress.totalBytes)} sent`
+    : `Sending ${formatFileSize(progress.totalBytes)} · keep this dialog open`
+}
+
+/**
+ * Filled as far as the upload is known to be; a file sent in one request reports nothing until it
+ * is sent, so while none of it is confirmed the bar sweeps instead.
+ */
+function UploadProgressBar({ progress }: { readonly progress: FileUploadProgress }) {
+  const fraction = progress.loadedBytes / Math.max(1, progress.totalBytes)
+  const known = progress.stage === "hash" || progress.loadedBytes > 0
+  return (
+    <div
+      role="progressbar"
+      aria-label={progress.stage === "hash" ? "Preparing upload" : "Uploading"}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(known ? { "aria-valuenow": Math.floor(fraction * 100) } : {})}
+      className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted"
+    >
+      {known ? (
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+          style={{ width: `${fraction * 100}%` }}
+        />
+      ) : (
+        <div className="h-full w-1/3 rounded-full bg-primary/70 motion-safe:animate-[progress-indeterminate_1.4s_ease-in-out_infinite]" />
+      )}
     </div>
   )
 }
