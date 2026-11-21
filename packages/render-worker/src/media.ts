@@ -19,8 +19,8 @@ import type {
   ArtifactMediaParts,
   ArtifactMediaProbe,
 } from "@sixb/core/storage"
+import mediaScript from "./derive.cjs" with { type: "text" }
 import type { RenderHost } from "./host"
-import mediaScript from "./media.cjs" with { type: "text" }
 import {
   downloadIntoSandbox,
   inRenderSandbox,
@@ -45,7 +45,7 @@ export type MediaHost = RenderHost & RenderDownloadHost
 /** Where the original is fetched to in the sandbox, and where the script writes what it derives. */
 const ORIGINAL = "media/original"
 const OUT = "media/derived"
-const SCRIPT = "media.cjs"
+const SCRIPT = "derive.cjs"
 /** Of the time left once the original is probed: the rest reads what it derived back. */
 const DERIVE_SHARE = 0.8
 /** How long ffprobe may read the original, before the probe says how long the rest takes. */
@@ -323,7 +323,7 @@ async function derive(input: {
 }
 
 /**
- * Runs media.cjs with `args`, within what is left, and reads its report: each part it made or why
+ * Runs derive.cjs with `args`, within what is left, and reads its report: each part it made or why
  * not, or every part unavailable in a sandbox without the tools, until the project's image has
  * them. A script that reports nothing throws, and the job tries again.
  */
