@@ -404,3 +404,49 @@ test("words handed to the input join it once, however often the composer is draw
   await waitFor(() => expect(input()).not.toBe(first))
   expect(input().value).toBe("")
 })
+
+// Guard proof: leave the artifact's title out of useAgentContextLabel; the chip reads "Artifact"
+// whatever the artifact is called.
+test("an artifact's chip shows its title once read, and its kind's icon", async () => {
+  const artifactId = "art_k3m9q2x7tp"
+  let answer: (() => void) | undefined
+  client.setConfig({
+    fetch: Object.assign(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = () =>
+            resolve(
+              Response.json({
+                artifact: {
+                  id: artifactId,
+                  projectId: "proj",
+                  kind: "video",
+                  title: "Teaser",
+                  owner: { type: "user", id: "usr_ava" },
+                  latestVersion: 1,
+                  revision: 1,
+                  createdAt: "2026-11-21T09:00:00.000Z",
+                  updatedAt: "2026-11-21T09:00:00.000Z",
+                },
+                versions: [],
+                access: "update",
+              })
+            )
+        }),
+      { preconnect: globalThis.fetch.preconnect }
+    ),
+  })
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ContextChips
+        entries={[{ context: { kind: "artifact", id: artifactId }, origin: "ambient" }]}
+      />
+    </QueryClientProvider>
+  )
+  expect(view.container.textContent).toBe("Artifact")
+
+  await waitFor(() => expect(answer).toBeDefined())
+  await act(async () => answer?.())
+  await waitFor(() => expect(view.container.textContent).toBe("Teaser"))
+  expect(view.container.querySelector("svg.lucide-clapperboard")).not.toBeNull()
+})

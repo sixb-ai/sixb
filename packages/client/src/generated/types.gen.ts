@@ -9754,6 +9754,17 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                 label?: string
               }
             | {
+                kind: "artifact"
+                /**
+                 * The artifact the person has open, such as art_k3m9q2x7tp
+                 */
+                id: string
+                /**
+                 * Shown in the chat instead of the artifact's title. Never sent to the model.
+                 */
+                label?: string
+              }
+            | {
                 kind: "app-state"
                 id: string
                 label: string
@@ -14738,6 +14749,17 @@ export type ListAgentThreadMessagesResponses = {
                   label?: string
                 }
               | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
                   kind: "app-state"
                   id: string
                   label: string
@@ -14941,6 +14963,17 @@ export type PostAgentThreadMessageData = {
             }
             /**
              * Shown in the chat instead of the object's title. Never sent to the model.
+             */
+            label?: string
+          }
+        | {
+            kind: "artifact"
+            /**
+             * The artifact the person has open, such as art_k3m9q2x7tp
+             */
+            id: string
+            /**
+             * Shown in the chat instead of the artifact's title. Never sent to the model.
              */
             label?: string
           }
@@ -15404,6 +15437,17 @@ export type PostAgentThreadMessageResponses = {
                   }
                   /**
                    * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
                    */
                   label?: string
                 }
@@ -15935,6 +15979,17 @@ export type ListAgentThreadInboxResponses = {
                   label?: string
                 }
               | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
                   kind: "app-state"
                   id: string
                   label: string
@@ -16452,6 +16507,17 @@ export type UpdateAgentThreadInboxItemResponses = {
                   label?: string
                 }
               | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
                   kind: "app-state"
                   id: string
                   label: string
@@ -16642,6 +16708,17 @@ export type EditAgentThreadMessageData = {
             }
             /**
              * Shown in the chat instead of the object's title. Never sent to the model.
+             */
+            label?: string
+          }
+        | {
+            kind: "artifact"
+            /**
+             * The artifact the person has open, such as art_k3m9q2x7tp
+             */
+            id: string
+            /**
+             * Shown in the chat instead of the artifact's title. Never sent to the model.
              */
             label?: string
           }
@@ -17105,6 +17182,17 @@ export type EditAgentThreadMessageResponses = {
                   }
                   /**
                    * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
                    */
                   label?: string
                 }
@@ -20536,6 +20624,17 @@ export type ListObservedAgentThreadMessagesResponses = {
                   }
                   /**
                    * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
+                  kind: "artifact"
+                  /**
+                   * The artifact the person has open, such as art_k3m9q2x7tp
+                   */
+                  id: string
+                  /**
+                   * Shown in the chat instead of the artifact's title. Never sent to the model.
                    */
                   label?: string
                 }

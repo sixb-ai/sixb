@@ -64,8 +64,10 @@ replaces it. Only the user creates a version, which freezes it; your next update
 one, and the created version stays as it was.
 
 The artifacts this conversation shares are listed in `$SIXB_ARTIFACTS`, each with its current
-version installed under `$SIXB_ARTIFACTS_DIR/<id>/`, including one you published moments ago. To
-change one, start from that copy, not from an older working copy:
+version installed under `$SIXB_ARTIFACTS_DIR/<id>/`, including one you published moments ago. An
+`<artifact_context>` in the user's message names the artifact they have open: when it is not
+listed, call `open_artifact` with its id, as below. To change one, start from that copy, not from
+an older working copy:
 
 ```bash
 rm -rf work/q3-review && cp -r "$SIXB_ARTIFACTS_DIR/art_k3m9q2x7tp" work/q3-review

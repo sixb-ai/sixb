@@ -19,6 +19,15 @@ export function serializeAgentContextForModel(
       continue
     }
 
+    if (part.context.kind === "artifact") {
+      lines.push(
+        "  <artifact_context>",
+        `    <artifact_id>${escapeXml(part.context.id)}</artifact_id>`,
+        "  </artifact_context>"
+      )
+      continue
+    }
+
     lines.push(
       "  <app_state_context>",
       `    <id>${escapeXml(part.context.id)}</id>`,

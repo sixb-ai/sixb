@@ -1,3 +1,4 @@
+import { getCallerArtifacts } from "../artifacts/caller"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentContextEntryInput,
@@ -14,6 +15,12 @@ export async function resolveAgentContextParts(
   const entries = normalizeAgentContextEntries(input)
 
   for (const entry of entries) {
+    if (entry.context.kind === "artifact") {
+      // As the sender reads it: one they cannot read is unknown, as a missing one is.
+      const artifact = await getCallerArtifacts(runtime).get(entry.context.id)
+      if (!artifact) invalidContext(`context references an unknown artifact '${entry.context.id}'`)
+      continue
+    }
     if (entry.context.kind !== "object") continue
     const { objectTypeId, primaryId } = entry.context.ref
 

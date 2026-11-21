@@ -8,6 +8,8 @@ export function agentContextLabel(
 ): string {
   if (context.kind === "app-state") return context.label
   if (context.label !== undefined) return context.label
+  // An artifact's chip shows its title, once read: see `useAgentContextLabel`.
+  if (context.kind === "artifact") return unnamed
 
   const typeLabel = displayWords(context.ref.objectTypeId) || unnamed
   const primaryId = stripObjectTypePrefix(context.ref.primaryId, context.ref.objectTypeId)
