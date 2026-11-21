@@ -105,9 +105,10 @@ export class SixbFileUploadError extends Error {
 
 /**
  * How far an upload is. A staged upload first reads the file for its digest (`hash`), then sends
- * it (`upload`). What one request sends is counted once it is sent: fetch reports no progress
- * within a request, so a file sent whole goes from none of it to all of it at once, and one sent
- * in parts, part by part.
+ * it (`upload`). In a browser, a staged file the API receives itself is counted as it is sent.
+ * Otherwise, what one request sends is counted once it is sent: fetch reports no progress within
+ * a request, so a file sent whole goes from none of it to all of it at once, and one sent in
+ * parts, part by part.
  */
 export interface FileUploadProgress {
   readonly stage: "hash" | "upload"
@@ -196,12 +197,18 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
   try {
     progress("upload", 0)
     if (upload.strategy === "server") {
+      const body = resolveUploadFile(file, options.fileName)
+      const transport = progressTransport(options.client ?? sharedClient, body, (sentBytes) =>
+        progress("upload", sentBytes)
+      )
+
       await runUploadStep("server-put", () =>
         uploadFileContent({
-          body: resolveUploadFile(file, options.fileName),
+          body,
           path: { uploadId: upload.uploadId },
           client: options.client,
           ...callOptions(options.signal),
+          ...(transport === undefined ? {} : { fetch: transport }),
         })
       )
       progress("upload", file.size)
@@ -280,6 +287,69 @@ async function putDirectUpload(input: {
       { stage: "direct-put", status: response.status }
     )
   }
+}
+
+/**
+ * A fetch for the one request that sends `file` to the API, through XHR, which says how much of it
+ * is sent as fetch does not. Only in a browser, and only for a client whose transport is the
+ * browser's own fetch: one that wraps it, as a shared link's or a native session's does, stamps
+ * its credential there, so it keeps sending through it.
+ */
+function progressTransport(
+  client: SixbClient,
+  file: File | Blob,
+  onSent: (sentBytes: number) => void
+): typeof fetch | undefined {
+  if (typeof XMLHttpRequest === "undefined" || client.getConfig().fetch !== undefined) {
+    return undefined
+  }
+
+  const send = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    new Promise<Response>((resolve, reject) => {
+      // The SDK hands over the request it built: its URL, its headers, its credentials and its
+      // signal are this one's. Its body is the file, sent as it is rather than read again.
+      const request =
+        input instanceof Request && init === undefined ? input : new Request(input, init)
+      const xhr = new XMLHttpRequest()
+      xhr.open(request.method, request.url)
+      xhr.withCredentials = request.credentials === "include"
+      xhr.responseType = "blob"
+      for (const [name, value] of request.headers) xhr.setRequestHeader(name, value)
+
+      xhr.upload.onprogress = (event) => onSent(Math.min(event.loaded, file.size))
+      xhr.onload = () => resolve(xhrResponse(xhr))
+      xhr.onerror = () => reject(new TypeError("[SixbClient] The file upload request failed."))
+      xhr.onabort = () => reject(new DOMException("The file upload was aborted.", "AbortError"))
+
+      if (request.signal.aborted) {
+        reject(new DOMException("The file upload was aborted.", "AbortError"))
+        return
+      }
+      request.signal.addEventListener("abort", () => xhr.abort(), { once: true })
+      xhr.send(file)
+    })
+
+  return Object.assign(send, { preconnect: globalThis.fetch.preconnect })
+}
+
+/** What an XHR answered, as fetch would have: a status that takes no body gets none. */
+function xhrResponse(xhr: XMLHttpRequest): Response {
+  const headers = new Headers()
+  for (const line of xhr
+    .getAllResponseHeaders()
+    .trim()
+    .split(/[\r\n]+/)) {
+    const separator = line.indexOf(":")
+    if (separator > 0)
+      headers.append(line.slice(0, separator).trim(), line.slice(separator + 1).trim())
+  }
+
+  const bodiless = xhr.status === 204 || xhr.status === 205 || xhr.status === 304
+  return new Response(bodiless ? null : xhr.response, {
+    status: xhr.status,
+    statusText: xhr.statusText,
+    headers,
+  })
 }
 
 async function uploadMultipartFile(input: {
