@@ -6,11 +6,13 @@ A marking classifies data. A clearance lets a role read data with that marking. 
 
 ## Define a marking
 
-Export markings from `security/markings/`. Sixb discovers them automatically.
+Export markings from `security/markings/`. Sixb discovers them automatically. Import
+`defineMarking` from `@sixb/core/security`: your ontology imports markings, your app imports the
+ontology, and that subpath also loads in the browser.
 
 ```ts
 // security/markings/financial.ts
-import { defineMarking } from "@sixb/core"
+import { defineMarking } from "@sixb/core/security"
 
 export const financial = defineMarking("financial", { label: "Financial" })
 ```
@@ -19,7 +21,7 @@ export const financial = defineMarking("financial", { label: "Financial" })
 
 ```ts
 // ontology/invoice.ts
-import { defineObjectType, prop } from "@sixb/core"
+import { defineObjectType, prop } from "@sixb/core/ontology"
 import { financial } from "../security/markings/financial"
 
 export const Invoice = defineObjectType({
