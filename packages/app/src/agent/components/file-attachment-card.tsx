@@ -8,9 +8,10 @@ import {
 } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { File as FileIcon, FileImage, FileText, Table2, X } from "lucide-react"
+import { File as FileIcon, FileImage, FileMusic, FilePlay, FileText, Table2, X } from "lucide-react"
 import { formatFileSize } from "../../artifacts/file-size"
 import type { FileSource } from "../../artifacts/file-source"
+import { fileView } from "../../artifacts/file-view"
 import { viewerTargetKey } from "../../artifacts/target"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
@@ -105,6 +106,9 @@ function fileMediaLabel(
   }
   if (normalized === "application/pdf" || lowerName.endsWith(".pdf")) return messages.pdf
   if (normalized?.startsWith("image/")) return messages.image
+  const view = fileView({ mediaType, fileName })
+  if (view === "video") return messages.video
+  if (view === "audio") return messages.audio
   if (normalized === "text/markdown" || lowerName.endsWith(".md")) return messages.markdown
   if (normalized === "text/plain" || lowerName.endsWith(".txt")) return messages.text
   if (normalized?.startsWith("text/")) return messages.document
@@ -131,6 +135,13 @@ function fileIconPresentation(mediaType: string | undefined, fileName: string) {
   }
   if (normalized === "application/pdf" || lowerName.endsWith(".pdf")) {
     return { Icon: FileText, className: "bg-rose-500/[0.08] text-rose-600 dark:text-rose-300" }
+  }
+  const view = fileView({ mediaType, fileName })
+  if (view === "video") {
+    return { Icon: FilePlay, className: "bg-pink-500/[0.08] text-pink-600 dark:text-pink-300" }
+  }
+  if (view === "audio") {
+    return { Icon: FileMusic, className: "bg-teal-500/[0.08] text-teal-600 dark:text-teal-300" }
   }
   if (normalized?.startsWith("text/") || /\.(txt|md|json|yaml|yml)$/i.test(lowerName)) {
     return { Icon: FileText, className: "bg-muted text-muted-foreground" }

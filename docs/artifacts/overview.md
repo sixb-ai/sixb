@@ -13,7 +13,7 @@ Each artifact has a page in your app where its owner reads it.
 | `slides`   | A deck: `index.html` with one `<section class="slide">` per slide       |
 | `page`     | A web page: `index.html` and its scripts, styles, images, and data      |
 | `canvas`   | An endless board of boards, sections, notes, shapes, and arrows         |
-| `file`     | One file, shown as its type allows or offered for download              |
+| `file`     | One file, shown or played as its type allows, or offered for download   |
 
 ## Publish an artifact
 
@@ -535,8 +535,10 @@ previous and next, an overview of every slide, and present, where the slide fill
   `<sixb-embed src="artifact:…#chart=revenue">` shows another artifact on a slide: a chart, a
   range, a section, or a slide of another deck, drawn by the app over the slide at the size the
   deck gives the box, as documents show it. `<img src="artifact:…/figure.png">` shows an image
-  file of another artifact. Either shows only what its reader can open; anything else is an empty
-  box. Thumbnails and the overview show each box empty, with its `title`.
+  file of another artifact, and `<video>`, `<audio>`, and `<source>` play its video and sound
+  files the same way, a `<video>`'s `poster` and a `<track>`'s captions too. Each shows only what
+  its reader can open; anything else is an empty box. Thumbnails and the overview show each box
+  empty, with its `title`.
 - `?part=4` opens a deck at slide 4, and `![…](artifact:…#4)` shows that slide in a document.
 - When the Agent publishes a deck, it lays the deck out in its sandbox's headless browser and
   gets a warning for each slide with content past its edge or over the footer, overlapping or cut
@@ -819,10 +821,11 @@ The [regional numbers](artifact:art_k3m9q2x7tp#Regions) explain the gap.
 ```
 
 A range shows as a table formatted the way its sheet formats it, a chart as the chart, a section as
-its text, an image file as the image, a deck as its first slide, a page live, as tall as it lays out
-up to 800px and then scrolling, and any other whole artifact as a card. Under each, a line names the
-source and whether it follows the latest version or a fixed one. Something shown inside a shown
-artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
+its text, an image file as the image, a video or sound file as a player, a deck as its first slide,
+a page live, as tall as it lays out up to 800px and then scrolling, and any other whole artifact as
+a card. Under each, a line names the source and whether it follows the latest version or a fixed
+one. Something shown inside a shown artifact appears as a link. In a sheet, a `link` or `image`
+column cell can hold an address.
 
 Publishing resolves every address in a version against what its author can read, and refuses one
 that names nothing, saying what the target has instead, and one pinned to a version still open.

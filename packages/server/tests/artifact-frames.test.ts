@@ -796,6 +796,78 @@ describe("a deck's images from other artifacts", () => {
     )
     expect(shown.status).toBe(200)
   })
+
+  test("play videos and sounds, with their posters and captions, a byte range at a time", async () => {
+    // Reproduce by reading and rewriting `img[src]` alone, or dropping `track` from
+    // HTML_FILE_ATTRIBUTES: publishing records no reference for the clip or its captions, the frame
+    // is issued no target for them, and the slide keeps the `artifact:` address.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = "0123456789".repeat(10)
+    const media = await publish(fixture, alice, "slides", [
+      await fixture.put("index.html", '<section class="slide"></section>', "text/html"),
+      await fixture.put("clip.mp4", clip, "video/mp4"),
+      await fixture.put("poster.svg", SVG, "image/svg+xml"),
+      await fixture.put("captions.vtt", "WEBVTT\n", "text/vtt"),
+      await fixture.put("theme.mp3", "ID3", "audio/mpeg"),
+    ])
+    const id = media.artifact.id
+    const frame = await deckShowing(
+      fixture,
+      alice,
+      [
+        `<video controls poster="artifact:${id}/poster.svg"><source src="artifact:${id}/clip.mp4" type="video/mp4"><track kind="captions" src="artifact:${id}/captions.vtt"></video>`,
+        `<audio controls src="artifact:${id}/theme.mp3"></audio>`,
+      ].join("")
+    )
+
+    const html = await (await fixture.app.fetch(new Request(url(`${frame}index.html`)))).text()
+    const lent = `__sixb/ref/${id}@latest`
+    expect(html).toContain(
+      `<video controls poster="${lent}/poster.svg" data-sixb-ref=""><source src="${lent}/clip.mp4" type="video/mp4" data-sixb-ref=""><track kind="captions" src="${lent}/captions.vtt" data-sixb-ref=""></video>`
+    )
+    expect(html).toContain(`<audio controls src="${lent}/theme.mp3" data-sixb-ref=""></audio>`)
+    const captions = await fixture.app.fetch(new Request(url(`${frame}${lent}/captions.vtt`)))
+    expect(captions.status).toBe(200)
+
+    // A media element asks for the clip a piece at a time, to seek in it.
+    const piece = await fixture.app.fetch(
+      new Request(url(`${frame}${lent}/clip.mp4`), {
+        headers: { range: "bytes=10-19", "sec-fetch-dest": "video" },
+      })
+    )
+    expect(piece.status).toBe(206)
+    expect(piece.headers.get("content-type")).toBe("video/mp4")
+    expect(piece.headers.get("content-range")).toBe(`bytes 10-19/${clip.length}`)
+    expect(await piece.text()).toBe("0123456789")
+  })
+
+  test("mark a video unavailable when its clip is, whatever its poster", async () => {
+    // Reproduce by marking each attribute as it is rewritten in rewriteFrameReferences: the
+    // poster, rewritten after the clip, marks the video available, and it plays nothing.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const posters = await publish(fixture, alice, "file", [
+      await fixture.put("poster.svg", SVG, "image/svg+xml"),
+    ])
+    const clips = await publish(fixture, alice, "file", [
+      await fixture.put("clip.mp4", "clip", "video/mp4"),
+    ])
+    const deck = await publish(fixture, alice, "slides", [
+      await fixture.put(
+        "index.html",
+        `<section class="slide"><video src="artifact:${clips.artifact.id}/clip.mp4" poster="artifact:${posters.artifact.id}/poster.svg"></video></section>`,
+        "text/html"
+      ),
+    ])
+    await remove(fixture, alice, clips.artifact.id)
+    const frame = (await (await mint(fixture, alice, deck.artifact.id)).json()) as { path: string }
+
+    const html = await (await fixture.app.fetch(new Request(url(`${frame.path}index.html`)))).text()
+    expect(html).toContain(
+      `<video poster="__sixb/ref/${posters.artifact.id}@latest/poster.svg" data-sixb-ref="unavailable"></video>`
+    )
+  })
 })
 
 describe("injecting the kit and the runtime", () => {

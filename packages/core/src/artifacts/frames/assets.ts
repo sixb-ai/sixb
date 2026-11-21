@@ -3,7 +3,7 @@ import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { decodeHtmlEntities } from "../html"
 import type { DocumentHeading } from "../outline"
 import type { DocumentPaper } from "../paper"
-import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
+import { FRAME_ASSET_PREFIX, HTML_FILE_ATTRIBUTES } from "../publish/validate/html"
 import { documentData } from "./document-data"
 import type { FrameLayout } from "./entries"
 import { FRAME_DECK_CSS, FRAME_DOCUMENT_CSS, FRAME_PAGE_CSS } from "./kit"
@@ -128,31 +128,38 @@ function frameReferencePath(target: ArtifactFrameTarget, entry: string): string 
 }
 
 /**
- * Points each image an entry shows from another artifact (`<img src="artifact:…">`) at the copy its
- * frame serves, marked `data-sixb-ref`. An image its reader cannot see, or that the frame has
- * no target for, loses its source and is marked unavailable: the kit draws it as an empty box.
- * Addresses are compared as publishing recorded them, with their entities decoded.
+ * Points each file an entry shows or plays from another artifact (`<img src="artifact:…">`, a
+ * `<video>`'s source or poster, an `<audio>`'s, a `<source>`'s, a `<track>`'s captions) at the
+ * copy its frame serves, marked `data-sixb-ref`. A file its reader cannot see, or that the frame
+ * has no target for, loses its attribute and is marked unavailable: the kit draws an image or a
+ * video as an empty box. Addresses are compared as publishing recorded them, with their entities
+ * decoded.
  */
 export function rewriteFrameReferences(
   html: string,
   targets: readonly ArtifactFrameTarget[],
   entry = "index.html"
 ): string {
-  return new HTMLRewriter()
-    .on("img[src]", {
+  const rewriter = new HTMLRewriter()
+  for (const { element: tag, attribute } of HTML_FILE_ATTRIBUTES) {
+    rewriter.on(`${tag}[${attribute}]`, {
       element(element) {
-        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
+        const source = decodeHtmlEntities(element.getAttribute(attribute) ?? "").trim()
         if (!isArtifactAddress(source)) return
         const target = targets.find((candidate) => candidate.address === source)
         const path = target ? frameReferencePath(target, entry) : null
         if (path) {
-          element.setAttribute("src", path)
-          element.setAttribute("data-sixb-ref", "")
+          element.setAttribute(attribute, path)
+          // A `<video>` names two files: either one unavailable marks it.
+          if (element.getAttribute("data-sixb-ref") !== "unavailable") {
+            element.setAttribute("data-sixb-ref", "")
+          }
         } else {
-          element.removeAttribute("src")
+          element.removeAttribute(attribute)
           element.setAttribute("data-sixb-ref", "unavailable")
         }
       },
     })
-    .transform(html)
+  }
+  return rewriter.transform(html)
 }

@@ -21,11 +21,25 @@ export function refuseFrameAssetPaths(files: readonly ArtifactFile[], what: stri
 }
 
 /**
+ * Where HTML shows or plays a file: each element and the attribute that names the file. A file of
+ * another artifact is an `artifact:` address in one of them, which a frame serves as its own.
+ */
+export const HTML_FILE_ATTRIBUTES = [
+  { element: "img", attribute: "src" },
+  { element: "video", attribute: "src" },
+  { element: "video", attribute: "poster" },
+  { element: "audio", attribute: "src" },
+  { element: "source", attribute: "src" },
+  { element: "track", attribute: "src" },
+] as const
+
+/**
  * Reads the `artifact:` addresses a web artifact's HTML uses, to resolve: links (`<a href>`),
- * files it shows from other artifacts (`<img src>`), and anything else it shows (`<sixb-embed
- * src>`), a chart, a range, a section, or a slide, which the app draws over the frame. `at` names
- * where each sits, such as a deck's slide, and `file` the HTML file it reads. The first thing that
- * would not render is the refusal.
+ * files it shows or plays from other artifacts (`<img src>`, `<video src>` and its `poster`,
+ * `<audio src>`, `<source src>`, `<track src>` for captions), and anything else it shows
+ * (`<sixb-embed src>`), a chart, a range, a section, or a slide, which the app draws over the
+ * frame. `at` names where each sits, such as a deck's slide, and `file` the HTML file it reads. The
+ * first thing that would not render is the refusal.
  */
 export function readHtmlReferences(
   rewriter: HTMLRewriter,
@@ -34,26 +48,30 @@ export function readHtmlReferences(
 ): { readonly references: FoundReference[]; readonly refusal: () => string | undefined } {
   const references: FoundReference[] = []
   let refused: string | undefined
-  rewriter
-    .on("a[href]", {
+  rewriter.on("a[href]", {
+    element(element) {
+      const href = decodeHtmlEntities(element.getAttribute("href") ?? "")
+      if (isArtifactAddress(href)) {
+        references.push({ address: href.trim(), as: "link", at: at() })
+      }
+    },
+  })
+
+  for (const { element: tag, attribute } of HTML_FILE_ATTRIBUTES) {
+    rewriter.on(`${tag}[${attribute}]`, {
       element(element) {
-        const href = decodeHtmlEntities(element.getAttribute("href") ?? "")
-        if (isArtifactAddress(href)) {
-          references.push({ address: href.trim(), as: "link", at: at() })
-        }
-      },
-    })
-    .on("img[src]", {
-      element(element) {
-        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
+        const source = decodeHtmlEntities(element.getAttribute(attribute) ?? "").trim()
         if (!isArtifactAddress(source)) return
         if (!parseArtifactAddress(source)?.path) {
-          refused ??= `An <img> shows a file from another artifact, and '${source}' names none: show a chart, a range, a section, or a slide with <sixb-embed src="${source}"></sixb-embed>.`
+          refused ??= `<${tag} ${attribute}> takes a file from another artifact, and '${source}' names none: show a chart, a range, a section, or a slide with <sixb-embed src="${source}"></sixb-embed>.`
           return
         }
         references.push({ address: source, as: "embed", at: at() })
       },
     })
+  }
+
+  rewriter
     .on("sixb-embed", {
       element(element) {
         const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
@@ -70,7 +88,7 @@ export function readHtmlReferences(
           element.getAttribute("src") ?? element.getAttribute("data") ?? ""
         ).trim()
         if (isArtifactAddress(source)) {
-          refused ??= `${file} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
+          refused ??= `${file} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>, <video>, or <audio>.`
         }
       },
     })

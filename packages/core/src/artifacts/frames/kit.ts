@@ -354,8 +354,10 @@ export const FRAME_DECK_CSS = kit(`  :root {
   }
   section.slide.chart > sixb-embed,
   section.slide.chart figure > sixb-embed { flex: 1; min-height: 0; aspect-ratio: auto; }
-  /* An image from another artifact its reader cannot see. */
-  section.slide img[data-sixb-ref="unavailable"] {
+  /* An image, or a video, from another artifact its reader cannot see. */
+  section.slide img[data-sixb-ref="unavailable"],
+  section.slide video[data-sixb-ref="unavailable"],
+  section.slide video:has(> source[data-sixb-ref="unavailable"]) {
     display: block;
     min-width: 160px;
     min-height: 90px;
@@ -568,7 +570,9 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
     font-size: 13px;
     color: var(--muted-foreground);
   }
-  img[data-sixb-ref="unavailable"] { display: block; min-width: 120px; min-height: 68px; border-radius: var(--radius); background: var(--muted); }
+  img[data-sixb-ref="unavailable"],
+  video[data-sixb-ref="unavailable"],
+  video:has(> source[data-sixb-ref="unavailable"]) { display: block; min-width: 120px; min-height: 68px; border-radius: var(--radius); background: var(--muted); }
 `)
 
 /**

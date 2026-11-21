@@ -118,6 +118,8 @@ export const en = {
   files: {
     spreadsheet: "Spreadsheet",
     image: "Image",
+    video: "Video",
+    audio: "Audio",
     pdf: "PDF",
     markdown: "Markdown",
     text: "Text",
