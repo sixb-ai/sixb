@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  ActionValidationError,
   type ArtifactFile,
   artifactRef,
   defineAction,
@@ -36,9 +37,14 @@ const Post = defineObjectType({
 const useEditAsMedia = defineAction("useEditAsMedia")
   .on(Post)
   .params({ edit: param(ref.artifact()) })
-  .writeback(async ({ sixb, params }) => {
+  .writeback(async ({ sixb, params, subject }) => {
     const mp4 = await sixb.artifacts.video(params.edit.id, { render: false })
-    if (mp4?.status !== "ready") throw new Error("Export the edit first.")
+    if (mp4?.status !== "ready") {
+      throw new ActionValidationError("Export the edit first.", {
+        actionId: "useEditAsMedia",
+        subject,
+      })
+    }
 
     return { media: mp4.file }
   })
@@ -136,6 +142,29 @@ describe("sixb.artifacts in an Action", () => {
     expect(run.status).toBe("succeeded")
     const post = await system.objects(Post).get("post-1")
     expect(post?.properties.media).toEqual({ ...edit.mp4, fileName: "Teaser.mp4" })
+  })
+
+  // Reproduce by throwing a plain Error in useEditAsMedia's writeback: the person reads "Action
+  // execution failed." instead of what to do.
+  test("refuses an edit not exported yet, saying so", async () => {
+    const { system, as, put } = await setup()
+    const files = [await put("index.html", index), await put("scenes/intro.html", scene)]
+    const { version } = await as("usr_alice").artifacts.create({
+      kind: "video",
+      title: "Teaser",
+      files,
+    })
+    await system.objects(Post).upsert({ properties: { id: "post-1" } })
+
+    const run = await as("usr_alice")
+      .objects(Post)
+      .byId("post-1")
+      .requestAction({ action: useEditAsMedia, params: { edit: artifactRef(version.artifactId) } })
+
+    expect(run).toMatchObject({
+      status: "failed",
+      error: { code: "action.rejected", message: "Export the edit first." },
+    })
   })
 
   // Reproduce by giving the run its own trusted artifacts, `execution.sixb.artifacts`, in

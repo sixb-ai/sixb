@@ -1,3 +1,4 @@
+import { withFailureMessage } from "../../errors/failure-message"
 import {
   createSixbError,
   isSixbError,
@@ -86,6 +87,9 @@ export function translateActionPhaseError(
     return error
   }
   if (error instanceof ActionValidationError) {
+    // Only Sixb's validators and the Action's own handlers construct one: in any phase, it is the
+    // author's refusal, whose words the caller reads, as they read a validator's returned error.
+    withFailureMessage(error, error.message)
     return createSixbError("action.rejected", error.message, { cause: error, details })
   }
   if (phase === "commit" && isMaterializationConflictError(error) && error.kind === "expectation") {
