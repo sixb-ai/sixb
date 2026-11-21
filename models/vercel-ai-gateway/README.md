@@ -306,6 +306,36 @@ that mix dimensions, and models with custom `providerOptions`, keep the Gateway-
 only. Under a cost limit, per-image models reserve every requested image; token-priced models
 and token-priced calls with reference images are blocked.
 
+## Video generation
+
+```ts
+const veo = vercelGateway.video("google/veo-3.1-fast-generate-001")
+const models = { video: [veo] }
+
+const { files, usage, cost } = await sixb.models.video.generate({ prompt, duration: 4 })
+```
+
+Video runs as a Gateway job: `/v4/ai/video-model/start` returns an operation as soon as the
+Gateway accepts it, with the call ID as its idempotency key, and `/v4/ai/video-model/status`
+looks at it once. A finished clip is downloaded at once, without the Gateway's credentials,
+since its hosted URL expires. A first frame alone goes as `image`; with a last frame, both go as
+role-tagged `frameImages`; reference images go as `inputReferences`. Input images go as the URLs
+Sixb hands out when it can, inline otherwise.
+
+The catalog's `video_capabilities` set the definition: aspect ratios, lengths, sound, the number
+of clips per job and the input images a model takes. The binding accepts a `description`,
+`providerOptions`, `timeoutMs` for each start and status request (default 60,000),
+`maxVideoBytes` (default 512 MiB) and `inputImages`. A clip downloads under its own bound:
+`timeoutMs` until it starts, then a second per MiB of its announced length, or of
+`maxVideoBytes`. Proxies without the `/v1` layout set the
+full `videoUrl`, which `/start` and `/status` follow.
+
+Pricing is the catalog's `video_duration_pricing`, per second by resolution tier and sound. A
+request's frame size names its tier by its shorter side (`1280x720` is `720p`, `3840x2160` is
+`4k`). Prices keyed by a quality mode or a length threshold, and token prices, keep the
+Gateway-reported cost only, and are blocked under a cost limit. A request without a length
+reserves the model's longest.
+
 ## Speech generation
 
 ```ts

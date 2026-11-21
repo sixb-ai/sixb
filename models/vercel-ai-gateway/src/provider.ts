@@ -40,6 +40,8 @@ import {
   type SpeechModel,
   type TranscriptionModel,
   UnsupportedModelFeatureError,
+  type VideoCostEstimator,
+  type VideoModel,
   type WebSearchModel,
 } from "@sixb/core/models"
 import {
@@ -62,7 +64,7 @@ import {
   type GatewayImageResolution,
   type VercelGatewayImageOptions,
 } from "./image"
-import { gatewayImagePrice } from "./media-pricing"
+import { gatewayImagePrice, gatewayVideoPrice } from "./media-pricing"
 import { gatewayPromptCaching } from "./provider-caching"
 import { createGatewayReranking } from "./reranking"
 import {
@@ -76,6 +78,12 @@ import {
   type GatewayTranscriptionPricing,
   type VercelGatewayTranscriptionOptions,
 } from "./transcription"
+import {
+  createGatewayVideo,
+  type GatewayVideoResolution,
+  type VercelGatewayVideoOptions,
+  videoPricingDimensions,
+} from "./video"
 import {
   createGatewayWebSearch,
   type VercelGatewayWebSearchEngine,
@@ -101,6 +109,8 @@ export interface VercelGatewayOptions {
   readonly imageUrl?: string
   /** Full speech endpoint for proxies without the standard /v1 and /v4 URL layout. */
   readonly speechUrl?: string
+  /** Full video endpoint for proxies without the /v1 and /v4 layout; `/start` and `/status` follow. */
+  readonly videoUrl?: string
   /** Full language-model endpoint web search uses, for proxies without the /v1 and /v4 layout. */
   readonly webSearchUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
@@ -145,6 +155,8 @@ export interface VercelGateway extends LanguageModelProvider {
   /** Image models, and language models that answer with images, such as Gemini image models. */
   image(modelId: string, options?: VercelGatewayImageOptions): ImageModel
   speech(modelId: string, options?: VercelGatewaySpeechOptions): SpeechModel
+  /** Video models, run as asynchronous jobs on the Gateway. */
+  video(modelId: string, options?: VercelGatewayVideoOptions): VideoModel
   /**
    * Web search through one of Gateway's search tools, Perplexity by default. Every language model
    * of this provider carries `webSearch("perplexity")`, so a project needs no other search.
@@ -226,6 +238,19 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
         fetch: transport.fetch ?? fetch,
         headers: () => gatewayHeaders(transport, "application/json"),
         resolution: () => catalog.speechResolution(modelId, snapshot.providerOptions),
+        metadata: (payload, requestId) => mediaMetadata(payload, requestId),
+      })
+    },
+    video: (modelId: string, videoOptions: VercelGatewayVideoOptions = {}) => {
+      const snapshot = structuredClone(videoOptions)
+      const url = v4Endpoint(baseUrl, options.videoUrl, "video-model", "videoUrl")
+      return createGatewayVideo(modelId, snapshot, {
+        startUrl: `${url}/start`,
+        statusUrl: `${url}/status`,
+        fetch: transport.fetch ?? fetch,
+        headers: () => gatewayHeaders(transport, "application/json"),
+        httpError: (response, id) => providerHttpError(response, PROVIDER_ID, id),
+        resolution: () => catalog.videoResolution(modelId, snapshot.providerOptions),
         metadata: (payload, requestId) => mediaMetadata(payload, requestId),
       })
     },
@@ -460,7 +485,7 @@ function v4Endpoint(
   return url
 }
 
-/** Billing metadata for image and speech replies, whose usage the binding fills in. */
+/** Billing metadata for image, speech and video replies, whose usage the binding fills in. */
 function mediaMetadata(payload: JsonObject, requestId: string | undefined) {
   const gateway = gatewayMetadata(payload)
   return {
@@ -476,6 +501,12 @@ interface MediaCatalogEntry {
   readonly description?: string
   readonly rateCard?: ModelRateCard
 }
+
+type VideoCatalogEntry = MediaCatalogEntry &
+  Pick<
+    GatewayVideoResolution,
+    "maxVideosPerCall" | "aspectRatios" | "durations" | "audio" | "inputImages"
+  >
 
 function configuredModelDefinitions(
   definitions: readonly LanguageModelDefinition[]
@@ -505,6 +536,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     MediaCatalogEntry & { readonly protocol: GatewayImageResolution["protocol"] }
   >()
   private readonly speechModels = new Map<string, MediaCatalogEntry>()
+  private readonly videoModels = new Map<string, VideoCatalogEntry>()
 
   async imageResolution(
     modelId: string,
@@ -600,6 +632,48 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       estimator,
       ...(card ? { rateCard: card } : {}),
     }
+  }
+
+  async videoResolution(
+    modelId: string,
+    providerOptions: JsonObject | undefined
+  ): Promise<GatewayVideoResolution> {
+    let entry: VideoCatalogEntry | undefined
+    try {
+      await this.load()
+      entry = this.videoModels.get(modelId)
+    } catch {
+      console.warn("[SixbVercelGateway] Video pricing unavailable; cost limits will fail closed.")
+    }
+    const card = entry?.rateCard
+    const candidates = gatewayCandidates(modelId, providerOptions)
+    // Each call keeps the cards and lengths it resolved with, its fallbacks' included.
+    const fallbacks = candidates.map((candidate) =>
+      candidate === undefined ? undefined : this.videoModels.get(candidate)
+    )
+    const estimator: VideoCostEstimator = {
+      // A request that leaves the length to the model reserves its longest.
+      estimateReservation: ({ n, durationSeconds, resolution, audio }) =>
+        highestReservation(
+          fallbacks.map((candidate) => {
+            const seconds = durationSeconds ?? candidate?.durations?.at(-1)
+            if (candidate?.rateCard === undefined || seconds === undefined) return undefined
+            return estimateModelReservation({
+              outputVideoMs: n * seconds * 1_000,
+              dimensions: videoPricingDimensions({ resolution, audio }),
+              rateCard: candidate.rateCard,
+            })
+          })
+        ),
+      estimate: ({ usage, responseModelId, route, dimensions }) =>
+        rateModelCall({
+          usage,
+          rateCard: answeredBy(candidates, { route, responseModelId }) ? card : undefined,
+          ...(dimensions === undefined ? {} : { dimensions }),
+        }),
+    }
+    const { rateCard: _, ...facts } = entry ?? {}
+    return { ...facts, estimator, ...(card ? { rateCard: card } : {}) }
   }
 
   async transcriptionPricing(
@@ -800,6 +874,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       MediaCatalogEntry & { readonly protocol: "image" | "chat" }
     >()
     const speechModels = new Map<string, MediaCatalogEntry>()
+    const videoModels = new Map<string, VideoCatalogEntry>()
     for (const entry of body.data) {
       const model = object(entry)
       const id = string(model?.id)
@@ -826,6 +901,13 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       }
       if (id && model?.type === "speech") {
         speechModels.set(id, { ...media, ...speechRateCard(pricing) })
+      }
+      if (id && model?.type === "video") {
+        videoModels.set(id, {
+          ...media,
+          ...videoRateCard(pricing),
+          ...videoCapabilities(object(model.video_capabilities)),
+        })
       }
       if (id && model?.type === "transcription" && pricing?.varies_by_provider !== true) {
         const rate = string(pricing?.transcription_duration_cost_per_second)
@@ -858,6 +940,8 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     for (const [id, entry] of imageModels) this.imageModels.set(id, entry)
     this.speechModels.clear()
     for (const [id, entry] of speechModels) this.speechModels.set(id, entry)
+    this.videoModels.clear()
+    for (const [id, entry] of videoModels) this.videoModels.set(id, entry)
     const merged = new Map(discovered.map((definition) => [definition.modelId, definition]))
     for (const definition of this.supplied.values()) merged.set(definition.modelId, definition)
     return Object.freeze([...merged.values()])
@@ -1030,6 +1114,63 @@ function speechRateCard(raw: JsonObject | undefined): { readonly rateCard?: Mode
   const tokens = modelRateCard(raw)
   const audioOutput = tokenPrice(raw.audio_output_token_cost, undefined)
   return tokens && audioOutput ? mediaRateCard({ ...tokens, audioOutput }) : {}
+}
+
+/** The per-second price of each resolution tier, with sound or without. */
+function videoRateCard(raw: JsonObject | undefined): { readonly rateCard?: ModelRateCard } {
+  if (!raw || raw.varies_by_provider === true) return {}
+  const videoOutputSeconds = gatewayVideoPrice(raw)
+  return videoOutputSeconds === undefined ? {} : mediaRateCard({ videoOutputSeconds })
+}
+
+const IMAGE_FORMATS: Readonly<Record<string, string>> = {
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  tiff: "image/tiff",
+}
+
+/** What the catalog's `video_capabilities` say a request may ask for. */
+function videoCapabilities(
+  raw: JsonObject | undefined
+): Omit<VideoCatalogEntry, keyof MediaCatalogEntry> {
+  if (!raw) return {}
+  const aspectRatios = stringArray(raw.supported_aspect_ratios)
+  const durations = Array.isArray(raw.supported_durations_seconds)
+    ? raw.supported_durations_seconds.filter(
+        (value): value is number =>
+          typeof value === "number" && Number.isSafeInteger(value) && value > 0
+      )
+    : []
+  const maxSamples = positiveInteger(raw.max_sample_count)
+  const images = object(object(raw.input_limits)?.image)
+  const maxCount = positiveInteger(images?.max_count)
+  const maxMegabytes = typeof images?.max_file_size_mb === "number" ? images.max_file_size_mb : 0
+  const mediaTypes = [
+    ...new Set(
+      stringArray(images?.supported_formats).flatMap((format) => IMAGE_FORMATS[format] ?? [])
+    ),
+  ]
+
+  return {
+    // Most providers return one clip per job, and the catalog names the few that take more.
+    maxVideosPerCall: maxSamples ?? 1,
+    ...(aspectRatios.length === 0 ? {} : { aspectRatios }),
+    ...(durations.length === 0 ? {} : { durations: durations.sort((a, b) => a - b) }),
+    ...(typeof raw.generate_audio === "boolean" ? { audio: raw.generate_audio } : {}),
+    ...(maxCount !== undefined && maxMegabytes > 0
+      ? {
+          inputImages: {
+            maxCount,
+            maxBytes: Math.floor(maxMegabytes * 1024 * 1024),
+            ...(mediaTypes.length === 0 ? {} : { mediaTypes }),
+          },
+        }
+      : {}),
+  }
 }
 
 function mediaRateCard(prices: Omit<ModelRateCard, "currency">): {

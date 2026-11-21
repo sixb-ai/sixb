@@ -341,6 +341,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("107-video-artifacts", videoArtifactsSql),
     sqliteSql("108-artifact-media", artifactMediaSql),
     sqliteSql("109-artifact-video-renders", artifactVideoRendersSql),
+    sqliteSql("110-video-generation", videoGenerationSql),
   ],
 })
 
@@ -789,3 +790,4 @@ import artifactMediaSql from "./migrations/108-artifact-media.sql" with { type: 
 import artifactVideoRendersSql from "./migrations/109-artifact-video-renders.sql" with {
   type: "text",
 }
+import videoGenerationSql from "./migrations/110-video-generation.sql" with { type: "text" }

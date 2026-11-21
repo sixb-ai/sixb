@@ -7,9 +7,14 @@ import { isModelReasoning } from "../../models/language-model"
 import { AiUsageStorageError } from "./errors"
 import type {
   AiModelCallFilesRecord,
+  AiModelCallOperationRecord,
   AiModelCallUsageRecord,
+  CreateAiModelCallOperationInput,
   RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
+  RecordAiModelCallOperationResultInput,
+  SettleAiModelCallOperationInput,
+  StartAiModelCallOperationInput,
 } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
@@ -101,6 +106,107 @@ function cloneRequestedReasoning(
     throw new TypeError("[Sixb] AI usage requestedReasoning is invalid.")
   }
   return typeof reasoning === "string" ? reasoning : { budgetTokens: reasoning.budgetTokens }
+}
+
+/** Validate and defensively snapshot a call about to start, before the provider has it. */
+export function normalizeAiModelCallOperation(
+  input: CreateAiModelCallOperationInput
+): AiModelCallOperationRecord {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  assertAiUsageExecutionId(input.executionId)
+  assertPositiveSafeInteger(input.attempt, "attempt")
+  if (!MODEL_KINDS.includes(input.modelKind)) {
+    throw new TypeError("[Sixb] AI model kind is invalid.")
+  }
+  assertNonBlank(input.providerId, "providerId")
+  assertNonBlank(input.modelId, "modelId")
+
+  assertOperationRequest(input.request)
+  if (typeof input.reserved !== "boolean") {
+    throw new TypeError("[Sixb] AI model-call operation reserved must be a boolean.")
+  }
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    executionId: input.executionId,
+    attempt: input.attempt,
+    modelKind: input.modelKind,
+    providerId: input.providerId,
+    modelId: input.modelId,
+    request: structuredClone(input.request),
+    reserved: input.reserved,
+    status: "pending",
+    createdAt: cloneValidDate(input.createdAt ?? new Date(), "createdAt"),
+  }
+}
+
+/** Validate the handle of a call the provider accepted. */
+export function normalizeAiModelCallStart(
+  input: StartAiModelCallOperationInput
+): StartAiModelCallOperationInput {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  if (input.operation === null || input.operation === undefined) {
+    throw new TypeError("[Sixb] AI model-call operation handle is required.")
+  }
+  assertJsonValue(input.operation, "AI model-call operation")
+  assertOperationRequest(input.request)
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    operation: structuredClone(input.operation),
+    request: structuredClone(input.request),
+  }
+}
+
+/** Validate what a pending call reported once it is in the ledger. */
+export function normalizeAiModelCallOperationResult(
+  input: RecordAiModelCallOperationResultInput
+): RecordAiModelCallOperationResultInput {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  assertOperationResult(input.result)
+
+  return { projectId: input.projectId, callId: input.callId, result: structuredClone(input.result) }
+}
+
+function assertOperationResult(result: unknown): void {
+  if (!isPlainRecord(result)) {
+    throw new TypeError("[Sixb] AI model-call operation result must be a JSON object.")
+  }
+  assertJsonValue(result, "AI model-call operation result")
+}
+
+function assertOperationRequest(request: unknown): void {
+  if (!isPlainRecord(request)) {
+    throw new TypeError("[Sixb] AI model-call operation request must be a JSON object.")
+  }
+  assertJsonValue(request, "AI model-call operation request")
+}
+
+/** Validate how a running call ended. */
+export function normalizeAiModelCallSettlement(
+  input: SettleAiModelCallOperationInput
+): Required<Omit<SettleAiModelCallOperationInput, "error">> & { readonly error?: string } {
+  assertNonBlank(input.projectId, "projectId")
+  assertNonBlank(input.callId, "callId")
+  if (input.status !== "completed" && input.status !== "failed") {
+    throw new TypeError("[Sixb] AI model-call operation status must be 'completed' or 'failed'.")
+  }
+  if (input.error !== undefined) assertNonBlank(input.error, "operation error")
+  assertOperationResult(input.result)
+
+  return {
+    projectId: input.projectId,
+    callId: input.callId,
+    status: input.status,
+    ...(input.error === undefined ? {} : { error: input.error }),
+    result: structuredClone(input.result),
+    settledAt: cloneValidDate(input.settledAt ?? new Date(), "settledAt"),
+  }
 }
 
 /** Validate a durable execution reference at storage and query boundaries. */

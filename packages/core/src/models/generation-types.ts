@@ -8,6 +8,7 @@ import type { ImageModelsRuntime } from "./image/types"
 import type { LanguageModel, ModelReasoning } from "./language-model"
 import type { ModelMessage } from "./messages"
 import type { ModelCallCost } from "./pricing"
+import type { VideoModelsRuntime } from "./video/types"
 
 export type LanguageModelOutputShape = Readonly<Record<string, SchemaOrRef>>
 
@@ -61,6 +62,7 @@ export interface ModelsRuntime {
   readonly language: LanguageModelsRuntime
   readonly decision: DecisionModelsRuntime
   readonly image: ImageModelsRuntime
+  readonly video: VideoModelsRuntime
   /** What past calls produced, as visible as the runs that made them. */
   readonly calls: ModelCallsRuntime
 }

@@ -1,5 +1,5 @@
 export type { FileRef } from "../blob-storage/types"
-export type { JsonObject, JsonPrimitive, JsonValue } from "../json"
+export type { JsonObject, JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "../json"
 export type {
   AudioModelCatalog,
@@ -206,6 +206,24 @@ export type {
 } from "./reranking-model"
 export { RerankingModelResponseError } from "./reranking-model"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"
+export type { VideoModelCatalog, VideoModelEntry } from "./video/catalog"
+export type {
+  VideoCostEstimator,
+  VideoData,
+  VideoGenerateInput,
+  VideoGenerateResult,
+  VideoGeneration,
+  VideoGenerationStatus,
+  VideoInputImage,
+  VideoModel,
+  VideoModelDefinition,
+  VideoModelRequest,
+  VideoModelResponseMetadata,
+  VideoModelStart,
+  VideoModelStatus,
+  VideoModelsRuntime,
+  VideoReservationInput,
+} from "./video/types"
 export type {
   WebSearchCostEstimator,
   WebSearchHit,

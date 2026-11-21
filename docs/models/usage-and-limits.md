@@ -46,8 +46,8 @@ Every applicable limit must allow a call before it starts. Once a limit is reach
 are blocked.
 
 Token limits count calls billed by tokens: generation, embeddings, and decisions. Transcription,
-reranking, web search, image generation, and speech are billed by audio duration, search, image, or
-character, so only cost limits apply to them.
+reranking, web search, image and video generation, and speech are billed by audio duration, search,
+image, second of video, or character, so only cost limits apply to them.
 
 Limits control whether calls can start. They are not hard caps on a provider's bill, because a
 call's actual usage can exceed its estimate. Use
@@ -91,6 +91,22 @@ A cost limit lets a call start only when Sixb can estimate its cost first:
 
 A call with reference images is also blocked under a cost limit when its model is priced by
 tokens. A model whose provider has no published price can only run without a cost limit.
+
+## Video generation
+
+A video generation appears in **AI usage** once it ends, with its cost.
+Its budget is reserved when it starts: the price per second of the requested resolution, or of
+the dearest one when the request names none, times the requested length, or the model's longest.
+
+| Model priced | Under a cost limit |
+| --- | --- |
+| Per second, by resolution and sound (Veo, Wan, Grok Imagine, Seedance 1.0, MiniMax) | Runs. |
+| By tokens or by quality mode (Seedance 2.x, Kling, HeyGen) | Blocked: Sixb cannot match the price before the call. |
+
+A generation that fails is recorded with what the provider billed for it, usually nothing. Sixb
+follows every generation itself until it ends, whether anyone asks for it again or not; one still
+running after an hour is failed, and its reservation counts as spent until the month ends, since
+whether the provider billed it is unknown.
 
 ## Reranking
 

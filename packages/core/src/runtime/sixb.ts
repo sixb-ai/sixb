@@ -191,7 +191,8 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
         canViewWorkflowRun: async (id) => (await workflows.runs.getById(id)) !== null,
         canViewAgentRun: async (id) => (await agent.runs.getById(id)) !== null,
       },
-      dependencies.blobStorage
+      dependencies.blobStorage,
+      dependencies.apiPublicOrigin
     ),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime, {

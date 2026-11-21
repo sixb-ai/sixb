@@ -1,5 +1,5 @@
 import type { FileRef } from "../../blob-storage/types"
-import type { ReadonlyJsonObject } from "../../json"
+import type { ReadonlyJsonObject, ReadonlyJsonValue } from "../../json"
 import type { ModelReasoning } from "../../models/language-model"
 
 /** Coverage of normalized usage. Complete means both token totals are known; duration alone is partial. */
@@ -24,6 +24,8 @@ export interface AiModelCallUsageInput {
   readonly outputImages?: number
   /** Input characters, counted by the provider's own billing rule. */
   readonly inputCharacters?: number
+  /** Milliseconds of video the call returned, every clip together, as the provider bills them. */
+  readonly outputVideoMs?: number
 }
 
 /** Normalized usage for one completed model call. Token details overlap their input/output totals. */
@@ -123,6 +125,70 @@ export interface GetAiModelCallFilesInput {
   readonly callId: string
 }
 
+export type AiModelCallOperationStatus = "pending" | "completed" | "failed"
+
+/**
+ * A model call the provider keeps running after the request that started it, such as a video
+ * generation: what a later request needs to check on it and record how it ended.
+ */
+export interface AiModelCallOperationRecord {
+  readonly projectId: string
+  readonly callId: string
+  /** The execution attempt that admitted the call, which its ledger record belongs to. */
+  readonly executionId: string
+  readonly attempt: number
+  readonly modelKind: import("../../models/definitions").ModelKind
+  readonly providerId: string
+  readonly modelId: string
+  /** The provider's handle on the running call, opaque to Sixb; absent until it accepted the call. */
+  readonly operation?: ReadonlyJsonValue
+  /** The request facts that price the call once it ends, owned by the model kind's runtime. */
+  readonly request: ReadonlyJsonObject
+  /** Whether admission reserved budget that recording the call must reconcile. */
+  readonly reserved: boolean
+  readonly status: AiModelCallOperationStatus
+  /** Why the provider failed the call, when it did. */
+  readonly error?: string
+  /**
+   * What the call reported, such as its usage and cost, owned by the kind's runtime. Kept while
+   * pending once the call is in the ledger, before its files are stored.
+   */
+  readonly result?: ReadonlyJsonObject
+  readonly createdAt: Date
+  readonly settledAt?: Date
+}
+
+export type CreateAiModelCallOperationInput = Omit<
+  AiModelCallOperationRecord,
+  "operation" | "status" | "error" | "result" | "createdAt" | "settledAt"
+> & {
+  readonly createdAt?: Date
+}
+
+export interface StartAiModelCallOperationInput {
+  readonly projectId: string
+  readonly callId: string
+  /** The provider's handle on the running call. */
+  readonly operation: ReadonlyJsonValue
+  /** The request facts as the provider accepted the call, in place of those kept at creation. */
+  readonly request: ReadonlyJsonObject
+}
+
+export interface RecordAiModelCallOperationResultInput {
+  readonly projectId: string
+  readonly callId: string
+  readonly result: ReadonlyJsonObject
+}
+
+export interface SettleAiModelCallOperationInput {
+  readonly projectId: string
+  readonly callId: string
+  readonly status: Exclude<AiModelCallOperationStatus, "pending">
+  readonly error?: string
+  readonly result: ReadonlyJsonObject
+  readonly settledAt?: Date
+}
+
 /** Durable, provider-neutral accounting for completed model calls. */
 export interface AiUsageStorage {
   /**
@@ -155,4 +221,39 @@ export interface AiUsageStorage {
   recordModelCallFiles(input: RecordAiModelCallFilesInput): Promise<AiModelCallFilesRecord>
 
   getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null>
+
+  /**
+   * Keep a call before the provider starts it, once per project and call ID, so a call the
+   * provider bills always has a record to settle.
+   */
+  createModelCallOperation(
+    input: CreateAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord>
+
+  /**
+   * Keep the provider's handle once it accepted the call. Only a pending call without one takes
+   * it; returns the record as it now stands, or null when no such call exists.
+   */
+  startModelCallOperation(
+    input: StartAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null>
+
+  getModelCallOperation(input: GetAiModelCallFilesInput): Promise<AiModelCallOperationRecord | null>
+
+  /**
+   * Keep what a pending call reported once it is in the ledger, before its files are stored, so a
+   * call settled without them still reports it. The first result wins; returns the record as it
+   * now stands, or null when no such call exists.
+   */
+  recordModelCallOperationResult(
+    input: RecordAiModelCallOperationResultInput
+  ): Promise<AiModelCallOperationRecord | null>
+
+  /**
+   * Record how a pending call ended. The first settlement wins: settling it again returns that
+   * record unchanged. Null when no such call exists.
+   */
+  settleModelCallOperation(
+    input: SettleAiModelCallOperationInput
+  ): Promise<AiModelCallOperationRecord | null>
 }

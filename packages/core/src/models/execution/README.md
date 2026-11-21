@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision, reranking, web search, image and speech calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking, web search, image, video and speech calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -78,7 +78,7 @@ and ranking validation. A complete permutation with finite scores is required; t
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
 Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
-neither admit nor count reranking, web search, transcription, image or speech calls (`aiLimitMeterApplies` in
+neither admit nor count reranking, web search, transcription, image, video or speech calls (`aiLimitMeterApplies` in
 the limit storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
 costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
 remains the existing accounting-only replay.
@@ -144,3 +144,62 @@ Characters and voice tiers are provider rules, so the binding owns both: `estima
 receives the text and voice and counts characters itself, providers report `inputCharacters` in
 usage, and `pricingDimensions` in the reply names the tier the provider billed, which selects the
 rate-card variant.
+
+## Video flow
+
+A video takes minutes, longer than any request, so `../video/runtime.ts` splits the call across
+requests:
+
+```text
+start(): admit the call, reserve its budget → keep the operation, queue its check
+         → provider start(callId) → keep the provider's handle
+get():   provider status(operation) → pending: answer as is
+                                    → ended: record it as the attempt that admitted it,
+                                      store the videos, settle the operation
+```
+
+`start` admits the call like an image, then keeps it in `aiUsage.createModelCallOperation`, with
+the execution attempt that admitted it and whether that reserved budget, and queues its check,
+all before the provider sees it: a job the provider may bill always has a record, and a check
+that settles it. Only then does it ask the provider to start the job, and keep the handle it
+returns, with the price variant the provider bills the job at, through `startModelCallOperation`.
+The call ID is the provider's idempotency key, so a retried start never bills a second job. A
+start that fails, queueing its check included, settles the operation as failed and keeps its
+reservation unknown, as a language call does. A process that stops between the provider's start
+and keeping its handle leaves an operation with no handle, which its check settles the same way
+at the ceiling.
+
+Any later `get`, from the same request or another process, looks at the job once. The look that
+sees it end records the call through `accountingFor` the starting execution and `resumeCall`, so the
+ledger row and the reservation it reconciles are that attempt's, then writes the videos to blob
+storage, records them against the call ID, and settles the operation with its usage and cost.
+Settling is first-wins: two looks that see the end at once record the same ledger identity, keep
+the first files, and both answer with the first settlement. A look that fails to ask, such as a
+network error, leaves the job pending. `generate` is `start`, then `get` every five seconds.
+
+No client has to come back. The `agent.model-call.check.requested` job `start` queued on the
+agent lane looks at the job with the same code (`../video/check.ts`) in the agent worker, then
+queues the next look, a quarter of the generation's age later, between one and five minutes. Since
+the handle lives in storage and the check in the queue, a process that stops between start and
+end loses nothing: whichever worker claims the check finishes it. A check that cannot ask is
+retried by the worker with backoff, twenty times in a row at most: about seventy minutes, past the
+ceiling below, after which a check that still fails stops, and the next `get` settles it.
+
+A generation is checked with the catalog entry its model has in `models.video`, so `start` takes
+only a listed model. Past `VIDEO_GENERATION_CEILING_MS`, one hour, a look settles a generation
+still running, or one it cannot ask about, as failed. The Gateway gives up on a provider's task
+after ten minutes and providers time their own out sooner, so an hour is far past any job that
+will still finish. Whether the provider billed it is unknown, so its reservation becomes unknown,
+as for a language call that never finished, rather than recorded as free.
+
+A generation the ledger already records is different: the look that sees it end keeps its result
+on the operation (`recordModelCallOperationResult`) before storing the videos. If they cannot be
+stored by the ceiling, it settles as failed with that usage and cost, its budget reconciled, and
+the check stops. One whose result could not be kept settles as failed too: the limits store
+refuses to mark its reconciled reservation unknown, and the ledger keeps what the provider billed.
+
+Usage is `outputVideoMs`: what the provider reports, else the requested length times the clips
+returned, which is what providers bill. The job's price variant, such as `{ resolution: "720p",
+audio: "audio" }`, comes from the binding at start, since the binding knows how its catalog names
+tiers.
+

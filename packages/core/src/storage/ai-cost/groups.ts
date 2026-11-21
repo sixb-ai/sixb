@@ -56,6 +56,7 @@ export interface AiModelCallGroupFragment {
   readonly outputImages: string | null
   readonly inputCharacters: string | null
   readonly audioDurationMs: string | null
+  readonly outputVideoMs: string | null
   readonly valuationStatus: "rated" | "unpriceable" | "unvalued"
   readonly money?: AiMoney
 }
@@ -78,6 +79,7 @@ export interface AiModelCallGroupRow {
   readonly output_images: string | null
   readonly input_characters: string | null
   readonly audio_duration_ms: string | null
+  readonly output_video_ms: string | null
   readonly valuation_status: AiModelCallGroupFragment["valuationStatus"]
   readonly amount_currency: string | null
   readonly amount_high: string | null
@@ -148,6 +150,7 @@ export function aiModelCallGroupFragmentFromRow(
     outputImages: row.output_images,
     inputCharacters: row.input_characters,
     audioDurationMs: row.audio_duration_ms,
+    outputVideoMs: row.output_video_ms,
     valuationStatus: row.valuation_status,
     ...(row.amount_currency === null
       ? {}
@@ -277,6 +280,7 @@ export function buildAiModelCallGroups(
         outputImages: item.usage.usage.outputImages?.toString() ?? null,
         inputCharacters: item.usage.usage.inputCharacters?.toString() ?? null,
         audioDurationMs: item.usage.usage.audioDurationMs?.toString() ?? null,
+        outputVideoMs: item.usage.usage.outputVideoMs?.toString() ?? null,
         valuationStatus: item.cost?.status ?? "unvalued",
         ...(item.cost && item.cost.status !== "unpriceable" ? { money: item.cost.money } : {}),
       })
@@ -301,6 +305,7 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
     outputImages: undefined as bigint | undefined,
     inputCharacters: undefined as bigint | undefined,
     audioDurationMs: undefined as bigint | undefined,
+    outputVideoMs: undefined as bigint | undefined,
   }
   const counts = { rated: 0n, unpriceable: 0n, unvalued: 0n }
   const money = new Map<string, bigint>()
@@ -316,6 +321,7 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
       "outputImages",
       "inputCharacters",
       "audioDurationMs",
+      "outputVideoMs",
     ] as const) {
       const value = item[field]
       if (value !== null) media[field] = (media[field] ?? 0n) + BigInt(value)
@@ -351,6 +357,7 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
     ...(media.audioDurationMs === undefined
       ? {}
       : { audioDurationMs: safeCount(media.audioDurationMs) }),
+    ...(media.outputVideoMs === undefined ? {} : { outputVideoMs: safeCount(media.outputVideoMs) }),
     costs,
   }
 }

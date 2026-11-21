@@ -116,6 +116,7 @@ function billableMeter(value: unknown): AiBillableMeter {
     value !== "tokens.output.audio" &&
     value !== "audio.input.milliseconds" &&
     value !== "images.output" &&
+    value !== "video.output.milliseconds" &&
     value !== "characters.input"
   ) {
     throw invalidDetails()

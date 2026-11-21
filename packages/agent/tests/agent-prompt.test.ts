@@ -606,6 +606,12 @@ describe("agent system prompt", () => {
           modelId: "google/gemini-3.1-flash-lite-image",
           description: "Edits photos",
         },
+        {
+          kind: "video",
+          provider: GATEWAY,
+          modelId: "google/veo-3.1-fast-generate-001",
+          description: "Clips with sound",
+        },
         { kind: "transcription", provider: GATEWAY, modelId: "openai/gpt-4o-transcribe" },
       ],
     })
@@ -624,6 +630,12 @@ describe("agent system prompt", () => {
     expect(prompt).toContain(
       "Images for an artifact: write them into the artifact's folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it."
     )
+    // A clip takes minutes, longer than a command's default bound.
+    expect(prompt).toContain(
+      '`sixb models video "<what happens, shot by shot>" --model <id> --duration <seconds> --output out/clip.mp4`'
+    )
+    expect(prompt).toContain("give the command a timeoutMs of 600000, or run it in the background")
+    expect(prompt).toContain("- google/veo-3.1-fast-generate-001: Clips with sound")
     expect(prompt).toContain(
       "`sixb models transcribe <audio-file> --model <id>`.\n- openai/gpt-4o-transcribe\n"
     )

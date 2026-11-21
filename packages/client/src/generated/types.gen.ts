@@ -538,6 +538,10 @@ export type AgentChild = {
      * Input characters, counted by the provider's own billing rule.
      */
     inputCharacters?: number
+    /**
+     * Milliseconds of video the call returned, every clip together, as the provider bills them.
+     */
+    outputVideoMs?: number
     reportingStatus: "complete" | "partial" | "unavailable"
   }
   cost?: {
@@ -636,6 +640,10 @@ export type AgentChildRun = {
      * Input characters, counted by the provider's own billing rule.
      */
     inputCharacters?: number
+    /**
+     * Milliseconds of video the call returned, every clip together, as the provider bills them.
+     */
+    outputVideoMs?: number
     reportingStatus: "complete" | "partial" | "unavailable"
   }
   cost?: {
@@ -2407,6 +2415,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2427,6 +2439,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -2473,6 +2486,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2493,6 +2510,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -2547,6 +2565,10 @@ export type GetAiAccountingOverviewResponses = {
            * Input characters, counted by the provider's own billing rule.
            */
           inputCharacters?: number
+          /**
+           * Milliseconds of video the call returned, every clip together, as the provider bills them.
+           */
+          outputVideoMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         usageCoverage: {
@@ -2567,6 +2589,7 @@ export type GetAiAccountingOverviewResponses = {
             audioOutputTokens: number
             outputImages: number
             inputCharacters: number
+            outputVideoMs: number
           }
         }
         costs: {
@@ -2616,6 +2639,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2636,6 +2663,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -2687,6 +2715,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2707,6 +2739,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -2765,6 +2798,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2785,6 +2822,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -2845,6 +2883,10 @@ export type GetAiAccountingOverviewResponses = {
              * Input characters, counted by the provider's own billing rule.
              */
             inputCharacters?: number
+            /**
+             * Milliseconds of video the call returned, every clip together, as the provider bills them.
+             */
+            outputVideoMs?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2865,6 +2907,7 @@ export type GetAiAccountingOverviewResponses = {
               audioOutputTokens: number
               outputImages: number
               inputCharacters: number
+              outputVideoMs: number
             }
           }
           costs: {
@@ -2912,6 +2955,10 @@ export type GetAiAccountingOverviewResponses = {
              * Input characters, counted by the provider's own billing rule.
              */
             inputCharacters?: number
+            /**
+             * Milliseconds of video the call returned, every clip together, as the provider bills them.
+             */
+            outputVideoMs?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2932,6 +2979,7 @@ export type GetAiAccountingOverviewResponses = {
               audioOutputTokens: number
               outputImages: number
               inputCharacters: number
+              outputVideoMs: number
             }
           }
           costs: {
@@ -2982,6 +3030,10 @@ export type GetAiAccountingOverviewResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -3002,6 +3054,7 @@ export type GetAiAccountingOverviewResponses = {
           audioOutputTokens: number
           outputImages: number
           inputCharacters: number
+          outputVideoMs: number
         }
       }
       costs: {
@@ -3152,6 +3205,10 @@ export type ListAiModelCallsResponses = {
            * Input characters, counted by the provider's own billing rule.
            */
           inputCharacters?: number
+          /**
+           * Milliseconds of video the call returned, every clip together, as the provider bills them.
+           */
+          outputVideoMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         occurredAt: string
@@ -3216,6 +3273,7 @@ export type ListAiModelCallsResponses = {
                       | "audio.input.milliseconds"
                       | "images.output"
                       | "characters.input"
+                      | "video.output.milliseconds"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
@@ -3248,6 +3306,7 @@ export type ListAiModelCallsResponses = {
                     | "audio.input.milliseconds"
                     | "images.output"
                     | "characters.input"
+                    | "video.output.milliseconds"
                   >
                 }
             billingIdentity: {
@@ -3293,6 +3352,7 @@ export type ListAiModelCallsResponses = {
                 | "audio.input.milliseconds"
                 | "images.output"
                 | "characters.input"
+                | "video.output.milliseconds"
               quantity: string
               rateAmountNanosPerMillion: string
               chargeAmountNanos: string
@@ -3329,6 +3389,7 @@ export type ListAiModelCallsResponses = {
                       | "audio.input.milliseconds"
                       | "images.output"
                       | "characters.input"
+                      | "video.output.milliseconds"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
@@ -3361,6 +3422,7 @@ export type ListAiModelCallsResponses = {
                     | "audio.input.milliseconds"
                     | "images.output"
                     | "characters.input"
+                    | "video.output.milliseconds"
                   >
                 }
             billingIdentity?: {
@@ -3407,6 +3469,7 @@ export type ListAiModelCallsResponses = {
               | "audio.input.milliseconds"
               | "images.output"
               | "characters.input"
+              | "video.output.milliseconds"
             >
             ratedAt: string
           }
@@ -4063,6 +4126,7 @@ export type ListAiModelCallGroupsResponses = {
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
+      outputVideoMs?: number
       costs: {
         amounts: Array<{
           currency: string
@@ -4122,6 +4186,7 @@ export type ListAiModelCallGroupsResponses = {
         outputImages?: number
         inputCharacters?: number
         audioDurationMs?: number
+        outputVideoMs?: number
         costs: {
           amounts: Array<{
             currency: string
@@ -4414,6 +4479,7 @@ export type GenerateTextResponses = {
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
+      outputVideoMs?: number
     }
     cost: {
       status: "reported" | "rated" | "unpriceable"
@@ -4531,6 +4597,7 @@ export type GenerateImagesResponses = {
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
+      outputVideoMs?: number
     }
     cost: {
       status: "reported" | "rated" | "unpriceable"
@@ -4553,6 +4620,234 @@ export type GenerateImagesResponses = {
 }
 
 export type GenerateImagesResponse = GenerateImagesResponses[keyof GenerateImagesResponses]
+
+export type StartVideoGenerationData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    prompt: string
+    n?: number
+    /**
+     * In seconds.
+     */
+    duration?: number
+    /**
+     * A frame size, such as 1280x720.
+     */
+    resolution?: string
+    aspectRatio?: string
+    audio?: boolean
+    seed?: number
+    firstFrame?: {
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }
+    lastFrame?: {
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }
+    referenceImages?: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+  }
+  path?: never
+  query?: never
+  url: "/api/models/video/generations"
+}
+
+export type StartVideoGenerationErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type StartVideoGenerationError = StartVideoGenerationErrors[keyof StartVideoGenerationErrors]
+
+export type StartVideoGenerationResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    status: "pending" | "completed" | "failed"
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+    error?: string
+    usage?: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+      outputVideoMs?: number
+    }
+    cost?: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    createdAt: string
+  }
+}
+
+export type StartVideoGenerationResponse =
+  StartVideoGenerationResponses[keyof StartVideoGenerationResponses]
+
+export type GetVideoGenerationData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query?: never
+  url: "/api/models/video/generations/{callId}"
+}
+
+export type GetVideoGenerationErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GetVideoGenerationError = GetVideoGenerationErrors[keyof GetVideoGenerationErrors]
+
+export type GetVideoGenerationResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    status: "pending" | "completed" | "failed"
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+    error?: string
+    usage?: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+      outputVideoMs?: number
+    }
+    cost?: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    createdAt: string
+  }
+}
+
+export type GetVideoGenerationResponse =
+  GetVideoGenerationResponses[keyof GetVideoGenerationResponses]
 
 export type GenerateSpeechData = {
   body: {
@@ -4646,6 +4941,7 @@ export type GenerateSpeechResponses = {
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
+      outputVideoMs?: number
     }
     cost: {
       status: "reported" | "rated" | "unpriceable"
@@ -4774,6 +5070,7 @@ export type TranscribeAudioResponses = {
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
+      outputVideoMs?: number
     }
     cost: {
       status: "reported" | "rated" | "unpriceable"
@@ -9077,6 +9374,10 @@ export type GetWorkflowRunResponses = {
            * Input characters, counted by the provider's own billing rule.
            */
           inputCharacters?: number
+          /**
+           * Milliseconds of video the call returned, every clip together, as the provider bills them.
+           */
+          outputVideoMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -9169,6 +9470,10 @@ export type GetWorkflowAgentNodeExecutionResponses = {
        * Input characters, counted by the provider's own billing rule.
        */
       inputCharacters?: number
+      /**
+       * Milliseconds of video the call returned, every clip together, as the provider bills them.
+       */
+      outputVideoMs?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -9767,6 +10072,10 @@ export type CancelWorkflowRunResponses = {
            * Input characters, counted by the provider's own billing rule.
            */
           inputCharacters?: number
+          /**
+           * Milliseconds of video the call returned, every clip together, as the provider bills them.
+           */
+          outputVideoMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -14744,6 +15053,10 @@ export type PostAgentThreadMessageResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -16441,6 +16754,10 @@ export type EditAgentThreadMessageResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -17009,6 +17326,10 @@ export type CancelAgentRunResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -17217,6 +17538,10 @@ export type RetryAgentRunResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -17485,6 +17810,10 @@ export type ListAgentThreadRunsResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -17657,6 +17986,10 @@ export type GetAgentRunResponses = {
        * Input characters, counted by the provider's own billing rule.
        */
       inputCharacters?: number
+      /**
+       * Milliseconds of video the call returned, every clip together, as the provider bills them.
+       */
+      outputVideoMs?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -17841,6 +18174,10 @@ export type CancelAgentRunByIdResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -19416,6 +19753,10 @@ export type DecideAgentApprovalResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -20476,6 +20817,10 @@ export type ListObservedAgentThreadRunsResponses = {
          * Input characters, counted by the provider's own billing rule.
          */
         inputCharacters?: number
+        /**
+         * Milliseconds of video the call returned, every clip together, as the provider bills them.
+         */
+        outputVideoMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -26614,7 +26959,7 @@ export type ListModelsResponses = {
         | "xhigh"
         | "max"
       /**
-       * USD. Token and character prices are per million; images per image; audio per second.
+       * USD. Token and character prices are per million; images per image; audio and video per second.
        */
       rateCard?: {
         currency: "USD"
@@ -26707,6 +27052,8 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26719,6 +27066,8 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26731,6 +27080,22 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+        videoOutputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26745,7 +27110,7 @@ export type ListModelsResponses = {
       description?: string
       via?: string
       /**
-       * USD. Token and character prices are per million; images per image; audio per second.
+       * USD. Token and character prices are per million; images per image; audio and video per second.
        */
       rateCard?: {
         currency: "USD"
@@ -26838,6 +27203,8 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26850,6 +27217,8 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26862,6 +27231,22 @@ export type ListModelsResponses = {
                 quality?: string
                 style?: string
                 voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+        videoOutputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
                 price: string
               }>
             }
@@ -26880,6 +27265,175 @@ export type ListModelsResponses = {
         mediaTypes?: Array<string>
       }
     }>
+    video: Array<{
+      provider: string
+      modelId: string
+      isDefault: boolean
+      name: string
+      description?: string
+      via?: string
+      /**
+       * USD. Token and character prices are per million; images per image; audio and video per second.
+       */
+      rateCard?: {
+        currency: "USD"
+        input?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        output?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheReadInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput5m?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput1h?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        imageOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        audioOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        images?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+        characters?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+        audioInputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+        videoOutputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                resolution?: string
+                audio?: string
+                price: string
+              }>
+            }
+      }
+      maxVideosPerCall?: number
+      resolutions?: Array<string>
+      aspectRatios?: Array<string>
+      /**
+       * Lengths in seconds.
+       */
+      durations?: Array<number>
+      /**
+       * Whether the model can make sound with the picture.
+       */
+      audio?: boolean
+      /**
+       * Images a clip starts from, ends on or takes after; absent when it takes none.
+       */
+      inputImages?: {
+        maxCount: number
+        maxBytes: number
+        mediaTypes?: Array<string>
+      }
+    }>
     audio: {
       speech: Array<{
         provider: string
@@ -26889,7 +27443,7 @@ export type ListModelsResponses = {
         description?: string
         via?: string
         /**
-         * USD. Token and character prices are per million; images per image; audio per second.
+         * USD. Token and character prices are per million; images per image; audio and video per second.
          */
         rateCard?: {
           currency: "USD"
@@ -26982,6 +27536,8 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }
@@ -26994,6 +27550,8 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }
@@ -27006,6 +27564,22 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
+                  price: string
+                }>
+              }
+          videoOutputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }
@@ -27024,7 +27598,7 @@ export type ListModelsResponses = {
         description?: string
         via?: string
         /**
-         * USD. Token and character prices are per million; images per image; audio per second.
+         * USD. Token and character prices are per million; images per image; audio and video per second.
          */
         rateCard?: {
           currency: "USD"
@@ -27117,6 +27691,8 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }
@@ -27129,6 +27705,8 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }
@@ -27141,6 +27719,22 @@ export type ListModelsResponses = {
                   quality?: string
                   style?: string
                   voiceTier?: string
+                  resolution?: string
+                  audio?: string
+                  price: string
+                }>
+              }
+          videoOutputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  resolution?: string
+                  audio?: string
                   price: string
                 }>
               }

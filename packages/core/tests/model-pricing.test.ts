@@ -326,6 +326,63 @@ describe("generated-media pricing", () => {
     ).toMatchObject({ money: { amountNanos: "180000" } })
   })
 
+  test("bills video per second at the variant the job ran at, and reserves the request's length", () => {
+    const veo = defineModelRateCard({
+      currency: "USD",
+      videoOutputSeconds: {
+        variants: [
+          { resolution: "720p", audio: "silent", price: "0.1" },
+          { resolution: "720p", audio: "audio", price: "0.15" },
+          { resolution: "4k", audio: "audio", price: "0.35" },
+        ],
+      },
+    })
+    expect(
+      rateModelCall({
+        usage: { outputVideoMs: 4_000 },
+        rateCard: veo,
+        dimensions: { resolution: "720p", audio: "audio" },
+      })
+    ).toEqual({
+      status: "rated",
+      money: { currency: "USD", amountNanos: "600000000" },
+      components: [
+        {
+          meter: "video.output.milliseconds",
+          quantity: "4000",
+          rateAmountNanosPerMillion: "150000000000",
+          chargeAmountNanos: "600000000",
+          variant: "720p · audio",
+        },
+      ],
+    })
+    expect(rateModelCall({ usage: {}, rateCard: veo })).toMatchObject({
+      reason: "missing-usage",
+      missingMeters: ["video.output.milliseconds"],
+    })
+    expect(
+      rateModelCall({
+        usage: { outputVideoMs: 4_000 },
+        rateCard: defineModelRateCard({ currency: "USD", images: "0.04" }),
+      })
+    ).toMatchObject({ reason: "missing-rate-card", missingMeters: ["video.output.milliseconds"] })
+
+    // Removal proof: drop the `* 1_000n` in estimateModelReservation; this reads 600000.
+    expect(
+      estimateModelReservation({
+        outputVideoMs: 4_000,
+        dimensions: { resolution: "720p", audio: "audio" },
+        rateCard: veo,
+      })
+    ).toEqual({ currency: "USD", amountNanos: "600000000" })
+    // A request that names no tier reserves the dearest one; one without a length, nothing.
+    expect(estimateModelReservation({ outputVideoMs: 4_000, rateCard: veo })).toEqual({
+      currency: "USD",
+      amountNanos: "1400000000",
+    })
+    expect(estimateModelReservation({ rateCard: veo })).toBeUndefined()
+  })
+
   test("never prices a count its card does not cover as free", () => {
     expect(
       rateModelCall({
@@ -383,7 +440,11 @@ describe("generated-media pricing", () => {
 
   test.each([
     { name: "input without output", card: { currency: "USD", input: "1" }, error: "together" },
-    { name: "no prices", card: { currency: "USD" }, error: "tokens, images, characters or audio" },
+    {
+      name: "no prices",
+      card: { currency: "USD" },
+      error: "tokens, images, characters, audio or video",
+    },
     {
       name: "cache prices without token prices",
       card: { currency: "USD", images: "0.04", cacheReadInput: "1" },

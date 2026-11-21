@@ -118,6 +118,7 @@ import {
   getSync,
   getTelemetryHistory,
   getUser,
+  getVideoGeneration,
   getWorkflow,
   getWorkflowAgentNodeExecution,
   getWorkflowIntervention,
@@ -222,6 +223,7 @@ import {
   signOutAll,
   signOutSharedAccess,
   startConnectorConnectionRun,
+  startVideoGeneration,
   stopAgentBackgroundCommand,
   submitWorkflowIntervention,
   suspendAuthMember,
@@ -557,6 +559,9 @@ import type {
   GetUserData,
   GetUserError,
   GetUserResponse,
+  GetVideoGenerationData,
+  GetVideoGenerationError,
+  GetVideoGenerationResponse,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionError,
   GetWorkflowAgentNodeExecutionResponse,
@@ -853,6 +858,9 @@ import type {
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunError,
   StartConnectorConnectionRunResponse,
+  StartVideoGenerationData,
+  StartVideoGenerationError,
+  StartVideoGenerationResponse,
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandError,
   StopAgentBackgroundCommandResponse,
@@ -2228,6 +2236,58 @@ export const generateImagesMutation = (
   }
   return mutationOptions
 }
+
+/**
+ * Start generating videos with a video model; poll the generation until it ends
+ */
+export const startVideoGenerationMutation = (
+  options?: Partial<Options<StartVideoGenerationData>>
+): UseMutationOptions<
+  StartVideoGenerationResponse,
+  StartVideoGenerationError,
+  Options<StartVideoGenerationData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    StartVideoGenerationResponse,
+    StartVideoGenerationError,
+    Options<StartVideoGenerationData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await startVideoGeneration({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getVideoGenerationQueryKey = (options: Options<GetVideoGenerationData>) =>
+  createQueryKey("getVideoGeneration", options)
+
+/**
+ * Get a video generation, checking with the provider while it runs
+ */
+export const getVideoGenerationOptions = (options: Options<GetVideoGenerationData>) =>
+  queryOptions<
+    GetVideoGenerationResponse,
+    GetVideoGenerationError,
+    GetVideoGenerationResponse,
+    ReturnType<typeof getVideoGenerationQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getVideoGeneration({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getVideoGenerationQueryKey(options),
+  })
 
 /**
  * Generate speech with a speech model

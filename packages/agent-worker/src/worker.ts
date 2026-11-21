@@ -30,6 +30,7 @@ import {
   enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
   recordRecoveredAiModelCall,
+  runScheduledVideoCheck,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker, RunOwnedElsewhereError, retryOnceReleased } from "@sixb/core/internal/workers"
@@ -39,7 +40,11 @@ import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
 import { workerChildren } from "./child-runner"
-import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
+import {
+  isPermanentAgentPreparationError,
+  MAX_AGENT_DELIVERY_ATTEMPTS,
+  MAX_VIDEO_CHECK_ATTEMPTS,
+} from "./delivery-policy"
 import { runnerContext } from "./execution-context"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import {
@@ -176,6 +181,20 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await recordRecoveredAiModelCall(this.host.storage, job)
       return
     }
+    if (job.type === "agent.model-call.check.requested") {
+      await runScheduledVideoCheck(
+        {
+          projectId: this.host.id,
+          storage: this.host.storage,
+          queues: this.host.queues,
+          catalog: this.host.definitions.models,
+          blobs: this.host.blobStorage,
+        },
+        job.payload.callId,
+        signal
+      )
+      return
+    }
     const context = this.requireContext()
     if (job.type === "agent.workflow-node.requested") {
       await executeWorkflowAgentNode({
@@ -301,6 +320,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision> {
+    // A provider or storage that could not answer: look again later. Past its ceiling, a check
+    // settles the generation whatever the provider says: a check still failing well past it gives up.
+    if (claimed.job.type === "agent.model-call.check.requested") {
+      if (claimed.job.attempt >= MAX_VIDEO_CHECK_ATTEMPTS) return { kind: "fail" }
+      return { kind: "retry", availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)) }
+    }
     if (claimed.job.type === "agent.ai-usage.record.requested") {
       return isPermanentAiUsageRecoveryError(error)
         ? { kind: "fail" }
@@ -362,7 +387,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): QueueWorkerFailureDecision {
-    if (claimed.job.type === "agent.ai-usage.record.requested") {
+    if (
+      claimed.job.type === "agent.ai-usage.record.requested" ||
+      claimed.job.type === "agent.model-call.check.requested"
+    ) {
       return {
         kind: "retry",
         availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),

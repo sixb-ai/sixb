@@ -37,6 +37,35 @@ export function createModelCallsRuntime(
   /** The execution reading; it reads what it produced, whoever can see its run. */
   executionId?: string
 ): ModelCallsRuntime {
+  const canReadCallsOf = createModelCallVisibility(runtime, runs, executionId)
+
+  return {
+    async files(callId) {
+      if (typeof callId !== "string" || !callId.trim()) {
+        throw new TypeError("[SixbModels] A model call ID must be a nonblank string.")
+      }
+      const record = await runtime.storage.aiUsage?.getModelCallFiles({
+        projectId: runtime.projectId,
+        callId,
+      })
+      if (!record) return null
+
+      const visible = { callId: record.callId, files: record.files, recordedAt: record.recordedAt }
+      return (await canReadCallsOf(record.executionId)) ? visible : null
+    },
+  }
+}
+
+/**
+ * Whether the caller sees what an execution's model calls produced: the request's own principal,
+ * the agent thread's readers, or the action or workflow run's viewers.
+ */
+export function createModelCallVisibility(
+  runtime: Pick<SixbRuntimeContext, "projectId" | "runtimeAuthorization" | "storage">,
+  runs: ModelCallRunVisibility,
+  /** The execution reading; it reads what it produced, whoever can see its run. */
+  executionId?: string
+): (callExecutionId: string) => Promise<boolean> {
   const projectId = runtime.projectId
 
   async function canRead(execution: ExecutionRecord): Promise<boolean> {
@@ -77,24 +106,12 @@ export function createModelCallsRuntime(
     return false
   }
 
-  return {
-    async files(callId) {
-      if (typeof callId !== "string" || !callId.trim()) {
-        throw new TypeError("[SixbModels] A model call ID must be a nonblank string.")
-      }
-      const record = await runtime.storage.aiUsage?.getModelCallFiles({ projectId, callId })
-      if (!record) return null
+  return async (callExecutionId) => {
+    // A workflow's agent step runs as a service account that cannot view its own workflow run,
+    // yet must read back the image it just made.
+    if (callExecutionId === executionId) return true
 
-      // A workflow's agent step runs as a service account that cannot view its own workflow run,
-      // yet must read back the image it just made.
-      const visible = { callId: record.callId, files: record.files, recordedAt: record.recordedAt }
-      if (record.executionId === executionId) return visible
-
-      const execution = await runtime.storage.executions.getById({
-        projectId,
-        id: record.executionId,
-      })
-      return execution && (await canRead(execution)) ? visible : null
-    },
+    const execution = await runtime.storage.executions.getById({ projectId, id: callExecutionId })
+    return execution !== null && (await canRead(execution))
   }
 }

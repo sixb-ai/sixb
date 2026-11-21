@@ -151,6 +151,7 @@ const SHIPPED_MIGRATIONS = [
   "110-video-artifacts",
   "111-artifact-media",
   "112-artifact-video-renders",
+  "113-video-generation",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1980,6 +1981,7 @@ describe("Postgres storage migrations", () => {
           audio_output_tokens: null,
           output_images: null,
           input_characters: null,
+          output_video_ms: null,
         }))
       )
       await expect(

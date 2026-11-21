@@ -1437,6 +1437,13 @@ export type {
   ImageModelsRuntime,
 } from "./models/image/types"
 export type {
+  VideoGenerateInput,
+  VideoGenerateResult,
+  VideoGeneration,
+  VideoGenerationStatus,
+  VideoModelsRuntime,
+} from "./models/video/types"
+export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   LinkProjectionTarget,

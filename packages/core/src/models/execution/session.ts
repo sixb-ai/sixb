@@ -1,6 +1,7 @@
 import type { ExecutionContext, RuntimeAuthorization } from "../../execution"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
 import type { SixbHostContext } from "../../runtime/types"
+import type { ExecutionRecord } from "../../storage/executions"
 import type { ModelExecutionAttempt } from "./binding"
 import { requireAccountingCapabilities } from "./model-call-accounting"
 import { createAiModelCallLimitController } from "./model-call-limits"
@@ -39,6 +40,19 @@ export class ModelExecutionSession {
     return this.recorder
   }
 
+  /**
+   * The recorder of the execution attempt that admitted a call, to record how it ended when a
+   * later request learns it: a video generation outlives the request that started it.
+   */
+  async accountingFor(execution: ExecutionRecord, attempt: number): Promise<AiModelCallRecorder> {
+    const binding = this.requireBinding()
+    if (execution.id === this.execution.id && attempt === binding.attempt) {
+      return this.accounting()
+    }
+
+    return this.recorderFor(execution, attempt)
+  }
+
   private requireBinding(): ModelExecutionAttempt {
     if (!this.binding) {
       throw new Error(
@@ -49,33 +63,48 @@ export class ModelExecutionSession {
   }
 
   private async createRecorder(): Promise<AiModelCallRecorder> {
-    const runtime = this.runtime
-    const execution = this.execution
     const { attempt } = this.requireBinding()
-    const storage = {
-      ...requireAccountingCapabilities(runtime.storage),
-      transaction: runtime.storage.transaction.bind(runtime.storage),
-    }
-    const { requesterGroupIds } = await ensureExecutionRecord(
-      runtime.storage.executions,
+    const record = await ensureExecutionRecord(
+      this.runtime.storage.executions,
       executionRecordInputFromRuntime({
-        execution,
-        runtimeAuthorization: runtime.runtimeAuthorization,
+        execution: this.execution,
+        runtimeAuthorization: this.runtime.runtimeAuthorization,
       })
     )
-    return new AiModelCallRecorder({
-      storage,
-      projectId: runtime.projectId,
-      executionId: execution.id,
-      attempt,
-      requesterGroupIds,
-      limits: createAiModelCallLimitController({
-        storage,
-        projectId: runtime.projectId,
-        requestedBy: execution.requestedBy,
-        requesterGroupIds,
-      }),
-      recoverAiModelCall: (input) => enqueueAiModelCallRecovery(runtime.queues.agents, input),
-    })
+    return this.recorderFor(record, attempt)
   }
+
+  private recorderFor(execution: ExecutionRecord, attempt: number): AiModelCallRecorder {
+    return createExecutionRecorder(this.runtime, execution, attempt)
+  }
+}
+
+/**
+ * A recorder for one execution attempt, outside any bound request: a queue job that learns how a
+ * call ended records it as the attempt that admitted it.
+ */
+export function createExecutionRecorder(
+  host: Pick<SixbHostContext, "projectId" | "storage" | "queues">,
+  execution: ExecutionRecord,
+  attempt: number
+): AiModelCallRecorder {
+  const storage = {
+    ...requireAccountingCapabilities(host.storage),
+    transaction: host.storage.transaction.bind(host.storage),
+  }
+  const requesterGroupIds = execution.requesterGroupIds
+  return new AiModelCallRecorder({
+    storage,
+    projectId: host.projectId,
+    executionId: execution.id,
+    attempt,
+    requesterGroupIds,
+    limits: createAiModelCallLimitController({
+      storage,
+      projectId: host.projectId,
+      requestedBy: execution.requestedBy,
+      requesterGroupIds,
+    }),
+    recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
+  })
 }

@@ -466,11 +466,13 @@ function renderRuntimeContext(
   return { base, skills: skillCatalog, ontology: ontologyCatalog }
 }
 
-const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
+const MEDIA_MODEL_KINDS = ["image", "video", "speech", "transcription"] as const
 
 const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string>> = {
   image:
     'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with read before you use it. An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options. Images for an artifact: write them into the artifact\'s folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it.',
+  video:
+    'Make a video clip: `sixb models video "<what happens, shot by shot>" --model <id> --duration <seconds> --output out/clip.mp4`, with `--first-frame <image>` to set it in motion from an image. It takes minutes: give the command a timeoutMs of 600000, or run it in the background. If it stops, `sixb models video --call <call-id> --output out/clip.mp4` picks the same clip up again, without paying twice. Make one clip unless the user asks for options.',
   speech: 'Make speech: `sixb models speech "<text>" --model <id> --output out/speech.mp3`.',
   transcription: "Transcribe audio: `sixb models transcribe <audio-file> --model <id>`.",
 }

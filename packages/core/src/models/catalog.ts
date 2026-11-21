@@ -21,6 +21,8 @@ import {
   modelReasoningSupportIssue,
 } from "./language-model"
 import { assertRerankingModel, type RerankingModel } from "./reranking-model"
+import { createVideoCatalog, type VideoModelCatalog } from "./video/catalog"
+import type { VideoModel } from "./video/types"
 import { assertWebSearchModel, type WebSearchModel } from "./web-search-model"
 
 /** Stable identity of a configured provider binding. */
@@ -118,6 +120,7 @@ export interface ModelCatalog {
   readonly decision?: DecisionModelCatalog
   readonly embedding: EmbeddingModelCatalog
   readonly image?: ImageModelCatalog
+  readonly video?: VideoModelCatalog
   readonly reranking?: RerankingModelCatalog
   readonly webSearch?: WebSearchModelCatalog
 }
@@ -134,6 +137,8 @@ export interface ModelCatalogInput {
   readonly embedding?: readonly EmbeddingModel[]
   /** Ordered; the first entry is the default image model. */
   readonly image?: readonly ImageModel[]
+  /** Ordered; the first entry is the default video model. */
+  readonly video?: readonly VideoModel[]
   /** Available rerankers; no default model and no automatic activation. */
   readonly reranking?: readonly RerankingModel[]
   /**
@@ -183,6 +188,7 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   const decision = createDecisionCatalog(input.decision)
   const audio = createAudioCatalog(input.audio)
   const image = createImageCatalog(input.image)
+  const video = createVideoCatalog(input.video)
   const reranking = createRerankingCatalog(input.reranking)
   const webSearch = createWebSearchCatalog(input.webSearch, language)
 
@@ -191,16 +197,17 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
     !decision &&
     !audio &&
     !image &&
+    !video &&
     embedding.list().length === 0 &&
     !reranking?.list().length &&
     !webSearch
   ) {
     throw new RuntimeError(
-      "[Sixb] Configure at least one language, embedding, decision, audio, image, reranking or web search model."
+      "[Sixb] Configure at least one language, embedding, decision, audio, image, video, reranking or web search model."
     )
   }
 
-  return Object.freeze({ language, embedding, decision, audio, image, reranking, webSearch })
+  return Object.freeze({ language, embedding, decision, audio, image, video, reranking, webSearch })
 }
 
 function createRerankingCatalog(

@@ -3,7 +3,7 @@
 Configure the AI models available to your project. Language models power conversations and
 generation. Decision models classify inputs, score them against a rubric, and estimate probabilities.
 Embedding models power semantic search. Audio models transcribe stored files and turn text into
-speech, and image models generate images. [Browse providers](#providers) for installation and credentials.
+speech, and image and video models generate images and clips. [Browse providers](#providers) for installation and credentials.
 
 ## Language models
 
@@ -595,6 +595,58 @@ style it requested and the number of images returned, and uses the same
 Authorize access to a reference image in the application before accepting a user-supplied
 `FileRef`.
 
+## Video generation
+
+Register video models in `models.video`. The first is the default:
+
+```ts
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    video: [
+      vercelGateway.video("google/veo-3.1-fast-generate-001", { description: "Clips with sound" }),
+      vercelGateway.video("bytedance/seedance-v1.0-pro-fast", { description: "Cheap silent drafts" }),
+    ],
+  },
+})
+```
+
+A video takes minutes. `generate()` waits for it, in a workflow step or anywhere the wait fits:
+
+```ts
+const { files, cost } = await sixb.models.video.generate({
+  prompt: "Slow dolly shot along the warehouse aisle at dawn",
+  duration: 4,
+  resolution: "1280x720",
+})
+```
+
+Or start it, and look later from any request or process:
+
+```ts
+const { callId } = await sixb.models.video.start({ prompt: "…", duration: 4 })
+const video = await sixb.models.video.get(callId) // status: "pending" | "completed" | "failed"
+```
+
+| Option | Meaning |
+| --- | --- |
+| `duration` | Length in whole seconds. Accepted lengths depend on the model. |
+| `resolution`, `aspectRatio` | A frame size such as `1280x720`, and a ratio such as `16:9`. |
+| `audio` | Make sound with the picture, where the model can. |
+| `firstFrame`, `lastFrame` | Images the clip starts from and ends on, as `FileRef`s. |
+| `referenceImages` | Characters, objects or a style the clip should show. |
+| `n`, `seed`, `signal` | As for images. |
+| `model` | One of `models.video`; Sixb checks on the clip with it later, from any process. |
+
+`files` are MP4 `FileRef`s in the project's blob storage: Sixb downloads each clip as soon as it
+is ready, because the provider's copy expires. A generation is as visible as the run that started
+it, like a [call's files](#read-a-calls-files-later), and each is priced per second of video at
+the resolution it ran at.
+
+Input images reach the provider as [download URLs](../server/overview.md#files) when the API has
+a public origin (`SIXB_API_PUBLIC_ORIGIN`), and inline otherwise. Inline, the Vercel AI Gateway
+accepts images up to about 300 KB in all.
+
 ## Speech generation
 
 Register speech models in `models.audio.speech`, beside any transcribers. The first is the default:
@@ -638,6 +690,8 @@ defineRole("model.users", { grantedTo: [designers], grants: [can.run(project.mod
 ```text
 POST /api/models/language/generations   { prompt, instructions?, maxOutputTokens?, reasoning? }
 POST /api/models/image/generations      { prompt, n?, size?, aspectRatio?, quality?, style?, seed?, images? }
+POST /api/models/video/generations      { prompt, duration?, resolution?, aspectRatio?, audio?, firstFrame?, … }
+GET  /api/models/video/generations/:callId
 POST /api/models/audio/speech           { text, voice?, mediaType?, instructions?, speed?, language? }
 POST /api/models/audio/transcriptions   { audio }
 ```
@@ -665,6 +719,7 @@ From the CLI, the same calls write their files where you say:
 ```bash
 sixb models image "Isometric warehouse floor plan" --size 1024x1024 --output out/plan.png
 sixb models image "Same plan, night lighting" --image out/plan.png --output out/night.png
+sixb models video "Slow dolly shot along the aisle" --duration 4 --first-frame out/plan.png --output out/aisle.mp4
 sixb models speech "Your order shipped." --format mp3 --output out/shipped.mp3
 sixb models transcribe call.wav
 sixb models text "Summarize this week's incidents in one line" --model light
@@ -681,18 +736,23 @@ a reference image; repeat it for several. `sixb models calls files <call-id> --o
 downloads a call's files again. `sixb models text` takes a model or a tier as `--model`, and reads
 a long prompt from `--file`: a path, or `-` for standard input.
 
+`sixb models video` waits for the clip, then downloads it. The video keeps generating if the
+command stops: `sixb models video --call <call-id> --output <path>` picks it up again, and
+`--no-wait` prints where it stands.
+
 With several language models, the Agent uses `sixb models text` to ask another one for a second
 opinion or a quick generation. Its prompt lists them with their tier, name and description. The
 model answers once, from the prompt alone: it does not see the project's data.
 
 A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that
 is reached answers `429`. An option the model does not accept answers `400` before any inference,
-and a provider failure answers `502`. Calls are synchronous; download a generated file through
-its call, below.
+and a provider failure answers `502`. Calls are synchronous, except video: its start answers `202`
+with a `callId`, and `GET /api/models/video/generations/:callId` answers until its `status` is
+`completed` or `failed`. Download a generated file through its call, below.
 
 ## Read a call's files later
 
-Every image and speech result carries a `callId`. The files a call produced stay readable through
+Every image, video and speech result carries a `callId`. The files a call produced stay readable through
 it, by whoever can see the run that made the call:
 
 ```ts
@@ -724,8 +784,8 @@ sixb models list --kind image
 sixb models get bfl/flux-3-image
 ```
 
-A price comes from the provider binding, as it bills: per token, image, character or second of
-audio, by size or voice tier where it varies. A model with no known price says "price unknown"; it
+A price comes from the provider binding, as it bills: per token, image, character, or second of
+audio or video, by size, voice tier or resolution where it varies. A model with no known price says "price unknown"; it
 can still be called, except while a [cost limit](./usage-and-limits.md#set-a-monthly-limit)
 applies.
 
