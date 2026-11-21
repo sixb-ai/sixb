@@ -1,6 +1,7 @@
 import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
 import { ARTIFACT_RESTORE_POINTS } from "@sixb/core/internal/storage"
 import { z } from "zod"
+import { AgentThreadSchema } from "./agents"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
 import { FileRefSchema, ShareGrantQuerySchema } from "./files"
 
@@ -594,6 +595,14 @@ export const ArtifactHolderListResponseSchema = z.object({
     .array(ArtifactHolderSchema)
     .describe(`The first ${ARTIFACT_HOLDERS_LIMIT} objects you read that hold the artifact`),
   hasMore: z.boolean().describe("More objects you read hold it"),
+})
+
+export const ArtifactThreadListResponseSchema = z.object({
+  threads: z
+    .array(AgentThreadSchema)
+    .describe(
+      "The conversations the artifact is shared in, among those you read, most recently updated first"
+    ),
 })
 
 export const ArtifactChangeResponseSchema = z.object({

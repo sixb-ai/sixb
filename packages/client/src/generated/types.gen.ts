@@ -22379,6 +22379,219 @@ export type ListArtifactHoldersResponses = {
 export type ListArtifactHoldersResponse =
   ListArtifactHoldersResponses[keyof ListArtifactHoldersResponses]
 
+export type ListArtifactThreadsData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/threads"
+}
+
+export type ListArtifactThreadsErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ListArtifactThreadsError = ListArtifactThreadsErrors[keyof ListArtifactThreadsErrors]
+
+export type ListArtifactThreadsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * The conversations the artifact is shared in, among those you read, most recently updated first
+     */
+    threads: Array<{
+      sandboxState?: {
+        name: string
+        status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+        initialized: boolean
+      }
+      id: string
+      projectId: string
+      kind: "conversation" | "subagent"
+      parent?: {
+        threadId: string
+        spawnedBy: string
+        key: string
+      }
+      ownerPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+        displayName?: string
+      }
+      participants: Array<{
+        principal: {
+          type: "user"
+          id: string
+          displayName?: string
+        }
+        addedAt: string
+        addedBy: {
+          type: "user" | "serviceAccount" | "system"
+          id: string
+        }
+      }>
+      title?: string
+      sandboxParams?: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+      runsOn?: "computer"
+      computer?: {
+        id: string
+        name: string
+        folder: string
+        online: boolean
+      }
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
+      movedAt?: string
+      status: "active" | "archived"
+      activeRunId: string | null
+      lastMessageAt?: string
+      messageCount: number
+      createdAt: string
+      updatedAt: string
+      read?: {
+        threadId: string
+        throughSeq: number
+        headSeq: number
+        unread: number
+        readAt?: string
+      }
+      lastRun?: {
+        id: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+        finishReason?:
+          | "stop"
+          | "length"
+          | "content-filter"
+          | "tool-calls"
+          | "timeout"
+          | "interrupted"
+          | "awaiting_approval"
+          | "awaiting_answer"
+          | "error"
+          | "other"
+          | "unknown"
+        errorCode?:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
+          | "agent.execution_failed"
+          | "agent.step_limit_reached"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        completedAt?: string
+        requestedBy?: {
+          type: "user" | "serviceAccount"
+          id: string
+        }
+      }
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      approvalModeSource?: "thread" | "default" | "fallback" | "run"
+    }>
+  }
+}
+
+export type ListArtifactThreadsResponse =
+  ListArtifactThreadsResponses[keyof ListArtifactThreadsResponses]
+
 export type ClearArtifactStateData = {
   body?: never
   path: {

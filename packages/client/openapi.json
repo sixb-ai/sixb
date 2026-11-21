@@ -64943,6 +64943,589 @@
         }
       }
     },
+    "/api/artifacts/{artifactId}/threads": {
+      "get": {
+        "summary": "List the conversations about an artifact",
+        "description": "The Agent conversations the artifact is shared in, among those you own or take part in, most recently updated first: each one the Agent wrote it from, and the fork it was copied for. A conversation you do not read is left out, though it shares the artifact.",
+        "tags": ["Artifacts"],
+        "operationId": "listArtifactThreads",
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "threads": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sandboxState": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                              },
+                              "initialized": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["name", "status", "initialized"],
+                            "additionalProperties": false
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["conversation", "subagent"]
+                          },
+                          "parent": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string"
+                              },
+                              "spawnedBy": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["threadId", "spawnedBy", "key"],
+                            "additionalProperties": false
+                          },
+                          "ownerPrincipal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "owner": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "participants": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "principal": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["user"]
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "displayName": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["type", "id"],
+                                  "additionalProperties": false
+                                },
+                                "addedAt": {
+                                  "type": "string"
+                                },
+                                "addedBy": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["user", "serviceAccount", "system"]
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["type", "id"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["principal", "addedAt", "addedBy"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "sandboxParams": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
+                          },
+                          "runsOn": {
+                            "type": "string",
+                            "enum": ["computer"]
+                          },
+                          "computer": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "folder": {
+                                "type": "string"
+                              },
+                              "online": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["id", "name", "folder", "online"],
+                            "additionalProperties": false
+                          },
+                          "backgroundCommands": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "threadId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "command": {
+                                  "type": "string",
+                                  "maxLength": 1000
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "exited", "stopped"]
+                                },
+                                "exitCode": {
+                                  "type": "integer"
+                                },
+                                "startedAt": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "endedAt": {
+                                  "type": "string",
+                                  "maxLength": 200
+                                },
+                                "stopping": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": ["threadId", "id", "command", "status", "startedAt"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "movedAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "archived"]
+                          },
+                          "activeRunId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "lastMessageAt": {
+                            "type": "string"
+                          },
+                          "messageCount": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "read": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string"
+                              },
+                              "throughSeq": {
+                                "type": "number"
+                              },
+                              "headSeq": {
+                                "type": "number"
+                              },
+                              "unread": {
+                                "type": "number"
+                              },
+                              "readAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["threadId", "throughSeq", "headSeq", "unread"],
+                            "additionalProperties": false
+                          },
+                          "lastRun": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                              },
+                              "finishReason": {
+                                "type": "string",
+                                "enum": [
+                                  "stop",
+                                  "length",
+                                  "content-filter",
+                                  "tool-calls",
+                                  "timeout",
+                                  "interrupted",
+                                  "awaiting_approval",
+                                  "awaiting_answer",
+                                  "error",
+                                  "other",
+                                  "unknown"
+                                ]
+                              },
+                              "errorCode": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "agent.context_limit_exceeded",
+                                  "agent.execution_failed",
+                                  "agent.step_limit_reached",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
+                                ]
+                              },
+                              "completedAt": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["id", "status"],
+                            "additionalProperties": false
+                          },
+                          "approvalMode": {
+                            "type": "string",
+                            "enum": ["manual", "accept-edits", "auto"]
+                          },
+                          "approvalModeSource": {
+                            "type": "string",
+                            "enum": ["thread", "default", "fallback", "run"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "kind",
+                          "ownerPrincipal",
+                          "owner",
+                          "participants",
+                          "status",
+                          "activeRunId",
+                          "messageCount",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The conversations the artifact is shared in, among those you read, most recently updated first"
+                    }
+                  },
+                  "required": ["threads"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, holder_not_found (no one object of the type a designed document names that you read holds it), query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), pdf_not_found (the document is not printed yet: ask for it first), pdf_unavailable (the project has no sandboxes to print in), video_not_found (the video is not rendered yet: ask for it first), video_unavailable (the project has no sandboxes to render in), still_not_found (the scene is not snapshotted yet, or will not be), media_not_found (the part of a media is not derived yet, or will not be), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts/{artifactId}/state": {
       "get": {
         "summary": "Read what a page keeps",

@@ -444,6 +444,9 @@ import type {
   ListArtifactsData,
   ListArtifactsErrors,
   ListArtifactsResponses,
+  ListArtifactThreadsData,
+  ListArtifactThreadsErrors,
+  ListArtifactThreadsResponses,
   ListAuthAccessTokensData,
   ListAuthAccessTokensErrors,
   ListAuthAccessTokensResponses,
@@ -4154,6 +4157,24 @@ export const listArtifactHolders = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/holders",
+    ...options,
+  })
+
+/**
+ * List the conversations about an artifact
+ *
+ * The Agent conversations the artifact is shared in, among those you own or take part in, most recently updated first: each one the Agent wrote it from, and the fork it was copied for. A conversation you do not read is left out, though it shares the artifact.
+ */
+export const listArtifactThreads = <ThrowOnError extends boolean = false>(
+  options: Options<ListArtifactThreadsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListArtifactThreadsResponses,
+    ListArtifactThreadsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/artifacts/{artifactId}/threads",
     ...options,
   })
 
