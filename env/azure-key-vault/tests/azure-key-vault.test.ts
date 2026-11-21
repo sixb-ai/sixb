@@ -131,7 +131,7 @@ const managed = (clientId?: string) =>
     server: { identity: "managed", ...(clientId ? { clientId } : {}) },
   })
 
-/** What `createServerToken` installs for a managed identity. */
+/** A server's token file for a managed identity. */
 const managedServerToken = JSON.stringify({ identity: "managed" })
 
 /** An access token for the object `mi-oid-1`: only its claims are read. */
@@ -389,89 +389,6 @@ describe("azureKeyVault", () => {
     })
   })
 
-  describe("createServerToken", () => {
-    const vaultId =
-      "/subscriptions/s/resourceGroups/g/providers/Microsoft.KeyVault/vaults/shop-prod"
-    const createdApp = { stdout: JSON.stringify({ appId: "app-1", password: "pw", tenant: "t-1" }) }
-
-    test("on Azure RBAC, gives a new service principal the reader role on that vault alone", async () => {
-      const log = await fakeAz({
-        "keyvault show": { stdout: JSON.stringify({ id: vaultId, rbac: true }) },
-        "ad sp create-for-rbac": createdApp,
-      })
-
-      const token = await source().createServerToken("prod", "sixb-shop")
-
-      expect(JSON.parse(token)).toEqual({ tenant: "t-1", clientId: "app-1", clientSecret: "pw" })
-      const made = await calls(log)
-      expect(made[0]).toStartWith("keyvault show --name shop-prod ")
-      expect(made[1]).toBe(
-        `ad sp create-for-rbac --name sixb-shop --role Key Vault Secrets User --scopes ${vaultId} --output json`
-      )
-      expect(made).toHaveLength(2)
-    })
-
-    test("on access policies, lets the new service principal get and list secrets", async () => {
-      const log = await fakeAz({
-        "keyvault show": { stdout: JSON.stringify({ id: vaultId, rbac: false }) },
-        "ad sp create-for-rbac": createdApp,
-        "ad sp show": { stdout: "object-1\n" },
-        "keyvault set-policy": { stdout: "{}" },
-      })
-
-      await source().createServerToken("prod", "sixb-shop")
-
-      const made = await calls(log)
-      expect(made[1]).toBe("ad sp create-for-rbac --name sixb-shop --output json")
-      expect(made[3]).toBe(
-        "keyvault set-policy --name shop-prod --object-id object-1 --secret-permissions get list"
-      )
-    })
-
-    // Reproduce: drop the cleanup. A failed setup then leaves a live credential in the tenant.
-    test("deletes the service principal when it can't be given access", async () => {
-      const log = await fakeAz({
-        "keyvault show": { stdout: JSON.stringify({ id: vaultId, rbac: true }) },
-        "ad sp create-for-rbac": {
-          stdout: createdApp.stdout,
-          stderr: "ERROR: AuthorizationFailed: no permission to write role assignments\n",
-          code: 1,
-        },
-        "ad app list": { stdout: "app-1\n" },
-        "ad app delete": {},
-      })
-
-      const error = await source()
-        .createServerToken("prod", "sixb-shop")
-        .catch((e) => e)
-
-      expect(String(error)).toContain(
-        "AuthorizationFailed: no permission to write role assignments"
-      )
-      expect(String(error)).not.toContain("pw")
-      expect((await calls(log)).slice(2)).toEqual([
-        "ad app list --display-name sixb-shop --query [].appId --output tsv",
-        "ad app delete --id app-1",
-      ])
-    })
-
-    test("says where to look when az can't find the vault", async () => {
-      await fakeAz({
-        "keyvault show": {
-          stderr: "ERROR: The Vault 'shop-prod' not found within subscription.\n",
-          code: 3,
-        },
-      })
-
-      const error = await source()
-        .createServerToken("prod", "sixb-shop")
-        .catch((e) => e)
-
-      expect(String(error)).toContain("az account set --subscription")
-      expect(String(error)).toContain("not found within subscription")
-    })
-  })
-
   describe("failures", () => {
     const read = () =>
       source()
@@ -574,21 +491,6 @@ describe("azureKeyVault", () => {
       }
     })
 
-    test("setup creates nothing: the token only says which identity reads", async () => {
-      const log = await fakeAz(signedIn)
-      const sent = fakeAzure(() => json({}))
-
-      expect(JSON.parse(await managed().createServerToken("prod", "sixb-shop"))).toEqual({
-        identity: "managed",
-      })
-      expect(JSON.parse(await managed("client-1").createServerToken("prod", "sixb-shop"))).toEqual({
-        identity: "managed",
-        clientId: "client-1",
-      })
-      expect(await calls(log)).toEqual([])
-      expect(sent).toEqual([])
-    })
-
     test("reads with a token from the instance metadata service, not Entra ID or az", async () => {
       const log = await fakeAz(signedIn)
       const sent = fakeAzure(metadataService(vault("shop-prod", { A: "1" })))
@@ -609,6 +511,25 @@ describe("azureKeyVault", () => {
         `Bearer ${managedAccessToken}`,
       ])
       expect(await calls(log)).toEqual([])
+    })
+
+    // Reproduce: leave `serverNeedsToken` true, or ignore `server` in read; a server reading with
+    // its managed identity then needs a token file it never uses.
+    test("needs no token file: a server reads with the identity alone", async () => {
+      const sent = fakeAzure(metadataService(vault("shop-prod", { A: "1" })))
+
+      expect(managed().serverNeedsToken).toBe(false)
+      expect(source().serverNeedsToken).toBe(true)
+      expect(await managed().read("prod", { server: true })).toEqual({ A: "1" })
+      expect(sent[0]?.url.hostname).toBe("169.254.169.254")
+    })
+
+    test("a server without a token or an identity says what it needs", async () => {
+      const error = await source()
+        .read("prod", { server: true })
+        .catch((failure: unknown) => failure)
+
+      expect(String(error)).toContain("reads with the credential in its token file")
     })
 
     test("asks for a user-assigned identity by its client ID", async () => {

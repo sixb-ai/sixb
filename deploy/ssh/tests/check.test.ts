@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { blocksDeploy, CHECK_MARKER, parseCheckOutput, renderCheckScript } from "../src/check"
-import { ensureEnvToken, pickPublicKey, renderAdminScript } from "../src/setup"
-import { LocalShell, RemoteScriptError } from "../src/transport"
+import { isPrivateAddress, renderProbe } from "../src/check"
+import { type JudgeInput, judge, parseFacts } from "../src/check/judge"
+import { LocalShell } from "../src/transport"
 
 const tempDirs: string[] = []
 
@@ -12,285 +12,241 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function syntaxErrors(script: string): Promise<string> {
-  const child = Bun.spawn(["bash", "-n"], { stdin: new Blob([script]), stderr: "pipe" })
-  await child.exited
-  return new Response(child.stderr).text()
+const input: JudgeInput = {
+  name: "shop",
+  ports: [3001, 3002],
+  settings: "env-token",
+  chromium: false,
 }
 
-const context = { name: "northline", location: "sixb@203.0.113.10" }
-const line = (id: string, status: string, detail: string) =>
-  [CHECK_MARKER, id, status, detail].join("\t")
+/** What a cell from the infra template reports. */
+const healthy: Record<string, string> = {
+  "os.id": "ubuntu",
+  "os.like": "debian",
+  "os.name": "Ubuntu 24.04.3 LTS",
+  "os.systemd": "yes",
+  "os.arch": "x86_64",
+  "os.missing": "",
+  "account.name": "deploy",
+  "account.home": "/home/deploy",
+  "account.uid": "1000",
+  linger: "yes",
+  "caddy.version": "2.10.2",
+  "caddy.reload": "yes",
+  "caddy.routes": "/etc/caddy/sixb.d/deploy",
+  "caddy.routes-writable": "yes",
+  "caddy.routes-imported": "yes",
+  "caddy.caddyfile-imports": "yes",
+  "file.env-token": "600 54",
+  "file.shared-env": "600 2048",
+  "file.legacy-env": "missing",
+  "deployments.others": "",
+  "port.3001": "own",
+  "port.3002": "free",
+  "disk.free-kb": "70000000",
+}
 
-describe("server checks", () => {
-  test("render as a script bash accepts", async () => {
-    const script = renderCheckScript({
-      name: "northline",
-      projectPath: "examples/northline",
-      ports: [
-        { service: "api", port: 3002 },
-        { service: "app", port: 3001 },
-      ],
-    })
-    expect(await syntaxErrors(script)).toBe("")
-    expect(script).toContain("project=\"$HOME\"/'northline/code/examples/northline'")
+function checks(overrides: Record<string, string>, options: Partial<JudgeInput> = {}) {
+  return judge(new Map(Object.entries({ ...healthy, ...overrides })), { ...input, ...options })
+}
+
+function statusOf(id: string, overrides: Record<string, string>, options?: Partial<JudgeInput>) {
+  const check = checks(overrides, options).find((candidate) => candidate.id === id)
+  return check && `${check.status}: ${check.detail}`
+}
+
+describe("judging the host", () => {
+  test("a server from the infra template passes every check", () => {
+    expect(checks({}).filter((check) => check.status !== "ok")).toEqual([])
   })
 
-  // Reproduce: drop the version check; on Ubuntu's Caddy 2.6 every deploy then passes the checks
-  // and fails at "Update routes", where `caddy validate` rejects `stream_close_delay`.
-  test("stop a deploy on a Caddy older than 2.7, and compare versions as numbers", async () => {
-    const caddyCheck = async (version: string) => {
-      const home = await mkdtemp(join(tmpdir(), "sixb-check-caddy-"))
-      tempDirs.push(home)
-      const tools = join(home, "tools")
-      await mkdir(tools)
-      await writeFile(join(tools, "caddy"), `#!/bin/sh\necho "v${version} h1:abc="\n`, {
-        mode: 0o755,
-      })
+  test.each([
+    ["not Debian-like", "server", { "os.id": "fedora", "os.like": "", "os.name": "Fedora 41" }],
+    ["no systemd", "server", { "os.systemd": "no" }],
+    ["a CPU Bun has no build for", "server", { "os.arch": "riscv64" }],
+    ["a missing tool", "server", { "os.missing": "flock unzip" }],
+    ["lingering off", "linger", { linger: "no" }],
+    ["no Caddy", "caddy", { "caddy.version": "" }],
+    ["Caddy before 2.7, compared as numbers", "caddy", { "caddy.version": "2.6.10" }],
+    ["routes not imported", "caddy", { "caddy.caddyfile-imports": "no" }],
+    ["no reload rights", "caddy", { "caddy.reload": "no" }],
+    ["no env token", "settings", { "file.env-token": "missing" }],
+    ["an empty env token", "settings", { "file.env-token": "600 0" }],
+    ["an env token others can read", "settings", { "file.env-token": "644 54" }],
+    ["an env token its group can read", "settings", { "file.env-token": "640 54" }],
+    ["a port another program holds", "ports", { "port.3002": "other" }],
+    ["another deployment", "deployments", { "deployments.others": "blog" }],
+    ["an account that is root", "account", { "account.name": "root", "account.uid": "0" }],
+  ])("fails on %s", (_name, id, overrides) => {
+    expect(statusOf(id, overrides)).toStartWith("fail")
+  })
 
-      const child = Bun.spawn(
-        ["bash", "-c", renderCheckScript({ ...context, projectPath: ".", ports: [] })],
-        {
-          env: { HOME: home, USER: "sixb", PATH: `${tools}:/usr/bin:/bin` },
-          stdout: "pipe",
-          stderr: "ignore",
-        }
-      )
-      const output = await new Response(child.stdout).text()
-      await child.exited
+  test("names each problem, and points every failure at the host requirements", () => {
+    const caddy = checks({ "caddy.version": "2.6.2", "caddy.reload": "no" }).find(
+      (check) => check.id === "caddy"
+    )
+    expect(caddy?.detail).toBe(
+      "Caddy 2.6.2 is older than 2.7; sudo systemctl reload caddy is not allowed"
+    )
+    expect(caddy?.remedy).toBe("See https://docs.sixb.ai/deployment/host-requirements.")
+  })
 
-      const [check] = parseCheckOutput(output.split("\n"), context).filter(
-        (entry) => entry.id === "server.caddy"
-      )
-      return check
+  test("Caddy 2.10 is newer than 2.7", () => {
+    expect(statusOf("caddy", { "caddy.version": "2.10.0" })).toStartWith("ok")
+  })
+
+  test("a project without a source needs .env instead, here or in the old code folder", () => {
+    const noSource = { settings: "env-file" } as const
+    expect(statusOf("settings", { "file.env-token": "missing" }, noSource)).toStartWith("ok")
+    expect(
+      statusOf("settings", { "file.shared-env": "missing", "file.legacy-env": "600 10" }, noSource)
+    ).toStartWith("ok")
+    expect(statusOf("settings", { "file.shared-env": "missing" }, noSource)).toBe(
+      "fail: no .env on the server"
+    )
+  })
+
+  test("checks Chromium only for a project that prints with it", () => {
+    const missing = {
+      "chromium.checked": "system libraries",
+      "chromium.missing": "libatk-1.0.so.0",
     }
-
-    expect(await caddyCheck("2.10.2")).toMatchObject({ label: "Caddy version", status: "ok" })
-
-    const old = await caddyCheck("2.6.2")
-    expect(old).toMatchObject({ status: "manual", detail: "2.6.2 is older than 2.7" })
-    expect(old && blocksDeploy(old)).toBe(true)
-    expect(old?.remedy).toContain("caddyserver.com/docs/install")
+    expect(statusOf("chromium", missing)).toBeUndefined()
+    expect(statusOf("chromium", missing, { chromium: true })).toBe(
+      "fail: missing libatk-1.0.so.0 (system libraries)"
+    )
+    expect(statusOf("chromium", { "chromium.missing": "" }, { chromium: true })).toStartWith("ok")
   })
 
-  test("read back with labels, and with what to do about each", () => {
-    const checks = parseCheckOutput(
-      [
-        "Welcome to Ubuntu",
-        line("server.os", "ok", "Ubuntu 24.04.4 LTS"),
-        line("server.routes", "fixable", "/etc/caddy/sixb.d/sixb is missing or not writable"),
-        line("project.env", "manual", "/home/sixb/northline/code/.env does not exist"),
-        line("project.port.api", "manual", "3002 is in use by another program"),
-        line("server.admin-api", "warning", "Caddy's admin API listens on localhost:2019"),
-      ],
-      context
+  // Reproduce: judge "identity" as "env-token"; a server reading with its managed identity then
+  // fails the check for a file it never uses.
+  test("needs no env token when the source reads with the server's own identity", () => {
+    const nothing = { "file.env-token": "missing", "file.shared-env": "missing" }
+    expect(statusOf("settings", nothing, { settings: "identity" })).toBe(
+      "ok: the source reads with the server's own identity"
     )
+  })
 
-    expect(checks.map((check) => [check.label, check.status])).toEqual([
-      ["Server", "ok"],
-      ["Caddy routes", "fixable"],
-      [".env", "manual"],
-      ["api port", "manual"],
-      ["Caddy admin API", "warning"],
+  test("hands a server with nothing set up the commands that set it up, for its account", () => {
+    const unset = checks({
+      "os.missing": "flock ss",
+      linger: "no",
+      "caddy.version": "",
+      "caddy.caddyfile-imports": "no",
+      "caddy.routes-imported": "no",
+      "caddy.routes-writable": "no",
+      "caddy.reload": "no",
+    })
+    const commandsOf = (id: string) => unset.find((check) => check.id === id)?.commands
+
+    expect(commandsOf("server")).toEqual(["apt-get install -y util-linux iproute2"])
+    expect(commandsOf("linger")).toEqual(["loginctl enable-linger deploy"])
+    expect(commandsOf("caddy")?.slice(3)).toEqual([
+      "grep -qxF 'import /etc/caddy/sixb.d/*.caddy' /etc/caddy/Caddyfile || echo 'import /etc/caddy/sixb.d/*.caddy' >> /etc/caddy/Caddyfile",
+      "install -d -m 0755 /etc/caddy/sixb.d",
+      "echo 'import /etc/caddy/sixb.d/deploy/*.caddy' > /etc/caddy/sixb.d/deploy.caddy",
+      "install -d -m 0755 -o deploy -g deploy /etc/caddy/sixb.d/deploy",
+      "echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/deploy",
+      "chmod 440 /etc/sudoers.d/deploy",
+      "systemctl reload caddy",
     ])
-    expect(checks[1]?.remedy).toBe("Run `sixb deploy setup`.")
-    expect(checks[2]?.remedy).toContain(
-      "ssh sixb@203.0.113.10 'install -m 600 /dev/null /home/sixb/northline/code/.env'"
-    )
-    expect(checks.filter(blocksDeploy).map((check) => check.id)).toEqual([
-      "server.routes",
-      "project.env",
-      "project.port.api",
+    expect(commandsOf("caddy")?.[2]).toBe("apt-get update && apt-get install -y caddy")
+  })
+
+  test("fixes only what is missing", () => {
+    const caddy = checks({ "caddy.reload": "no" }).find((check) => check.id === "caddy")
+    expect(caddy?.commands).toEqual([
+      "echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy' > /etc/sudoers.d/deploy",
+      "chmod 440 /etc/sudoers.d/deploy",
+      "systemctl reload caddy",
     ])
+    expect(checks({}).some((check) => check.commands)).toBe(false)
+  })
+
+  // Reproduce: drop `pasteable`; a home the server reports with a `;` in it then lands in a command
+  // pasted into a root shell.
+  test("gives no commands for an account or home that would need quoting", () => {
+    const odd = checks({
+      "account.home": "/home/x;rm -rf /",
+      "account.name": "dep loy",
+      linger: "no",
+      "caddy.reload": "no",
+      "file.env-token": "644 54",
+    })
+    for (const id of ["linger", "caddy", "settings"]) {
+      expect(odd.find((check) => check.id === id)?.commands).toBeUndefined()
+    }
+    expect(odd.find((check) => check.id === "linger")?.status).toBe("fail")
+  })
+
+  test("names the deployment's files in what fixes its settings", () => {
+    const loose = checks({ "file.env-token": "644 54" }).find((check) => check.id === "settings")
+    expect(loose?.commands).toEqual(["chmod 600 /home/deploy/shop/env-token"])
+    const missing = checks({ "file.env-token": "missing" }).find((c) => c.id === "settings")
+    expect(missing?.remedy).toContain("/home/deploy/shop/env-token, mode 600")
+  })
+
+  test("takes a settings file only its owner can read, writable or not", () => {
+    expect(statusOf("settings", { "file.env-token": "400 54" })).toStartWith("ok")
+  })
+
+  test("warns about a nearly full disk", () => {
+    expect(statusOf("disk", { "disk.free-kb": "1048576" })).toBe("warning: 1024 MB free")
   })
 })
 
-describe("a project with a source", () => {
-  async function checkWithHome(home: string, envFromSource: boolean): Promise<string[]> {
-    const lines: string[] = []
-    const script = renderCheckScript({
-      name: "northline",
-      projectPath: ".",
-      ports: [],
-      envFromSource,
-    })
-    // Other checks fail on a machine that isn't a server, which says nothing about these two.
-    await new LocalShell({ HOME: home }).run(script, {
-      onLine: (line, stream) => {
-        if (stream === "stdout") lines.push(line)
-      },
-    })
-    return lines
-      .map((text) => text.split("\t"))
-      .filter(([marker, id]) => marker === CHECK_MARKER && id?.includes("env"))
-      .map(([, id, status]) => `${id} ${status}`)
-  }
-
-  // Reproduce: remove the `envFromSource` branch in renderCheckScript. A first deploy then stops on
-  // a missing .env that the deploy itself is about to write.
-  test("needs the token instead of .env, and setup fixes it", async () => {
-    const home = await mkdtemp(join(tmpdir(), "sixb-check-"))
+describe("the probe", () => {
+  // Reproduce: source /etc/os-release outside its subshell. On Linux its NAME replaces the
+  // deployment's, and the settings facts then read another folder.
+  test("reports facts the judge reads, as the deploy account, changing nothing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "sixb-probe-"))
     tempDirs.push(home)
-
-    expect(await checkWithHome(home, true)).toEqual(["project.env-token fixable"])
-    expect(await checkWithHome(home, false)).toEqual(["project.env manual"])
-  })
-
-  test("reads a missing token back as something setup can fix", () => {
-    const [check] = parseCheckOutput(
-      [line("project.env-token", "fixable", "/home/sixb/northline/env-token has no token")],
-      context
-    )
-
-    expect(check).toMatchObject({
-      label: "Source token",
-      status: "fixable",
-      remedy: "Run `sixb deploy setup`.",
-    })
-    expect(check && blocksDeploy(check)).toBe(true)
-  })
-
-  describe("ensureEnvToken", () => {
-    async function server() {
-      const home = await mkdtemp(join(tmpdir(), "sixb-check-"))
-      tempDirs.push(home)
-      return {
-        shell: new LocalShell({ HOME: home }),
-        path: join(home, "northline", "env-token"),
-        home,
-      }
+    await mkdir(join(home, "northline", "shared"), { recursive: true })
+    await writeFile(join(home, "northline", "shared", ".env"), "A=1\n")
+    // A deployment from before releases, in a monorepo: its .env sits in the project's folder.
+    await mkdir(join(home, "northline", "code", "apps", "northline"), { recursive: true })
+    await writeFile(join(home, "northline", "code", "apps", "northline", ".env"), "A=1\n")
+    const units = join(home, ".config", "systemd", "user")
+    await mkdir(units, { recursive: true })
+    for (const unit of ["sixb-northline@.service", "sixb-blog.service", "sixb-blog@.service"]) {
+      await writeFile(join(units, unit), "")
     }
 
-    // Reproduce: put the token in the script. Any process on the server can read a command's arguments.
-    test("installs the token only its owner can read, sent on standard input", async () => {
-      const { shell, path } = await server()
-      const scripts: string[] = []
-
-      const installed = await ensureEnvToken(
-        {
-          run: (script, options) => {
-            scripts.push(script)
-            return shell.run(script, options)
-          },
-          close: async () => {},
-        },
-        "northline",
-        async () => "dp.st.prd.secret"
-      )
-
-      expect(installed).toBe(true)
-      expect(await readFile(path, "utf8")).toBe("dp.st.prd.secret\n")
-      expect((await stat(path)).mode & 0o777).toBe(0o600)
-      expect(scripts.join("\n")).not.toContain("dp.st.prd.secret")
+    const lines: string[] = []
+    const shell = new LocalShell({ HOME: home, USER: "deploy" })
+    const probe = renderProbe({
+      name: "northline",
+      projectPath: "apps/northline",
+      ports: [3001, 3002],
+      chromium: true,
     })
+    await shell.run(probe, { onLine: (line, stream) => stream === "stdout" && lines.push(line) })
+    const facts = parseFacts(lines)
 
-    // Reproduce: go by the checks setup started with. On a fresh server those stop at SSH, so setup
-    // exits 0 without a token and the deploy after it stops.
-    test("a server that has one keeps it, without creating another", async () => {
-      const { shell, path, home } = await server()
-      await mkdir(join(home, "northline"))
-      await writeFile(path, "existing\n")
-
-      const installed = await ensureEnvToken(shell, "northline", async () => {
-        throw new Error("Creates a token nobody needs.")
-      })
-
-      expect(installed).toBe(false)
-      expect(await readFile(path, "utf8")).toBe("existing\n")
-    })
-
-    test("replaces an empty file, which can't authenticate", async () => {
-      const { shell, path, home } = await server()
-      await mkdir(join(home, "northline"))
-      await writeFile(path, "")
-
-      expect(await ensureEnvToken(shell, "northline", async () => "new")).toBe(true)
-      expect(await readFile(path, "utf8")).toBe("new\n")
-    })
-
-    // Reproduce: remove `set -e`. `mv` then succeeds, an empty file replaces the token, and setup
-    // says it installed one.
-    test("a write that fails installs nothing and says so", async () => {
-      const { shell, path, home } = await server()
-      await mkdir(join(home, "northline"))
-      await mkdir(`${path}.new`)
-
-      const error = await ensureEnvToken(shell, "northline", async () => "new").catch((e) => e)
-
-      expect(error).toBeInstanceOf(Error)
-      expect(await Bun.file(path).exists()).toBe(false)
-    })
-
-    // Reproduce: treat every failure as a missing token. Each dropped connection then creates a
-    // token in Doppler that nothing uses.
-    test("a connection that fails isn't read as a missing token", async () => {
-      let created = 0
-      const failing = {
-        run: async () => {
-          throw new RemoteScriptError("ssh failed", 255)
-        },
-        close: async () => {},
-      }
-
-      const error = await ensureEnvToken(failing, "northline", async () => {
-        created += 1
-        return "new"
-      }).catch((e) => e)
-
-      expect(error).toBeInstanceOf(RemoteScriptError)
-      expect(created).toBe(0)
-    })
+    expect(facts.get("os.arch")).toBeTruthy()
+    expect(facts.get("file.env-token")).toBe("missing")
+    expect(facts.get("file.shared-env")).not.toBe("missing")
+    expect(facts.get("file.legacy-env")).not.toBe("missing")
+    expect(facts.get("deployments.others")).toBe("blog")
+    expect(facts.get("caddy.routes")).toBe("/etc/caddy/sixb.d/deploy")
+    expect(facts.get("account.uid")).toMatch(/^\d+$/)
+    expect(facts.get("account.home")).toBe(home)
+    expect(facts.has("port.3001")).toBe(true)
+    expect(facts.get("chromium.checked")).toBe("system libraries")
   })
 })
 
-describe("setup", () => {
-  test("renders an admin script bash accepts", async () => {
-    const script = renderAdminScript({
-      user: "sixb",
-      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample dev@laptop",
-      admin: "ademattos",
-    })
-    expect(await syntaxErrors(script)).toBe("")
-    expect(script).toContain("%sixb-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy")
-    expect(script).toContain("import /etc/caddy/sixb.d/*.caddy")
-  })
-
-  test("keeps apt quiet, except when it fails", async () => {
-    const script = renderAdminScript({ user: "sixb", publicKey: "ssh-ed25519 AAAA", admin: "root" })
-    const quiet = script.split("\n").find((line) => line.startsWith("quiet()")) ?? ""
-    const run = async (command: string) => {
-      const child = Bun.spawn(["bash", "-c", `${quiet}\n${command}`], {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ])
-      return { exitCode, output: stdout + stderr }
-    }
-
-    expect(await run("quiet echo pages of apt")).toEqual({ exitCode: 0, output: "" })
-    expect(await run("quiet sh -c 'echo E: Unable to locate package; exit 100'")).toEqual({
-      exitCode: 100,
-      output: "E: Unable to locate package\n",
-    })
-  })
-
-  test("authorizes the key given, else the first one SSH would offer", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sixb-setup-"))
-    tempDirs.push(dir)
-    await writeFile(join(dir, "id_ed25519.pub"), "ssh-ed25519 AAAA offered\n")
-    await writeFile(join(dir, "chosen.pub"), "ssh-ed25519 AAAA chosen\n")
-
-    expect(
-      await pickPublicKey({
-        identityFiles: [join(dir, "id_rsa"), join(dir, "id_ed25519")],
-      })
-    ).toEqual({ text: "ssh-ed25519 AAAA offered", source: join(dir, "id_ed25519.pub") })
-    expect(
-      await pickPublicKey({ key: join(dir, "chosen"), identityFiles: [join(dir, "id_ed25519")] })
-    ).toEqual({ text: "ssh-ed25519 AAAA chosen", source: join(dir, "chosen.pub") })
+describe("DNS", () => {
+  test.each([
+    ["100.109.12.127", true],
+    ["10.108.0.5", true],
+    ["172.16.4.1", true],
+    ["192.168.1.10", true],
+    ["fd7a:115c:a1e0::1", true],
+    ["159.89.254.216", false],
+    ["172.32.0.1", false],
+    ["2604:a880:400::1", false],
+  ])("%s is private: %p", (address, expected) => {
+    expect(isPrivateAddress(address)).toBe(expected)
   })
 })

@@ -6,12 +6,9 @@ import type { DeployConfig, DeployRelease, DeployTarget } from "@sixb/core/deplo
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import {
   runDeploy,
-  runDeployAccess,
   runDeployCheck,
-  runDeployCi,
   runDeployControl,
   runDeployLogs,
-  runDeploySetup,
   runDeployStatus,
 } from "../src/commands/deploy"
 import { parseCliArgs } from "../src/lib/command-line"
@@ -138,11 +135,7 @@ describe("deploy release", () => {
     // No `env` step: a project without a source keeps its own `.env`.
     expect(built.steps).toEqual({
       build: [{ program: "sixb", args: ["build"] }],
-      beforeStart: [
-        { program: "sixb", args: ["db", "migrate"] },
-        { program: "sixb", args: ["check"] },
-        { program: "sixb", args: ["lake", "check"] },
-      ],
+      beforeStart: [{ program: "sixb", args: ["check", "--migrate", "--lake"] }],
     })
   })
 
@@ -402,74 +395,13 @@ export default {
       return [
         { id: "ssh", label: "SSH", status: "ok", detail: "sixb@test-server" },
         ...(process.env.DEPLOY_BLOCK
-          ? [{ id: "project.env", label: ".env", status: "manual", detail: ".env does not exist", remedy: "Create it." }]
+          ? [{ id: "settings", label: "Settings", status: "fail", detail: "no .env on the server", remedy: "Create it.", commands: ["loginctl enable-linger deploy"] }]
           : []),
       ]
-    },
-    async setup(release, context) {
-      record({ setup: context.name, admin: context.admin ?? null, key: context.key ?? null, envToken: await context.createEnvToken?.() })
-      context.write("setting up the test server")
-    },
-    access: {
-      async list() {
-        return [{ type: "ssh-ed25519", fingerprint: "SHA256:abc", comment: "dev@laptop", restricted: false }]
-      },
-      async add(key) {
-        record({ add: key })
-        return { type: "ssh-ed25519", fingerprint: "SHA256:new", comment: key.split(" ")[2] ?? "", restricted: false }
-      },
-      async remove(match) {
-        record({ remove: match })
-        return [{ type: "ssh-ed25519", fingerprint: match, comment: "old@laptop", restricted: false }]
-      },
-    },
-    ci: {
-      async create(job, context) {
-        record({ ci: job, name: context.name })
-        return {
-          description: "SHA256:ci for sixb@test-server",
-          secrets: { SIXB_DEPLOY_SSH_KEY: "the private key", SIXB_DEPLOY_KNOWN_HOSTS: "test-server ssh-ed25519 AAAA" },
-          install: ["echo installing the key"],
-          async retireOthers() {
-            record({ retired: job })
-            return [{ type: "ssh-ed25519", fingerprint: "SHA256:old", comment: job, restricted: true }]
-          },
-          async revoke() {
-            record({ revoked: job })
-          },
-        }
-      },
     },
   },
 }
 `
-
-  /** A \`gh\` that records each call, with what it read on stdin, and answers like GitHub. */
-  async function fakeGh(): Promise<{ path: string; calls: () => Promise<string[]> }> {
-    const bin = await tempDir()
-    const log = join(bin, "calls.log")
-    await writeFile(
-      join(bin, "gh"),
-      [
-        "#!/bin/sh",
-        'if [ "$1 $2" = "secret set" ]; then input="$(cat)"; else input=""; fi',
-        `printf '%s <%s>\\n' "$*" "$input" >> ${JSON.stringify(log)}`,
-        'case "$1 $2" in',
-        '  "repo view") echo \'{"nameWithOwner":"acme/shop","defaultBranchRef":{"name":"main"}}\' ;;',
-        '  "secret set") [ -z "$GH_FAIL_SECRETS" ] || { echo "HTTP 403: Resource not accessible" >&2; exit 1; } ;;',
-        '  "secret list") echo "[]" ;;',
-        '  "api repos/acme/shop/environments/production") [ -n "$GH_ENVIRONMENT_EXISTS" ] || exit 1 ;;',
-        "  api\\ repos/acme/*) echo true ;;",
-        "esac",
-      ].join("\n"),
-      { mode: 0o755 }
-    )
-    return {
-      path: `${bin}:${process.env.PATH}`,
-      calls: async () =>
-        (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean),
-    }
-  }
 
   /** A committed project with the recording config, and a fresh file for what its target records. */
   async function project(): Promise<{ root: string; recordPath: string }> {
@@ -543,7 +475,6 @@ export default {
         names: async () => [],
         read: async () => ({}),
         write: async () => {},
-        createServerToken: async (env, label) => env + " token: " + label,
       }
       export default { source, vars: {} }
     `
@@ -615,22 +546,6 @@ export default {
       expect(result.error).toBeUndefined()
       expect((await records(recordPath))[1]?.envStep).toBeUndefined()
     })
-
-    test("setup can create the server's read-only prod token", async () => {
-      const { root, recordPath } = await projectWithSource()
-
-      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
-
-      expect((await records(recordPath))[0]?.envToken).toStartWith("prod token: sixb-northline-")
-    })
-
-    test("a project without a source has no token to create", async () => {
-      const { root, recordPath } = await readOnlyProject()
-
-      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
-
-      expect((await records(recordPath))[0]?.envToken).toBeUndefined()
-    })
   })
 
   test("names the step that failed, with its output", async () => {
@@ -676,10 +591,13 @@ export default {
     expect(check.exitCode).toBe(1)
     expect(check.output).toContain("northline · 1 to fix before deploying")
     expect(check.output).toContain("Create it.")
+    // Reproduce: leave `fixes` out of deployChecksView; the commands then never reach a terminal.
+    expect(check.output).toContain("Run once on the server, as root")
+    expect(check.output).toContain("$ loginctl enable-linger deploy")
 
     const blocked = await deploy(env, () => runDeploy({ cwd: root }))
     expect(blocked.exitCode).toBe(1)
-    expect(blocked.output).toContain(".env does not exist")
+    expect(blocked.output).toContain("no .env on the server")
     // Only the checks ran: nothing was uploaded.
     expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
   })
@@ -709,112 +627,6 @@ export default {
     expect(deployed.output).toContain("Lake retention: Not deployed")
   })
 
-  test("sets the target up, then shows what is left", async () => {
-    const { root, recordPath } = await readOnlyProject()
-    const result = await deploy({ DEPLOY_RECORD: recordPath }, () =>
-      runDeploySetup({ admin: "ademattos", key: "~/.ssh/id.pub", cwd: root })
-    )
-
-    expect(result.error).toBeUndefined()
-    expect(result.output).toContain("setting up the test server")
-    expect(result.output).toContain("northline is ready to deploy")
-    expect((await records(recordPath))[0]).toEqual({
-      setup: "northline",
-      admin: "ademattos",
-      key: "~/.ssh/id.pub",
-    })
-  })
-
-  test("sets up GitHub Actions, storing the new key before revoking the old", async () => {
-    const { root, recordPath } = await project()
-    await writeFile(
-      join(root, ".gitmodules"),
-      '[submodule "vendor/lib"]\n\tpath = vendor/lib\n\turl = ../lib.git\n'
-    )
-    const gh = await fakeGh()
-    const env = { DEPLOY_RECORD: recordPath, PATH: gh.path }
-    const result = await deploy(env, () => runDeployCi({ cwd: root }))
-
-    expect(result.error).toBeUndefined()
-    expect(result.output).toContain("northline deploys from GitHub Actions on every push to main")
-    expect(result.output).toContain("revoked SHA256:old")
-    expect(result.output).toContain("vendor/lib is private")
-    expect(result.output).toContain("Contents: read on acme/lib")
-    expect(await gh.calls()).toEqual([
-      "repo view --json nameWithOwner,defaultBranchRef <>",
-      "api repos/acme/lib --jq .private <>",
-      "api repos/acme/shop/environments/production --silent <>",
-      "api --method PUT repos/acme/shop/environments/production --silent <>",
-      "secret set SIXB_DEPLOY_SSH_KEY_NORTHLINE --env production --repo acme/shop <the private key>",
-      "secret set SIXB_DEPLOY_KNOWN_HOSTS_NORTHLINE --env production --repo acme/shop <test-server ssh-ed25519 AAAA>",
-      "secret list --env production --repo acme/shop --json name <>",
-      "secret list --repo acme/shop --json name <>",
-    ])
-    expect(await records(recordPath)).toEqual([
-      { ci: "github:acme/shop", name: "northline" },
-      { retired: "github:acme/shop" },
-    ])
-
-    const workflow = await readFile(join(root, ".github/workflows/deploy-northline.yml"), "utf8")
-    expect(workflow).toContain("bun-version-file: package.json")
-    expect(workflow).toContain(`SIXB_DEPLOY_SSH_KEY: \${{ secrets.SIXB_DEPLOY_SSH_KEY_NORTHLINE }}`)
-    expect(workflow).toContain("          echo installing the key")
-    expect(workflow).toContain(`token: \${{ secrets.SIXB_GITHUB_TOKEN }}`)
-
-    // Running it again rotates the key without undoing edits to the workflow.
-    const path = join(root, ".github/workflows/deploy-northline.yml")
-    const edited = `${workflow}# edited\n`
-    await writeFile(path, edited)
-    const again = await deploy(env, () => runDeployCi({ cwd: root }))
-    expect(again.error).toBeUndefined()
-    expect(again.output).toContain("(yours, kept")
-    expect(await readFile(path, "utf8")).toBe(edited)
-  })
-
-  test("revokes the new CI key when GitHub does not take it", async () => {
-    const { root, recordPath } = await project()
-    const gh = await fakeGh()
-    const result = await deploy(
-      {
-        DEPLOY_RECORD: recordPath,
-        PATH: gh.path,
-        GH_FAIL_SECRETS: "1",
-        GH_ENVIRONMENT_EXISTS: "1",
-      },
-      () => runDeployCi({ cwd: root })
-    )
-
-    // An existing environment is left as it is: a PUT would reset its protection rules.
-    expect((await gh.calls()).some((call) => call.includes("--method PUT"))).toBe(false)
-    expect(String(result.error)).toContain("Resource not accessible")
-    expect(await records(recordPath)).toEqual([
-      { ci: "github:acme/shop", name: "northline" },
-      { revoked: "github:acme/shop" },
-    ])
-  })
-
-  test("lists, adds, and revokes keys", async () => {
-    const { root, recordPath } = await readOnlyProject()
-    const keyFile = join(await tempDir(), "teammate.pub")
-    await writeFile(keyFile, "ssh-ed25519 AAAAteammate quentin@mbp\n")
-    const env = { DEPLOY_RECORD: recordPath }
-
-    const list = await deploy(env, () => runDeployAccess({ action: "list", cwd: root }))
-    expect(list.output).toContain("dev@laptop")
-    const add = await deploy(env, () =>
-      runDeployAccess({ action: "add", value: keyFile, cwd: root })
-    )
-    expect(add.output).toContain("quentin@mbp")
-    const remove = await deploy(env, () =>
-      runDeployAccess({ action: "remove", value: "SHA256:old", cwd: root })
-    )
-    expect(remove.output).toContain("old@laptop")
-    expect(await records(recordPath)).toEqual([
-      { add: "ssh-ed25519 AAAAteammate quentin@mbp" },
-      { remove: "SHA256:old" },
-    ])
-  })
-
   test("prints the release as JSON", async () => {
     const result = await deploy({}, () =>
       runDeploy({ dryRun: true, json: true, cwd: fixtureProject })
@@ -830,7 +642,7 @@ export default {
       "rules",
       "workers",
     ])
-    expect(service(built, "api").http?.port).toBe(3012)
+    expect(service(built, "api").http?.port).toBe(3002)
     expect(service(built, "app").http?.publicOrigin).toBe("https://ops.example.com")
   })
 
@@ -865,7 +677,7 @@ export default {
     expect(result.error).toBeUndefined()
     expect(result.output).toContain("sixb deploy --dry-run  northline")
     expect(result.output).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
-    expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3012 --no-migrate")
+    expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3002 --no-migrate")
     expect(result.output).toContain("Nothing was deployed")
   })
 
@@ -888,14 +700,6 @@ describe("deploy command line", () => {
       id: "deploy:logs",
       positionals: ["api"],
       options: { follow: true },
-    })
-    expect(parseCliArgs(["deploy", "setup", "--admin", "root"])).toMatchObject({
-      id: "deploy:setup",
-      options: { admin: "root" },
-    })
-    expect(parseCliArgs(["deploy", "access", "add", "github:quentin"])).toMatchObject({
-      id: "deploy:access:add",
-      positionals: ["github:quentin"],
     })
     expect(parseCliArgs(["deploy", "--help"]).kind).toBe("help")
     expect(() => parseCliArgs(["deploy", "statsu"])).toThrow("Unknown deploy command 'statsu'")

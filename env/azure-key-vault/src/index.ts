@@ -14,8 +14,6 @@ const ACCESS_POLICY_DENIED = "AccessDenied"
 const READER_ROLE = "Key Vault Secrets User"
 const REQUEST_TIMEOUT_MS = 15_000
 const CLI_TIMEOUT_MS = 60_000
-/** `az ad sp create-for-rbac` retries its role assignment until the new principal replicates. */
-const CREATE_TIMEOUT_MS = 300_000
 const PARALLEL_REQUESTS = 8
 const RECOVERY_CHECKS = 30
 const RECOVERY_CHECK_MS = 2_000
@@ -30,7 +28,7 @@ export interface AzureKeyVaultOptions {
   /** The Microsoft Entra tenant the vaults belong to, when it isn't `az`'s default. */
   readonly tenant?: string
   /**
-   * How a server reads its vault. By default with a service principal `sixb deploy setup` creates.
+   * How a server reads its vault. By default with the service principal in its token file.
    * `{ identity: "managed" }` reads with the Azure VM's managed identity instead; add `clientId`
    * for a user-assigned one.
    */
@@ -284,9 +282,20 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
       return names.map(variableName)
     },
 
+    serverNeedsToken: server === undefined,
+
     async read(env, readOptions) {
       const credential =
-        readOptions?.token === undefined ? undefined : serverCredential(readOptions.token)
+        readOptions?.token !== undefined
+          ? serverCredential(readOptions.token)
+          : readOptions?.server
+            ? server
+            : undefined
+      if (readOptions?.server && credential === undefined) {
+        throw new Error(
+          '[AzureKeyVault] A server reads with the credential in its token file, or with its managed identity when `server` is { identity: "managed" }.'
+        )
+      }
 
       if (credential !== undefined && isManagedIdentity(credential)) {
         const token = await managedIdentityToken(credential)
@@ -327,70 +336,6 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
       // Key Vault sets one secret per request. A failure part way leaves the others written,
       // and writing them again is harmless.
       await mapInParallel(names, (name) => setSecret(env, token, name, values[name] ?? ""))
-    },
-
-    async createServerToken(env, label) {
-      // Nothing to create: the server already has its identity, and an admin grants it the vault.
-      if (server) {
-        return JSON.stringify({
-          identity: "managed",
-          ...(server.clientId === undefined ? {} : { clientId: server.clientId }),
-        } satisfies AzureKeyVaultServer)
-      }
-
-      const vault = vaults[env]
-      const shown = await azJson<{ readonly id?: unknown; readonly rbac?: unknown }>(
-        [
-          "keyvault",
-          "show",
-          "--name",
-          vault,
-          "--query",
-          "{id:id, rbac:properties.enableRbacAuthorization}",
-          "--output",
-          "json",
-        ],
-        `Could not find the vault ${vault} in az's current subscription (change it with \`az account set --subscription <id>\`)`
-      )
-      if (typeof shown.id !== "string" || shown.id === "") {
-        throw new Error(`[AzureKeyVault] az did not return the vault ${vault}'s ID.`)
-      }
-
-      // A vault on Azure RBAC takes a role on the vault alone. One on access policies takes a
-      // policy that can get and list secrets, which is what that role grants.
-      const rbac = shown.rbac === true
-      const created = await createServicePrincipal(
-        label,
-        rbac ? ["--role", READER_ROLE, "--scopes", shown.id] : []
-      )
-      if (!rbac) {
-        try {
-          const objectId = await servicePrincipalObjectId(created.clientId)
-          await azText(
-            [
-              "keyvault",
-              "set-policy",
-              "--name",
-              vault,
-              "--object-id",
-              objectId,
-              "--secret-permissions",
-              "get",
-              "list",
-            ],
-            `Could not let ${label} read the vault ${vault}`
-          )
-        } catch (error) {
-          await deleteApps(label)
-          throw error
-        }
-      }
-
-      return JSON.stringify({
-        tenant: created.tenant,
-        clientId: created.clientId,
-        clientSecret: created.clientSecret,
-      } satisfies ServicePrincipal)
     },
   }
 }
@@ -500,7 +445,7 @@ function parseServerCredential(token: string): ServerCredential {
     typeof clientSecret !== "string"
   ) {
     throw new Error(
-      "[AzureKeyVault] This token isn't a Key Vault credential. Delete it and run `sixb deploy setup` again."
+      '[AzureKeyVault] This token isn\'t a Key Vault credential. Write a service principal\'s `tenant`, `clientId` and `clientSecret` to it as JSON, or `{"identity":"managed"}`.'
     )
   }
   return { tenant, clientId, clientSecret }
@@ -704,71 +649,6 @@ async function clientToken(credential: ServicePrincipal): Promise<string> {
   throw new Error(`[AzureKeyVault] ${where}: ${reason}`)
 }
 
-/** Creates the service principal a server reads with, and its secret. */
-async function createServicePrincipal(
-  label: string,
-  roleArgs: readonly string[]
-): Promise<ServicePrincipal> {
-  let created: { readonly appId?: unknown; readonly password?: unknown; readonly tenant?: unknown }
-  try {
-    created = await azJson(
-      ["ad", "sp", "create-for-rbac", "--name", label, ...roleArgs, "--output", "json"],
-      `Could not create the service principal ${label}`,
-      CREATE_TIMEOUT_MS
-    )
-  } catch (error) {
-    // It may have been created before its role assignment failed.
-    await deleteApps(label)
-    throw error
-  }
-
-  const { appId, password, tenant } = created
-  if (typeof appId !== "string" || typeof password !== "string" || typeof tenant !== "string") {
-    await deleteApps(label)
-    throw new Error(`[AzureKeyVault] az did not return a credential for ${label}.`)
-  }
-  return { tenant, clientId: appId, clientSecret: password }
-}
-
-/** A new service principal can take a few seconds to appear, so this asks until it does. */
-async function servicePrincipalObjectId(appId: string): Promise<string> {
-  for (let attempt = 1; ; attempt++) {
-    const shown = await az(["ad", "sp", "show", "--id", appId, "--query", "id", "--output", "tsv"])
-    const objectId = shown.stdout.trim()
-    if (shown.code === 0 && objectId) return objectId
-    if (attempt === 12) {
-      throw new Error(
-        `[AzureKeyVault] Could not find the new service principal ${appId}: ${azReason(shown.stderr)}`
-      )
-    }
-    await sleep(5_000)
-  }
-}
-
-/** Removes the app registrations named `label`, so a failed setup leaves no credential behind. */
-async function deleteApps(label: string): Promise<void> {
-  const listed = await az([
-    "ad",
-    "app",
-    "list",
-    "--display-name",
-    label,
-    "--query",
-    "[].appId",
-    "--output",
-    "tsv",
-  ])
-  const appIds = listed.code === 0 ? listed.stdout.split(/\s+/).filter(Boolean) : []
-  for (const appId of appIds) {
-    const deleted = await az(["ad", "app", "delete", "--id", appId])
-    if (deleted.code !== 0) {
-      console.warn(
-        `[AzureKeyVault] Could not delete the app registration ${appId} (${label}). Delete it in the Azure portal.`
-      )
-    }
-  }
-}
-
 interface AzResult {
   readonly code: number
   readonly stdout: string
@@ -796,31 +676,4 @@ async function az(args: readonly string[], timeout = CLI_TIMEOUT_MS): Promise<Az
     child.exited,
   ])
   return { code, stdout, stderr }
-}
-
-async function azText(args: readonly string[], failure: string, timeout?: number): Promise<string> {
-  const result = await az(args, timeout)
-  if (result.code !== 0) throw new Error(`[AzureKeyVault] ${failure}: ${azReason(result.stderr)}`)
-  return result.stdout
-}
-
-async function azJson<T>(args: readonly string[], failure: string, timeout?: number): Promise<T> {
-  const text = await azText(args, failure, timeout)
-  try {
-    return JSON.parse(text) as T
-  } catch (error) {
-    throw new Error(`[AzureKeyVault] ${failure}: az's answer wasn't JSON.`, { cause: error })
-  }
-}
-
-/** The first line `az` printed as an error, which names the problem. */
-function azReason(stderr: string): string {
-  const line =
-    stderr
-      .split(/\r?\n/)
-      .map((text) => text.trim())
-      .find((text) => text.startsWith("ERROR:")) ??
-    stderr.trim().split(/\r?\n/)[0] ??
-    ""
-  return line.replace(/^ERROR:\s*/, "") || "az failed without saying why."
 }

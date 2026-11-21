@@ -128,7 +128,7 @@ Run these from your project root:
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
-| `sixb check` | Validate the project and check provider health. |
+| `sixb check` | Validate the project and check provider health. `--migrate` first does what `sixb db migrate` does, and `--lake` checks the lake too, in one load, as a deploy does. |
 | `sixb run <script> [args...]` | Run a [script](../fundamentals/scripts.md) against the project; with `--deployed`, on its deployment. |
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db migrate --check` | Report pending storage migrations without applying them; exits `3` when there are some. |
@@ -218,13 +218,10 @@ Run these from a project with a `sixb.deploy.ts`. See [Deploy to a server](../de
 | Command | Purpose |
 | --- | --- |
 | `sixb deploy` | Deploy the committed `HEAD`, or `--ref <ref>`. `--dry-run` shows what would run. |
-| `sixb deploy setup` | Prepare the server and the deploy account. `--admin <login>` names an account with `sudo`. |
-| `sixb deploy check` | Check what stands between the server and a working deploy. |
+| `sixb deploy check` | Check the server against the [host requirements](../deployment/host-requirements.md). |
 | `sixb deploy status` | Show the running processes and the deployed commit. |
 | `sixb deploy logs [service]` | Print recent log lines; `--follow` keeps printing. |
 | `sixb deploy restart [service]` | Restart services. Also `stop` and `start`. |
-| `sixb deploy access <list\|add\|remove>` | Manage the SSH keys that can deploy. |
-| `sixb deploy ci` | [Deploy from GitHub Actions](../deployment/github-actions.md) on every push. |
 
 ## Connect to an instance
 

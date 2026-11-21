@@ -1,11 +1,7 @@
 export { defineDeploy } from "./define"
 export type {
-  DeployAccess,
-  DeployAccessKey,
   DeployCheck,
   DeployCheckContext,
-  DeployCi,
-  DeployCiCredential,
   DeployCommand,
   DeployConfig,
   DeployContext,
@@ -29,7 +25,6 @@ export type {
   DeployScript,
   DeployServiceName,
   DeployServicesConfig,
-  DeploySetupContext,
   DeploySingletonServiceConfig,
   DeploySingletonServiceName,
   DeploySource,

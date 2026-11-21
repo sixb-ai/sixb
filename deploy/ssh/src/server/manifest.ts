@@ -10,6 +10,11 @@ export interface ProcessManifest {
   readonly name: string
   /** Which port pair (`blue` or `green`) this release's HTTP services bind. */
   readonly slot?: DeploySlot
+  /**
+   * Leaves the singletons and project scripts stopped at start, while another slot still runs
+   * them: a deploy starts them here once the routes have moved. See `isExclusiveService`.
+   */
+  readonly holdExclusive?: boolean
   /** The project directory every process starts in. */
   readonly cwd: string
   /** Supervisor state, control requests, and logs live here. */
@@ -40,24 +45,25 @@ export interface ProcessServiceManifest {
 
 const SERVICE_KINDS: readonly ProcessServiceKind[] = ["http", "singleton", "workers", "script"]
 
-export function isOverlapSafeService(service: ProcessServiceManifest): boolean {
-  if (service.kind) return service.kind === "http" || service.kind === "workers"
-  return service.name === "api" || service.name === "app" || service.name === "workers"
+/** A service two releases must never run at once: a singleton, or a project script. */
+export function isExclusiveService(service: ProcessServiceManifest): boolean {
+  if (service.kind) return service.kind === "singleton" || service.kind === "script"
+  return service.name !== "api" && service.name !== "app" && service.name !== "workers"
 }
 
 export async function loadProcessManifest(path: string): Promise<ProcessManifest> {
   return parseProcessManifest(JSON.parse(await readFile(path, "utf8")), path)
 }
 
-export function statePath(manifest: ProcessManifest): string {
+export function statePath(manifest: Pick<ProcessManifest, "runDir">): string {
   return resolve(manifest.runDir, "state.json")
 }
 
-export function controlDir(manifest: ProcessManifest): string {
+export function controlDir(manifest: Pick<ProcessManifest, "runDir">): string {
   return resolve(manifest.runDir, "control")
 }
 
-export function responseDir(manifest: ProcessManifest): string {
+export function responseDir(manifest: Pick<ProcessManifest, "runDir">): string {
   return resolve(manifest.runDir, "responses")
 }
 
@@ -73,6 +79,7 @@ export function parseProcessManifest(value: unknown, source = "process manifest"
     version: 1,
     name: string(manifest.name, `${source}.name`),
     ...(slot === undefined ? {} : { slot }),
+    ...(manifest.holdExclusive === true ? { holdExclusive: true } : {}),
     cwd: string(manifest.cwd, `${source}.cwd`),
     runDir: string(manifest.runDir, `${source}.runDir`),
     logDir: string(manifest.logDir, `${source}.logDir`),

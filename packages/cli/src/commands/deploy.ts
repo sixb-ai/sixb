@@ -1,8 +1,6 @@
-import { mkdir } from "node:fs/promises"
-import { dirname, join, relative } from "node:path"
+import { relative } from "node:path"
 import { writeJson } from "@sixb/cli-core"
 import type {
-  DeployAccessKey,
   DeployCheck,
   DeployConfig,
   DeployControlAction,
@@ -16,30 +14,14 @@ import {
   deployer,
   packSource,
   projectPathOf,
-  repoRootOf,
   resolveBunVersion,
+  usesChromium,
 } from "../lib/deploy-source"
 import { ENV_CONFIG_FILE, loadEnvConfig } from "../lib/env-config"
 import { SixbCliError } from "../lib/errors"
 import {
-  bunVersionFile,
-  CI_ENVIRONMENT,
-  currentRepo,
-  ensureEnvironment,
-  hasSecret,
-  isPrivate,
-  readSubmodules,
-  renderWorkflow,
-  SUBMODULE_TOKEN_SECRET,
-  secretName,
-  setSecret,
-  workflowPath,
-} from "../lib/github-ci"
-import {
   cliErrorView,
-  deployAccessView,
   deployChecksView,
-  deployCiView,
   deployCompleteView,
   deployReleaseView,
   deployStatusView,
@@ -60,7 +42,8 @@ export interface DeployOptions {
 export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd()
   const { path, config } = await loadDeployConfig(cwd)
-  const envFromSource = Boolean((await loadEnvConfig(cwd))?.source)
+  const envSource = (await loadEnvConfig(cwd))?.source
+  const envFromSource = Boolean(envSource)
 
   if (options.dryRun) {
     const release = buildDeployRelease(config, {
@@ -91,6 +74,8 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     const checks = await config.target.check(release, {
       name: config.name,
       projectPath: source.projectPath,
+      chromium: await usesChromium(cwd),
+      envToken: envSource?.serverNeedsToken !== false,
     })
     return { source, release, checks }
   })
@@ -132,13 +117,19 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
 export async function runDeployCheck(options: { readonly json?: boolean; readonly cwd?: string }) {
   const cwd = options.cwd ?? process.cwd()
   const { config } = await loadDeployConfig(cwd)
+  const envSource = (await loadEnvConfig(cwd))?.source
   const release = buildDeployRelease(config, {
     bunVersion: await resolveBunVersion(cwd),
-    envFromSource: Boolean((await loadEnvConfig(cwd))?.source),
+    envFromSource: Boolean(envSource),
   })
-  const projectPath = await projectPathOf(cwd)
+  const context = {
+    name: config.name,
+    projectPath: await projectPathOf(cwd),
+    chromium: await usesChromium(cwd),
+    envToken: envSource?.serverNeedsToken !== false,
+  }
   const targetChecks = await withTask("deploy check", `Checking ${location(config)}`, () =>
-    config.target.check(release, { name: config.name, projectPath })
+    config.target.check(release, context)
   )
   const checks = [...targetChecks, ...lakeWorkChecks(config)]
   if (options.json) writeJson(checks)
@@ -147,173 +138,12 @@ export async function runDeployCheck(options: { readonly json?: boolean; readonl
   if (checks.some(blocksDeploy)) process.exitCode = 1
 }
 
-export async function runDeploySetup(options: {
-  readonly admin?: string
-  readonly key?: string
-  readonly cwd?: string
-}) {
-  const cwd = options.cwd ?? process.cwd()
-  const { config } = await loadDeployConfig(cwd)
-  const source = (await loadEnvConfig(cwd))?.source
-  const release = buildDeployRelease(config, {
-    bunVersion: await resolveBunVersion(cwd),
-    envFromSource: Boolean(source),
-  })
-  const context = { name: config.name, projectPath: await projectPathOf(cwd) }
-
-  if (!config.target.setup) {
-    console.log(`A ${config.target.kind} target needs no setup.`)
-  } else {
-    await config.target.setup(release, {
-      ...context,
-      ...(options.admin ? { admin: options.admin } : {}),
-      ...(options.key ? { key: options.key } : {}),
-      ...(source
-        ? {
-            createEnvToken: () =>
-              source.createServerToken("prod", `sixb-${config.name}-${new Date().toISOString()}`),
-          }
-        : {}),
-      write: (line) => console.log(line),
-    })
-  }
-  const checks = await config.target.check(release, context)
-  await renderStatic(deployChecksView({ name: config.name, location: location(config), checks }))
-}
-
-export async function runDeployAccess(options: {
-  readonly action: "list" | "add" | "remove"
-  readonly value?: string
-  readonly json?: boolean
-  readonly cwd?: string
-}) {
-  const { config } = await loadDeployConfig(options.cwd)
-  const access = config.target.access
-  if (!access) {
-    throw new SixbCliError(`[SixbDeploy] A ${config.target.kind} target has no keys to manage.`)
-  }
-  const context = { name: config.name }
-
-  if (options.action === "list") {
-    const keys = await access.list(context)
-    if (options.json) return writeJson(keys)
-    return renderStatic(deployAccessView({ title: `Keys for ${location(config)}`, keys }))
-  }
-  if (options.action === "add") {
-    const added: DeployAccessKey[] = []
-    for (const key of await publicKeys(options.value ?? ""))
-      added.push(await access.add(key, context))
-    return renderStatic(deployAccessView({ title: "Authorized", keys: added }))
-  }
-  const removed = await access.remove(options.value ?? "", context)
-  return renderStatic(deployAccessView({ title: "Revoked", keys: removed }))
-}
-
-/**
- * Sets up deploys from GitHub Actions: a key for the job, authorized on the target and stored as
- * secrets of the repository's `production` environment, and the workflow that uses it. Running it
- * again rotates the key: the new one is stored before the old one is revoked.
- */
-export async function runDeployCi(options: { readonly branch?: string; readonly cwd?: string }) {
-  const cwd = options.cwd ?? process.cwd()
-  const { config } = await loadDeployConfig(cwd)
-  const ci = config.target.ci
-  if (!ci) {
-    throw new SixbCliError(`[SixbDeploy] A ${config.target.kind} target cannot deploy from CI.`)
-  }
-
-  const repo = await currentRepo(cwd)
-  const projectPath = await projectPathOf(cwd)
-  const repoRoot = await repoRootOf(cwd)
-  const submodules = await readSubmodules(repoRoot, repo)
-  const privateSubmodules = []
-  for (const submodule of submodules) {
-    if (!submodule.repo || (await isPrivate(submodule.repo))) privateSubmodules.push(submodule)
-  }
-
-  const credential = await ci.create(`github:${repo.name}`, { name: config.name })
-  const secrets = Object.fromEntries(
-    Object.keys(credential.secrets).map((variable) => [variable, secretName(config.name, variable)])
-  )
-  try {
-    await ensureEnvironment(repo)
-    for (const [variable, value] of Object.entries(credential.secrets)) {
-      await setSecret(repo, secrets[variable] ?? variable, value)
-    }
-  } catch (error) {
-    // CI never got the new key, so it must not stay authorized.
-    await credential.revoke()
-    throw error
-  }
-  const retired = await credential.retireOthers()
-
-  const branch = options.branch ?? repo.defaultBranch
-  const workflow = renderWorkflow({
-    name: config.name,
-    branch,
-    projectPath,
-    bunVersionFile: await bunVersionFile(join(repoRoot, projectPath), repoRoot),
-    secrets,
-    install: credential.install,
-    submodules:
-      privateSubmodules.length > 0 ? "private" : submodules.length > 0 ? "public" : "none",
-  })
-  const path = workflowPath(config.name)
-  const file = Bun.file(join(repoRoot, path))
-  // A workflow already there may have been edited, and rotating the key must not undo that.
-  const existing = (await file.exists()) ? await file.text() : null
-  if (existing === null) {
-    await mkdir(dirname(join(repoRoot, path)), { recursive: true })
-    await Bun.write(file, workflow)
-  }
-
-  await renderStatic(
-    deployCiView({
-      name: config.name,
-      repo: repo.name,
-      environment: CI_ENVIRONMENT,
-      branch,
-      credential: credential.description,
-      secrets: Object.values(secrets),
-      retired,
-      workflow: {
-        path,
-        state: existing === null ? "written" : existing === workflow ? "unchanged" : "kept",
-      },
-      token:
-        privateSubmodules.length > 0 && !(await hasSecret(repo, SUBMODULE_TOKEN_SECRET))
-          ? { name: SUBMODULE_TOKEN_SECRET, submodules: privateSubmodules }
-          : null,
-    })
-  )
-}
-
-/**
- * The public keys a value names: `github:<user>` for the keys on that GitHub account, a path to a
- * `.pub` file, or the key's own text.
- */
-async function publicKeys(value: string): Promise<string[]> {
-  if (value.startsWith("github:")) {
-    const user = value.slice("github:".length)
-    const response = await fetch(`https://github.com/${encodeURIComponent(user)}.keys`)
-    if (!response.ok) {
-      throw new SixbCliError(`[SixbDeploy] GitHub has no public keys for '${user}'.`)
-    }
-    const keys = (await response.text()).split("\n").filter((line) => line.trim())
-    if (keys.length === 0) throw new SixbCliError(`[SixbDeploy] '${user}' has no keys on GitHub.`)
-    return keys.map((key) => `${key.trim()} ${user}@github`)
-  }
-  const file = Bun.file(value)
-  if (await file.exists()) return [(await file.text()).trim()]
-  return [value]
-}
-
 function configWarnings(config: DeployConfig): readonly string[] {
   return lakeWorkChecks(config).map((check) => `${check.label}: ${check.detail} ${check.remedy}`)
 }
 
 function blocksDeploy(check: DeployCheck): boolean {
-  return check.status === "fixable" || check.status === "manual"
+  return check.status === "fail"
 }
 
 function location(config: DeployConfig): string {

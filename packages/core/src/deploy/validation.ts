@@ -68,7 +68,7 @@ function services(value: unknown): void {
 
     if (isDeployHttpService(service)) {
       knownKeys(options, ["domain", "env", "process"], path, {
-        port: "Ports belong to the target, such as `new SshTarget({ ports: { api: 3012 } })`.",
+        port: "The target picks the ports; remove the setting.",
       })
       if (options.domain !== undefined) domain(options.domain, `${path}.domain`)
       if (options.process !== undefined) {

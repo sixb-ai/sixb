@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import { runCheck } from "../src/commands/check"
 import { runDbMigrate } from "../src/commands/db-migrate"
 import { runDbPrepare } from "../src/commands/db-prepare"
 import { FAST_CLI_TIMEOUT_MS, readLogEntries, runCliToCompletion } from "./shared/cli-process"
@@ -119,5 +120,30 @@ describe("sixb db", () => {
     expect(logEntries).toContainEqual({ type: "storage:migrate" })
     expect(logEntries).toContainEqual({ type: "queues:close" })
     expect(logEntries).toContainEqual({ type: "lake-storage:close" })
+  })
+})
+
+// A deploy runs `sixb check --migrate --lake`: one project load instead of three.
+describe("sixb check --migrate", () => {
+  test("migrates before it probes anything, in the same load", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "pending"
+      return runCheck({ entry, migrate: true })
+    })
+
+    expect(result.output).toContain("Database migrations complete")
+    expect(result.output).toMatch(/✓ \S+ is healthy/)
+    expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
+  })
+
+  // Reproduce: return from `migrate` when no migration is pending. A release that only makes a
+  // property unique then deploys with it unprepared, and every write to that type is refused.
+  test("prepares storage even when no migration is pending", async () => {
+    const result = await runLogged(() => {
+      process.env.SIXB_CLI_TEST_MIGRATION_STATE = "current"
+      return runCheck({ entry, migrate: true })
+    })
+
+    expect(result.logEntries[0]).toEqual({ type: "storage.migrate" })
   })
 })

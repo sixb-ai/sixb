@@ -1,8 +1,12 @@
 #!/usr/bin/env bun
 import { readFile } from "node:fs/promises"
+import { homedir, userInfo } from "node:os"
 import type { DeployRecord, DeployStatus } from "@sixb/core/deploy"
+import type { ReleasePlan } from "../plan"
 import { followLogFiles, type LogLine, readRecentLogLines, renderProcessLogLine } from "./logs"
 import { loadProcessManifest, type ProcessManifest, statePath } from "./manifest"
+import { runRelease } from "./release"
+import { createReleaseHost } from "./release-host"
 import { runScript } from "./run"
 import { isMissing, isPidRunning, readProcessState } from "./state"
 import { runSupervisor, type SupervisorCommand, sendSupervisorCommand } from "./supervisor"
@@ -12,12 +16,11 @@ import { runSupervisor, type SupervisorCommand, sendSupervisorCommand } from "./
  * script, which pins the Bun version and manifest. `sixb deploy` reaches it over SSH.
  *
  *   supervise                       run the deployment's processes (the systemd unit's command)
- *   status [--json] [--check] [--candidate]
+ *   status [--json] [--check]
  *   logs [service] [--tail n] [--follow]
  *   restart|start|stop [service]
- *   stage <candidate-manifest>
- *   activate|discard
  *   run <staged> <path> [args...]   run an uploaded script with `sixb run`; see ./run.ts
+ *   release <plan>                  roll a release out, under the deploy lock; see ./release.ts
  */
 const argv = process.argv.slice(2)
 
@@ -29,6 +32,14 @@ try {
 }
 
 async function main(): Promise<void> {
+  if (argv[0] === "release") {
+    const planPath = argv[1]
+    if (!planPath) throw new Error("[SshTarget] Usage: release <plan>")
+    const plan = JSON.parse(await readFile(planPath, "utf8")) as ReleasePlan
+    await runRelease(plan, createReleaseHost(), { home: homedir(), user: userInfo().username })
+    return process.exit(0)
+  }
+
   // A script's arguments are anything, `--manifest` included; `ctl` appends the real one last.
   if (argv[0] === "run") {
     const [, staged, path, ...args] = argv.slice(0, -2)
@@ -64,18 +75,6 @@ async function main(): Promise<void> {
         )
       )
       return
-    case "stage":
-      if (!arg) throw new Error("[SshTarget] Usage: stage <candidate-manifest> --manifest <path>")
-      console.log(
-        await sendSupervisorCommand(await loadProcessManifest(manifestPath), "stage", {
-          manifestPath: arg,
-        })
-      )
-      return
-    case "activate":
-    case "discard":
-      console.log(await sendSupervisorCommand(await loadProcessManifest(manifestPath), command))
-      return
     default:
       throw new Error(`[SshTarget] Unknown command '${command ?? ""}'.`)
   }
@@ -84,7 +83,7 @@ async function main(): Promise<void> {
 async function status(manifest: ProcessManifest): Promise<void> {
   const state = await readProcessState(statePath(manifest))
   const running = state !== null && isPidRunning(state.supervisorPid)
-  const sourceInstances = flag("--candidate") ? (state?.staged ?? []) : (state?.instances ?? [])
+  const sourceInstances = state?.instances ?? []
   const report: DeployStatus = {
     release: await readRelease(manifest.releasePath),
     running,
@@ -109,9 +108,6 @@ async function status(manifest: ProcessManifest): Promise<void> {
       (process) => process.status !== "running" || process.restarts > 0
     )
     if (!running) console.error("The supervisor is not running.")
-    else if (flag("--candidate") && report.processes.length === 0) {
-      console.error("No candidate processes are staged.")
-    }
     for (const process of down) {
       const label =
         process.instance === 0 ? process.service : `${process.service}#${process.instance}`
@@ -119,7 +115,7 @@ async function status(manifest: ProcessManifest): Promise<void> {
         process.status === "running" ? `restarted ${process.restarts}x` : process.status
       console.error(`${label} ${stateText}${process.lastError ? `: ${process.lastError}` : ""}`)
     }
-    if (!running || down.length > 0 || (flag("--candidate") && report.processes.length === 0)) {
+    if (!running || down.length > 0) {
       process.exit(1)
     }
     return
