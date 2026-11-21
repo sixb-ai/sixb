@@ -9,7 +9,11 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { BlobStorageError } from "@sixb/core/blob-storage/server"
-import { createArtifactFrame, injectFrameAssets } from "@sixb/core/internal/artifacts/frames"
+import {
+  createArtifactFrame,
+  HYPERFRAMES_VERSION,
+  injectFrameAssets,
+} from "@sixb/core/internal/artifacts/frames"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -585,6 +589,200 @@ describe("a deck's frame", () => {
       expect(response.status, path).toBe(404)
       expectFrameHeaders(response, path)
     }
+  })
+})
+
+/** Keeps a ready proxy of the recording with `digest`, and returns the name a frame plays it by. */
+async function readyProxy(fixture: Fixture, digest: string, body: string): Promise<string> {
+  const proxy = await fixture.blobStorage.put({
+    body: new TextEncoder().encode(body),
+    fileName: "clip.proxy.mp4",
+    mediaType: "video/mp4",
+  })
+  const pending = { status: "pending" } as const
+  await artifactStorage(fixture.storage).putMedia({
+    projectId: PROJECT_ID,
+    digest,
+    parts: {
+      probe: pending,
+      proxy: { status: "ready", file: proxy },
+      poster: pending,
+      filmstrip: pending,
+      waveform: pending,
+      cuts: pending,
+      transcript: pending,
+    },
+    attempts: 1,
+    updatedAt: new Date(),
+  })
+  return proxy.digest.replace(/^sha256:/, "").slice(0, 16)
+}
+
+describe("a video's frame", () => {
+  const SCENE = `<template>
+  <div data-composition-id="intro" data-width="1280" data-height="720"><h1>Hello</h1></div>
+</template>`
+  const INDEX = `<!doctype html>
+<html><head><title>Film</title></head><body>
+<div data-composition-id="main" data-width="1280" data-height="720">
+  <div id="intro" data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2"></div>
+</div>
+</body></html>`
+
+  // Reproduce by leaving `video` out of frameLayout in frames/entries.ts: the mint answers 409.
+  test("serves its entry with its runtime and HyperFrames' own, its scenes as they are", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put("index.html", INDEX, "text/html"),
+      await fixture.put("scenes/intro.html", SCENE, "text/html"),
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    expect(minted.status).toBe(200)
+    const { path } = (await minted.json()) as { path: string }
+
+    // No kit: a video shows as HyperFrames renders it.
+    const html = await (await fixture.app.fetch(new Request(url(`${path}index.html`)))).text()
+    expect(html).toContain(
+      '<head><script src="__sixb/video.js"></script><script src="__sixb/hyperframes.js"></script><title>'
+    )
+    expect(html).not.toContain("stylesheet")
+
+    const scene = await fixture.app.fetch(new Request(url(`${path}scenes/intro.html`)))
+    expect(await scene.text()).toBe(SCENE)
+
+    const runtime = await fixture.app.fetch(new Request(url(`${path}__sixb/hyperframes.js`)))
+    expectFrameHeaders(runtime, "hyperframes.js")
+    expect(runtime.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+    const body = await runtime.text()
+    expect(body).toStartWith(
+      `/*! HyperFrames runtime ${HYPERFRAMES_VERSION}, from @hyperframes/core`
+    )
+    expect(body).toContain('"hf-preview"')
+  })
+
+  // Reproduce by dropping `rewriteVideoProxies` from frameResponse: the scene keeps playing the
+  // original once its proxy is ready.
+  test("plays each recording's proxy once it is ready, by its own name, in its scenes too", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = await fixture.put("media/clip.mov", "the original, 2 GB", "video/quicktime")
+    const scene = SCENE.replace("<h1>Hello</h1>", '<video src="../media/clip.mov" muted></video>')
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put(
+        "index.html",
+        INDEX.replace('data-height="720">', 'data-height="720" data-duration="2">').replace(
+          "</div>\n</body>",
+          '<audio src="media/clip.mov"></audio></div>\n</body>'
+        ),
+        "text/html"
+      ),
+      await fixture.put("scenes/intro.html", scene, "text/html"),
+      clip,
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    const { path } = (await minted.json()) as { path: string }
+    const read = async (file: string) =>
+      fixture.app.fetch(
+        new Request(url(`${path}${file}`), { headers: { "sec-fetch-dest": "video" } })
+      )
+
+    // Until it is ready, every recording plays its original.
+    expect(await (await read("scenes/intro.html")).text()).toBe(scene)
+
+    const name = await readyProxy(fixture, clip.file.digest, "the proxy, 20 MB")
+
+    // The path stays as written: HyperFrames resolves it from the scene's folder as before.
+    expect(await (await read("scenes/intro.html")).text()).toContain(
+      `<video src="../media/clip.mov?sixb-proxy=${name}" muted>`
+    )
+    expect(await (await read("index.html")).text()).toContain(
+      `<audio src="media/clip.mov?sixb-proxy=${name}">`
+    )
+
+    const played = await read(`media/clip.mov?sixb-proxy=${name}`)
+    expect(played.headers.get("content-type")).toBe("video/mp4")
+    expect(await played.text()).toBe("the proxy, 20 MB")
+    // The original's address keeps serving the original, and a name that is not the proxy's none.
+    expect(await (await read("media/clip.mov")).text()).toBe("the original, 2 GB")
+    expect((await read("media/clip.mov?sixb-proxy=0000000000000000")).status).toBe(404)
+  })
+
+  // Reproduce by leaving the frame's targets out of videoRecordings, or serving a lent file's
+  // proxy only for the video's own files in frameResponse: the scene keeps playing the borrowed
+  // 4K original, and the proxy's address answers 404. Drop the target check from the lent branch,
+  // and a reader issued no target for the footage gets its proxy all the same.
+  test("plays a recording another artifact lends it through its proxy, while its reader may read it", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const clip = await fixture.put("clip.mov", "the original, 4K", "video/quicktime")
+    const footage = await publish(fixture, alice, "file", [clip])
+    const id = footage.artifact.id
+    const scene = SCENE.replace(
+      "<h1>Hello</h1>",
+      `<video src="artifact:${id}/clip.mov" muted></video>`
+    )
+    const film = await publish(fixture, alice, "video", [
+      await fixture.put("index.html", INDEX, "text/html"),
+      await fixture.put("scenes/intro.html", scene, "text/html"),
+    ])
+    const minted = await mint(fixture, alice, film.artifact.id)
+    const { path } = (await minted.json()) as { path: string }
+    const read = async (frame: string, file: string) =>
+      fixture.app.fetch(
+        new Request(url(`${frame}${file}`), { headers: { "sec-fetch-dest": "video" } })
+      )
+    const lent = `__sixb/ref/${id}@latest/clip.mov`
+
+    // Until its proxy is ready, the borrowed recording plays its original.
+    expect(await (await read(path, "scenes/intro.html")).text()).toContain(
+      `<video src="../${lent}" muted data-sixb-ref="">`
+    )
+    expect(await (await read(path, lent)).text()).toBe("the original, 4K")
+
+    const name = await readyProxy(fixture, clip.file.digest, "the proxy, 720p")
+    expect(await (await read(path, "scenes/intro.html")).text()).toContain(
+      `<video src="../${lent}?sixb-proxy=${name}" muted data-sixb-ref="">`
+    )
+    const played = await read(path, `${lent}?sixb-proxy=${name}`)
+    expect(played.headers.get("content-type")).toBe("video/mp4")
+    expect(await played.text()).toBe("the proxy, 720p")
+    expect(await (await read(path, lent)).text()).toBe("the original, 4K")
+    expect((await read(path, `${lent}?sixb-proxy=0000000000000000`)).status).toBe(404)
+
+    // A reader who may read the film but not the footage is issued no target for it: their frame
+    // serves neither the original nor its proxy, and names neither.
+    const artifacts = artifactStorage(fixture.storage)
+    const version = await artifacts.getVersion({
+      projectId: PROJECT_ID,
+      artifactId: film.artifact.id,
+      version: 1,
+    })
+    if (!version) throw new Error("Expected the film's version.")
+    const unlent = await createArtifactFrame({
+      projectId: PROJECT_ID,
+      storage: artifacts,
+      version,
+      read: async () => null,
+    })
+    const html = await (await read(unlent.path, "scenes/intro.html")).text()
+    expect(html).toContain('<video muted data-sixb-ref="unavailable">')
+    expect(html).not.toContain("sixb-proxy")
+    expect((await read(unlent.path, lent)).status).toBe(404)
+    expect((await read(unlent.path, `${lent}?sixb-proxy=${name}`)).status).toBe(404)
+  })
+
+  test("lets the runtime load from the frame alone, and play its version's media", async () => {
+    // Its scenes and recordings are the version's files: the policy needs nothing beyond them.
+    const { app, frame } = await deck()
+    const response = await app.fetch(new Request(url(`${frame.path}__sixb/hyperframes.js`)))
+    const policy = response.headers.get("content-security-policy") ?? ""
+    const base = `http://api.localhost${frame.path}`
+    expect(policy).toContain(`script-src ${base} 'unsafe-inline'`)
+    expect(policy).toContain(`media-src ${base} data: blob:`)
+    expect(policy).toContain(`connect-src ${base}`)
+    expect(policy).toContain("sandbox allow-scripts allow-modals")
+    expect(policy).not.toContain("allow-same-origin")
   })
 })
 

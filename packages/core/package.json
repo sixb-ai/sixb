@@ -544,10 +544,12 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "generate:hyperframes-runtime": "bun ./scripts/generate-hyperframes-runtime.ts",
     "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/published-artifacts.e2e.ts ./tests/browser-entries.e2e.ts",
     "prepack": "bun run build"
   },
   "devDependencies": {
+    "@hyperframes/core": "0.9.68",
     "@types/bun": "latest",
     "@types/mdast": "4.0.4",
     "happy-dom": "^20.11.6",

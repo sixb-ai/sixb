@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
-import { quoteArtifactComment } from "../src/artifacts"
+import { placeVideoComment, quoteArtifactComment } from "../src/artifacts"
 import { parseArtifactAddress } from "../src/artifacts/address"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import type { VideoOutline } from "../src/artifacts/outline"
@@ -9,6 +9,7 @@ import { resolveArtifactAddress } from "../src/artifacts/resolve"
 import { readVideoComposition, videoFilePath } from "../src/artifacts/video/composition"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { inferFileMediaType } from "../src/blob-storage/internal"
+import type { ArtifactCommentAnchor } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -182,6 +183,29 @@ describe("a video's composition", () => {
 
     const longer = root.replace('data-duration="7">', 'data-duration="9">')
     expect(composed({ ...LAUNCH, "index.html": longer }).durationMs).toBe(9000)
+  })
+
+  test("shows the instant its root's data-poster names before it plays, within its length", () => {
+    const root = LAUNCH["index.html"] ?? ""
+    const poster = (value: string) =>
+      read({
+        ...LAUNCH,
+        "index.html": root.replace(
+          'data-duration="7">',
+          `data-duration="7" data-poster="${value}">`
+        ),
+      })
+
+    expect(composed(LAUNCH).posterMs).toBeUndefined()
+    expect(poster("2.4")).toMatchObject({ composition: { posterMs: 2400 } })
+    expect(poster("0")).toMatchObject({ composition: { posterMs: 0 } })
+    for (const outside of ["7", "-1", "soon"]) {
+      expect(poster(outside)).toEqual({
+        error: expect.stringContaining(
+          `the root composition's data-poster is the instant that shows the video before it plays, in seconds from 0 up to its length of 7 s, such as 2.5; it is "${outside}".`
+        ),
+      })
+    }
   })
 
   test("lists what each scene and the root play, where each is written", () => {
@@ -473,7 +497,7 @@ function setup() {
     kind: "video" | "document" | "page" = "video"
   ) => sixb.artifacts.create({ kind, title: "Launch film", files: await files(contents) })
 
-  return { sixb, publish }
+  return { sixb, publish, files }
 }
 
 async function refusal(promise: Promise<unknown>): Promise<string> {
@@ -551,6 +575,21 @@ describe("publishing a video", () => {
       const keys = await after(changes)
       for (const id of ["intro", "demo", "outro"]) expect(keys[id]).not.toBe(before[id])
     }
+  })
+
+  // Removal proof: drop `data-poster` from what sceneRenderKeys cuts from the root, and moving the
+  // poster renders every scene again.
+  test("outlines its poster's instant, which renders no scene again", async () => {
+    const { publish } = setup()
+    const before = (await publish(LAUNCH)).version.outline
+    const root = (LAUNCH["index.html"] ?? "").replace(
+      'data-duration="7">',
+      'data-duration="7" data-poster="2.4">'
+    )
+    const after = (await publish({ ...LAUNCH, "index.html": root })).version.outline
+
+    expect(after).toMatchObject({ kind: "video", posterMs: 2400 })
+    expect(keysOf(after)).toEqual(keysOf(before))
   })
 
   // Removal proof: let sceneRenderKeys hash all of index.html instead of `root`, and trimming the
@@ -793,7 +832,7 @@ describe("publishing a video", () => {
     [
       "a scene past its size",
       { "scenes/intro.html": scene("intro", "x".repeat(ARTIFACT_LIMITS.maxSceneBytes)) },
-      `; it may be at most ${ARTIFACT_LIMITS.maxSceneBytes}`,
+      `each of a video's HTML files holds at most ${ARTIFACT_LIMITS.maxSceneBytes}`,
     ],
   ] satisfies [
     string,
@@ -818,6 +857,17 @@ describe("publishing a video", () => {
     // The launch film plays one clip and one soundtrack already: two more than enough.
     expect(await refusal(publish({ ...LAUNCH, ...clips }))).toContain(
       "A video holds at most 50 video and sound files; this one has 52"
+    )
+  })
+
+  // Guard proof: drop refuseLargePages from validateVideo; a page no scene names is never read,
+  // and the version publishes.
+  test(`refuses an HTML file over ${ARTIFACT_LIMITS.maxSceneBytes} bytes that no scene names`, async () => {
+    const { publish } = setup()
+    const notes = "x".repeat(ARTIFACT_LIMITS.maxSceneBytes + 1)
+
+    expect(await refusal(publish({ ...LAUNCH, "notes/transcript.htm": notes }))).toContain(
+      `'notes/transcript.htm' is ${ARTIFACT_LIMITS.maxSceneBytes + 1} bytes: each of a video's HTML files holds at most ${ARTIFACT_LIMITS.maxSceneBytes}.`
     )
   })
 })
@@ -885,29 +935,112 @@ describe("an address into a video", () => {
 })
 
 describe("comments on a video", () => {
+  /** A comment as a quote names it, without its id. */
+  const quoted = ({ anchor, body }: { anchor: ArtifactCommentAnchor; body: string }) => ({
+    anchor,
+    body,
+  })
+
   test("are about an instant, the scene it plays, and a point on the frame", async () => {
     const { sixb, publish } = setup()
-    const { artifact } = await publish(LAUNCH)
+    const { artifact, version } = await publish(LAUNCH)
 
     const comment = await sixb.artifacts.addComment(artifact.id, {
       body: "Hold the logo longer",
       anchor: { at: 6200, scene: "outro", point: { x: 0.5, y: 0.4 } },
     })
     expect(comment.anchor).toEqual({
-      at: 6200,
       scene: "outro",
+      label: "Thanks",
+      offset: 700,
       point: { x: 0.5, y: 0.4 },
       revision: 1,
     })
-    expect(quoteArtifactComment({ anchor: comment.anchor, body: comment.body })).toBe(
-      "[0:06 · outro · revision 1] Hold the logo longer"
-    )
+    expect(
+      quoteArtifactComment({ ...quoted(comment), outline: version.outline as VideoOutline })
+    ).toBe("[0:06 · outro · revision 1] Hold the logo longer")
+
+    // An instant that names no scene is kept in the one playing then.
+    const unnamed = await sixb.artifacts.addComment(artifact.id, {
+      body: "Slower",
+      anchor: { at: 3000 },
+    })
+    expect(unnamed.anchor).toEqual({ scene: "demo", offset: 1000, revision: 1 })
 
     const scene = await sixb.artifacts.addComment(artifact.id, {
       body: "Too fast",
       anchor: { scene: "demo" },
     })
     expect(scene.anchor).toEqual({ scene: "demo", revision: 1 })
+  })
+
+  // Guard proof: give a comment the scene that started last before its instant in checkScenePlace
+  // (`outline.scenes.filter((each) => each.startMs <= at).at(-1)`), as the player once did, and
+  // the one between the demo and the outro is kept 3.2 s into the 3 s demo.
+  test("are about any instant, one between two scenes in none", async () => {
+    const { sixb, publish } = setup()
+    const { artifact, version } = await publish(LAUNCH)
+
+    // The demo ends at 5 s, and the outro starts half a second later.
+    const gap = await sixb.artifacts.addComment(artifact.id, { body: "Hold", anchor: { at: 5200 } })
+    expect(gap.anchor).toEqual({ at: 5200, revision: 1 })
+    expect(quoteArtifactComment({ ...quoted(gap), outline: version.outline as VideoOutline })).toBe(
+      "[0:05 · revision 1] Hold"
+    )
+  })
+
+  // Guard proof: keep `at` as it is sent in checkScenePlace (`{ at, scene }`), and the comment
+  // stays at 30.5 s once the demo is cut, 13 s into the outro.
+  test("follow their scene when a later version moves it, and say when it is gone", async () => {
+    const { sixb, publish, files } = setup()
+    const film = (demo: number, outro = "15") => ({
+      ...LAUNCH,
+      "index.html": index([
+        host("intro", "0", "2"),
+        host("demo", "intro", String(demo)),
+        host("outro", "demo + 0.5", outro, ' data-label="Thanks"'),
+      ]),
+    })
+    const { artifact } = await publish(film(18))
+    const comment = await sixb.artifacts.addComment(artifact.id, {
+      body: "Hold the logo longer",
+      anchor: { at: 30_500, scene: "outro" },
+    })
+    const update = async (contents: Readonly<Record<string, string>>) => {
+      const { version } = await sixb.artifacts.update(artifact.id, {
+        kind: "video",
+        title: "Launch film",
+        files: await files(contents),
+      })
+      return version.outline as VideoOutline
+    }
+    const [kept] = (await sixb.artifacts.listComments(artifact.id)) ?? []
+    expect(kept?.anchor).toEqual(comment.anchor)
+
+    // Three seconds cut from the demo: the outro starts at 17.5 s, and the comment 10 s into it.
+    const cut = await update(film(15))
+    expect(placeVideoComment(comment.anchor, cut)).toMatchObject({
+      ms: 27_500,
+      scene: { id: "outro" },
+    })
+    expect(quoteArtifactComment({ ...quoted(comment), outline: cut })).toBe(
+      "[0:27 · outro · revision 1] Hold the logo longer"
+    )
+
+    // An outro shorter than the comment's offset holds it at its end.
+    expect(placeVideoComment(comment.anchor, await update(film(15, "4")))).toMatchObject({
+      ms: 21_500,
+    })
+
+    // Without the outro, it has no instant, and its label names the scene it was in.
+    const gone = await update({ ...film(15), "index.html": index([host("intro", "0", "2")]) })
+    expect(placeVideoComment(comment.anchor, gone)).toEqual({ gone: true })
+    expect(quoteArtifactComment({ ...quoted(comment), outline: gone })).toBe(
+      '[outro · "Thanks" · no longer in the video · revision 1] Hold the logo longer'
+    )
+    expect(quoteArtifactComment(quoted(comment))).toBe(
+      "[0:10 into outro · revision 1] Hold the logo longer"
+    )
   })
 
   // Guard proof: return `{ ...anchor }` from checkScenePlace in comments.ts, and each is kept.
@@ -918,7 +1051,7 @@ describe("comments on a video", () => {
     [{ at: 1.5 }, "`at` is 0 to 7000 milliseconds"],
     [{ point: { x: 0.5, y: 0.5 } }, "A comment's point is on the frame at its instant"],
     [{ at: 1000, point: { x: 1.5, y: 0.5 } }, "x and y from 0 to 1"],
-    [{ at: 1000, scene: "outro" }, "Scene 'outro' plays from 5500 to 7000 milliseconds"],
+    [{ at: 5200, scene: "demo" }, "Scene 'demo' plays from 2000 to 5000 milliseconds"],
     [{ board: "intro" }, "A comment on a video is about an instant or a scene, not a board."],
   ])("refuses an anchor %o", async (anchor, message) => {
     const { sixb, publish } = setup()

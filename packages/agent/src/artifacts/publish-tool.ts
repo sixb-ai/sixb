@@ -367,8 +367,10 @@ async function publish(
     }
   }
   // A published deck, page, designed document, or canvas is laid out in the sandbox's browser, so
-  // the Agent sees what the reader will, and fixes it in its next update.
-  const layout = frameLayout(version)
+  // the Agent sees what the reader will, and fixes it in its next update. A video plays rather
+  // than lays out: this check reads none.
+  const framed = frameLayout(version)
+  const layout = framed === "video" ? null : framed
   const { outline, entry } = version
   const root = layout ? sources.find((source) => source.path === entry) : undefined
   // A merged version is checked from its installed copy, which holds what it holds.

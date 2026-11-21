@@ -277,7 +277,9 @@ into it, as when the reader picks what to comment on.
 
 Whoever reads an artifact reads its comments and adds their own. A comment on a canvas can be about
 a board, or an element of one; a comment on a video, about an instant (`at`, in milliseconds), its
-scene, and a `point` on the frame. Its author, or anyone who may change the artifact, resolves or
+scene, and a `point` on the frame. Within a scene, the instant is kept as an `offset` into it, so
+the comment follows the scene when a later version moves it; `placeVideoComment` places it in a
+version. Its author, or anyone who may change the artifact, resolves or
 deletes it. Replies go one level deep. A copy of the artifact, such as a forked conversation's,
 keeps no comments.
 
@@ -810,6 +812,8 @@ media/<name>        the footage, sound, and images the scenes play
   length, and `data-label` its name as a chapter.
 - A root that plays something itself, such as a soundtrack, gives its own `data-duration`. No
   scene ends a frame or more after a root's `data-duration`.
+- The root's `data-poster="2.5"` names the instant, in seconds, the video shows before it plays.
+  Without one, it shows a moment late in its first scene.
 - A scene file's composition has its host's `data-composition-id`, the scene's id in addresses
   and comments. Every file a scene plays or nests is one of the version's; one it plays may also
   be another artifact's, by its address.
@@ -818,8 +822,18 @@ media/<name>        the footage, sound, and images the scenes play
   a side, in even numbers, at 24, 25, 30, 50, or 60 frames a second, 30 by default. Each HTML file
   is at most 1 MiB, and a version holds at most 50 video and sound files.
 
-The app lists a video's scenes as chapters, each at its time. The Agent revises a video someone
-made, and does not start one.
+The app plays a video as HyperFrames does, in a sandboxed frame, with the runtime release the
+agent image renders with (0.9.68):
+
+- Its scenes are its chapters, on the timeline and beside the player.
+- A comment is placed on the paused frame, at any instant: it keeps its scene, how far into it,
+  and the point clicked. Once a scene is cut or moved, its comments move with it; one on a scene
+  that is gone says so.
+- Keys: Space or K, J and L (10 s), ← and → (5 s, a frame with Shift while paused), `,` and `.`
+  (a frame), Home, End, M (mute), F (fullscreen), C (comment).
+- Settings › Copy link gives a link that opens the video at the instant shown.
+
+The Agent revises a video someone made, and does not start one.
 
 ## Declare a query
 

@@ -41,7 +41,7 @@ export const PresenceLayer = memo(function PresenceLayer({
 }) {
   const messages = useArtifactMessages().canvas.live
   const all = useArtifactMessages()
-  const guestLabel = all.canvas.comments.guest
+  const guestLabel = all.comments.guest
   const labels = { guest: guestLabel, teamMember: all.live.teamMember }
   const { peers, agents } = useLivePresence(live)
 

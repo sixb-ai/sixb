@@ -31,6 +31,7 @@ import {
   createArtifactAccessRule,
   type HolderAccess,
 } from "./access"
+import { parseArtifactAddress } from "./address"
 import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
 import { documentMarks, fillDocumentHtml, frozenDocumentHtml } from "./document-fill"
 import { ArtifactRequestError } from "./errors"
@@ -700,8 +701,13 @@ export function createArtifactsRuntime(
     const storage = runtime.storage.artifacts
     if (!options.rendersInSandboxes || !storage) return
 
-    // Each video and sound of any kind, once for every file with its bytes.
-    await requestArtifactMedia(mediaContext(storage), version)
+    // Each video and sound of any kind, once for every file with its bytes, and each a video
+    // plays from another artifact: its frame plays their proxies too.
+    const borrowed = await borrowedRecordings(version)
+    await requestArtifactMedia(mediaContext(storage), {
+      ...version,
+      files: [...version.files, ...borrowed],
+    })
 
     // Its queries are answered as whoever published it, who is this runtime's caller.
     await requestBoardPreviews(
@@ -714,6 +720,33 @@ export function createArtifactsRuntime(
       version,
       requestOptions
     )
+  }
+
+  /**
+   * The videos and sounds a video plays from other artifacts, at the versions its addresses
+   * resolved to when it was published, as the caller reads them. One that cannot be read now is
+   * left out: it plays as it is.
+   */
+  const borrowedRecordings = async (version: ArtifactVersionRecord): Promise<ArtifactFile[]> => {
+    if (version.outline.kind !== "video") return []
+
+    const recordings: ArtifactFile[] = []
+    try {
+      for (const reference of version.references) {
+        const address = parseArtifactAddress(reference.address)
+        if (reference.as !== "embed" || !address?.path) continue
+
+        const lender = await readVersion(address.artifactId, reference.resolvedVersion)
+        const file = lender?.version.files.find((candidate) => candidate.path === address.path)
+        if (file && isMediaFile(file)) recordings.push(file)
+      }
+    } catch (error) {
+      console.error(
+        `[Sixb] Could not read the recordings version ${version.version} of '${version.artifactId}' plays from other artifacts; they play as they are.`,
+        error
+      )
+    }
+    return recordings
   }
 
   /** The artifact with what the caller may do with it; `null` when there is none. */

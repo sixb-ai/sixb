@@ -61,14 +61,17 @@ export function sceneRenderKeys(input: {
   const { index, composition, files, rootLoads, rootTimeline, loads } = input
   const { scenes } = composition
 
-  // A sound shows in no frame: the root's `<audio>` elements are left out, each with the space
-  // before it, so a soundtrack added, moved, or trimmed with the video leaves the root's text as
-  // it was.
-  const durationAt = composition.root.attributes["data-duration"]
+  // Its length and its poster's instant change no frame a scene renders, and a sound shows in
+  // none: the root's `<audio>` elements are left out too. Each goes with the space before it, so a
+  // root that writes one and a root that does not are the same text, and a soundtrack added,
+  // moved, or trimmed with the video leaves it as it was.
+  const { attributes } = composition.root
   const root = cut(index, [
     ...scenes.map((scene) => ({ ...scene.host.element, with: HOST_PLACE })),
-    ...(durationAt ? [{ ...durationAt, with: "" }] : []),
-    ...composition.sounds.map((sound) => ({ ...withSpaceBefore(index, sound), with: "" })),
+    ...[
+      ...(["data-duration", "data-poster"] as const).flatMap((name) => attributes[name] ?? []),
+      ...composition.sounds,
+    ].map((span) => ({ ...withSpaceBefore(index, span), with: "" })),
   ])
 
   const sceneFiles = new Set(scenes.map((scene) => scene.src))
@@ -108,7 +111,7 @@ export function sceneRenderKeys(input: {
 
       const key = [
         RENDER_KEY_FORMAT,
-        frameKitDigest(),
+        frameKitDigest("video"),
         scene.id,
         sha256(root),
         beside.map((each) => [hostOf(each), each.startMs - scene.startMs, each.durationMs]),

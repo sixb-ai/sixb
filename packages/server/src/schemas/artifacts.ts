@@ -103,6 +103,11 @@ const VideoOutlineSchema = z.object({
   height: z.number().int().describe("The frame's height, in pixels"),
   fps: z.number().int().describe("Frames a second"),
   durationMs: z.number().int(),
+  posterMs: z
+    .number()
+    .int()
+    .optional()
+    .describe("The instant that shows it before it plays: its root's data-poster"),
   scenes: z
     .array(
       z.object({
@@ -621,14 +626,26 @@ const ArtifactCommentAnchorSchema = z.object({
     .string()
     .max(1000)
     .optional()
-    .describe("The element's first words, which name it once it is gone; kept to 120 characters"),
+    .describe(
+      "The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters"
+    ),
   at: z
     .number()
     .int()
     .min(0)
     .optional()
-    .describe("The video's instant it is about, in milliseconds from its start"),
+    .describe(
+      "The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`"
+    ),
   scene: z.string().max(200).optional().describe("The id of the video's scene it is about"),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter"
+    ),
   point: z
     .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
     .optional()
@@ -679,10 +696,11 @@ export const ArtifactCommentParamsSchema = ArtifactParamsSchema.extend({
 
 export const AddArtifactCommentBodySchema = z.object({
   body: z.string().min(1).max(4_000).describe("Plain text"),
-  anchor: ArtifactCommentAnchorSchema.partial()
+  anchor: ArtifactCommentAnchorSchema.omit({ offset: true })
+    .partial()
     .optional()
     .describe(
-      "What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+      "What it is about: a board, an element of the board, a video's instant in its latest version and the scene playing then, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
     ),
   parentId: z.string().min(1).max(64).optional().describe("The comment it replies to"),
 })

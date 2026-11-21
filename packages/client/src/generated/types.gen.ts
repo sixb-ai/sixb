@@ -21390,6 +21390,10 @@ export type CreateArtifactResponses = {
             fps: number
             durationMs: number
             /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
+            /**
              * Its scenes, in the order they start
              */
             scenes: Array<{
@@ -22691,6 +22695,10 @@ export type UpdateArtifactResponses = {
             fps: number
             durationMs: number
             /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
+            /**
              * Its scenes, in the order they start
              */
             scenes: Array<{
@@ -23075,6 +23083,10 @@ export type FreezeArtifactVersionResponses = {
             fps: number
             durationMs: number
             /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
+            /**
              * Its scenes, in the order they start
              */
             scenes: Array<{
@@ -23268,17 +23280,21 @@ export type ListArtifactCommentsResponses = {
          */
         element?: string
         /**
-         * The element's first words, which name it once it is gone; kept to 120 characters
+         * The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters
          */
         label?: string
         /**
-         * The video's instant it is about, in milliseconds from its start
+         * The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`
          */
         at?: number
         /**
          * The id of the video's scene it is about
          */
         scene?: string
+        /**
+         * How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter
+         */
+        offset?: number
         /**
          * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
          */
@@ -23339,7 +23355,7 @@ export type AddArtifactCommentData = {
      */
     body: string
     /**
-     * What it is about: a board, an element of the board, a video's instant and scene, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to.
+     * What it is about: a board, an element of the board, a video's instant in its latest version and the scene playing then, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to.
      */
     anchor?: {
       /**
@@ -23351,11 +23367,11 @@ export type AddArtifactCommentData = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone; kept to 120 characters
+       * The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters
        */
       label?: string
       /**
-       * The video's instant it is about, in milliseconds from its start
+       * The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`
        */
       at?: number
       /**
@@ -23537,17 +23553,21 @@ export type AddArtifactCommentResponses = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone; kept to 120 characters
+       * The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters
        */
       label?: string
       /**
-       * The video's instant it is about, in milliseconds from its start
+       * The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`
        */
       at?: number
       /**
        * The id of the video's scene it is about
        */
       scene?: string
+      /**
+       * How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter
+       */
+      offset?: number
       /**
        * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
        */
@@ -23742,17 +23762,21 @@ export type ResolveArtifactCommentResponses = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone; kept to 120 characters
+       * The element's first words, or the video scene's label: what names it once it is gone; kept to 120 characters
        */
       label?: string
       /**
-       * The video's instant it is about, in milliseconds from its start
+       * The video's instant it is about, in milliseconds from its start. Kept only for an instant that plays no scene, between two or past the last: one within a scene is kept as `offset`
        */
       at?: number
       /**
        * The id of the video's scene it is about
        */
       scene?: string
+      /**
+       * How far into `scene` its instant is, in milliseconds: it follows the scene in later versions, and stops at its end once it is shorter
+       */
+      offset?: number
       /**
        * Where its pin is, as fractions of the width and height from the top left: on the board, or on the video's frame at its instant
        */
@@ -24314,6 +24338,10 @@ export type GetArtifactRestorePointResponses = {
           fps: number
           durationMs: number
           /**
+           * The instant that shows it before it plays: its root's data-poster
+           */
+          posterMs?: number
+          /**
            * Its scenes, in the order they start
            */
           scenes: Array<{
@@ -24708,6 +24736,10 @@ export type RestoreArtifactResponses = {
              */
             fps: number
             durationMs: number
+            /**
+             * The instant that shows it before it plays: its root's data-poster
+             */
+            posterMs?: number
             /**
              * Its scenes, in the order they start
              */
@@ -25151,6 +25183,10 @@ export type GetArtifactVersionResponses = {
            */
           fps: number
           durationMs: number
+          /**
+           * The instant that shows it before it plays: its root's data-poster
+           */
+          posterMs?: number
           /**
            * Its scenes, in the order they start
            */

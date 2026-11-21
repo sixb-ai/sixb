@@ -1,13 +1,21 @@
-import type { ArtifactFrameTarget } from "../../storage/artifacts/types"
+import type {
+  ArtifactFile,
+  ArtifactFrameTarget,
+  ArtifactMediaRecord,
+} from "../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { decodeHtmlEntities, HTML_FILE_ATTRIBUTES } from "../html"
+import { mediaProxyReference } from "../media/media"
 import type { DocumentHeading } from "../outline"
 import type { DocumentPaper } from "../paper"
 import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
+import { videoFilePath } from "../video/composition"
 import { documentData } from "./document-data"
 import type { FrameLayout } from "./entries"
+import { HYPERFRAMES_RUNTIME } from "./hyperframes"
 import { FRAME_DECK_CSS, FRAME_DOCUMENT_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
+import { videoFrameRuntime } from "./video-runtime"
 
 /**
  * Hosts a frame may load from besides its own files: CSS and script libraries and web fonts, Google
@@ -24,11 +32,14 @@ export const FRAME_CDN_ALLOWLIST = [
 
 /**
  * The files a frame gets besides the version's own, under `__sixb/`, which a version may not use:
- * a kit per layout, and the runtime. The server serves them to the app's frames, and the Agent's
- * layout check serves them to its browser, so both lay a version out the same way.
+ * a kit per layout, the runtime, and a video's runtimes. The server serves them to the app's
+ * frames, and the Agent's layout check serves them to its browser, so both lay a version out the
+ * same way. Their bodies are in the render keys (`frameKitDigest`): a file with a `layout` is
+ * loaded by that layout's frames alone, and only that layout's keys take it in, so a new
+ * HyperFrames release renders every video again, and no deck, page or document.
  */
 export const FRAME_ASSETS: Readonly<
-  Record<string, { readonly body: string; readonly type: string }>
+  Record<string, { readonly body: string; readonly type: string; readonly layout?: FrameLayout }>
 > = {
   [`${FRAME_ASSET_PREFIX}deck.css`]: { body: FRAME_DECK_CSS, type: "text/css; charset=utf-8" },
   [`${FRAME_ASSET_PREFIX}page.css`]: { body: FRAME_PAGE_CSS, type: "text/css; charset=utf-8" },
@@ -40,13 +51,31 @@ export const FRAME_ASSETS: Readonly<
     body: `(${frameRuntime.toString()})(${documentData.toString()})\n`,
     type: "text/javascript; charset=utf-8",
   },
+  [`${FRAME_ASSET_PREFIX}video.js`]: {
+    body: `(${videoFrameRuntime.toString()})()\n`,
+    type: "text/javascript; charset=utf-8",
+    layout: "video",
+  },
+  [`${FRAME_ASSET_PREFIX}hyperframes.js`]: {
+    body: HYPERFRAMES_RUNTIME,
+    type: "text/javascript; charset=utf-8",
+    layout: "video",
+  },
 }
 
 /**
  * The kit for the layout and the runtime, which reads the layout from its own tag, and a designed
  * document's paper: its width, height, and margins, top, right, bottom and left, in pixels.
+ *
+ * A video gets no kit and runtimes of its own: its scenes show as HyperFrames renders them, so
+ * what the app plays is what an export renders. HyperFrames' runtime comes right after the
+ * frame's, before the scenes' scripts, as its own player puts it.
  */
 function injected(layout: FrameLayout, base: string, paper?: DocumentPaper): string {
+  if (layout === "video") {
+    return `<script src="${base}${FRAME_ASSET_PREFIX}video.js"></script><script src="${base}${FRAME_ASSET_PREFIX}hyperframes.js"></script>`
+  }
+
   const sheet = paper
     ? ` data-sixb-paper="${[paper.width, paper.height, paper.margin.top, paper.margin.right, paper.margin.bottom, paper.margin.left].join(" ")}"`
     : ""
@@ -162,4 +191,37 @@ export function rewriteFrameReferences(
     })
   }
   return rewriter.transform(html)
+}
+
+/**
+ * Points each recording a video's HTML file plays, a `<video>`'s, an `<audio>`'s or a
+ * `<source>`'s, at its proxy once one is ready: the path as written, with the proxy's name in its
+ * query, as `mediaProxyReference` names it, so HyperFrames finds the proxy wherever it finds the
+ * original. A recording with no ready proxy plays its original. `path` is where the file is in
+ * the version: its references are read from there, as HyperFrames reads them.
+ */
+export function rewriteVideoProxies(
+  html: string,
+  path: string,
+  files: readonly ArtifactFile[],
+  media: ReadonlyMap<string, ArtifactMediaRecord>
+): string {
+  const held = new Map(files.map((file) => [file.path, file]))
+  return new HTMLRewriter()
+    .on("video[src], audio[src], source[src]", {
+      element(element) {
+        const written = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
+        const target = videoFilePath(path, written, (candidate) => held.has(candidate))
+        const file = target === undefined ? undefined : held.get(target)
+        const proxy = file ? mediaProxyReference(file, media.get(file.file.digest)) : null
+        if (!proxy) return
+
+        // Only the query: the path stays as written, which HyperFrames resolves as it did.
+        element.setAttribute(
+          "src",
+          `${written.replace(/[?#].*$/, "")}${proxy.slice(proxy.indexOf("?"))}`
+        )
+      },
+    })
+    .transform(html)
 }
