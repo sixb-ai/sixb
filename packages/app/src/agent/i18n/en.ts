@@ -149,6 +149,8 @@ export const en = {
     replies: (count: number) => (count === 1 ? "1 reply" : `${count} replies`),
     /** A context entry with no readable name. */
     unnamed: "Context",
+    /** An artifact's chip while its title loads, or when it cannot be read. */
+    artifact: "Artifact",
   },
   models: {
     unavailable: "Models unavailable",

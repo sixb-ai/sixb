@@ -28926,6 +28926,28 @@
                                     "properties": {
                                       "kind": {
                                         "type": "string",
+                                        "enum": ["artifact"]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200,
+                                        "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                      }
+                                    },
+                                    "required": ["kind", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
                                         "enum": ["app-state"]
                                       },
                                       "id": {
@@ -43433,6 +43455,28 @@
                                           "properties": {
                                             "kind": {
                                               "type": "string",
+                                              "enum": ["artifact"]
+                                            },
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200,
+                                              "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                            }
+                                          },
+                                          "required": ["kind", "id"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
                                               "enum": ["app-state"]
                                             },
                                             "id": {
@@ -44106,6 +44150,28 @@
                               "properties": {
                                 "kind": {
                                   "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
                                   "enum": ["app-state"]
                                 },
                                 "id": {
@@ -44314,6 +44380,28 @@
                               "properties": {
                                 "kind": {
                                   "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
                                   "enum": ["app-state"]
                                 },
                                 "id": {
@@ -44515,6 +44603,28 @@
                                 }
                               },
                               "required": ["kind", "ref"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
                               "additionalProperties": false
                             },
                             {
@@ -45571,6 +45681,28 @@
                                           }
                                         },
                                         "required": ["kind", "ref"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["artifact"]
+                                          },
+                                          "id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200,
+                                            "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                          }
+                                        },
+                                        "required": ["kind", "id"],
                                         "additionalProperties": false
                                       },
                                       {
@@ -46999,6 +47131,28 @@
                                           "properties": {
                                             "kind": {
                                               "type": "string",
+                                              "enum": ["artifact"]
+                                            },
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200,
+                                              "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                            }
+                                          },
+                                          "required": ["kind", "id"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
                                               "enum": ["app-state"]
                                             },
                                             "id": {
@@ -48330,6 +48484,28 @@
                                         "properties": {
                                           "kind": {
                                             "type": "string",
+                                            "enum": ["artifact"]
+                                          },
+                                          "id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200,
+                                            "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                          }
+                                        },
+                                        "required": ["kind", "id"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
                                             "enum": ["app-state"]
                                           },
                                           "id": {
@@ -49146,6 +49322,28 @@
                               "properties": {
                                 "kind": {
                                   "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
                                   "enum": ["app-state"]
                                 },
                                 "id": {
@@ -49346,6 +49544,28 @@
                               "properties": {
                                 "kind": {
                                   "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
                                   "enum": ["app-state"]
                                 },
                                 "id": {
@@ -49539,6 +49759,28 @@
                                 }
                               },
                               "required": ["kind", "ref"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["artifact"]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                }
+                              },
+                              "required": ["kind", "id"],
                               "additionalProperties": false
                             },
                             {
@@ -50591,6 +50833,28 @@
                                           }
                                         },
                                         "required": ["kind", "ref"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["artifact"]
+                                          },
+                                          "id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200,
+                                            "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                          }
+                                        },
+                                        "required": ["kind", "id"],
                                         "additionalProperties": false
                                       },
                                       {
@@ -60190,6 +60454,28 @@
                                             }
                                           },
                                           "required": ["kind", "ref"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": ["artifact"]
+                                            },
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "The artifact the person has open, such as art_k3m9q2x7tp"
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200,
+                                              "description": "Shown in the chat instead of the artifact's title. Never sent to the model."
+                                            }
+                                          },
+                                          "required": ["kind", "id"],
                                           "additionalProperties": false
                                         },
                                         {

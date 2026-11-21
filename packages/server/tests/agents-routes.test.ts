@@ -13,6 +13,7 @@ import {
   InMemoryStorage,
   param,
   prop,
+  resolveAuthorizationContext,
   SixbHost,
 } from "@sixb/core"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
@@ -165,6 +166,11 @@ function createApp(options: { readonly auth?: boolean; readonly sandbox?: boolea
   )
 
   return { app, sixb, storage, queues }
+}
+
+/** An artifact as the message context names it. */
+function agentContextOf(id: string) {
+  return { kind: "artifact", id } as const
 }
 
 async function seedSession(
@@ -470,7 +476,76 @@ describe("agent routes", () => {
     })
   })
 
+  // Reproduce by leaving the artifact branch out of resolveAgentContextParts
+  // (agents/context-resolution.ts): Bob's message names Alice's draft, and the Agent reads its id.
+  test("takes an artifact the sender reads as context, and refuses one they cannot", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    const asAlice = createTestSixb(sixb, {
+      authorization: resolveAuthorizationContext({
+        principal: { type: "user", id: "usr_alice" },
+        groupIds: ["support-users"],
+        roles: sixb.definitions.security.listResolvedRoles(),
+      }),
+    })
+    const file = await createTestSixb(sixb).blobs.put({
+      body: new TextEncoder().encode("# Draft"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const draft = await asAlice.artifacts.create({
+      kind: "document",
+      title: "Draft",
+      files: [{ path: "document.md", file }],
+    })
+    const context = [{ context: agentContextOf(draft.artifact.id), origin: "ambient" as const }]
+
+    const send = async (session: Awaited<ReturnType<typeof seedSession>>) => {
+      const created = await app.fetch(
+        jsonRequest("/api/agent-threads", "POST", {}, session.csrfHeaders)
+      )
+      const { thread } = (await created.json()) as { thread: { id: string } }
+      const response = await app.fetch(
+        jsonRequest(
+          `/api/agent-threads/${thread.id}/messages`,
+          "POST",
+          { text: "Make it shorter", context },
+          session.csrfHeaders
+        )
+      )
+      return { thread, response }
+    }
+
+    const sent = await send(alice)
+    expect(sent.response.status).toBe(202)
+    const persisted = await storage.agents.messages.list({
+      projectId: sixb.id,
+      threadId: sent.thread.id,
+    })
+    expect(persisted.messages[0]?.parts[0]).toEqual({ type: "context", ...context[0] })
+
+    const refused = await send(bob)
+    expect(refused.response.status).toBe(400)
+    expect(await refused.response.json()).toEqual({
+      error: `[Sixb] Invalid agent context: context references an unknown artifact '${draft.artifact.id}'.`,
+      code: "invalid_context",
+    })
+  })
+
   test.each([
+    {
+      name: "a malformed artifact context id",
+      context: { kind: "artifact", id: "draft" },
+      error:
+        "[Sixb] Invalid agent context: context[0].context.id must be an artifact id, such as 'art_k3m9q2x7tp'.",
+    },
+    {
+      name: "a missing artifact context",
+      context: { kind: "artifact", id: "art_zzzzzzzzzz" },
+      error:
+        "[Sixb] Invalid agent context: context references an unknown artifact 'art_zzzzzzzzzz'.",
+    },
     {
       name: "a blank object context label, naming the field",
       context: {

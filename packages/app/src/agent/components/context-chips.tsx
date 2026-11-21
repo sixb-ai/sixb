@@ -8,8 +8,9 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Box, MessageSquare, PanelsTopLeft, X } from "lucide-react"
 import { useState } from "react"
 import { type CommentsContextValue, readCommentsContext } from "../../artifacts/comments-context"
+import { ArtifactKindIcon } from "../../artifacts/kind-icon"
 import { useAgentMessages } from "../i18n"
-import { useAgentContextLabel } from "../object-context-title"
+import { useAgentContextLabel, useArtifactContext } from "../object-context-title"
 
 /** A context or attachment chip: a framed icon, the name, and a remove button in the composer. */
 export const COMPOSER_CHIP_CLASS_NAME =
@@ -53,12 +54,15 @@ function ContextChip({
 }) {
   const messages = useAgentMessages().context
   const label = useAgentContextLabel(context)
+  const artifact = useArtifactContext(context.kind === "artifact" ? context : null)
   const comments = readCommentsContext(context)
   return (
     <span className={cn(COMPOSER_CHIP_CLASS_NAME, onRemove ? "pr-1.5" : "pr-2.5")}>
       <span className={COMPOSER_CHIP_THUMB_CLASS_NAME}>
         {context.kind === "object" ? (
           <Box className="size-3" strokeWidth={2} aria-hidden="true" />
+        ) : context.kind === "artifact" ? (
+          <ArtifactKindIcon kind={artifact?.kind ?? "document"} className="size-3" />
         ) : comments ? (
           <MessageSquare className="size-3" strokeWidth={2} aria-hidden="true" />
         ) : (

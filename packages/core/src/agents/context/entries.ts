@@ -1,3 +1,4 @@
+import { isArtifactId } from "../../artifacts/ids"
 import type { JsonValue } from "../../json"
 import { cloneJsonValue, getInvalidJsonValueReason, stableJsonStringify } from "../../json"
 import type { ObjectRef } from "../../ontology/refs"
@@ -10,6 +11,16 @@ export type AgentContextInput =
       /**
        * What the chat shows for this object instead of its title. Display only: it is not part of
        * the context's identity and is never sent to the model.
+       */
+      readonly label?: string
+    }
+  | {
+      readonly kind: "artifact"
+      /** The artifact's id, such as `art_k3m9q2x7tp`. */
+      readonly id: string
+      /**
+       * What the chat shows for this artifact instead of its title. Display only: it is not part
+       * of the context's identity and is never sent to the model.
        */
       readonly label?: string
     }
@@ -58,6 +69,26 @@ export const agentContext = {
     }
   },
 
+  /** The artifact the person has open, such as the video they edit beside the chat. */
+  artifact(artifactId: string, options: { readonly label?: string } = {}) {
+    const fail = (message: string): never => {
+      throw new TypeError(`[Sixb] ${message}.`)
+    }
+    if (!isArtifactId(artifactId)) {
+      fail("agentContext.artifact() takes an artifact id, such as 'art_k3m9q2x7tp'")
+    }
+
+    const label =
+      options.label === undefined
+        ? undefined
+        : objectContextLabel(options.label, "agentContext.artifact() label", fail)
+    return {
+      kind: "artifact" as const,
+      id: artifactId,
+      ...(label === undefined ? {} : { label }),
+    }
+  },
+
   appState<const TValue extends JsonValue>(
     id: string,
     input: {
@@ -72,9 +103,10 @@ export const agentContext = {
 
 /** Stable identity shared by core deduplication and context-aware clients. */
 export function agentContextIdentity(context: AgentContextInput): string {
-  return context.kind === "object"
-    ? `object:${encodeURIComponent(context.ref.objectTypeId)}:${encodeURIComponent(context.ref.primaryId)}`
-    : `app-state:${encodeURIComponent(context.id)}`
+  if (context.kind === "object") {
+    return `object:${encodeURIComponent(context.ref.objectTypeId)}:${encodeURIComponent(context.ref.primaryId)}`
+  }
+  return `${context.kind}:${encodeURIComponent(context.id)}`
 }
 
 /** Stable semantic key for client-side comparisons. */
@@ -104,11 +136,7 @@ export function normalizeAgentContextEntries(
     const identity = agentContextIdentity(entry.context)
     // A label is display only, so two entries that differ only by label are the same entry; the
     // first one's label is kept.
-    const serialized = stableJsonStringify(
-      entry.context.kind === "object"
-        ? { ...entry, context: { kind: "object", ref: entry.context.ref } }
-        : entry
-    )
+    const serialized = stableJsonStringify(withoutLabel(entry))
     const existing = byIdentity.get(identity)
 
     if (existing !== undefined) {
@@ -170,6 +198,23 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
     }
   }
 
+  if (context.kind === "artifact") {
+    const id = requireNonEmptyString(context.id, `context[${index}].context.id`)
+    if (!isArtifactId(id)) {
+      invalidContext(
+        `context[${index}].context.id must be an artifact id, such as 'art_k3m9q2x7tp'`
+      )
+    }
+    const label =
+      context.label === undefined
+        ? undefined
+        : objectContextLabel(context.label, `context[${index}].context.label`, invalidContext)
+    return {
+      context: { kind: "artifact", id, ...(label === undefined ? {} : { label }) },
+      origin: rawEntry.origin,
+    }
+  }
+
   if (context.kind === "app-state") {
     const id = requireNonEmptyString(context.id, `context[${index}].context.id`)
     const label = requireNonEmptyString(context.label, `context[${index}].context.label`)
@@ -193,7 +238,16 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
     }
   }
 
-  invalidContext(`context[${index}].context.kind must be 'object' or 'app-state'`)
+  invalidContext(`context[${index}].context.kind must be 'object', 'artifact' or 'app-state'`)
+}
+
+/** The entry as its identity compares it: an object's or an artifact's label is display only. */
+function withoutLabel(entry: AgentContextEntryInput): AgentContextEntryInput {
+  const { context } = entry
+  if (context.kind === "object") return { ...entry, context: { kind: "object", ref: context.ref } }
+  if (context.kind === "artifact")
+    return { ...entry, context: { kind: "artifact", id: context.id } }
+  return entry
 }
 
 function objectContextLabel(

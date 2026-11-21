@@ -448,6 +448,15 @@ reads the object itself.
 agentContext.object(Project, project.id, { label: project.name })
 ```
 
+Give it the artifact the person has open with `agentContext.artifact(id)`, such as the video they
+edit beside the chat. Its chip shows the artifact's title, and the agent opens it to read or revise
+it. A message whose context names an artifact its sender cannot read is refused, as one naming an
+object they cannot read is.
+
+```tsx
+<AgentPanel context={[agentContext.object(Post, post.id), agentContext.artifact(edit.id)]} />
+```
+
 ### Dictation
 
 Declare a [transcription model](./configuration.md#audio-transcription) and the chat gets a

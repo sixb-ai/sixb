@@ -66,6 +66,17 @@ export const AgentObjectContextSchema = z.object({
     .describe("Shown in the chat instead of the object's title. Never sent to the model."),
 })
 
+export const AgentArtifactContextSchema = z.object({
+  kind: z.literal("artifact"),
+  id: z.string().min(1).describe("The artifact the person has open, such as art_k3m9q2x7tp"),
+  label: z
+    .string()
+    .min(1)
+    .max(MAX_AGENT_CONTEXT_LABEL_LENGTH)
+    .optional()
+    .describe("Shown in the chat instead of the artifact's title. Never sent to the model."),
+})
+
 export const AgentAppStateContextSchema = z.object({
   kind: z.literal("app-state"),
   id: z.string().min(1),
@@ -76,6 +87,7 @@ export const AgentAppStateContextSchema = z.object({
 
 export const AgentContextInputSchema = z.discriminatedUnion("kind", [
   AgentObjectContextSchema,
+  AgentArtifactContextSchema,
   AgentAppStateContextSchema,
 ])
 

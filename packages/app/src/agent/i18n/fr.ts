@@ -143,6 +143,7 @@ export const fr: Translation<AgentMessages> = {
     someone: "Quelqu’un",
     replies: (count) => (count === 1 ? "1 réponse" : `${count} réponses`),
     unnamed: "Contexte",
+    artifact: "Artefact",
   },
   models: {
     unavailable: "Modèles indisponibles",
