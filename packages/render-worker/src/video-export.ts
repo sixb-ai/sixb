@@ -147,10 +147,10 @@ export async function assembleVideoExport(input: {
         "assemble",
         [
           mp4,
+          sound,
           Math.floor(left() * JOIN_SHARE),
           plan.frames,
           payload.outline.fps,
-          sound,
           ...pictures.map((each) => each.path),
         ],
         { timeoutMs: left(), signal }
