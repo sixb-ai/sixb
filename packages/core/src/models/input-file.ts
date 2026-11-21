@@ -39,11 +39,32 @@ export function prepareModelInputBytes(
   return { bytes: input.data.slice(), mediaType }
 }
 
-/** The essence of a media type, such as `audio/webm` for `audio/webm;codecs=opus`. */
+/**
+ * The registered name of an audio format some systems label by an older alias. A stored file
+ * often carries the alias whatever its uploader declared: Bun types a multipart part by its file
+ * name, so `talk.m4a` sent as `audio/mp4` is stored as `audio/x-m4a`. Providers key on the
+ * registered name; through the Gateway, an `.m4a` stored under its alias was refused.
+ */
+const AUDIO_ALIASES: Readonly<Record<string, string>> = {
+  "audio/x-m4a": "audio/mp4",
+  "audio/m4a": "audio/mp4",
+  "audio/x-wav": "audio/wav",
+  "audio/wave": "audio/wav",
+  "audio/vnd.wave": "audio/wav",
+  "audio/x-flac": "audio/flac",
+  "audio/x-aac": "audio/aac",
+  "audio/mp3": "audio/mpeg",
+}
+
+/**
+ * The essence of a media type, such as `audio/webm` for `audio/webm;codecs=opus`, under its
+ * registered name.
+ */
 function modelInputMediaType(value: unknown, type: "audio" | "image"): string | undefined {
   if (typeof value !== "string") return undefined
 
-  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase()
+  const essence = value.split(";", 1)[0]?.trim().toLowerCase()
+  const mediaType = essence && (AUDIO_ALIASES[essence] ?? essence)
   return mediaType && new RegExp(`^${type}/[a-z0-9.+-]+$`).test(mediaType) ? mediaType : undefined
 }
 
