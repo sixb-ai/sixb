@@ -7,7 +7,8 @@
 //     Mixes the whole project's sound once, as HyperFrames' own render mixes it, through the plan
 //     its distributed render makes: AAC. A project with no sound gets silence, as long as it.
 //   node video.cjs assemble <out.mp4> <sound> <budget ms> <frames> <fps> <segment>...
-//     Joins the segments in order without encoding them again, with the sound, its index first.
+//     Joins the segments in order without encoding them again, with the sound cut to their frames,
+//     its index first.
 //   node video.cjs stills <project> <out dir> <budget ms> <engine> <width> <second>[,<second>]...
 //     Snapshots the project at each moment, as JPEGs at most <width> pixels wide.
 //
@@ -172,7 +173,10 @@ async function assemble(left) {
     "ffmpeg",
     [
       ...["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-i", soundtrack],
-      ...["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", out],
+      // The mix runs as long as what it plays: a clip longer than its scene sounds past the
+      // film's last frame. The film ends with its frames, sound included.
+      ...["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-t", seconds(frames, fps)],
+      ...["-movflags", "+faststart", out],
     ],
     { timeoutMs: left() }
   )
@@ -181,11 +185,16 @@ async function assemble(left) {
   const counted = await countFrames(out, left)
   if (counted !== Number(frames)) return { failed: `it holds ${counted} frames, not ${frames}` }
 
-  // Every frame where it plays: segments joined at the wrong time play a frozen frame.
-  const lasts = await videoDuration(out, left)
+  // Every frame where it plays: segments joined at the wrong time play a frozen frame, and a
+  // sound longer than the film plays over its last one.
   const length = Number(frames) / Number(fps)
-  if (!(Math.abs(lasts - length) * Number(fps) < 1)) {
-    return { failed: `it plays ${lasts} seconds, not ${length}` }
+  for (const [what, lasts] of [
+    ["its picture", await videoDuration(out, left)],
+    ["it", await fileDuration(out, left)],
+  ]) {
+    if (!(Math.abs(lasts - length) * Number(fps) < 1)) {
+      return { failed: `${what} plays ${lasts} seconds, not ${length}` }
+    }
   }
   return ready(out, "video/mp4", { frames: counted })
 }
@@ -321,6 +330,15 @@ async function videoDuration(file, left) {
   const run = await execute(
     "ffprobe",
     [...["-v", "error", "-select_streams", "v:0"], ...["-show_entries", "stream=duration", "-of", "csv=p=0", file]],
+    { timeoutMs: left(), stdout: true }
+  )
+  return run.failed ? Number.NaN : Number(run.stdout.toString("utf8").trim())
+}
+
+async function fileDuration(file, left) {
+  const run = await execute(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
     { timeoutMs: left(), stdout: true }
   )
   return run.failed ? Number.NaN : Number(run.stdout.toString("utf8").trim())

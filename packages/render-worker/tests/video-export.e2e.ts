@@ -370,4 +370,73 @@ describe.skipIf(!tools)("a video exported scene by scene", () => {
     },
     { timeout: 180_000 }
   )
+
+  // A scene that plays a clip longer than itself, in a root that names no length: HyperFrames
+  // mixes the clip's sound to its end, past the film's last frame. Reproduce by dropping the
+  // assemble's `-t` in video.cjs: the MP4 would play 3 seconds of sound over a 2-second film, and
+  // the assemble refuses it.
+  test(
+    "ends the MP4 with its last frame, though a clip sounds past it",
+    async () => {
+      const project = join(dir, "long-clip")
+      await mkdir(join(project, "scenes"), { recursive: true })
+      await mkdir(join(project, "media"), { recursive: true })
+      await run("ffmpeg", [
+        ...["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=3"],
+        ...["-f", "lavfi", "-i", "sine=frequency=220:duration=3"],
+        ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y"],
+        join(project, "media/clip.mp4"),
+      ])
+      await writeFile(
+        join(project, "index.html"),
+        `<html><body><div data-composition-id="main" data-width="640" data-height="360">
+          <div data-composition-id="a" data-composition-src="scenes/a.html" data-start="0" data-duration="2"></div>
+        </div></body></html>`
+      )
+      await writeFile(
+        join(project, "scenes/a.html"),
+        scene("a", '    <video src="media/clip.mp4" playsinline></video>')
+      )
+      const scripts = join(dir, "scripts")
+      await mkdir(scripts, { recursive: true })
+      for (const name of ["video.cjs", "shared.cjs"]) {
+        await writeFile(join(scripts, name), await readFile(join(import.meta.dir, "../src", name)))
+      }
+      const report = async (args: readonly string[]) =>
+        JSON.parse(
+          (await run("node", [join(scripts, "video.cjs"), ...args]))
+            .toString("utf8")
+            .trim()
+            .split("\n")
+            .at(-1) ?? "{}"
+        )
+
+      const sound = join(dir, "long-clip.m4a")
+      expect(
+        await report(["sound", project, sound, "120000", VIDEO_ENGINE, "30", "60"])
+      ).toMatchObject({ status: "ready" })
+
+      const segment = join(dir, "long-clip-segment.mp4")
+      await run("ffmpeg", [
+        ...["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=2"],
+        ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", segment],
+      ])
+      const out = join(dir, "long-clip.mp4")
+      expect(await report(["assemble", out, sound, "120000", "60", "30", segment])).toMatchObject({
+        status: "ready",
+      })
+
+      const timing = JSON.parse(
+        (
+          await run("ffprobe", [
+            ...["-v", "error", "-show_entries", "format=duration:stream=codec_type,duration"],
+            ...["-of", "json", out],
+          ])
+        ).toString("utf8")
+      ) as { format: { duration: string }; streams: { duration: string }[] }
+      expect(Math.abs(Number(timing.format.duration) - 2)).toBeLessThan(1 / 30)
+      for (const stream of timing.streams) expect(Number(stream.duration)).toBeLessThan(2 + 1 / 30)
+    },
+    { timeout: 180_000 }
+  )
 })
