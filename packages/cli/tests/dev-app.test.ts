@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { AppPackagesMissingError, type CustomAppDevServer } from "@sixb/app/server"
+import {
+  AppPackagesMissingError,
+  AppPackagesSplitError,
+  type CustomAppDevServer,
+} from "@sixb/app/server"
 import { startDevApp } from "../src/commands/dev-runner"
 
 const options = { host: "127.0.0.1", port: 3000 }
@@ -18,6 +22,21 @@ describe("sixb dev's app", () => {
     expect(started.server).toBeNull()
     expect(started.warning).toBe(
       "The app needs react, react-dom in this project. Install them with: bun add react react-dom"
+    )
+  })
+
+  // Regression proof: drop AppPackagesSplitError from startDevApp's check and this rejects.
+  test("a project installing two copies of an editor package keeps dev running, with the fix", async () => {
+    const split =
+      "[SixbCustomApp] The app's editor would load more than one copy of yjs 13.6.1 and 13.6.33."
+    const started = await startDevApp(
+      { dev: () => Promise.reject(new AppPackagesSplitError(split)) },
+      options
+    )
+
+    expect(started.server).toBeNull()
+    expect(started.warning).toBe(
+      "The app's editor would load more than one copy of yjs 13.6.1 and 13.6.33."
     )
   })
 

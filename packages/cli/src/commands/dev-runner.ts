@@ -1,6 +1,7 @@
 import { dirname, resolve } from "node:path"
 import {
   AppPackagesMissingError,
+  AppPackagesSplitError,
   type CustomAppDevOptions,
   type CustomAppDevServer,
   createCustomApp,
@@ -202,8 +203,9 @@ export async function runDevRuntime(options: DevOptions = {}) {
 }
 
 /**
- * Starts the app's dev server. A project missing the packages the app is bundled from still gets
- * its API, with the install command as a warning; `sixb build` refuses instead.
+ * Starts the app's dev server. A project missing the packages the app is bundled from, or holding
+ * two copies of one its editor shares, still gets its API, with the fix as a warning; `sixb build`
+ * refuses instead.
  */
 export async function startDevApp(
   customApp: { dev(options: CustomAppDevOptions): Promise<CustomAppDevServer> },
@@ -212,7 +214,9 @@ export async function startDevApp(
   try {
     return { server: await customApp.dev(options) }
   } catch (error) {
-    if (!(error instanceof AppPackagesMissingError)) throw error
+    const install =
+      error instanceof AppPackagesMissingError || error instanceof AppPackagesSplitError
+    if (!install) throw error
     return { server: null, warning: error.message.replace("[SixbCustomApp] ", "") }
   }
 }
