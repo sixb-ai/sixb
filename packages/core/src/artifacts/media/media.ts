@@ -44,7 +44,7 @@ const SLOW_CODECS = new Set(["hevc", "prores", "av1", "vp9"])
 /** The time one attempt has: `timeoutMs` in all, of which the proxy and the sandbox's script. */
 export interface MediaJobBudget {
   readonly timeoutMs: number
-  /** The script, every part in turn: the proxy, then what media.cjs bounds by the length. */
+  /** The script, every part in turn: the proxy, then what derive.cjs bounds by the length. */
   readonly deriveMs: number
   readonly proxyMs: number
   readonly transcribeMs: number
@@ -72,7 +72,7 @@ export function mediaJobBudget(probe: ArtifactMediaProbe | undefined): MediaJobB
     : 0
   const slow = video && SLOW_CODECS.has(video.codec) ? 2 : 1
   const proxyMs = Math.round(2 * 60_000 + durationMs * Math.max(0.2, PROXY_SHARE * rate) * slow)
-  // As media.cjs bounds them: a poster in a few looks, then the filmstrip, cuts, peaks and sound.
+  // As derive.cjs bounds them: a poster in a few looks, then the filmstrip, cuts, peaks and sound.
   const restMs = 8 * 60_000 + durationMs * 1.1
   const deriveMs = Math.round(proxyMs + restMs)
 

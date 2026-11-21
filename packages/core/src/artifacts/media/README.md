@@ -11,9 +11,9 @@ publish (create, update, restore, the Agent's publish)
     refreshArtifactMedia for one kept
 render worker (packages/render-worker/src/media.ts)
   → putMedia: the attempt, counted before it starts
-  → sandbox: fetch the original by download URL, media.cjs probes it
+  → sandbox: fetch the original by download URL, derive.cjs probes it
   → putMedia: the probe, which gives the rest its time (mediaJobBudget)
-  → media.cjs derives each part with FFmpeg
+  → derive.cjs derives each part with FFmpeg
   → putMedia: every part as it stands, the transcript pending
   → MediaTranscriber: the project's transcription model, as a kernel operation
   → putMedia: the transcript

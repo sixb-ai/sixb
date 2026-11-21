@@ -3,7 +3,7 @@
 // picture cuts, and the sound for the transcription model. Each part is made on its own, so one
 // that fails costs only itself; each FFmpeg run is bounded by the media's length.
 //
-//   node media.cjs <original> <out dir> <budget ms> <max duration ms> <proxy ms> <part>[,<part>]...
+//   node derive.cjs <original> <out dir> <budget ms> <max duration ms> <proxy ms> <part>[,<part>]...
 //
 // Parts: proxy, poster, filmstrip, waveform, cuts, audio; none probes alone, which says how long
 // the rest may take. The probe always runs. The proxy takes at most <proxy ms>, which the worker

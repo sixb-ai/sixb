@@ -49,7 +49,7 @@ yet. One job per digest, so a file published again, anywhere, is derived once. O
   short left it. It counts the attempt in what is kept before it starts.
 - Opens a blank sandbox of the project that also reaches the API, where it fetches the original by
   a download URL (see Large files below).
-- Runs `media.cjs` there with the image's FFmpeg: the probe first, which gives the attempt its
+- Runs `derive.cjs` there with the image's FFmpeg: the probe first, which gives the attempt its
   time (`mediaJobBudget` in core: the proxy by the pixels it decodes, the rest by the length, two
   hours at most), then each part on its own, so one that fails costs only itself and is kept failed
   with why. Media past 30 minutes get their probe alone.
