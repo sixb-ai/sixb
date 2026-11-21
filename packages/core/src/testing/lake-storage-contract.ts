@@ -183,6 +183,33 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
         })
       })
 
+      test("persists compatible metadata updates", async () => {
+        await withStorage(async (storage) => {
+          const initialDataset = defineDataset("contract.definitions.metadata_update", {
+            schema: [col("orderId", "string"), col("orderDate", "date")],
+            description: "Initial description",
+          })
+          const updatedDataset = defineDataset("contract.definitions.metadata_update", {
+            schema: [col("orderId", "string"), col("orderDate", "date")],
+            description: "Updated description",
+          })
+          const omittedDataset = defineDataset("contract.definitions.metadata_update", {
+            schema: [col("orderId", "string"), col("orderDate", "date")],
+          })
+
+          await storage.createDataset(initialDataset)
+          await storage.assertDatasetDefinitionsCompatible([updatedDataset])
+
+          expect(await storage.getDataset(initialDataset.id)).toEqual(initialDataset)
+          await expect(storage.createDataset(updatedDataset)).resolves.toEqual(updatedDataset)
+          expect(await storage.getDataset(initialDataset.id)).toEqual(updatedDataset)
+
+          await storage.assertDatasetDefinitionsCompatible([omittedDataset])
+          await expect(storage.createDataset(omittedDataset)).resolves.toEqual(updatedDataset)
+          expect(await storage.getDataset(initialDataset.id)).toEqual(updatedDataset)
+        })
+      })
+
       test("rejects incompatible definition changes without mutating the stored definition", async () => {
         await withStorage(async (storage) => {
           const changedDataset = defineDataset(definitionDataset.id, {

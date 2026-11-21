@@ -525,7 +525,8 @@ Schema changes:
 
 Metadata changes:
 
-- add compatible metadata such as `description` or `partitionBy`
+- add or update `description` metadata
+- add compatible `partitionBy` metadata
 
 Rejected changes:
 
@@ -534,7 +535,7 @@ Rejected changes:
 - rename columns
 - change column types
 - change column nullability
-- change existing `description` or `partitionBy` metadata
+- change existing `partitionBy` metadata
 
 Sixb matches existing columns by name, not by declaration position. If a
 developer declares a new nullable column between existing columns, DuckLake still

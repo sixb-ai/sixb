@@ -176,17 +176,41 @@ describe("dataset definition update planning", () => {
         })
       )
     ).toThrow("incompatible partitionBy")
+  })
+  test("detects compatible metadata updates", () => {
+    const existing = defineDataset("raw.erp.orders", {
+      schema: [col("orderId", "string"), col("orderDate", "date")],
+      partitionBy: ["orderId"],
+      description: "Raw ERP orders",
+    })
 
-    expect(() =>
-      planDatasetDefinitionUpdate(
-        existing,
-        defineDataset("raw.erp.orders", {
-          schema: [col("orderId", "string"), col("orderDate", "date")],
-          partitionBy: ["orderId"],
-          description: "Changed",
-        })
-      )
-    ).toThrow("incompatible description")
+    const requested = defineDataset("raw.erp.orders", {
+      schema: [col("orderId", "string"), col("orderDate", "date")],
+      partitionBy: ["orderId"],
+      description: "Updated ERP orders",
+    })
+
+    expect(planDatasetDefinitionUpdate(existing, requested)).toMatchObject({
+      definition: {
+        description: "Updated ERP orders",
+      },
+      schema: { kind: "none" },
+      metadata: { descriptionChanged: true, partitionByChanged: false },
+      changed: true,
+    })
+
+    const omitted = defineDataset("raw.erp.orders", {
+      schema: [col("orderId", "string"), col("orderDate", "date")],
+      partitionBy: ["orderId"],
+    })
+
+    expect(planDatasetDefinitionUpdate(existing, omitted)).toMatchObject({
+      definition: {
+        description: "Raw ERP orders",
+      },
+      metadata: { descriptionChanged: false },
+      changed: false,
+    })
   })
 
   test("strict merge and the lake compatibility preflight reject schema evolution", async () => {

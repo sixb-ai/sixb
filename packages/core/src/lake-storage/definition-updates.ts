@@ -208,12 +208,6 @@ function mergeDatasetDefinition(
 ): DatasetDefinition {
   assertCompatibleMetadataField(
     requested.id,
-    "description",
-    existing.description,
-    requested.description
-  )
-  assertCompatibleMetadataField(
-    requested.id,
     "partitionBy",
     existing.partitionBy,
     requested.partitionBy
@@ -237,9 +231,9 @@ function mergeDatasetDefinition(
 
 function assertCompatibleMetadataField(
   datasetId: string,
-  field: "description" | "partitionBy",
-  existing: string | readonly string[] | undefined,
-  requested: string | readonly string[] | undefined
+  field: "partitionBy",
+  existing: readonly string[] | undefined,
+  requested: readonly string[] | undefined
 ): void {
   if (
     existing === undefined ||
