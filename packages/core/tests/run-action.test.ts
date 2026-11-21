@@ -119,6 +119,7 @@ async function createContext(
     },
     actions: host.definitions.actions,
     requestedBy: execution.sixb.execution.requestedBy,
+    artifactsAsRequester: execution.sixb.artifacts,
     client: undefined,
   }
 }
@@ -170,7 +171,17 @@ async function executePreparedRun(input: {
   })
   if (!execution) throw new Error(`Action run '${run.id}' has no execution.`)
 
-  const outcome = await executeActionRun(host, { run, execution, signal: input.signal })
+  // Requested by trusted code, as a workflow requests a run: it reaches artifacts as the run does.
+  const { sixb } = bindDurablePrimitiveExecution(host, {
+    execution,
+    primitive: { kind: "action", id: run.actionId, runId: run.id },
+  })
+  const outcome = await executeActionRun(host, {
+    run,
+    execution,
+    signal: input.signal,
+    artifactsAsRequester: sixb.artifacts,
+  })
   await outcome.effects?.()
   const stored = await host.storage.actionRuns?.getById({ projectId: host.id, id: run.id })
   if (!stored) throw new Error(`Action run '${run.id}' was not recorded.`)

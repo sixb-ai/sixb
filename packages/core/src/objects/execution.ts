@@ -1,4 +1,5 @@
 import { shareActionRunExecutor } from "../actions/run/executor"
+import { shareCallerArtifacts } from "../artifacts/caller"
 import type { BlobStorage } from "../blob-storage"
 import { shareSixbErrorReporter } from "../error-reporting/capability"
 import type { ExecutionContext } from "../execution"
@@ -179,6 +180,7 @@ export function createObjectsRuntime(
   shareOntologyMutationRuntime(runtime, capturedRuntime)
   shareSixbErrorReporter(runtime, capturedRuntime)
   shareActionRunExecutor(runtime, capturedRuntime)
+  shareCallerArtifacts(runtime, capturedRuntime)
   Object.freeze(capturedRuntime)
   const ontologyView = () => getAuthorizedOntologyView(objectReader)
   const objects = Object.assign(

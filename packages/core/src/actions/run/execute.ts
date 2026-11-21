@@ -1,3 +1,4 @@
+import type { ArtifactsRuntime } from "../../artifacts/execution"
 import { createSixbError } from "../../errors/internal"
 import {
   type BoundPrimitiveExecution,
@@ -32,6 +33,8 @@ export interface ExecuteActionRunInput {
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
   readonly readSubjectAsRequester?: ReadSubjectAsRequester
+  /** The artifacts the requester reaches, which the run's handlers reach as `sixb.artifacts`. */
+  readonly artifactsAsRequester: ArtifactsRuntime
   /** The client of the HTTP request that requested the run directly. */
   readonly client?: RequestClient
 }
@@ -98,7 +101,7 @@ function buildActionContext(
   host: ActionRunHost,
   actionRunsStorage: ActionRunStorage,
   execution: BoundPrimitiveExecution,
-  input: Pick<ExecuteActionRunInput, "readSubjectAsRequester" | "client">
+  input: Pick<ExecuteActionRunInput, "readSubjectAsRequester" | "artifactsAsRequester" | "client">
 ): ActionRunContext {
   const { readSubjectAsRequester } = input
   const sixb = {
@@ -120,6 +123,7 @@ function buildActionContext(
     sixb,
     actions: host.definitions.actions,
     requestedBy: execution.sixb.execution.requestedBy,
+    artifactsAsRequester: input.artifactsAsRequester,
     client: input.client,
     ...(readSubjectAsRequester === undefined ? {} : { readSubjectAsRequester }),
   }

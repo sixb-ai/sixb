@@ -230,6 +230,32 @@ undo the edits or make the committed action fail. If the process stops, or their
 recorded, a succeeded run may never get `run.effects`, so do not wait for it indefinitely. Pass
 `run.idempotencyKey` to these calls as well.
 
+### Use an artifact
+
+`sixb.artifacts` in `.writeback()` and `.effects()` reaches [artifacts](../artifacts/overview.md)
+as whoever requested the run, with their rights: a person's run reads only what they read, and
+publishes as them. A run that a schedule, an event or a workflow requests reaches every artifact.
+
+This action gives a post the MP4 of the video it was edited in, without the browser downloading
+it and uploading it again:
+
+```ts
+export const useEditAsMedia = defineAction("useEditAsMedia")
+  .on(Post)
+  .params({ edit: param(ref.artifact()) })
+  .writeback(async ({ sixb, params }) => {
+    const mp4 = await sixb.artifacts.video(params.edit.id, { render: false })
+    if (mp4?.status !== "ready") throw new Error("Export the edit first.")
+    return { media: mp4.file }
+  })
+  .edits(({ objects, subject, writeback }) => {
+    objects(Post).byId(subject.primaryId).update({ media: writeback.media })
+  })
+```
+
+A video renders in about as long as it plays, and a run has 30 seconds: ask for the
+[export](../artifacts/overview.md#export-a-video) first, and request the action once it is ready.
+
 The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
 at least `.writeback()` or `.edits()`. The object and link [events](../websockets/overview.md) of the
 saved edits carry `origin: { kind: "action", actionId, runId }`. The run itself emits no event: its

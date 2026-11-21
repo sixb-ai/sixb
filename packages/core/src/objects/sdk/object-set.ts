@@ -6,6 +6,7 @@
 
 import type { ActionDefinition } from "../../actions"
 import { shareActionRunExecutor } from "../../actions/run/executor"
+import { shareCallerArtifacts } from "../../artifacts/caller"
 import type { AuthorizationContext } from "../../authorization"
 import type { BlobStorage } from "../../blob-storage"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
@@ -95,6 +96,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
   shareOntologyMutationRuntime(params, resolvedCtx)
   shareSixbErrorReporter(params, resolvedCtx)
   shareActionRunExecutor(params, resolvedCtx)
+  shareCallerArtifacts(params, resolvedCtx)
 
   const objectSet = {
     get: async (id: string) => {

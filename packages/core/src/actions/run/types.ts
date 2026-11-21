@@ -1,3 +1,4 @@
+import type { ArtifactsRuntime } from "../../artifacts/execution"
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors/execution"
 import type { RequestClient } from "../../execution/request-client"
@@ -35,6 +36,11 @@ export interface ActionRunContext {
   readonly actions: Pick<SixbDefinitions["actions"], "getById">
   /** Who started the chain of executions the run belongs to, when a principal did. */
   readonly requestedBy: AuthorizablePrincipal | undefined
+  /**
+   * The artifacts of whoever requested the run, as they reach them: a person's, or those of the
+   * trusted code, such as a workflow, that requested it. Kept in memory only.
+   */
+  readonly artifactsAsRequester: ArtifactsRuntime
   /** The client of the HTTP request that requested the run directly. Kept in memory only. */
   readonly client: RequestClient | undefined
   /** Reads the subject as its requester sees it: see {@link ReadSubjectAsRequester}. */

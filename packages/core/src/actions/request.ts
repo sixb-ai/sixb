@@ -1,3 +1,4 @@
+import { getCallerArtifacts } from "../artifacts/caller"
 import { updatableArtifactIds } from "../artifacts/execution"
 import { AuthorizationError, assertAuthorized } from "../authorization"
 import {
@@ -167,6 +168,7 @@ export async function requestAction(
     assertCanReuse,
     signal: request.signal,
     onRequested: request.onRequested,
+    artifactsAsRequester: getCallerArtifacts(runtime),
     ...(client === undefined ? {} : { client }),
     ...(conditioned
       ? {

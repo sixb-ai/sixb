@@ -40,6 +40,9 @@ const { artifact } = await sixb.artifacts.create({
 })
 ```
 
+In an [action](../actions/overview.md#use-an-artifact), `sixb.artifacts` acts as whoever requested
+the run, so the artifact belongs to them.
+
 A version holds at most 500 files: 25 MiB each and 250 MiB in all, except a `file` artifact,
 whose one file may reach 2 GiB, such as a recording, and a `video`, whose files may reach 2 GiB
 each and 8 GiB in all. Every file counts at its full size, also one an earlier version holds
@@ -888,6 +891,8 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
   joined. Over HTTP, `POST /api/artifacts/{id}/versions/{version}/video` answers the same, and
   `GET` on the same path downloads it. From a terminal:
   `sixb artifacts export <id> --output film.mp4`.
+- An [action](../actions/overview.md#use-an-artifact) takes the MP4's `file` from
+  `sixb.artifacts.video()` to store it in an object, as its requester reads it.
 - Each scene renders on its own and is kept: a version that changes one scene renders that scene
   again, and the scenes it overlaps, and reuses the others. The sound is mixed once for the whole
   video, so music that runs across a cut plays on unbroken.

@@ -8,6 +8,7 @@ import {
 import type { ActivityService } from "../activity/service"
 import { type AgentRuntime, createAgentRuntime } from "../agents/execution"
 import { type AiUsageRuntime, createAiUsageRuntime } from "../ai-usage"
+import { registerCallerArtifacts } from "../artifacts/caller"
 import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
@@ -135,6 +136,14 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
   execution: ExecutionContext,
   dependencies: SixbDependencies
 ): Omit<Sixb<TParams>, "execution"> {
+  const artifacts = createArtifactsRuntime(runtime, dependencies.blobStorage, {
+    rendersInSandboxes: dependencies.rendersInSandboxes,
+    transcribesMedia: dependencies.definitions.models?.audio?.transcription !== undefined,
+  })
+  // An Action run this caller requests, from `actions` or from an object, reaches artifacts as
+  // the caller does.
+  registerCallerArtifacts(runtime, artifacts)
+
   const actions = createActionsRuntime(runtime, execution)
   const syncConnections = createSyncConnections(dependencies.connectorService)
   const workflows = createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows)
@@ -177,10 +186,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
     agent,
-    artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage, {
-      rendersInSandboxes: dependencies.rendersInSandboxes,
-      transcribesMedia: dependencies.definitions.models?.audio?.transcription !== undefined,
-    }),
+    artifacts,
     models: createModelsRuntime(
       runtime,
       execution,
