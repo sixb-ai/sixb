@@ -587,7 +587,14 @@ function partsOf(
                   `${item.type === "board" ? "Board" : "Section"} ${item.id}${item.title ? `: ${item.title}` : ""}`
                 )
               )
-            : []
+            : outline.kind === "video"
+              ? outline.scenes.map((scene) =>
+                  part(
+                    scene.id,
+                    `Scene ${scene.id}, ${scene.startMs / 1000}s to ${(scene.startMs + scene.durationMs) / 1000}s${scene.label ? `: ${scene.label}` : ""}`
+                  )
+                )
+              : []
   return parts.length > 0 ? { parts } : {}
 }
 

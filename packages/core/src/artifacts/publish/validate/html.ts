@@ -1,6 +1,6 @@
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../../address"
-import { decodeHtmlEntities } from "../../html"
+import { decodeHtmlEntities, HTML_FILE_ATTRIBUTES } from "../../html"
 import { invalidArtifact } from "../files"
 import type { FoundReference } from "../references"
 
@@ -19,19 +19,6 @@ export function refuseFrameAssetPaths(files: readonly ArtifactFile[], what: stri
     )
   }
 }
-
-/**
- * Where HTML shows or plays a file: each element and the attribute that names the file. A file of
- * another artifact is an `artifact:` address in one of them, which a frame serves as its own.
- */
-export const HTML_FILE_ATTRIBUTES = [
-  { element: "img", attribute: "src" },
-  { element: "video", attribute: "src" },
-  { element: "video", attribute: "poster" },
-  { element: "audio", attribute: "src" },
-  { element: "source", attribute: "src" },
-  { element: "track", attribute: "src" },
-] as const
 
 /**
  * Reads the `artifact:` addresses a web artifact's HTML uses, to resolve: links (`<a href>`),

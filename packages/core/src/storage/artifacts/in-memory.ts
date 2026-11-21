@@ -7,6 +7,7 @@ import {
   artifactStorageErrors,
   checkArtifactStateWrite,
   othersCommented,
+  storedCommentAnchor,
   turnUndoable,
 } from "./record"
 import type {
@@ -543,15 +544,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       artifactId: input.artifactId,
       id: input.id,
       ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
-      anchor: {
-        ...(input.anchor.board === undefined ? {} : { board: input.anchor.board }),
-        ...(input.anchor.element === undefined ? {} : { element: input.anchor.element }),
-        ...(input.anchor.label === undefined ? {} : { label: input.anchor.label }),
-        ...(input.anchor.point === undefined
-          ? {}
-          : { point: { x: input.anchor.point.x, y: input.anchor.point.y } }),
-        revision: input.anchor.revision,
-      },
+      anchor: storedCommentAnchor(input.anchor),
       body: input.body,
       author:
         input.author.type === "guest"

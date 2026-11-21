@@ -71,9 +71,13 @@ type ArtifactToolName = typeof CREATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** A file of up to 2 GB, uploaded from the sandbox through the API. */
 const SANDBOX_UPLOAD_TIMEOUT_MS = 10 * 60_000
-/** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
-const PUBLISHABLE_KINDS = ARTIFACT_KINDS
-type PublishableKind = ArtifactKind
+/**
+ * The kinds the Agent can create today; each lands with its validator, renderer, and skill. A
+ * video waits for its guide: until then the Agent revises one someone else made, by its id, but
+ * does not start one.
+ */
+type PublishableKind = Exclude<ArtifactKind, "video">
+const PUBLISHABLE_KINDS = ARTIFACT_KINDS.filter((kind): kind is PublishableKind => kind !== "video")
 
 // One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
 // kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
