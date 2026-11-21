@@ -7,7 +7,7 @@ import {
   TooltipProvider,
 } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { type ReactNode, useLayoutEffect, useState } from "react"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
@@ -80,13 +80,19 @@ const OUTLINE = FILM.outline.kind === "video" ? FILM.outline : null
 if (!OUTLINE) throw new Error("Expected a video.")
 
 const originalConfig = client.getConfig()
-afterEach(() => client.setConfig({ fetch: originalConfig.fetch }))
+afterEach(() => {
+  focusManager.setFocused(undefined)
+  client.setConfig({ fetch: originalConfig.fetch })
+})
 afterAll(() => client.setConfig({ baseUrl: originalConfig.baseUrl }))
 
 const rendering = (ready: number, assembling = false) => ({
   status: "rendering",
   progress: { ready, total: 3, assembling },
 })
+
+/** An export no one asked for, read without asking. */
+const IDLE = { status: "idle" }
 
 /** The API, answering each version's export as `answers` says, and keeping what was asked. */
 function serve(answers: (version: string, query: URLSearchParams) => unknown) {
@@ -145,21 +151,50 @@ const open = async (trigger: Element) => {
 }
 
 describe("a video's MP4 in its header", () => {
-  test("reads an answer nobody asked for as idle, and one asked for as rendering", () => {
+  // Reproduce by reading a rendering answer not asked for here as idle in videoExportView: an
+  // export asked for on another device offers to start it again, with no sign it renders.
+  test("reads an export no one asked for as idle, and one asked for anywhere as rendering", () => {
     expect(videoExportView(undefined, false)).toEqual({ state: "loading" })
-    expect(videoExportView(rendering(0) as never, false)).toEqual({ state: "idle" })
-    expect(videoExportView(rendering(0) as never, false, 2)).toEqual({ state: "idle", earlier: 2 })
-    expect(videoExportView(rendering(0) as never, true)).toMatchObject({ state: "rendering" })
-    // Parts rendered for another version, as an edit of one scene keeps the others: still idle.
-    // Reproduce by reading parts rendered as someone asking: the header then shows a render nobody
-    // asked for, with no way to start it.
-    expect(videoExportView(rendering(1) as never, false)).toEqual({ state: "idle" })
-    expect(videoExportView(rendering(3, true) as never, false)).toEqual({ state: "idle" })
+    expect(videoExportView(IDLE as never, false)).toEqual({ state: "idle" })
+    expect(videoExportView(IDLE as never, false, 2)).toEqual({ state: "idle", earlier: 2 })
+    expect(videoExportView(rendering(1) as never, false)).toMatchObject({
+      state: "rendering",
+      ready: 1,
+    })
     expect(videoExportView(rendering(1) as never, true)).toMatchObject({
       state: "rendering",
       ready: 1,
     })
     expect(videoExportView(rendering(3, true) as never, true)).toMatchObject({ assembling: true })
+    // A failure kept from before is the reader's to hear once they ask.
+    const failed = { status: "failed", reason: "Scene 'outro' could not be rendered." }
+    expect(videoExportView(failed as never, false)).toEqual({ state: "idle" })
+    expect(videoExportView(failed as never, true)).toEqual({ state: "failed" })
+  })
+
+  // Reproduce the first look as the test above: the header offers to export what renders already.
+  // Reproduce the next by reading with `asked` alone in useVideoExport's queryFn: an export whose
+  // job was lost renders for good in every header, none of which asks for it again.
+  test("shows an export asked for elsewhere rendering, and asks for it again as it watches", async () => {
+    const asked = serve(() => rendering(1))
+    const view = render(
+      <Wrap>
+        <ExportButton version={FILM} />
+      </Wrap>
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector("[data-video-export='rendering']")).not.toBeNull()
+    )
+    expect(asked).toEqual(["POST /api/artifacts/art_v1de0f17m0/versions/3/video?render=false"])
+
+    // Its next look, as the watch every two seconds or a return to the tab takes it, asks.
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    await waitFor(() =>
+      expect(asked.at(-1)).toBe("POST /api/artifacts/art_v1de0f17m0/versions/3/video")
+    )
   })
 
   // Reproduce by giving a ready export the menu too: downloading it takes a second click.
@@ -188,7 +223,7 @@ describe("a video's MP4 in its header", () => {
   test("exports when asked, then shows how far it has rendered", async () => {
     let started = false
     const asked = serve((_version, query) =>
-      query.get("render") === "false" && !started ? rendering(0) : rendering(started ? 1 : 0)
+      query.get("render") === "false" && !started ? IDLE : rendering(started ? 1 : 0)
     )
     const view = render(
       <Wrap>
@@ -254,7 +289,7 @@ describe("a video's MP4 in its header", () => {
   test("says it failed in plain words once asked, and tries again with retry", async () => {
     let started = false
     const asked = serve((_version, query) => {
-      if (query.get("render") === "false" && !started) return rendering(0)
+      if (query.get("render") === "false" && !started) return IDLE
       started = true
       return query.get("retry") === "true"
         ? rendering(1)
@@ -297,7 +332,7 @@ describe("a video's MP4 in its header", () => {
   test("says export is not available, with no retry, when the project cannot render", async () => {
     serve((_version, query) =>
       query.get("render") === "false"
-        ? rendering(0)
+        ? IDLE
         : { status: "failed", reason: "No HyperFrames.", lacks: "sandbox_tools" }
     )
     const view = render(
@@ -340,7 +375,7 @@ describe("a video's MP4 in its header", () => {
   test("says export is not available when the project has no sandboxes", async () => {
     serve((_version, query) =>
       query.get("render") === "false"
-        ? rendering(0)
+        ? IDLE
         : Response.json(
             { error: "No sandbox provider.", code: "video_unavailable" },
             { status: 400 }
@@ -370,7 +405,7 @@ describe("a video's MP4 in its header", () => {
   test("reads a version's MP4 anew once a write changes it", async () => {
     let revision = 1
     const asked = serve(() =>
-      revision === 1 ? { status: "ready", durationMs: 7000, sizeBytes: 12_400_000 } : rendering(2)
+      revision === 1 ? { status: "ready", durationMs: 7000, sizeBytes: 12_400_000 } : IDLE
     )
     const view = render(
       <Wrap>
@@ -399,7 +434,9 @@ describe("a video's MP4 in its header", () => {
   // being rendered asks to render what it holds now, unasked, and shows it rendering.
   test("an export asked for before a write is not asked for what the write made", async () => {
     let started = false
-    const asked = serve(() => rendering(started ? 1 : 0))
+    const asked = serve((_version, query) =>
+      query.get("render") === "false" || !started ? IDLE : rendering(1)
+    )
     const view = render(
       <Wrap>
         <ExportButton version={FILM} />
@@ -434,7 +471,7 @@ describe("a video's MP4 in its header", () => {
   // Reproduce by leaving `earlier` out of useVideoExport: a new version hides the MP4 there was.
   test("offers the version before it, out of date, while this one is not exported", async () => {
     const asked = serve((version) =>
-      version === "2" ? { status: "ready", durationMs: 6000, sizeBytes: 9_000_000 } : rendering(0)
+      version === "2" ? { status: "ready", durationMs: 6000, sizeBytes: 9_000_000 } : IDLE
     )
     const view = render(
       <Wrap>
@@ -462,7 +499,7 @@ describe("a video's MP4 in its header", () => {
   test("folded into More, exporting keeps the menu open on how far it has rendered", async () => {
     let started = false
     serve((_version, query) =>
-      query.get("render") === "false" && !started ? rendering(0) : rendering(started ? 1 : 0)
+      query.get("render") === "false" && !started ? IDLE : rendering(started ? 1 : 0)
     )
     const view = render(
       <Wrap>

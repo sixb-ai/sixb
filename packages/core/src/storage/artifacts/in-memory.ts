@@ -29,6 +29,8 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoExportAskRecord,
+  ArtifactVideoRenderKey,
   ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
@@ -91,6 +93,7 @@ interface InMemoryArtifactSnapshot {
   readonly pdfs: ReadonlyMap<string, ArtifactPdfRecord>
   readonly media: ReadonlyMap<string, ArtifactMediaRecord>
   readonly videoRenders: ReadonlyMap<string, ArtifactVideoRenderRecord>
+  readonly videoExportAsks: ReadonlyMap<string, ArtifactVideoExportAskRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -106,6 +109,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private media = new Map<string, ArtifactMediaRecord>()
   /** By project and key; no artifact owns one. */
   private videoRenders = new Map<string, ArtifactVideoRenderRecord>()
+  /** By project and export key; no artifact owns one. */
+  private videoExportAsks = new Map<string, ArtifactVideoExportAskRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -566,6 +571,18 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     }
   }
 
+  async getVideoExportAsk(
+    input: ArtifactVideoRenderKey
+  ): Promise<ArtifactVideoExportAskRecord | null> {
+    const kept = this.videoExportAsks.get(`${input.projectId}\0${input.key}`)
+    return kept ? structuredClone(kept) : null
+  }
+
+  async putVideoExportAsk(input: ArtifactVideoExportAskRecord): Promise<void> {
+    const key = `${input.projectId}\0${input.key}`
+    if (!this.videoExportAsks.has(key)) this.videoExportAsks.set(key, structuredClone(input))
+  }
+
   async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
     const key = artifactKey(input.projectId, input.artifactId)
     const stored = this.artifacts.get(key)
@@ -676,6 +693,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       pdfs: this.pdfs,
       media: this.media,
       videoRenders: this.videoRenders,
+      videoExportAsks: this.videoExportAsks,
     })
   }
 
@@ -688,6 +706,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.pdfs = new Map(restored.pdfs)
     this.media = new Map(restored.media)
     this.videoRenders = new Map(restored.videoRenders)
+    this.videoExportAsks = new Map(restored.videoExportAsks)
   }
 
   /**

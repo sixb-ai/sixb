@@ -267,7 +267,7 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   /**
    * A video version's MP4: `ready` with its file once rendered, named after the version's title,
    * else `rendering` with how far it has come, having asked the render worker for it;
-   * `render: false` reads it without asking. It renders scene by scene in sandboxes of the
+   * `render: false` reads it without asking, `idle` when no one asked for it yet. It renders scene by scene in sandboxes of the
    * project, about as long as the video itself for a light one, and keeps each scene's segment, so a version that changes one scene renders only
    * that scene again. Its `artifact:` files are those the caller reads. `failed` with why when it
    * could not be rendered; `retry` asks again instead. Whoever reads the artifact may ask. `null`
@@ -357,6 +357,8 @@ export type ArtifactVideoExport =
       /** Its segments rendered, of all of them, then the MP4 being joined from them. */
       readonly progress: VideoExportProgress
     }
+  /** Read with `render: false`, no one asked for it yet: asking renders it. */
+  | { readonly status: "idle" }
   | {
       readonly status: "failed"
       /** Why, as a developer reads it: the scene, the sound, or what the project lacks. */
@@ -1286,7 +1288,15 @@ export function createArtifactsRuntime(
         }
       }
       if (status.status === "failed" && !videoOptions.retry) return status
-      if (videoOptions.render === false) return { status: "rendering", progress: progress() }
+      if (videoOptions.render === false) {
+        // What its segments' keys hold may have been rendered for another video made in part the
+        // same: only an ask says it renders.
+        const asked = await storage.getVideoExportAsk({
+          projectId: runtime.projectId,
+          key: plan.key,
+        })
+        return asked ? { status: "rendering", progress: progress() } : { status: "idle" }
+      }
       if (!options.rendersInSandboxes) {
         throw new ArtifactRequestError(
           "video_unavailable",

@@ -16,6 +16,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  parseArtifactVideoExportAskRow,
   parseArtifactVideoRenderRow,
   storedCommentAnchor,
   turnUndoable,
@@ -39,6 +40,8 @@ import type {
   ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  ArtifactVideoExportAskRecord,
+  ArtifactVideoRenderKey,
   ArtifactVideoRenderRecord,
   CopyArtifactInput,
   CreateArtifactCommentInput,
@@ -840,6 +843,24 @@ export class PgArtifactStorage implements ArtifactStorage {
       WHERE project_id = ${input.projectId}
         AND key = ANY(${[...new Set(input.keys)]}::text[])
         AND failure IS NOT NULL
+    `
+  }
+
+  async getVideoExportAsk(
+    input: ArtifactVideoRenderKey
+  ): Promise<ArtifactVideoExportAskRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT project_id AS "projectId", key, asked_at AS "askedAt" FROM artifact_video_export_asks
+      WHERE project_id = ${input.projectId} AND key = ${input.key}
+    `
+    return row ? parseArtifactVideoExportAskRow(row) : null
+  }
+
+  async putVideoExportAsk(input: ArtifactVideoExportAskRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO artifact_video_export_asks (project_id, key, asked_at)
+      VALUES (${input.projectId}, ${input.key}, ${input.askedAt})
+      ON CONFLICT (project_id, key) DO NOTHING
     `
   }
 

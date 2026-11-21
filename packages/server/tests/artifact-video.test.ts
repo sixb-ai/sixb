@@ -146,15 +146,22 @@ describe("a video's MP4 over the API", () => {
       expect(response.status).toBe(200)
       return response.json()
     }
-    // Read without asking, then asked.
-    const read = await fixture.app.fetch(
-      new Request(url(`${path}?render=false`), { method: "POST", headers: alice.mutationHeaders })
-    )
-    expect(await read.json()).toMatchObject({ status: "rendering" })
+    // Read without asking, which no one did yet, then asked, then read again.
+    const read = async () => {
+      const response = await fixture.app.fetch(
+        new Request(url(`${path}?render=false`), {
+          method: "POST",
+          headers: alice.mutationHeaders,
+        })
+      )
+      return response.json()
+    }
+    expect(await read()).toEqual({ status: "idle" })
     expect(await ask()).toEqual({
       status: "rendering",
       progress: { ready: 0, total: 3, assembling: false },
     })
+    expect(await read()).toMatchObject({ status: "rendering" })
 
     const get = () => fixture.app.fetch(new Request(url(path), { headers: alice.headers }))
     const missing = await get()

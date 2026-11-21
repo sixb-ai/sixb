@@ -493,6 +493,57 @@ describe("sixb.artifacts.video()", () => {
     expect(await claimable()).toEqual([])
   })
 
+  // Reproduce by answering `rendering` for render: false in video() whatever was asked: an export
+  // no one asked for reads as one rendering, with the segments another video rendered counted.
+  test("answers idle, read without asking, until someone asks for it", async () => {
+    const { sixb, publish, claimable, storage, withLogo } = setup()
+    const { LAUNCH, logo, logoFile } = await withLogo()
+    const { version } = await publish(LAUNCH)
+    const plan = videoExportPlan(
+      sourceOf(version, [{ address: `artifact:${logo}/logo.png`, file: logoFile }])
+    )
+    await claimable()
+
+    // A scene another version rendered, as an edit of one scene keeps the others.
+    await storage().putVideoRender({
+      projectId: "videos",
+      key: plan.segments[0]?.key ?? "",
+      file: (version.files[0] as ArtifactFile).file,
+      createdAt: new Date(),
+    })
+    expect(await sixb.artifacts.video(version.artifactId, { render: false })).toEqual({
+      status: "idle",
+    })
+    expect(await claimable()).toEqual([])
+
+    await sixb.artifacts.video(version.artifactId)
+    expect(await sixb.artifacts.video(version.artifactId, { render: false })).toEqual({
+      status: "rendering",
+      progress: { ready: 1, total: 4, assembling: false },
+    })
+  })
+
+  // Reproduce by keeping the ask before `enqueue` in requestVideoExport: an ask that never reached
+  // the queue reads as rendering for good, and no one is offered to export it again.
+  test("stays idle when its ask never reached the render queue", async () => {
+    const { sixb, publish, queues, withLogo } = setup()
+    const { version } = await publish((await withLogo()).LAUNCH)
+    const enqueue = queues.renders.enqueue
+    queues.renders.enqueue = async () => {
+      throw new Error("Queue unavailable.")
+    }
+
+    try {
+      const refused = await sixb.artifacts.video(version.artifactId).catch((error) => error)
+      expect(refused.message).toBe("Queue unavailable.")
+    } finally {
+      queues.renders.enqueue = enqueue
+    }
+    expect(await sixb.artifacts.video(version.artifactId, { render: false })).toEqual({
+      status: "idle",
+    })
+  })
+
   test("answers ready with the MP4, and failed with why until asked to retry", async () => {
     const { sixb, publish, claimable, storage, files, withLogo } = setup()
     const { LAUNCH, logo, logoFile } = await withLogo()
@@ -559,9 +610,9 @@ describe("sixb.artifacts.video()", () => {
     const { version } = await bare.publish((await bare.withLogo()).LAUNCH)
     const unavailable = await bare.sixb.artifacts.video(version.artifactId).catch((error) => error)
     expect(unavailable.code).toBe("video_unavailable")
-    // Read without asking, it says where it stands.
-    expect(await bare.sixb.artifacts.video(version.artifactId, { render: false })).toMatchObject({
-      status: "rendering",
+    // Read without asking, it says where it stands: no one asked for it.
+    expect(await bare.sixb.artifacts.video(version.artifactId, { render: false })).toEqual({
+      status: "idle",
     })
   })
 })
