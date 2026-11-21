@@ -39,7 +39,7 @@ import type {
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState, requireRequestSixb } from "../auth/scope"
+import { requestActor, requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createFileContentResponse,
   fileContentGetResponses,
@@ -74,6 +74,7 @@ import {
   ArtifactRestorePointSchema,
   ArtifactStateParamsSchema,
   ArtifactStateResponseSchema,
+  ArtifactThreadListResponseSchema,
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
   ArtifactVideoExportQuerySchema,
@@ -94,6 +95,7 @@ import {
 } from "../schemas/artifacts"
 import { FileContentQuerySchema, ShareGrantQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { serializeThreads } from "./agents"
 import { handleObjectQueryError } from "./objects"
 
 type RouteSet = { status?: number | string }
@@ -1023,6 +1025,39 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "listArtifactHolders",
           security: accessTokenSecurityRequirement("listArtifactHolders"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/threads",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const sixb = requireRequestSixb(context)
+          const threads = await sixb.agent.threads.listForArtifact(artifactId)
+          if (!threads) return await refusal(context, artifactId, context.set)
+
+          return ArtifactThreadListResponseSchema.parse({
+            threads: await serializeThreads(host, threads, requestActor(sixb)),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactThreadListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List the conversations about an artifact",
+          description:
+            "The Agent conversations the artifact is shared in, among those you own or take part in, most recently updated first: each one the Agent wrote it from, and the fork it was copied for. A conversation you do not read is left out, though it shares the artifact.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactThreads",
         },
       }
     )

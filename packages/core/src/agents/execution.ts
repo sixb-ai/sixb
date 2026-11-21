@@ -1,3 +1,4 @@
+import { getCallerArtifacts } from "../artifacts/caller"
 import { principalsEqual, type UserPrincipal } from "../auth"
 import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
@@ -167,6 +168,12 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
+    /**
+     * The conversations an artifact is shared in, among those the caller reads, theirs or another's
+     * they take part in, most recently updated first: each one the Agent wrote it from, and the
+     * fork it was copied for. `null` when the caller cannot read the artifact.
+     */
+    listForArtifact(artifactId: string): Promise<readonly AgentThreadView[] | null>
     /**
      * Record that the caller's reading of a thread reached a message, or its newest when omitted,
      * which is what a Done button sends. It never moves backwards, so another device that read
@@ -1160,6 +1167,22 @@ export function createAgentRuntime<
         })
         const views = await agentThreadViews(runtime, result.threads)
         return { ...result, threads: await withThreadState(views, readViewer()) }
+      },
+      listForArtifact: async (artifactId) => {
+        if (!(await getCallerArtifacts(runtime).get(artifactId))) return null
+
+        const threadIds =
+          (await runtime.storage.artifacts?.listThreadIds({
+            projectId: runtime.projectId,
+            id: artifactId,
+          })) ?? []
+        // Each as the caller reads it: a sub-agent's is read through its conversation, so only a
+        // conversation of theirs, or one they take part in, is listed.
+        const readable = await Promise.all(threadIds.map((threadId) => rule.read(threadId)))
+        const threads = readable
+          .flatMap((read) => (read && read.thread.kind === "conversation" ? [read.thread] : []))
+          .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+        return withThreadState(threads, readViewer())
       },
       participants: {
         add: (threadId, users) =>

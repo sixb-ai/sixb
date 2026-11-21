@@ -148,6 +148,7 @@ import {
   listArtifactHolders,
   listArtifactRestorePoints,
   listArtifacts,
+  listArtifactThreads,
   listAuthAccessTokens,
   listAuthInvitations,
   listAuthMembers,
@@ -648,6 +649,9 @@ import type {
   ListArtifactsData,
   ListArtifactsError,
   ListArtifactsResponse,
+  ListArtifactThreadsData,
+  ListArtifactThreadsError,
+  ListArtifactThreadsResponse,
   ListAuthAccessTokensData,
   ListAuthAccessTokensError,
   ListAuthAccessTokensResponse,
@@ -6621,6 +6625,33 @@ export const listArtifactHoldersOptions = (options: Options<ListArtifactHoldersD
       return data
     },
     queryKey: listArtifactHoldersQueryKey(options),
+  })
+
+export const listArtifactThreadsQueryKey = (options: Options<ListArtifactThreadsData>) =>
+  createQueryKey("listArtifactThreads", options)
+
+/**
+ * List the conversations about an artifact
+ *
+ * The Agent conversations the artifact is shared in, among those you own or take part in, most recently updated first: each one the Agent wrote it from, and the fork it was copied for. A conversation you do not read is left out, though it shares the artifact.
+ */
+export const listArtifactThreadsOptions = (options: Options<ListArtifactThreadsData>) =>
+  queryOptions<
+    ListArtifactThreadsResponse,
+    ListArtifactThreadsError,
+    ListArtifactThreadsResponse,
+    ReturnType<typeof listArtifactThreadsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifactThreads({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactThreadsQueryKey(options),
   })
 
 /**

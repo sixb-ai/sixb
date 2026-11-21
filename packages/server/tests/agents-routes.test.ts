@@ -533,6 +533,61 @@ describe("agent routes", () => {
     })
   })
 
+  // The listing is core's and proven there; this proves the route answers as it decides.
+  test("lists the conversations about an artifact to whoever reads them", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    const asAlice = createTestSixb(sixb, {
+      authorization: resolveAuthorizationContext({
+        principal: { type: "user", id: "usr_alice" },
+        groupIds: ["support-users"],
+        roles: sixb.definitions.security.listResolvedRoles(),
+      }),
+    })
+    const file = await createTestSixb(sixb).blobs.put({
+      body: new TextEncoder().encode("# Teaser"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const { artifact, version } = await asAlice.artifacts.create({
+      kind: "document",
+      title: "Teaser",
+      files: [{ path: "document.md", file }],
+    })
+
+    // The Agent wrote it from Alice's conversation.
+    const owner = { type: "user", id: "usr_alice" } as const
+    await storage.agents.threads.create({ projectId: sixb.id, id: "thr_1", ownerPrincipal: owner })
+    const stored = await storage.artifacts.getVersion({
+      projectId: sixb.id,
+      artifactId: artifact.id,
+      version: version.version,
+    })
+    if (!stored) throw new Error("Expected the artifact's version.")
+    await storage.artifacts.publish({
+      projectId: sixb.id,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...stored, origin: { threadId: "thr_1", runId: "run_1" } },
+    })
+
+    const read = (session: Awaited<ReturnType<typeof seedSession>>, id = artifact.id) =>
+      app.fetch(
+        new Request(`http://localhost/api/artifacts/${id}/threads`, { headers: session.headers })
+      )
+    const listed = await read(alice)
+    expect(listed.status).toBe(200)
+    expect(await listed.json()).toMatchObject({
+      threads: [{ id: "thr_1", kind: "conversation", owner: { id: "usr_alice" } }],
+    })
+
+    const refused = await read(bob)
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({ code: "not_shared" })
+    expect((await read(alice, "art_zzzzzzzzzz")).status).toBe(404)
+  })
+
   test.each([
     {
       name: "a malformed artifact context id",
