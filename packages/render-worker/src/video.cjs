@@ -6,7 +6,7 @@
 //   node video.cjs sound <project> <out.m4a> <budget ms> <engine> <fps> <frames>
 //     Mixes the whole project's sound once, as HyperFrames' own render mixes it, through the plan
 //     its distributed render makes: AAC. A project with no sound gets silence, as long as it.
-//   node video.cjs assemble <out.mp4> <budget ms> <frames> <fps> <sound> <segment>...
+//   node video.cjs assemble <out.mp4> <sound> <budget ms> <frames> <fps> <segment>...
 //     Joins the segments in order without encoding them again, with the sound, its index first.
 //   node video.cjs stills <project> <out dir> <budget ms> <engine> <width> <second>[,<second>]...
 //     Snapshots the project at each moment, as JPEGs at most <width> pixels wide.
@@ -164,7 +164,7 @@ async function sound(left) {
 }
 
 async function assemble(left) {
-  const [out, , frames, fps, soundtrack, ...segments] = args
+  const [out, soundtrack, , frames, fps, ...segments] = args
   const list = `${out}.txt`
   fs.writeFileSync(list, segments.map((segment) => `file '${segment.replaceAll("'", "'\\''")}'\n`).join(""))
 

@@ -329,11 +329,14 @@ describe("a video's export in the render worker", () => {
     expect(look?.id).toBe(job.id)
     await assemble(look as ArtifactVideoExportRequestedQueueJob)
     const joined = sandboxes.ran.at(-1)
-    // Its frames and their rate, the sound, then each scene's segment, in the order they play.
+    // The sound, its time, its frames and their rate, then each scene's segment, in the order
+    // they play. Its time sits where every mode's does, which the script reads its deadline from:
+    // a frame count there would leave each FFmpeg step one second.
     expect(joined?.mode).toBe("assemble")
-    expect(joined?.args[2]).toBe("180")
-    expect(joined?.args[3]).toBe("30")
-    expect(joined?.args[4]).toEndWith("/sound.m4a")
+    expect(joined?.args[1]).toEndWith("/sound.m4a")
+    expect(Number(joined?.args[2])).toBeGreaterThan(60_000)
+    expect(joined?.args[3]).toBe("180")
+    expect(joined?.args[4]).toBe("30")
 
     const plan = videoExportPlan(job.payload)
     const [mp4] = await artifacts().listVideoRenders({ projectId, keys: [plan.key] })
