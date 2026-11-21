@@ -8,6 +8,7 @@ import {
   gzip as gzipCallback,
   constants as zlibConstants,
 } from "node:zlib"
+import { singleCopyPlugin } from "./build-single-copies"
 import { renderServiceWorker, SERVICE_WORKER_PATH } from "./service-worker"
 import { LAUNCH_ICON_SIZE } from "./shell/phone/launch"
 
@@ -188,7 +189,11 @@ async function buildBrowserEntry(
       chunk: "chunk-[name]-[hash].[ext]",
       asset: "asset-[name]-[hash].[ext]",
     },
-    plugins: [extensionlessSourceImportPlugin, publicRootUrlPlugin],
+    plugins: [
+      extensionlessSourceImportPlugin,
+      publicRootUrlPlugin,
+      singleCopyPlugin(import.meta.dir),
+    ],
     // Report a failed build through `result.logs` instead of throwing Bun's bare "Bundle failed".
     throw: false,
     // React is bundled into this browser output, so without pinning NODE_ENV the production build
