@@ -160,11 +160,17 @@ function configuredModelDefinitions(
 class RemoteAnthropicCatalog implements AnthropicCatalog {
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
+  private thinkingTypesById: ReadonlyMap<string, JsonObject> = new Map()
 
   constructor(
     private readonly transport: AnthropicTransport,
     private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>
   ) {}
+
+  /** The thinking types the catalog last listed for a model, if it has loaded. Never loads it. */
+  thinkingTypes(modelId: string): JsonObject | undefined {
+    return this.thinkingTypesById.get(modelId)
+  }
 
   async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
     return (
@@ -202,6 +208,7 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
 
   private async fetchDefinitions(): Promise<readonly LanguageModelDefinition[]> {
     const discovered = new Map<string, LanguageModelDefinition>()
+    const thinkingTypes = new Map<string, JsonObject>()
     let afterId: string | undefined
     for (;;) {
       const url = new URL(`${this.transport.baseUrl}/models`)
@@ -238,7 +245,10 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
       }
       for (const entry of body.data) {
         const definition = catalogDefinition(entry)
-        if (definition) discovered.set(definition.modelId, definition)
+        if (!definition) continue
+        discovered.set(definition.modelId, definition)
+        const types = catalogThinkingTypes(object(object(entry)?.capabilities))
+        if (types) thinkingTypes.set(definition.modelId, types)
       }
       if (body.has_more !== true) break
       const next = string(body.last_id)
@@ -254,6 +264,7 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
     for (const definition of this.supplied.values()) {
       discovered.set(definition.modelId, definition)
     }
+    this.thinkingTypesById = thinkingTypes
     return Object.freeze([...discovered.values()])
   }
 }
@@ -384,7 +395,7 @@ class AnthropicLanguageModel implements LanguageModel {
 
   constructor(
     private readonly transport: AnthropicTransport,
-    private readonly catalog: AnthropicCatalog,
+    private readonly catalog: RemoteAnthropicCatalog,
     private readonly prices: ModelsDevPrices,
     modelId: string,
     private readonly options: AnthropicModelOptions,
@@ -578,7 +589,8 @@ class AnthropicLanguageModel implements LanguageModel {
       request.reasoning,
       this.definition.capabilities.reasoning,
       maxOutputTokens,
-      this.modelId
+      this.modelId,
+      anthropicThinkingOff(this.modelId, this.catalog.thinkingTypes(this.modelId))
     )
     const thinking = summarizedThinking(reasoning.thinking, this.modelId)
     const outputConfig: JsonObject = {
@@ -682,10 +694,11 @@ function anthropicReasoningRequest(
   reasoning: LanguageModelRequest["reasoning"],
   capabilities: ModelCapabilities["reasoning"],
   maxOutputTokens: number,
-  modelId: string
+  modelId: string,
+  thinkingOff: AnthropicThinkingOff | undefined
 ): { readonly effort?: ModelReasoningEffort; readonly thinking?: JsonObject } {
   const issue =
-    reasoning === "none" && anthropicThinkingAlwaysOn(modelId)
+    reasoning === "none" && thinkingOff === undefined
       ? "reasoning cannot be disabled"
       : modelReasoningSupportIssue(capabilities, reasoning)
   if (issue) {
@@ -698,7 +711,8 @@ function anthropicReasoningRequest(
     throw new UnsupportedModelFeatureError(`[SixbAnthropic] Model '${modelId}' ${issue}.`)
   }
   if (reasoning === undefined || reasoning === "provider-default") return {}
-  if (reasoning === "none") return { thinking: { type: "disabled" } }
+  // `between_tools` takes no effort above `high`; `none` sends none, and the default is `high`.
+  if (reasoning === "none") return thinkingOff ? { thinking: { type: thinkingOff } } : {}
   if (typeof reasoning === "string") {
     if (reasoning === "minimal") {
       console.warn(
@@ -831,8 +845,6 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
   return object(capabilities?.[name])?.supported === true
 }
 
-// The catalog exposes adaptive/manual support, but not whether thinking can be disabled.
-// Keep the same restriction for direct and offline bindings that have no catalog metadata.
 /**
  * Anthropic caches only what a request marks, so the adapter marks the prefixes Sixb repeats:
  *
@@ -883,7 +895,8 @@ function withPromptCaching(
 /**
  * Claude 4.7 and later return empty thinking text unless a request asks for a summary, and Claude 5
  * and later think without a `thinking` field. Sixb shows reasoning, so wherever thinking runs on
- * those models, the adapter asks for summaries. Billing is the same; `disabled` takes no display.
+ * those models, the adapter asks for summaries. Billing is the same; `disabled` and
+ * `between_tools` take no display.
  */
 function summarizedThinking(
   thinking: JsonObject | undefined,
@@ -903,8 +916,29 @@ function summarizedThinking(
     : thinking
 }
 
-function anthropicThinkingAlwaysOn(modelId: string): boolean {
-  return /^claude-(?:fable-5|mythos-(?:5|preview))(?:-|$)/.test(modelId)
+type AnthropicThinkingOff = "disabled" | "between_tools"
+
+/**
+ * The `thinking` type that turns a model's thinking off, or `undefined` for a model that always
+ * thinks. Most take `disabled`; Sonnet 5.5 takes `between_tools` instead, which skips extended
+ * thinking and returns the notes it writes between tool calls as thinking blocks. The catalog
+ * lists each model's types. Without it (an offline binding, or before the catalog loads), the
+ * models known to differ.
+ */
+function anthropicThinkingOff(
+  modelId: string,
+  thinkingTypes: JsonObject | undefined
+): AnthropicThinkingOff | undefined {
+  if (thinkingTypes && ("disabled" in thinkingTypes || "between_tools" in thinkingTypes)) {
+    if (supported(thinkingTypes, "disabled")) return "disabled"
+    return supported(thinkingTypes, "between_tools") ? "between_tools" : undefined
+  }
+  if (/^claude-(?:fable-5|mythos-(?:5|preview)|opus-5-5)(?:-|$)/.test(modelId)) return undefined
+  return /^claude-sonnet-5-5(?:-|$)/.test(modelId) ? "between_tools" : "disabled"
+}
+
+function catalogThinkingTypes(capabilities: JsonObject | undefined): JsonObject | undefined {
+  return object(object(capabilities?.thinking)?.types)
 }
 
 function anthropicReasoningCapabilities(
@@ -916,10 +950,10 @@ function anthropicReasoningCapabilities(
 
   const effortCapabilities = object(capabilities.effort)
   const efforts = MODEL_REASONING_EFFORTS.filter((effort) => supported(effortCapabilities, effort))
-  const thinkingTypes = object(object(capabilities.thinking)?.types)
+  const thinkingTypes = catalogThinkingTypes(capabilities)
   const supportsManualBudget = supported(thinkingTypes, "enabled")
   return {
-    canDisable: !anthropicThinkingAlwaysOn(modelId),
+    canDisable: anthropicThinkingOff(modelId, thinkingTypes) !== undefined,
     ...(efforts.length === 0 ? {} : { efforts }),
     ...(supportsManualBudget ? { budgetTokens: { min: 1_024 } } : {}),
   }
