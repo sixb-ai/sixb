@@ -63,7 +63,9 @@ CI runs these as independent parallel jobs (each does `bun install --frozen-lock
 - `client`: `bun run generate:client`, then `git diff --exit-code`
 - `test`: `bun run test:ci`
 - `lint`: `bun run check`
-- `e2e`: package-scoped matrix jobs for packages with `test:e2e`
+- `e2e`: package-scoped matrix jobs for packages with `test:e2e`. On a pull request each job first
+  asks `scripts/ci-scope.ts` whether the change reaches its package, and passes without installing
+  when it cannot. Pushes to `main` run every suite, so a dependency the script misses fails there.
 
 `test:ci` is `bun test` wrapped in `scripts/ci-guard.ts`, which fails the run at the first 60-second
 silence and prints the last test file, the process tree, and each thread's kernel wait state. The
