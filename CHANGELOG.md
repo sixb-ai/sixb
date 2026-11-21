@@ -2,6 +2,16 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- The agent's `edit` no longer needs the file read first in the same turn: `old_string` must match
+  the file as it is, and the result says when the file holds changes the agent has not seen.
+  Several edits of one file in one step all land, where one was lost or the file left torn. `write`
+  replaces an existing file only once the agent has read every line of it as it is now, not just
+  its first lines.
+
 ## 2026-11-22 — Sixb 0.2.7
 
 0.2.7 lets a sub-agent work in its conversation's checkout or folder, connects Azure AI Foundry

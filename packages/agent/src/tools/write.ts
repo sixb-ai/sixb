@@ -1,20 +1,21 @@
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxHandle } from "../sandbox-handle"
-import { assertReadAsIs, objectInput, pathInput } from "./edit"
+import { objectInput, pathInput } from "./edit"
 import {
   commitSandboxFile,
-  type FileReadLedger,
   loadSandboxFile,
   MAX_EDITED_FILE_BYTES,
   publicError,
+  type SeenFile,
+  type SeenFiles,
 } from "./file-writes"
 
 export const WRITE_TOOL_SPEC = {
   name: "write",
   strict: true,
   description:
-    "Create a file, or replace one whole; missing parent directories are created. Replacing an existing file needs a read of it first. To change part of a file, use edit.",
+    "Create a file, or replace one whole; missing parent directories are created. Replacing an existing file needs all of it read first, as it is now. To change part of a file, use edit.",
   inputSchema: {
     type: "object",
     properties: {
@@ -45,7 +46,7 @@ export interface WriteToolOutput {
 
 export function createWriteTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>,
-  ledger: FileReadLedger
+  seenFiles: SeenFiles
 ): ModelTool<WriteToolInput> {
   return {
     ...WRITE_TOOL_SPEC,
@@ -59,25 +60,45 @@ export function createWriteTool(
         )
       }
       const handle = await resolveSandbox()
-      const loaded = await loadSandboxFile(handle, { path: input.path, tool: "write", signal })
-      if (loaded.kind === "file") assertReadAsIs(ledger, loaded, input.path, "write")
+      return seenFiles.change(async () => {
+        const loaded = await loadSandboxFile(handle, { path: input.path, tool: "write", signal })
+        if (loaded.kind === "file") {
+          assertSeenWhole(seenFiles.get(loaded.realPath), loaded.fingerprint, input.path)
+        }
 
-      const written = await commitSandboxFile(handle, {
-        path: loaded.kind === "file" ? loaded.realPath : input.path,
-        expected: loaded.kind === "file" ? loaded.fingerprint : "missing",
-        bytes,
-        tool: "write",
-        signal,
+        const written = await commitSandboxFile(handle, {
+          path: input.path,
+          loaded,
+          bytes,
+          tool: "write",
+          signal,
+        })
+        seenFiles.recordWrite(written.realPath, written.fingerprint, true)
+        return {
+          path: input.path,
+          created: loaded.kind === "missing",
+          lines: lineCount(input.content),
+          bytes: bytes.byteLength,
+        } satisfies WriteToolOutput
       })
-      ledger.record(written.realPath, written.fingerprint)
-      return {
-        path: input.path,
-        created: loaded.kind === "missing",
-        lines: lineCount(input.content),
-        bytes: bytes.byteLength,
-      } satisfies WriteToolOutput
     },
     errorText: agentToolErrorText,
+  }
+}
+
+/** Replacing a file drops all of it: the model must have seen all of it, as it is now. */
+function assertSeenWhole(seen: SeenFile | undefined, fingerprint: string, path: string): void {
+  if (seen !== undefined && seen.fingerprint !== fingerprint) {
+    throw publicError(
+      "write",
+      `'${path}' changed since you last read or changed it. Read all of it again first.`
+    )
+  }
+  if (!seen?.whole) {
+    throw publicError(
+      "write",
+      `you have not seen all of '${path}', and write replaces it whole: read the whole file first, or change part of it with edit.`
+    )
   }
 }
 
