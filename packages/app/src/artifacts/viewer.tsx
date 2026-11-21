@@ -41,7 +41,7 @@ import {
   Undo2,
   X,
 } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useCurrentUser } from "../session"
 import { useSharedGuest } from "../shared-session"
@@ -95,6 +95,11 @@ export interface ViewerChrome {
   readonly fullPageHref?: string
   /** No link to the artifact's own page to copy: its reader cannot open it there. */
   readonly withoutPageLink?: boolean
+  /**
+   * No kind or title before the header's actions: the page around it shows what the artifact is.
+   * The header keeps the rest, editing's undo, redo, save state and Done among it.
+   */
+  readonly withoutTitle?: boolean
 }
 
 /** An artifact or a file under its header. One viewer serves the panel, the dialog, and the page. */
@@ -103,6 +108,7 @@ export function Viewer({
   onTargetChange,
   onOpenReference = onTargetChange,
   chrome = {},
+  defaultEditing = false,
   className,
 }: {
   readonly target: ViewerTarget
@@ -110,6 +116,8 @@ export function Viewer({
   /** Opens an artifact this one shows or links to; a host can remember the way back. */
   readonly onOpenReference?: (target: ArtifactTarget) => void
   readonly chrome?: ViewerChrome
+  /** Starts editing as the header's Edit does, once the reader may change the artifact. */
+  readonly defaultEditing?: boolean
   readonly className?: string
 }) {
   return (
@@ -123,6 +131,7 @@ export function Viewer({
             target={target}
             onTargetChange={onTargetChange}
             chrome={chrome}
+            defaultEditing={defaultEditing}
           />
         </ArtifactReferencesProvider>
       ) : (
@@ -139,10 +148,12 @@ function ArtifactView({
   target,
   onTargetChange,
   chrome,
+  defaultEditing,
 }: {
   readonly target: ArtifactTarget
   readonly onTargetChange: (target: ViewerTarget) => void
   readonly chrome: ViewerChrome
+  readonly defaultEditing: boolean
 }) {
   const messages = useArtifactMessages().viewer
   const artifactQuery = useQuery({
@@ -178,12 +189,22 @@ function ArtifactView({
   const designed = !!shown && isDesignedDocument(shown)
   const markdown = detail?.artifact.kind === "document" && !!shown && !designed
   const liveKind = detail ? liveKindOf(detail.artifact.kind) : null
-  const liveView = useLiveView(
-    detail && liveKind && versionNumber === detail.artifact.latestVersion
-      ? target.artifactId
-      : null,
-    liveKind ?? "canvas"
-  )
+  const shownLive = !!detail && !!liveKind && versionNumber === detail.artifact.latestVersion
+  const liveView = useLiveView(shownLive ? target.artifactId : null, liveKind ?? "canvas")
+
+  // Opened to edit, it starts editing as Edit would, once the reader may: a live one once its
+  // document holds it, never as a draft while its live view is still to come. Once only: Done
+  // leaves editing for good, as on the artifact's page.
+  const start =
+    markdown && liveView && !liveView.state.left ? undefined : startEditing(edit, liveView)
+  const opensEditing = useRef(defaultEditing)
+  const startsOpened = shownLive && !liveView ? undefined : start
+  useEffect(() => {
+    if (!opensEditing.current || !startsOpened) return
+
+    opensEditing.current = false
+    startsOpened()
+  }, [startsOpened])
 
   if (error || (artifactQuery.isSuccess && !detail)) {
     return (
@@ -229,9 +250,7 @@ function ArtifactView({
       <EditSessionProvider
         editing={edit.editing || !!liveView?.editing}
         report={edit.report}
-        start={
-          markdown && liveView && !liveView.state.left ? undefined : startEditing(edit, liveView)
-        }
+        start={start}
       >
         <LiveArtifactProvider artifact={liveView?.live ?? null}>
           <ArtifactViewProvider
@@ -1370,8 +1389,8 @@ function ViewerBar({
           </HeaderButton>
         ) : null}
         <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", !chrome.onBack && "pl-1")}>
-          {leading}
-          {title ? (
+          {chrome.withoutTitle ? null : leading}
+          {title && !chrome.withoutTitle ? (
             <h2
               className="min-w-0 truncate text-[14.5px] leading-tight font-semibold tracking-[-0.01em] text-foreground"
               title={title}

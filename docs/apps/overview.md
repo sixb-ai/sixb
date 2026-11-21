@@ -321,8 +321,20 @@ const plan = contract.properties.onboardingPlan
 | --- | --- | --- |
 | `artifactId` | required | The artifact, shown at its latest version |
 | `className` | none | Sizes the frame, which is `34rem` tall otherwise |
+| `defaultEditing` | `false` | Opens editing, as its Edit does, once the person may change it |
+| `withoutTitle` | `false` | Leaves the kind and title out of its header, which keeps its actions and editing's controls |
+| `inlineOnPhone` | `false` | Shows the viewer on a phone too, instead of the artifact's card |
 
-On a phone it shows as the artifact's card, which opens its page. A person who cannot open the
+For an editor built around the artifact, such as a post's video next to the post's details:
+
+```tsx
+<ArtifactViewer artifactId={post.properties.edit.id} defaultEditing withoutTitle inlineOnPhone />
+```
+
+Editing works as on the artifact's page: Done leaves it, and Edit starts it again. Someone who may
+only read the artifact sees it without editing.
+
+Without `inlineOnPhone`, a phone shows the artifact's card, which opens its page. A person who cannot open the
 artifact sees why in its place. Through a
 [shared link](../auth/shared-access.md#share-an-objects-artifacts), the visitor follows it live and
 comments as a guest, with nothing to edit.

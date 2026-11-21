@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
+import { ArtifactViewer, type ArtifactViewerProps } from "../src/artifacts/artifact-viewer"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { LiveHubProvider } from "../src/artifacts/live/hooks"
 import { LiveHub } from "../src/artifacts/live/session"
@@ -17,7 +18,7 @@ import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
 import { canvasOf, FakeConnection, FakeServer, settle } from "./helpers/live-server"
 
-installDom([
+const browser = installDom([
   "document",
   "navigator",
   "Node",
@@ -222,6 +223,26 @@ describe("a canvas held live in the viewer", () => {
     ui.unmount()
   })
 
+  // Reproduce by starting `opensEditing` with the draft's start in ArtifactView whether or not a
+  // live view is to come: a canvas read before opens on the draft's Save, and never live.
+  test("embedded to edit, read before, opens editing live rather than as a draft", async () => {
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    const ui = render(
+      <QueryClientProvider client={seeded()}>
+        <MemoryRouter>
+          <LiveHubProvider hub={new LiveHub(server.open)}>
+            <ArtifactViewer artifactId={ARTIFACT_ID} defaultEditing />
+          </LiveHubProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await act(settle)
+
+    expect(ui.getByRole("button", { name: "Done" })).toBeDefined()
+    expect(ui.queryByRole("button", { name: "Save" })).toBeNull()
+    ui.unmount()
+  })
+
   test("says it is offline to whoever only looks at it, as to who edits it", async () => {
     // Reproduce by showing the save state only in LiveEditBar: once Done, the canvas freezes
     // while the socket is down, and nothing says why.
@@ -309,5 +330,84 @@ describe("a video held live in the viewer", () => {
     })
     expect(ui.getByRole("button", { name: "Done" })).toBeDefined()
     ui.unmount()
+  })
+
+  /** The video on a page of the app's own, as an editor built around it embeds it. */
+  function embedded(hub: LiveHub, props: Omit<ArtifactViewerProps, "artifactId"> = {}) {
+    return render(
+      <QueryClientProvider client={seededVideo()}>
+        <MemoryRouter>
+          <LiveHubProvider hub={hub}>
+            <ArtifactViewer artifactId={ARTIFACT_ID} {...props} />
+          </LiveHubProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  // Reproduce by dropping the effect that starts `opensEditing` in ArtifactView: the embedded
+  // editor opens on Edit, as a reader's view.
+  test("embedded to edit, opens editing once its document holds it, and Done leaves it", async () => {
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    let connection: FakeConnection | undefined
+    const ui = embedded(
+      new LiveHub((handlers) => {
+        connection = new FakeConnection(server, handlers)
+        server.connections.add(connection)
+        return connection
+      }),
+      { defaultEditing: true }
+    )
+    await act(settle)
+    expect(ui.queryByRole("button", { name: "Done" })).toBeNull()
+
+    await act(async () => {
+      connection?.connect()
+      await settle()
+    })
+    const done = ui.getByRole("button", { name: "Done" })
+    expect(ui.getByRole("button", { name: "Undo" })).toBeDefined()
+
+    await act(async () => {
+      fireEvent.click(done)
+      await settle()
+    })
+    expect(ui.queryByRole("button", { name: "Done" })).toBeNull()
+    expect(ui.getByRole("button", { name: "Edit" })).toBeDefined()
+    ui.unmount()
+  })
+
+  // Reproduce by leaving `withoutTitle` out of ViewerBar: the page shows the title twice.
+  test("embedded without its title, keeps editing's controls in its header", async () => {
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    const ui = embedded(new LiveHub(server.open), { defaultEditing: true, withoutTitle: true })
+    await act(settle)
+
+    expect(ui.queryByRole("heading", { name: "Launch film" })).toBeNull()
+    expect(ui.getByRole("button", { name: "Done" })).toBeDefined()
+    expect(ui.getByRole("button", { name: "Undo" })).toBeDefined()
+    expect(ui.getByRole("button", { name: "Redo" })).toBeDefined()
+    expect(ui.container.querySelector("[data-save]")?.getAttribute("data-save")).toBe("saved")
+    ui.unmount()
+  })
+
+  // Reproduce by returning the card on a phone whatever `inlineOnPhone` says in ArtifactViewer.
+  test("embedded on a phone, shows its card, or the viewer itself when the page asks", async () => {
+    browser.happyDOM.setViewport({ width: 375, height: 812 })
+    try {
+      const card = embedded(new LiveHub(new FakeServer(ARTIFACT_ID, CANVAS).open))
+      await act(settle)
+      expect(card.queryByRole("banner")).toBeNull()
+      card.unmount()
+
+      const server = new FakeServer(ARTIFACT_ID, CANVAS)
+      const inline = embedded(new LiveHub(server.open), { inlineOnPhone: true })
+      await act(settle)
+      expect(inline.getByRole("banner")).toBeDefined()
+      expect(inline.getByRole("heading", { name: "Launch film" })).toBeDefined()
+      inline.unmount()
+    } finally {
+      browser.happyDOM.setViewport({ width: 1024, height: 768 })
+    }
   })
 })
