@@ -20,6 +20,7 @@ import type { ActionRunContext, PendingActionRun } from "./types"
 
 export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeFacade {
   return {
+    artifacts: runtime.artifactsAsRequester,
     blobs: {
       put(input) {
         return runtime.sixb.blobs.put(input)

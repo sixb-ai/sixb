@@ -1,3 +1,4 @@
+import type { ArtifactsRuntime } from "../../artifacts/execution"
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors"
 import type { RecordEditsContext } from "../../edits"
@@ -169,6 +170,12 @@ export type ActionBlobContext = Pick<
 >
 
 export interface ActionRuntimeFacade {
+  /**
+   * Artifacts as whoever requested the run reaches them, with the same rights: a person's request
+   * reads only what that person reads, and publishes as them. A run requested by trusted code,
+   * such as a schedule or a workflow, reaches every artifact, and publishes as the system.
+   */
+  readonly artifacts: ArtifactsRuntime
   readonly blobs: ActionBlobContext
   readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime

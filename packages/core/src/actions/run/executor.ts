@@ -1,3 +1,4 @@
+import type { ArtifactsRuntime } from "../../artifacts/execution"
 import { reportRunFailure } from "../../error-reporting/capability"
 import { createSixbError, type SixbCodedError } from "../../errors/internal"
 import type { RequestClient } from "../../execution/request-client"
@@ -28,6 +29,8 @@ export interface ActionRunRequest {
   readonly onRequested?: (runId: string) => void | Promise<void>
   /** Set when the requester views the subject's type through a condition. */
   readonly readSubjectAsRequester?: ReadSubjectAsRequester
+  /** The artifacts the requester reaches: those the run's handlers reach. */
+  readonly artifactsAsRequester: ArtifactsRuntime
   /** Set when an HTTP request requested the run directly. Never persisted. */
   readonly client?: RequestClient
 }
@@ -173,6 +176,7 @@ export class ActionRunExecutor {
         run,
         execution,
         signal: request.signal,
+        artifactsAsRequester: request.artifactsAsRequester,
         ...(request.readSubjectAsRequester === undefined
           ? {}
           : { readSubjectAsRequester: request.readSubjectAsRequester }),
