@@ -257,16 +257,25 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   again, writing each part again where one still lands in its file, a removal takes every part, a
   split makes two clips that each go on, the sound is the same in each (a fade in on the first, out
   on the last), typed words go to every part. A part counts only while it goes on from the one
-  before as a placement wrote it, whatever was done to their scenes since: in the scene placement
-  goes on in after the other's (`sceneAfter`), and, for a recording, playing its file on from where
-  the part before stops as written, so a scene made shorter under it, hiding its end, or longer,
-  leaving a gap, keeps the clip whole; anything else from where the part before reaches its
-  scene's end. Each part is found against the last one found, so a stale part hides none. A clip
-  that goes on lasts as long as its parts show, so its next placement plays its file on without the
-  gap or the hidden end. A split or a cut keeps the attribute on one piece, and what went on from
-  a clip cut into pieces goes on from its last. A head is the one clip of the video with its id. A
-  part edited apart, whose first part is gone, or whose scene a copy now follows, is a clip of its
-  own, and loses the attribute once it is placed again.
+  before as a placement or a cut wrote it, whatever was done to their scenes since: for a
+  recording, a piece starting where the one before ends in the same scene, or a part in the scene
+  placement goes on in after the other's (`sceneAfter`), starting no later than its end, so a scene
+  made shorter under it, hiding its end, or longer, leaving a gap, keeps the clip whole; anything
+  else from where the part before reaches its scene's end. Of two that would go on, the one playing
+  the file on from where the last stops, else the piece beside it, so a stale part hides none. A
+  head is the one clip of the video with its id. A part edited apart, whose first part is gone, or
+  whose scene a copy now follows, is a clip of its own, and loses the attribute once it is placed
+  again.
+- A recording that goes on plays its file on from part to part, unless its words were cut there:
+  it lasts as long as its parts show, and placed again (`logicalClip`), it plays on across a gap or
+  a hidden end, and skips where a part starts elsewhere in its file than the one before stops
+  (`MediaJump`), cut again at each skip (`atJumps`) into pieces back to back in a scene, or one a
+  few frames sooner when a skip comes too close to a scene's edge for a piece of its own. A cut by
+  words (`removeMediaRanges`, `keepClipRanges`) takes from every part what it plays of the words,
+  so words across a scene's edge go whole, from either file. Whatever an operation cuts, what is
+  left of each part goes on from the first piece left (`markCutChains`); a scene moved or removed
+  so that two parts play at once places the clip again (`settleChains`), each part where the one
+  before ends.
 - A clip that leaves its file keeps its id, unless another element of the video has it, and takes
   one of its own when parts go on from it (copies always take new ones); its recording's path is
   rebased for the new folder. What followed it there keeps its time. A clip that holds others, or a
@@ -284,7 +293,11 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   their name when the new scene reads none other by it, and take `<name>-2` otherwise; the key
   reads them by their place, so a renamed look keeps it. The scene's own rules never change, so its
   clips keep their look. Moved again, a clip takes its look along by the same key, and drops it
-  when it goes home; a style goes once no element carries its key, whatever removed the last. A
+  when it goes home; a style goes once no element carries its key, whatever removed the last, and
+  a style written twice, as two people bringing clips at once may leave it, but once. An edit that
+  brings a clip whose look the scene writes already writes that look whole again
+  (`writeWhole`), so someone taking its last clip out at the same time leaves it. No clip is named
+  `sixb-look`. A
   rule that styles what the clip holds through it, `.caption .hot` or `.caption > span`, goes with
   it, its tail as written; escaped class names and attribute operators are read. A rule that may
   style it through a wrapper, by its place among its siblings, or styles its siblings, is not
@@ -343,9 +356,9 @@ What moves with what:
   that clip is split, it follows the last part; once it is removed or cut, it starts at the time
   it did, which the ripple then moves as any other's.
 - A copied scene's elements take new ids, and what names them in the file follows, each by its
-  whole name: a chained start, the look carried for it, `getElementById`, and `#id` or `[id=…]`
-  where they are selectors (a style's preludes, a script's selector strings), never a value such as
-  a colour `#fade`. A part in it goes on from nothing.
+  whole name: a chained start, `getElementById`, and `#id` or `[id=…]` where they are selectors (a
+  style's preludes, a script's selector strings), never a value such as a colour `#fade`. A part in
+  it goes on from nothing.
 - What `index.html` plays during one scene, a line of voice-over at a number of seconds, belongs
   to the scene it plays most during, when it lasts no longer than that scene: it keeps its time
   into the scene as the scene moves, and goes with it. A soundtrack under every scene belongs to
