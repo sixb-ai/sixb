@@ -203,7 +203,9 @@ describe("the timeline's arithmetic", () => {
     expect(atAfter).toBeCloseTo(atBefore, 6)
   })
 
-  test("clips that overlap lie on rows of their own, by track", () => {
+  // Guard proof: give every track the first row free in onRows (model.ts), as sounds take it;
+  // the end card's title, which paints over the footage still playing, then lies under it.
+  test("clips that overlap lie on rows of their own, what paints over another above it", () => {
     const timeline = {
       composition: { element: { start: 0, end: 0 }, tag: { start: 0, end: 0 }, attributes: {} },
       texts: [],
@@ -212,18 +214,24 @@ describe("the timeline's arithmetic", () => {
         { ref: "b", track: "picture", startMs: 1000, durationMs: 2000 },
         { ref: "c", track: "picture", startMs: 2500, durationMs: 1000 },
         { ref: "d", track: "sound", startMs: 0 },
+        { ref: "e", track: "sound", startMs: 0, durationMs: 1000 },
+        { ref: "f", track: "sound", startMs: 1500, durationMs: 1000 },
       ],
     } as never
     const laid = layClips(timeline, "scenes/a.html", 4000, 9000)
+    // c paints over b, which still plays: it lies above it, though a has ended under it. Sounds
+    // stack nothing: f takes the row e has left.
     expect(
       laid.map((clip) => [clip.clip.ref, clip.startMs, clip.endMs, clip.row, clip.open])
     ).toEqual([
       ["a", 4000, 6000, 0, false],
       ["b", 5000, 7000, 1, false],
-      ["c", 6500, 7500, 0, false],
+      ["c", 6500, 7500, 2, false],
       ["d", 4000, 9000, 0, true],
+      ["e", 4000, 5000, 1, false],
+      ["f", 5500, 6500, 1, false],
     ])
-    expect(trackRows(laid)).toEqual({ picture: 2, text: 1, sound: 1 })
+    expect(trackRows(laid)).toEqual({ picture: 3, text: 1, sound: 2 })
   })
 
   // Reproduce by laying each clip its whole length: footage of 5.8 s in a scene trimmed to 5.15 s
@@ -1629,6 +1637,69 @@ describe("the timeline", () => {
       const title = view.getByRole("button", { name: /^Chapter 1, Title/ })
       expect(title.getAttribute("aria-current")).toBe("true")
       expect(view.container.querySelector(".opacity-50")).toBeNull()
+    })
+
+    // Guard proof: draw every row from the top in rowTop (timeline.tsx), as sounds are; the card
+    // painted over the footage is then drawn under it. Draw them so, but lay the boxes a
+    // rectangle touches from the top, and the rectangle over the upper row takes the footage.
+    test("draws what paints in front on the upper row, where a selection rectangle finds it", () => {
+      const files = new Map(FILES)
+      files.set("scenes/talk.html", {
+        text: TALK.replace(
+          "    <p class",
+          '    <img id="card" src="media/card.png" data-start="1" data-duration="2">\n    <p class'
+        ),
+      })
+      files.set("media/card.png", { file: ref("media/card.png") })
+      const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+      const shown = state.composition
+      if (!shown) throw new Error("No video.")
+
+      const selected: unknown[] = []
+      const view = render(
+        timeline({
+          timeMs: 0,
+          composition: shown,
+          clips: everySceneClips(state, shown),
+          edits: {
+            seek: () => {},
+            select: (next: unknown) => selected.push(next),
+            moveClip: () => {},
+            moveClips: () => {},
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          } as never,
+        })
+      )
+      const top = (ref: string) =>
+        Number.parseFloat(
+          view.container.querySelector<HTMLElement>(`[data-timeline-clip="${ref}"]`)?.style.top ??
+            ""
+        )
+      expect(top("card")).toBeLessThan(top("clip"))
+
+      const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]")
+      const picture = [...(tracks?.children ?? [])].find((child) => child.tagName === "DIV")
+        ?.children[1]
+      if (!tracks || !picture) throw new Error("No picture track.")
+      const command = appleKeyboard() ? { metaKey: true } : { ctrlKey: true }
+      fireEvent.pointerDown(picture, {
+        button: 0,
+        clientX: xAt(3500),
+        clientY: 8,
+        pointerId: 1,
+        ...command,
+      })
+      fireEvent.pointerMove(tracks, { clientX: xAt(4500), clientY: 14, pointerId: 1 })
+      expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/talk.html", target: "card" })
+      fireEvent.pointerUp(tracks, { clientX: xAt(4500), clientY: 14, pointerId: 1 })
     })
 
     // Guard proof: give each clip its chapter's start as its floor in onDragMove (timeline.tsx),
