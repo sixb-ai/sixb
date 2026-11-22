@@ -1,5 +1,4 @@
 import {
-  VIDEO_ENTRY,
   type VideoClip,
   type VideoComposition,
   type VideoFileTimeline,
