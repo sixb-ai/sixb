@@ -247,11 +247,17 @@ export default function VideoEditor({
   )
   const edit = useCallback(
     (make: (sources: VideoSources) => VideoEditResult) => {
-      const refused = video.apply(make)
-      if (refused) refuse(refused)
+      // A chapter grown too large is said in the reader's words; the rest as the edit says it.
+      let tooLarge = false
+      const refused = video.apply((sources) => {
+        const result = make(sources)
+        tooLarge = "error" in result && result.refusal === "too_large"
+        return result
+      })
+      if (refused) refuse(tooLarge ? messages.chapterTooLarge : refused)
       return refused === null
     },
-    [video, refuse]
+    [video, refuse, messages.chapterTooLarge]
   )
 
   const { uploads, importFiles } = useMediaImport(video, (detail) =>

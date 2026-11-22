@@ -932,6 +932,8 @@ export const en = {
     cancel: "Cancel",
     cutAway: "Cut",
     refused: "That change would break the video",
+    chapterTooLarge:
+      "This chapter would be too large to publish. Move fewer clips at once, or ask the agent to simplify it.",
     /** A clip moved out of the chapter whose script animated it. */
     keepsLook: (name: string) => `“${name}” keeps its look`,
     animationStays: (chapter: string) =>
@@ -1932,6 +1934,8 @@ export const fr: Translation<ArtifactMessages> = {
     cancel: "Annuler",
     cutAway: "Coupé",
     refused: "Cette modification casserait la vidéo",
+    chapterTooLarge:
+      "Ce chapitre serait trop lourd pour être publié. Déplacez moins de plans à la fois, ou demandez à l’agent de le simplifier.",
     keepsLook: (name) => `« ${name} » garde son style`,
     animationStays: (chapter) =>
       `Son animation reste dans « ${chapter} ». Demandez à l’agent de l’animer ici.`,
