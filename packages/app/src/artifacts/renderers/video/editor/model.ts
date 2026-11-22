@@ -84,6 +84,48 @@ export function snapMove(
   }
 }
 
+/**
+ * How far clips dragged together move, `deltaMs` at most: none before its composition's start,
+ * `floorMs`, so the group keeps its shape where one of them stops.
+ */
+export function groupDelta(
+  clips: readonly { readonly startMs: number; readonly floorMs: number }[],
+  deltaMs: number
+): number {
+  return Math.max(deltaMs, ...clips.map((clip) => clip.floorMs - clip.startMs))
+}
+
+/** A clip where the timeline draws it: its time, and its top and height in pixels. */
+export interface ClipBox<T> {
+  readonly clip: T
+  readonly startMs: number
+  readonly endMs: number
+  readonly top: number
+  readonly height: number
+}
+
+/**
+ * The clips a selection rectangle touches: each whose time and row it crosses, its corners in any
+ * order, from where the drag started to where the pointer is.
+ */
+export function inRectangle<T>(
+  boxes: readonly ClipBox<T>[],
+  from: { readonly ms: number; readonly y: number },
+  to: { readonly ms: number; readonly y: number }
+): T[] {
+  const [startMs, endMs] = [Math.min(from.ms, to.ms), Math.max(from.ms, to.ms)]
+  const [top, bottom] = [Math.min(from.y, to.y), Math.max(from.y, to.y)]
+  return boxes
+    .filter(
+      (box) =>
+        box.startMs <= endMs &&
+        box.endMs >= startMs &&
+        box.top <= bottom &&
+        box.top + box.height >= top
+    )
+    .map((box) => box.clip)
+}
+
 /** A clip as the timeline lays it out: where it plays in the video, on which track and row. */
 export interface LaidClip {
   readonly clip: VideoClip

@@ -7,6 +7,7 @@ import {
   type VideoScene,
   type VideoTarget,
   type VideoText,
+  videoTarget,
 } from "@sixb/core/artifacts/live"
 import type { LiveVideoState } from "../../../live/video"
 import { type LaidClip, layClips, onRows } from "./model"
@@ -17,11 +18,19 @@ import { type LaidClip, layClips, onRows } from "./model"
 /**
  * A scene, or a clip of a file by its target: its id, else its place with what it held, so a
  * selection follows its clip when someone else's edit shifts the places, and lets go once it is gone.
+ * Several clips, from any scene and the video's own, are each named the same way.
  */
 export type EditorSelection =
   | { readonly type: "scene"; readonly scene: string }
   | { readonly type: "clip"; readonly file: string; readonly target: VideoTarget }
+  | { readonly type: "clips"; readonly clips: readonly ClipChoice[] }
   | null
+
+/** A clip of a file a selection names. */
+export interface ClipChoice {
+  readonly file: string
+  readonly target: VideoTarget
+}
 
 /** The scene a selection is in: the scene itself, or the scene whose file holds the clip. */
 export function selectedScene(
@@ -31,17 +40,79 @@ export function selectedScene(
   if (!selection) return undefined
   if (selection.type === "scene")
     return composition.scenes.find((scene) => scene.id === selection.scene)
-  return composition.scenes.find((scene) => scene.src === selection.file)
+
+  // Of several clips, the scene of the last chosen that is in one.
+  const files = choices(selection).map((choice) => choice.file)
+  const file = [...files].reverse().find((each) => each !== VIDEO_ENTRY) ?? files[0]
+  return composition.scenes.find((scene) => scene.src === file)
 }
 
-/** The clip a selection names, if it still is in its file. */
-export function selectedClip(
+/** The clips a selection names: none for a scene, one, or several. */
+export function choices(selection: EditorSelection): readonly ClipChoice[] {
+  if (selection?.type === "clip") return [{ file: selection.file, target: selection.target }]
+  if (selection?.type === "clips") return selection.clips
+  return []
+}
+
+/** The selection of these clips, as the editor reads them now: none, the one, or all of them. */
+export function choose(
+  clips: readonly { readonly file: string; readonly clip: VideoClip }[]
+): EditorSelection {
+  return selectionOf(clips.map((each) => ({ file: each.file, target: videoTarget(each.clip) })))
+}
+
+/** The selection of the clips these name: none, the one, or all of them. */
+export function selectionOf(clips: readonly ClipChoice[]): EditorSelection {
+  const [only] = clips
+  if (!only) return null
+  return clips.length === 1 ? { type: "clip", ...only } : { type: "clips", clips }
+}
+
+/**
+ * The clips laid out on the timeline that a selection names, as their files are now: one gone, or
+ * no longer alone like it, is let go.
+ */
+export function chosenIn<T extends { readonly file: string; readonly clip: VideoClip }>(
+  clips: readonly T[],
+  selection: EditorSelection
+): T[] {
+  const chosen = new Set<T>()
+  for (const choice of choices(selection)) {
+    const inFile = clips.filter((each) => each.file === choice.file)
+    const found = findVideoTarget(
+      inFile.map((each) => each.clip),
+      choice.target
+    )
+    const laid = Array.isArray(found) ? undefined : inFile.find((each) => each.clip === found)
+    if (laid) chosen.add(laid)
+  }
+  return [...chosen]
+}
+
+/**
+ * The selection once `laid` is added to the clips chosen, or taken out when it is one of them, as
+ * a click with the command key does.
+ */
+export function toggled<T extends { readonly file: string; readonly clip: VideoClip }>(
+  clips: readonly T[],
+  selection: EditorSelection,
+  laid: T
+): EditorSelection {
+  const chosen = chosenIn(clips, selection)
+  const same = (each: T) => each.file === laid.file && each.clip.ref === laid.clip.ref
+  return choose(chosen.some(same) ? chosen.filter((each) => !same(each)) : [...chosen, laid])
+}
+
+/** Every clip a selection names that is still in its file, each in its file. */
+export function selectedClips(
   state: LiveVideoState,
   selection: EditorSelection
-): VideoClip | undefined {
-  if (selection?.type !== "clip") return undefined
-  const found = findVideoTarget(state.timelines.get(selection.file)?.clips ?? [], selection.target)
-  return Array.isArray(found) ? undefined : (found as VideoClip)
+): { readonly file: string; readonly clip: VideoClip }[] {
+  const files = new Set(choices(selection).map((choice) => choice.file))
+  const clips = [...files].flatMap((file) =>
+    (state.timelines.get(file)?.clips ?? []).map((clip) => ({ file, clip }))
+  )
+  return chosenIn(clips, selection)
 }
 
 /**

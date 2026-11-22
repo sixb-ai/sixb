@@ -32,6 +32,8 @@ import {
 } from "../src/artifacts/renderers/video/editor/media"
 import {
   editPoints,
+  groupDelta,
+  inRectangle,
   layClips,
   nextEditPoint,
   openingSeek,
@@ -64,6 +66,7 @@ import {
   TranscriptPanel,
   TranscriptTab,
 } from "../src/artifacts/renderers/video/editor/transcript-panel"
+import { appleKeyboard } from "../src/artifacts/renderers/video/keys"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -245,6 +248,38 @@ describe("the timeline's arithmetic", () => {
     expect(openingSeek(scene, (165 / 30) * 1000, 30)).toBe((166 / 30) * 1000)
     expect(openingSeek(scene, 7000, 30)).toBe((166 / 30) * 1000)
     expect(openingSeek(scene, 6000, 30)).toBeUndefined()
+  })
+
+  // Guard proof: return `deltaMs` alone from groupDelta in model.ts; the caption is dragged 1.5 s
+  // into the scene before its own, and the group apart.
+  test("clips dragged together go only as far as the first to reach its composition's start", () => {
+    const group = [
+      { startMs: 3500, floorMs: 3000 },
+      { startMs: 6000, floorMs: 3000 },
+      { startMs: 1000, floorMs: 0 },
+    ]
+    expect(groupDelta(group, -2000)).toBe(-500)
+    expect(groupDelta(group, -200)).toBe(-200)
+    expect(groupDelta(group, 4000)).toBe(4000)
+  })
+
+  // Guard proof: compare the times alone in inRectangle in model.ts; the soundtrack under the
+  // rectangle's span, two tracks below it, is selected too.
+  test("a selection rectangle takes each clip whose time and row it crosses, drawn either way", () => {
+    const boxes = [
+      { clip: "footage", startMs: 3000, endMs: 10_000, top: 2, height: 40 },
+      { clip: "caption", startMs: 3500, endMs: 5500, top: 46, height: 22 },
+      { clip: "score", startMs: 0, endMs: 10_000, top: 108, height: 32 },
+    ]
+    expect(inRectangle(boxes, { ms: 4000, y: 10 }, { ms: 5000, y: 50 })).toEqual([
+      "footage",
+      "caption",
+    ])
+    expect(inRectangle(boxes, { ms: 5000, y: 50 }, { ms: 4000, y: 10 })).toEqual([
+      "footage",
+      "caption",
+    ])
+    expect(inRectangle(boxes, { ms: 6000, y: 50 }, { ms: 9000, y: 60 })).toEqual([])
   })
 
   test("the ruler leaves room for its labels at every zoom", () => {
@@ -723,6 +758,8 @@ describe("the editor's pieces", () => {
             clipText: noop,
             removeClip: noop,
             splitClip: noop,
+            splitClips: noop,
+            removeClips: noop,
           }}
         />
       )
@@ -776,6 +813,8 @@ describe("the editor's pieces", () => {
               clipText: noop,
               removeClip: noop,
               splitClip: noop,
+              splitClips: noop,
+              removeClips: noop,
             }}
           />
         )
@@ -929,6 +968,8 @@ describe("what is derived of a recording", () => {
             clipText: noop,
             removeClip: noop,
             splitClip: noop,
+            splitClips: noop,
+            removeClips: noop,
           }}
         />
       )
@@ -1176,6 +1217,7 @@ describe("the timeline", () => {
           seek: () => {},
           select: () => {},
           moveClip: () => {},
+          moveClips: () => {},
           trimClip: () => {},
           sceneLength: () => {},
           scene: {
@@ -1202,6 +1244,7 @@ describe("the timeline", () => {
           seek: () => {},
           select: () => {},
           moveClip: () => {},
+          moveClips: () => {},
           trimClip: () => {},
           sceneLength: () => {},
           scene: {
@@ -1252,6 +1295,112 @@ describe("the timeline", () => {
     // Moved, the playhead is brought back in sight.
     view.rerender(timeline({ timeMs: 1000, marks: { in: 1000 } }))
     expect(scroller.scrollLeft).not.toBe(600)
+  })
+
+  describe("selecting several clips", () => {
+    // The timeline here draws 100 px a second from its labels' edge, 112 px in: 4 s is at 512.
+    const xAt = (ms: number) => 112 + ms / 10
+    // Asked once the page's navigator is in place: ⌘ on a Mac, Ctrl elsewhere.
+    const command = () => (appleKeyboard() ? { metaKey: true } : { ctrlKey: true })
+    const footage = { file: "scenes/talk.html", target: "clip" }
+    const caption = {
+      file: "scenes/talk.html",
+      target: { ref: "#1", tag: "p", words: "Thanks for having me." },
+    }
+
+    function selecting(selection: Parameters<typeof Timeline>[0]["selection"] = null) {
+      const selected: Parameters<typeof Timeline>[0]["selection"][] = []
+      const moved: [string[], number][] = []
+      const edits = {
+        seek: () => {},
+        select: (next: Parameters<typeof Timeline>[0]["selection"]) => selected.push(next),
+        moveClip: () => {},
+        moveClips: (clips: readonly { readonly clip: { readonly ref: string } }[], ms: number) =>
+          moved.push([clips.map((laid) => laid.clip.ref), ms]),
+        trimClip: () => {},
+        sceneLength: () => {},
+        scene: { select: () => {}, move: () => {}, duplicate: () => {}, remove: () => {} },
+      }
+      const view = render(timeline({ timeMs: 0, selection, edits: edits as never }))
+      const query = (selector: string) => {
+        const found = view.container.querySelector<HTMLElement>(selector)
+        if (!found) throw new Error(`Nothing at ${selector}.`)
+        return found
+      }
+      return { view, selected, moved, query }
+    }
+
+    // Guard proof: drop the command key's branch from the clip's onPointerDown in timeline.tsx;
+    // the press starts a move, and the click selects the caption alone.
+    test("a click with the command key adds a clip to the selection, and takes it out again", () => {
+      const added = selecting({ type: "clip", ...footage })
+      const block = added.query('[data-timeline-clip="#1"]')
+      fireEvent.pointerDown(block, { button: 0, clientX: xAt(4000), pointerId: 1, ...command() })
+      fireEvent.pointerUp(added.query("[data-video-tracks]"), { pointerId: 1, ...command() })
+      expect(added.selected).toEqual([{ type: "clips", clips: [footage, caption] }])
+      cleanup()
+
+      const taken = selecting({ type: "clips", clips: [footage, caption] })
+      const again = taken.query('[data-timeline-clip="#1"]')
+      fireEvent.pointerDown(again, { button: 0, clientX: xAt(4000), pointerId: 1, ...command() })
+      fireEvent.pointerUp(taken.query("[data-video-tracks]"), { pointerId: 1, ...command() })
+      expect(taken.selected).toEqual([{ type: "clip", ...footage }])
+    })
+
+    // Guard proof: drop the command key's branch from the tracks' onBackground in timeline.tsx;
+    // the press clears the selection, and no rectangle follows the pointer.
+    test("a drag with the command key selects every clip its rectangle touches, as it grows", () => {
+      const { selected, query } = selecting()
+      const tracks = query("[data-video-tracks]")
+      const picture = tracks.children[0]?.children[1]
+      if (!picture) throw new Error("No picture track.")
+
+      fireEvent.pointerDown(picture, {
+        button: 0,
+        clientX: xAt(4000),
+        clientY: 10,
+        pointerId: 1,
+        ...command(),
+      })
+      fireEvent.pointerMove(tracks, { clientX: xAt(4500), clientY: 20, pointerId: 1 })
+      expect(selected.at(-1)).toEqual({ type: "clip", ...footage })
+
+      fireEvent.pointerMove(tracks, { clientX: xAt(5000), clientY: 50, pointerId: 1 })
+      expect(selected.at(-1)).toEqual({ type: "clips", clips: [footage, caption] })
+      expect(query("[data-marquee]").style.top).toBe("10px")
+
+      fireEvent.pointerUp(tracks, { clientX: xAt(5000), clientY: 50, pointerId: 1 })
+      expect(selected.at(-1)).toEqual({ type: "clips", clips: [footage, caption] })
+      expect(tracks.querySelector("[data-marquee]")).toBeNull()
+    })
+
+    // Guard proof: start the move without its `group` in timeline.tsx; the footage stays put, and
+    // the caption moves alone, through moveClip.
+    test("dragging one of the clips selected moves them all, as one edit", () => {
+      const { moved, query } = selecting({ type: "clips", clips: [footage, caption] })
+      const block = () => query('[data-timeline-clip="clip"]')
+      const before = block().style.left
+
+      fireEvent.pointerDown(query('[data-timeline-clip="#1"]'), {
+        button: 0,
+        clientX: xAt(4000),
+        pointerId: 1,
+      })
+      fireEvent.pointerMove(query('[data-timeline-clip="#1"]'), {
+        clientX: xAt(4500),
+        pointerId: 1,
+        shiftKey: true,
+      })
+      // The footage follows the caption it was selected with.
+      expect(Number.parseFloat(block().style.left) - Number.parseFloat(before)).toBe(50)
+
+      fireEvent.pointerUp(query('[data-timeline-clip="#1"]'), {
+        clientX: xAt(4500),
+        pointerId: 1,
+        shiftKey: true,
+      })
+      expect(moved).toEqual([[["clip", "#1"], 500]])
+    })
   })
 
   // Reproduce by finding the dragged clip by identity, as the timeline did: a change that lands
