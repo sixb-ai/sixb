@@ -1702,6 +1702,72 @@ describe("the timeline", () => {
       fireEvent.pointerUp(tracks, { clientX: xAt(4500), clientY: 14, pointerId: 1 })
     })
 
+    // Guard proof: give every block both handles at 8 px in ClipBlock (timeline.tsx), as it had;
+    // the one-word caption is then all handles, held only to trim. Drop the command key's branch
+    // from the handles' press, and a ⌘-press on an edge trims rather than selects.
+    test("a narrow clip keeps a middle to hold, and the command key on an edge selects", () => {
+      const files = new Map(FILES)
+      files.set("scenes/talk.html", {
+        text: TALK.replace(
+          "  </div>",
+          '  <p class="caption" data-start="3" data-duration="0.12">So</p>\n    <p class="caption" data-start="4" data-duration="0.2">we</p>\n  </div>'
+        ),
+      })
+      const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+      const shown = state.composition
+      if (!shown) throw new Error("No video.")
+      const selected: unknown[] = []
+      const moved: number[] = []
+      const view = render(
+        timeline({
+          timeMs: 0,
+          composition: shown,
+          clips: everySceneClips(state, shown),
+          edits: {
+            seek: () => {},
+            select: (next: unknown) => selected.push(next),
+            moveClip: (_: unknown, ms: number) => moved.push(ms),
+            moveClips: () => {},
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          } as never,
+        })
+      )
+      const word = (words: string) => {
+        const found = view.container.querySelector<HTMLElement>(`[aria-label$=", ${words}"]`)
+        if (!found) throw new Error(`No caption "${words}".`)
+        return found
+      }
+      const handles = (block: HTMLElement) => [
+        ...block.querySelectorAll<HTMLElement>(".cursor-ew-resize"),
+      ]
+
+      // 12 px: none, so it moves; 20 px: a quarter of it each.
+      expect(handles(word("So")).length).toBe(0)
+      expect(handles(word("we")).map((handle) => handle.style.width)).toEqual(["5px", "5px"])
+      fireEvent.pointerDown(word("So"), { button: 0, clientX: xAt(6050), pointerId: 1 })
+      fireEvent.pointerMove(word("So"), { clientX: xAt(6550), pointerId: 1, shiftKey: true })
+      fireEvent.pointerUp(word("So"), { clientX: xAt(6550), pointerId: 1, shiftKey: true })
+      expect(moved).toEqual([6500])
+
+      const command = appleKeyboard() ? { metaKey: true } : { ctrlKey: true }
+      const [edge] = handles(
+        view.container.querySelector<HTMLElement>('[data-timeline-clip="clip"]') as HTMLElement
+      )
+      if (!edge) throw new Error("No handle on the footage.")
+      fireEvent.pointerDown(edge, { button: 0, clientX: xAt(3000), pointerId: 2, ...command })
+      const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]") as HTMLElement
+      fireEvent.pointerUp(tracks, { clientX: xAt(3000), pointerId: 2, ...command })
+      expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/talk.html", target: "clip" })
+    })
+
     // Guard proof: give each clip its chapter's start as its floor in onDragMove (timeline.tsx),
     // `floorMs: sceneStartOf(each.file)`, as the timeline had it: the group stops at the
     // interview's start, and moveClips is asked for no move at all.

@@ -66,6 +66,9 @@ const LABELS_PX = 112
 const TAIL_PX = 160
 /** The playhead's knob on the ruler, centred on its line; each ruler mark's time starts past it. */
 const KNOB_PX = 11
+/** A trim handle's width, and the narrowest block that has both at that width. */
+const HANDLE_PX = 8
+const HANDLES_FROM_PX = 24
 
 const ROW_PX: Record<"ruler" | "scenes" | VideoTrack, number> = {
   ruler: 24,
@@ -480,14 +483,20 @@ export function Timeline({
         moved: false,
       })
     },
-    trim: (event, laid, edge) =>
+    trim: (event, laid, edge) => {
+      // With the command key, a press on an edge selects, as anywhere else on the clip.
+      if (commandKey(event)) {
+        startSelecting(event, laid)
+        return
+      }
       startDrag(event, {
         type: "trim",
         clip: laid,
         edge,
         x: event.clientX,
         atMs: edge === "start" ? laid.startMs : laid.endMs,
-      }),
+      })
+    },
     select: (laid) =>
       edits.select({ type: "clip", file: laid.file, target: videoTarget(laid.clip) }),
     ...dragHandlers,
@@ -1226,6 +1235,11 @@ const ClipBlock = memo(function ClipBlock({
       ? ((parts.durationMs - mediaAt) / 1000) * zoom
       : undefined
   const runsOut = fileEndPx !== undefined && fileEndPx < width - 2
+  // Its edges trim it, only with room left to hold it by the middle: a quarter of a narrow block
+  // each, none for one under 16 pixels.
+  const handle = width >= HANDLES_FROM_PX ? HANDLE_PX : width >= 16 ? width / 4 : 0
+  const trimsStart = handle > 0
+  const trimsEnd = handle > 0 && !laid.open
 
   return (
     <div
@@ -1329,18 +1343,22 @@ const ClipBlock = memo(function ClipBlock({
         ) : null}
       </span>
 
-      <TrimHandle
-        edge="start"
-        onPointerDown={(event) => handlers.trim(event, laid, "start")}
-        {...dragHandlers}
-      />
-      {laid.open ? null : (
+      {trimsStart ? (
+        <TrimHandle
+          edge="start"
+          width={handle}
+          onPointerDown={(event) => handlers.trim(event, laid, "start")}
+          {...dragHandlers}
+        />
+      ) : null}
+      {trimsEnd ? (
         <TrimHandle
           edge="end"
+          width={handle}
           onPointerDown={(event) => handlers.trim(event, laid, "end")}
           {...dragHandlers}
         />
-      )}
+      ) : null}
     </div>
   )
 })
@@ -1373,10 +1391,12 @@ function FileEnd({ left, label }: { readonly left: number; readonly label: strin
 
 function TrimHandle({
   edge,
+  width,
   onPointerDown,
   ...handlers
 }: {
   readonly edge: "start" | "end"
+  readonly width: number
   readonly onPointerDown: (event: ReactPointerEvent) => void
   readonly onPointerMove: (event: ReactPointerEvent) => void
   readonly onPointerUp: (event: ReactPointerEvent) => void
@@ -1386,9 +1406,10 @@ function TrimHandle({
     <span
       aria-hidden="true"
       className={cn(
-        "absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-white/0 transition-colors hover:bg-white/35 group-aria-pressed/clip:bg-white/25",
+        "absolute inset-y-0 z-10 cursor-ew-resize touch-none bg-white/0 transition-colors hover:bg-white/35 group-aria-pressed/clip:bg-white/25",
         edge === "start" ? "left-0 rounded-l-md" : "right-0 rounded-r-md"
       )}
+      style={{ width }}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.stopPropagation()
