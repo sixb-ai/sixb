@@ -274,7 +274,11 @@ export default function VideoEditor({
     if (follow && placed.length > 0) {
       setSelection(selectionOf(placed.map(({ file, clip }) => ({ file, target: clip }))))
     }
-    tellAnimations(result.animationsLeft ?? [], result.animationsJoined ?? [])
+    tellAnimations(
+      result.animationsLeft ?? [],
+      result.animationsJoined ?? [],
+      result.looksMayDiffer ?? []
+    )
   }
 
   /**
@@ -283,7 +287,8 @@ export default function VideoEditor({
    */
   const tellAnimations = (
     left: readonly VideoAnimationLeft[],
-    joined: readonly VideoAnimationJoined[]
+    joined: readonly VideoAnimationJoined[],
+    differs: readonly VideoClipTarget[]
   ) => {
     const now = video.getState()
     const chapter = (id: string) => {
@@ -295,49 +300,70 @@ export default function VideoEditor({
       return Array.isArray(found) ? undefined : clipName(found as VideoClip)
     }
 
-    // Each clip once, with what it left and what it joined, each said once while the editor is open.
-    const clips = new Map<string, { name: string; from?: string; to?: string }>()
-    const note = (target: VideoClipTarget, scene: string, side: "from" | "to") => {
+    // Each clip once, with what it left and joined, and whether its look may differ, each said
+    // once while the editor is open.
+    const clips = new Map<string, { name: string; from?: string; to?: string; differs?: true }>()
+    const note = (
+      target: VideoClipTarget,
+      key: string,
+      what: { from?: string; to?: string; differs?: true }
+    ) => {
       const name = named(target)
-      const key = `${side}\n${scene}\n${name}`
-      if (name === undefined || told.current.has(key)) return
-      told.current.add(key)
+      if (name === undefined || told.current.has(`${key}\n${name}`)) return
+      told.current.add(`${key}\n${name}`)
       const at = `${target.file}\n${JSON.stringify(target.clip)}`
-      clips.set(at, { name, ...clips.get(at), [side]: chapter(scene) })
+      clips.set(at, { name, ...clips.get(at), ...what })
     }
-    for (const { clip, scene } of left) note(clip, scene, "from")
-    for (const { clip, scene } of joined) note(clip, scene, "to")
+    for (const { clip, scene } of left) note(clip, `from\n${scene}`, { from: chapter(scene) })
+    for (const { clip, scene } of joined) note(clip, `to\n${scene}`, { to: chapter(scene) })
+    for (const clip of differs) note(clip, "look", { differs: true })
 
     const said = [...clips.values()]
     const [first] = said
     if (!first) return
+    const moves = said.some((each) => each.from || each.to)
+    const differ = said.some((each) => each.differs)
     if (said.length > 1) {
-      setNotice({
-        title: messages.keepLooks(said.length),
-        detail: messages.animationsChange,
-        tone: "info",
-      })
+      setNotice(
+        moves
+          ? {
+              title: messages.keepLooks(said.length),
+              detail: differ
+                ? `${messages.animationsChange} ${messages.lookAlsoDiffers}`
+                : messages.animationsChange,
+              tone: "info",
+            }
+          : {
+              title: messages.looksMayDiffer(said.length),
+              detail: messages.looksDiffer,
+              tone: "info",
+            }
+      )
       return
     }
+
     const name = shortName(first.name)
+    const also = first.differs ? ` ${messages.lookAlsoDiffers}` : ""
     setNotice(
       first.from && first.to
         ? {
             title: messages.keepsLook(name),
-            detail: messages.animationSwaps(first.from, first.to),
+            detail: `${messages.animationSwaps(first.from, first.to)}${also}`,
             tone: "info",
           }
         : first.from
           ? {
               title: messages.keepsLook(name),
-              detail: messages.animationStays(first.from),
+              detail: `${messages.animationStays(first.from)}${also}`,
               tone: "info",
             }
-          : {
-              title: messages.takesMotion(name, first.to ?? ""),
-              detail: messages.motionApplies(first.to ?? ""),
-              tone: "info",
-            }
+          : first.to
+            ? {
+                title: messages.takesMotion(name, first.to),
+                detail: `${messages.motionApplies(first.to)}${also}`,
+                tone: "info",
+              }
+            : { title: messages.lookMayDiffer(name), detail: messages.lookDiffers, tone: "info" }
     )
   }
 
