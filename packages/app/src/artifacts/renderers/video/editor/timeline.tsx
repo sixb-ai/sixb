@@ -28,6 +28,8 @@ import { commandKey } from "../keys"
 import { type MediaTarget, useMediaParts } from "./media"
 import {
   type ClipBox,
+  chainKey,
+  clipKey,
   fitZoom,
   groupDelta,
   inRectangle,
@@ -437,11 +439,7 @@ export function Timeline({
         // A press let go, or a clip brought back where it was, as a snap or a group held at the
         // video's start does: it is chosen, and nothing is edited.
         if (!current.moved || current.startMs === current.clip.startMs) {
-          edits.select({
-            type: "clip",
-            file: current.clip.file,
-            target: videoTarget(current.clip.clip),
-          })
+          edits.select(selectionOfClip(headOf(current.clip)))
           return
         }
         if (current.group) edits.moveClips(current.group, current.startMs - current.clip.startMs)
@@ -464,6 +462,18 @@ export function Timeline({
     onPointerCancel: () => setDrag(null),
   }
 
+  // Each clip that goes on in other scenes, by its first part's key: its parts, laid out now.
+  const chains = useMemo(() => {
+    const found = new Map<string, LaidClip[]>()
+    for (const laid of clips) {
+      if (laid.chain) found.set(laid.chain.key, [...(found.get(laid.chain.key) ?? []), laid])
+    }
+    return found
+  }, [clips])
+  const partsOf = (laid: LaidClip) => (laid.chain ? (chains.get(laid.chain.key) ?? [laid]) : [laid])
+  /** The part a selection names for a clip: its first. */
+  const headOf = (laid: LaidClip) => partsOf(laid).find((part) => part.chain?.first) ?? laid
+
   // What each clip's block calls, the same functions in every render, which reach this render's.
   const latest = useRef<ClipHandlers | null>(null)
   latest.current = {
@@ -473,11 +483,13 @@ export function Timeline({
         startSelecting(event, laid)
         return
       }
-      const together = chosen.length > 1 && chosenKeys.has(clipKey(laid))
+      // A clip goes with the clips selected with it, and as a whole: every part of it.
+      const together = chosen.length > 1 && chosenKeys.has(chainKey(laid))
+      const group = together ? chosen.flatMap(partsOf) : partsOf(laid)
       startDrag(event, {
         type: "move",
         clip: laid,
-        ...(together ? { group: chosen } : {}),
+        ...(group.length > 1 ? { group } : {}),
         x: event.clientX,
         startMs: laid.startMs,
         moved: false,
@@ -497,8 +509,7 @@ export function Timeline({
         atMs: edge === "start" ? laid.startMs : laid.endMs,
       })
     },
-    select: (laid) =>
-      edits.select({ type: "clip", file: laid.file, target: videoTarget(laid.clip) }),
+    select: (laid) => edits.select(selectionOfClip(headOf(laid))),
     ...dragHandlers,
   }
   const clipHandlers = useMemo<ClipHandlers>(
@@ -515,9 +526,9 @@ export function Timeline({
 
   // ── Layout ─────────────────────────────────────────────────────────
 
-  // The clips selected, as their files are now, and those a drag moves.
-  const chosen = chosenIn(clips, selection)
-  const chosenKeys = new Set(chosen.map(clipKey))
+  // The clips selected, as their files are now, each as a whole, and those a drag moves.
+  const chosen = chosenIn(clips, selection).map(headOf)
+  const chosenKeys = new Set(chosen.map(chainKey))
   const movingKeys =
     drag?.type === "move" && drag.moved
       ? new Set([drag.clip, ...(drag.group ?? [])].map(clipKey))
@@ -617,15 +628,23 @@ export function Timeline({
       Math.abs(to.y - current.from.y) > 3
     if (!moved) return
 
-    const touched = inRectangle(boxes, current.from, to)
-    const key = touched.map((laid) => `${laid.file}#${laid.clip.ref}`).join("\n")
+    // Each clip it touches a part of, as a whole.
+    const touched = [
+      ...new Map(
+        inRectangle(boxes, current.from, to).map((laid) => [chainKey(laid), headOf(laid)])
+      ).values(),
+    ]
+    const key = touched.map(clipKey).join("\n")
     setDrag({ ...current, to, moved, touched: key })
     if (key === current.touched && current.moved) return
 
     // What it touches joins what was selected, as the pointer goes.
-    const before = chosenIn(clips, current.before)
+    const before = chosenIn(clips, current.before).map(headOf)
     edits.select(
-      choose([...before, ...touched.filter((laid) => !before.some((each) => sameClip(each, laid)))])
+      choose([
+        ...before,
+        ...touched.filter((laid) => !before.some((each) => chainKey(each) === chainKey(laid))),
+      ])
     )
   }
 
@@ -634,7 +653,9 @@ export function Timeline({
     if (current?.type !== "marquee") return
     dragRef.current = null
     setDrag(null)
-    if (!current.moved && current.over) edits.select(toggled(clips, current.before, current.over))
+    if (!current.moved && current.over) {
+      edits.select(toggled(clips, current.before, headOf(current.over)))
+    }
   }
 
   // The chapter selected, the one under the playhead, and where files dragged in would land.
@@ -858,7 +879,7 @@ export function Timeline({
                     <ClipBlock
                       key={key}
                       laid={laid}
-                      selected={chosenKeys.has(key)}
+                      selected={chosenKeys.has(chainKey(laid))}
                       dragging={!!moving || !!trimming}
                       left={px(start)}
                       width={Math.max(6, px(end - start))}
@@ -1000,14 +1021,14 @@ function rowTop(track: VideoTrack, row: number, rows: number): number {
   return track === "sound" ? row * height : (rows - 1 - row) * height
 }
 
+/** The selection of one laid clip, as its file names it now. */
+function selectionOfClip(laid: LaidClip): EditorSelection {
+  return { type: "clip", file: laid.file, target: videoTarget(laid.clip) }
+}
+
 /** Whether two laid clips are the same clip of the same file, laid out at different times. */
 function sameClip(a: LaidClip, b: LaidClip): boolean {
   return a.file === b.file && a.clip.ref === b.clip.ref
-}
-
-/** A clip's name on the timeline: its file and its ref, the same for the same clip laid anew. */
-function clipKey(laid: LaidClip): string {
-  return `${laid.file}#${laid.clip.ref}`
 }
 
 export interface ZoomControls {
@@ -1235,11 +1256,11 @@ const ClipBlock = memo(function ClipBlock({
       ? ((parts.durationMs - mediaAt) / 1000) * zoom
       : undefined
   const runsOut = fileEndPx !== undefined && fileEndPx < width - 2
-  // Its edges trim it, only with room left to hold it by the middle: a quarter of a narrow block
-  // each, none for one under 16 pixels.
+  // Its edges trim it where the clip, as a whole, starts and ends, and only with room left to hold
+  // it by the middle: a quarter of a narrow block each, none for one under 16 pixels.
   const handle = width >= HANDLES_FROM_PX ? HANDLE_PX : width >= 16 ? width / 4 : 0
-  const trimsStart = handle > 0
-  const trimsEnd = handle > 0 && !laid.open
+  const trimsStart = handle > 0 && (!laid.chain || laid.chain.first)
+  const trimsEnd = handle > 0 && !laid.open && (!laid.chain || laid.chain.last)
 
   return (
     <div
@@ -1252,6 +1273,9 @@ const ClipBlock = memo(function ClipBlock({
       data-failed={failed ? "" : undefined}
       className={cn(
         "group/clip absolute touch-none overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
+        // A part against the part before or after it is one block with it.
+        laid.chain?.joinsBefore && "rounded-l-none",
+        laid.chain?.joinsAfter && "rounded-r-none",
         failed
           ? "bg-[color-mix(in_oklab,var(--destructive)_10%,var(--background))] text-destructive"
           : TRACK_TONE[clip.track],
@@ -1342,6 +1366,15 @@ const ClipBlock = memo(function ClipBlock({
           </span>
         ) : null}
       </span>
+
+      {/* Where it goes on from the part before it, at its chapter's edge. */}
+      {laid.chain?.joinsBefore ? (
+        <span
+          aria-hidden="true"
+          data-seam=""
+          className="pointer-events-none absolute inset-y-1.5 left-0 w-px bg-current opacity-30"
+        />
+      ) : null}
 
       {trimsStart ? (
         <TrimHandle

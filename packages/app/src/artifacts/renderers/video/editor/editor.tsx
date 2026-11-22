@@ -84,7 +84,16 @@ import { InPlaceEditor, type InPlaceText } from "./in-place"
 import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
-import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt, sceneFor } from "./model"
+import {
+  chainKey,
+  clipKey,
+  editPoints,
+  type LaidClip,
+  nextEditPoint,
+  openingSeek,
+  sceneAt,
+  sceneFor,
+} from "./model"
 import { readMagnetic, writeMagnetic } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
@@ -250,8 +259,8 @@ export default function VideoEditor({
   )
 
   /**
-   * Makes an edit that places clips. A move's selection follows them to where they start now;
-   * what the move did to their animations is said once, kindly.
+   * Makes an edit that places clips. The selection follows them to where they start now, as a
+   * move or a trim leaves them; what the move did to their animations is said once, kindly.
    */
   const place = (make: (sources: VideoSources) => VideoPlaceResult, follow: boolean) => {
     let result: VideoPlaceResult | undefined
@@ -434,6 +443,20 @@ export default function VideoEditor({
     removeScene: sceneActions.remove,
     clipTiming: (file, target, timing) =>
       edit((sources) => setClipTiming(sources, file, videoTarget(target), timing)),
+    // A clip's start and length, in the video, are where it plays: placed as a drag places it.
+    clipStart: (file, target, ms) =>
+      place((sources) => moveClip(sources, file, videoTarget(target), ms - offsetOf(file)), true),
+    clipLength: (file, target, ms) => {
+      const endMs = endOf(file)
+      place(
+        (sources) =>
+          trimClip(sources, file, videoTarget(target), "end", target.startMs + ms, {
+            ripple: false,
+            ...(endMs === undefined ? {} : { endMs }),
+          }),
+        true
+      )
+    },
     clipSound: (file, target, sound) =>
       edit((sources) => setClipSound(sources, file, videoTarget(target), sound)),
     text: (file, text, words) => edit((sources) => setVideoText(sources, file, text, words)),
@@ -450,9 +473,8 @@ export default function VideoEditor({
   /** The clip the playhead splits: the one selected when it is under it, else the picture on top. */
   const splitTarget = (): LaidClip | undefined => {
     const under = shown.filter((laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100)
-    const chosen = clip
-      ? under.find((laid) => laid.file === clip.file && laid.clip.ref === clip.clip.ref)
-      : undefined
+    // The part of the clip selected under the playhead, whichever chapter it is in.
+    const chosen = clip ? under.find((laid) => chainKey(laid) === clipKey(clip)) : undefined
     return (
       chosen ??
       under.filter((laid) => laid.track === "picture" && laid.file !== VIDEO_ENTRY).at(-1) ??
@@ -461,12 +483,14 @@ export default function VideoEditor({
   }
 
   /** The clips selected together that the playhead is inside, which S splits. */
-  const groupUnder = (): LaidClip[] =>
-    picked.length > 1
-      ? chosenIn(shown, selection).filter(
-          (laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100
-        )
-      : []
+  const groupUnder = (): LaidClip[] => {
+    if (picked.length <= 1) return []
+    const chosen = new Set(chosenIn(shown, selection).map(chainKey))
+    return shown.filter(
+      (laid) =>
+        chosen.has(chainKey(laid)) && laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100
+    )
+  }
 
   /** What S does: splits the clips selected together under the playhead, or the one it splits. */
   const splitNow = () => {
@@ -583,7 +607,8 @@ export default function VideoEditor({
         sceneActions.duplicate(open)
       } else if (key === "a") {
         handled()
-        setSelection(choose(shown))
+        // Every clip, each as a whole.
+        setSelection(choose(shown.filter((laid) => !laid.chain || laid.chain.first)))
       }
       return
     }
@@ -809,7 +834,28 @@ export default function VideoEditor({
   const splittable =
     picked.length > 1
       ? groupUnder().length > 0
-      : !!clip && splitTarget()?.clip.ref === clip.clip.ref && splitTarget()?.file === clip.file
+      : (() => {
+          const under = splitTarget()
+          return !!clip && !!under && chainKey(under) === clipKey(clip)
+        })()
+
+  // The clip selected as the video plays it: from its first part's start to its last's end.
+  const span = clip
+    ? (() => {
+        const parts = shown.filter((laid) => chainKey(laid) === clipKey(clip))
+        const startMs = Math.min(...parts.map((laid) => laid.startMs))
+        const last = parts.at(-1)
+        return parts.length === 0 || !last
+          ? { startMs: offsetOf(clip.file) + clip.clip.startMs, durationMs: clip.clip.durationMs }
+          : {
+              startMs,
+              durationMs: last.open
+                ? undefined
+                : Math.max(...parts.map((laid) => laid.endMs)) - startMs,
+              fadeOutMs: last.clip.fadeOutMs,
+            }
+      })()
+    : undefined
 
   return (
     <div
@@ -878,6 +924,7 @@ export default function VideoEditor({
                 timelines={state.timelines}
                 scene={selectedScene(composition, selection)}
                 clip={clip}
+                span={span}
                 clips={picked.length > 1 ? picked : undefined}
                 splittable={splittable}
                 target={target}
@@ -965,7 +1012,8 @@ export default function VideoEditor({
                       ...(endMs === undefined ? {} : { endMs }),
                     }
                   ),
-                false
+                // A clip that now goes on takes an id: the selection follows it.
+                true
               )
             },
             sceneLength: sceneActions.sceneLength,

@@ -141,6 +141,28 @@ export interface LaidClip {
    * tracks, row 0 is the lowest, and a clip painted over another lies above it.
    */
   readonly row: number
+  /**
+   * The clip it is a part of, when that clip goes on in other scenes: its first part's
+   * {@link clipKey}, whether it is that first part or the last, and whether a part of it lies
+   * against it on its row, before it or after it.
+   */
+  readonly chain?: {
+    readonly key: string
+    readonly first: boolean
+    readonly last: boolean
+    readonly joinsBefore: boolean
+    readonly joinsAfter: boolean
+  }
+}
+
+/** A clip's name on the timeline: its file and its ref, the same for the same clip laid anew. */
+export function clipKey(laid: { readonly file: string; readonly clip: { readonly ref: string } }) {
+  return `${laid.file}#${laid.clip.ref}`
+}
+
+/** The clip a laid part belongs to, by the key of its first part: its own key when it is whole. */
+export function chainKey(laid: LaidClip): string {
+  return laid.chain?.key ?? clipKey(laid)
 }
 
 /**

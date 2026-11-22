@@ -766,6 +766,8 @@ describe("the editor's pieces", () => {
             duplicateScene: noop,
             removeScene: noop,
             clipTiming: noop,
+            clipStart: noop,
+            clipLength: noop,
             clipSound: noop,
             text: noop,
             clipText: noop,
@@ -821,6 +823,8 @@ describe("the editor's pieces", () => {
               duplicateScene: noop,
               removeScene: noop,
               clipTiming: noop,
+              clipStart: noop,
+              clipLength: noop,
               clipSound: noop,
               text: noop,
               clipText: noop,
@@ -976,6 +980,8 @@ describe("what is derived of a recording", () => {
             duplicateScene: noop,
             removeScene: noop,
             clipTiming: noop,
+            clipStart: noop,
+            clipLength: noop,
             clipSound: noop,
             text: noop,
             clipText: noop,
@@ -1286,6 +1292,40 @@ describe("the editor", () => {
     expect(caption().getAttribute("data-timeline-file")).toBe("scenes/title.html")
     expect(caption().style.left).toBe("50px")
     expect(caption().getAttribute("aria-pressed")).toBe("true")
+    live.destroy()
+  })
+
+  // Guard proof: commit the Inspector's Start as the caption's own time in its file,
+  // `setClipTiming`, as the editor did; the caption then starts 1 s into the interview. Leave the
+  // selection where it was after a length (`place(…, false)` in clipLength, editor.tsx): the
+  // caption, given an id once it goes on, is then let go, and the Inspector empties.
+  test("sets a clip's start and length in the video, placed as a drag places it", () => {
+    const { view, live, text } = openEditor()
+    const caption = () => {
+      const found = view.container.querySelector<HTMLElement>(
+        '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+      )
+      if (!found) throw new Error("No caption on the timeline.")
+      return found
+    }
+    fireEvent.pointerDown(caption(), { button: 0, clientX: 112 + 350, pointerId: 1 })
+    fireEvent.pointerUp(caption(), { clientX: 112 + 350, pointerId: 1 })
+
+    const start = view.getByRole("textbox", { name: /Starts at/ }) as HTMLInputElement
+    expect(start.value).toBe("3.5")
+    type(start, "1")
+    fireEvent.keyDown(start, { key: "Enter" })
+    expect(text("scenes/title.html")).toContain(
+      '<p class="caption" data-start="1" data-duration="2">Thanks for having me.</p>'
+    )
+
+    // Longer than the title has room for: it goes on into the interview, and reads as one.
+    const length = view.getByRole("textbox", { name: "Length" }) as HTMLInputElement
+    type(length, "4")
+    fireEvent.keyDown(length, { key: "Enter" })
+    expect(text("scenes/talk.html")).toContain('data-continues="text"')
+    expect((view.getByRole("textbox", { name: /Starts at/ }) as HTMLInputElement).value).toBe("1")
+    expect((view.getByRole("textbox", { name: "Length" }) as HTMLInputElement).value).toBe("4")
     live.destroy()
   })
 
@@ -1790,6 +1830,109 @@ describe("the timeline", () => {
       const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]") as HTMLElement
       fireEvent.pointerUp(tracks, { clientX: xAt(3000), pointerId: 2, ...command })
       expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/talk.html", target: "clip" })
+    })
+
+    /** The title opening on footage that goes on into the interview, as an edit continues it. */
+    function continued(selection: Parameters<typeof Timeline>[0]["selection"] = null) {
+      const files = new Map(FILES)
+      files.set("scenes/title.html", {
+        text: TITLE.replace(
+          "<h1>",
+          '<video id="intro" src="media/talk.mp4" data-start="0" data-duration="3"></video>\n    <h1>'
+        ),
+      })
+      files.set("scenes/talk.html", {
+        text: TALK.replace(
+          '    <video id="clip"',
+          '    <video id="intro-2" src="media/talk.mp4" data-start="0" data-duration="2" data-media-start="3" data-continues="intro"></video>\n    <video id="clip"'
+        ),
+      })
+      const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+      const shown = state.composition
+      if (!shown) throw new Error("No video.")
+
+      const selected: unknown[] = []
+      const grouped: [string[], number][] = []
+      const view = render(
+        timeline({
+          timeMs: 0,
+          selection,
+          composition: shown,
+          clips: everySceneClips(state, shown),
+          edits: {
+            seek: () => {},
+            select: (next: unknown) => selected.push(next),
+            moveClip: () => {},
+            moveClips: (clips: readonly { clip: { ref: string } }[], ms: number) =>
+              grouped.push([clips.map((laid) => laid.clip.ref), ms]),
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          } as never,
+        })
+      )
+      const block = (ref: string) => {
+        const found = view.container.querySelector<HTMLElement>(`[data-timeline-clip="${ref}"]`)
+        if (!found) throw new Error(`No clip ${ref} on the timeline.`)
+        return found
+      }
+      return { view, selected, grouped, block }
+    }
+
+    // Guard proof: select the part pressed in onDragEnd (timeline.tsx),
+    // `selectionOfClip(current.clip)`; the interview's part is then chosen alone. Drag the part
+    // pressed alone in its press handler, and the title's stays put. Give every part both trim
+    // handles, and the seam holds two that cut the clip in the middle.
+    test("a clip that goes on in the next chapter is pressed, selected and dragged as one", () => {
+      const pressed = continued()
+      fireEvent.pointerDown(pressed.block("intro-2"), {
+        button: 0,
+        clientX: xAt(3500),
+        pointerId: 1,
+      })
+      fireEvent.pointerUp(pressed.block("intro-2"), { clientX: xAt(3500), pointerId: 1 })
+      expect(pressed.selected).toEqual([
+        { type: "clip", file: "scenes/title.html", target: "intro" },
+      ])
+
+      fireEvent.pointerDown(pressed.block("intro-2"), {
+        button: 0,
+        clientX: xAt(3500),
+        pointerId: 1,
+      })
+      fireEvent.pointerMove(pressed.block("intro-2"), {
+        clientX: xAt(4500),
+        pointerId: 1,
+        shiftKey: true,
+      })
+      // Both parts follow the pointer.
+      expect(pressed.block("intro").style.left).toBe("100px")
+      fireEvent.pointerUp(pressed.block("intro-2"), {
+        clientX: xAt(4500),
+        pointerId: 1,
+        shiftKey: true,
+      })
+      expect(pressed.grouped).toEqual([[["intro", "intro-2"], 1000]])
+      cleanup()
+
+      // Chosen, every part shows it; it is trimmed at its two ends only, one block across the edge.
+      const chosen = continued({ type: "clip", file: "scenes/title.html", target: "intro" })
+      expect(chosen.block("intro").getAttribute("aria-pressed")).toBe("true")
+      expect(chosen.block("intro-2").getAttribute("aria-pressed")).toBe("true")
+      const handles = (ref: string) =>
+        [...chosen.block(ref).querySelectorAll<HTMLElement>(".cursor-ew-resize")].map((handle) =>
+          handle.className.includes("left-0") ? "start" : "end"
+        )
+      expect(handles("intro")).toEqual(["start"])
+      expect(handles("intro-2")).toEqual(["end"])
+      expect(chosen.block("intro").className).toContain("rounded-r-none")
+      expect(chosen.block("intro-2").querySelector("[data-seam]")).not.toBeNull()
     })
 
     // Guard proof: give each clip its chapter's start as its floor in onDragMove (timeline.tsx),
