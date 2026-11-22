@@ -6,7 +6,11 @@ import {
   type ModelRateCard,
   type ModelReasoningCapabilities,
 } from "@sixb/core/models"
-import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
+import {
+  downloadModelsDev,
+  modelsDevRateCard,
+  scaleTokenPrice,
+} from "@sixb/model-protocols/models-dev"
 import { fireworksPublisher } from "./publisher"
 import type { FoundryProtocol } from "./transport"
 import { object, PREFIX } from "./util"
@@ -243,8 +247,15 @@ function rates(
 ): ModelRateCard | undefined {
   const card = modelsDevRateCard(raw)
   if (protocol !== "messages" || card?.cacheWriteInput === undefined) return card
-  // models.dev's Messages cache_write is five-minute creation, including in context tiers.
-  // One-hour prices are unknown and must not fall back to this rate.
+  // models.dev's Messages cache_write is the five-minute write, in context tiers too. It lists
+  // Claude on Azure at Anthropic's prices (Azure publishes no meter of its own), where a one-hour
+  // write costs twice the input price.
   const { cacheWriteInput, ...rest } = card
-  return defineModelRateCard({ ...rest, cacheWriteInput5m: cacheWriteInput })
+  return defineModelRateCard({
+    ...rest,
+    cacheWriteInput5m: cacheWriteInput,
+    ...(rest.input === undefined
+      ? {}
+      : { cacheWriteInput1h: scaleTokenPrice(rest.input, [2n, 1n]) }),
+  })
 }

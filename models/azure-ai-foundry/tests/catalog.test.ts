@@ -263,13 +263,12 @@ test("uses one fresh catalog snapshot per list, get and refresh when caching is 
   expect(calls).toBe(3)
 })
 
-// Regression proof: restore generic cacheWriteInput for Messages reference prices;
-// one-hour writes become rated. Remove the Messages reservation TTL guard and the
-// one-hour reservation uses the cheaper five-minute rate. Run with -t "Messages reference".
+// Regression proof: drop cacheWriteInput1h from the Messages rate card in catalog.ts rates().
+// One-hour writes, which Sixb asks for on conversations, become unpriceable.
 test.each([
   false,
   true,
-])("Messages reference cache writes retain their TTL with tiers=%s", async (tiered) => {
+])("Messages reference cache writes are priced for each TTL with tiers=%s", async (tiered) => {
   const base = { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 }
   const high = { input: 6, output: 30, cache_read: 0.6, cache_write: 7.5 }
   const raw = {
@@ -290,6 +289,11 @@ test.each([
     apiKey: "key",
     catalog: { fetch: async () => page(raw) },
   })
+  // Five minutes at models.dev's write rate, an hour at twice the input rate, as Anthropic bills.
+  const writes = {
+    "5m": tiered ? "7500000000" : "3750000000",
+    "1h": tiered ? "12000000000" : "6000000000",
+  }
   for (const ttl of ["5m", "1h"] as const) {
     const model = await provider
       .messages("production", {
@@ -308,21 +312,14 @@ test.each([
         },
       }),
     })
-    const reservation = model.costEstimator.estimateReservation?.({
-      inputTokens: 1000000,
-      outputTokens: 0,
+    expect(estimate).toMatchObject({
+      status: "rated",
+      money: { currency: "USD", amountNanos: writes[ttl] },
     })
-    if (ttl === "5m") {
-      const money = { currency: "USD", amountNanos: tiered ? "7500000000" : "3750000000" } as const
-      expect(estimate).toMatchObject({ status: "rated", money })
-      expect(reservation).toEqual(money)
-    } else {
-      expect(estimate).toMatchObject({
-        status: "unpriceable",
-        missingMeters: ["tokens.input.cacheWrite1h"],
-      })
-      expect(reservation).toBeUndefined()
-    }
+    // A reservation holds the highest input rate, the one-hour write.
+    expect(
+      model.costEstimator.estimateReservation?.({ inputTokens: 1000000, outputTokens: 0 })
+    ).toEqual({ currency: "USD", amountNanos: writes["1h"] })
   }
   const explicit = await provider
     .messages("production", {

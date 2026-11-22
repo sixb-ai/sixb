@@ -353,13 +353,50 @@ test("sends exact Claude schemas and strict tools; optional properties need not 
   await collect(
     (await model.stream(request({ tools: [{ ...tools[0]!, inputSchema: constrained }] }))).events
   )
+  // The last tool also carries the cache marker every request with tools gets.
   expect(bodies[1]?.tools).toEqual([
-    { name: "answer", description: "Answer", input_schema: constrained },
+    {
+      name: "answer",
+      description: "Answer",
+      input_schema: constrained,
+      cache_control: { type: "ephemeral" },
+    },
   ])
   await expect(
     model.stream(request({ responseFormat: { type: "json", name: "answer", schema: constrained } }))
   ).rejects.toThrow("Claude schema")
   expect(bodies).toHaveLength(2)
+})
+
+// Claude on Azure caches nothing unless a request marks it (measured November 2026). The
+// policy itself is messagesPromptCaching's, shared with @sixb/anthropic and tested there.
+// Regression proof: build foundryMessagesRequest's body without messagesPromptCaching.
+test("marks the system prompt, the last tool and the conversation for caching", async () => {
+  const bodies: JsonObject[] = []
+  const model = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return message()
+    },
+  }).messages("deployment", { definition, identity: metadata })
+  const messages: LanguageModelRequest["messages"] = [
+    { role: "system", content: "Project instructions" },
+    { role: "user", content: [{ type: "text", text: "Hello" }] },
+  ]
+  const tools = [{ name: "lookup", description: "Look up", inputSchema: schema }]
+  const conversation = { lifetime: "long" as const, key: "thread-1" }
+  await collect((await model.stream(request({ messages, tools, caching: conversation }))).events)
+  await collect((await model.stream(request({ messages }))).events)
+  await collect((await model.stream(request({ messages, tools, caching: "off" }))).events)
+  const hour = { type: "ephemeral", ttl: "1h" }
+  expect(bodies[0]).toMatchObject({
+    cache_control: hour,
+    system: [{ type: "text", text: "Project instructions", cache_control: hour }],
+    tools: [{ name: "lookup", cache_control: hour }],
+  })
+  for (const body of bodies.slice(1)) expect(JSON.stringify(body)).not.toContain("cache_control")
 })
 
 // Regression proof: drop the isStrictToolLimitError retry in postMessages, the

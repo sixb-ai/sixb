@@ -412,7 +412,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Reservations | Conservative highest rates; same pinned card as completed estimates |
 | Cache and reasoning | Partitions of totals; never counted twice |
 | Zero cache writes | Need no price; positive writes without rates remain unpriceable |
-| Messages cache TTLs | Catalog write rates cover five minutes only; one-hour writes need explicit rates, and reservations are unavailable when the requested TTL has no rate |
+| Messages cache TTLs | Five-minute writes at models.dev's write rate; one-hour writes at twice the input rate, as Anthropic bills Claude (Azure publishes no Claude meter). Reservations hold the one-hour rate |
 | Missing or ambiguous usage/prices | Explicitly unpriceable; missing counters are not zero |
 | Unknown billing dimensions | Require a custom estimator |
 | Response model mismatch | Not priced using the requested model's rates |
