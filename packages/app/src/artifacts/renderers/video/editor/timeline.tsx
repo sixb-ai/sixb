@@ -410,10 +410,13 @@ export function Timeline({
             magnetic ? Number.NEGATIVE_INFINITY : sceneStartOf(clip.file)
           )
         : sceneStartOf(clip.file)
+      // A clip that goes on in other chapters is trimmed as one: back into its first chapter, or
+      // on into its last.
+      const span = spanOf(clip)
       const atMs =
         edge === "start"
-          ? Math.min(Math.max(floor, snapped.ms), clip.endMs - 100)
-          : Math.max(clip.startMs + 100, snapped.ms)
+          ? Math.min(Math.max(floor, snapped.ms), span.endMs - 100)
+          : Math.max(span.startMs + 100, snapped.ms)
       setDrag({ ...current, atMs, target: atMs === snapped.ms ? snapped.target : undefined })
       return
     }
@@ -471,6 +474,35 @@ export function Timeline({
     return found
   }, [clips])
   const partsOf = (laid: LaidClip) => (laid.chain ? (chains.get(laid.chain.key) ?? [laid]) : [laid])
+  /** Where a clip plays as one, all its parts. */
+  const spanOf = (laid: LaidClip) => {
+    const parts = partsOf(laid)
+    return {
+      startMs: Math.min(...parts.map((part) => part.startMs)),
+      endMs: Math.max(...parts.map((part) => part.endMs)),
+    }
+  }
+  /**
+   * A part as a trim of its clip leaves it: its first part starting, or its last ending, at the
+   * edge dragged, the parts it passes hidden, the others cut there.
+   */
+  const trimmedPart = (laid: LaidClip, trim: Extract<Drag, { type: "trim" }>) => {
+    const span = spanOf(laid)
+    if (trim.edge === "end") {
+      const endMs = laid.endMs >= span.endMs ? trim.atMs : Math.min(laid.endMs, trim.atMs)
+      return {
+        startMs: laid.startMs,
+        endMs: Math.max(laid.startMs, endMs),
+        hidden: endMs <= laid.startMs,
+      }
+    }
+    const startMs = laid.startMs <= span.startMs ? trim.atMs : Math.max(laid.startMs, trim.atMs)
+    return {
+      startMs: Math.min(startMs, laid.endMs),
+      endMs: laid.endMs,
+      hidden: startMs >= laid.endMs,
+    }
+  }
   /** The part a selection names for a clip: its first. */
   const headOf = (laid: LaidClip) => partsOf(laid).find((part) => part.chain?.first) ?? laid
 
@@ -860,27 +892,28 @@ export function Timeline({
                 {track.clips.map((laid) => {
                   const key = clipKey(laid)
                   const moving = drag?.type === "move" && movingKeys?.has(key) ? drag : null
-                  const trimming = drag?.type === "trim" && sameClip(drag.clip, laid) ? drag : null
+                  // A trim cuts every part of the clip it trims as one, and hides a part it passes.
+                  const trimming =
+                    drag?.type === "trim" && chainKey(drag.clip) === chainKey(laid) ? drag : null
                   // The clip dragged where it is dragged; the others selected with it as far.
                   const movedTo = moving
                     ? sameClip(moving.clip, laid)
                       ? moving.startMs
                       : laid.startMs + moving.startMs - moving.clip.startMs
                     : undefined
-                  const start =
-                    movedTo ?? (trimming?.edge === "start" ? trimming.atMs : laid.startMs)
+                  const trimmed = trimming ? trimmedPart(laid, trimming) : undefined
+                  const start = movedTo ?? trimmed?.startMs ?? laid.startMs
                   const end =
                     movedTo !== undefined
                       ? movedTo + laid.endMs - laid.startMs
-                      : trimming?.edge === "end"
-                        ? trimming.atMs
-                        : laid.endMs
+                      : (trimmed?.endMs ?? laid.endMs)
                   return (
                     <ClipBlock
                       key={key}
                       laid={laid}
                       selected={chosenKeys.has(chainKey(laid))}
                       dragging={!!moving || !!trimming}
+                      hidden={trimmed?.hidden === true}
                       left={px(start)}
                       width={Math.max(6, px(end - start))}
                       top={rowTop(track.track, laid.row, track.rows)}
@@ -1219,6 +1252,7 @@ const ClipBlock = memo(function ClipBlock({
   target,
   zoom,
   viewStartMs,
+  hidden = false,
   handlers,
 }: {
   readonly laid: LaidClip
@@ -1232,6 +1266,8 @@ const ClipBlock = memo(function ClipBlock({
   readonly zoom: number
   /** Where the block starts now, as dragged: its art follows its file from there. */
   readonly viewStartMs: number
+  /** Passed by a trim of its clip: kept, for the drag it may hold, but not seen. */
+  readonly hidden?: boolean
   readonly handlers: ClipHandlers
 }) {
   const messages = useArtifactMessages().videoEditor
@@ -1258,7 +1294,8 @@ const ClipBlock = memo(function ClipBlock({
   const runsOut = fileEndPx !== undefined && fileEndPx < width - 2
   // Its edges trim it where the clip, as a whole, starts and ends, and only with room left to hold
   // it by the middle: a quarter of a narrow block each, none for one under 16 pixels.
-  const handle = width >= HANDLES_FROM_PX ? HANDLE_PX : width >= 16 ? width / 4 : 0
+  // A block being dragged keeps its handles, whatever the drag makes of it: one is held.
+  const handle = width >= HANDLES_FROM_PX || dragging ? HANDLE_PX : width >= 16 ? width / 4 : 0
   const trimsStart = handle > 0 && (!laid.chain || laid.chain.first)
   const trimsEnd = handle > 0 && !laid.open && (!laid.chain || laid.chain.last)
 
@@ -1285,6 +1322,7 @@ const ClipBlock = memo(function ClipBlock({
             ? "ring-1 ring-destructive/45"
             : "ring-1 ring-black/10 dark:ring-white/10",
         dragging && "z-20 shadow-lg opacity-90",
+        hidden && "opacity-0",
         "cursor-grab active:cursor-grabbing"
       )}
       style={{

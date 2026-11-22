@@ -1931,6 +1931,7 @@ describe("the timeline", () => {
 
       const selected: unknown[] = []
       const grouped: [string[], number][] = []
+      const trimmed: [string, string, number][] = []
       const view = render(
         timeline({
           timeMs: 0,
@@ -1943,7 +1944,8 @@ describe("the timeline", () => {
             moveClip: () => {},
             moveClips: (clips: readonly { clip: { ref: string } }[], ms: number) =>
               grouped.push([clips.map((laid) => laid.clip.ref), ms]),
-            trimClip: () => {},
+            trimClip: (laid: { clip: { ref: string } }, edge: string, ms: number) =>
+              trimmed.push([laid.clip.ref, edge, ms]),
             sceneLength: () => {},
             scene: {
               select: () => {},
@@ -1960,8 +1962,25 @@ describe("the timeline", () => {
         if (!found) throw new Error(`No clip ${ref} on the timeline.`)
         return found
       }
-      return { view, selected, grouped, block }
+      return { view, selected, grouped, trimmed, block }
     }
+
+    // Guard proof: bound the end handle by the part it is on, `clip.startMs + 100`, in onDragMove
+    // (timeline.tsx), as it did; the clip then cannot be trimmed back into the title. Trim the
+    // part held alone in the layout, and the title's stays whole. Drop the handles of a block a
+    // drag makes narrower than 16 px, and the release reaches no handle: the trim is lost.
+    test("a clip that goes on is trimmed back into its first chapter, its passed part hidden", () => {
+      const { block, trimmed } = continued()
+      const handle = [...block("intro-2").querySelectorAll<HTMLElement>(".cursor-ew-resize")].at(-1)
+      if (!handle) throw new Error("No end handle.")
+
+      fireEvent.pointerDown(handle, { button: 0, clientX: xAt(5000), pointerId: 1, shiftKey: true })
+      fireEvent.pointerMove(handle, { clientX: xAt(2000), pointerId: 1, shiftKey: true })
+      expect(block("intro").style.width).toBe("200px")
+      expect(block("intro-2").className).toContain("opacity-0")
+      fireEvent.pointerUp(handle, { clientX: xAt(2000), pointerId: 1, shiftKey: true })
+      expect(trimmed).toEqual([["intro-2", "end", 2000]])
+    })
 
     // Guard proof: select the part pressed in onDragEnd (timeline.tsx),
     // `selectionOfClip(current.clip)`; the interview's part is then chosen alone. Drag the part
