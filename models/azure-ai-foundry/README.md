@@ -411,7 +411,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Legacy pricing | `context_over_200k` must agree with the exact tier |
 | Reservations | Conservative highest rates; same pinned card as completed estimates |
 | Cache and reasoning | Partitions of totals; never counted twice |
-| Zero cache writes | Need no price; positive writes without rates remain unpriceable |
+| Cache writes | Priced at the write rate: GPT-5.6 and later report them in `cache_write_tokens`, apart from reads, on Responses and Chat. Zero writes need no price; positive writes without a rate stay unpriceable |
 | Messages cache TTLs | Five-minute writes at models.dev's write rate; one-hour writes at twice the input rate, as Anthropic bills Claude (Azure publishes no Claude meter). Reservations hold the one-hour rate |
 | Missing or ambiguous usage/prices | Explicitly unpriceable; missing counters are not zero |
 | Unknown billing dimensions | Require a custom estimator |

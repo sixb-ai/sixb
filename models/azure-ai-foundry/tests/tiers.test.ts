@@ -148,9 +148,10 @@ test("cache-write tiers and reservations stay pinned across catalog refresh", as
   ).toEqual({ currency: "USD", amountNanos: "48000" })
 })
 
-// Removal proof: omit cacheWriteInputTokens for explicit zero wire meters; both
-// adapters become unpriceable with a catalog that includes a cache-write price.
-test("explicit zero cache writes are usable with catalog write rates; absent counts stay unknown", () => {
+// GPT-5.6 and later bill a cache write in place of ordinary input. Removal proof: drop
+// cacheWriteInputTokens in foundryUsage and foundryChatUsage; with a catalog write price both
+// adapters become unpriceable for every write count.
+test("cache writes are priced at the write rate; absent or invalid counts stay unknown", () => {
   const card = {
     currency: "USD",
     input: "1",
@@ -158,6 +159,11 @@ test("explicit zero cache writes are usable with catalog write rates; absent cou
     cacheReadInput: "0.1",
     cacheWriteInput: "3",
   } as const
+  // 10 input tokens and 1 output: uncached at 1, written at 3, output at 2.
+  const priced = new Map<unknown, string>([
+    [0, "12000"],
+    [1, "14000"],
+  ])
   for (const writes of [undefined, 0, 1, null]) {
     const details = {
       cached_tokens: 0,
@@ -175,8 +181,8 @@ test("explicit zero cache writes are usable with catalog write rates; absent cou
       foundryEstimator(card, undefined).estimate({ usage: responses }),
       foundryChatEstimator(card, undefined).estimate({ usage: chat }),
     ]) {
-      if (writes === 0)
-        expect(estimate).toMatchObject({ status: "rated", money: { amountNanos: "12000" } })
+      const nanos = priced.get(writes)
+      if (nanos) expect(estimate).toMatchObject({ status: "rated", money: { amountNanos: nanos } })
       else expect(estimate.status).toBe("unpriceable")
     }
   }

@@ -11,6 +11,8 @@ export function foundryChatUsage(
   const input = counter(raw?.prompt_tokens)
   const output = counter(raw?.completion_tokens)
   const read = counter(object(raw?.prompt_tokens_details)?.cached_tokens)
+  // Written tokens are input billed at the write rate, apart from reads (as on Responses).
+  const written = counter(object(raw?.prompt_tokens_details)?.cache_write_tokens)
   const reported = reasoningTokens(raw)
   const reasoning =
     reported !== undefined &&
@@ -23,11 +25,9 @@ export function foundryChatUsage(
     ...(input === undefined ? {} : { inputTokens: input }),
     ...(output === undefined ? {} : { outputTokens: output }),
     ...(read === undefined ? {} : { cacheReadInputTokens: read }),
-    ...(object(raw?.prompt_tokens_details)?.cache_write_tokens === 0
-      ? { cacheWriteInputTokens: 0 }
-      : {}),
-    ...(input !== undefined && read !== undefined && read <= input && known
-      ? { uncachedInputTokens: input - read }
+    ...(written === undefined ? {} : { cacheWriteInputTokens: written }),
+    ...(input !== undefined && read !== undefined && read + (written ?? 0) <= input && known
+      ? { uncachedInputTokens: input - read - (written ?? 0) }
       : {}),
     ...(reasoning === undefined ? {} : { reasoningOutputTokens: reasoning }),
     ...(output !== undefined && reasoning !== undefined && reasoning <= output && known
@@ -80,7 +80,8 @@ function tokenMeters(raw: JsonObject | undefined): boolean {
       if (!details) return false
       for (const [meter, count] of Object.entries(details)) {
         if (
-          (key === "prompt_tokens_details" && meter === "cached_tokens") ||
+          (key === "prompt_tokens_details" &&
+            (meter === "cached_tokens" || meter === "cache_write_tokens")) ||
           (key !== "prompt_tokens_details" && meter === "reasoning_tokens")
         ) {
           if (counter(count) === undefined) return false
@@ -93,7 +94,7 @@ function tokenMeters(raw: JsonObject | undefined): boolean {
           ![
             "audio_tokens",
             ...(key === "prompt_tokens_details"
-              ? ["cache_write_tokens"]
+              ? []
               : ["accepted_prediction_tokens", "rejected_prediction_tokens"]),
           ].includes(meter) ||
           count !== 0
