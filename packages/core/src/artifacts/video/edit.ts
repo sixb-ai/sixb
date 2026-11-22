@@ -335,14 +335,20 @@ export function trimClip(
   })
 }
 
-/** Moves a clip to start at `startMs` in its composition, its length kept. */
+/**
+ * Moves a clip to start at `startMs` in its composition, its length kept. Moved later, it shows as
+ * much as before: its scene grows to hold it, as {@link moveClips} moves several.
+ */
 export function moveClip(
   sources: VideoSources,
   file: string,
   clip: VideoTarget,
   startMs: number
 ): VideoEditResult {
-  return setClipTiming(sources, file, clip, { startMs: Math.max(0, Math.round(startMs)) })
+  return run(sources, (work) => {
+    const found = clipOf(work, file, clip)
+    moveFound(work, [{ file, clip: found }], Math.max(0, Math.round(startMs)) - found.startMs)
+  })
 }
 
 /** Sets how loud a clip plays, from 0 to 1, and how long it fades in and out, in milliseconds. */
@@ -457,25 +463,15 @@ export interface VideoClipTarget {
 
 /**
  * Moves clips together by `deltaMs`, each in its own file, as one edit: they keep their places
- * one to another. None goes before its composition's start: the whole group moves less.
+ * one to another. None goes before its composition's start: the whole group moves less. Moved
+ * later, each shows as much as before: a scene grows to hold its clips.
  */
 export function moveClips(
   sources: VideoSources,
   clips: readonly VideoClipTarget[],
   deltaMs: number
 ): VideoEditResult {
-  return run(sources, (work) => {
-    const found = clipsOf(work, clips)
-    const delta = Math.max(Math.round(deltaMs), ...found.map(({ clip }) => -clip.startMs))
-
-    for (const [file, each] of byFile(found)) {
-      rewriteClips(
-        work,
-        file,
-        new Map(each.map(({ clip }) => [clip.ref, { "data-start": seconds(clip.startMs + delta) }]))
-      )
-    }
-  })
+  return run(sources, (work) => moveFound(work, clipsOf(work, clips), deltaMs))
 }
 
 /**
@@ -1340,6 +1336,42 @@ function timelineOf(work: Working, file: string): VideoFileTimeline {
 
 function clipOf(work: Working, file: string, target: VideoTarget): VideoClip {
   return resolveTarget(timelineOf(work, file).clips, target, file, "clip")
+}
+
+/**
+ * Moves clips found in their files by `deltaMs`, none before its composition's start. A clip that
+ * writes its length and goes later keeps showing what its scene showed of it: the scene's end
+ * goes as far as the furthest of them needs, in whole frame steps, and the scenes after follow.
+ */
+function moveFound(
+  work: Working,
+  found: readonly { readonly file: string; readonly clip: VideoClip }[],
+  deltaMs: number
+): void {
+  const delta = Math.max(Math.round(deltaMs), ...found.map(({ clip }) => -clip.startMs))
+  if (delta === 0) return
+
+  for (const [file, each] of byFile(found)) {
+    rewriteClips(
+      work,
+      file,
+      new Map(each.map(({ clip }) => [clip.ref, { "data-start": seconds(clip.startMs + delta) }]))
+    )
+
+    const scene = sceneOf(work, file)
+    if (!scene || delta < 0) continue
+    const needed = Math.max(
+      ...each.map(({ clip }) =>
+        clip.durationMs === undefined
+          ? 0
+          : Math.min(clip.startMs + clip.durationMs, scene.durationMs) + delta
+      )
+    )
+    if (needed > scene.durationMs + SAME_MS) {
+      const step = frameStepMs(rootOf(work).fps)
+      lengthenScene(work, scene.id, Math.ceil(needed / step) * step)
+    }
+  }
 }
 
 /**

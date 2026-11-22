@@ -15,6 +15,7 @@ import {
   duplicateScene,
   insertClip,
   keepClipRanges,
+  moveClip,
   moveClips,
   moveScene,
   removeClip,
@@ -719,6 +720,45 @@ describe("editing several clips at once", () => {
       ["#2", 0],
       ["#3", 2500],
     ])
+  })
+
+  // Guard proof: drop the scene's growth from moveFound in edit.ts; the demo still ends at
+  // 10.5 s, and the end of the screen moved past it is never seen.
+  test("a scene grows to show whole what a move takes past its end, and the scenes after follow", () => {
+    expect(times(SOURCES)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 8000],
+      ["outro", 10_500, 4500],
+    ])
+
+    const one = applied(moveClip(SOURCES, "scenes/demo.html", "screen", 5500))
+    expect(times(one)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 8500],
+      ["outro", 11_000, 4500],
+    ])
+
+    const group = applied(
+      moveClips(
+        SOURCES,
+        [
+          { file: "scenes/demo.html", clip: "screen" },
+          { file: "scenes/demo.html", clip: caption("in two taps") },
+        ],
+        1000
+      )
+    )
+    expect(times(group)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 9000],
+      ["outro", 11_500, 4500],
+    ])
+
+    // A move that stays inside its scene, or goes sooner, leaves the scenes as they are.
+    const inside = applied(moveClip(SOURCES, "scenes/demo.html", caption("in two taps"), 3000))
+    expect(times(inside)).toEqual(times(SOURCES))
+    const sooner = applied(moveClip(SOURCES, "scenes/demo.html", "screen", 4000))
+    expect(times(sooner)).toEqual(times(SOURCES))
   })
 
   test("refuses the whole edit when one of the clips is gone", () => {
