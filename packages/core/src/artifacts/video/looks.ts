@@ -31,7 +31,15 @@ export interface LookSheet {
   readonly blocks: readonly CssBlock[]
   readonly byId?: boolean
   readonly carried?: boolean
+  /** A sheet `index.html` links, which every scene reads: its rules hold wherever a clip goes. */
+  readonly shared?: boolean
 }
+
+/**
+ * Where an element is, as a selector reads it: the elements that hold it, outermost first, the
+ * video's root and its scene's host and composition among them.
+ */
+export type LookContext = readonly LookElement[]
 
 /** A rule of an element's look, as {@link writtenLook} writes it for another scene. */
 export interface LookRule {
@@ -57,6 +65,12 @@ export interface Look {
   readonly rules: readonly LookRule[]
   readonly keyframes: ReadonlyMap<string, string>
   readonly uncertain: boolean
+  /** The rules that make it uncertain, which {@link lookDiffers} reads where it was and lands. */
+  readonly unsure?: readonly {
+    readonly selector: string
+    readonly body: string
+    readonly sheet: LookSheet
+  }[]
 }
 
 /** The keyframes a scene reads by name: its own and its linked sheets', and the looks carried in. */
@@ -118,7 +132,7 @@ export function lookOf(element: LookElement, scene: string, sheets: readonly Loo
   const rules: LookRule[] = []
   const keyframes = new Map<string, string>()
   const defined = new Map<string, string>()
-  let uncertain = false
+  const unsure: { selector: string; body: string; sheet: LookSheet }[] = []
   for (const sheet of sheets) {
     for (const [name, body] of keyframesOf(sheet.blocks)) {
       if (!defined.has(name)) defined.set(name, body)
@@ -135,7 +149,7 @@ export function lookOf(element: LookElement, scene: string, sheets: readonly Loo
 
       for (const selector of selectorsOf(block.prelude)) {
         const styled = stylesItself(selector, element, scene, sheet)
-        if (styled === "uncertain") uncertain = true
+        if (styled === "uncertain") unsure.push({ selector, body: block.body, sheet })
         if (styled === undefined || styled === "uncertain") continue
 
         const rule = { ...styled, body: block.body, within }
@@ -149,7 +163,103 @@ export function lookOf(element: LookElement, scene: string, sheets: readonly Loo
     }
   }
   for (const sheet of sheets) visit(sheet.blocks, sheet, [])
-  return { rules, keyframes, uncertain }
+  return {
+    rules,
+    keyframes,
+    uncertain: unsure.length > 0,
+    ...(unsure.length > 0 ? { unsure } : {}),
+  }
+}
+
+/**
+ * Whether an element looks otherwise where it lands than where it was, as far as its look's
+ * stylesheets can tell: a rule it could not carry, through what holds it, that styles it in
+ * one place and not the other, or that a scene's own sheet gave it; or one a linked sheet gives it
+ * in both, whose properties a carried rule now outranks. Without where it is and lands, any such
+ * rule makes it so.
+ */
+export function lookDiffers(
+  look: Look,
+  element: LookElement,
+  context?: { readonly from: LookContext; readonly to: LookContext }
+): boolean {
+  if (!look.uncertain) return false
+  if (!context) return true
+
+  const both: string[] = []
+  for (const { selector, body, sheet } of look.unsure ?? []) {
+    if (sheet.carried || sheet.byId) return true
+    const from = matchesIn(selector, element, context.from)
+    if (from === "uncertain") return true
+    if (!sheet.shared) {
+      // A scene's own sheet stays with it: what it gave the element there, it gives none here.
+      if (from) return true
+      continue
+    }
+    const to = matchesIn(selector, element, context.to)
+    if (to === "uncertain" || to !== from) return true
+    if (from) both.push(body)
+  }
+  return both.some((body) => look.rules.some((rule) => sharesProperty(body, rule.body)))
+}
+
+/**
+ * Whether a selector styles an element where it is, `ancestors` holding it: `"uncertain"` when
+ * it depends on what a stylesheet cannot tell, its siblings or its place among them.
+ */
+export function matchesIn(
+  selector: string,
+  element: LookElement,
+  ancestors: LookContext
+): boolean | "uncertain" {
+  const compounds = compoundsOf(selector).map((each) => ({
+    combinator: each.combinator,
+    parts: subjectParts(each.compound),
+  }))
+  if (compounds.length === 0) return false
+  if (compounds.some((each) => !each.parts)) return "uncertain"
+  if (compounds.slice(1).some((each) => each.combinator !== " " && each.combinator !== ">")) {
+    return "uncertain"
+  }
+
+  let uncertain = false
+  const holds = (at: number, candidate: LookElement, held: boolean) => {
+    const matched = matchCompound(compounds[at]?.parts ?? [], candidate, held)
+    if (matched === "uncertain") uncertain = true
+    return matched !== false
+  }
+  // From the element out, each compound on an element holding the one after it: its parent,
+  // after `>`, or any further out.
+  const within = (at: number, from: number): boolean => {
+    if (at < 0) return true
+    if (compounds[at + 1]?.combinator === ">") {
+      const parent = ancestors[from]
+      return parent !== undefined && holds(at, parent, true) && within(at - 1, from - 1)
+    }
+    for (let outer = from; outer >= 0; outer -= 1) {
+      const candidate = ancestors[outer]
+      if (candidate && holds(at, candidate, true) && within(at - 1, outer - 1)) return true
+    }
+    return false
+  }
+  const last = compounds.length - 1
+  const matched = holds(last, element, false) && within(last - 1, ancestors.length - 1)
+  return uncertain ? "uncertain" : matched
+}
+
+/** Whether two rules' declarations set a property in common, a shorthand and its longhands too. */
+function sharesProperty(one: string, other: string): boolean {
+  const names = (body: string) =>
+    body
+      .split(";")
+      .map((declaration) => declaration.split(":")[0]?.trim().toLowerCase() ?? "")
+      .filter(Boolean)
+  const theirs = names(other)
+  return names(one).some((name) =>
+    theirs.some(
+      (each) => each === name || each.startsWith(`${name}-`) || name.startsWith(`${each}-`)
+    )
+  )
 }
 
 /**
@@ -222,6 +332,42 @@ export function scriptReaches(scripts: string, element: LookElement): boolean {
   if (scripts.trim() === "") return false
   const byTag = new RegExp(`[\\]}]\\s+${escapeRegExp(element.tag)}(?=["'\`\\s,.:\\[>)])`, "i")
   return byTag.test(scripts) || element.classes.some((name) => inSelector(scripts, `.${name}`))
+}
+
+/**
+ * Whether a scene's script reaches an element where it lands, `context` holding it: a selector it
+ * writes matches it there, as a string, or a template naming the strings it declares,
+ * `${scene} video`. A script building one otherwise is read as {@link scriptReaches} reads it.
+ */
+export function scriptReachesIn(
+  scripts: string,
+  element: LookElement,
+  context: LookContext
+): boolean {
+  if (scripts.trim() === "") return false
+  const strings = [...scripts.matchAll(/(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/g)]
+  const declared = new Map<string, string>()
+  for (const match of scripts.matchAll(
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(["'])((?:\\.|(?!\2)[^\\\n])*)\2/g
+  )) {
+    if (match[1]) declared.set(match[1], match[3] ?? "")
+  }
+
+  let built = false
+  const selectors = strings.flatMap((match) => {
+    const text = (match[2] ?? "").replace(/\$\{\s*([A-Za-z_$][\w$]*)\s*\}/g, (whole, name) =>
+      match[1] === "`" && declared.has(name) ? (declared.get(name) ?? "") : whole
+    )
+    if (text.includes("${")) built = true
+    const selector = text.trim()
+    return selector && /^[\w\s\-.#[\]="':(),>+~*|^$]+$/.test(selector) && /[.#[]/.test(selector)
+      ? [selector]
+      : []
+  })
+  if (built || selectors.length === 0) return scriptReaches(scripts, element)
+  return selectors.some((text) =>
+    selectorsOf(text).some((selector) => matchesIn(selector, element, context) !== false)
+  )
 }
 
 /** A rule as a scene's file writes it: on one line when its body is, else one line each. */
@@ -379,7 +525,11 @@ function subjectParts(compound: string): string[] | undefined {
  * Whether a compound's simple selectors match an element: `"uncertain"` when one of them depends
  * on what the element's attributes do not say, its place among its siblings or what it holds.
  */
-function matchCompound(parts: readonly string[], element: LookElement): boolean | "uncertain" {
+function matchCompound(
+  parts: readonly string[],
+  element: LookElement,
+  held = false
+): boolean | "uncertain" {
   let uncertain = false
   for (const part of parts) {
     if (part.startsWith("::")) continue
@@ -390,7 +540,7 @@ function matchCompound(parts: readonly string[], element: LookElement): boolean 
       if ((name === "is" || name === "where" || name === "not") && args !== undefined) {
         const each = selectorsOf(args).map((arg) => {
           const inner = compoundsOf(arg).length === 1 ? subjectParts(arg.trim()) : undefined
-          return inner ? matchCompound(inner, element) : "uncertain"
+          return inner ? matchCompound(inner, element, held) : "uncertain"
         })
         const any = each.includes(true)
         if (name === "not" ? any : !any && !each.includes("uncertain")) return false
@@ -409,8 +559,9 @@ function matchCompound(parts: readonly string[], element: LookElement): boolean 
         uncertain = true
         continue
       }
+      // A clip is no composition; what holds it may be.
       const value = element.attributes.get(name)
-      if (name === "data-composition-id" || value === undefined) return false
+      if ((name === "data-composition-id" && !held) || value === undefined) return false
       if (attribute[2] && !attributeMatches(value, attribute[2], attribute[4] ?? "")) return false
     } else if (part !== "*" && part.toLowerCase() !== element.tag) {
       return false

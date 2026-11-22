@@ -269,13 +269,20 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - A recording that goes on plays its file on from part to part, unless its words were cut there:
   it lasts as long as its parts show, and placed again (`logicalClip`), it plays on across a gap or
   a hidden end, and skips where a part starts elsewhere in its file than the one before stops
-  (`MediaJump`), cut again at each skip (`atJumps`) into pieces back to back in a scene, or one a
-  few frames sooner when a skip comes too close to a scene's edge for a piece of its own. A cut by
+  (`MediaJump`), cut again at each skip (`atJumps`) into pieces back to back in a scene, a piece
+  of a few frames or less where a skip falls that close to a scene's edge: what was cut is never
+  heard again, and what was kept never lost. A cut by
   words (`removeMediaRanges`, `keepClipRanges`) takes from every part what it plays of the words,
   so words across a scene's edge go whole, from either file. Whatever an operation cuts, what is
   left of each part goes on from the first piece left (`markCutChains`); a scene moved or removed
   so that two parts play at once places the clip again (`settleChains`), each part where the one
-  before ends.
+  before ends. Any edit to a file holding parts settles them too: a part two people's edits left
+  naming another head goes on from the clip it follows again (`joinStrays`).
+- A part left out of its clip lets go of `data-continues`, so nothing links it again across what
+  came between: a copied scene coming between two parts, a removed one leaving a part that no
+  longer goes on, or a placement that wrote the clip without it. Past a gap, a recording goes on
+  only where it plays its file on; elsewhere in the file, only from a part that reaches its
+  scene's end.
 - A clip that leaves its file keeps its id, unless another element of the video has it, and takes
   one of its own when parts go on from it (copies always take new ones); its recording's path is
   rebased for the new folder. What followed it there keeps its time. A clip that holds others, or a
@@ -301,12 +308,17 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   rule that styles what the clip holds through it, `.caption .hot` or `.caption > span`, goes with
   it, its tail as written; escaped class names and attribute operators are read. A rule that may
   style it through a wrapper, by its place among its siblings, or styles its siblings, is not
-  carried, and neither is one it cannot read: `looksMayDiffer` names the clip. A placement works
+  carried: `looksMayDiffer` names the clip only where such a rule styles it otherwise where it lands
+  (`lookDiffers`), read with what holds it in both places, the video's root, the scene's host and
+  composition, and its wrappers: a linked sheet's rule that holds it alike in both says nothing,
+  unless a rule it takes along now outranks it on a property; a scene's own, or one it cannot
+  read, does. A placement works
   each look out once for the elements alike, and an edit that would grow an HTML file past what
   publishing reads is refused.
 - Its old scene's script cannot follow: `animationsLeft` names each clip that left a script naming
-  its `#id` or a class, and `animationsJoined` each that landed where the script reaches one of its
-  classes or its tag (`${scene} video`).
+  its `#id` or a class, and `animationsJoined` each that landed where a selector the script writes
+  matches it there, as a string or a template of the strings it declares (`${scene} video`); a
+  script building its selectors otherwise is read by the clip's classes and tag.
 
 How an operation works:
 

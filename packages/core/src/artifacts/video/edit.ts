@@ -15,21 +15,26 @@ import {
   keyframesOf,
   LOOK_ID,
   type Look,
+  type LookContext,
   type LookElement,
   type LookSheet,
+  lookDiffers,
   lookKey,
   lookOf,
   type SceneKeyframes,
   scriptNames,
   scriptReaches,
+  scriptReachesIn,
   writtenLook,
 } from "./looks"
 import {
+  goesOnFrom,
   readRootLayers,
   readRootTimeline,
   readSceneTimeline,
   sceneAfter,
   type VideoChain,
+  type VideoChainPart,
   type VideoClip,
   type VideoElementSource,
   type VideoFileTimeline,
@@ -216,6 +221,7 @@ export function duplicateScene(
 ): VideoEditResult & { readonly scene?: string } {
   let copy: string | undefined
   const result = run(sources, (work) => {
+    const chains = chainsOf(work)
     const before = openRoot(work)
     const original = hostOf(work, scene)
     const taken = takenNames(work)
@@ -262,6 +268,7 @@ export function duplicateScene(
         })
       }
     })
+    strandedParts(work, chains)
   })
   return "edit" in result && copy ? { ...result, scene: copy } : result
 }
@@ -273,9 +280,29 @@ export function duplicateScene(
  */
 export function removeScene(sources: VideoSources, scene: string): VideoEditResult {
   return run(sources, (work) => {
+    const chains = chainsOf(work)
     openRoot(work)
     dropScene(work, scene)
+    strandedParts(work, chains)
   })
+}
+
+/**
+ * Lets go of the parts a scene copied or removed leaves out of the clip they went on from, as a
+ * copy coming between two of its scenes does: each loses `data-continues`, so no later
+ * placement links it again across what came between, and it is a clip of its own.
+ */
+function strandedParts(work: Working, before: ReadonlyMap<string, VideoChain>): void {
+  const after = new Set([...chainsOf(work).keys()])
+  for (const [key, chain] of before) {
+    const [file] = key.split("\n")
+    const part = chain.parts.find((each) => `${each.file}\n${each.clip.ref}` === key)
+    if (!file || !part || part === chain.parts[0] || after.has(key)) continue
+    if (work.textOf(file) === undefined || !part.clip.id) continue
+
+    const now = readTimeline(work, file)?.clips.find((clip) => clip.id === part.clip.id)
+    if (now?.continues) setAttributes(work, file, now.source, { "data-continues": null })
+  }
 }
 
 // Clips -------------------------------------------------------------------------------------------
@@ -1034,6 +1061,13 @@ class Working {
     this.files.delete(path)
   }
 
+  /** The paths whose text the operation changed so far. */
+  changed(): string[] {
+    return [...this.files].flatMap(([path, text]) =>
+      typeof text === "string" && this.sources.get(path) !== text ? [path] : []
+    )
+  }
+
   /** Writes `text`, which the file holds as it did, whole in its edit. */
   writeWhole(path: string, text: string): void {
     this.whole.set(path, (this.whole.get(path) ?? new Set()).add(text))
@@ -1182,10 +1216,9 @@ function run(sources: VideoSources, operation: (work: Working) => void): VideoEd
   try {
     operation(work)
     markCutChains(work)
-    if (work.opened) {
-      settleChains(work)
-      fitRoot(work, work.opened)
-    }
+    // Scenes moved, or a file holding parts of a clip that goes on changed: its parts agree again.
+    if (work.opened || work.changed().some((path) => holdsParts(work, path))) settleChains(work)
+    if (work.opened) fitRoot(work, work.opened)
   } catch (error) {
     if (error instanceof EditError) return { error: error.message }
     throw error
@@ -2038,6 +2071,8 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): vo
  * show, it goes on in the next scene where the one before ends, and is heard once.
  */
 function settleChains(work: Working): void {
+  joinStrays(work)
+
   // Each clip once: one placed again plays once, and leaves the others as they were.
   for (let placed = 0; ; placed += 1) {
     const scenes = rootOf(work).scenes
@@ -2057,6 +2092,75 @@ function settleChains(work: Working): void {
     if (!head) return
     placeFound(work, [logicalClip(work, chains, head)])
   }
+}
+
+/**
+ * Joins to its clip each part that goes on from that clip's last part but names another head, as
+ * two people's edits merged may leave it, one cutting the clip's words and marking its pieces
+ * again, the other placing it: such a part, and the parts that go on from it, name its head again.
+ */
+function joinStrays(work: Working): void {
+  for (let joined = 0; joined <= MAX_STRAYS; joined += 1) {
+    const scenes = rootOf(work).scenes
+    const chains = [...new Set(chainsOf(work).values())]
+    const linked = new Set(chains.flatMap((chain) => chain.parts.map((part) => keyOf(part))))
+
+    // A clip whose head is gone, or a part that names one and goes on from nothing.
+    const strays: VideoChainPart[][] = chains
+      .filter((chain) => chain.parts[0]?.clip.continues)
+      .map((chain) => [...chain.parts])
+    for (const scene of scenes) {
+      if (work.textOf(scene.src) === undefined) continue
+      for (const clip of readTimeline(work, scene.src)?.clips ?? []) {
+        const part = { file: scene.src, clip }
+        if (!clip.continues || clip.durationMs === undefined || linked.has(keyOf(part))) continue
+        const startMs = scene.startMs + clip.startMs
+        strays.push([{ ...part, startMs, endMs: startMs + clip.durationMs }])
+      }
+    }
+
+    const heads = chains.filter(
+      (chain) => chain.parts[0]?.clip.id && !chain.parts[0].clip.continues
+    )
+    const found = strays
+      .map((stray) => ({
+        stray,
+        chain: heads.find((chain) => {
+          const last = chain.parts.at(-1)
+          return last && stray[0] && goesOnFrom(scenes, last, stray[0])
+        }),
+      }))
+      .find((each) => each.chain)
+    const head = found?.chain?.parts[0]?.clip.id
+    if (!found || !head) return
+
+    for (const part of found.stray) {
+      const now = clipOf(work, part.file, videoTarget(part.clip))
+      setAttributes(work, part.file, now.source, { "data-continues": head })
+    }
+  }
+}
+
+/** Whether a file holds a part of a clip that goes on: one naming its head, or a head named. */
+function holdsParts(work: Working, path: string): boolean {
+  const text = work.textOf(path)
+  if (path === VIDEO_ENTRY || text === undefined || !/\.html?$/i.test(path)) return false
+  if (text.includes("data-continues")) return true
+
+  const heads = new Set<string>()
+  for (const file of work.paths()) {
+    for (const match of (work.textOf(file) ?? "").matchAll(/\sdata-continues\s*=\s*"([^"]+)"/g)) {
+      if (match[1]) heads.add(match[1])
+    }
+  }
+  return [...heads].some((id) => text.includes(` id="${id}"`))
+}
+
+/** How many strays an edit joins again at most: two people's edits leave a few, never more. */
+const MAX_STRAYS = 20
+
+function keyOf(part: { readonly file: string; readonly clip: VideoClip }): string {
+  return `${part.file}\n${part.clip.ref}`
 }
 
 /**
@@ -2701,6 +2805,19 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     return blocks
   }
   const looksOf = new Map<string, { look: Look; home: string }>()
+  // What holds a clip landing in each scene, read once for all that land there.
+  const contexts = new Map<string, LookContext>()
+  const landing = (id: string) => {
+    const known = contexts.get(id)
+    if (known) return known
+    // The scene as the files are now, which what is written in them may have moved.
+    const scene = rootOf(work).scenes.find((each) => each.id === id)
+    const context = scene ? sceneContext(work, scene) : undefined
+    if (context) contexts.set(id, context)
+    return context
+  }
+  // The parts each clip placed goes on in, as `file\nid`, by the ids its parts may name.
+  const wrote = new Map<string, Set<string>>()
 
   for (const [file, each] of byFile(plans)) {
     const text = work.text(file)
@@ -2746,7 +2863,17 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const look = known?.look
       const home = known?.home ?? own.id
       const key = look && look.rules.length > 0 ? lookKey(home, look) : undefined
-      if (look?.uncertain && parts.some((part) => part.scene.id !== home)) uncertain.add(index)
+      // It may look otherwise only where what it could not take along styles it otherwise.
+      if (look?.uncertain) {
+        const from = clipContext(work, own, text, clip)
+        const elsewhere = new Set(
+          parts.map((part) => part.scene).filter((scene) => scene.id !== home)
+        )
+        const differs = [...elsewhere].some((scene) =>
+          lookDiffers(look, facts, { from, to: landing(scene.id) ?? [] })
+        )
+        if (differs) uncertain.add(index)
+      }
       const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
       const fresh = () => {
         const id = uniqueName(base || was.kind, taken)
@@ -2766,6 +2893,8 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const keepsId = was.id !== undefined && (stays || (counts.get(was.id) ?? 0) <= 1)
       const headId = keepsId ? was.id : was.id || parts.length > 1 ? fresh() : undefined
       if (headId && headId === was.id) taken.add(headId)
+      const written = new Set<string>()
+      for (const id of [headId, was.id]) if (id) wrote.set(id, written)
 
       // As one clip, it fades in on its first part and out on its last: the fade out it ended on.
       const lastOther = plan.others?.at(-1)
@@ -2782,7 +2911,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       })
 
       parts.forEach((part, n) => {
-        const media = partMedia(mediaStartMs, plan.jumps, part)
+        const media = mediaAt(mediaStartMs, plan.jumps, part.intoMs)
         const timing = {
           start: seconds(part.startMs - part.scene.startMs),
           duration: part.durationMs === undefined ? undefined : seconds(part.durationMs),
@@ -2809,6 +2938,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         const kept = n > 0 ? reuse(part.scene.src) : undefined
         if (kept) {
           const old = kept.clip
+          written.add(`${kept.file}\n${old.id ?? old.ref}`)
           change(kept.file, old.ref, {
             ...(part.startMs - part.scene.startMs === old.startMs
               ? {}
@@ -2826,6 +2956,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         }
 
         const id = n === 0 ? headId : fresh()
+        if (n > 0 && id) written.add(`${part.scene.src}\n${id}`)
         // Its look, by its key, where it is not at home; at home, its scene's own rules.
         const styled = key !== undefined && part.scene.id !== home
         const src = attributeOf(text, clip, "src")
@@ -2913,13 +3044,34 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           carriedIn.set(name, [...(carriedIn.get(name) ?? []), body])
         }
       }
-      if (scriptReaches(scripts, one.element) && !joined.some((each) => each.index === one.index)) {
+      const context = landing(one.scene)
+      const reaches = context
+        ? scriptReachesIn(scripts, one.element, context)
+        : scriptReaches(scripts, one.element)
+      if (reaches && !joined.some((each) => each.index === one.index)) {
         joined.push({ index: one.index, scene: one.scene })
       }
     }
     writeLooks(work, file, looks)
   }
   for (const file of touched) pruneLooks(work, file)
+
+  // Whatever else names a clip placed, a part some edit left out of it, lets go of it: it is
+  // a clip of its own, and no later placement links it again.
+  if (wrote.size > 0) {
+    for (const scene of rootOf(work).scenes) {
+      const text = work.textOf(scene.src)
+      if (text === undefined || !text.includes("data-continues")) continue
+      for (;;) {
+        const stale = readTimeline(work, scene.src)?.clips.find((clip) => {
+          const parts = clip.continues ? wrote.get(clip.continues) : undefined
+          return parts !== undefined && !parts.has(`${scene.src}\n${clip.id ?? clip.ref}`)
+        })
+        if (!stale) break
+        setAttributes(work, scene.src, stale.source, { "data-continues": null })
+      }
+    }
+  }
 
   // The last scene grows to hold what lands past its end.
   const needed = new Map<string, number>()
@@ -3028,8 +3180,9 @@ function partsOf(
 
 /**
  * A recording's parts cut again where it skips on in its file, so each plays one stretch of it:
- * two pieces back to back in a scene, which go on one from the other. A jump closer than a clip
- * may be to a part's edge moves to it, a few frames heard more or less rather than a sliver.
+ * two pieces back to back in a scene, which go on one from the other. A skip however close to a
+ * part's edge cuts it there, a piece of a few frames or less if need be: what its words left out
+ * is never heard again, and what they kept, never lost.
  */
 function atJumps(parts: readonly Part[], placing: Placing): Part[] {
   const jumps = placing.jumps ?? []
@@ -3038,38 +3191,18 @@ function atJumps(parts: readonly Part[], placing: Placing): Part[] {
   return parts.flatMap((part) => {
     if (part.durationMs === undefined) return [part]
     const end = part.intoMs + part.durationMs
-    const cuts = jumps
-      .map((jump) => jump.intoMs)
-      .filter((at) => at - part.intoMs >= MIN_CLIP_MS && end - at >= MIN_CLIP_MS)
+    const cuts = jumps.map((jump) => jump.intoMs).filter((at) => at > part.intoMs && at < end)
     const edges = [part.intoMs, ...cuts, end]
-    return cuts.length === 0
-      ? [part]
-      : edges.slice(1).map((to, at) => {
-          const from = edges[at] as number
-          return {
-            ...part,
-            startMs: part.startMs + from - part.intoMs,
-            durationMs: to - from,
-            intoMs: from,
-          }
-        })
+    return edges.slice(1).map((to, at) => {
+      const from = edges[at] as number
+      return {
+        ...part,
+        startMs: part.startMs + from - part.intoMs,
+        durationMs: to - from,
+        intoMs: from,
+      }
+    })
   })
-}
-
-/**
- * Where a placed part plays its file from: as far into the clip as it starts, or, when a jump
- * comes too soon after for a piece of its own, from that jump's stretch, a few frames sooner.
- */
-function partMedia(
-  mediaStartMs: number,
-  jumps: readonly MediaJump[] | undefined,
-  part: Part
-): number {
-  const near = jumps?.find(
-    (jump) => jump.intoMs > part.intoMs && jump.intoMs - part.intoMs < MIN_CLIP_MS
-  )
-  if (near) return Math.max(0, near.mediaMs - (near.intoMs - part.intoMs))
-  return mediaAt(mediaStartMs, jumps, part.intoMs)
 }
 
 /** A clip's element written for another file, the look it takes along, and what it is. */
@@ -3086,6 +3219,83 @@ interface Carried {
   readonly key?: string
   readonly home?: string
 }
+
+/**
+ * What holds a clip landing in a scene, as a selector reads it: the video's root, the scene's host
+ * and its composition, of which the clip is a child.
+ */
+function sceneContext(work: Working, scene: Scene): LookContext {
+  const index = work.text(VIDEO_ENTRY)
+  const composition =
+    work.textOf(scene.src) === undefined ? undefined : readTimeline(work, scene.src)
+  return [
+    startTagOf(index, rootOf(work).root),
+    startTagOf(index, scene.host),
+    ...(composition ? [startTagOf(work.text(scene.src), composition.composition)] : []),
+  ]
+}
+
+/** What holds a clip where it is: its scene's, and the elements of its file around it. */
+function clipContext(work: Working, scene: Scene, text: string, clip: VideoClip): LookContext {
+  const timeline = readTimeline(work, scene.src)
+  const content = timeline?.composition.content
+  const wrappers = content ? wrappersOf(text, content.start, clip.source.element.start) : []
+  return [...sceneContext(work, scene), ...wrappers]
+}
+
+/** An element as a selector reads it, from its start tag alone. */
+function startTagOf(text: string, source: VideoElementSource): LookElement {
+  const html = text.slice(source.tag.start, source.tag.end)
+  const element = lookElement(html, undefined)
+  const id = element.attributes.get("id")
+  return id ? { ...element, id } : element
+}
+
+/** The elements open at `to`, from `from` in a file, outermost first: what holds what is there. */
+function wrappersOf(text: string, from: number, to: number): LookElement[] {
+  const open: { readonly tag: string; readonly html: string }[] = []
+  const tags = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)\b[^>]*>/g
+  tags.lastIndex = from
+  for (let match = tags.exec(text); match && match.index < to; match = tags.exec(text)) {
+    const [html, closing, name] = match
+    if (!name) continue
+    const tag = name.toLowerCase()
+    if (closing) {
+      const at = open.map((each) => each.tag).lastIndexOf(tag)
+      if (at >= 0) open.length = at
+      continue
+    }
+    if (VOID_TAGS.has(tag) || html.endsWith("/>")) continue
+    // What a script or a style holds is no element.
+    if (tag === "script" || tag === "style") {
+      const end = text.indexOf(`</${tag}`, tags.lastIndex)
+      tags.lastIndex = end < 0 ? text.length : end
+      continue
+    }
+    open.push({ tag, html })
+  }
+  return open.map(({ html }) => {
+    const element = lookElement(html, undefined)
+    const id = element.attributes.get("id")
+    return id ? { ...element, id } : element
+  })
+}
+
+const VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "source",
+  "track",
+  "wbr",
+])
 
 /** An element as a selector reads it, from its HTML, by the id it has where it is. */
 function lookElement(html: string, id: string | undefined): LookElement {
@@ -3162,7 +3372,7 @@ function lookSheets(
   // In the order the page reads them: the linked sheets in its head, the scene's own styles,
   // then the look carried in, written after them.
   const sheets: LookSheet[] = [
-    ...linked.map((blocks) => ({ blocks, byId })),
+    ...linked.map((blocks) => ({ blocks, byId, shared: true })),
     ...styles
       .filter((style) => style.look === undefined)
       .map((style) => ({ blocks: parsed(style.css), byId })),

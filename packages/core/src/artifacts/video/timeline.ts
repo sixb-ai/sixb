@@ -393,7 +393,8 @@ export function sceneAfter<T extends { readonly startMs: number; readonly durati
  * - a recording in the scene placement goes on in after `previous`'s, starting no later than that
  *   one's end, or its own start after a gap: a scene made shorter under `previous` hides its end,
  *   one made longer leaves a gap after it, and both stay one clip, which its next placement makes
- *   whole again. Where it plays its file from is its own: a cut at the edge skips what it took;
+ *   whole again. Where it plays its file from is its own, a cut at the edge skipping what it took,
+ *   but only after a part that reaches its scene's end: past a gap, it plays the file on;
  * - anything else in that scene, from where `previous` reaches its scene's end, at least, starting
  *   there or where its own scene starts after a gap.
  */
@@ -416,9 +417,30 @@ function goesOn(
   const sceneEnd = before.startMs + before.durationMs
   const from = Math.max(Math.min(previous.endMs, sceneEnd), after.startMs)
 
-  if (recording) return next.startMs <= Math.max(sceneEnd, after.startMs) + SAME_MS
+  if (recording) {
+    // Past a gap the scene made longer, only where it plays the file on: a part elsewhere in the
+    // file goes on only from one that reaches its scene's end, so a stale one never links.
+    const reaches = previous.endMs >= sceneEnd - SAME_MS
+    return (
+      (reaches || playsOn(previous, next)) &&
+      next.startMs <= Math.max(sceneEnd, after.startMs) + SAME_MS
+    )
+  }
   if (previous.endMs < sceneEnd - SAME_MS) return false
   return Math.abs(next.startMs - from) <= SAME_MS
+}
+
+/**
+ * Whether `next` would go on from `previous` as {@link videoChains} links parts, whatever head its
+ * `data-continues` names: a part two edits at once left naming another.
+ */
+export function goesOnFrom(
+  scenes: readonly VideoSceneSpan[],
+  previous: VideoChainPart,
+  next: VideoChainPart
+): boolean {
+  const sceneOf = (part: VideoChainPart) => scenes.find((scene) => scene.src === part.file)
+  return goesOn(scenes, previous, next, sceneOf)
 }
 
 /** Whether `next` plays its file on from where `previous`, as written, stops. */

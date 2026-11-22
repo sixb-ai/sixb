@@ -1436,6 +1436,77 @@ describe("placing clips in the video", () => {
     expect(applied(result, sources).get("scenes/outro.html")).not.toContain("border-radius")
   })
 
+  // Guard proof: say every rule through what holds a clip in lookDiffers (looks.ts), as it did; the
+  // footage then may look different in an outro that holds it as the demo did. Read a scene's
+  // script by its classes and tags alone in placeFound (edit.ts), scriptReaches, and the outro's
+  // captions' animation reaches the footage too.
+  test("says a look or an animation changes only where what holds the clip makes it so", () => {
+    const scened = (text: string, id: string) =>
+      text.replace(
+        `<div data-composition-id="${id}"`,
+        `<div class="scene" data-composition-id="${id}"`
+      )
+    const linked = ".scene video { object-fit: cover; border-radius: 12px; }\n"
+    const footage = (sources: VideoSources) =>
+      moveClips(sources, [{ file: "scenes/demo.html", clip: "screen" }], 3000)
+    const differ = (sources: VideoSources) => {
+      const result = footage(sources)
+      if ("error" in result) throw new Error(result.error)
+      return result.looksMayDiffer ?? []
+    }
+
+    // Both chapters' compositions are scenes: the linked rule holds the footage alike in both.
+    const alike = with_({
+      "styles.css": linked,
+      "scenes/demo.html": scened(DEMO, "demo"),
+      "scenes/outro.html": scened(OUTRO, "outro"),
+    })
+    expect(differ(alike)).toEqual([])
+
+    // Unless a rule it takes along sets what the linked one does: carried, it outranks it now.
+    const outranked = new Map(alike)
+    outranked.set(
+      "scenes/demo.html",
+      scened(DEMO, "demo").replace(
+        "<script>",
+        "<style>video { border-radius: 4px; }</style>\n    <script>"
+      )
+    )
+    expect(differ(outranked)).toEqual([{ file: "scenes/outro.html", clip: "screen" }])
+
+    // The outro is no scene, or the demo's own sheet styles it through the scene: it may differ.
+    expect(
+      differ(with_({ "styles.css": linked, "scenes/demo.html": scened(DEMO, "demo") }))
+    ).toEqual([{ file: "scenes/outro.html", clip: "screen" }])
+    const own = with_({
+      "scenes/demo.html": scened(DEMO, "demo").replace(
+        "<script>",
+        '<style>[data-composition-id="demo"] .scene video { opacity: 0.9; }</style>\n    <script>'
+      ),
+      "scenes/outro.html": scened(OUTRO, "outro"),
+    })
+    expect(differ(own)).toEqual([{ file: "scenes/outro.html", clip: "screen" }])
+
+    // A script animating the outro's captions, or shots inside a hero the outro does not hold,
+    // reaches no footage; one animating its scene's footage, the footage that lands there.
+    const animated = (selector: string) => {
+      const sources = with_({
+        "scenes/demo.html": DEMO.replace('id="screen"', 'id="screen" class="shot"'),
+        "scenes/outro.html": scened(OUTRO, "outro").replace(
+          "</div>",
+          `<script>gsap.timeline().from('${selector}', { opacity: 0 })</script>\n  </div>`
+        ),
+      })
+      const result = footage(sources)
+      return "edit" in result ? result.animationsJoined : undefined
+    }
+    expect(animated('[data-composition-id="outro"] .caption')).toEqual([])
+    expect(animated(".hero .shot")).toEqual([])
+    expect(animated(".scene video")).toEqual([
+      { clip: { file: "scenes/outro.html", clip: "screen" }, scene: "outro" },
+    ])
+  })
+
   // Guard proof: return false from scriptNames (looks.ts); the talk then leaves the demo, whose
   // script still looks for #talk, and nothing says so.
   test("says which clip left a scene whose script animates it", () => {
@@ -1979,10 +2050,14 @@ describe("a clip that goes on in later scenes", () => {
 
   /**
    * Each stretch of the opening's recording as the export plays it, `[file, ref, from, to, media]`
-   * in the video, checking that it is heard once: no two stretches at once, none of the file twice,
-   * and, `whole`, every one a part of the one clip it is, so the next edit moves them all.
+   * in the video, checking that it is heard once: no two stretches at once, none of the file twice
+   * (but in a copied scene's own copy), and, as one clip, every one a part of the clip it is, so
+   * the next edit moves them all.
    */
-  const heardOnce = (files: ReadonlyMap<string, string | null>, whole = true) => {
+  const heardOnce = (
+    files: ReadonlyMap<string, string | null>,
+    as: "one clip" | "apart" | "copied" = "one clip"
+  ) => {
     const scenes = composition(files).scenes
     const heard: { file: string; ref: string; from: number; to: number; media: number }[] = []
     for (const scene of scenes) {
@@ -2002,7 +2077,18 @@ describe("a clip that goes on in later scenes", () => {
         throw new Error(`${before.ref} and ${each.ref} play at once: ${JSON.stringify(byTime)}`)
       }
     })
-    const byMedia = [...heard].sort((a, b) => a.media - b.media)
+    const chains = videoChains(
+      scenes,
+      (file) => readSceneTimeline(files.get(file) as string) ?? undefined
+    ).filter((chain) => chain.parts[0]?.clip.src === "media/a.mp4")
+    const parts = new Set(
+      chains.flatMap((chain) => chain.parts.map((part) => `${part.file}#${part.clip.ref}`))
+    )
+
+    // A copied scene plays its own copy of the file again; the clip itself, never.
+    const byMedia = heard
+      .filter((each) => as !== "copied" || parts.has(`${each.file}#${each.ref}`))
+      .sort((a, b) => a.media - b.media)
     byMedia.slice(1).forEach((each, at) => {
       const before = byMedia[at] as (typeof heard)[number]
       if (each.media < before.media + before.to - before.from - 15) {
@@ -2012,15 +2098,8 @@ describe("a clip that goes on in later scenes", () => {
       }
     })
 
-    const chains = videoChains(
-      scenes,
-      (file) => readSceneTimeline(files.get(file) as string) ?? undefined
-    ).filter((chain) => chain.parts[0]?.clip.src === "media/a.mp4")
-    const parts = new Set(
-      chains.flatMap((chain) => chain.parts.map((part) => `${part.file}#${part.clip.ref}`))
-    )
     if (
-      whole &&
+      as === "one clip" &&
       heard.length > 1 &&
       (chains.length !== 1 || heard.some((each) => !parts.has(`${each.file}#${each.ref}`)))
     ) {
@@ -2244,15 +2323,6 @@ describe("a clip that goes on in later scenes", () => {
       ["the outro first", () => moveScene(files, "outro", 0)],
       ["the outro last again", () => moveScene(files, "outro", 2)],
       [
-        "the demo copied, then its copy removed",
-        () => {
-          const copied = duplicateScene(files, "demo")
-          if ("error" in copied || !copied.scene) return copied
-          const both = applied(copied, files)
-          return applied(removeScene(both, copied.scene), both)
-        },
-      ],
-      [
         "moved again",
         () => moveClip(files, "scenes/hook.html", heads().ref, heads().startMs + 200),
       ],
@@ -2261,26 +2331,56 @@ describe("a clip that goes on in later scenes", () => {
         "moved over the gap",
         () => moveClip(files, "scenes/hook.html", heads().ref, heads().startMs + 200),
       ],
+      [
+        "moved over it again",
+        () => moveClip(files, "scenes/hook.html", heads().ref, heads().startMs + 200),
+      ],
       ["ended in the hook", () => trimClip(files, "scenes/hook.html", heads().ref, "end", 2500)],
       ["pulled on to 12 s", () => trimClip(files, "scenes/hook.html", heads().ref, "end", 12_000)],
     ]
-    for (const [step, edit] of steps) {
-      const result = edit()
-      if ("error" in result) throw new Error(`${step}: ${result.error}`)
-      const next = "edit" in result ? applied(result as VideoEditResult, files) : new Map(result)
-      // A copy taken away again leaves the clip as it was.
-      if (step === "the demo copied, then its copy removed") {
-        expect(heardOnce(next)).toEqual(heardOnce(files))
-      }
-      files = next
-      try {
-        // Played first, the outro's part is apart from the clip until it is last again.
-        heardOnce(files, step !== "the outro first")
-      } catch (error) {
-        throw new Error(`${step}: ${(error as Error).message}`)
+    const play = (
+      steps_: typeof steps,
+      as: (step: string) => "one clip" | "apart" | "copied" = () => "one clip"
+    ) => {
+      for (const [step, edit] of steps_) {
+        const result = edit()
+        if ("error" in result) throw new Error(`${step}: ${result.error}`)
+        files = "edit" in result ? applied(result as VideoEditResult, files) : new Map(result)
+        try {
+          heardOnce(files, as(step))
+        } catch (error) {
+          throw new Error(`${step}: ${(error as Error).message}`)
+        }
       }
     }
+    // Played first, the outro's part is apart from the clip until it is last again.
+    const outroFirst = steps.findIndex(([step]) => step === "the outro first")
+    play(steps.slice(0, outroFirst))
+    play(steps.slice(outroFirst, outroFirst + 1), () => "apart")
+    play(steps.slice(outroFirst + 1, outroFirst + 2))
+    const copyFrom = files
+    play(steps.slice(outroFirst + 2))
     expect(heardOnce(files).length).toBeGreaterThan(1)
+    const end = files
+
+    // The demo copied between it and the outro: the outro's part, left out, is a clip of its own,
+    // and two moves of the head play nothing at once, even into the copy.
+    files = copyFrom
+    play(
+      [
+        ["the demo copied", () => duplicateScene(files, "demo")],
+        [
+          "moved into the copy",
+          () => moveClip(files, "scenes/hook.html", heads().ref, heads().startMs + 200),
+        ],
+        [
+          "moved further into it",
+          () => moveClip(files, "scenes/hook.html", heads().ref, heads().startMs + 200),
+        ],
+      ],
+      () => "copied"
+    )
+    files = end
 
     // Removed with what follows it, the recording is gone.
     const gone = applied(
@@ -2288,6 +2388,142 @@ describe("a clip that goes on in later scenes", () => {
       files
     )
     expect(heardOnce(gone)).toEqual([])
+  })
+
+  // Guard proof: cut placed parts only where a skip leaves a clip's least length either side in
+  // atJumps (edit.ts), moving the others to the edge as it did; a move of 50 ms then brings back
+  // 50 ms of the cut words, and loses as much of those kept.
+  test("a skip near a chapter's edge keeps what is heard, however little the move", () => {
+    const index = `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="15">
+    <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html" data-start="0" data-duration="3"></div>
+    <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="hook - 0.5" data-duration="4"></div>
+    <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo" data-duration="4"></div>
+  </div>
+`
+    let files = new Map<string, string | null>([
+      ["index.html", index],
+      [
+        "scenes/hook.html",
+        scene(
+          "hook",
+          '<video id="v" src="media/a.mp4" data-start="1" data-duration="2" data-has-audio="true"></video>'
+        ),
+      ],
+      ["scenes/demo.html", scene("demo")],
+      ["scenes/outro.html", scene("outro")],
+      ["media/a.mp4", null],
+    ])
+    files = applied(trimClip(files, "scenes/hook.html", "v", "end", 9000), files)
+    files = applied(
+      removeMediaRanges(files, "scenes/demo.html", "media/a.mp4", [{ startMs: 3000, endMs: 3300 }]),
+      files
+    )
+    // Words cut 70 ms before the hook's end.
+    files = applied(
+      removeMediaRanges(files, "scenes/hook.html", "media/a.mp4", [{ startMs: 1930, endMs: 2200 }]),
+      files
+    )
+
+    /** What of the file is heard, as merged stretches of it. */
+    const heard = (each: ReadonlyMap<string, string | null>) => {
+      const stretches = heardOnce(each)
+        .map((part) => {
+          const [, , from, to, media] = part as [string, string, number, number, number]
+          return [media, media + to - from] as [number, number]
+        })
+        .sort((a, b) => a[0] - b[0])
+      const merged: [number, number][] = []
+      for (const [from, to] of stretches) {
+        const last = merged.at(-1)
+        if (last && from <= last[1] + 1) last[1] = Math.max(last[1], to)
+        else merged.push([from, to])
+      }
+      return merged
+    }
+    const before = heard(files)
+    expect(before).toEqual([
+      [0, 1900],
+      [2200, 3000],
+      [3300, 8000],
+    ])
+    for (const by of [10, 50, 99, 120, -10, -50, -99, -120]) {
+      const moved = applied(moveClip(files, "scenes/hook.html", "v", 1000 + by), files)
+      expect([by, heard(moved)]).toEqual([by, before])
+    }
+  })
+
+  // Guard proof: drop strandedParts from duplicateScene or removeScene (edit.ts), or the stale-marker
+  // sweep from placeFound, and the outro's part, left out, keeps its marker; with none of the three,
+  // and a recording let go on past a gap from anywhere in its file in goesOn (timeline.ts), it
+  // joins the head's overflow into the copy, and the next move plays the copy's recording twice.
+  test("a chapter copied or removed between a clip's parts leaves no part to link again", () => {
+    const index = `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="15">
+    <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html" data-start="0" data-duration="3"></div>
+    <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="hook - 0.5" data-duration="4"></div>
+    <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo" data-duration="4"></div>
+  </div>
+`
+    const start = new Map<string, string | null>([
+      ["index.html", index],
+      [
+        "scenes/hook.html",
+        scene(
+          "hook",
+          '<video id="v" src="media/a.mp4" data-start="1" data-duration="2" data-has-audio="true"></video>'
+        ),
+      ],
+      ["scenes/demo.html", scene("demo")],
+      ["scenes/outro.html", scene("outro")],
+      ["media/a.mp4", null],
+    ])
+    const long = applied(trimClip(start, "scenes/hook.html", "v", "end", 9000), start)
+    expect(heardOnce(long).map((part) => part[1])).toEqual(["v", "v-2", "v-3"])
+
+    // The middle chapter removed, the head's, or cut across: one clip, heard once.
+    expect(heardOnce(applied(removeScene(long, "demo"), long)).map((part) => part[1])).toEqual([
+      "v",
+      "v-3",
+    ])
+    heardOnce(applied(removeScene(long, "hook"), long))
+    heardOnce(applied(cutRange(long, { startMs: 4000, endMs: 6000 }), long))
+
+    // Copied, the demo comes between: the outro's part is a clip of its own from then on.
+    const copied = applied(duplicateScene(long, "demo"), long)
+    const outro = readSceneTimeline(copied.get("scenes/outro.html") as string)?.clips[0]
+    expect([outro?.ref, outro?.continues]).toEqual(["v-3", undefined])
+    heardOnce(applied(removeScene(copied, "demo"), copied), "copied")
+
+    // A marker the outro's part kept all the same, as an older edit wrote it, goes once the head
+    // is placed again without it.
+    const kept = new Map(copied)
+    kept.set(
+      "scenes/outro.html",
+      (copied.get("scenes/outro.html") as string).replace('id="v-3"', 'id="v-3" data-continues="v"')
+    )
+    const placed = applied(moveClip(kept, "scenes/hook.html", "v", 1200), kept)
+    expect(readSceneTimeline(placed.get("scenes/outro.html") as string)?.clips[0]?.continues).toBe(
+      undefined
+    )
+    heardOnce(applied(moveClip(placed, "scenes/hook.html", "v", 1400), placed), "copied")
+
+    // A chapter removed after a gap the hook was made longer by: the outro's part plays elsewhere
+    // in the file than the head stops, so it goes on from nothing, and lets go of its marker.
+    const gap = applied(setSceneLength(long, "hook", 3500), long)
+    const apart = applied(removeScene(gap, "demo"), gap)
+    expect(readSceneTimeline(apart.get("scenes/outro.html") as string)?.clips[0]?.continues).toBe(
+      undefined
+    )
+
+    // Moved twice, the head goes on into the copy, over none of its own.
+    const once = applied(moveClip(copied, "scenes/hook.html", "v", 1200), copied)
+    const twice = applied(moveClip(once, "scenes/hook.html", "v", 1400), once)
+    expect(heardOnce(twice, "copied").map((part) => [part[1], part[2], part[3]])).toEqual([
+      ["v", 1400, 3000],
+      ["v-2", 3000, 6500],
+      ["v-5", 6500, 6900],
+      ["v-4", 7000, 10_500],
+      ["v-3", 10_500, 13_000],
+    ])
   })
 
   // Guard proof: walk the parts once in order in videoChains (timeline.ts), as it did; a stale part
@@ -2877,6 +3113,73 @@ describe("editing live", () => {
     // What nothing plays any more goes, as the Agent wrote.
     expect(files.has("media/screen.mp4")).toBe(false)
     expect(files.has("scenes/demo.html")).toBe(false)
+  })
+
+  // Guard proof: drop joinStrays from settleChains (edit.ts), or settle only once scenes moved in
+  // run; the part one person added then names the head the other's cut took away, and stays a clip
+  // of its own after the next edit.
+  test("one person cutting a clip's words while another pulls it on leave one clip, next edit", () => {
+    const index = `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="20">
+    <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html" data-start="0" data-duration="3"></div>
+    <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="hook" data-duration="4"></div>
+    <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo" data-duration="4"></div>
+    <div id="end" data-composition-id="end" data-composition-src="scenes/end.html" data-start="outro" data-duration="4"></div>
+  </div>
+`
+    const scene = (id: string, inner = "") =>
+      `<template>\n  <div data-composition-id="${id}" data-width="1920" data-height="1080">\n    ${inner}\n  </div>\n</template>\n`
+    const start = new Map<string, string | null>([
+      ["index.html", index],
+      [
+        "scenes/hook.html",
+        scene(
+          "hook",
+          '<video id="v" src="media/a.mp4" data-start="1" data-duration="2" data-has-audio="true"></video>'
+        ),
+      ],
+      [
+        "scenes/demo.html",
+        scene("demo", '<p class="caption" data-start="1" data-duration="1">Hi</p>'),
+      ],
+      ["scenes/outro.html", scene("outro")],
+      ["scenes/end.html", scene("end")],
+      ["media/a.mp4", null],
+    ])
+    // The recording from the hook into the middle of the outro.
+    const base = applied(trimClip(start, "scenes/hook.html", "v", "end", 9000), start)
+    const one = createArtifactDocument("video", live(base))
+    const two = new Y.Doc()
+    Y.applyUpdate(two, Y.encodeStateAsUpdate(one))
+
+    // One person cuts the hook's words away, so the demo's part heads the clip; the other pulls it
+    // on into the end card, from the files before the cut.
+    editDocument(
+      one,
+      removeMediaRanges(sourcesOf(one), "scenes/hook.html", "media/a.mp4", [
+        { startMs: 0, endMs: 2000 },
+      ])
+    )
+    editDocument(two, trimClip(sourcesOf(two), "scenes/hook.html", "v", "end", 13_000))
+    Y.applyUpdate(one, Y.encodeStateAsUpdate(two))
+    Y.applyUpdate(two, Y.encodeStateAsUpdate(one))
+    const merged = sourcesOf(one)
+    expect(sourcesOf(two)).toEqual(merged)
+    const parts = (files: VideoSources) =>
+      videoChains(composition(files).scenes, (file) =>
+        typeof files.get(file) === "string"
+          ? (readSceneTimeline(files.get(file) as string) ?? undefined)
+          : undefined
+      ).map((chain) => chain.parts.map((part) => part.file))
+    expect(parts(merged)).toEqual([["scenes/demo.html", "scenes/outro.html"]])
+
+    // The next edit of a file holding one of its parts makes it one clip again.
+    const caption = demoClips(merged).find((clip) => clip.text === "Hi")
+    if (!caption) throw new Error("No caption in the demo.")
+    const next = applied(
+      setClipTiming(merged, "scenes/demo.html", videoTarget(caption), { startMs: 1500 }),
+      merged
+    )
+    expect(parts(next)).toEqual([["scenes/demo.html", "scenes/outro.html", "scenes/end.html"]])
   })
 
   // Guard proof: write a look the outro holds already only once, as before, in placeFound
