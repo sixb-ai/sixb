@@ -30,6 +30,7 @@ import {
   type ClipBox,
   chainKey,
   clipKey,
+  coveredEdges,
   fitZoom,
   groupDelta,
   inRectangle,
@@ -71,6 +72,8 @@ const KNOB_PX = 11
 /** A trim handle's width, and the narrowest block that has both at that width. */
 const HANDLE_PX = 8
 const HANDLES_FROM_PX = 24
+/** The least a clip's block is drawn wide, however short the clip. */
+const MIN_BLOCK_PX = 6
 
 const ROW_PX: Record<"ruler" | "scenes" | VideoTrack, number> = {
   ruler: 24,
@@ -690,6 +693,32 @@ export function Timeline({
     }
   }
 
+  /** Where a clip's block is drawn now: as dragged, trimmed with its clip, or where it lies. */
+  const placedBlock = (laid: LaidClip) => {
+    const key = clipKey(laid)
+    const moving = drag?.type === "move" && movingKeys?.has(key) ? drag : null
+    // A trim cuts every part of the clip it trims as one, and hides a part it passes.
+    const trimming = drag?.type === "trim" && chainKey(drag.clip) === chainKey(laid) ? drag : null
+    // The clip dragged where it is dragged; the others selected with it as far.
+    const movedTo = moving
+      ? sameClip(moving.clip, laid)
+        ? moving.startMs
+        : laid.startMs + moving.startMs - moving.clip.startMs
+      : undefined
+    const trimmed = trimming ? trimmedPart(laid, trimming) : undefined
+    const start = movedTo ?? trimmed?.startMs ?? laid.startMs
+    const end =
+      movedTo !== undefined ? movedTo + laid.endMs - laid.startMs : (trimmed?.endMs ?? laid.endMs)
+    return {
+      start,
+      left: px(start),
+      width: Math.max(MIN_BLOCK_PX, px(end - start)),
+      moving,
+      trimming,
+      hidden: trimmed?.hidden === true,
+    }
+  }
+
   // The chapter selected, the one under the playhead, and where files dragged in would land.
   const chosenScene = selection?.type === "scene" ? selection.scene : undefined
   const playingScene = sceneAt(composition.scenes, timeMs)?.id
@@ -889,42 +918,44 @@ export function Timeline({
                   edits.seek(msAt(event.clientX), "commit")
                 }}
               >
-                {track.clips.map((laid) => {
-                  const key = clipKey(laid)
-                  const moving = drag?.type === "move" && movingKeys?.has(key) ? drag : null
-                  // A trim cuts every part of the clip it trims as one, and hides a part it passes.
-                  const trimming =
-                    drag?.type === "trim" && chainKey(drag.clip) === chainKey(laid) ? drag : null
-                  // The clip dragged where it is dragged; the others selected with it as far.
-                  const movedTo = moving
-                    ? sameClip(moving.clip, laid)
-                      ? moving.startMs
-                      : laid.startMs + moving.startMs - moving.clip.startMs
-                    : undefined
-                  const trimmed = trimming ? trimmedPart(laid, trimming) : undefined
-                  const start = movedTo ?? trimmed?.startMs ?? laid.startMs
-                  const end =
-                    movedTo !== undefined
-                      ? movedTo + laid.endMs - laid.startMs
-                      : (trimmed?.endMs ?? laid.endMs)
-                  return (
-                    <ClipBlock
-                      key={key}
-                      laid={laid}
-                      selected={chosenKeys.has(chainKey(laid))}
-                      dragging={!!moving || !!trimming}
-                      hidden={trimmed?.hidden === true}
-                      left={px(start)}
-                      width={Math.max(6, px(end - start))}
-                      top={rowTop(track.track, laid.row, track.rows)}
-                      height={ROW_PX[track.track]}
-                      target={target}
-                      zoom={zoom}
-                      viewStartMs={start}
-                      handlers={clipHandlers}
-                    />
+                {(() => {
+                  // Each block where it is drawn, then what of its edges its neighbours at rest
+                  // cover: a block dragged lies over them all, and moves no handle of theirs.
+                  const laidOut = track.clips.map((laid) => ({ laid, ...placedBlock(laid) }))
+                  const covered = coveredEdges(
+                    laidOut
+                      .filter(({ moving, trimming }) => !moving && !trimming)
+                      .map(({ laid, left, width }) => ({
+                        key: clipKey(laid),
+                        row: laid.row,
+                        left,
+                        width,
+                      }))
                   )
-                })}
+                  return laidOut.map(({ laid, left, width, start, moving, trimming, hidden }) => {
+                    const key = clipKey(laid)
+                    const edges = covered.get(key)
+                    return (
+                      <ClipBlock
+                        key={key}
+                        laid={laid}
+                        selected={chosenKeys.has(chainKey(laid))}
+                        dragging={!!moving || !!trimming}
+                        hidden={hidden}
+                        left={left}
+                        width={width}
+                        top={rowTop(track.track, laid.row, track.rows)}
+                        height={ROW_PX[track.track]}
+                        target={target}
+                        zoom={zoom}
+                        viewStartMs={start}
+                        coveredStart={edges?.start ?? 0}
+                        coveredEnd={edges?.end ?? 0}
+                        handlers={clipHandlers}
+                      />
+                    )
+                  })
+                })()}
                 {uploads
                   .filter((upload) => upload.track === track.track && track.id !== "soundtrack")
                   .map((upload) => (
@@ -1253,6 +1284,8 @@ const ClipBlock = memo(function ClipBlock({
   zoom,
   viewStartMs,
   hidden = false,
+  coveredStart = 0,
+  coveredEnd = 0,
   handlers,
 }: {
   readonly laid: LaidClip
@@ -1268,6 +1301,9 @@ const ClipBlock = memo(function ClipBlock({
   readonly viewStartMs: number
   /** Passed by a trim of its clip: kept, for the drag it may hold, but not seen. */
   readonly hidden?: boolean
+  /** How far its edges lie under the blocks beside it, in pixels: its handles start past it. */
+  readonly coveredStart?: number
+  readonly coveredEnd?: number
   readonly handlers: ClipHandlers
 }) {
   const messages = useArtifactMessages().videoEditor
@@ -1296,8 +1332,13 @@ const ClipBlock = memo(function ClipBlock({
   // it by the middle: a quarter of a narrow block each, none for one under 16 pixels.
   // A block being dragged keeps its handles, whatever the drag makes of it: one is held.
   const handle = width >= HANDLES_FROM_PX || dragging ? HANDLE_PX : width >= 16 ? width / 4 : 0
-  const trimsStart = handle > 0 && (!laid.chain || laid.chain.first)
-  const trimsEnd = handle > 0 && !laid.open && (!laid.chain || laid.chain.last)
+  // A handle starts past what covers its edge, and is left out when the block has no room for it.
+  const roomFor = (covered: number) => dragging || covered + handle <= width - handle
+  const trimsStart = handle > 0 && (!laid.chain || laid.chain.first) && roomFor(coveredStart)
+  const trimsEnd =
+    handle > 0 && !laid.open && (!laid.chain || laid.chain.last) && roomFor(coveredEnd)
+  // A block narrower than its handles would be is the one aimed at: it lies over its neighbours'.
+  const narrow = width < HANDLES_FROM_PX
 
   return (
     <div
@@ -1321,6 +1362,7 @@ const ClipBlock = memo(function ClipBlock({
           : failed
             ? "ring-1 ring-destructive/45"
             : "ring-1 ring-black/10 dark:ring-white/10",
+        narrow && !selected && !dragging && "z-[11]",
         dragging && "z-20 shadow-lg opacity-90",
         hidden && "opacity-0",
         "cursor-grab active:cursor-grabbing"
@@ -1418,6 +1460,7 @@ const ClipBlock = memo(function ClipBlock({
         <TrimHandle
           edge="start"
           width={handle}
+          inset={coveredStart}
           onPointerDown={(event) => handlers.trim(event, laid, "start")}
           {...dragHandlers}
         />
@@ -1426,6 +1469,7 @@ const ClipBlock = memo(function ClipBlock({
         <TrimHandle
           edge="end"
           width={handle}
+          inset={coveredEnd}
           onPointerDown={(event) => handlers.trim(event, laid, "end")}
           {...dragHandlers}
         />
@@ -1463,11 +1507,14 @@ function FileEnd({ left, label }: { readonly left: number; readonly label: strin
 function TrimHandle({
   edge,
   width,
+  inset,
   onPointerDown,
   ...handlers
 }: {
   readonly edge: "start" | "end"
   readonly width: number
+  /** How far from its edge it starts, past the block that covers it. */
+  readonly inset: number
   readonly onPointerDown: (event: ReactPointerEvent) => void
   readonly onPointerMove: (event: ReactPointerEvent) => void
   readonly onPointerUp: (event: ReactPointerEvent) => void
@@ -1480,7 +1527,7 @@ function TrimHandle({
         "absolute inset-y-0 z-10 cursor-ew-resize touch-none bg-white/0 transition-colors hover:bg-white/35 group-aria-pressed/clip:bg-white/25",
         edge === "start" ? "left-0 rounded-l-md" : "right-0 rounded-r-md"
       )}
-      style={{ width }}
+      style={{ width, ...(edge === "start" ? { left: inset } : { right: inset }) }}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.stopPropagation()
