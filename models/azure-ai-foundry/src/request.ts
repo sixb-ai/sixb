@@ -12,6 +12,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { requiredNullableSchema, responsesInput } from "@sixb/model-protocols/responses"
+import { promptCaching } from "./caching"
 import type { AzureAIFoundryDeployment } from "./discovery"
 import { foundryOutputSchema } from "./structured-output"
 import { object, PREFIX, positiveInteger } from "./util"
@@ -140,6 +141,14 @@ export function responsesRequest(
     stream: true,
     store: false,
     ...(options.encryptedReasoning === false ? {} : { include: ["reasoning.encrypted_content"] }),
+    ...promptCaching({
+      caching: request.caching,
+      messages: request.messages,
+      localTools: request.tools.length,
+      deployment,
+      request: options.request,
+      scope,
+    }),
     ...(max === undefined ? {} : { max_output_tokens: max }),
     ...(tools.length
       ? {

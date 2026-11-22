@@ -419,6 +419,24 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Reasoning counts | Positive reports retained; zero trusted automatically only for OpenAI |
 | `reasoningUsage` override | `"reported"` trusts reported zero; `"unknown"` omits reasoning partitions |
 
+## Prompt caching
+
+Sixb asks each protocol to cache what it will read again, from the caching intent the agent sends
+with every request: a conversation's key, and a lifetime that outlasts a pause between turns.
+
+| Deployment | Agent steps and conversation turns | One-shot requests (no tools, no earlier answer) |
+| --- | --- | --- |
+| Claude (Messages) | The last tool, the last system block and the conversation tail are marked: an hour for a conversation, five minutes otherwise | Nothing marked; Claude caches nothing unmarked |
+| GPT-5.6 and later (Responses, Chat) | Azure's automatic caching for its default 30 minutes, with the conversation's `prompt_cache_key` | `prompt_cache_options: { mode: "explicit" }`, which writes nothing: a write costs 1.25 times input |
+| Earlier OpenAI models | Automatic caching with `prompt_cache_key`, kept 24 hours for a conversation at no extra price | Automatic caching; writes are free |
+| Other publishers (Chat) | Automatic caching with `prompt_cache_key` | Automatic caching |
+
+GPT-5.6 and later keep 30 minutes for a conversation too: a 12-hour cache would double the price of
+every write. `caching: "off"` marks and writes nothing. A binding's own `cache_control`,
+`prompt_cache_key`, `prompt_cache_retention` or `prompt_cache_options` in `request` wins. A setting
+Azure refuses for a deployment is dropped from that deployment's later requests instead of failing
+them.
+
 ## Transport and caching
 
 | Option / behavior | Default / contract |

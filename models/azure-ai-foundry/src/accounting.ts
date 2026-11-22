@@ -60,7 +60,8 @@ export function foundryEstimator(
   return tokenEstimator(
     card,
     request,
-    ["temperature", "top_p", "metadata"],
+    // A cache key and 24-hour retention do not change the price; prompt_cache_options can.
+    ["temperature", "top_p", "metadata", "prompt_cache_key", "prompt_cache_retention"],
     onlyTokenMeters,
     modelName,
     modelVersion,
