@@ -184,10 +184,7 @@ export default function VideoEditor({
   const composition = state.composition
   const scenes = composition?.scenes ?? []
   const playing = sceneAt(scenes, timeMs)
-  const open =
-    (composition && selection?.type === "scene"
-      ? selectedScene(composition, selection)
-      : undefined) ?? playing
+  const open = (composition ? selectedScene(composition, selection) : undefined) ?? playing
   // What the Transcript tab reads: the open chapter's clips and the video's own.
   const clips = useMemo(
     () => (composition ? laidClips(state, composition, open) : []),
@@ -841,9 +838,7 @@ export default function VideoEditor({
               <Inspector
                 composition={composition}
                 timelines={state.timelines}
-                scene={
-                  selection?.type === "scene" ? selectedScene(composition, selection) : undefined
-                }
+                scene={selectedScene(composition, selection)}
                 clip={clip}
                 clips={picked.length > 1 ? picked : undefined}
                 splittable={splittable}

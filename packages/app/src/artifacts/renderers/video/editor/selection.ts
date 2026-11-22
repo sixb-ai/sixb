@@ -32,19 +32,13 @@ export interface ClipChoice {
   readonly target: VideoTarget
 }
 
-/** The scene a selection is in: the scene itself, or the scene whose file holds the clip. */
+/** The chapter a selection names, when it is one. */
 export function selectedScene(
   composition: VideoComposition,
   selection: EditorSelection
 ): VideoScene | undefined {
-  if (!selection) return undefined
-  if (selection.type === "scene")
-    return composition.scenes.find((scene) => scene.id === selection.scene)
-
-  // Of several clips, the scene of the last chosen that is in one.
-  const files = choices(selection).map((choice) => choice.file)
-  const file = [...files].reverse().find((each) => each !== VIDEO_ENTRY) ?? files[0]
-  return composition.scenes.find((scene) => scene.src === file)
+  if (selection?.type !== "scene") return undefined
+  return composition.scenes.find((scene) => scene.id === selection.scene)
 }
 
 /** The clips a selection names: none for a scene, one, or several. */
