@@ -7,6 +7,7 @@ import {
 } from "@sixb/core/models"
 import {
   messagesInput,
+  messagesPromptCaching,
   messagesStrictTools,
   StrictToolRefusals,
   strictToolsKey,
@@ -133,27 +134,34 @@ export function foundryMessagesRequest(
   const refused = unconstrained || (key !== undefined && strictToolRefusals.has(key))
   const strict = chosen.map((choice) => choice && !refused)
   const strictTools = refused ? undefined : key
-  const body: JsonObject = {
-    ...options.request,
-    model: definition.modelId,
-    messages: mapped.messages,
-    ...(mapped.system.length ? { system: mapped.system } : {}),
-    stream: true,
-    max_tokens: max,
-    ...(thinking.thinking ? { thinking: thinking.thinking } : {}),
-    ...(Object.keys(output).length ? { output_config: output } : {}),
-    ...(request.tools.length
-      ? {
-          tools: request.tools.map((tool, index) => ({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.inputSchema,
-            ...(strict[index] ? { strict: true } : {}),
-          })),
-          tool_choice: { type: "auto", disable_parallel_tool_use: caps.parallelToolCalls !== true },
-        }
-      : {}),
-  }
+  const body = messagesPromptCaching(
+    {
+      ...options.request,
+      model: definition.modelId,
+      messages: mapped.messages,
+      ...(mapped.system.length ? { system: mapped.system } : {}),
+      stream: true,
+      max_tokens: max,
+      ...(thinking.thinking ? { thinking: thinking.thinking } : {}),
+      ...(Object.keys(output).length ? { output_config: output } : {}),
+      ...(request.tools.length
+        ? {
+            tools: request.tools.map((tool, index) => ({
+              name: tool.name,
+              description: tool.description,
+              input_schema: tool.inputSchema,
+              ...(strict[index] ? { strict: true } : {}),
+            })),
+            tool_choice: {
+              type: "auto",
+              disable_parallel_tool_use: caps.parallelToolCalls !== true,
+            },
+          }
+        : {}),
+    },
+    request.caching,
+    request.tools.length
+  )
   return { body, ...(strictTools === undefined ? {} : { strictTools }) }
 }
 
