@@ -2431,7 +2431,10 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           ...(id ? { id } : {}),
           "data-start": timing.start,
           ...(timing.duration === undefined ? {} : { "data-duration": timing.duration }),
-          ...(timing.media === undefined ? {} : { "data-media-start": timing.media }),
+          // Where it plays its file from, written only where that changes.
+          ...(timing.media === undefined || mediaStartMs + part.intoMs === was.mediaStartMs
+            ? {}
+            : { "data-media-start": timing.media }),
           ...(moved === undefined ? {} : { src: moved }),
           "data-continues": n === 0 ? null : (headId ?? null),
           ...(n === 0 ? {} : { [PLACING]: null }),
