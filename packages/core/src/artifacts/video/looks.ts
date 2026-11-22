@@ -40,6 +40,8 @@ export interface LookRule {
   /** Its tag, if it names one, and the rest of what it names the element by, its id aside. */
   readonly tag: string
   readonly rest: string
+  /** What it styles inside the element, through it, as written: ` .hot`, ` > span`. */
+  readonly tail: string
   /** How many times it names the element's id, which the rewritten rule names it as often. */
   readonly ids: number
   readonly body: string
@@ -179,7 +181,7 @@ export function writtenLook(look: Look, scene: string, id: string, seen: SceneKe
     let body = rule.body
     for (const [from, to] of renamed) body = renameAnimation(body, from, to)
     const scope = rule.scoped ? `[data-composition-id="${scene}"] ` : ""
-    const selector = `${scope}${rule.tag}${`#${id}`.repeat(rule.ids)}${rule.rest}`
+    const selector = `${scope}${rule.tag}${`#${id}`.repeat(rule.ids)}${rule.rest}${rule.tail}`
     return rule.within.reduceRight(
       (inner, prelude) => wrapped(prelude, inner),
       cssRule(selector, body)
@@ -260,20 +262,29 @@ function stylesItself(
   sheet: LookSheet
 ): Omit<LookRule, "body" | "within"> | "uncertain" | undefined {
   const compounds = compoundsOf(selector)
-  const subject = compounds.at(-1)
-  if (!subject) return undefined
+  if (compounds.length === 0) return undefined
 
-  const before = compounds.slice(0, -1)
-  const scopes = before.map((compound) => SCOPE.exec(compound)?.[2])
-  if (scopes.some((each) => each !== undefined && each !== scene)) return undefined
+  // The scene it is scoped to, then the compound that would be the clip, then what it holds.
+  let first = 0
+  while (first < compounds.length - 1 && SCOPE.exec(compounds[first]?.compound ?? "")) first += 1
+  const scopes = compounds.slice(0, first).map((each) => SCOPE.exec(each.compound)?.[2])
+  if (scopes.some((each) => each !== scene)) return undefined
+  const anchor = compounds[first]
+  const after = compounds.slice(first + 1)
+  if (!anchor) return undefined
 
-  const parts = subjectParts(subject)
-  if (!parts) return undefined
-  const matched = matchCompound(parts, element)
-  if (matched === false) return undefined
-
-  // The subject styles it: through what else, the stylesheet alone cannot tell.
-  if (scopes.some((each) => each === undefined) || matched === "uncertain") return "uncertain"
+  const parts = subjectParts(anchor.compound)
+  const matched = parts ? matchCompound(parts, element) : "uncertain"
+  if (matched === false || !parts) {
+    // Not the clip: it may be one further on, through a wrapper the stylesheet cannot see.
+    const last = compounds.at(-1)
+    const lastParts = last && after.length > 0 ? subjectParts(last.compound) : undefined
+    if (!parts) return "uncertain"
+    return lastParts && matchCompound(lastParts, element) !== false ? "uncertain" : undefined
+  }
+  if (matched === "uncertain") return "uncertain"
+  // What a rule styles beside the clip, its siblings, stays with the scene.
+  if (after.some((each) => each.combinator !== " " && each.combinator !== ">")) return "uncertain"
 
   let names = false
   let ids = 0
@@ -300,15 +311,20 @@ function stylesItself(
   if (!names) return undefined
   if (sheet.byId && ids === 0) return undefined
 
+  // What it holds, styled through it, as written: `.caption .hot`, `.caption > span`.
+  const tail = after
+    .map((each) => `${each.combinator === " " ? " " : ` ${each.combinator} `}${each.compound}`)
+    .join("")
+
   // One id more specific than it was, unless it is a carried look's, which is already.
-  return { scoped: before.length > 0, tag, rest, ids: sheet.carried ? ids : ids + 1 }
+  return { scoped: first > 0, tag, rest, tail, ids: sheet.carried ? ids : ids + 1 }
 }
 
 /** A compound's simple selectors, in order; undefined when it holds what is not one. */
 function subjectParts(compound: string): string[] | undefined {
   const parts =
     compound.match(
-      /::?[\w-]+(?:\((?:[^()]|\([^()]*\))*\))?|\[[^\]]*\]|[#.][\w-]+|\*|[a-zA-Z][\w-]*/g
+      /::?[\w-]+(?:\((?:[^()]|\([^()]*\))*\))?|\[[^\]]*\]|[#.](?:[\w-]|\\.)+|\*|[a-zA-Z][\w-]*/g
     ) ?? []
   return parts.join("") === compound ? parts : undefined
 }
@@ -337,18 +353,19 @@ function matchCompound(parts: readonly string[], element: LookElement): boolean 
       }
       uncertain = true
     } else if (part.startsWith("#")) {
-      if (part.slice(1) !== element.id) return false
+      if (unescaped(part.slice(1)) !== element.id) return false
     } else if (part.startsWith(".")) {
-      if (!element.classes.includes(part.slice(1))) return false
+      if (!element.classes.includes(unescaped(part.slice(1)))) return false
     } else if (part.startsWith("[")) {
-      const attribute = /^\[\s*([\w-]+)\s*(?:=\s*(["']?)([^"'\]]*)\2\s*)?\]$/.exec(part)
+      const attribute = /^\[\s*([\w-]+)\s*(?:([~^$*|]?=)\s*(["']?)([^"'\]]*)\3\s*)?\]$/.exec(part)
       const name = attribute?.[1]?.toLowerCase()
       if (!attribute || !name) {
         uncertain = true
         continue
       }
-      if (name === "data-composition-id" || !element.attributes.has(name)) return false
-      if (attribute[3] !== undefined && element.attributes.get(name) !== attribute[3]) return false
+      const value = element.attributes.get(name)
+      if (name === "data-composition-id" || value === undefined) return false
+      if (attribute[2] && !attributeMatches(value, attribute[2], attribute[4] ?? "")) return false
     } else if (part !== "*" && part.toLowerCase() !== element.tag) {
       return false
     }
@@ -357,21 +374,41 @@ function matchCompound(parts: readonly string[], element: LookElement): boolean 
 }
 
 /** A selector's compounds, split at its combinators outside brackets and parentheses. */
-function compoundsOf(selector: string): string[] {
-  const compounds: string[] = []
+function compoundsOf(
+  selector: string
+): { readonly combinator: string; readonly compound: string }[] {
+  const compounds: { combinator: string; compound: string }[] = []
   let depth = 0
   let current = ""
-  for (const char of selector.trim()) {
+  let combinator = ""
+  const text = selector.trim()
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at] ?? ""
+    if (char === "\\") {
+      current += text.slice(at, at + 2)
+      at += 1
+      continue
+    }
     if (char === "[" || char === "(") depth += 1
     if (char === "]" || char === ")") depth -= 1
     if (depth === 0 && /[\s>+~]/.test(char)) {
-      if (current) compounds.push(current)
+      if (current)
+        compounds.push({
+          combinator: compounds.length === 0 ? "" : combinator || " ",
+          compound: current,
+        })
+      if (current) combinator = ""
       current = ""
+      if (char !== " " && !/\s/.test(char)) combinator = char
       continue
     }
     current += char
   }
-  if (current) compounds.push(current)
+  if (current)
+    compounds.push({
+      combinator: compounds.length === 0 ? "" : combinator || " ",
+      compound: current,
+    })
   return compounds
 }
 
@@ -395,6 +432,33 @@ function selectorsOf(prelude: string): string[] {
   }
   selectors.push(prelude.slice(start).trim())
   return selectors.filter(Boolean)
+}
+
+/** Whether an attribute's value matches an attribute selector's `op` and `wanted`. */
+function attributeMatches(value: string, op: string, wanted: string): boolean {
+  switch (op) {
+    case "~=":
+      return value.split(/\s+/).includes(wanted)
+    case "^=":
+      return wanted !== "" && value.startsWith(wanted)
+    case "$=":
+      return wanted !== "" && value.endsWith(wanted)
+    case "*=":
+      return wanted !== "" && value.includes(wanted)
+    case "|=":
+      return value === wanted || value.startsWith(`${wanted}-`)
+    default:
+      return value === wanted
+  }
+}
+
+/** An identifier as a selector escapes it, read: `md\\:big` is the class `md:big`. */
+function unescaped(identifier: string): string {
+  return identifier.replace(/\\([0-9a-fA-F]{1,6}\s?|.)/g, (_, escaped: string) =>
+    /^[0-9a-fA-F]/.test(escaped) && escaped.trim().length > 1
+      ? String.fromCodePoint(Number.parseInt(escaped.trim(), 16))
+      : escaped.trim() || escaped
+  )
 }
 
 /** Whether a rule's declarations animate by the keyframes `name`. */

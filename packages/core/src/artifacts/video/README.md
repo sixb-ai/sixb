@@ -280,8 +280,10 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   is from>">` of its own. Keyframes it animates by keep their name when the new scene reads none
   other by it, and take `<name>-2` otherwise. The scene's own rules never change, so its clips keep
   their look. Moved again, the carried style goes with the clip, and is dropped when it goes home.
-  A rule that may style it through a wrapper, or by its place among its siblings, is not carried:
-  `looksMayDiffer` names the clip.
+  A rule that styles what the clip holds through it, `.caption .hot` or `.caption > span`, goes
+  with it, its tail as written; escaped class names and attribute operators are read. A rule that
+  may style it through a wrapper, by its place among its siblings, or styles its siblings, is not
+  carried, and neither is one it cannot read: `looksMayDiffer` names the clip.
 - Its old scene's script cannot follow: `animationsLeft` names each clip that left a script naming
   its `#id` or a class, and `animationsJoined` each that landed where the script reaches one of its
   classes or its tag (`${scene} video`).
