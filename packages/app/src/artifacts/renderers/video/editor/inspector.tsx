@@ -49,6 +49,9 @@ export interface InspectorActions {
       readonly mediaStartMs?: number
     }
   ) => void
+  /** Where a clip starts in the video, and how long it plays: placed as a drag places it. */
+  readonly clipStart: (file: string, clip: VideoClip, ms: number) => void
+  readonly clipLength: (file: string, clip: VideoClip, ms: number) => void
   readonly clipSound: (
     file: string,
     clip: VideoClip,
@@ -68,6 +71,7 @@ export function Inspector({
   timelines,
   scene,
   clip,
+  span,
   clips,
   splittable,
   target,
@@ -79,6 +83,11 @@ export function Inspector({
   readonly scene: VideoScene | undefined
   /** The clip selected, in its file. */
   readonly clip: { readonly file: string; readonly clip: VideoClip } | undefined
+  /**
+   * Where the clip selected plays in the video, all its parts as one: from its first's start,
+   * for as long as they last, and its last's fade out.
+   */
+  readonly span?: ClipSpan | undefined
   /** The clips selected together, when there are several. */
   readonly clips?: readonly { readonly file: string; readonly clip: VideoClip }[] | undefined
   /** Whether the playhead is inside the selected clip, or one of those, where it splits. */
@@ -134,6 +143,7 @@ export function Inspector({
       <ClipInspector
         file={clip.file}
         clip={clip.clip}
+        span={span ?? { startMs: clip.clip.startMs, durationMs: clip.clip.durationMs }}
         typed={typedText(timelines.get(clip.file), clip.clip) !== undefined}
         splittable={splittable}
         target={target}
@@ -240,9 +250,17 @@ function SceneInspector({
   )
 }
 
+/** Where a clip plays in the video, as the Inspector shows it. */
+export interface ClipSpan {
+  readonly startMs: number
+  readonly durationMs: number | undefined
+  readonly fadeOutMs?: number | undefined
+}
+
 function ClipInspector({
   file,
   clip,
+  span,
   typed,
   splittable,
   target,
@@ -250,6 +268,7 @@ function ClipInspector({
 }: {
   readonly file: string
   readonly clip: VideoClip
+  readonly span: ClipSpan
   /** Whether its words can be typed over: it holds text alone. */
   readonly typed: boolean
   readonly splittable: boolean
@@ -307,16 +326,16 @@ function ClipInspector({
       <Section title={messages.timing}>
         <SecondsField
           label={messages.start}
-          hint={file === VIDEO_ENTRY ? messages.startIn.video : messages.startIn.scene}
-          ms={clip.startMs}
+          hint={messages.startIn.video}
+          ms={span.startMs}
           min={0}
-          onCommit={(ms) => actions.clipTiming(file, clip, { startMs: ms })}
+          onCommit={(ms) => actions.clipStart(file, clip, ms)}
         />
         <SecondsField
           label={messages.length}
-          ms={clip.durationMs}
+          ms={span.durationMs}
           min={100}
-          onCommit={(ms) => actions.clipTiming(file, clip, { durationMs: ms })}
+          onCommit={(ms) => actions.clipLength(file, clip, ms)}
         />
         {plays ? (
           <SecondsField
@@ -343,7 +362,7 @@ function ClipInspector({
           />
           <SecondsField
             label={messages.fadeOut}
-            ms={clip.fadeOutMs ?? 0}
+            ms={span.fadeOutMs ?? clip.fadeOutMs ?? 0}
             min={0}
             onCommit={(ms) => actions.clipSound(file, clip, { fadeOutMs: ms })}
           />

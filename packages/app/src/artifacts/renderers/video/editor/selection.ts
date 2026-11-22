@@ -7,10 +7,11 @@ import {
   type VideoScene,
   type VideoTarget,
   type VideoText,
+  videoChains,
   videoTarget,
 } from "@sixb/core/artifacts/live"
 import type { LiveVideoState } from "../../../live/video"
-import { type LaidClip, layClips, onRows } from "./model"
+import { clipKey, type LaidClip, layClips, onRows } from "./model"
 
 // What the reader has selected in the editor, and what follows from it: every clip laid out in the
 // video's time, as the timeline shows them, and the chapter the Transcript tab reads.
@@ -143,7 +144,48 @@ export function everySceneClips(state: LiveVideoState, composition: VideoComposi
         : []
     })
 
-  return [...onRows(scenes), ...(own ? layClips(own, VIDEO_ENTRY, 0, composition.durationMs) : [])]
+  return [
+    ...inChains(onRows(scenes), composition, state),
+    ...(own ? layClips(own, VIDEO_ENTRY, 0, composition.durationMs) : []),
+  ]
+}
+
+/**
+ * Laid clips, each part of a clip that goes on in later scenes knowing that clip, as the core
+ * reads it (`videoChains`), and whether the part before or after it lies against it on its row.
+ */
+function inChains(
+  clips: readonly LaidClip[],
+  composition: VideoComposition,
+  state: LiveVideoState
+): LaidClip[] {
+  const chains = videoChains(composition.scenes, (file) => state.timelines.get(file))
+  if (chains.length === 0) return [...clips]
+
+  const byKey = new Map(clips.map((laid) => [clipKey(laid), laid]))
+  const chained = new Map<string, NonNullable<LaidClip["chain"]>>()
+  for (const chain of chains) {
+    const parts = chain.parts.map((part) => byKey.get(clipKey(part)))
+    const key = chain.parts[0] ? clipKey(chain.parts[0]) : ""
+    parts.forEach((laid, index) => {
+      if (!laid) return
+      const touches = (other: LaidClip | undefined, before: boolean) =>
+        other !== undefined &&
+        other.row === laid.row &&
+        Math.abs(before ? other.endMs - laid.startMs : laid.endMs - other.startMs) <= 1
+      chained.set(clipKey(laid), {
+        key,
+        first: index === 0,
+        last: index === parts.length - 1,
+        joinsBefore: touches(parts[index - 1], true),
+        joinsAfter: touches(parts[index + 1], false),
+      })
+    })
+  }
+  return clips.map((laid) => {
+    const chain = chained.get(clipKey(laid))
+    return chain ? { ...laid, chain } : laid
+  })
 }
 
 /** Where a clip that writes no length ends, from its composition's start, for an edit to it. */
