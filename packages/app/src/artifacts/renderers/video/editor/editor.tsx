@@ -20,6 +20,7 @@ import {
   splitClips,
   trimClip,
   VIDEO_ENTRY,
+  type VideoAnimationJoined,
   type VideoAnimationLeft,
   type VideoClip,
   type VideoClipTarget,
@@ -249,8 +250,8 @@ export default function VideoEditor({
   )
 
   /**
-   * Makes an edit that places clips. A move's selection follows them to where they start now; a
-   * clip whose animation stayed with its chapter is said once, kindly.
+   * Makes an edit that places clips. A move's selection follows them to where they start now;
+   * what the move did to their animations is said once, kindly.
    */
   const place = (make: (sources: VideoSources) => VideoPlaceResult, follow: boolean) => {
     let result: VideoPlaceResult | undefined
@@ -264,33 +265,70 @@ export default function VideoEditor({
     if (follow && placed.length > 0) {
       setSelection(selectionOf(placed.map(({ file, clip }) => ({ file, target: clip }))))
     }
-    tellAnimations(result.animationsLeft ?? [])
+    tellAnimations(result.animationsLeft ?? [], result.animationsJoined ?? [])
   }
 
-  const tellAnimations = (left: readonly VideoAnimationLeft[]) => {
+  /**
+   * Says, once for each, what a move did to clips' motion: an animation a chapter's script gave a
+   * clip stays with that chapter, and the chapter it lands in may animate it as its own.
+   */
+  const tellAnimations = (
+    left: readonly VideoAnimationLeft[],
+    joined: readonly VideoAnimationJoined[]
+  ) => {
     const now = video.getState()
-    const fresh = left.flatMap(({ clip, scene }) => {
-      const found = findVideoTarget(now.timelines.get(clip.file)?.clips ?? [], clip.clip)
-      if (Array.isArray(found)) return []
+    const chapter = (id: string) => {
+      const found = now.composition?.scenes.find((each) => each.id === id)
+      return found ? sceneName(found) : id
+    }
+    const named = (target: VideoClipTarget) => {
+      const found = findVideoTarget(now.timelines.get(target.file)?.clips ?? [], target.clip)
+      return Array.isArray(found) ? undefined : clipName(found as VideoClip)
+    }
 
-      const name = clipName(found as VideoClip)
-      const key = `${scene}\n${name}`
-      if (told.current.has(key)) return []
+    // Each clip once, with what it left and what it joined, each said once while the editor is open.
+    const clips = new Map<string, { name: string; from?: string; to?: string }>()
+    const note = (target: VideoClipTarget, scene: string, side: "from" | "to") => {
+      const name = named(target)
+      const key = `${side}\n${scene}\n${name}`
+      if (name === undefined || told.current.has(key)) return
       told.current.add(key)
-      const chapter = now.composition?.scenes.find((each) => each.id === scene)
-      return [{ name, chapter: chapter ? sceneName(chapter) : scene }]
-    })
+      const at = `${target.file}\n${JSON.stringify(target.clip)}`
+      clips.set(at, { name, ...clips.get(at), [side]: chapter(scene) })
+    }
+    for (const { clip, scene } of left) note(clip, scene, "from")
+    for (const { clip, scene } of joined) note(clip, scene, "to")
 
-    const [first] = fresh
+    const said = [...clips.values()]
+    const [first] = said
     if (!first) return
+    if (said.length > 1) {
+      setNotice({
+        title: messages.keepLooks(said.length),
+        detail: messages.animationsChange,
+        tone: "info",
+      })
+      return
+    }
+    const name = shortName(first.name)
     setNotice(
-      fresh.length === 1
+      first.from && first.to
         ? {
-            title: messages.keepsLook(shortName(first.name)),
-            detail: messages.animationStays(first.chapter),
+            title: messages.keepsLook(name),
+            detail: messages.animationSwaps(first.from, first.to),
             tone: "info",
           }
-        : { title: messages.keepLooks(fresh.length), detail: messages.animationsStay, tone: "info" }
+        : first.from
+          ? {
+              title: messages.keepsLook(name),
+              detail: messages.animationStays(first.from),
+              tone: "info",
+            }
+          : {
+              title: messages.takesMotion(name, first.to ?? ""),
+              detail: messages.motionApplies(first.to ?? ""),
+              tone: "info",
+            }
     )
   }
 

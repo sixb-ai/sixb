@@ -1202,7 +1202,7 @@ describe("the Transcript tab", () => {
 
 describe("the editor", () => {
   /** The video as the editor opens it, live, the title's words timed so both chapters have clips. */
-  function openEditor(talk = TALK) {
+  function openEditor(talk = TALK, title = (text: string) => text) {
     const live = new LiveArtifact("art_video", () => false, {
       list: () => [],
       write: () => {},
@@ -1210,7 +1210,7 @@ describe("the editor", () => {
     })
     const files = new Map(FILES)
     files.set("scenes/title.html", {
-      text: TITLE.replace("<h1>", '<h1 data-start="0" data-duration="3">'),
+      text: title(TITLE.replace("<h1>", '<h1 data-start="0" data-duration="3">')),
     })
     files.set("scenes/talk.html", { text: talk })
     Y.applyUpdate(live.doc, Y.encodeStateAsUpdate(createArtifactDocument("video", files)))
@@ -1286,6 +1286,30 @@ describe("the editor", () => {
     expect(caption().getAttribute("data-timeline-file")).toBe("scenes/title.html")
     expect(caption().style.left).toBe("50px")
     expect(caption().getAttribute("aria-pressed")).toBe("true")
+    live.destroy()
+  })
+
+  // Guard proof: say only what a clip leaves in tellAnimations (editor.tsx), dropping `joined`;
+  // the caption lands in a title whose script fades every caption in, and nothing says so.
+  test("says once that a chapter's animation now plays on the clip moved into it", () => {
+    const { view, live } = openEditor(TALK, (title) =>
+      title.replace(
+        "  </div>",
+        "  <script>gsap.timeline().from('[data-composition-id=\"title\"] .caption', { opacity: 0 })</script>\n  </div>"
+      )
+    )
+    const caption = view.container.querySelector<HTMLElement>(
+      '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+    )
+    if (!caption) throw new Error("No caption on the timeline.")
+    fireEvent.pointerDown(caption, { button: 0, clientX: 112 + 350, pointerId: 1 })
+    fireEvent.pointerMove(caption, { clientX: 112 + 50, pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(caption, { clientX: 112 + 50, pointerId: 1, shiftKey: true })
+
+    const notice = view
+      .getByText("“Thanks for having me.” now moves with “Title”")
+      .closest("[role=status]")
+    expect(notice?.textContent).toContain("“Title” animates clips like it")
     live.destroy()
   })
 

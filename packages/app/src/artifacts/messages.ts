@@ -936,9 +936,15 @@ export const en = {
     keepsLook: (name: string) => `“${name}” keeps its look`,
     animationStays: (chapter: string) =>
       `Its animation stays with “${chapter}”. Ask the agent to animate it here.`,
+    animationSwaps: (from: string, to: string) =>
+      `Its animation stays with “${from}”, and the one of “${to}” plays on it now.`,
+    /** A clip moved into a chapter whose script animates clips like it. */
+    takesMotion: (name: string, chapter: string) => `“${name}” now moves with “${chapter}”`,
+    motionApplies: (chapter: string) =>
+      `“${chapter}” animates clips like it, so its animation plays on this one too.`,
     keepLooks: (count: number) => `${number(count)} clips keep their look`,
-    animationsStay:
-      "Their animations stay with the chapters they came from. Ask the agent to animate them here.",
+    animationsChange:
+      "Their animations follow the chapters they are in now. Ask the agent to adjust them.",
     dismiss: "Dismiss",
     inPlaceHint: "Enter to keep · Esc to leave as it was",
     broken: "The video’s files don’t read as a video right now",
@@ -1923,9 +1929,14 @@ export const fr: Translation<ArtifactMessages> = {
     keepsLook: (name) => `« ${name} » garde son style`,
     animationStays: (chapter) =>
       `Son animation reste dans « ${chapter} ». Demandez à l’agent de l’animer ici.`,
+    animationSwaps: (from, to) =>
+      `Son animation reste dans « ${from} », et celle de « ${to} » s’y applique désormais.`,
+    takesMotion: (name, chapter) => `« ${name} » s’anime désormais avec « ${chapter} »`,
+    motionApplies: (chapter) =>
+      `« ${chapter} » anime les plans comme lui : son animation s’applique aussi à celui-ci.`,
     keepLooks: (count) => `${numberFr(count)} plans gardent leur style`,
-    animationsStay:
-      "Leurs animations restent dans leurs chapitres d’origine. Demandez à l’agent de les animer ici.",
+    animationsChange:
+      "Leurs animations suivent les chapitres où ils se trouvent. Demandez à l’agent de les ajuster.",
     dismiss: "Fermer",
     inPlaceHint: "Entrée pour garder · Échap pour laisser tel quel",
     broken: "Les fichiers de la vidéo ne se lisent pas comme une vidéo pour l’instant",
