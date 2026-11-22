@@ -111,8 +111,9 @@ export function selectedClips(
 }
 
 /**
- * The open chapter's clips, from its start, and the video's own, such as its soundtrack, along its
- * whole length: what the Transcript tab reads.
+ * The open chapter's clips, from its start, each part of a clip that goes on with the parts it
+ * goes on in, where they play in the other chapters, and the video's own, such as its soundtrack,
+ * along its whole length: what the Transcript tab reads.
  */
 export function laidClips(
   state: LiveVideoState,
@@ -121,10 +122,25 @@ export function laidClips(
 ): LaidClip[] {
   const own = state.timelines.get(VIDEO_ENTRY)
   const scene = open ? state.timelines.get(open.src) : undefined
+  const here =
+    scene && open ? layClips(scene, open.src, open.startMs, open.startMs + open.durationMs) : []
+
+  // A clip that goes on is one clip, its words read across every chapter it plays in.
+  const every = here.length > 0 ? everySceneClips(state, composition) : []
+  const chainOf = new Map(
+    every.flatMap((laid) => (laid.chain ? [[clipKey(laid), laid.chain]] : []))
+  )
+  const mine = here.map((laid) => {
+    const chain = chainOf.get(clipKey(laid))
+    return chain ? { ...laid, chain } : laid
+  })
+  const chains = new Set(mine.flatMap((laid) => (laid.chain ? [laid.chain.key] : [])))
+  const elsewhere = every.filter(
+    (laid) => laid.file !== open?.src && laid.chain !== undefined && chains.has(laid.chain.key)
+  )
   return [
-    ...(scene && open
-      ? layClips(scene, open.src, open.startMs, open.startMs + open.durationMs)
-      : []),
+    ...mine,
+    ...elsewhere,
     ...(own ? layClips(own, VIDEO_ENTRY, 0, composition.durationMs) : []),
   ]
 }
@@ -229,6 +245,8 @@ export interface SpokenRecording {
   readonly src: string
   /** The open scene's file, or `index.html` for the video's own, such as a voice-over. */
   readonly file: string
+  /** The clip that goes on it is, by its key, when it is one: its parts in every chapter. */
+  readonly chain?: string
   readonly clips: readonly LaidClip[]
 }
 
@@ -247,11 +265,13 @@ export function heardRecordings(
     const { kind, src, silent } = laid.clip
     if (!src || silent || (kind !== "video" && kind !== "audio")) continue
 
-    const key = `${laid.file}\n${src}`
+    // A clip that goes on, by its parts in every chapter, read from the open one's file.
+    const key = laid.chain ? `${laid.chain.key}\n${src}` : `${laid.file}\n${src}`
     const found = byRecording.get(key)
     byRecording.set(key, {
       src,
-      file: laid.file,
+      file: found?.file ?? laid.file,
+      ...(laid.chain ? { chain: laid.chain.key } : {}),
       clips: [...(found?.clips ?? []), laid],
     })
   }

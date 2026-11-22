@@ -1161,11 +1161,17 @@ describe("the Transcript tab", () => {
     }
   }
 
-  function tab(sceneId: string, timeMs: number, onSeek: (ms: number) => void = () => {}) {
+  function tab(
+    sceneId: string,
+    timeMs: number,
+    onSeek: (ms: number) => void = () => {},
+    title = TITLE,
+    talk = SPOKEN_TALK
+  ) {
     const files: LiveFiles = new Map([
       ["index.html", { text: SPOKEN_INDEX }],
-      ["scenes/title.html", { text: TITLE }],
-      ["scenes/talk.html", { text: SPOKEN_TALK }],
+      ["scenes/title.html", { text: title }],
+      ["scenes/talk.html", { text: talk }],
     ])
     const state = new LiveVideo(createArtifactDocument("video", files)).getState()
     const shown = state.composition
@@ -1241,6 +1247,42 @@ describe("the Transcript tab", () => {
     }
   })
 
+  // Guard proof: lay the open chapter's clips alone in laidClips (selection.ts), as it did; the
+  // title's transcript then strikes the words the interview plays, as cut, and a click on one goes
+  // nowhere.
+  test("a recording that goes on reads as one, its words played in every chapter it is in", async () => {
+    const restore = serve()
+    try {
+      // The answer from 2 s in the title, on into the interview, where it says "before lunch."
+      const title = TITLE.replace(
+        "<h1>",
+        '<audio id="answer" src="media/answer.m4a" data-start="2" data-duration="1"></audio>\n    <h1>'
+      )
+      const talk = SPOKEN_TALK.replace(
+        '<audio id="answer" src="media/answer.m4a" data-start="0.5" data-duration="6"></audio>',
+        '<audio id="answer-2" src="media/answer.m4a" data-start="0" data-duration="2" data-media-start="1" data-continues="answer"></audio>'
+      )
+      const seeks: number[] = []
+      const view = render(tab("title", 2500, (ms) => seeks.push(ms), title, talk))
+      await waitFor(() => view.getByText("lunch."))
+
+      const struck = (word: string) => view.getByText(word).className.includes("line-through")
+      expect(["We", "fixed", "it", "before", "lunch."].map(struck)).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+      ])
+      // "lunch." is said 1.6 s into the file, 0.6 s into the interview's part.
+      fireEvent.pointerDown(view.getByText("lunch."), { button: 0, pointerId: 1 })
+      fireEvent.pointerUp(view.getByText("lunch."), { button: 0, pointerId: 1 })
+      expect(seeks).toEqual([3600])
+    } finally {
+      restore()
+    }
+  })
+
   test("falls back on the video's own voice-over when the scene has no recording", async () => {
     const restore = serve()
     try {
@@ -1255,7 +1297,11 @@ describe("the Transcript tab", () => {
 
 describe("the editor", () => {
   /** The video as the editor opens it, live, the title's words timed so both chapters have clips. */
-  function openEditor(talk = TALK, title = (text: string) => text) {
+  function openEditor(
+    talk = TALK,
+    title = (text: string) => text,
+    extra: Readonly<Record<string, string>> = {}
+  ) {
     const live = new LiveArtifact("art_video", () => false, {
       list: () => [],
       write: () => {},
@@ -1266,6 +1312,7 @@ describe("the editor", () => {
       text: title(TITLE.replace("<h1>", '<h1 data-start="0" data-duration="3">')),
     })
     files.set("scenes/talk.html", { text: talk })
+    for (const [path, text] of Object.entries(extra)) files.set(path, { text })
     Y.applyUpdate(live.doc, Y.encodeStateAsUpdate(createArtifactDocument("video", files)))
 
     const outline = {
@@ -1422,10 +1469,9 @@ describe("the editor", () => {
     fireEvent.pointerMove(caption, { clientX: 112 + 50, pointerId: 1, shiftKey: true })
     fireEvent.pointerUp(caption, { clientX: 112 + 50, pointerId: 1, shiftKey: true })
 
-    const notice = view
-      .getByText("“Thanks for having me.” now moves with “Title”")
-      .closest("[role=status]")
-    expect(notice?.textContent).toContain("“Title” animates clips like it")
+    expect(
+      view.getByText("“Title” animates its text, so this clip now moves like the rest.")
+    ).toBeDefined()
     live.destroy()
   })
 
@@ -1449,15 +1495,47 @@ describe("the editor", () => {
     }
 
     drag(3500, 500)
-    const notice = view
-      .getByText("“Thanks for having me.” may look a little different here")
-      .closest("[role=status]")
-    expect(notice?.textContent).toContain("Check it in the preview.")
+    expect(view.getByText("This clip may look a little different in “Title”.")).toBeDefined()
     fireEvent.click(view.getByRole("button", { name: "Dismiss" }))
 
     drag(500, 3500)
     drag(3500, 500)
     expect(view.queryByText(/may look a little different/)).toBeNull()
+    live.destroy()
+  })
+
+  // Guard proof: say every rule through what holds a clip in lookDiffers (core looks.ts), as it
+  // did; footage moved between two chapters that are both scenes then says it may look different,
+  // though the linked sheet styles it alike in both.
+  test("says nothing of a look that stays the same where the clip lands", () => {
+    const scened = (text: string, id: string) =>
+      text.replace(
+        `<div data-composition-id="${id}"`,
+        `<div class="scene" data-composition-id="${id}"`
+      )
+    // A linked sheet styles every scene's footage, and both chapters are scenes.
+    const { view, live, text } = openEditor(
+      scened(TALK, "talk"),
+      (title) =>
+        scened(title, "title").replace(
+          "<h1",
+          '<video id="shot" src="media/talk.mp4" data-start="0" data-duration="1" data-media-start="0"></video>\n    <h1'
+        ),
+      {
+        "index.html": `<link rel="stylesheet" href="styles.css">\n${INDEX}`,
+        "styles.css": ".scene video { object-fit: cover; border-radius: 12px; }",
+      }
+    )
+    const shot = view.container.querySelector<HTMLElement>(
+      '[data-video-tracks] [data-timeline-clip][data-timeline-file="scenes/title.html"]'
+    )
+    if (!shot) throw new Error("No footage in the title.")
+    fireEvent.pointerDown(shot, { button: 0, clientX: 112 + 50, pointerId: 1 })
+    fireEvent.pointerMove(shot, { clientX: 112 + 450, pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(shot, { clientX: 112 + 450, pointerId: 1, shiftKey: true })
+
+    expect(text("scenes/talk.html")).toContain('id="shot"')
+    expect(view.queryByText(/look a little different|animation|moves like/)).toBeNull()
     live.destroy()
   })
 
@@ -1481,14 +1559,17 @@ describe("the editor", () => {
     }
 
     drag(3500, 500)
-    const notice = view.getByText("“Thanks for having me.” keeps its look").closest("[role=status]")
-    expect(notice?.textContent).toContain("Its animation stays with “Interview”.")
+    expect(
+      view.getByText(
+        "This clip’s animation stays in “Interview”: ask the agent to animate it here."
+      )
+    ).toBeDefined()
     fireEvent.click(view.getByRole("button", { name: "Dismiss" }))
 
     // Back into the interview, and out again: said already.
     drag(500, 3500)
     drag(3500, 500)
-    expect(view.queryByText(/keeps its look/)).toBeNull()
+    expect(view.queryByText(/animation stays/)).toBeNull()
     live.destroy()
   })
 })
