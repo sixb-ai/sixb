@@ -752,7 +752,7 @@ export function insertClip(
 
     // A picture goes over the pictures before it and under the words; a sound beside the sounds.
     const track = clip.kind === "audio" ? "sound" : "picture"
-    insertInComposition(work, file, timeline, html, insertionPoint(timeline, track)?.source)
+    insertInComposition(work, file, timeline, [html], track)
 
     const found = clipOf(work, file, id)
     placeFound(work, [
@@ -1884,26 +1884,71 @@ function clipHtml(
   }
 }
 
-/** Puts a clip's element after `after`, or first in the composition, on a line of its own. */
+/**
+ * Puts clips' elements in a composition, on lines of their own, as children of the composition
+ * itself: never inside one of its elements, a phone's frame or a lower third, whose look would be
+ * theirs. A clip goes after the last element holding one of its track. When there is none, a
+ * picture goes under the words, before the first element holding any, and words or a sound over
+ * the pictures, after the last element holding one; else they go last, before the composition's
+ * closing styles and scripts.
+ */
 function insertInComposition(
   work: Working,
   file: string,
   timeline: VideoFileTimeline,
-  html: string,
-  after: VideoElementSource | undefined
+  elements: readonly string[],
+  track: VideoTrack
 ): void {
   const text = work.text(file)
-  if (after) {
-    const block = lineBlock(text, after.element)
-    const indent = lineIndent(text, after.element.start)
+  const children = timeline.children
+  const holds = (child: (typeof children)[number], tracks: readonly VideoTrack[]) => {
+    const { start, end } = child.source.element
+    const inside = (span: VideoSourceSpan) => span.start >= start && span.end <= end
+    return (
+      timeline.clips.some((clip) => tracks.includes(clip.track) && inside(clip.source.element)) ||
+      (tracks.includes("text") && timeline.texts.some((each) => inside(each.source.element)))
+    )
+  }
+  const lastHolding = (tracks: readonly VideoTrack[]) =>
+    children.filter((child) => holds(child, tracks)).at(-1)
+
+  const after = lastHolding([track]) ?? (track === "picture" ? undefined : lastHolding(["picture"]))
+  const before =
+    after === undefined
+      ? track === "picture"
+        ? children.find((child) => holds(child, ["text"]))
+        : undefined
+      : undefined
+  // Last, before the styles and scripts that close the composition.
+  let closing = children.length
+  while (closing > 0 && ["style", "script"].includes(children[closing - 1]?.tag ?? "")) closing -= 1
+  const next = before ?? (after ? undefined : children[closing])
+  const previous = after ?? (next ? undefined : children[closing - 1])
+
+  if (previous) {
+    const block = lineBlock(text, previous.source.element)
+    const indent = lineIndent(text, previous.source.element.start)
+    const html = elements.join(`\n${indent}`)
     work.replace(file, block.end, block.end, `${indent}${html}${lineEnd(text, block)}`)
+    return
+  }
+
+  if (next) {
+    const block = lineBlock(text, next.source.element)
+    const indent = lineIndent(text, next.source.element.start)
+    const html = elements.join(`\n${indent}`)
+    if (block.start < next.source.element.start || aloneOnLine(text, next.source.element.start)) {
+      work.replace(file, block.start, block.start, `${indent}${html}\n`)
+    } else {
+      work.replace(file, next.source.element.start, next.source.element.start, `${html} `)
+    }
     return
   }
 
   const content = timeline.composition.content
   if (!content) throw new EditError(`${file}: its composition holds nothing a clip can join.`)
   const indent = `${lineIndent(text, timeline.composition.element.start)}  `
-  work.replace(file, content.start, content.start, `\n${indent}${html}`)
+  work.replace(file, content.start, content.start, `\n${indent}${elements.join(`\n${indent}`)}`)
 }
 
 // Placing clips ----------------------------------------------------------------------------------
@@ -2135,14 +2180,13 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const batch = each.filter((one) => one.track === track)
       if (batch.length === 0) continue
 
-      const timeline = timelineOf(work, file)
-      const text = work.text(file)
-      const after = insertionPoint(timeline, track)
-      const indent = after
-        ? lineIndent(text, after.source.element.start)
-        : `${lineIndent(text, timeline.composition.element.start)}  `
-      const html = batch.map((one) => one.html).join(`\n${indent}`)
-      insertInComposition(work, file, timeline, html, after?.source)
+      insertInComposition(
+        work,
+        file,
+        timelineOf(work, file),
+        batch.map((one) => one.html),
+        track
+      )
     }
     carryLooks(
       work,
@@ -2553,15 +2597,6 @@ function markedClip(text: string, clips: readonly VideoClip[], index: number): V
 function attributeOf(text: string, clip: VideoClip, name: string): string | undefined {
   const at = clip.source.attributes[name]
   return at ? attributeValue(text, at) : undefined
-}
-
-/**
- * The clip a new one of `track` goes after: the last of its track; words and sounds go over the
- * pictures when their track has none, and a picture first in its composition.
- */
-function insertionPoint(timeline: VideoFileTimeline, track: VideoTrack): VideoClip | undefined {
-  const last = (each: VideoTrack) => timeline.clips.filter((clip) => clip.track === each).at(-1)
-  return last(track) ?? (track === "picture" ? undefined : last("picture"))
 }
 
 function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {

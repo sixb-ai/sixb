@@ -244,7 +244,12 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   crossfade shows nothing twice, its `data-media-start` advanced by what the parts before played;
   the last scene grows, in frame steps, to hold the rest. No other scene changes length. A clip
   without a written length moves but is never split. A move keeps the length its scene shows: an
-  overhang never seen stays behind. The video's own clips stay in `index.html`.
+  overhang never seen stays behind. The video's own clips stay in `index.html`. A move that goes
+  nowhere, or a trim to the same length, is no edit.
+- A clip that lands in a file, moved or imported, is a child of its composition itself, never of
+  a wrapper whose look would become its own: after the last element holding a clip of its track,
+  else a picture under the words and words or a sound over the pictures, else last before the
+  closing `<style>` and `<script>`.
 - A clip that leaves its file takes an id no other element of the video has (copies always take
   new ones), its recording's path rebased for the new folder, and its look: the rules naming its
   id or a class, from its scene's `<style>` (all of them, as an export renders the new scene

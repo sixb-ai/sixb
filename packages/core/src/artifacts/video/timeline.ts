@@ -78,6 +78,8 @@ export interface VideoFileTimeline {
   readonly texts: readonly VideoText[]
   /** The composition's own element, which new clips go into. */
   readonly composition: VideoElementSource
+  /** The elements it holds itself, in order, each by its tag: where a new clip may go. */
+  readonly children: readonly { readonly tag: string; readonly source: VideoElementSource }[]
 }
 
 /** The tags whose words an editor may type over, when they hold text alone. */
@@ -258,7 +260,11 @@ function timelineOf(composition: Element): VideoFileTimeline {
     ]
   })
 
-  return { clips, texts, composition: sourceOf(composition) }
+  const children = composition.childNodes
+    .filter((node): node is Element => "tagName" in node)
+    .map((element) => ({ tag: element.tagName, source: sourceOf(element) }))
+
+  return { clips, texts, composition: sourceOf(composition), children }
 }
 
 /** A composition nested in this one, whose clips are its own. */

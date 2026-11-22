@@ -1028,7 +1028,9 @@ describe("placing clips in the video", () => {
     )
     const demoCaption = demoClips(back).find((clip) => clip.text === "in two taps")
     if (!demoCaption) throw new Error("The caption did not come back to the demo.")
-    expect(back.get("scenes/demo.html")).toBe(sources.get("scenes/demo.html"))
+    const styleOf = (text: string | null | undefined) =>
+      /<style>[\s\S]*<\/style>/.exec(text ?? "")?.[0]
+    expect(styleOf(back.get("scenes/demo.html"))).toBe(styleOf(sources.get("scenes/demo.html")))
     const again = applied(
       moveClip(back, "scenes/demo.html", videoTarget(demoCaption), 2500 + 7000),
       back
@@ -1176,6 +1178,64 @@ describe("placing clips in the video", () => {
       ),
     })
     expect(unchanged(trimClip(past, "scenes/demo.html", "screen", "end", 12_000))).toEqual([])
+  })
+
+  // Guard proof: put a clip after the last clip of its track in insertInComposition (edit.ts),
+  // as it did; the footage then lands in the outro's tilted phone, and the caption in its lower
+  // third, styled as theirs.
+  test("a clip lands beside the composition's own elements, never inside one", () => {
+    const sources = with_({
+      "scenes/outro.html": `<template>
+  <div data-composition-id="outro" data-width="1920" data-height="1080">
+    <div class="phone" style="transform: scale(0.4) rotate(-8deg)">
+      <video id="phone" src="media/screen.mp4" data-start="0" data-duration="4" muted></video>
+    </div>
+    <div class="lower-third">
+      <p class="name" data-start="0.5" data-duration="3">Ada</p>
+    </div>
+    <script>window.__timelines = window.__timelines || {}</script>
+  </div>
+</template>
+`,
+    })
+    const files = applied(
+      moveClips(
+        sources,
+        [
+          { file: "scenes/demo.html", clip: "talk" },
+          { file: "scenes/demo.html", clip: caption("in two taps") },
+        ],
+        9000
+      ),
+      sources
+    )
+    expect(files.get("scenes/outro.html")).toBe(`<template>
+  <div data-composition-id="outro" data-width="1920" data-height="1080">
+    <div class="phone" style="transform: scale(0.4) rotate(-8deg)">
+      <video id="phone" src="media/screen.mp4" data-start="0" data-duration="4" muted></video>
+    </div>
+    <video id="talk" src="media/talk.mp4" data-start="1" data-duration="5" data-media-start="2" data-has-audio="true" playsinline></video>
+    <div class="lower-third">
+      <p class="name" data-start="0.5" data-duration="3">Ada</p>
+    </div>
+    <p class="caption" data-start="3.5" data-duration="2">in two taps</p>
+    <script>window.__timelines = window.__timelines || {}</script>
+  </div>
+</template>
+`)
+
+    // An import too, and a picture under the words when the scene shows none yet.
+    const imported = applied(
+      insertClip(SOURCES, "scenes/outro.html", {
+        kind: "image",
+        src: "media/logo.png",
+        startMs: 0,
+        durationMs: 1000,
+      })
+    )
+    expect(imported.get("scenes/outro.html")).toContain(
+      '<img src="media/logo.png" alt="Logo">\n    <img id="logo" src="media/logo.png"'
+    )
   })
 
   // Guard proof: drop the placeFound call from insertClip (edit.ts); the footage then plays on
