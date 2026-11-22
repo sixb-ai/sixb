@@ -179,6 +179,24 @@ describe("reading a composition's clips", () => {
     )
     expect(timeline?.clips.map((clip) => clip.startMs)).toEqual([1000, 3500])
   })
+
+  // Guard proof: classify clips with `wordsOf` again in `clipKind`; the styled caption lands on
+  // the picture track as an element, with no words.
+  test("a caption that styles its words reads on the text track, and is not typed over", () => {
+    const timeline = readSceneTimeline(
+      '<template><div data-composition-id="a">' +
+        '<p class="caption" data-start="0" data-duration="1"><span class="hot">Office</span> parties<br><b>all</b> week</p>' +
+        '<div class="card" data-start="1" data-duration="1"><img src="logo.png"> Bagels</div>' +
+        "</div></template>"
+    )
+
+    expect(timeline?.clips.map((clip) => [clip.kind, clip.track, clip.text])).toEqual([
+      ["text", "text", "Office parties all week"],
+      ["element", "picture", undefined],
+    ])
+    // Only the styled word itself, which holds text alone, is typed over.
+    expect(timeline?.texts.map((text) => text.ref)).toEqual(["span:0"])
+  })
 })
 
 describe("editing scenes", () => {

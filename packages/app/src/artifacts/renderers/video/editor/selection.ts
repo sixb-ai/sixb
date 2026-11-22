@@ -6,6 +6,7 @@ import {
   type VideoFileTimeline,
   type VideoScene,
   type VideoTarget,
+  type VideoText,
 } from "@sixb/core/artifacts/live"
 import type { LiveVideoState } from "../../../live/video"
 import { type LaidClip, layClips } from "./model"
@@ -80,6 +81,17 @@ export function clipName(clip: VideoClip): string {
 /** A scene's name, as its chapter shows it: its label, else its id. */
 export function sceneName(scene: VideoScene): string {
   return scene.label ?? scene.id
+}
+
+/**
+ * The words of a clip an editor may type over: the clip itself, when it holds text alone. A caption
+ * that styles its words has none, since typing over them would drop the styling.
+ */
+export function typedText(
+  timeline: VideoFileTimeline | undefined,
+  clip: VideoClip
+): VideoText | undefined {
+  return timeline?.texts.find((text) => text.source.element.start === clip.source.element.start)
 }
 
 /** The first recording a scene shows, which its thumbnail falls back on. */

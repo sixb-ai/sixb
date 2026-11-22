@@ -105,6 +105,21 @@ const TEXT_TAGS: ReadonlySet<string> = new Set([
 /** Elements that only break a line inside words. */
 const LINE_BREAKS: ReadonlySet<string> = new Set(["br", "wbr"])
 
+/** Elements that only style words inside a line, such as a caption's highlighted word. */
+const INLINE_STYLES: ReadonlySet<string> = new Set([
+  "span",
+  "b",
+  "strong",
+  "i",
+  "em",
+  "u",
+  "s",
+  "mark",
+  "small",
+  "sub",
+  "sup",
+])
+
 /**
  * The clips and texts of a scene file: the timed elements in its `<template>`'s composition,
  * leaving out what a composition it nests holds. Null for a file that is not one.
@@ -198,7 +213,7 @@ function timelineOf(composition: Element): VideoFileTimeline {
     const fadeInMs = readMs(attribute(element, "data-fade-in"))
     const fadeOutMs = readMs(attribute(element, "data-fade-out"))
     const src = attribute(element, "src")?.trim()
-    const text = kind === "text" ? wordsOf(element) : undefined
+    const text = kind === "text" ? styledWordsOf(element) : undefined
 
     const clip: VideoClip = {
       ref: id ?? `#${index}`,
@@ -268,7 +283,7 @@ function clipKind(element: Element): VideoClipKind {
     case "svg":
       return "image"
     default:
-      return wordsOf(element) === undefined ? "element" : "text"
+      return styledWordsOf(element) === undefined ? "element" : "text"
   }
 }
 
@@ -291,6 +306,36 @@ function clipStart(written: string, endOf: (name: string) => number | undefined)
 
 function hasAudio(element: Element): boolean {
   return attribute(element, "data-has-audio")?.trim() === "true"
+}
+
+/**
+ * The words an element reads as, its styled words included, such as a caption that colours one of
+ * them; undefined for one that holds anything else, or nothing to read. It decides the text track;
+ * only `wordsOf` decides what an editor may type over, since typing would drop the styling.
+ */
+function styledWordsOf(element: Element): string | undefined {
+  const collect = (node: Element): string | undefined => {
+    let words = ""
+    for (const child of node.childNodes) {
+      if ("tagName" in child) {
+        if (LINE_BREAKS.has(child.tagName)) {
+          words += " "
+          continue
+        }
+        if (!INLINE_STYLES.has(child.tagName)) return undefined
+
+        const inner = collect(child)
+        if (inner === undefined) return undefined
+        words += inner
+      } else if (child.nodeName === "#text" && "value" in child) {
+        words += child.value
+      }
+    }
+    return words
+  }
+
+  const text = collect(element)?.replace(/\s+/g, " ").trim()
+  return text === undefined || text === "" ? undefined : text
 }
 
 /**

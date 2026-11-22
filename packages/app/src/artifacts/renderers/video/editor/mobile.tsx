@@ -27,7 +27,7 @@ import { formatSeconds, TextField, textKind } from "./inspector"
 import type { MediaTarget } from "./media"
 import { useReorder } from "./reorder"
 import { SceneThumbnail } from "./scenes"
-import { clipName, sceneName } from "./selection"
+import { clipName, sceneName, typedText } from "./selection"
 
 // Editing on a phone: what a thumb does well. The scenes in a list, each dragged by its grip to
 // reorder, made shorter or longer half a second at a time, and opened to type over its titles or
@@ -203,7 +203,7 @@ function SceneDetails({
 }) {
   const messages = useArtifactMessages().videoEditor
   const texts = timeline?.texts ?? []
-  const clips = (timeline?.clips ?? []).filter((clip) => clip.kind !== "text")
+  const clips = (timeline?.clips ?? []).filter((clip) => typedText(timeline, clip) === undefined)
 
   return (
     <div className="flex flex-col gap-4 border-t border-border/70 p-3">

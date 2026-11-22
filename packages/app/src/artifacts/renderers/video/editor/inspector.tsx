@@ -25,7 +25,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import { type MediaTarget, useMediaParts } from "./media"
-import { clipName, sceneName } from "./selection"
+import { clipName, sceneName, typedText } from "./selection"
 import { TRACK_TONE } from "./timeline"
 
 // What the selection is, and its settings: a scene's name, length and words on screen; a clip's
@@ -86,6 +86,7 @@ export function Inspector({
       <ClipInspector
         file={clip.file}
         clip={clip.clip}
+        typed={typedText(timelines.get(clip.file), clip.clip) !== undefined}
         splittable={splittable}
         target={target}
         actions={actions}
@@ -194,12 +195,15 @@ function SceneInspector({
 function ClipInspector({
   file,
   clip,
+  typed,
   splittable,
   target,
   actions,
 }: {
   readonly file: string
   readonly clip: VideoClip
+  /** Whether its words can be typed over: it holds text alone. */
+  readonly typed: boolean
   readonly splittable: boolean
   readonly target: MediaTarget
   readonly actions: InspectorActions
@@ -298,7 +302,7 @@ function ClipInspector({
         </Section>
       ) : null}
 
-      {clip.kind === "text" && clip.text !== undefined ? (
+      {typed && clip.text !== undefined ? (
         <Section title={messages.text}>
           <TextField
             label={messages.text}
