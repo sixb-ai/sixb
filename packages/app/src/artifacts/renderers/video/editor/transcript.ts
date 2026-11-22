@@ -188,6 +188,21 @@ export function fillers(
   })
 }
 
+/**
+ * The stretches of a file the video plays on without a skip, as one: a recording that goes on
+ * across chapters plays its file on from one part to the next, which a cut or a cleanup reads as
+ * one stretch, a pause across the edge whole.
+ */
+export function keptSpans(ranges: readonly VideoRange[]): VideoRange[] {
+  const spans: { startMs: number; endMs: number }[] = []
+  for (const range of [...ranges].sort((a, b) => a.startMs - b.startMs)) {
+    const last = spans.at(-1)
+    if (last && range.startMs <= last.endMs + 1) last.endMs = Math.max(last.endMs, range.endMs)
+    else spans.push({ startMs: range.startMs, endMs: range.endMs })
+  }
+  return spans
+}
+
 /** How long the ranges last together, once joined where they overlap. */
 export function rangesLength(ranges: readonly VideoRange[]): number {
   const sorted = [...ranges].sort((a, b) => a.startMs - b.startMs)
