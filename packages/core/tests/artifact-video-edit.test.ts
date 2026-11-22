@@ -985,21 +985,34 @@ describe("placing clips in the video", () => {
     expect(files.get("scenes/demo.html")).toContain('id="after" class="caption" data-start="6"')
   })
 
-  // Guard proof: drop carryLooks from placeFound (edit.ts); the outro then holds no rule for
-  // the caption, which loses its colour there and its place in the export.
-  test("a clip that leaves takes its scene's rules along, rewritten for where it lands, once", () => {
-    const style = `<style>
+  // Guard proof: write each rule as the demo scoped it, rescoped to the outro, in writtenLook
+  // (looks.ts), as carryLooks did; the outro's own caption then turns yellow, and its `rise`
+  // gives way to the demo's. Name the keyframes as they were, `chosen = name`, and the outro's
+  // slide fades instead. Leave a carried look where its clip left (no removeCarriedLook in
+  // placeFound, edit.ts), and the outro keeps one for a caption it no longer holds.
+  test("a clip takes its look along to reach it alone, and the scene it lands in keeps its own", () => {
+    const demoStyle = `<style>
       @keyframes rise { from { opacity: 0 } to { opacity: 1 } }
       @keyframes spin { to { rotate: 1turn } }
       [data-composition-id="demo"] .caption { color: #ffd166; animation: rise 0.4s; }
       [data-composition-id="hook"] .caption { color: red; }
       .caption,
       .callout { font-weight: 700; }
-      .screen-frame video { border-radius: 24px; }
+      .caption:first-child { margin: 0; }
+      .frame .caption { border-radius: 24px; }
+      .caption.big { font-size: 80px; }
     </style>
     <script>`
+    const outroStyle = `<style>
+      @keyframes rise { from { transform: translateY(40px) } to { transform: none } }
+      [data-composition-id="outro"] .caption { color: white; animation: rise 1s; }
+    </style>`
     const sources = with_({
-      "scenes/demo.html": DEMO.replace("<script>", style),
+      "scenes/demo.html": DEMO.replace("<script>", demoStyle),
+      "scenes/outro.html": OUTRO.replace(
+        "<h2>Try it today</h2>",
+        `<p class="caption" data-start="0" data-duration="2">Try it today</p>\n    ${outroStyle}`
+      ),
       "styles.css":
         'h1 { font-size: 140px }\n[data-composition-id="demo"] .caption {\n  letter-spacing: -0.01em;\n}\n',
     })
@@ -1008,37 +1021,47 @@ describe("placing clips in the video", () => {
       sources
     )
     const outro = there.get("scenes/outro.html") ?? ""
-    expect(outro).toContain(`  <style>
-      [data-composition-id="outro"] .caption { color: #ffd166; animation: rise 0.4s; }
-      @keyframes rise { from { opacity: 0 } to { opacity: 1 } }
-      .caption { font-weight: 700; }
-      [data-composition-id="outro"] .caption { letter-spacing: -0.01em; }
+    expect(outro).toBe(`<template>
+  <div data-composition-id="outro" data-width="1920" data-height="1080">
+    <img src="media/logo.png" alt="Logo">
+    <p class="caption" data-start="0" data-duration="2">Try it today</p>
+    <p class="caption" data-start="1.5" data-duration="2" id="text">in two taps</p>
+    ${outroStyle}
+    <style data-carried="text" data-from="demo">
+      [data-composition-id="outro"] #text { color: #ffd166; animation: rise-2 0.4s; }
+      [data-composition-id="outro"] #text { font-weight: 700; }
+      [data-composition-id="outro"] #text { letter-spacing: -0.01em; }
+      @keyframes rise-2 { from { opacity: 0 } to { opacity: 1 } }
     </style>
-  </div>`)
-    expect(outro).not.toContain("red")
-    expect(outro).not.toContain(".callout")
-    expect(outro).not.toContain("spin")
+  </div>
+</template>
+`)
 
-    // Back and there again: nothing is written twice.
+    // Home again, it leaves its look behind it, and the demo's own rules style it as before.
     const outroCaption = outroClips(there).find((clip) => clip.text === "in two taps")
     if (!outroCaption) throw new Error("The caption did not land in the outro.")
     const back = applied(
       moveClip(there, "scenes/outro.html", videoTarget(outroCaption), 5000 - 10_500),
       there
     )
-    const demoCaption = demoClips(back).find((clip) => clip.text === "in two taps")
-    if (!demoCaption) throw new Error("The caption did not come back to the demo.")
+    expect(back.get("scenes/outro.html")).toBe(sources.get("scenes/outro.html"))
     const styleOf = (text: string | null | undefined) =>
       /<style>[\s\S]*<\/style>/.exec(text ?? "")?.[0]
     expect(styleOf(back.get("scenes/demo.html"))).toBe(styleOf(sources.get("scenes/demo.html")))
-    const again = applied(
-      moveClip(back, "scenes/demo.html", videoTarget(demoCaption), 2500 + 7000),
-      back
-    )
+    expect(back.get("scenes/demo.html")).not.toContain("data-carried")
+
+    // And there again: the same look, once.
+    const again = applied(moveClip(back, "scenes/demo.html", "text", 2500 + 7000), back)
     expect(again.get("scenes/outro.html")).toBe(outro)
+
+    // On to the hook: the look it carried goes with it, scoped anew, and leaves the outro.
+    const onward = applied(moveClip(again, "scenes/outro.html", "text", 1000 - 10_500), again)
+    expect(onward.get("scenes/outro.html")).toBe(sources.get("scenes/outro.html"))
+    expect(onward.get("scenes/hook.html")).toContain(`<style data-carried="text" data-from="demo">
+      [data-composition-id="hook"] #text { color: #ffd166; animation: rise-2 0.4s; }`)
   })
 
-  // Guard proof: return false from animates (edit.ts); the talk then leaves the demo, whose
+  // Guard proof: return false from scriptNames (looks.ts); the talk then leaves the demo, whose
   // script still looks for #talk, and nothing says so.
   test("says which clip left a scene whose script animates it", () => {
     const talk = moveClip(SOURCES, "scenes/demo.html", "talk", -2500)
@@ -1075,6 +1098,43 @@ describe("placing clips in the video", () => {
       -1500
     )
     expect(left(moved).map((each) => each.scene)).toEqual(["demo"])
+  })
+
+  // Guard proof: return false from scriptReaches (looks.ts); the caption and the footage land in
+  // an outro whose script animates captions and footage, and nothing says so.
+  test("says which clip landed in a scene whose script animates what it is", () => {
+    const sources = with_({
+      "scenes/outro.html": OUTRO.replace(
+        "</div>",
+        `<script>
+      const scene = '[data-composition-id="outro"]'
+      gsap.timeline().from(\`\${scene} .caption\`, { opacity: 0 }).from(\`\${scene} video\`, { scale: 1.1 })
+    </script>
+  </div>`
+      ),
+    })
+    const result = moveClips(
+      sources,
+      [
+        { file: "scenes/demo.html", clip: caption("in two taps") },
+        { file: "scenes/demo.html", clip: "screen" },
+      ],
+      7000
+    )
+    expect("edit" in result ? result.animationsJoined : []).toEqual([
+      {
+        clip: { file: "scenes/outro.html", clip: { ref: "#1", tag: "p", words: "in two taps" } },
+        scene: "outro",
+      },
+      { clip: { file: "scenes/outro.html", clip: "screen" }, scene: "outro" },
+    ])
+    // A script that names neither, or only by words, reaches neither.
+    const quiet = moveClips(
+      SOURCES,
+      [{ file: "scenes/demo.html", clip: caption("in two taps") }],
+      7000
+    )
+    expect("edit" in quiet ? quiet.animationsJoined : undefined).toEqual([])
   })
 
   // Guard proof: give the video's own clips a scene in placeFound (edit.ts), the first; the music

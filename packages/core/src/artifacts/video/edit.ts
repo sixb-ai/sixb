@@ -10,6 +10,19 @@ import {
   videoFilePath,
 } from "./composition"
 import {
+  type CssBlock,
+  cssBlocks,
+  keyframesOf,
+  type Look,
+  type LookElement,
+  type LookSheet,
+  lookOf,
+  type SceneKeyframes,
+  scriptNames,
+  scriptReaches,
+  writtenLook,
+} from "./looks"
+import {
   readRootLayers,
   readRootTimeline,
   readSceneTimeline,
@@ -486,15 +499,28 @@ export interface VideoAnimationLeft {
 }
 
 /**
+ * A clip that landed in a scene whose script animates what it is, a class of it or its tag: that
+ * motion now plays on it too.
+ */
+export interface VideoAnimationJoined {
+  /** Where the clip is now. */
+  readonly clip: VideoClipTarget
+  /** The scene it landed in, whose script reaches it. */
+  readonly scene: string
+}
+
+/**
  * An edit that places clips in the video, as a move, an end trim or an import does: a clip of a
  * scene lives in the scene that plays where it starts, its own while that holds it, else the one
  * on top there, and goes on past that scene's end as a copy in the next, playing on from where it
  * stopped; the last scene grows to hold it. `clips` names each clip placed where it now starts, in
- * the order given, and `animationsLeft` each that left a scene whose script animates it.
+ * the order given, `animationsLeft` each that left a scene whose script animates it, and
+ * `animationsJoined` each that landed in one whose script animates what it is.
  */
 export type VideoPlaceResult = VideoEditResult & {
   readonly clips?: readonly VideoClipTarget[]
   readonly animationsLeft?: readonly VideoAnimationLeft[]
+  readonly animationsJoined?: readonly VideoAnimationJoined[]
 }
 
 /**
@@ -1957,6 +1983,7 @@ function insertInComposition(
 interface Placement {
   readonly clips: readonly VideoClipTarget[]
   readonly animationsLeft: readonly VideoAnimationLeft[]
+  readonly animationsJoined?: readonly VideoAnimationJoined[]
 }
 
 /** A clip found in its file, and where in the video it is to play. */
@@ -2009,6 +2036,7 @@ function moveFound(
     return {
       clips: found.map(({ file, clip }) => ({ file, clip: videoTarget(clip) })),
       animationsLeft: [],
+      animationsJoined: [],
     }
   }
 
@@ -2097,11 +2125,12 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
   const taken = new Set(counts.keys())
   const carried: Carried[] = []
   const left: { readonly index: number; readonly scene: string }[] = []
+  const joined: { readonly index: number; readonly scene: string }[] = []
+  const leaving: string[] = []
 
   for (const [file, each] of byFile(plans)) {
     const text = work.text(file)
     const clips = timelineOf(work, file).clips
-    const looks = file === VIDEO_ENTRY ? [] : sheetsOf(work, file)
     const scripts = file === VIDEO_ENTRY ? "" : scriptsOf(text)
     const plan = new Map<string, ClipChange>()
 
@@ -2119,8 +2148,15 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       }
 
       const element = text.slice(clip.source.element.start, clip.source.element.end)
-      const classes = (attributeOf(text, clip, "class") ?? "").split(/\s+/).filter(Boolean)
+      const facts = lookElement(element, was.id)
       const stays = parts[0]?.scene.id === own.id
+      // How it looks where it is, for each part that lands elsewhere: its scene is its home,
+      // unless it came with a look carried from another.
+      const styled = parts.some((part) => part.scene.id !== own.id)
+        ? lookSheets(work, file, was.id)
+        : undefined
+      const look = styled ? lookOf(facts, own.id, styled.sheets) : undefined
+      const home = styled?.home ?? own.id
 
       parts.forEach((part, n) => {
         if (n === 0 && stays) {
@@ -2135,10 +2171,12 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           return
         }
 
-        // The clip itself keeps its id unless another element has it; a copy takes a new one.
+        // The clip itself keeps its id unless another element has it, and takes one for a look
+        // to reach it by; a copy takes a new one.
         const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
+        const styles = (look?.rules.length ?? 0) > 0 && part.scene.id !== home
         const id =
-          n === 0 && !was.id
+          n === 0 && !was.id && !styles
             ? undefined
             : n === 0 && was.id && (counts.get(was.id) ?? 0) <= 1
               ? was.id
@@ -2162,16 +2200,22 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           scene: part.scene.id,
           track: was.track,
           html,
-          look: { from: own.id, sheets: looks, id: was.id, renamed: id, classes },
+          index,
+          element: { ...facts, ...(id ? { id } : {}) },
+          ...(look && id && styles ? { look, id, home } : {}),
         })
       })
 
       if (!stays) {
         plan.set(clip.ref, "remove")
-        if (animates(scripts, was.id, classes)) left.push({ index, scene: own.id })
+        if (was.id) leaving.push(was.id)
+        if (scriptNames(scripts, facts)) left.push({ index, scene: own.id })
       }
     }
     rewriteClips(work, file, plan)
+
+    // The look a clip carried here goes with it.
+    for (const id of leaving.splice(0)) removeCarriedLook(work, file, id)
   }
 
   // What lands in a file goes after the last clip of its track there, in the order placed.
@@ -2188,12 +2232,19 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         track
       )
     }
-    carryLooks(
-      work,
-      file,
-      each[0]?.scene ?? "",
-      each.map((one) => one.look)
-    )
+
+    // Each look that came with a clip, in a style of its own that reaches that clip alone, and
+    // each animation of this scene that reaches what landed.
+    const scripts = scriptsOf(work.text(file))
+    for (const one of each) {
+      if (one.look && one.id && one.home) {
+        const rules = writtenLook(one.look, one.scene, one.id, sceneKeyframes(work, file))
+        if (rules.length > 0) writeCarriedLook(work, file, one.id, one.home, rules)
+      }
+      if (scriptReaches(scripts, one.element) && !joined.some((each) => each.index === one.index)) {
+        joined.push({ index: one.index, scene: one.scene })
+      }
+    }
   }
 
   // The last scene grows to hold what lands past its end.
@@ -2239,6 +2290,10 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       return at ? [at] : []
     }),
     animationsLeft: left.flatMap(({ index, scene }) => {
+      const clip = found.get(index)
+      return clip ? [{ clip, scene }] : []
+    }),
+    animationsJoined: joined.flatMap(({ index, scene }) => {
       const clip = found.get(index)
       return clip ? [{ clip, scene }] : []
     }),
@@ -2293,170 +2348,155 @@ function partsOf(
   return [longest]
 }
 
-/** A clip's element written for another file, and the look it takes along. */
+/** A clip's element written for another file, the look it takes along, and what it is. */
 interface Carried {
   readonly file: string
   readonly scene: string
   readonly track: VideoTrack
   readonly html: string
-  readonly look: Look
+  /** The clip it is a part of, by its place among those placed. */
+  readonly index: number
+  readonly element: LookElement
+  /** Its look, the id it reaches it by, and the scene it is from, when it lands elsewhere. */
+  readonly look?: Look
+  readonly id?: string
+  readonly home?: string
 }
 
-/** What styles a clip in the scene it leaves, by its id and its classes. */
-interface Look {
-  /** The scene it leaves, and the styles that reach it there. */
-  readonly from: string
-  readonly sheets: readonly Sheet[]
-  readonly id: string | undefined
-  /** Its id where it lands, when it takes another. */
-  readonly renamed: string | undefined
-  readonly classes: readonly string[]
+/** An element as a selector reads it, from its HTML, by the id it has where it is. */
+function lookElement(html: string, id: string | undefined): LookElement {
+  const source = readElement(html)
+  const attributes = new Map<string, string>()
+  for (const [name, at] of Object.entries(source.attributes)) {
+    attributes.set(name, attributeValue(html, at) ?? "")
+  }
+  return {
+    tag: (/^<([a-zA-Z][\w-]*)/.exec(html)?.[1] ?? "").toLowerCase(),
+    ...(id ? { id } : {}),
+    classes: (attributes.get("class") ?? "").split(/\s+/).filter(Boolean),
+    attributes,
+  }
 }
 
-/**
- * A stylesheet whose rules reach a scene: its file's own `<style>`, every rule of which reaches the
- * scene's segment of an export, and the sheets `index.html` links, whose rules scoped to the scene
- * alone are its own.
- */
-interface Sheet {
-  readonly blocks: readonly CssBlock[]
-  readonly scopedOnly: boolean
+/** A file's `<style>` elements: each one's CSS, and the clip whose look it carries, if it does. */
+function stylesIn(
+  text: string
+): { readonly css: string; readonly carried?: string; readonly from?: string }[] {
+  return [...text.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)].map((match) => {
+    const attributes = match[1] ?? ""
+    const carried = /\sdata-carried\s*=\s*"([^"]*)"/.exec(attributes)?.[1]
+    const from = /\sdata-from\s*=\s*"([^"]*)"/.exec(attributes)?.[1]
+    return { css: match[2] ?? "", ...(carried ? { carried } : {}), ...(from ? { from } : {}) }
+  })
 }
 
-/** A rule or an at-rule of a stylesheet: what comes before its braces, and what they hold. */
-interface CssBlock {
-  readonly prelude: string
-  readonly body: string
-}
-
-/** The stylesheets whose rules may style a clip of a scene's file. */
-function sheetsOf(work: Working, file: string): Sheet[] {
-  const own = [...work.text(file).matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => ({
-    blocks: cssBlocks(match[1] ?? ""),
-    scopedOnly: false,
-  }))
-
+/** The stylesheets `index.html` links, each as its blocks. */
+function linkedBlocks(work: Working): CssBlock[][] {
   const exists = (path: string) => work.has(path)
-  const linked = rootOf(work).links.stylesheets.flatMap((link) => {
+  return rootOf(work).links.stylesheets.flatMap((link) => {
     const path = videoFilePath(VIDEO_ENTRY, link.value, exists)
     const css = path === undefined ? undefined : work.textOf(path)
-    return css === undefined ? [] : [{ blocks: cssBlocks(css), scopedOnly: true }]
+    return css === undefined ? [] : [cssBlocks(css)]
   })
-  return [...own, ...linked]
-}
-
-/** What a file's inline scripts say, as one text. */
-function scriptsOf(text: string): string {
-  return [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
-    .map((match) => match[1] ?? "")
-    .join("\n")
-}
-
-/** Whether a scene's script names a clip, by its id or one of its classes, as a selector does. */
-function animates(scripts: string, id: string | undefined, classes: readonly string[]): boolean {
-  if (scripts.trim() === "") return false
-  // A class is named where a selector writes it, never as a property, such as `demo.from(…)`.
-  const named = (token: string) =>
-    new RegExp(`(?<![\\w$)\\]])${escapeRegExp(token)}(?![\\w-])`).test(scripts)
-  const byId =
-    id !== undefined &&
-    (named(`#${id}`) ||
-      new RegExp(`getElementById\\(\\s*["'\`]${escapeRegExp(id)}["'\`]`).test(scripts))
-  return byId || classes.some((name) => named(`.${name}`))
 }
 
 /**
- * Copies into a scene's file the rules that styled each clip landing there in the scene it left:
- * those naming its id or one of its classes, each selector rewritten from that scene to this one
- * and to the id it took, and the keyframes they animate by. A selector whose rule already reaches
- * this scene, from its own `<style>` or a sheet `index.html` links, as after a clip goes and comes
- * back, is not written again.
+ * The sheets that give a clip of a scene's file its look, and the scene it is from when it came
+ * with a look of its own: then that look, and the rules naming it by its id; else every rule of
+ * its scene's that styles it.
  */
-function carryLooks(work: Working, file: string, scene: string, looks: readonly Look[]): void {
-  const reaching = new Set(sheetsOf(work, file).flatMap((sheet) => ruleKeys(sheet.blocks)))
-  const rules: string[] = []
-  const add = (prelude: string, body: string, selectors?: readonly string[]) => {
-    const fresh = (selectors ?? [prelude]).filter(
-      (each) => !reaching.has(cssKey(`${each}{${body}}`))
-    )
-    if (fresh.length === 0) return
-    for (const each of fresh) reaching.add(cssKey(`${each}{${body}}`))
-    rules.push(cssRule(selectors ? fresh.join(", ") : prelude, body))
+function lookSheets(
+  work: Working,
+  file: string,
+  id: string | undefined
+): { readonly sheets: LookSheet[]; readonly home?: string } {
+  const styles = stylesIn(work.text(file))
+  const own = id ? styles.find((style) => style.carried === id) : undefined
+  const byId = own !== undefined
+  const sheets: LookSheet[] = [
+    ...(own ? [{ blocks: cssBlocks(own.css), scopedOnly: false }] : []),
+    ...styles
+      .filter((style) => style.carried === undefined)
+      .map((style) => ({ blocks: cssBlocks(style.css), scopedOnly: false, byId })),
+    ...linkedBlocks(work).map((blocks) => ({ blocks, scopedOnly: true, byId })),
+  ]
+  return { sheets, ...(own?.from ? { home: own.from } : {}) }
+}
+
+/** The keyframes a scene's file reads by name: its own, its linked sheets', and its looks'. */
+function sceneKeyframes(work: Working, file: string): SceneKeyframes {
+  const own = new Map<string, string>()
+  const carried = new Map<string, string[]>()
+  const styles = stylesIn(work.text(file))
+  for (const blocks of [
+    ...styles.filter((style) => !style.carried).map((style) => cssBlocks(style.css)),
+    ...linkedBlocks(work),
+  ]) {
+    for (const [name, body] of keyframesOf(blocks)) if (!own.has(name)) own.set(name, body)
   }
-
-  for (const look of looks) {
-    for (const sheet of look.sheets) {
-      const keyframes = new Map(
-        sheet.blocks.flatMap((block) => {
-          const name = /^@(?:-webkit-)?keyframes\s+([\w-]+)/i.exec(block.prelude)?.[1]
-          return name ? [[name, block] as const] : []
-        })
-      )
-
-      for (const block of sheet.blocks) {
-        if (block.prelude.startsWith("@")) continue
-        const selectors = selectorsOf(block.prelude).filter(
-          (selector) => namesLook(selector, look) && scopedFor(selector, look.from, sheet)
-        )
-        if (selectors.length === 0) continue
-
-        const restyledSelectors = selectors.map((each) => restyled(each, look, scene))
-        add(restyledSelectors.join(", "), block.body, restyledSelectors)
-        for (const [name, frames] of keyframes) {
-          const animation = new RegExp(`animation(?:-name)?\\s*:[^;}]*\\b${escapeRegExp(name)}\\b`)
-          if (animation.test(block.body)) add(frames.prelude, frames.body)
-        }
-      }
+  for (const style of styles.filter((each) => each.carried)) {
+    for (const [name, body] of keyframesOf(cssBlocks(style.css))) {
+      carried.set(name, [...(carried.get(name) ?? []), body])
     }
   }
-  if (rules.length > 0) writeRules(work, file, rules)
+  return { own, carried }
 }
 
-/** Each selector's rule of a stylesheet, and each at-rule, as {@link cssKey} reads them. */
-function ruleKeys(blocks: readonly CssBlock[]): string[] {
-  return blocks.flatMap((block) =>
-    block.prelude.startsWith("@")
-      ? [cssKey(`${block.prelude}{${block.body}}`)]
-      : selectorsOf(block.prelude).map((selector) => cssKey(`${selector}{${block.body}}`))
-  )
-}
-
-/** Rules added to a scene's file: in its first `<style>`, or one of its own before its script. */
-function writeRules(work: Working, file: string, rules: readonly string[]): void {
+/** The `<style>` holding the look carried for the element `id` in a file, if there is one. */
+function carriedStyle(work: Working, file: string, id: string): VideoSourceSpan | undefined {
   const text = work.text(file)
-  const composition = timelineOf(work, file).composition
-  const inner = `${lineIndent(text, composition.element.start)}  `
-
-  const style = /<style\b[^>]*>([\s\S]*?)<\/style>/i.exec(
-    text.slice(composition.element.start, composition.element.end)
-  )
-  if (style) {
-    const close = composition.element.start + style.index + style[0].lastIndexOf("</style>")
-    const closeIndent = lineIndent(text, close)
-    const first = /\n([ \t]*)\S/.exec(style[1] ?? "")?.[1] ?? `${closeIndent}  `
-    const lines = rules.map((rule) => `${first}${rule.replace(/\n/g, `\n${first}`)}`).join("\n")
-    if (aloneOnLine(text, close)) {
-      const lineStart = text.lastIndexOf("\n", close - 1) + 1
-      work.replace(file, lineStart, lineStart, `${lines}\n`)
-    } else {
-      work.replace(file, close, close, `\n${lines}\n${closeIndent}`)
-    }
-    return
+  for (const match of text.matchAll(/<style\b([^>]*)>[\s\S]*?<\/style>/gi)) {
+    if (/\sdata-carried\s*=\s*"([^"]*)"/.exec(match[1] ?? "")?.[1] !== id) continue
+    return { start: match.index, end: match.index + match[0].length }
   }
+  return undefined
+}
 
-  const content = composition.content
-  if (!content) throw new EditError(`${file}: its composition holds nothing a style can join.`)
-  const body = rules.map((rule) => `${inner}  ${rule.replace(/\n/g, `\n${inner}  `)}`).join("\n")
-  const block = `${inner}<style>\n${body}\n${inner}</style>\n`
+function removeCarriedLook(work: Working, file: string, id: string): void {
+  const style = carriedStyle(work, file, id)
+  if (style) work.replace(file, ...spanOf(lineBlock(work.text(file), style)), "")
+}
 
-  // Before its script, as the Agent writes a scene, else last in it.
-  const script = /<script\b/i.exec(text.slice(content.start, content.end))
-  const at = script ? content.start + script.index : content.end
-  if (aloneOnLine(text, at)) {
-    const lineStart = text.lastIndexOf("\n", at - 1) + 1
-    work.replace(file, lineStart, lineStart, block)
+/**
+ * Writes the look carried for the element `id` from the scene `home` in a style of its own,
+ * `<style data-carried="<id>" data-from="<home>">`, a child of the composition before the scripts
+ * that close it, which a later move finds and takes along.
+ */
+function writeCarriedLook(
+  work: Working,
+  file: string,
+  id: string,
+  home: string,
+  rules: readonly string[]
+): void {
+  removeCarriedLook(work, file, id)
+
+  const text = work.text(file)
+  const timeline = timelineOf(work, file)
+  const children = timeline.children
+  let closing = children.length
+  while (closing > 0 && children[closing - 1]?.tag === "script") closing -= 1
+  const next = children[closing]
+  const previous = children[closing - 1]
+  const indent = next
+    ? lineIndent(text, next.source.element.start)
+    : previous
+      ? lineIndent(text, previous.source.element.start)
+      : `${lineIndent(text, timeline.composition.element.start)}  `
+
+  const body = rules.map((rule) => `${indent}  ${rule.replace(/\n/g, `\n${indent}  `)}`).join("\n")
+  const style = `<style data-carried="${escapeAttribute(id)}" data-from="${escapeAttribute(home)}">\n${body}\n${indent}</style>`
+
+  if (next && aloneOnLine(text, next.source.element.start)) {
+    const lineStart = text.lastIndexOf("\n", next.source.element.start - 1) + 1
+    work.replace(file, lineStart, lineStart, `${indent}${style}\n`)
+  } else if (previous) {
+    const block = lineBlock(text, previous.source.element)
+    work.replace(file, block.end, block.end, `${indent}${style}${lineEnd(text, block)}`)
   } else {
-    work.replace(file, at, at, `\n${block}${inner.slice(2)}`)
+    const content = timeline.composition.content
+    if (!content) throw new EditError(`${file}: its composition holds nothing a style can join.`)
+    work.replace(file, content.start, content.start, `\n${indent}${style}`)
   }
 }
 
@@ -2465,112 +2505,15 @@ function aloneOnLine(text: string, at: number): boolean {
   return text.slice(text.lastIndexOf("\n", at - 1) + 1, at).trim() === ""
 }
 
-/**
- * The top-level rules and at-rules of a stylesheet, comments aside: `@media` and its kind are
- * blocks of their own, which no rule of theirs is taken from.
- */
-function cssBlocks(css: string): CssBlock[] {
-  const text = css.replace(/\/\*[\s\S]*?\*\//g, "")
-  const blocks: CssBlock[] = []
-  let at = 0
-  while (at < text.length) {
-    const open = text.indexOf("{", at)
-    if (open < 0) break
-
-    // What a statement before it ends, as `@import …;`, is not its prelude.
-    const prelude = (text.slice(at, open).split(";").at(-1) ?? "").trim()
-    let depth = 0
-    let quote = ""
-    let close = open
-    for (; close < text.length; close += 1) {
-      const char = text[close]
-      if (quote) {
-        if (char === "\\") close += 1
-        else if (char === quote) quote = ""
-      } else if (char === '"' || char === "'") quote = char
-      else if (char === "{") depth += 1
-      else if (char === "}" && --depth === 0) break
-    }
-    blocks.push({ prelude, body: text.slice(open + 1, close) })
-    at = close + 1
-  }
-  return blocks
+/** A file's inline scripts, as one text. */
+function scriptsOf(text: string): string {
+  return [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((match) => match[1] ?? "")
+    .join("\n")
 }
 
-/** A selector list's selectors, split at its commas outside brackets, parentheses and quotes. */
-function selectorsOf(prelude: string): string[] {
-  const selectors: string[] = []
-  let depth = 0
-  let quote = ""
-  let start = 0
-  for (let at = 0; at < prelude.length; at += 1) {
-    const char = prelude[at]
-    if (quote) {
-      if (char === quote) quote = ""
-    } else if (char === '"' || char === "'") quote = char
-    else if (char === "(" || char === "[") depth += 1
-    else if (char === ")" || char === "]") depth -= 1
-    else if (char === "," && depth === 0) {
-      selectors.push(prelude.slice(start, at).trim())
-      start = at + 1
-    }
-  }
-  selectors.push(prelude.slice(start).trim())
-  return selectors.filter(Boolean)
-}
-
-/** Each composition a selector names by `[data-composition-id=…]`. */
-const SCOPE = /\[\s*data-composition-id\s*=\s*(["']?)([^"'\]\s]+)\1\s*\]/g
-
-/** Whether a selector names a clip's id or one of its classes. */
-function namesLook(selector: string, look: Look): boolean {
-  const names = (token: string) => new RegExp(`${escapeRegExp(token)}(?![\\w-])`).test(selector)
-  return (
-    (look.id !== undefined && names(`#${look.id}`)) ||
-    look.classes.some((name) => names(`.${name}`))
-  )
-}
-
-/**
- * Whether a selector styles a clip of `scene` alone: scoped to it, or, in the scene's own file,
- * to no composition.
- */
-function scopedFor(selector: string, scene: string, sheet: Sheet): boolean {
-  const scopes = [...selector.matchAll(SCOPE)].map((match) => match[2])
-  if (scopes.length === 0) return !sheet.scopedOnly
-  return scopes.every((each) => each === scene)
-}
-
-/** A selector of the scene a clip leaves, for the scene it lands in and the id it took there. */
-function restyled(selector: string, look: Look, scene: string): string {
-  const scoped = selector.replace(SCOPE, (whole, _quote, name) =>
-    name === look.from ? `[data-composition-id="${scene}"]` : whole
-  )
-  if (!look.id || !look.renamed || look.renamed === look.id) return scoped
-  return scoped.replace(
-    new RegExp(`${escapeRegExp(`#${look.id}`)}(?![\\w-])`, "g"),
-    `#${look.renamed}`
-  )
-}
-
-/** A rule as a scene's file writes it: on one line when its body is, else one line each. */
-function cssRule(prelude: string, body: string): string {
-  const lines = body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (lines.length <= 1) return `${prelude} { ${lines[0] ?? ""} }`
-  return [`${prelude} {`, ...lines.map((line) => `  ${line}`), "}"].join("\n")
-}
-
-/** A rule's text, its spaces aside, to tell whether a file has it already. */
-function cssKey(css: string): string {
-  return css
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\s+/g, " ")
-    .replace(/\s*([{};:,>])\s*/g, "$1")
-    .replace(/;}/g, "}")
-    .trim()
+function spanOf(span: VideoSourceSpan): [number, number] {
+  return [span.start, span.end]
 }
 
 /** A file's path as a scene's file writes it, rebased for another; undefined when unchanged. */
@@ -2603,10 +2546,6 @@ function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, 
   const groups = new Map<string, T[]>()
   for (const item of items) groups.set(key(item), [...(groups.get(key(item)) ?? []), item])
   return groups
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 // Text, inside ------------------------------------------------------------------------------------

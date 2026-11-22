@@ -251,6 +251,24 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   else a picture under the words and words or a sound over the pictures, else last before the
   closing `<style>` and `<script>`.
 - A clip that leaves its file takes an id no other element of the video has (copies always take
+  new ones), and its recording's path rebased for the new folder. What followed it there keeps its
+  time. A clip that holds others, or a file two scenes play, stays put: the edit is refused whole.
+- **Its look** (`looks.ts`) goes with it, to reach it alone: every rule of its scene's `<style>`,
+  and of the linked sheets scoped to that scene, whose selector styles the element itself (its
+  tag, id, classes, attributes; no wrapper, `:first-child` or `:hover`), written in the scene it
+  lands in as `[data-composition-id="<scene>"] #<id>`, which outranks that scene's own class rules,
+  in a `<style data-carried="<id>" data-from="<scene it is from>">` of its own. Keyframes it
+  animates by keep their name when the new scene reads none other by it, and take `<name>-2`
+  otherwise. The scene's own rules never change, so its clips keep their look. Moved again, the
+  carried style goes with the clip, and is dropped when it goes home.
+- Its old scene's script cannot follow: `animationsLeft` names each clip that left a script naming
+  its `#id` or a class, and `animationsJoined` each that landed where the script reaches one of its
+  classes or its tag (`${scene} video`).
+- A clip that lands in a file, moved or imported, is a child of its composition itself, never of
+  a wrapper whose look would become its own: after the last element holding a clip of its track,
+  else a picture under the words and words or a sound over the pictures, else last before the
+  closing `<style>` and `<script>`.
+- A clip that leaves its file takes an id no other element of the video has (copies always take
   new ones), its recording's path rebased for the new folder, and its look: the rules naming its
   id or a class, from its scene's `<style>` (all of them, as an export renders the new scene
   without the old one's file) and from the linked sheets (those scoped to its old scene alone),

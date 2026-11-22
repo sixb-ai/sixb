@@ -32,6 +32,7 @@ export {
   splitClip,
   splitClips,
   trimClip,
+  type VideoAnimationJoined,
   type VideoAnimationLeft,
   type VideoClipTarget,
   type VideoCut,
