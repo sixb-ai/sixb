@@ -335,22 +335,23 @@ export function videoChains(
   }
 
   for (const [id, after] of following) {
+    // From its head, each link the part that goes on from the last one found, wherever it lies
+    // among them: a part left stale by an edit hides none after it. A part left over heads a chain
+    // of its own, as one whose head is gone.
+    const left = after.sort((a, b) => a.startMs - b.startMs)
     const head = byId.get(id)
-    const run = [...(head ? [head] : []), ...after.sort((a, b) => a.startMs - b.startMs)]
-
-    // Runs of parts that each go on from the one before.
-    let chain: VideoChainPart[] = []
-    for (const part of run) {
-      const previous = chain.at(-1)
-      const first = chain[0]
-      if (previous && first && goesOn(scenes, previous, part, first, sceneOf)) {
-        chain.push(part)
-        continue
+    let start: VideoChainPart | undefined = head ?? left.shift()
+    while (start) {
+      const chain = [start]
+      for (;;) {
+        const last = chain[chain.length - 1] as VideoChainPart
+        const at = left.findIndex((part) => goesOn(scenes, last, part, sceneOf))
+        if (at < 0) break
+        chain.push(...left.splice(at, 1))
       }
       if (chain.length > 1) chains.push({ parts: chain })
-      chain = [part]
+      start = left.shift()
     }
-    if (chain.length > 1) chains.push({ parts: chain })
   }
   return chains.sort((a, b) => (a.parts[0]?.startMs ?? 0) - (b.parts[0]?.startMs ?? 0))
 }
@@ -378,16 +379,18 @@ export function sceneAfter<T extends { readonly startMs: number; readonly durati
 }
 
 /**
- * Whether `next` goes on from `previous`, a chain starting at `first`, exactly as a placement
- * writes it: the same element; `previous` ends with its scene; `next` is in the scene placement
- * goes on in after that one, starting where `previous` ends, or where its scene starts after a
- * gap; and plays its file on from where `first` started.
+ * Whether `next` goes on from `previous` as a placement wrote it, whatever was done to their scenes
+ * since: the same element, in the scene placement goes on in after `previous`'s, and
+ * - a recording playing its file on from where `previous`, as written, stops: a scene made shorter
+ *   under `previous` hides its end, one made longer leaves a gap after it, and both stay one clip,
+ *   which its next placement makes whole again;
+ * - anything else from where `previous` reaches its scene's end, at least, starting there or where
+ *   its own scene starts after a gap.
  */
 function goesOn(
   scenes: readonly VideoSceneSpan[],
   previous: VideoChainPart,
   next: VideoChainPart,
-  first: VideoChainPart,
   sceneOf: (part: VideoChainPart) => VideoSceneSpan | undefined
 ): boolean {
   const [a, b] = [previous.clip, next.clip]
@@ -397,14 +400,17 @@ function goesOn(
 
   const before = sceneOf(previous)
   const after = sceneOf(next)
-  if (!before || !after) return false
-  if (Math.abs(previous.endMs - (before.startMs + before.durationMs)) > SAME_MS) return false
-  if (sceneAfter(scenes, before) !== after) return false
-  if (Math.abs(next.startMs - Math.max(previous.endMs, after.startMs)) > SAME_MS) return false
+  if (!before || !after || sceneAfter(scenes, before) !== after) return false
+  const sceneEnd = before.startMs + before.durationMs
+  const from = Math.max(Math.min(previous.endMs, sceneEnd), after.startMs)
 
-  if (b.kind !== "video" && b.kind !== "audio") return true
-  const played = next.startMs - first.startMs
-  return Math.abs(b.mediaStartMs - first.clip.mediaStartMs - played) <= SAME_MS
+  if (b.kind === "video" || b.kind === "audio") {
+    const stops = a.mediaStartMs + (a.durationMs ?? 0)
+    if (Math.abs(b.mediaStartMs - stops) > SAME_MS) return false
+    return next.startMs <= Math.max(sceneEnd, after.startMs) + SAME_MS
+  }
+  if (previous.endMs < sceneEnd - SAME_MS) return false
+  return Math.abs(next.startMs - from) <= SAME_MS
 }
 
 /** A composition nested in this one, whose clips are its own. */

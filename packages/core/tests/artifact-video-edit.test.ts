@@ -1688,6 +1688,145 @@ describe("a clip that goes on in later scenes", () => {
     scene("hook", '<h1 class="title" data-start="0" data-duration="3">Title</h1>')
   )
 
+  /**
+   * Whether the opening's recording plays once at every instant, as its chain holds it: its parts
+   * never overlap, each plays its file on from where the one before stops as written, and after a
+   * placement, from where it stops as seen.
+   */
+  const playsOnce = (files: ReadonlyMap<string, string | null>, placed = false) => {
+    const scenes = composition(files).scenes
+    const found = videoChains(
+      scenes,
+      (file) => readSceneTimeline(files.get(file) as string) ?? undefined
+    )
+    const chain = found.find((each) => each.parts[0]?.clip.src === "media/a.mp4")
+    if (!chain) throw new Error("The recording is in no chain.")
+    const seen = chain.parts.map((part) => {
+      const scene = scenes.find((each) => each.src === part.file)
+      const end = Math.min(part.endMs, scene ? scene.startMs + scene.durationMs : part.endMs)
+      return { ...part, seenEnd: end }
+    })
+    seen.slice(1).forEach((part, index) => {
+      const before = seen[index]
+      if (!before) return
+      expect(part.startMs).toBeGreaterThanOrEqual(before.seenEnd)
+      const stops = placed
+        ? before.clip.mediaStartMs + before.seenEnd - before.startMs
+        : before.clip.mediaStartMs + (before.clip.durationMs ?? 0)
+      expect(part.clip.mediaStartMs).toBe(stops)
+      if (placed) expect(part.startMs).toBe(before.seenEnd)
+    })
+    return seen.map((part) => [
+      part.file,
+      part.clip.ref,
+      part.startMs,
+      part.seenEnd,
+      part.clip.mediaStartMs,
+    ])
+  }
+  /** The opening's recording played to 6 s, over the hook and into the demo. */
+  const sixSeconds = applied(trimClip(opening, "scenes/hook.html", "intro", "end", 6000), opening)
+
+  // Guard proof: judge a recording's part by where the part before it ends in goesOn
+  // (timeline.ts), as it did: once the hook is shorter, its end hidden, the chain breaks, and the
+  // move writes a second part over the demo's, which plays the recording twice.
+  test("a scene made shorter under a clip that goes on keeps it one clip", () => {
+    const shorter = applied(setSceneLength(sixSeconds, "hook", 2500), sixSeconds)
+    expect(playsOnce(shorter)).toEqual([
+      ["scenes/hook.html", "intro", 0, 2500, 0],
+      ["scenes/demo.html", "intro-2", 2500, 5500, 3000],
+    ])
+    const moved = applied(moveClip(shorter, "scenes/hook.html", "intro", 500), shorter)
+    expect(playsOnce(moved, true)).toEqual([
+      ["scenes/hook.html", "intro", 500, 2500, 0],
+      ["scenes/demo.html", "intro-2", 2500, 6000, 2000],
+    ])
+  })
+
+  // Guard proof: give a clip that goes on the length from its first part's start to its last's
+  // end in logicalClip (edit.ts), as it did; the move then keeps the gap the longer hook left,
+  // and plays half a second more.
+  test("a scene made longer under a clip that goes on keeps it one clip, which a move closes", () => {
+    const longer = applied(setSceneLength(sixSeconds, "hook", 3500), sixSeconds)
+    expect(playsOnce(longer)).toEqual([
+      ["scenes/hook.html", "intro", 0, 3000, 0],
+      ["scenes/demo.html", "intro-2", 3500, 6500, 3000],
+    ])
+    const moved = applied(moveClip(longer, "scenes/hook.html", "intro", 500), longer)
+    expect(playsOnce(moved, true)).toEqual([
+      ["scenes/hook.html", "intro", 500, 3500, 0],
+      ["scenes/demo.html", "intro-2", 3500, 6500, 3000],
+    ])
+  })
+
+  // Guard proof: leave a recording cut into pieces named by what went on from it in rippleRemove
+  // (edit.ts), dropping `repointContinues`; the demo's part then goes on from the hook's first
+  // piece, which no longer reaches it, and moving the last piece doubles the recording.
+  test("a cut in its first scene leaves the parts after going on from its last piece", () => {
+    const cut = applied(
+      removeMediaRanges(sixSeconds, "scenes/hook.html", "media/a.mp4", [
+        { startMs: 1000, endMs: 1500 },
+      ]),
+      sixSeconds
+    )
+    expect(playsOnce(cut)).toEqual([
+      ["scenes/hook.html", "intro-3", 1000, 2500, 1500],
+      ["scenes/demo.html", "intro-2", 2500, 5500, 3000],
+    ])
+    const moved = applied(moveClip(cut, "scenes/hook.html", "intro-3", 2000), cut)
+    expect(playsOnce(moved, true)).toEqual([
+      ["scenes/hook.html", "intro-3", 2000, 2500, 1500],
+      ["scenes/demo.html", "intro-2", 2500, 6500, 2000],
+    ])
+  })
+
+  // Guard proof: let every piece of a cut part keep `data-continues` in clipParts (edit.ts); the
+  // demo's second piece then names the head too, and the transcript cut is undone by the next move
+  // as a stale part.
+  test("a cut in a later scene leaves the marker on its first piece alone", () => {
+    const cut = applied(
+      removeMediaRanges(sixSeconds, "scenes/demo.html", "media/a.mp4", [
+        { startMs: 4000, endMs: 4500 },
+      ]),
+      sixSeconds
+    )
+    const pieces = readSceneTimeline(cut.get("scenes/demo.html") as string)?.clips.filter(
+      (clip) => clip.src
+    )
+    expect(pieces?.map((clip) => [clip.ref, clip.continues])).toEqual([
+      ["intro-2", "intro"],
+      ["intro-3", undefined],
+    ])
+    const moved = applied(moveClip(cut, "scenes/hook.html", "intro", 1000), cut)
+    expect(playsOnce(moved, true)).toEqual([
+      ["scenes/hook.html", "intro", 1000, 3000, 0],
+      ["scenes/demo.html", "intro-2", 3000, 5000, 2000],
+    ])
+  })
+
+  // Guard proof: walk the parts once in order in videoChains (timeline.ts), as it did; a stale part
+  // the Agent left before the real one breaks the chain there, and the real part is lost from it.
+  test("a stale part hides no later one, and a split then a move plays once", () => {
+    const stale = new Map(sixSeconds)
+    stale.set(
+      "scenes/demo.html",
+      (sixSeconds.get("scenes/demo.html") as string).replace(
+        "<video",
+        '<video id="old" src="media/a.mp4" data-start="0" data-duration="1" data-media-start="40" data-continues="intro"></video>\n    <video'
+      )
+    )
+    expect(playsOnce(stale).map((part) => part[1])).toEqual(["intro", "intro-2"])
+
+    const split = splitClip(sixSeconds, "scenes/hook.html", "intro", 1000)
+    const second = ("clip" in split ? split.clip : undefined) ?? ""
+    const files = applied(split, sixSeconds)
+    const moved = applied(moveClip(files, "scenes/hook.html", second, 1500), files)
+    expect(playsOnce(moved, true)).toEqual([
+      ["scenes/hook.html", second, 1500, 3000, 1000],
+      ["scenes/demo.html", "intro-2", 3000, 6500, 2500],
+    ])
+  })
+
   // Guard proof: drop the check that the part before ends with its scene from goesOn
   // (timeline.ts), as the gap rule let it; the outro's part then goes on from the hook's across
   // the demo, and moving the head writes a whole title into the demo again.

@@ -257,11 +257,16 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   again, writing each part again where one still lands in its file, a removal takes every part, a
   split makes two clips that each go on, the sound is the same in each (a fade in on the first, out
   on the last), typed words go to every part. A part counts only while it goes on from the one
-  before exactly as a placement writes it: the same element, the one before ending with its scene,
-  this one in the scene placement goes on in after that (`sceneAfter`), starting where it ends and
-  playing its file on, and a head is the one clip of the video with its id. One the Agent edits
-  apart, whose first part is gone, or whose scene a copy now follows, is a clip of its own, and
-  loses the attribute once it is placed again.
+  before as a placement wrote it, whatever was done to their scenes since: in the scene placement
+  goes on in after the other's (`sceneAfter`), and, for a recording, playing its file on from where
+  the part before stops as written, so a scene made shorter under it, hiding its end, or longer,
+  leaving a gap, keeps the clip whole; anything else from where the part before reaches its
+  scene's end. Each part is found against the last one found, so a stale part hides none. A clip
+  that goes on lasts as long as its parts show, so its next placement plays its file on without the
+  gap or the hidden end. A split or a cut keeps the attribute on one piece, and what went on from
+  a clip cut into pieces goes on from its last. A head is the one clip of the video with its id. A
+  part edited apart, whose first part is gone, or whose scene a copy now follows, is a clip of its
+  own, and loses the attribute once it is placed again.
 - A clip that leaves its file takes an id no other element of the video has (copies always take
   new ones), and its recording's path rebased for the new folder. What followed it there keeps its
   time. A clip that holds others, or a file two scenes play, stays put: the edit is refused whole.
