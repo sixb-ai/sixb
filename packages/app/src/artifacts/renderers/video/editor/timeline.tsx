@@ -391,6 +391,8 @@ export function Timeline({
   const onDragEnd = (event: ReactPointerEvent) => {
     const current = dragRef.current
     if (current?.type === "marquee") return
+    // A trim handle's release bubbles to its clip, whose handlers end the same drag: it ends once.
+    dragRef.current = null
     setDrag(null)
     if (!current) return
 
