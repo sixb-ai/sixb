@@ -12,9 +12,9 @@
   "dependencies": {
     "@sixb/app": "^0.2.0",
     "@sixb/blob-local": "^0.2.0",
-    "@sixb/cli": "^0.2.6",
-    "@sixb/client": "^0.2.6",
-    "@sixb/core": "^0.2.6",
+    "@sixb/cli": "^0.2.7",
+    "@sixb/client": "^0.2.7",
+    "@sixb/core": "^0.2.7",
     "@sixb/ducklake": "^0.2.0",
     "@sixb/sqlite": "^0.2.0",
     "@sixb/ui": "^0.2.0",

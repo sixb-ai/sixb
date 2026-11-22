@@ -1,6 +1,6 @@
 {
   "name": "@sixb/env-azure-key-vault",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Keep a Sixb project's environment variables in Azure Key Vault",
   "keywords": [
     "sixb",

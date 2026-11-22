@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-azure",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Azure Container Apps sandbox provider for Sixb agents (preview)",
   "keywords": [
     "sixb",

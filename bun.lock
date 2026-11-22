@@ -493,7 +493,7 @@
     },
     "deploy/ssh": {
       "name": "@sixb/deploy-ssh",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "bin": {
         "sixb-deploy-ssh": "./src/server/cli.ts",
       },
@@ -508,7 +508,7 @@
     },
     "env/azure-key-vault": {
       "name": "@sixb/env-azure-key-vault",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -520,7 +520,7 @@
     },
     "env/doppler": {
       "name": "@sixb/env-doppler",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -653,7 +653,7 @@
     },
     "models/anthropic": {
       "name": "@sixb/anthropic",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -665,7 +665,7 @@
     },
     "models/azure-ai-foundry": {
       "name": "@sixb/azure-ai-foundry",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -677,7 +677,7 @@
     },
     "models/protocols": {
       "name": "@sixb/model-protocols",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
       },
@@ -688,7 +688,7 @@
     },
     "models/typesafe": {
       "name": "@sixb/typesafe",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -700,7 +700,7 @@
     },
     "models/vercel-ai-gateway": {
       "name": "@sixb/vercel-ai-gateway",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -712,7 +712,7 @@
     },
     "packages/agent": {
       "name": "@sixb/agent",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/cli-core": "workspace:^",
         "hast-util-from-parse5": "^8.0.4",
@@ -737,7 +737,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/agent": "workspace:*",
       },
@@ -754,7 +754,7 @@
     },
     "packages/app": {
       "name": "@sixb/app",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:^",
@@ -803,7 +803,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "bin": {
         "sixb": "./src/index.tsx",
       },
@@ -843,7 +843,7 @@
     },
     "packages/cli-core": {
       "name": "@sixb/cli-core",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -851,7 +851,7 @@
     },
     "packages/client": {
       "name": "@sixb/client",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
       },
@@ -878,7 +878,7 @@
     },
     "packages/core": {
       "name": "@sixb/core",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "mdast-util-from-markdown": "2.0.3",
         "mdast-util-gfm": "3.1.0",
@@ -899,7 +899,7 @@
     },
     "packages/create-sixb": {
       "name": "create-sixb",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "bin": {
         "create-sixb": "./dist/index.js",
       },
@@ -928,7 +928,7 @@
     },
     "packages/lake-worker": {
       "name": "@sixb/lake-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -940,7 +940,7 @@
     },
     "packages/orchestrator": {
       "name": "@sixb/orchestrator",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -952,7 +952,7 @@
     },
     "packages/pipeline-worker": {
       "name": "@sixb/pipeline-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -964,7 +964,7 @@
     },
     "packages/projection-worker": {
       "name": "@sixb/projection-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -976,7 +976,7 @@
     },
     "packages/render-worker": {
       "name": "@sixb/render-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
@@ -989,7 +989,7 @@
     },
     "packages/rules-worker": {
       "name": "@sixb/rules-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1001,7 +1001,7 @@
     },
     "packages/server": {
       "name": "@sixb/server",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.16",
@@ -1028,7 +1028,7 @@
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1087,7 +1087,7 @@
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1115,7 +1115,7 @@
     },
     "sandboxes/apple-container": {
       "name": "@sixb/sandboxes-apple-container",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1127,7 +1127,7 @@
     },
     "sandboxes/azure": {
       "name": "@sixb/sandboxes-azure",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@azure/core-auth": "1.10.1",
         "@azure/identity": "4.13.0",
@@ -1143,7 +1143,7 @@
     },
     "sandboxes/boxd": {
       "name": "@sixb/sandboxes-boxd",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "dependencies": {
         "@boxd-sh/sdk": "^0.3.1",
       },
@@ -1158,7 +1158,7 @@
     },
     "sandboxes/local": {
       "name": "@sixb/sandboxes-local",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1170,7 +1170,7 @@
     },
     "sandboxes/smolvm": {
       "name": "@sixb/sandboxes-smolvm",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1182,7 +1182,7 @@
     },
     "sandboxes/vercel": {
       "name": "@sixb/sandboxes-vercel",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "dependencies": {
         "@vercel/sandbox": "^2.3.0",
       },
@@ -1272,7 +1272,7 @@
     },
     "storage/pg": {
       "name": "@sixb/pg",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "postgres": "^3.4.5",
       },
@@ -1287,7 +1287,7 @@
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "sqlite-vec": "0.1.9",
       },

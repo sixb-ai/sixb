@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-boxd",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "boxd provider for Sixb agent sandboxes",
   "keywords": [
     "sixb",

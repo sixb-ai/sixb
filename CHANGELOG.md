@@ -2,7 +2,11 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## Unreleased
+## 2026-11-22 — Sixb 0.2.7
+
+0.2.7 lets a sub-agent work in its conversation's checkout or folder, connects Azure AI Foundry
+with Entra ID and caches what its models read again, deploys each release beside the live one
+with no downtime, and browses the Console's definitions by the folders they sit in.
 
 ### Highlights
 
@@ -35,6 +39,19 @@ Sixb packages are versioned independently. Each release entry names the packages
   dropped connection doesn't stop it, and a deploy loads the project once to migrate and check it.
   `sixb deploy check` checks a short list of [host requirements](docs/deployment/host-requirements.md),
   Chromium's libraries for projects that use Playwright among them.
+- The Console browses each primitive by the folders its definitions sit in: syncs, datasets,
+  pipelines, projections, connectors, object types, actions, workflows and rules show a tile per
+  subfolder, such as `datasets/raw/erp`, and a search groups its matches by folder. Their list and
+  get responses carry that `folder`. A project without subfolders sees its lists as before.
+- Sandbox turns start and end cleanly. A background command runs up to its provider's limit, five
+  hours on Vercel; a command the provider refuses to start is a tool error the agent reads and goes
+  past; and a turn whose workspace could not be saved keeps its answer, with a
+  `workspace_not_saved` diagnostic. An open Vercel sandbox extends its session while the agent
+  uses it, up to your plan's maximum, so `sessionTimeoutMs` can stay short.
+- `@sixb/pg` no longer fails a process whose first query reads a list of one, such as one board's
+  pictures or one execution: Postgres refused it as a malformed array literal.
+- `@sixb/sandboxes-smolvm` writes files through the command's input instead of its arguments, so
+  a run no longer fails at start with "Argument list too long" when it installs `sixb`.
 
 ### Upgrade notes
 
@@ -70,6 +87,25 @@ Sixb packages are versioned independently. Each release entry names the packages
 - `DeployTarget` loses `setup`, `access` and `ci`, a check's status is `ok`, `fail` or `warning`,
   and `DeployCheckContext` gains `chromium` and `envToken`. A check can carry `commands` that fix
   it, which `sixb deploy check` prints for someone with root to run on the server.
+- A sandbox provider of your own declares `maxCommandTimeout` and caps a longer command timeout
+  to it, and throws `SandboxRequestRefusedError` (from `@sixb/core/sandboxes`) for a request it
+  refused before anything ran, so the workspace stays saveable.
+- A run's diagnostics gain `workspace_not_saved`: code that switches over
+  `AGENT_RUN_DIAGNOSTIC_CODES` handles it.
+
+### Package versions
+
+- `0.2.7`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/app`, `@sixb/cli`,
+  `@sixb/agent`, `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`, `@sixb/lake-worker`,
+  `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/render-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`, `@sixb/deploy-ssh`,
+  `@sixb/model-protocols`, `@sixb/anthropic`, `@sixb/azure-ai-foundry`, `@sixb/typesafe`,
+  `@sixb/vercel-ai-gateway`.
+- `0.2.6`: `@sixb/sandboxes-boxd`.
+- `0.2.5`: `@sixb/cli-core`, `@sixb/env-azure-key-vault`.
+- `0.2.2`: `@sixb/sandboxes-vercel`, `create-sixb`.
+- `0.2.1`: `@sixb/env-doppler`, `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-azure`,
+  `@sixb/sandboxes-local`, `@sixb/sandboxes-smolvm`.
 
 ## 2026-11-19 — Sixb 0.2.6
 
