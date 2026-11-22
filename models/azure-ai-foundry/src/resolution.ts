@@ -42,16 +42,7 @@ export function resolveModel(input: {
       ? (entry?.definition.publisher ?? deploymentPublisher)
       : (deploymentPublisher ?? entry?.definition.publisher)
   const protocol =
-    input.protocol ??
-    entry?.protocol ??
-    (deployment?.capabilities.responses === "true"
-      ? "responses"
-      : deployment?.capabilities.chatCompletion === "true" ||
-          deployment?.capabilities.chat_completion === "true"
-        ? "chat"
-        : deployment?.capabilities.messages === "true"
-          ? "messages"
-          : "responses")
+    input.protocol ?? (deployment ? publisherProtocol(deployment.modelPublisher) : "responses")
   const flag =
     deployment?.capabilities[protocol === "chat" ? "chatCompletion" : protocol] ??
     (protocol === "chat" ? deployment?.capabilities.chat_completion : undefined)
@@ -118,6 +109,18 @@ export function resolveModel(input: {
       ]),
     ]),
   }
+}
+
+/**
+ * The protocol that serves a publisher's models fully. Azure's capability flags cannot choose:
+ * every chat deployment reports `chat_completion` alone, Claude included. OpenAI models reason
+ * with tools only on Responses (gpt-6.2-sol refuses both on Chat); Claude answers Messages, not
+ * Chat; other publishers take reasoning efforts on Chat, which Kimi and DeepSeek refuse on
+ * Responses (measured November 2026).
+ */
+function publisherProtocol(publisher: string): FoundryProtocol {
+  const name = publisher.toLowerCase()
+  return name === "openai" ? "responses" : name === "anthropic" ? "messages" : "chat"
 }
 
 // Catalog facts and explicit overrides still have to fit the selected wire adapter.

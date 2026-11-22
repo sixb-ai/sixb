@@ -92,13 +92,25 @@ test("project URL and API key resolve an alias, enforce Sixb capabilities and pr
       expect(init?.redirect).toBe("error")
       if (String(url).endsWith("/deployments?api-version=v1"))
         return Response.json({ value: [deployment] })
-      expect(String(url)).toBe(`${resource}/openai/v1/chat/completions`)
+      expect(String(url)).toBe(`${resource}/openai/v1/responses`)
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: "production",
-        max_completion_tokens: 100,
+        max_output_tokens: 100,
       })
+      const response = { id: "r", model: "future-model-2026-09-01" }
+      const usage = {
+        input_tokens: 10,
+        output_tokens: 2,
+        input_tokens_details: { cached_tokens: 0 },
+      }
       return new Response(
-        'data: {"id":"r","model":"future-model-2026-09-01","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}}}\n\ndata: [DONE]\n\n'
+        [
+          { type: "response.created", response },
+          { type: "response.output_text.delta", item_id: "m", delta: "ok" },
+          { type: "response.completed", response: { ...response, status: "completed", usage } },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+          .join("")
       )
     },
     catalog: {
@@ -133,7 +145,8 @@ test("project URL and API key resolve an alias, enforce Sixb capabilities and pr
     capabilities: { localTools: true },
   })
   expect(model.metadata).toMatchObject({ modelName: "future-model", modelVersion: "2026-09-01" })
-  expect(model.protocol).toBe("chat")
+  // Azure reports the publisher as OpenAI, and only `chat_completion` among its flags.
+  expect(model.protocol).toBe("responses")
   const { events } = await handle.stream({
     callId: "test",
     messages: [],
@@ -157,7 +170,7 @@ test("project URL and API key resolve an alias, enforce Sixb capabilities and pr
   expect(calls).toEqual([
     `${endpoint}/deployments?api-version=v1`,
     "https://models.dev/api.json",
-    `${resource}/openai/v1/chat/completions`,
+    `${resource}/openai/v1/responses`,
   ])
 })
 

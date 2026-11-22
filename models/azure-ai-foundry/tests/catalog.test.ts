@@ -614,8 +614,7 @@ test("derives Messages thinking controls from metadata, not model names", async 
     },
     catalog: { fetch: async () => Response.json({ azure: { models: { "new-model": raw } } }) },
   })
-  const model = await provider("production").resolve()
-  expect(model.protocol).toBe("messages")
+  const model = await provider.messages("production").resolve()
   await model.stream({
     callId: "test",
     messages: [],

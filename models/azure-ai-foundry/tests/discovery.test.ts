@@ -21,23 +21,47 @@ afterEach(() => {
   jest.useRealTimers()
 })
 
-// Removal proof: remove the Messages fallback in resolveModel, or its BOOLEAN_KEYS entry.
-test("routes uncataloged Messages deployments and validates their eligibility", async () => {
-  let messages = "true"
+// Azure reports `chat_completion` alone for every chat deployment, Claude included, so the
+// publisher chooses the protocol. Regression proof: choose by capability flags in resolveModel
+// again; every deployment here then resolves to Chat.
+test("chooses the protocol from the deployment's publisher", async () => {
+  const record = (name: string, modelPublisher: string) => ({
+    ...deployment(name, { chat_completion: "true" }),
+    modelPublisher,
+  })
   const provider = providerFixture({
     endpoint,
     apiKey: "key",
     fetch: async () =>
-      Response.json({
-        value: [
-          {
-            ...deployment("production", { messages, responses: "false", chat_completion: "false" }),
-            connectionName: undefined,
-          },
-        ],
-      }),
+      page([
+        record("gpt", "OpenAI"),
+        record("claude", "Anthropic"),
+        record("kimi", "MoonshotAI"),
+        record("gpt-oss", "OpenAI-OSS"),
+      ]),
   })
-  expect((await provider("production").resolve()).protocol).toBe("messages")
+  const protocols = await Promise.all(
+    ["gpt", "claude", "kimi", "gpt-oss"].map(
+      async (name) => (await provider(name).resolve()).protocol
+    )
+  )
+  expect(protocols).toEqual(["responses", "messages", "chat", "chat"])
+  expect((await provider.catalog.list()).map((entry) => entry.modelId)).toEqual([
+    "gpt",
+    "claude",
+    "kimi",
+    "gpt-oss",
+  ])
+  expect((await provider.chat("gpt").resolve()).protocol).toBe("chat")
+})
+
+test("validates the Messages capability flag", async () => {
+  let messages = "true"
+  const provider = providerFixture({
+    endpoint,
+    apiKey: "key",
+    fetch: async () => page([deployment("production", { messages })]),
+  })
   expect((await provider.catalog.list()).map((entry) => entry.modelId)).toEqual(["production"])
   messages = "invalid"
   await expect(provider.catalog.refresh()).rejects.toThrow("capability 'messages'")
@@ -322,8 +346,8 @@ test("retains unknown capability strings without inferring Responses, tools or s
     "future-value"
   )
   expect((await provider("unknown").resolve()).metadata.modelName).toBe("publisher-model")
-  expect((await provider("no").resolve()).protocol).toBe("chat")
-  await expect(provider.responses("no").resolve()).rejects.toMatchObject({
+  expect((await provider.chat("no").resolve()).protocol).toBe("chat")
+  await expect(provider("no").resolve()).rejects.toMatchObject({
     name: "UnsupportedModelFeatureError",
   })
 })

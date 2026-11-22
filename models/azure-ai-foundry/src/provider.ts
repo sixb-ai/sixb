@@ -247,14 +247,16 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
           deployment,
           catalogModel: lookup?.(deployment.modelName),
         })
+        // Without catalog facts, Azure's flags say whether the deployment chats at all; they
+        // name no protocol reliably, so an automatic listing accepts any of them.
         const flags = deployment.capabilities
+        const offers = (offered: FoundryProtocol) =>
+          offered === "chat"
+            ? flags.chatCompletion === "true" || flags.chat_completion === "true"
+            : flags[offered] === "true"
         const supported =
           profile.metadata.catalog ||
-          (profile.protocol === "responses"
-            ? flags?.responses === "true"
-            : profile.protocol === "chat"
-              ? flags?.chatCompletion === "true" || flags?.chat_completion === "true"
-              : flags?.messages === "true")
+          (protocol ? offers(protocol) : (["responses", "chat", "messages"] as const).some(offers))
         if (supported) results.push(profile.definition)
       } catch (error) {
         if (!(error instanceof UnsupportedModelFeatureError)) throw error
