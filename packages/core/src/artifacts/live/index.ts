@@ -52,6 +52,7 @@ export {
   type VideoClip,
   type VideoClipKind,
   type VideoFileTimeline,
+  type VideoSceneSpan,
   type VideoText,
   type VideoTrack,
   videoChains,

@@ -302,21 +302,30 @@ export interface VideoChain {
  * of its own, or stands alone, so a video nobody cut this way has none.
  */
 export function videoChains(
-  scenes: readonly { readonly src: string; readonly startMs: number }[],
+  scenes: readonly VideoSceneSpan[],
   timelineOf: (file: string) => VideoFileTimeline | undefined
 ): VideoChain[] {
-  const files = new Map<string, number>()
-  for (const scene of scenes) if (!files.has(scene.src)) files.set(scene.src, scene.startMs)
+  const files = new Map<string, VideoSceneSpan>()
+  for (const scene of scenes) if (!files.has(scene.src)) files.set(scene.src, scene)
 
   const parts: VideoChainPart[] = []
-  for (const [file, offsetMs] of files) {
+  const written = new Map<string, number>()
+  for (const [file, scene] of files) {
     for (const clip of timelineOf(file)?.clips ?? []) {
+      if (clip.id) written.set(clip.id, (written.get(clip.id) ?? 0) + 1)
       if (clip.durationMs === undefined) continue
-      const startMs = offsetMs + clip.startMs
+      const startMs = scene.startMs + clip.startMs
       parts.push({ file, clip, startMs, endMs: startMs + clip.durationMs })
     }
   }
-  const byId = new Map(parts.flatMap((part) => (part.clip.id ? [[part.clip.id, part]] : [])))
+  // A head is the one clip of the video with its id: two that share it, as a copied scene's may,
+  // head nothing.
+  const byId = new Map(
+    parts.flatMap((part) =>
+      part.clip.id && written.get(part.clip.id) === 1 ? [[part.clip.id, part]] : []
+    )
+  )
+  const sceneOf = (part: VideoChainPart) => files.get(part.file)
 
   const chains: VideoChain[] = []
   const following = new Map<string, VideoChainPart[]>()
@@ -334,7 +343,7 @@ export function videoChains(
     for (const part of run) {
       const previous = chain.at(-1)
       const first = chain[0]
-      if (previous && first && goesOn(previous, part, first, files.get(part.file) ?? 0)) {
+      if (previous && first && goesOn(scenes, previous, part, first, sceneOf)) {
         chain.push(part)
         continue
       }
@@ -346,19 +355,53 @@ export function videoChains(
   return chains.sort((a, b) => (a.parts[0]?.startMs ?? 0) - (b.parts[0]?.startMs ?? 0))
 }
 
-/** Whether `next` goes on from `previous`, a chain starting at `first`, as a cut wrote it. */
+/** A scene's file and where it plays in the video. */
+export interface VideoSceneSpan {
+  readonly src: string
+  readonly startMs: number
+  readonly durationMs: number
+}
+
+/**
+ * The scene a clip that runs past `scene`'s end goes on in: the one on top at that instant, the
+ * later in play order, else the next to start; none past the last. `scenes` in play order.
+ */
+export function sceneAfter<T extends { readonly startMs: number; readonly durationMs: number }>(
+  scenes: readonly T[],
+  scene: T
+): T | undefined {
+  const end = scene.startMs + scene.durationMs
+  const onTop = scenes
+    .filter((each) => each !== scene && each.startMs <= end && end < each.startMs + each.durationMs)
+    .at(-1)
+  return onTop ?? scenes.find((each) => each !== scene && each.startMs >= end)
+}
+
+/**
+ * Whether `next` goes on from `previous`, a chain starting at `first`, exactly as a placement
+ * writes it: the same element; `previous` ends with its scene; `next` is in the scene placement
+ * goes on in after that one, starting where `previous` ends, or where its scene starts after a
+ * gap; and plays its file on from where `first` started.
+ */
 function goesOn(
+  scenes: readonly VideoSceneSpan[],
   previous: VideoChainPart,
   next: VideoChainPart,
   first: VideoChainPart,
-  sceneStartMs: number
+  sceneOf: (part: VideoChainPart) => VideoSceneSpan | undefined
 ): boolean {
   const [a, b] = [previous.clip, next.clip]
   if (previous.file === next.file || a.tag !== b.tag || a.src !== b.src || a.text !== b.text) {
     return false
   }
-  if (next.startMs < previous.endMs - SAME_MS) return false
-  if (next.startMs > Math.max(previous.endMs, sceneStartMs) + SAME_MS) return false
+
+  const before = sceneOf(previous)
+  const after = sceneOf(next)
+  if (!before || !after) return false
+  if (Math.abs(previous.endMs - (before.startMs + before.durationMs)) > SAME_MS) return false
+  if (sceneAfter(scenes, before) !== after) return false
+  if (Math.abs(next.startMs - Math.max(previous.endMs, after.startMs)) > SAME_MS) return false
+
   if (b.kind !== "video" && b.kind !== "audio") return true
   const played = next.startMs - first.startMs
   return Math.abs(b.mediaStartMs - first.clip.mediaStartMs - played) <= SAME_MS
