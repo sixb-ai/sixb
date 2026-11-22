@@ -84,6 +84,7 @@ import {
   openEnd,
   selectedClip,
   selectedScene,
+  typedText,
 } from "./selection"
 import { Timeline, type ZoomControls } from "./timeline"
 import { TranscriptTab } from "./transcript-panel"
@@ -292,9 +293,7 @@ export default function VideoEditor({
       edit((sources) => setClipSound(sources, file, videoTarget(target), sound)),
     text: (file, text, words) => edit((sources) => setVideoText(sources, file, text, words)),
     clipText: (file, target, text) => {
-      const words = state.timelines
-        .get(file)
-        ?.texts.find((each) => each.source.element.start === target.source.element.start)
+      const words = typedText(state.timelines.get(file), target)
       if (words) edit((sources) => setVideoText(sources, file, videoTarget(words), text))
     },
     removeClip: (file, target) => removeSelected({ file, clip: target }),

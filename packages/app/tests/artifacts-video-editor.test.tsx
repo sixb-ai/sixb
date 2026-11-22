@@ -3,6 +3,7 @@ import { client, type GetArtifactMediaResponse } from "@sixb/client"
 import {
   type LiveFiles,
   readVideoComposition,
+  readVideoFileTimeline,
   setSceneLength,
   splitClip,
 } from "@sixb/core/artifacts/live"
@@ -695,6 +696,53 @@ describe("the editor's pieces", () => {
     expect(length.value).toBe("4.25")
     // Enter commits it, and so does the blur it causes, with this scene still 3 s long.
     expect([...new Set(lengths)]).toEqual([4250])
+  })
+
+  // Guard proof: show the Text field for every text clip, as `clip.kind === "text"` did: the
+  // styled caption offers its words, and typing them would drop its highlighted word.
+  test("a clip's words are typed over only when it holds text alone", () => {
+    const composition = new LiveVideo(createArtifactDocument("video", FILES)).getState().composition
+    const timeline = readVideoFileTimeline(
+      "scenes/captions.html",
+      '<template><div data-composition-id="captions">' +
+        '<p data-start="0" data-duration="1">Fresh bagels</p>' +
+        '<p data-start="1" data-duration="1"><span class="hot">Office</span> parties</p>' +
+        "</div></template>"
+    )
+    const [plain, styled] = timeline?.clips ?? []
+    if (!composition || !timeline || !plain || !styled) throw new Error("No captions.")
+
+    const noop = () => {}
+    const inspect = (clip: typeof plain) =>
+      render(
+        wrap(
+          <Inspector
+            composition={composition}
+            timelines={new Map([["scenes/captions.html", timeline]])}
+            scene={undefined}
+            clip={{ file: "scenes/captions.html", clip }}
+            splittable={false}
+            target={{ artifactId: "art_video", version: 2, files: [] }}
+            actions={{
+              renameScene: noop,
+              sceneLength: noop,
+              duplicateScene: noop,
+              removeScene: noop,
+              clipTiming: noop,
+              clipSound: noop,
+              text: noop,
+              clipText: noop,
+              removeClip: noop,
+              splitClip: noop,
+            }}
+          />
+        )
+      )
+
+    expect(inspect(plain).queryByRole("textbox", { name: "Text" })).not.toBeNull()
+    cleanup()
+    expect(styled.track).toBe("text")
+    expect(inspect(styled).queryByRole("textbox", { name: "Text" })).toBeNull()
   })
 })
 
