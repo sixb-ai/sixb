@@ -1299,6 +1299,26 @@ describe("placing clips in the video", () => {
     )
   })
 
+  // Guard proof: put a picture after the last element holding one in insertInComposition
+  // (edit.ts), whatever else it holds; the talk then covers the end card's words.
+  test("footage lands under a card that holds a picture and words", () => {
+    const sources = with_({
+      "scenes/outro.html": `<template>
+  <div data-composition-id="outro" data-width="1920" data-height="1080">
+    <div class="card">
+      <img id="logo" src="media/logo.png" data-start="0" data-duration="4">
+      <p data-start="0" data-duration="4">Try it today</p>
+    </div>
+  </div>
+</template>
+`,
+    })
+    const files = applied(moveClip(sources, "scenes/demo.html", "talk", 8500), sources)
+    expect(files.get("scenes/outro.html")).toContain(
+      '<video id="talk" src="media/talk.mp4" data-start="0.5" data-duration="5" data-media-start="2" data-has-audio="true" playsinline></video>\n    <div class="card">'
+    )
+  })
+
   // Guard proof: drop the placeFound call from insertClip (edit.ts); the footage then plays on
   // past the hook's end, unseen, and the demo shows none of it.
   test("an import past its scene's end goes on in the next one", () => {
