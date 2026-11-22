@@ -375,13 +375,10 @@ export function SceneThumbnail({
   scene,
   timeline,
   target,
-  fill = false,
 }: {
   readonly scene: VideoScene
   readonly timeline: VideoFileTimeline | undefined
   readonly target: MediaTarget
-  /** Fills its box, rather than taking the video's shape at its width. */
-  readonly fill?: boolean
 }) {
   const still = videoStillUrl(target, scene.id)
   // Each address is tried once: a scene renamed or another version tries again.
@@ -401,12 +398,7 @@ export function SceneThumbnail({
     : 0
 
   return (
-    <span
-      className={cn(
-        "relative block overflow-hidden bg-neutral-900",
-        fill ? "size-full" : "aspect-video w-full"
-      )}
-    >
+    <span className="relative block aspect-video w-full overflow-hidden bg-neutral-900">
       {shown !== "fallback" ? (
         <img
           src={still}
