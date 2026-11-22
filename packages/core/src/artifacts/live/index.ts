@@ -46,12 +46,15 @@ export {
   videoSceneLength,
   videoTarget,
 } from "../video/edit"
-export type {
-  VideoClip,
-  VideoClipKind,
-  VideoFileTimeline,
-  VideoText,
-  VideoTrack,
+export {
+  type VideoChain,
+  type VideoChainPart,
+  type VideoClip,
+  type VideoClipKind,
+  type VideoFileTimeline,
+  type VideoText,
+  type VideoTrack,
+  videoChains,
 } from "../video/timeline"
 export {
   type BlockMark,

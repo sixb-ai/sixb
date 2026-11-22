@@ -85,6 +85,9 @@ work/launch-teaser/
   Times inside it count from the scene's start. Scope its selectors to it,
   `[data-composition-id="demo"] .callout`, and register its GSAP timeline, `{ paused: true }`, as
   `window.__timelines["<id>"]`, positions in seconds. CSS animations play too.
+- **What the editor writes.** A clip someone pulls past a scene's end goes on in the next as a
+  copy with `data-continues="<its id>"`, and one moved to another scene takes its look along in a
+  `<style data-carried="<id>">`: keep both, and edit a continued clip as one, every part together.
 - **Determined by time alone.** The export seeks to each frame and captures it: nothing random,
   no clock, no timer, no `requestAnimationFrame` loop. What the timeline does not drive is not
   rendered as you saw it.

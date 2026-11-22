@@ -250,6 +250,15 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   a wrapper whose look would become its own: after the last element holding a clip of its track,
   else a picture under the words and words or a sound over the pictures, else last before the
   closing `<style>` and `<script>`.
+- **A clip that goes on** (`videoChains`, `timeline.ts`) is one clip: each copy past a scene's end
+  writes `data-continues="<the first part's id>"`, and every operation on any part acts on all of
+  them, as one span from the first part's start to the last's end: a move or a trim places it
+  again, writing each part again where one still lands in its file, a removal takes every part, a
+  split makes two clips that each go on, the sound is the same in each (a fade in on the first, out
+  on the last), typed words go to every part. A part counts only while it goes on from the one
+  before, the same element starting where that one ends and playing its file on: one the Agent
+  edits apart, or whose first part is gone, is a clip of its own, and loses the attribute once it
+  is placed again.
 - A clip that leaves its file takes an id no other element of the video has (copies always take
   new ones), and its recording's path rebased for the new folder. What followed it there keeps its
   time. A clip that holds others, or a file two scenes play, stays put: the edit is refused whole.
