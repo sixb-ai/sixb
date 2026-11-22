@@ -530,7 +530,6 @@ test("prices final Chat usage without assuming missing counters or double-billin
   })
   expect(foundryChatUsage(rawUsage, false).reasoningOutputTokens).toBeUndefined()
   const unknown: JsonObject[] = [
-    { ...rawUsage, prompt_tokens_details: { cached_tokens: 2, cache_write_tokens: 1 } },
     { ...rawUsage, input_tokens: 10 },
     { ...rawUsage, completion_tokens_details: { reasoning_tokens: 2, audio_tokens: 1 } },
   ]

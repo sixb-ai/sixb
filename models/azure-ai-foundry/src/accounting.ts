@@ -8,7 +8,7 @@ import {
   rateModelCall,
 } from "@sixb/core/models"
 import { responsesUsage } from "@sixb/model-protocols/responses"
-import { object } from "./util"
+import { counter, object } from "./util"
 
 export function foundryUsage(
   raw: JsonObject | undefined,
@@ -17,6 +17,9 @@ export function foundryUsage(
   const usage = responsesUsage(raw)
   const { reasoningOutputTokens, ...totals } = usage
   const cached = usage.cacheReadInputTokens
+  // GPT-5.6 and later bill a cache write in place of ordinary input: input tokens are uncached,
+  // read or written, each once (measured on Azure: 7,546 input, 7,543 written, 0 read).
+  const written = counter(object(raw?.input_tokens_details)?.cache_write_tokens)
   const input = usage.inputTokens
   const output = usage.outputTokens
   const knownReasoning =
@@ -26,11 +29,12 @@ export function foundryUsage(
     (reliableReasoning === true || (reliableReasoning === undefined && reasoningOutputTokens > 0))
   return {
     ...totals,
-    ...(object(raw?.input_tokens_details)?.cache_write_tokens === 0
-      ? { cacheWriteInputTokens: 0 }
-      : {}),
-    ...(input !== undefined && cached !== undefined && cached <= input && onlyTokenMeters(raw)
-      ? { uncachedInputTokens: input - cached }
+    ...(written === undefined ? {} : { cacheWriteInputTokens: written }),
+    ...(input !== undefined &&
+    cached !== undefined &&
+    cached + (written ?? 0) <= input &&
+    onlyTokenMeters(raw)
+      ? { uncachedInputTokens: input - cached - (written ?? 0) }
       : {}),
     ...(knownReasoning ? { reasoningOutputTokens } : {}),
     ...(knownReasoning &&
@@ -94,7 +98,7 @@ export function tokenEstimator(
   }
 }
 
-/** Unknown/new meters (notably overlapping cache writes) require a custom estimator. */
+/** Unknown or new meters require a custom estimator. */
 function onlyTokenMeters(raw: JsonObject | undefined): boolean {
   if (!raw) return true
   if (
@@ -110,11 +114,9 @@ function onlyTokenMeters(raw: JsonObject | undefined): boolean {
     )
   )
     return false
-  // Azure includes this meter with zero on ordinary Responses calls. Nonzero writes have
-  // offering-specific billing/overlap semantics and still require a custom estimator.
   return (
-    Object.entries(object(raw.input_tokens_details) ?? {}).every(
-      ([key, value]) => key === "cached_tokens" || (key === "cache_write_tokens" && value === 0)
+    Object.keys(object(raw.input_tokens_details) ?? {}).every(
+      (key) => key === "cached_tokens" || key === "cache_write_tokens"
     ) &&
     Object.keys(object(raw.output_tokens_details) ?? {}).every((key) => key === "reasoning_tokens")
   )

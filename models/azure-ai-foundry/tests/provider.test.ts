@@ -520,14 +520,10 @@ test("preserves unknown usage, non-OpenAI reasoning counters, explicit prices an
   expect(partnerEvent.usage.reasoningOutputTokens).toBe(2)
   expect(partnerEvent.usage.textOutputTokens).toBe(3)
   expect(partnerEvent.usage.raw?.output_tokens_details).toEqual({ reasoning_tokens: 2 })
-  const extraMeters: JsonObject[] = [
-    { input_tokens_details: { cache_write_tokens: 2 } },
-    { server_tool_use: { requests: 1 } },
-  ]
-  for (const raw of extraMeters)
-    expect(partner.costEstimator?.estimate({ usage: { ...event.usage, raw } })).toMatchObject({
-      status: "unpriceable",
-    })
+  const extraMeter: JsonObject = { server_tool_use: { requests: 1 } }
+  expect(
+    partner.costEstimator?.estimate({ usage: { ...event.usage, raw: extraMeter } })
+  ).toMatchObject({ status: "unpriceable" })
   expect(
     partner.costEstimator?.estimate({ usage: { inputTokens: 10, outputTokens: 5 } })
   ).toMatchObject({ status: "unpriceable", reason: "missing-usage" })
