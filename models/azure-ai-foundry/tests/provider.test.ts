@@ -11,6 +11,7 @@ import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adap
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+const resource = "https://resource.services.ai.azure.com"
 
 // Removal proof: restore tool-calls precedence in Responses finishReason, or drop
 // `withoutLocalToolCalls` from runModelLoop. This valid tool then executes, or the loop throws.
@@ -144,7 +145,9 @@ async function collect(
   return result
 }
 
-test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (path) => {
+// Regression proof: build the Responses URL from projectUrl in transport.ts url(). The project's
+// path refused gpt-6.2-sol's reasoning effort and ignored its tools (measured November 2026).
+test.each(["", "/"])("calls Responses on the project's resource (endpoint%s)", async (path) => {
   let url: unknown
   let body: JsonObject | undefined
   let headers: Headers | undefined
@@ -167,7 +170,7 @@ test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (pa
   const events = await collect(
     (await model.stream(request({ maxOutputTokens: 20, reasoning: "high" }))).events
   )
-  expect(url).toBe(`${endpoint}/openai/v1/responses`)
+  expect(url).toBe(`${resource}/openai/v1/responses`)
   expect(body).toMatchObject({
     model: "deployment",
     stream: true,

@@ -23,16 +23,17 @@ const foundry = createAzureAIFoundry({
 const model = foundry("production") // Your Azure deployment name.
 ```
 
-The full project URL and API key are required. The provider uses the same key to fetch project
-deployments and call inference. Keys may be strings or synchronous/asynchronous functions;
-functions receive an abort signal and are evaluated for each Azure HTTP attempt.
+The project URL tells Sixb what is deployed; every model call goes to the resource that owns the
+project, `https://my-resource.services.ai.azure.com`, with the same key. Keys may be strings or
+synchronous/asynchronous functions; functions receive an abort signal and are evaluated for each
+Azure HTTP attempt.
 
 Language model resolution follows this sequence:
 
 1. Find the deployment in the Azure project and read its model name, version, and publisher.
 2. Look up the underlying model in models.dev.
 3. Build the Sixb model definition and cost estimator, intersecting capabilities with adapter support.
-4. Call Azure using the deployment name.
+4. Call the project's resource using the deployment name.
 
 Construction is network-free. `resolve()` returns a pinned model for worker admission and
 execution. A direct `stream()` resolves and pins the handle before inference. Discovery failures
@@ -43,18 +44,9 @@ missing capabilities and prices remain unknown. Catalog listings and refresh rep
 
 ## Embeddings
 
-Configure the resource endpoint separately: Foundry project endpoints do not route embeddings.
+Deploy an embedding model in the project and declare it with the model it runs:
 
 ```ts
-const foundry = createAzureAIFoundry({
-  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
-  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
-  embeddings: {
-    endpoint: "https://my-resource.openai.azure.com/openai/v1",
-    apiKey: () => process.env.AZURE_OPENAI_API_KEY,
-  },
-})
-
 export const productEmbedding = foundry.embedding("product-embedding", {
   model: { name: "text-embedding-3-small", version: "1" },
   dimensions: 1536,
@@ -64,8 +56,6 @@ export const productEmbedding = foundry.embedding("product-embedding", {
 Register this binding under `models.embedding` and use it in an ObjectType's vector profile.
 Set `model` to your deployment's actual model name and version. A mismatch blocks inference;
 changing the declared model or version excludes previously stored vectors from search.
-The deployment name must exist in the project and refer to the same deployment on the configured
-resource. For connected deployments, supply the owning resource's endpoint and key.
 
 | Deployed model | Dimensions |
 | --- | --- |
@@ -324,10 +314,10 @@ foundry.chat("production")
 foundry.messages("claude-production")
 ```
 
-Responses and Chat use the project inference URL. Native Messages uses the owning resource's
-`/anthropic/v1/messages` URL, derived from the project URL. A Messages deployment from a project
-connection is rejected because the owning resource cannot be inferred from that record; configure
-the provider with that resource's own project URL and API key.
+Every protocol calls the project's resource: `/openai/v1/responses`, `/openai/v1/chat/completions`
+and `/anthropic/v1/messages`. The project's own inference path is not used: it answers through
+another service, which trails new models. A deployment from a project connection runs on another
+resource and is rejected; configure a provider with that resource's project URL.
 
 | Feature | Responses | Chat | Messages |
 | --- | --- | --- | --- |

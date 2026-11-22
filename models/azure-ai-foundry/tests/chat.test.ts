@@ -7,6 +7,7 @@ import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+const resource = "https://resource.services.ai.azure.com"
 const schema: JsonObject = {
   type: "object",
   properties: { answer: { type: "string" } },
@@ -107,13 +108,13 @@ async function collect(
   return result
 }
 
-test("sends Chat to the canonical project endpoint", async () => {
+test("sends Chat to the project's resource", async () => {
   let captured: JsonObject | undefined
   const provider = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
     fetch: async (url, init) => {
-      expect(String(url)).toBe(`${endpoint}/openai/v1/chat/completions`)
+      expect(String(url)).toBe(`${resource}/openai/v1/chat/completions`)
       const headers = new Headers(init?.headers)
       expect(headers.get("api-key")).toBe("key")
       expect(headers.has("anthropic-version")).toBe(false)

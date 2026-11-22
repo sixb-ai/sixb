@@ -11,8 +11,16 @@ test("Foundry indexing and text search record usage and enforce limits through S
   const foundry = createAzureAIFoundry({
     endpoint: "https://resource.services.ai.azure.com/api/projects/test",
     apiKey: "project-key",
-    fetch: async () =>
-      Response.json({
+    fetch: async (url) => {
+      if (new URL(String(url)).pathname.endsWith("/embeddings")) {
+        calls++
+        return Response.json({
+          model: "text-embedding-3-small",
+          data: [{ index: 0, embedding: [1, 0] }],
+          usage: { prompt_tokens: 12, total_tokens: 12 },
+        })
+      }
+      return Response.json({
         value: [
           {
             type: "ModelDeployment",
@@ -24,18 +32,7 @@ test("Foundry indexing and text search record usage and enforce limits through S
             sku: { name: "GlobalStandard" },
           },
         ],
-      }),
-    embeddings: {
-      endpoint: "https://resource.openai.azure.com/openai/v1",
-      apiKey: "resource-key",
-      fetch: async () => {
-        calls++
-        return Response.json({
-          model: "text-embedding-3-small",
-          data: [{ index: 0, embedding: [1, 0] }],
-          usage: { prompt_tokens: 12, total_tokens: 12 },
-        })
-      },
+      })
     },
     catalog: {
       fetch: async () =>

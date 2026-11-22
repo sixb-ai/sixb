@@ -4,7 +4,7 @@ import { vectorConfiguration } from "../../../packages/core/src/objects/vectors/
 import { type AzureAIFoundryEmbeddingOptions, createAzureAIFoundry } from "../src"
 
 const project = "https://project.services.ai.azure.com/api/projects/test"
-const resource = "https://embedding-resource.openai.azure.com"
+const resource = "https://project.services.ai.azure.com"
 const name = "text-embedding-3-small"
 
 function setup(
@@ -26,9 +26,13 @@ function setup(
     apiKey: "project-key",
     providerId: "my-foundry",
     fetch: async (url, init) => {
-      discoveryCount++
       expect(new Headers(init?.headers).get("api-key")).toBe("project-key")
-      expect(String(url)).toBe(`${project}/deployments?api-version=v1`)
+      if (String(url) !== `${project}/deployments?api-version=v1`) {
+        calls.push({ url: String(url), init })
+        if (options.resourceFetch) return options.resourceFetch(url, init)
+        return options.response?.() ?? response()
+      }
+      discoveryCount++
       return Response.json({
         value: [
           {
@@ -42,15 +46,6 @@ function setup(
           },
         ],
       })
-    },
-    embeddings: {
-      endpoint: resource,
-      apiKey: "embedding-key",
-      fetch: async (url, init) => {
-        calls.push({ url: String(url), init })
-        if (options.resourceFetch) return options.resourceFetch(url, init)
-        return options.response?.() ?? response()
-      },
     },
     catalog: {
       fetch: async () =>
@@ -93,9 +88,9 @@ function response(overrides: Record<string, unknown> = {}) {
   )
 }
 
-// Regression proof: remove the provider's embedding binding, or send inference through the
-// project transport. This fails before returning vectors and accounting evidence.
-test("embeddings route to their resource with separate credentials and preserve usage", async () => {
+// Regression proof: send embeddings to the project path in transport.ts url(). Azure answers it
+// with 404 (measured November 2026); here the URL assertion fails.
+test("embeddings go to the project's resource with its key and preserve usage", async () => {
   const f = setup()
   const model = f.provider.embedding("products", { model: f.identity, dimensions: 2 })
   expect(f.discoveryCount()).toBe(0)
@@ -115,7 +110,7 @@ test("embeddings route to their resource with separate credentials and preserve 
   })
   const call = f.calls[0]!
   expect(call.url).toBe(`${resource}/openai/v1/embeddings`)
-  expect(new Headers(call.init?.headers).get("api-key")).toBe("embedding-key")
+  expect(new Headers(call.init?.headers).get("api-key")).toBe("project-key")
   expect(new Headers(call.init?.headers).get("accept")).toBe("application/json")
   expect(call.init?.redirect).toBe("error")
   expect(JSON.parse(String(call.init?.body))).toEqual({
@@ -295,7 +290,7 @@ test("unsupported models and dimensions fail before inference", async () => {
 test("no implicit HTTP retries; provider errors redact resource credentials", async () => {
   const f = setup({
     response: () =>
-      Response.json({ error: { message: "embedding-key", code: "busy" } }, { status: 503 }),
+      Response.json({ error: { message: "project-key", code: "busy" } }, { status: 503 }),
   })
   await expect(
     f.provider.embedding("products", { model: f.identity, dimensions: 2 }).embed({ texts: ["x"] })
@@ -347,20 +342,15 @@ test("explicit pricing can rate a model absent from the public catalog", async (
   expect(model.costEstimator?.estimate({ usage: result.usage! })).toMatchObject({ status: "rated" })
 })
 
-test("resource endpoint and credentials are explicitly required and validated", () => {
-  const provider = createAzureAIFoundry({ endpoint: project, apiKey: "project-key" })
+test("a separate embeddings endpoint is refused: embeddings use the project's resource", () => {
   expect(() =>
-    provider.embedding("products", { model: { name, version: "1" }, dimensions: 2 })
-  ).toThrow("embeddings.endpoint")
-  for (const endpoint of [project, `${resource}/other`, `${resource}?key=secret`, "not-a-url"]) {
-    expect(() =>
-      createAzureAIFoundry({
-        endpoint: project,
-        apiKey: "key",
-        embeddings: { endpoint, apiKey: "resource-key" },
-      })
-    ).toThrow()
-  }
+    createAzureAIFoundry({
+      endpoint: project,
+      apiKey: "key",
+      // @ts-expect-error The option was removed.
+      embeddings: { endpoint: `${resource}/openai/v1`, apiKey: "resource-key" },
+    })
+  ).toThrow("Remove the embeddings option")
 })
 
 test("a successful response with invalid JSON retains its request identifier", async () => {
