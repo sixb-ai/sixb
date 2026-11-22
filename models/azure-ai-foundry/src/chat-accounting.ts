@@ -1,5 +1,5 @@
 import type { JsonObject, ModelCostEstimator, ModelRateCard, ModelUsage } from "@sixb/core/models"
-import { type PricedEstimator, tokenEstimator } from "./accounting"
+import { defaultLifetimeWrites, type PricedEstimator, tokenEstimator } from "./accounting"
 import { counter, object } from "./util"
 
 // Interpret Chat counters directly. Cache reads overlap prompt_tokens; reasoning overlaps
@@ -85,6 +85,8 @@ function tokenMeters(raw: JsonObject | undefined): boolean {
           (key !== "prompt_tokens_details" && meter === "reasoning_tokens")
         ) {
           if (counter(count) === undefined) return false
+        } else if (key === "prompt_tokens_details" && meter === "cache_write_tokens_details") {
+          if (!defaultLifetimeWrites(count)) return false
         } else if (key === "prompt_tokens_details" && meter === "image_tokens") {
           // Image tokens are already included in prompt_tokens, at the input token rate.
           const image = counter(count)
