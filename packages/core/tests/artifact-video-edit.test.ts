@@ -1452,6 +1452,42 @@ describe("a clip that goes on in later scenes", () => {
     ])
   })
 
+  // Guard proof: write no fades on the parts placeFound adds (edit.ts), dropping `fades`; each
+  // keeps the voice's fades, and the sound dips at every chapter's edge. Drop them from a part
+  // written again, or from the head in place, and a fade out is lost or left mid-clip.
+  test("fades in on its first part and out on its last, however it is placed", () => {
+    const voice = new Map(opening)
+    voice.set(
+      "scenes/hook.html",
+      scene(
+        "hook",
+        '<audio id="vo" src="media/a.mp4" data-start="0" data-duration="2" data-fade-in="0.5" data-fade-out="1"></audio>'
+      )
+    )
+    const fades = (files: ReadonlyMap<string, string | null>) =>
+      ["scenes/hook.html", "scenes/demo.html", "scenes/outro.html"].flatMap((file) =>
+        (readSceneTimeline(files.get(file) as string)?.clips ?? [])
+          .filter((clip) => clip.kind === "audio")
+          .map((clip) => [file, clip.fadeInMs, clip.fadeOutMs])
+      )
+
+    const long = applied(trimClip(voice, "scenes/hook.html", "vo", "end", 12_000), voice)
+    expect(fades(long)).toEqual([
+      ["scenes/hook.html", 500, undefined],
+      ["scenes/demo.html", undefined, undefined],
+      ["scenes/outro.html", undefined, 1000],
+    ])
+    // Shorter, its last part is now in the demo, and fades out there.
+    const shorter = applied(trimClip(long, "scenes/hook.html", "vo", "end", 5000), long)
+    expect(fades(shorter)).toEqual([
+      ["scenes/hook.html", 500, undefined],
+      ["scenes/demo.html", undefined, 1000],
+    ])
+    // Back in its first scene alone, it fades out there again.
+    const back = applied(trimClip(shorter, "scenes/hook.html", "vo", "end", 2000), shorter)
+    expect(fades(back)).toEqual([["scenes/hook.html", 500, 1000]])
+  })
+
   // Guard proof: write the sound on the part named alone in setClipSound (edit.ts); the hook's and
   // the outro's parts then play at full volume, and the fade out lands mid-clip. Find no chain in
   // setClipTiming, and the parts after the head play their file as they did, out of step.
