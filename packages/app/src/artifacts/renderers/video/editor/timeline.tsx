@@ -566,7 +566,7 @@ export function Timeline({
         clip: laid,
         startMs: laid.startMs,
         endMs: laid.endMs,
-        top: tracksHeight + laid.row * height + 2,
+        top: tracksHeight + rowTop(track.track, laid.row, track.rows) + 2,
         height: height - 4,
       })
     }
@@ -853,7 +853,7 @@ export function Timeline({
                       dragging={!!moving || !!trimming}
                       left={px(start)}
                       width={Math.max(6, px(end - start))}
-                      top={laid.row * ROW_PX[track.track]}
+                      top={rowTop(track.track, laid.row, track.rows)}
                       height={ROW_PX[track.track]}
                       target={target}
                       zoom={zoom}
@@ -980,6 +980,15 @@ function Marquee({
       }}
     />
   )
+}
+
+/**
+ * Where a row is drawn down its track: on the picture and text tracks from the foot, so a clip
+ * painted over another lies above it; sounds from the top.
+ */
+function rowTop(track: VideoTrack, row: number, rows: number): number {
+  const height = ROW_PX[track]
+  return track === "sound" ? row * height : (rows - 1 - row) * height
 }
 
 /** Whether two laid clips are the same clip of the same file, laid out at different times. */

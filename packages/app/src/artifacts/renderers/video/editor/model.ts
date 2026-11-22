@@ -136,7 +136,10 @@ export interface LaidClip {
   readonly endMs: number
   /** Whether it writes no length, and plays until its scene or file ends. */
   readonly open: boolean
-  /** Its row on its track: clips that overlap lie on rows of their own. */
+  /**
+   * Its row on its track: clips that overlap lie on rows of their own. On the picture and text
+   * tracks, row 0 is the lowest, and a clip painted over another lies above it.
+   */
   readonly row: number
 }
 
@@ -171,18 +174,30 @@ export function layClips(
 }
 
 /**
- * Clips on rows of their own track, in the order given: each on the first row free where it
- * starts, so clips that overlap lie apart.
+ * Clips on rows of their own track, in the order they paint: a scene's in its file's order, and a
+ * later scene's over an earlier one's, as a crossfade stacks them. On the picture and text tracks,
+ * what paints over a clip lies above it, every editor's way: each on the row over the highest it
+ * overlaps. Sounds stack nothing, and take the first row free where they start.
  */
 export function onRows(placed: readonly Omit<LaidClip, "row">[]): LaidClip[] {
-  const rows = new Map<VideoTrack, number[]>()
+  const laid = new Map<VideoTrack, LaidClip[]>()
   return placed.map((each) => {
-    const ends = rows.get(each.track) ?? []
-    rows.set(each.track, ends)
-    let row = ends.findIndex((end) => end <= each.startMs)
-    if (row < 0) row = ends.length
-    ends[row] = each.endMs
-    return { ...each, row }
+    const track = laid.get(each.track) ?? []
+    laid.set(each.track, track)
+    const overlapping = track.filter(
+      (other) => other.startMs < each.endMs && each.startMs < other.endMs
+    )
+
+    let row = 0
+    if (each.track === "sound") {
+      while (overlapping.some((other) => other.row === row)) row += 1
+    } else {
+      row = Math.max(-1, ...overlapping.map((other) => other.row)) + 1
+    }
+
+    const placedClip = { ...each, row }
+    track.push(placedClip)
+    return placedClip
   })
 }
 
