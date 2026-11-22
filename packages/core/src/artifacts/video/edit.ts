@@ -1630,8 +1630,6 @@ function splitChained(
   const second = splitFound(work, file, found, atMs, endMs)
   if (!chain || !second) return second
 
-  const piece = clipOf(work, file, second)
-  if (piece.continues) setAttributes(work, file, piece.source, { "data-continues": null })
   for (const part of chain.parts) {
     if (part.file === file || part.startMs < at) continue
     const now = clipOf(work, part.file, videoTarget(part.clip))
@@ -1769,6 +1767,7 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): vo
 
   const taken = takenNames(work)
   const plan = new Map<string, ClipChange>()
+  const repointed: [string, string][] = []
   for (const clip of timelineOf(work, file).clips) {
     if (!numericStart(work, file, clip)) continue
 
@@ -1802,6 +1801,9 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): vo
         taken
       )
       plan.set(clip.ref, { html: parts.html })
+      // What went on from it goes on from its last piece, which ends where it did.
+      const last = parts.refs.at(-1)
+      if (clip.id && last && last !== clip.id) repointed.push([clip.id, last])
       continue
     }
 
@@ -1817,9 +1819,24 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): vo
     })
   }
   rewriteClips(work, file, plan)
+  for (const [from, to] of repointed) repointContinues(work, from, to)
 
   const scene = sceneOf(work, file)
   if (scene) lengthenScene(work, scene.id, Math.max(MIN_CLIP_MS, map(scene.durationMs)))
+}
+
+/** Points every part that went on from the clip `from`, in any scene's file, to `to`. */
+function repointContinues(work: Working, from: string, to: string): void {
+  for (const file of work.paths()) {
+    if (file === VIDEO_ENTRY || !/\.html?$/i.test(file)) continue
+    const text = work.textOf(file)
+    if (text === undefined || !text.includes("data-continues")) continue
+    for (;;) {
+      const part = readSceneTimeline(work.text(file))?.clips.find((clip) => clip.continues === from)
+      if (!part) break
+      setAttributes(work, file, part.source, { "data-continues": to })
+    }
+  }
 }
 
 /**
@@ -2031,6 +2048,8 @@ function clipParts(
       "data-start": seconds(part.startMs),
       "data-duration": seconds(part.durationMs),
       ...(playsFile(clip) ? { "data-media-start": seconds(part.mediaStartMs) } : {}),
+      // Only the first piece goes on from the clip the whole did.
+      ...(index === 0 ? {} : { "data-continues": null }),
     })
   })
   return { html: html.join(`\n${indent}`), refs }
@@ -2248,20 +2267,20 @@ function logicalClip(
   ]
   if (!head) throw new EditError(`'${found.clip.ref}' is not one of the video's clips.`)
 
-  const last = others.at(-1) ?? head
-  const scene = sceneOf(work, last.file)
+  // As long as its scenes show it: each part to its scene's end, a part past it, unseen, as it
+  // is. A clip that goes on lasts as long as its parts show, so placed again it plays its file on
+  // without the gap or the hidden end a scene made longer or shorter under it left.
+  const shown = (part: { readonly file: string; readonly clip: VideoClip }) => {
+    if (part.clip.durationMs === undefined) return undefined
+    const scene = sceneOf(work, part.file)
+    if (!scene || part.clip.startMs >= scene.durationMs) return part.clip.durationMs
+    return Math.min(part.clip.durationMs, scene.durationMs - part.clip.startMs)
+  }
+  const lengths = [head, ...others].map(shown)
+  const durationMs = lengths.some((length) => length === undefined)
+    ? undefined
+    : lengths.reduce<number>((sum, length) => sum + (length ?? 0), 0)
   const startMs = head.startMs
-  const durationMs =
-    last.clip.durationMs === undefined
-      ? undefined
-      : (() => {
-          const end = videoStartOf(work, last.file, last.clip) + last.clip.durationMs
-          const shown =
-            scene && last.clip.startMs < scene.durationMs
-              ? Math.min(end, scene.startMs + scene.durationMs)
-              : end
-          return shown - startMs
-        })()
   return {
     file: head.file,
     clip: head.clip,
