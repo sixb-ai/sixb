@@ -37,16 +37,10 @@ for (const protocol of ["responses", "chat", "messages", "embeddings"] as const)
         },
       })
       try {
-        const transport = new FoundryTransport(
-          {
-            endpoint:
-              protocol === "embeddings"
-                ? origin.url.origin
-                : `${origin.url.origin}/api/projects/test`,
-            apiKey: "private-key",
-          },
-          protocol === "embeddings" ? "resource" : "project"
-        )
+        const transport = new FoundryTransport({
+          endpoint: `${origin.url.origin}/api/projects/test`,
+          apiKey: "private-key",
+        })
         const result = await transport
           .post(body, AbortSignal.timeout(2_000), "provider", "model", protocol)
           .then(

@@ -3,6 +3,7 @@ import {
   type LanguageModelDefinitionCatalog,
   ModelCatalogUnavailableError,
   ModelProviderError,
+  UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { RequestDiagnostics } from "./diagnostics"
 import type { AzureAIFoundryModelMetadata } from "./provider"
@@ -127,6 +128,11 @@ export class FoundryDeployments {
     if (!snapshot || !deployment)
       throw this.invalid(
         `Deployment '${name}' was not found in ${offline ? "cached project deployments; resolve online first" : "this project"}.`
+      )
+    // Sixb calls models on the project's own resource; a connection's deployment is elsewhere.
+    if (deployment.connectionName)
+      throw new UnsupportedModelFeatureError(
+        `${PREFIX} Deployment '${name}' comes from project connection '${deployment.connectionName}', on another resource. Configure a provider with that resource's project URL.`
       )
     return {
       deployment,

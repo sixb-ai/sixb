@@ -59,7 +59,6 @@ function deployment(
     modelVersion: "2026-01-01",
     capabilities,
     sku: { name: "GlobalStandard", capacity: 1 },
-    connectionName: "resource-connection",
   }
 }
 
@@ -163,7 +162,6 @@ test("coalesces paginated discovery and shares refreshed API keys and headers wi
     modelVersion: "2026-01-01",
     deployment: {
       name: "production",
-      connectionName: "resource-connection",
       sku: { name: "GlobalStandard" },
     },
   })

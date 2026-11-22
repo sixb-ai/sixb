@@ -22,19 +22,8 @@ import {
   type ResolvedDeployment,
 } from "./discovery"
 import type { AzureAIFoundryModelMetadata } from "./provider"
-import {
-  abortable,
-  type FoundryTransport,
-  readJson,
-  requestId,
-  type TransportOptions,
-} from "./transport"
+import { abortable, type FoundryTransport, readJson, requestId } from "./transport"
 import { counter, object, PREFIX } from "./util"
-
-export type AzureAIFoundryEmbeddingTransportOptions = Pick<
-  TransportOptions,
-  "endpoint" | "apiKey" | "headers" | "fetch"
->
 
 export interface AzureAIFoundryEmbeddingOptions {
   /** Pin the actual model behind the deployment; discovery must match before inference. */
@@ -55,7 +44,6 @@ interface EmbeddingResolution extends ResolvedDeployment {
   readonly configurableDimensions: boolean
 }
 
-/** Discovery uses project credentials; inference uses only the explicit resource transport. */
 export function createFoundryEmbedding(
   providerId: string,
   modelId: string,

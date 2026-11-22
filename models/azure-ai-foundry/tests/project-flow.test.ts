@@ -4,6 +4,7 @@ import { prepareAgentModel } from "../../../packages/agent/src/context-budget"
 import { createAzureAIFoundry } from "../src"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+const resource = "https://resource.services.ai.azure.com"
 const deployment = {
   type: "ModelDeployment",
   name: "production",
@@ -91,7 +92,7 @@ test("project URL and API key resolve an alias, enforce Sixb capabilities and pr
       expect(init?.redirect).toBe("error")
       if (String(url).endsWith("/deployments?api-version=v1"))
         return Response.json({ value: [deployment] })
-      expect(String(url)).toBe(`${endpoint}/openai/v1/chat/completions`)
+      expect(String(url)).toBe(`${resource}/openai/v1/chat/completions`)
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: "production",
         max_completion_tokens: 100,
@@ -156,7 +157,7 @@ test("project URL and API key resolve an alias, enforce Sixb capabilities and pr
   expect(calls).toEqual([
     `${endpoint}/deployments?api-version=v1`,
     "https://models.dev/api.json",
-    `${endpoint}/openai/v1/chat/completions`,
+    `${resource}/openai/v1/chat/completions`,
   ])
 })
 
@@ -182,7 +183,9 @@ test("discovery failure cannot fall back to an unverified inference binding", as
   expect(calls).toBe(1)
 })
 
-test("native Messages rejects connected deployments whose resource cannot be inferred", async () => {
+// Regression proof: remove the connectionName check in FoundryDeployments.resolve. The
+// bindings then resolve, and their calls would go to a resource that lacks the deployment.
+test("a deployment from a project connection is rejected for every protocol", async () => {
   const foundry = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
@@ -190,10 +193,16 @@ test("native Messages rejects connected deployments whose resource cannot be inf
       Response.json({ value: [{ ...deployment, connectionName: "other-resource" }] }),
     catalog: { fetch: async () => Response.json({ azure: { models: {} } }) },
   })
-  expect(await foundry.catalog.list({ protocol: "messages" })).toEqual([])
-  await expect(foundry.messages("production").resolve()).rejects.toThrow(
-    "owning resource's project URL"
-  )
+  expect(await foundry.catalog.list()).toEqual([])
+  for (const binding of [
+    foundry("production"),
+    foundry.responses("production"),
+    foundry.chat("production"),
+    foundry.messages("production"),
+  ])
+    await expect(binding.resolve()).rejects.toThrow(
+      "comes from project connection 'other-resource', on another resource"
+    )
 })
 
 // The old optional apiKey accepted these configurations at construction.

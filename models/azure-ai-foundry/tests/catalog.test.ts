@@ -356,7 +356,7 @@ test("resolves Fireworks naming conventions with Azure transport and pinned refe
     endpoint,
     apiKey: "key",
     fetch: async (url, init) => {
-      expect(String(url)).toStartWith(endpoint)
+      expect(String(url)).toStartWith(new URL(endpoint).origin)
       body = JSON.parse(String(init?.body))
       return new Response("unused")
     },

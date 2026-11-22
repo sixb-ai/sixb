@@ -57,20 +57,11 @@ export function assertDeploymentKind(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Deployment '${deploymentName}' runs ${deployment.modelName}, not ${article(kind)} ${kind} model. Use ${KIND_BINDINGS[actual]}.`
     )
-  // A connection's deployment lives on another resource, which its record does not name.
-  if (deployment.connectionName)
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} ${capitalize(article(kind))} ${kind} deployment from a project connection cannot be routed; use the owning resource's project URL and API key.`
-    )
 }
 
 /** "an image", "a speech": the article a kind's name takes. */
 export function article(kind: FoundryKind): string {
   return /^[aeiou]/.test(kind) ? "an" : "a"
-}
-
-function capitalize(word: string): string {
-  return word.charAt(0).toUpperCase() + word.slice(1)
 }
 
 function isEmbeddingDeployment(deployment: AzureAIFoundryDeployment): boolean {

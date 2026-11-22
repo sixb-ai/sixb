@@ -5,9 +5,9 @@ Sixb's execution session reserves and records calls around the adapter.
 
 ```text
 Binding (no I/O)
-  → Discover project deployment with project credentials
+  → Discover the project deployment
   → Verify declared model/version; validate dimensions and pin pricing
-  → POST resource /openai/v1/embeddings with resource credentials
+  → POST the project's resource /openai/v1/embeddings
   → Capture usage and request ID; validate model and indexed vectors
 ```
 
@@ -19,8 +19,9 @@ Binding (no I/O)
   resolution; catalog refresh affects future resolutions, not existing snapshots.
 - The catalog separates embedding entries before building language definitions. models.dev can
   label embedding output as text; known embedding families and IDs take precedence.
-- Resource transport reuses authentication, redaction, HTTP errors, and redirect protection.
-  Embeddings consume bounded JSON responses, not SSE, and never retry inference automatically.
+- The provider's one transport supplies authentication, redaction, HTTP errors, and redirect
+  protection. Embeddings consume bounded JSON responses, not SSE, and never retry inference
+  automatically.
 - `dimensions` is sent only for third-generation OpenAI embeddings. Ada's fixed output size is
   checked locally. Response indices restore batch order; missing, duplicate, nonfinite, zero,
   or incorrectly sized vectors raise `EmbeddingModelResponseError` with available billing evidence.
@@ -31,13 +32,13 @@ Binding (no I/O)
   300,000 bytes total. Byte-level tokenization bounds tokens by bytes; one token of per-input
   headroom avoids the 8191/8192 boundary. The projection indexer also applies its smaller local
   page bounds. This is eligibility for grouping, not truncation or a deployment-quota guarantee.
-- Credentials and signals are isolated between project discovery and resource inference.
-  Discovery has its own bounded, shared cache; cancelling one inference waiter does not abort
-  discovery needed by other callers.
+- Signals are isolated between discovery and inference. Discovery has its own bounded, shared
+  cache; cancelling one inference waiter does not abort discovery needed by other callers.
 
-Foundry project endpoints do not route embeddings. Explicit resource configuration avoids guessing
-an endpoint or forwarding project credentials to a connected resource. The deployment must match
-on both endpoints; the returned model identity is validated before vectors are accepted.
+The project's own path does not route embeddings (Azure answers 404), so they go to the resource
+that owns the project, with the same credentials. A deployment from a project connection runs on
+another resource and is rejected at resolution. The returned model identity is validated before
+vectors are accepted.
 
 Cohere's document/query input purpose is absent from the core embedding request contract, so the
 adapter rejects that family instead of selecting a purpose implicitly.

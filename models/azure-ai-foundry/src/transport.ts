@@ -40,15 +40,23 @@ export interface TransportOptions {
   readonly maxRetryDelayMs?: number
 }
 
+/**
+ * The project URL says what is deployed; every model call goes to the resource that owns the
+ * project. The project's own inference path answers through another service that trails new
+ * models: for gpt-6.2-sol it refused reasoning efforts, ignored tools and reported no input
+ * tokens, where the resource answered all three (measured November 2026).
+ */
 export class FoundryTransport {
   private readonly diagnostics = new WeakMap<Response, RequestDiagnostics>()
-  readonly baseUrl: string
+  /** Deployment discovery: `https://<resource>.services.ai.azure.com/api/projects/<project>`. */
   readonly projectUrl: string
+  /** Every model call: the project URL's origin. */
+  readonly resourceUrl: string
   private readonly options: TransportOptions
 
-  constructor(options: TransportOptions, target: "project" | "resource" = "project") {
+  constructor(options: TransportOptions) {
     if (!URL.canParse(options.endpoint))
-      throw new TypeError(`${PREFIX} endpoint must be a valid ${target} URL.`)
+      throw new TypeError(`${PREFIX} endpoint must be a valid project URL.`)
     const url = new URL(options.endpoint)
     if (
       !["https:", "http:"].includes(url.protocol) ||
@@ -58,20 +66,16 @@ export class FoundryTransport {
       url.hash
     ) {
       throw new TypeError(
-        `${PREFIX} endpoint must be an HTTP(S) ${target} URL without credentials, query, or fragment.`
+        `${PREFIX} endpoint must be an HTTP(S) project URL without credentials, query, or fragment.`
       )
     }
     const path = url.pathname.replace(/\/+$/, "")
-    if (target === "project" && !/^\/api\/projects\/[^/]+$/.test(path))
+    if (!/^\/api\/projects\/[^/]+$/.test(path))
       throw new TypeError(
         `${PREFIX} endpoint must be a Foundry project URL: https://<resource>.services.ai.azure.com/api/projects/<project>.`
       )
-    if (target === "resource" && path !== "" && path !== "/openai/v1")
-      throw new TypeError(
-        `${PREFIX} embeddings.endpoint must be a resource origin or /openai/v1 URL.`
-      )
     this.projectUrl = `${url.origin}${path}`
-    this.baseUrl = target === "project" ? `${this.projectUrl}/openai/v1` : `${url.origin}/openai/v1`
+    this.resourceUrl = url.origin
     if (
       typeof options.apiKey !== "function" &&
       (typeof options.apiKey !== "string" || !options.apiKey.trim())
@@ -188,24 +192,21 @@ export class FoundryTransport {
   }
 
   url(protocol: FoundryRoute, deployment?: string): string {
-    if (protocol === "embeddings") return `${this.baseUrl}/embeddings`
-    // Audio deployments answer on the resource origin, by deployment path.
+    const resource = this.resourceUrl
+    const path = encodeURIComponent(deployment ?? "")
+    // Audio and image deployments answer by deployment path, at the versions noted above.
     if (protocol === "transcription")
-      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/audio/transcriptions?api-version=${AUDIO_API_VERSION}`
-    // Decision models answer on the resource origin; the project path does not route them.
-    if (protocol === "decision")
-      return `${new URL(this.baseUrl).origin}/providers/microsoft/v1/systemone`
-    // Image deployments answer on the resource origin, by deployment path.
+      return `${resource}/openai/deployments/${path}/audio/transcriptions?api-version=${AUDIO_API_VERSION}`
     if (protocol === "image" || protocol === "image-edit")
-      return `${new URL(this.baseUrl).origin}/openai/deployments/${encodeURIComponent(deployment ?? "")}/images/${protocol === "image" ? "generations" : "edits"}?api-version=${IMAGE_API_VERSION}`
-    // Cohere rerankers answer Cohere's v2 API on the resource origin.
-    if (protocol === "reranking")
-      return `${new URL(this.baseUrl).origin}/providers/cohere/v2/rerank`
-    // Speech answers on the resource's v1 API; the project path does not route it.
-    if (protocol === "speech") return `${new URL(this.baseUrl).origin}/openai/v1/audio/speech`
-    if (protocol === "responses") return `${this.baseUrl}/responses`
-    if (protocol === "chat") return `${this.baseUrl}/chat/completions`
-    return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
+      return `${resource}/openai/deployments/${path}/images/${protocol === "image" ? "generations" : "edits"}?api-version=${IMAGE_API_VERSION}`
+    if (protocol === "decision") return `${resource}/providers/microsoft/v1/systemone`
+    // Cohere rerankers answer Cohere's v2 API.
+    if (protocol === "reranking") return `${resource}/providers/cohere/v2/rerank`
+    if (protocol === "messages") return `${resource}/anthropic/v1/messages`
+    if (protocol === "embeddings") return `${resource}/openai/v1/embeddings`
+    if (protocol === "speech") return `${resource}/openai/v1/audio/speech`
+    if (protocol === "chat") return `${resource}/openai/v1/chat/completions`
+    return `${resource}/openai/v1/responses`
   }
 }
 

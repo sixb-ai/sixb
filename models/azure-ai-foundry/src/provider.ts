@@ -42,7 +42,6 @@ import {
 import {
   type AzureAIFoundryEmbeddingModel,
   type AzureAIFoundryEmbeddingOptions,
-  type AzureAIFoundryEmbeddingTransportOptions,
   createFoundryEmbedding,
 } from "./embedding"
 import {
@@ -85,8 +84,6 @@ import {
 import { object, PREFIX } from "./util"
 
 export interface AzureAIFoundryOptions extends TransportOptions {
-  /** Explicit resource transport: project endpoints do not route embeddings. */
-  readonly embeddings?: AzureAIFoundryEmbeddingTransportOptions
   /** Public model capabilities and reference pricing from models.dev. */
   readonly catalog?: AzureAIFoundryCatalogOptions
   /** Namespace bindings from different resources/projects in a single Sixb catalog. */
@@ -181,28 +178,17 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
 }
 
 export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFoundryProvider {
+  if ("embeddings" in options)
+    throw new TypeError(
+      `${PREFIX} Remove the embeddings option: embedding deployments are called on the project's resource with its credentials.`
+    )
   const transport = new FoundryTransport(options)
   const providerId = options.providerId ?? "azure-ai-foundry"
   if (!providerId.trim()) throw new TypeError(`${PREFIX} providerId must not be empty.`)
   const deployments = new FoundryDeployments(providerId, transport, options.discovery)
   const modelCatalog = new RemoteModelsDevCatalog(options.catalog)
-  const embeddingTransport = options.embeddings
-    ? new FoundryTransport(options.embeddings, "resource")
-    : undefined
-  const embedding = (name: string, input: AzureAIFoundryEmbeddingOptions) => {
-    if (!embeddingTransport)
-      throw new TypeError(
-        `${PREFIX} Configure embeddings.endpoint and embeddings.apiKey before declaring an embedding model.`
-      )
-    return createFoundryEmbedding(
-      providerId,
-      name,
-      input,
-      embeddingTransport,
-      deployments,
-      modelCatalog
-    )
-  }
+  const embedding = (name: string, input: AzureAIFoundryEmbeddingOptions) =>
+    createFoundryEmbedding(providerId, name, input, transport, deployments, modelCatalog)
   const model = <P extends FoundryProtocol = FoundryProtocol>(
     protocol: P | undefined,
     deploymentName: string,
@@ -247,6 +233,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
       const name = deployment.name
       // Listings hold language models; every other kind has its own binding.
       if (
+        deployment.connectionName ||
         deploymentKind(deployment) !== "language" ||
         (await modelCatalog.getEmbedding(deployment.modelName, true))
       )
@@ -368,11 +355,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       ...structuredClone(serializable),
       ...(costEstimator ? { costEstimator } : {}),
     }
-    this.scope = JSON.stringify([
-      protocol === "messages" ? transport.url(protocol) : transport.baseUrl,
-      this.protocol,
-      modelId,
-    ])
+    this.scope = JSON.stringify([transport.url(protocol), protocol, modelId])
     this.reliableReasoning =
       options.reasoningUsage === "unknown"
         ? false
