@@ -83,7 +83,14 @@ import {
 } from "./transport"
 import { object, PREFIX } from "./util"
 
-export interface AzureAIFoundryOptions extends TransportOptions {
+export interface AzureAIFoundryOptions extends Omit<TransportOptions, "endpoint"> {
+  /**
+   * The project endpoint from the Foundry portal,
+   * `https://<resource>.services.ai.azure.com/api/projects/<project>`.
+   * Default: `AZURE_AI_FOUNDRY_ENDPOINT`. Without `credential`, `apiKey` defaults to
+   * `AZURE_AI_FOUNDRY_API_KEY`, read for each call.
+   */
+  readonly endpoint?: string
   /** Public model capabilities and reference pricing from models.dev. */
   readonly catalog?: AzureAIFoundryCatalogOptions
   /** Namespace bindings from different resources/projects in a single Sixb catalog. */
@@ -177,12 +184,23 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
 
-export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFoundryProvider {
+export function createAzureAIFoundry(options: AzureAIFoundryOptions = {}): AzureAIFoundryProvider {
   if ("embeddings" in options)
     throw new TypeError(
       `${PREFIX} Remove the embeddings option: embedding deployments are called on the project's resource with its credentials.`
     )
-  const transport = new FoundryTransport(options)
+  const endpoint = options.endpoint ?? process.env.AZURE_AI_FOUNDRY_ENDPOINT
+  if (!endpoint)
+    throw new TypeError(
+      `${PREFIX} endpoint is required: pass the project endpoint or set AZURE_AI_FOUNDRY_ENDPOINT.`
+    )
+  const transport = new FoundryTransport({
+    ...options,
+    endpoint,
+    ...(options.credential || options.apiKey !== undefined
+      ? {}
+      : { apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY }),
+  })
   const providerId = options.providerId ?? "azure-ai-foundry"
   if (!providerId.trim()) throw new TypeError(`${PREFIX} providerId must not be empty.`)
   const deployments = new FoundryDeployments(providerId, transport, options.discovery)

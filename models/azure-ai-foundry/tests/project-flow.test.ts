@@ -218,9 +218,134 @@ test("a deployment from a project connection is rejected for every protocol", as
     )
 })
 
-// The old optional apiKey accepted these configurations at construction.
-test.each([undefined, "   "])("requires an explicit nonempty API key (%j)", (apiKey) => {
-  expect(() => createAzureAIFoundry({ endpoint, apiKey })).toThrow("apiKey is required")
+const noCatalog = { fetch: async () => Response.json({ azure: { models: {} } }) }
+const hello = {
+  callId: "test",
+  messages: [{ role: "user" as const, content: [{ type: "text" as const, text: "Hi" }] }],
+  tools: [],
+  maxOutputTokens: 100,
+  signal: AbortSignal.timeout(1000),
+}
+const answered = () => {
+  const response = { id: "r", model: "future-model-2026-09-01" }
+  const usage = { input_tokens: 1, output_tokens: 1 }
+  return new Response(
+    [
+      { type: "response.created", response },
+      { type: "response.completed", response: { ...response, status: "completed", usage } },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join("")
+  )
+}
+
+// Regression proof: drop the AZURE_AI_FOUNDRY_* defaults in createAzureAIFoundry. It then
+// throws without an endpoint, and discovery sends no key.
+test("connects from AZURE_AI_FOUNDRY_ENDPOINT and AZURE_AI_FOUNDRY_API_KEY, read for each call", async () => {
+  const saved = [process.env.AZURE_AI_FOUNDRY_ENDPOINT, process.env.AZURE_AI_FOUNDRY_API_KEY]
+  const keys: (string | null)[] = []
+  try {
+    process.env.AZURE_AI_FOUNDRY_ENDPOINT = endpoint
+    process.env.AZURE_AI_FOUNDRY_API_KEY = "first-key"
+    const foundry = createAzureAIFoundry({
+      catalog: noCatalog,
+      fetch: async (url, init) => {
+        expect(String(url)).toBe(`${endpoint}/deployments?api-version=v1`)
+        keys.push(new Headers(init?.headers).get("api-key"))
+        return Response.json({ value: [deployment] })
+      },
+    })
+    await foundry.catalog.refresh()
+    process.env.AZURE_AI_FOUNDRY_API_KEY = "second-key"
+    await foundry.catalog.refresh()
+    expect(keys).toEqual(["first-key", "second-key"])
+    delete process.env.AZURE_AI_FOUNDRY_API_KEY
+    const missing = await foundry.catalog.refresh().catch((error: unknown) => error)
+    expect(String((missing as Error).cause)).toContain("set AZURE_AI_FOUNDRY_API_KEY")
+    delete process.env.AZURE_AI_FOUNDRY_ENDPOINT
+    expect(() => createAzureAIFoundry()).toThrow("set AZURE_AI_FOUNDRY_ENDPOINT")
+  } finally {
+    for (const [name, value] of [
+      ["AZURE_AI_FOUNDRY_ENDPOINT", saved[0]],
+      ["AZURE_AI_FOUNDRY_API_KEY", saved[1]],
+    ] as const)
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+  }
+})
+
+// A cognitiveservices.azure.com token is refused by project discovery (measured November 2026).
+// Regression proof: send the key headers beside the token in transport.ts headers(), or ask for
+// another scope; the header or scope assertions fail.
+test("an Entra ID credential signs discovery and every model call with one cached token", async () => {
+  const scopes: unknown[] = []
+  const sent: Headers[] = []
+  const foundry = createAzureAIFoundry({
+    endpoint,
+    credential: {
+      getToken: async (scope) => {
+        scopes.push(scope)
+        return { token: `token-${scopes.length}`, expiresOnTimestamp: Date.now() + 60 * 60_000 }
+      },
+    },
+    catalog: noCatalog,
+    fetch: async (url, init) => {
+      sent.push(new Headers(init?.headers))
+      if (String(url).endsWith("/deployments?api-version=v1"))
+        return Response.json({ value: [deployment] })
+      return answered()
+    },
+  })
+  for await (const event of (await foundry("production").stream(hello)).events)
+    if (event.type === "error") throw event.error
+  await foundry.messages("production").stream(hello)
+  expect(scopes).toEqual(["https://ai.azure.com/.default"])
+  expect(sent).toHaveLength(3)
+  for (const headers of sent) {
+    expect(headers.get("authorization")).toBe("Bearer token-1")
+    expect(headers.has("api-key")).toBe(false)
+    expect(headers.has("x-api-key")).toBe(false)
+  }
+})
+
+// Regression proof: drop the five-minute margin in bearerToken; the second call then reuses
+// the first token.
+test("a token within five minutes of expiry is renewed, and errors never show it", async () => {
+  let issued = 0
+  const foundry = createAzureAIFoundry({
+    endpoint,
+    credential: {
+      getToken: async () => ({
+        token: `secret-token-${++issued}`,
+        expiresOnTimestamp: Date.now() + 4 * 60_000,
+      }),
+    },
+    catalog: noCatalog,
+    fetch: async (url, init) => {
+      if (String(url).endsWith("/deployments?api-version=v1"))
+        return Response.json({ value: [deployment] })
+      const echoed = new Headers(init?.headers).get("authorization")
+      return Response.json({ error: { message: `Refused ${echoed}` } }, { status: 400 })
+    },
+  })
+  const error = await foundry("production")
+    .stream(hello)
+    .catch((failure: unknown) => failure)
+  expect(String(error)).toContain("Refused Bearer [REDACTED]")
+  expect(String(error)).not.toContain("secret-token")
+  expect(issued).toBe(2)
+})
+
+test("takes apiKey or credential, not both, and refuses a blank key", () => {
+  const credential = { getToken: async () => ({ token: "token" }) }
+  expect(() => createAzureAIFoundry({ endpoint, apiKey: "key", credential })).toThrow(
+    "either apiKey or credential"
+  )
+  expect(() => createAzureAIFoundry({ endpoint, apiKey: "   " })).toThrow(
+    "apiKey or credential is required"
+  )
+  // @ts-expect-error A credential needs getToken.
+  expect(() => createAzureAIFoundry({ endpoint, credential: {} })).toThrow("getToken")
 })
 
 test.each([
