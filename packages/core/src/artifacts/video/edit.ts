@@ -2383,6 +2383,20 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           : undefined
       if (headId && headId === was.id) taken.add(headId)
 
+      // As one clip, it fades in on its first part and out on its last: the fade out it ended on.
+      const lastOther = plan.others?.at(-1)
+      const fadeOutMs = lastOther ? lastOther.clip.fadeOutMs : was.fadeOutMs
+      const fades = (n: number, now: VideoClip): Record<string, string | null> => ({
+        ...(n > 0 && now.fadeInMs !== undefined ? { "data-fade-in": null } : {}),
+        ...(n < parts.length - 1
+          ? now.fadeOutMs === undefined
+            ? {}
+            : { "data-fade-out": null }
+          : now.fadeOutMs === fadeOutMs
+            ? {}
+            : { "data-fade-out": fadeOutMs === undefined ? null : seconds(fadeOutMs) }),
+      })
+
       parts.forEach((part, n) => {
         const timing = {
           start: seconds(part.startMs - part.scene.startMs),
@@ -2401,6 +2415,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
               : { "data-media-start": timing.media }),
             ...(headId && headId !== was.id ? { id: headId } : {}),
             ...(was.continues ? { "data-continues": null } : {}),
+            ...fades(n, was),
           })
           return
         }
@@ -2420,6 +2435,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
               ? {}
               : { "data-media-start": timing.media }),
             ...(old.continues === headId ? {} : { "data-continues": headId ?? null }),
+            ...fades(n, old),
           })
           return
         }
@@ -2438,6 +2454,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
             : { "data-media-start": timing.media }),
           ...(moved === undefined ? {} : { src: moved }),
           "data-continues": n === 0 ? null : (headId ?? null),
+          ...fades(n, was),
           ...(n === 0 ? {} : { [PLACING]: null }),
         })
         carried.push({
