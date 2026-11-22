@@ -14,6 +14,8 @@ type FixtureOptions<T> = T & { identity?: Identity }
 
 // Protocol fixtures still exercise mandatory deployment resolution, with synthetic Azure
 // records and an empty public catalog. `identity` describes the mock Azure response only.
+// The default binding is Responses whatever the publisher: these are adapter fixtures, and
+// protocol selection has its own tests.
 export function createAzureAIFoundry(options: AzureAIFoundryOptions) {
   const records = new Map<string, unknown>()
   const provider = create({
@@ -42,7 +44,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions) {
   }
   return Object.assign(
     (name: string, input: FixtureOptions<AzureAIFoundryModelOptions> = {}) =>
-      provider(name, register(name, input, "responses")),
+      provider.responses(name, register(name, input, "responses")),
     {
       providerId: provider.providerId,
       catalog: provider.catalog,

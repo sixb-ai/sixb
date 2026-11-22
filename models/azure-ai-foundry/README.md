@@ -308,11 +308,19 @@ Use `definition.publisher` to override the displayed author for an unrecognized 
 ## Protocols and controls
 
 ```ts
-foundry("production")           // Catalog protocol → Responses/Chat/Messages flags → Responses.
-foundry.responses("production")
+foundry("gpt-production")      // Responses: Azure reports the publisher as OpenAI.
+foundry("claude-production")   // Messages: Azure reports Anthropic.
+foundry("kimi-production")     // Chat: every other publisher.
+
+foundry.responses("production") // Choose the protocol yourself.
 foundry.chat("production")
 foundry.messages("claude-production")
 ```
+
+The publisher decides because each protocol serves some models only in part: OpenAI models reason
+with tools on Responses but not on Chat, Claude answers Messages but not Chat, and models such as
+Kimi and DeepSeek take a reasoning effort on Chat but not on Responses. Azure's deployment records
+cannot tell them apart: they report `chat_completion` for every chat model, Claude included.
 
 Every protocol calls the project's resource: `/openai/v1/responses`, `/openai/v1/chat/completions`
 and `/anthropic/v1/messages`. The project's own inference path is not used: it answers through
