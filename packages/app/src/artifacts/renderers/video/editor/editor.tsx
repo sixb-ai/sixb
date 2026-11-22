@@ -36,6 +36,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import {
   ArrowRightFromLine,
   ArrowRightToLine,
+  GalleryHorizontalEnd,
   Keyboard,
   Magnet,
   Maximize2,
@@ -76,9 +77,11 @@ import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
 import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt } from "./model"
+import { readEveryScene, writeEveryScene } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
   type EditorSelection,
+  everySceneClips,
   heardRecordings,
   laidClips,
   openEnd,
@@ -135,6 +138,7 @@ export default function VideoEditor({
   const [marks, setMarks] = useState<{ readonly in?: number; readonly out?: number }>({})
   const [magnetic, setMagnetic] = useState(true)
   const [snapping, setSnapping] = useState(true)
+  const [everyScene, setEveryScene] = useState(readEveryScene)
   const [panel, setPanel] = useState<"inspector" | "transcript">("inspector")
   const [notice, setNotice] = useState<{ readonly title: string; readonly detail?: string } | null>(
     null
@@ -163,6 +167,12 @@ export default function VideoEditor({
   const clips = useMemo(
     () => (composition ? laidClips(state, composition, open) : []),
     [state, composition, open]
+  )
+  // What the timeline shows, splits and steps through: the open scene's clips, or every scene's.
+  // The Transcript tab keeps to the open scene's either way.
+  const shown = useMemo(
+    () => (composition && everyScene ? everySceneClips(state, composition) : clips),
+    [state, composition, everyScene, clips]
   )
   const clip = selectedClip(state, selection)
   const playing = sceneAt(scenes, timeMs)
@@ -302,7 +312,7 @@ export default function VideoEditor({
 
   /** The clip the playhead splits: the one selected when it is under it, else the picture on top. */
   const splitTarget = (): LaidClip | undefined => {
-    const under = clips.filter((laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100)
+    const under = shown.filter((laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100)
     const chosen =
       clip && selection?.type === "clip"
         ? under.find((laid) => laid.file === selection.file && laid.clip.ref === clip.ref)
@@ -443,7 +453,7 @@ export default function VideoEditor({
         if (!composition) return
         handled()
         const point = nextEditPoint(
-          editPoints(composition, clips),
+          editPoints(composition, shown),
           timeMs,
           key === "ArrowUp" ? -1 : 1
         )
@@ -726,7 +736,7 @@ export default function VideoEditor({
       <div className="flex h-[min(45%,18.5rem)] min-h-[12rem] shrink-0 flex-col border-t border-border">
         <Timeline
           composition={composition}
-          clips={clips}
+          clips={shown}
           open={open}
           selection={selection}
           timeMs={timeMs}
@@ -791,6 +801,11 @@ export default function VideoEditor({
               onMagnetic={setMagnetic}
               snapping={snapping}
               onSnapping={setSnapping}
+              everyScene={everyScene}
+              onEveryScene={(on) => {
+                setEveryScene(on)
+                writeEveryScene(on)
+              }}
               zoom={zoom}
               onImport={(files) => {
                 if (!open) return
@@ -913,6 +928,8 @@ function Toolbar({
   onMagnetic,
   snapping,
   onSnapping,
+  everyScene,
+  onEveryScene,
   zoom,
   onImport,
   formatLength,
@@ -934,6 +951,8 @@ function Toolbar({
   readonly onMagnetic: (on: boolean) => void
   readonly snapping: boolean
   readonly onSnapping: (on: boolean) => void
+  readonly everyScene: boolean
+  readonly onEveryScene: (on: boolean) => void
   readonly zoom: ZoomControls
   readonly onImport: (files: File[]) => void
   readonly formatLength: (ms: number) => string
@@ -1041,6 +1060,21 @@ function Toolbar({
             </Toggle>
           </TooltipTrigger>
           <TooltipContent>{editor.snappingHint}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Toggle
+              size="sm"
+              pressed={everyScene}
+              onPressedChange={onEveryScene}
+              aria-label={editor.everyScene}
+              className="h-8 gap-1.5 px-2 text-[13px]"
+            >
+              <GalleryHorizontalEnd />
+              <span className="@max-4xl/toolbar:sr-only">{editor.everyScene}</span>
+            </Toggle>
+          </TooltipTrigger>
+          <TooltipContent>{editor.everySceneHint}</TooltipContent>
         </Tooltip>
         <Divider />
         <ToolButton label={editor.zoomOut} onClick={zoom.zoomOut} disabled={!zoom.canZoomOut}>
