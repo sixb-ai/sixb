@@ -26,11 +26,13 @@ import {
   readRootLayers,
   readRootTimeline,
   readSceneTimeline,
+  type VideoChain,
   type VideoClip,
   type VideoElementSource,
   type VideoFileTimeline,
   type VideoText,
   type VideoTrack,
+  videoChains,
 } from "./timeline"
 
 // What an editor does to a video, as the smallest changes to the text of its files: a scene made
@@ -294,7 +296,22 @@ export function setClipTiming(
       throw new EditError("A clip plays its file from 0 or later.")
     }
 
-    setAttributes(work, file, found.source, {
+    // A clip that goes on in later scenes plays its file on from as far further in each.
+    const chain = chainsOf(work).get(`${file}\n${found.ref}`)
+    if (mediaStartMs !== undefined && playsFile(found) && chain) {
+      const by = mediaStartMs - found.mediaStartMs
+      if (chain.parts.some((part) => part.clip.mediaStartMs + by < 0)) {
+        throw new EditError("A clip plays its file from 0 or later.")
+      }
+      for (const part of chain.parts) {
+        if (part.file === file) continue
+        setAttributes(work, part.file, clipOf(work, part.file, part.clip.ref).source, {
+          "data-media-start": seconds(part.clip.mediaStartMs + by),
+        })
+      }
+    }
+
+    setAttributes(work, file, clipOf(work, file, found.ref).source, {
       ...(startMs === undefined ? {} : { "data-start": seconds(startMs) }),
       ...(durationMs === undefined ? {} : { "data-duration": seconds(durationMs) }),
       ...(mediaStartMs === undefined || !playsFile(found)
@@ -323,21 +340,53 @@ export function trimClip(
   return placing(sources, (work) => {
     const found = clipOf(work, file, clip)
     const end = clipEnd(found, options.endMs)
+    // Where the file's composition starts in the video: `toMs` is from there.
+    const offsetMs = videoStartOf(work, file, found) - found.startMs
+    const chains = file === VIDEO_ENTRY ? new Map<string, VideoChain>() : chainsOf(work)
+    const logical = logicalClip(work, chains, { file, clip: found })
 
     if (edge === "end") {
-      const length = Math.round(toMs) - found.startMs
-      if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
-      if (length === found.durationMs) return undefined
-
       if (options.ripple || file === VIDEO_ENTRY) {
+        const length = Math.round(toMs) - found.startMs
+        if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
+        if (length === found.durationMs) return undefined
+
         setAttributes(work, file, found.source, { "data-duration": seconds(length) })
         if (options.ripple)
           ripple(work, file, end, found.startMs + length - end, new Set([found.ref]))
         return undefined
       }
 
+      // The clip as one, whichever part's end is pulled: it ends there in the video.
+      const length = offsetMs + Math.round(toMs) - logical.startMs
+      if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
+      // As long as its scenes show it already: nothing changes.
+      if (length === logical.durationMs) return undefined
+      return placeFound(work, [{ ...logical, durationMs: length }])
+    }
+
+    // A clip that goes on in later scenes starts later or sooner as one, and is placed again:
+    // never before its file's start, nor its first scene's.
+    if ((logical.others?.length ?? 0) > 0 && !options.ripple) {
+      const head = sceneOf(work, logical.file)
+      const into = logical.clip.mediaStartMs
+      const floor = Math.max(
+        head?.startMs ?? 0,
+        playsFile(logical.clip) ? logical.startMs - into : (head?.startMs ?? 0)
+      )
+      const startMs = Math.max(offsetMs + Math.round(toMs), floor)
+      const endMs = logical.startMs + (logical.durationMs ?? 0)
+      if (endMs - startMs < MIN_CLIP_MS) {
+        throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
+      }
+      if (startMs === logical.startMs) return undefined
       return placeFound(work, [
-        { file, clip: found, startMs: videoStartOf(work, file, found), durationMs: length },
+        {
+          ...logical,
+          startMs,
+          durationMs: endMs - startMs,
+          mediaStartMs: into + startMs - logical.startMs,
+        },
       ])
     }
 
@@ -398,14 +447,21 @@ export function setClipSound(
       if (fade !== undefined && !(fade >= 0)) throw new EditError("A fade lasts 0 s or more.")
     }
 
-    setAttributes(work, file, found.source, {
-      ...(volume === undefined ? {} : { "data-volume": String(Math.round(volume * 100) / 100) }),
-      ...(fadeInMs === undefined
-        ? {}
-        : { "data-fade-in": fadeInMs === 0 ? null : seconds(fadeInMs) }),
-      ...(fadeOutMs === undefined
-        ? {}
-        : { "data-fade-out": fadeOutMs === 0 ? null : seconds(fadeOutMs) }),
+    // A clip that goes on in later scenes sounds as one: as loud in each part, fading in on the
+    // first and out on the last.
+    const parts = chainsOf(work).get(`${file}\n${found.ref}`)?.parts ?? [
+      { file, clip: found, startMs: 0, endMs: 0 },
+    ]
+    parts.forEach((part, index) => {
+      setAttributes(work, part.file, clipOf(work, part.file, part.clip.ref).source, {
+        ...(volume === undefined ? {} : { "data-volume": String(Math.round(volume * 100) / 100) }),
+        ...(fadeInMs === undefined || index > 0
+          ? {}
+          : { "data-fade-in": fadeInMs === 0 ? null : seconds(fadeInMs) }),
+        ...(fadeOutMs === undefined || index < parts.length - 1
+          ? {}
+          : { "data-fade-out": fadeOutMs === 0 ? null : seconds(fadeOutMs) }),
+      })
     })
   })
 }
@@ -431,6 +487,21 @@ export function setVideoText(
       .split(/\r?\n/)
       .map((line) => escapeText(line.trim()))
       .join("<br>")
+
+    // A caption that goes on in later scenes says the same in each.
+    const clip = timelineOf(work, file).clips.find(
+      (each) => each.source.element.start === found.source.element.start
+    )
+    const chain = clip ? chainsOf(work).get(`${file}\n${clip.ref}`) : undefined
+    for (const part of chain?.parts ?? []) {
+      if (part.file === file) continue
+      const text = timelineOf(work, part.file).texts.find(
+        (each) => each.source.element.start === part.clip.source.element.start
+      )
+      if (text?.source.content) {
+        work.replace(part.file, text.source.content.start, text.source.content.end, html)
+      }
+    }
     work.replace(file, found.source.content.start, found.source.content.end, html)
   })
 }
@@ -449,7 +520,8 @@ export function splitClip(
 ): VideoEditResult & { readonly clip?: string } {
   let second: string | undefined
   const result = run(sources, (work) => {
-    second = splitFound(work, file, clipOf(work, file, clip), atMs, options.endMs)
+    const chains = chainsOf(work)
+    second = splitChained(work, chains, file, clipOf(work, file, clip), atMs, options.endMs)
   })
   return "edit" in result && second ? { ...result, clip: second } : result
 }
@@ -466,14 +538,22 @@ export function removeClip(
 ): VideoEditResult {
   return run(sources, (work) => {
     const found = clipOf(work, file, clip)
-    const end = clipEnd(found, options.endMs)
 
+    // A clip that goes on in later scenes goes whole.
+    const chain = file === VIDEO_ENTRY ? undefined : chainsOf(work).get(`${file}\n${found.ref}`)
+    if (chain) {
+      removeFound(work, chain.parts, options.ripple === true)
+      return
+    }
+
+    const end = clipEnd(found, options.endMs)
     // What followed it keeps its time: its name will name nothing.
     if (found.id) freezeFollowers(work, file, (each) => each.id === found.id)
 
     const removed = clipOf(work, file, clip)
     const block = lineBlock(work.text(file), removed.source.element)
     work.replace(file, block.start, block.end, "")
+    if (found.id) removeCarriedLook(work, file, found.id)
     if (options.ripple) rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }])
   })
 }
@@ -548,26 +628,47 @@ export function removeClips(
   options: { readonly ripple?: boolean } = {}
 ): VideoEditResult {
   return run(sources, (work) => {
-    const found = clipsOf(work, clips).map((each) => ({
-      ...each,
-      endMs: clipEnd(each.clip, clips[each.index]?.endMs),
-    }))
-
-    for (const [file, each] of byFile(found)) {
-      // What followed them keeps its time: their names will name nothing.
-      const ids = new Set(each.flatMap(({ clip }) => (clip.id ? [clip.id] : [])))
-      freezeFollowers(work, file, (clip) => clip.id !== undefined && ids.has(clip.id))
-
-      rewriteClips(work, file, new Map(each.map(({ clip }) => [clip.ref, "remove" as const])))
-      if (options.ripple) {
-        rippleRemove(
-          work,
-          file,
-          each.map(({ clip, endMs }) => ({ startMs: clip.startMs, endMs }))
-        )
+    // A clip that goes on in later scenes goes whole, each of its parts once.
+    const chains = chainsOf(work)
+    const found = new Map<string, { file: string; clip: VideoClip; endMs?: number }>()
+    for (const each of clipsOf(work, clips)) {
+      const endMs = clips[each.index]?.endMs
+      const parts = chains.get(`${each.file}\n${each.clip.ref}`)?.parts ?? [each]
+      for (const part of parts) {
+        found.set(`${part.file}\n${part.clip.ref}`, {
+          file: part.file,
+          clip: part.clip,
+          ...(endMs === undefined ? {} : { endMs }),
+        })
       }
     }
+    removeFound(work, [...found.values()], options.ripple === true)
   })
+}
+
+/**
+ * Removes clips found in their files, and the looks they carried. With `ripple`, each file closes
+ * the gaps its clips leave, as one cut of all their stretches.
+ */
+function removeFound(
+  work: Working,
+  found: readonly { readonly file: string; readonly clip: VideoClip; readonly endMs?: number }[],
+  ripple: boolean
+): void {
+  for (const [file, each] of byFile(found)) {
+    const stretches = each.map(({ clip, endMs }) => ({
+      startMs: clip.startMs,
+      endMs: clipEnd(clip, endMs),
+    }))
+
+    // What followed them keeps its time: their names will name nothing.
+    const ids = new Set(each.flatMap(({ clip }) => (clip.id ? [clip.id] : [])))
+    freezeFollowers(work, file, (clip) => clip.id !== undefined && ids.has(clip.id))
+
+    rewriteClips(work, file, new Map(each.map(({ clip }) => [clip.ref, "remove" as const])))
+    for (const id of ids) removeCarriedLook(work, file, id)
+    if (ripple) rippleRemove(work, file, stretches)
+  }
 }
 
 /**
@@ -581,6 +682,7 @@ export function splitClips(
   const parts: (VideoClipTarget | undefined)[] = []
   const result = run(sources, (work) => {
     const found = clipsOf(work, splits)
+    const chains = chainsOf(work)
 
     for (const [file, each] of byFile(found)) {
       // From the last in the file to the first: a part added shifts only the places after it.
@@ -592,7 +694,7 @@ export function splitClips(
         if (!split) continue
 
         const now = clipOf(work, file, clip.ref)
-        const second = splitFound(work, file, now, split.atMs, split.endMs)
+        const second = splitChained(work, chains, file, now, split.atMs, split.endMs)
         if (second) parts[index] = { file, clip: second }
       }
     }
@@ -1486,6 +1588,33 @@ function splitFound(
   return second
 }
 
+/**
+ * Splits a clip as {@link splitFound} does, and when it goes on in later scenes, as two: the
+ * second part heads the parts after it, which go on from it.
+ */
+function splitChained(
+  work: Working,
+  chains: ReadonlyMap<string, VideoChain>,
+  file: string,
+  found: VideoClip,
+  atMs: number,
+  endMs: number | undefined
+): string | undefined {
+  const chain = chains.get(`${file}\n${found.ref}`)
+  const at = videoStartOf(work, file, found) - found.startMs + Math.round(atMs)
+  const second = splitFound(work, file, found, atMs, endMs)
+  if (!chain || !second) return second
+
+  const piece = clipOf(work, file, second)
+  if (piece.continues) setAttributes(work, file, piece.source, { "data-continues": null })
+  for (const part of chain.parts) {
+    if (part.file === file || part.startMs < at) continue
+    const now = clipOf(work, part.file, videoTarget(part.clip))
+    setAttributes(work, part.file, now.source, { "data-continues": second })
+  }
+  return second
+}
+
 /** The element a target names in a file, or why none is: see {@link findVideoTarget}. */
 function resolveTarget<T extends { readonly ref: string; readonly tag: string }>(
   items: readonly T[],
@@ -1994,6 +2123,10 @@ interface Placing {
   readonly startMs: number
   /** How long it plays; none for a clip that writes no length, which plays until its scene ends. */
   readonly durationMs: number | undefined
+  /** Where in its file it starts playing, when not where it does now: a start trimmed. */
+  readonly mediaStartMs?: number
+  /** The parts it goes on in, in later scenes: each used again where one lands, else removed. */
+  readonly others?: readonly { readonly file: string; readonly clip: VideoClip }[]
 }
 
 type Scene = VideoRoot["scenes"][number]
@@ -2028,13 +2161,21 @@ function moveFound(
   found: readonly { readonly file: string; readonly clip: VideoClip }[],
   deltaMs: number
 ): Placement {
-  const starts = found.map(({ file, clip }) => videoStartOf(work, file, clip))
-  const delta = Math.max(Math.round(deltaMs), ...starts.map((start) => -start))
+  const chains = chainsOf(work)
+  const logical = [
+    ...new Map(
+      found.map((each) => {
+        const clip = logicalClip(work, chains, each)
+        return [`${clip.file}\n${clip.clip.ref}`, clip] as const
+      })
+    ).values(),
+  ]
+  const delta = Math.max(Math.round(deltaMs), ...logical.map((clip) => -clip.startMs))
 
   // A move that goes nowhere, as a group held at the video's start, changes nothing.
   if (delta === 0) {
     return {
-      clips: found.map(({ file, clip }) => ({ file, clip: videoTarget(clip) })),
+      clips: logical.map(({ file, clip }) => ({ file, clip: videoTarget(clip) })),
       animationsLeft: [],
       animationsJoined: [],
     }
@@ -2042,15 +2183,60 @@ function moveFound(
 
   return placeFound(
     work,
-    found.map(({ file, clip }, index) => {
-      const scene = sceneOf(work, file)
-      const shown =
-        scene && clip.durationMs !== undefined && clip.startMs < scene.durationMs
-          ? Math.min(clip.durationMs, scene.durationMs - clip.startMs)
-          : clip.durationMs
-      return { file, clip, startMs: (starts[index] ?? 0) + delta, durationMs: shown }
-    })
+    logical.map((clip) => ({ ...clip, startMs: clip.startMs + delta }))
   )
+}
+
+/** The chains of the video's scenes, each by every part of it, as `file\nref`. */
+function chainsOf(work: Working): Map<string, VideoChain> {
+  const scenes = rootOf(work).scenes
+  const chains = videoChains(scenes, (file) =>
+    work.textOf(file) === undefined ? undefined : (readSceneTimeline(work.text(file)) ?? undefined)
+  )
+  const byPart = new Map<string, VideoChain>()
+  for (const chain of chains) {
+    for (const part of chain.parts) byPart.set(`${part.file}\n${part.clip.ref}`, chain)
+  }
+  return byPart
+}
+
+/**
+ * A clip as one, whatever part of it is named: its head, where it starts in the video, how long
+ * it plays as its scenes show it, and the parts it goes on in. What played on past the last
+ * part's scene's end, never seen, is not part of it.
+ */
+function logicalClip(
+  work: Working,
+  chains: ReadonlyMap<string, VideoChain>,
+  found: { readonly file: string; readonly clip: VideoClip }
+): Placing {
+  const chain = chains.get(`${found.file}\n${found.clip.ref}`)
+  const [head, ...others] = chain?.parts ?? [
+    { ...found, startMs: videoStartOf(work, found.file, found.clip), endMs: 0 },
+  ]
+  if (!head) throw new EditError(`'${found.clip.ref}' is not one of the video's clips.`)
+
+  const last = others.at(-1) ?? head
+  const scene = sceneOf(work, last.file)
+  const startMs = head.startMs
+  const durationMs =
+    last.clip.durationMs === undefined
+      ? undefined
+      : (() => {
+          const end = videoStartOf(work, last.file, last.clip) + last.clip.durationMs
+          const shown =
+            scene && last.clip.startMs < scene.durationMs
+              ? Math.min(end, scene.startMs + scene.durationMs)
+              : end
+          return shown - startMs
+        })()
+  return {
+    file: head.file,
+    clip: head.clip,
+    startMs,
+    durationMs,
+    others: others.map(({ file, clip }) => ({ file, clip })),
+  }
 }
 
 /**
@@ -2106,39 +2292,51 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     }
   }
 
-  // What followed a clip that leaves, or now ends sooner in its file, keeps its time.
-  for (const [file, each] of byFile(plans)) {
-    const cut = new Set(
-      each.flatMap(({ clip, own, parts, durationMs }) => {
-        const [first] = parts
-        const whole =
-          parts.length === 1 && first?.scene.id === own?.id && first?.durationMs === durationMs
-        return own && clip.id && !whole ? [clip.id] : []
-      })
-    )
-    if (cut.size > 0)
-      freezeFollowers(work, file, (clip) => clip.id !== undefined && cut.has(clip.id))
+  // What followed a clip that leaves, or now ends sooner in its file, or a part of one that may
+  // go, keeps its time.
+  const cut = new Map<string, Set<string>>()
+  const cuts = (file: string, id: string | undefined) => {
+    if (!id) return
+    cut.set(file, (cut.get(file) ?? new Set()).add(id))
+  }
+  for (const { file, clip, own, parts, durationMs, others } of plans) {
+    const [first] = parts
+    const whole =
+      parts.length === 1 && first?.scene.id === own?.id && first?.durationMs === durationMs
+    if (own && !whole) cuts(file, clip.id)
+    for (const other of others ?? []) cuts(other.file, other.clip.id)
+  }
+  for (const [file, ids] of cut) {
+    freezeFollowers(work, file, (clip) => clip.id !== undefined && ids.has(clip.id))
   }
 
   // Each file's clips written in place or taken out, and what lands in another file kept for it.
+  // Every file is read before any is written, so each clip's ref still names it.
   const counts = nameCounts(work)
   const taken = new Set(counts.keys())
   const carried: Carried[] = []
   const left: { readonly index: number; readonly scene: string }[] = []
   const joined: { readonly index: number; readonly scene: string }[] = []
-  const leaving: string[] = []
+  const changes = new Map<string, Map<string, ClipChange>>()
+  const change = (file: string, ref: string, what: ClipChange) => {
+    const plan = changes.get(file) ?? new Map<string, ClipChange>()
+    changes.set(file, plan)
+    plan.set(ref, what)
+  }
+  // Each element whose carried look goes with it, by its file.
+  const lookless: { readonly file: string; readonly id: string }[] = []
 
   for (const [file, each] of byFile(plans)) {
     const text = work.text(file)
     const clips = timelineOf(work, file).clips
     const scripts = file === VIDEO_ENTRY ? "" : scriptsOf(text)
-    const plan = new Map<string, ClipChange>()
 
-    for (const { clip: was, own, parts, startMs, durationMs, index } of each) {
+    for (const plan of each) {
+      const { clip: was, own, parts, startMs, durationMs, index } = plan
       const clip = markedClip(text, clips, index)
 
       if (!own) {
-        plan.set(clip.ref, {
+        change(file, clip.ref, {
           ...(startMs === was.startMs ? {} : { "data-start": seconds(startMs) }),
           ...(durationMs === undefined || durationMs === was.durationMs
             ? {}
@@ -2150,6 +2348,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const element = text.slice(clip.source.element.start, clip.source.element.end)
       const facts = lookElement(element, was.id)
       const stays = parts[0]?.scene.id === own.id
+      const mediaStartMs = plan.mediaStartMs ?? was.mediaStartMs
       // How it looks where it is, for each part that lands elsewhere: its scene is its home,
       // unless it came with a look carried from another.
       const styled = parts.some((part) => part.scene.id !== own.id)
@@ -2157,42 +2356,84 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         : undefined
       const look = styled ? lookOf(facts, own.id, styled.sheets) : undefined
       const home = styled?.home ?? own.id
+      const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
+      const fresh = () => {
+        const id = uniqueName(base || was.kind, taken)
+        taken.add(id)
+        return id
+      }
+
+      // Its parts in later scenes, each used again where a new one lands in its file.
+      const others = [...(plan.others ?? [])]
+      const reuse = (src: string) => {
+        const at = others.findIndex((other) => other.file === src)
+        return at < 0 ? undefined : others.splice(at, 1)[0]
+      }
+
+      // The head: in place, or written for the file it lands in. It has an id once parts go on
+      // from it, or a look is to reach it, and its own id unless another element has it.
+      const first = parts[0]
+      const landsStyled = (look?.rules.length ?? 0) > 0 && first?.scene.id !== home
+      const keepsId = was.id !== undefined && (stays || (counts.get(was.id) ?? 0) <= 1)
+      const headId = keepsId
+        ? was.id
+        : was.id || parts.length > 1 || (!stays && landsStyled)
+          ? fresh()
+          : undefined
+      if (headId && headId === was.id) taken.add(headId)
 
       parts.forEach((part, n) => {
+        const timing = {
+          start: seconds(part.startMs - part.scene.startMs),
+          duration: part.durationMs === undefined ? undefined : seconds(part.durationMs),
+          media: playsFile(was) ? seconds(mediaStartMs + part.intoMs) : undefined,
+        }
+
         if (n === 0 && stays) {
-          plan.set(clip.ref, {
-            ...(part.startMs === own.startMs + was.startMs
+          change(file, clip.ref, {
+            ...(part.startMs === own.startMs + was.startMs ? {} : { "data-start": timing.start }),
+            ...(timing.duration === undefined || part.durationMs === was.durationMs
               ? {}
-              : { "data-start": seconds(part.startMs - own.startMs) }),
-            ...(part.durationMs === undefined || part.durationMs === was.durationMs
+              : { "data-duration": timing.duration }),
+            ...(timing.media === undefined || mediaStartMs === was.mediaStartMs
               ? {}
-              : { "data-duration": seconds(part.durationMs) }),
+              : { "data-media-start": timing.media }),
+            ...(headId && headId !== was.id ? { id: headId } : {}),
+            ...(was.continues ? { "data-continues": null } : {}),
           })
           return
         }
 
-        // The clip itself keeps its id unless another element has it, and takes one for a look
-        // to reach it by; a copy takes a new one.
-        const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
-        const styles = (look?.rules.length ?? 0) > 0 && part.scene.id !== home
-        const id =
-          n === 0 && !was.id && !styles
-            ? undefined
-            : n === 0 && was.id && (counts.get(was.id) ?? 0) <= 1
-              ? was.id
-              : uniqueName(base || was.kind, taken)
-        if (id) taken.add(id)
+        // A part that goes on, in a file holding one already: that one, written again.
+        const kept = n > 0 ? reuse(part.scene.src) : undefined
+        if (kept) {
+          const old = kept.clip
+          change(kept.file, old.ref, {
+            ...(part.startMs - part.scene.startMs === old.startMs
+              ? {}
+              : { "data-start": timing.start }),
+            ...(part.durationMs === old.durationMs || timing.duration === undefined
+              ? {}
+              : { "data-duration": timing.duration }),
+            ...(timing.media === undefined || mediaStartMs + part.intoMs === old.mediaStartMs
+              ? {}
+              : { "data-media-start": timing.media }),
+            ...(old.continues === headId ? {} : { "data-continues": headId ?? null }),
+          })
+          return
+        }
 
+        const id = n === 0 ? headId : fresh()
+        const styles = (look?.rules.length ?? 0) > 0 && part.scene.id !== home
         const src = attributeOf(text, clip, "src")
         const moved = src === undefined ? undefined : rebased(work, file, part.scene.src, src)
         const html = withAttributes(element, {
           ...(id ? { id } : {}),
-          "data-start": seconds(part.startMs - part.scene.startMs),
-          ...(part.durationMs === undefined ? {} : { "data-duration": seconds(part.durationMs) }),
-          ...(playsFile(was) && part.intoMs > 0
-            ? { "data-media-start": seconds(was.mediaStartMs + part.intoMs) }
-            : {}),
+          "data-start": timing.start,
+          ...(timing.duration === undefined ? {} : { "data-duration": timing.duration }),
+          ...(timing.media === undefined ? {} : { "data-media-start": timing.media }),
           ...(moved === undefined ? {} : { src: moved }),
+          "data-continues": n === 0 ? null : (headId ?? null),
           ...(n === 0 ? {} : { [PLACING]: null }),
         })
         carried.push({
@@ -2207,16 +2448,21 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       })
 
       if (!stays) {
-        plan.set(clip.ref, "remove")
-        if (was.id) leaving.push(was.id)
+        change(file, clip.ref, "remove")
+        if (was.id) lookless.push({ file, id: was.id })
         if (scriptNames(scripts, facts)) left.push({ index, scene: own.id })
       }
-    }
-    rewriteClips(work, file, plan)
 
-    // The look a clip carried here goes with it.
-    for (const id of leaving.splice(0)) removeCarriedLook(work, file, id)
+      // The parts no new one lands beside go, with the looks they carried.
+      for (const other of others) {
+        change(other.file, other.clip.ref, "remove")
+        if (other.clip.id) lookless.push({ file: other.file, id: other.clip.id })
+      }
+    }
   }
+
+  for (const [file, plan] of changes) rewriteClips(work, file, plan)
+  for (const { file, id } of lookless) removeCarriedLook(work, file, id)
 
   // What lands in a file goes after the last clip of its track there, in the order placed.
   for (const [file, each] of groupBy(carried, (one) => one.file)) {

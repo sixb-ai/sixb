@@ -56,6 +56,11 @@ export interface VideoClip {
   readonly silent: boolean
   /** What a text clip says. */
   readonly text?: string
+  /**
+   * The clip it goes on from, by its id, from `data-continues`: a part of that clip in a later
+   * scene, which an editor edits with it as one (see {@link videoChains}).
+   */
+  readonly continues?: string
   readonly source: VideoElementSource
 }
 
@@ -216,6 +221,7 @@ function timelineOf(composition: Element): VideoFileTimeline {
     const fadeOutMs = readMs(attribute(element, "data-fade-out"))
     const src = attribute(element, "src")?.trim()
     const text = kind === "text" ? styledWordsOf(element) : undefined
+    const continues = attribute(element, "data-continues")?.trim()
 
     const clip: VideoClip = {
       ref: id ?? `#${index}`,
@@ -233,6 +239,7 @@ function timelineOf(composition: Element): VideoFileTimeline {
       ...(fadeOutMs === undefined ? {} : { fadeOutMs }),
       silent: kind === "video" && has(element, "muted") && !hasAudio(element),
       ...(text === undefined ? {} : { text }),
+      ...(continues ? { continues } : {}),
       source: sourceOf(element),
     }
     resolved.set(element, clip)
@@ -265,6 +272,96 @@ function timelineOf(composition: Element): VideoFileTimeline {
     .map((element) => ({ tag: element.tagName, source: sourceOf(element) }))
 
   return { clips, texts, composition: sourceOf(composition), children }
+}
+
+/** Within this, two instants are one: under a frame at 60 fps. */
+const SAME_MS = 15
+
+/** A part of a clip laid in the video: its scene's file, the clip there, and when it plays. */
+export interface VideoChainPart {
+  readonly file: string
+  readonly clip: VideoClip
+  readonly startMs: number
+  readonly endMs: number
+}
+
+/**
+ * A clip and the parts that go on from it in the scenes after, past each one's end: one clip to
+ * whoever edits it, from its first part's start to its last's end. Its parts are in play order,
+ * the first, its head, holding the id each other names in `data-continues`.
+ */
+export interface VideoChain {
+  readonly parts: readonly VideoChainPart[]
+}
+
+/**
+ * The video's chains: each clip that parts in later scenes go on from, with those parts. A part
+ * is one only while it goes on from the one before it, as the edit that cut it wrote it: the same
+ * element, starting where that one ends, or where its own scene starts after a gap, and playing
+ * its file on from where that one stopped. One edited apart, or whose head is gone, heads a chain
+ * of its own, or stands alone, so a video nobody cut this way has none.
+ */
+export function videoChains(
+  scenes: readonly { readonly src: string; readonly startMs: number }[],
+  timelineOf: (file: string) => VideoFileTimeline | undefined
+): VideoChain[] {
+  const files = new Map<string, number>()
+  for (const scene of scenes) if (!files.has(scene.src)) files.set(scene.src, scene.startMs)
+
+  const parts: VideoChainPart[] = []
+  for (const [file, offsetMs] of files) {
+    for (const clip of timelineOf(file)?.clips ?? []) {
+      if (clip.durationMs === undefined) continue
+      const startMs = offsetMs + clip.startMs
+      parts.push({ file, clip, startMs, endMs: startMs + clip.durationMs })
+    }
+  }
+  const byId = new Map(parts.flatMap((part) => (part.clip.id ? [[part.clip.id, part]] : [])))
+
+  const chains: VideoChain[] = []
+  const following = new Map<string, VideoChainPart[]>()
+  for (const part of parts) {
+    if (!part.clip.continues) continue
+    following.set(part.clip.continues, [...(following.get(part.clip.continues) ?? []), part])
+  }
+
+  for (const [id, after] of following) {
+    const head = byId.get(id)
+    const run = [...(head ? [head] : []), ...after.sort((a, b) => a.startMs - b.startMs)]
+
+    // Runs of parts that each go on from the one before.
+    let chain: VideoChainPart[] = []
+    for (const part of run) {
+      const previous = chain.at(-1)
+      const first = chain[0]
+      if (previous && first && goesOn(previous, part, first, files.get(part.file) ?? 0)) {
+        chain.push(part)
+        continue
+      }
+      if (chain.length > 1) chains.push({ parts: chain })
+      chain = [part]
+    }
+    if (chain.length > 1) chains.push({ parts: chain })
+  }
+  return chains.sort((a, b) => (a.parts[0]?.startMs ?? 0) - (b.parts[0]?.startMs ?? 0))
+}
+
+/** Whether `next` goes on from `previous`, a chain starting at `first`, as a cut wrote it. */
+function goesOn(
+  previous: VideoChainPart,
+  next: VideoChainPart,
+  first: VideoChainPart,
+  sceneStartMs: number
+): boolean {
+  const [a, b] = [previous.clip, next.clip]
+  if (previous.file === next.file || a.tag !== b.tag || a.src !== b.src || a.text !== b.text) {
+    return false
+  }
+  if (next.startMs < previous.endMs - SAME_MS) return false
+  if (next.startMs > Math.max(previous.endMs, sceneStartMs) + SAME_MS) return false
+  if (b.kind !== "video" && b.kind !== "audio") return true
+  const played = next.startMs - first.startMs
+  return Math.abs(b.mediaStartMs - first.clip.mediaStartMs - played) <= SAME_MS
 }
 
 /** A composition nested in this one, whose clips are its own. */

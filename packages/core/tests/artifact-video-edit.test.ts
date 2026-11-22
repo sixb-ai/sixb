@@ -1329,6 +1329,199 @@ describe("placing clips in the video", () => {
   })
 })
 
+describe("a clip that goes on in later scenes", () => {
+  /** Three scenes back to back, the first opening on a recording. */
+  const CHAINED_INDEX = `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="15">
+    <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html" data-start="0" data-duration="3"></div>
+    <div id="demo" data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="hook" data-duration="8"></div>
+    <div id="outro" data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo" data-duration="4"></div>
+  </div>
+`
+  const scene = (id: string, inner = "") => `<template>
+  <div data-composition-id="${id}" data-width="1920" data-height="1080">
+    ${inner}
+  </div>
+</template>
+`
+  const opening = new Map<string, string | null>([
+    ["index.html", CHAINED_INDEX],
+    [
+      "scenes/hook.html",
+      scene(
+        "hook",
+        '<video id="intro" src="media/a.mp4" data-start="0" data-duration="2" data-has-audio="true"></video>'
+      ),
+    ],
+    ["scenes/demo.html", scene("demo", '<p class="t" data-start="1" data-duration="1">x</p>')],
+    ["scenes/outro.html", scene("outro", '<p class="t" data-start="1" data-duration="1">y</p>')],
+    ["media/a.mp4", null],
+  ])
+  const intro = (files: ReadonlyMap<string, string | null>) =>
+    ["scenes/hook.html", "scenes/demo.html", "scenes/outro.html"].flatMap((file) =>
+      (readSceneTimeline(files.get(file) as string)?.clips ?? [])
+        .filter((clip) => clip.src === "media/a.mp4")
+        .map((clip) => [
+          file,
+          clip.ref,
+          clip.startMs,
+          clip.durationMs,
+          clip.mediaStartMs,
+          clip.continues,
+        ])
+    )
+  /** The opening, its recording pulled to play until 5 s, then 12 s, into the scenes after. */
+  const toFive = applied(trimClip(opening, "scenes/hook.html", "intro", "end", 5000), opening)
+  const toTwelve = applied(trimClip(opening, "scenes/hook.html", "intro", "end", 12_000), opening)
+
+  // Guard proof: write no `data-continues` on the parts placeFound adds (edit.ts); they then name
+  // nothing, and no later edit finds them with their clip.
+  test("each part names the clip it goes on from", () => {
+    expect(intro(toTwelve)).toEqual([
+      ["scenes/hook.html", "intro", 0, 3000, 0, undefined],
+      ["scenes/demo.html", "intro-2", 0, 8000, 3000, "intro"],
+      ["scenes/outro.html", "intro-3", 0, 1000, 11_000, "intro"],
+    ])
+  })
+
+  // Guard proof: find no chain in logicalClip (edit.ts), each part named a clip of its own; the
+  // move adds new parts beside the old one, and the recording plays twice in the demo.
+  test("moves as one, its parts written again where they are, never twice", () => {
+    const moved = moveClip(toFive, "scenes/hook.html", "intro", 1000)
+    const files = applied(moved, toFive)
+    expect(intro(files)).toEqual([
+      ["scenes/hook.html", "intro", 1000, 2000, 0, undefined],
+      ["scenes/demo.html", "intro-2", 0, 3000, 2000, "intro"],
+    ])
+    // Dragged by its part in the demo, as far.
+    const byPart = applied(moveClip(toFive, "scenes/demo.html", "intro-2", 1000), toFive)
+    expect(intro(byPart)).toEqual(intro(files))
+  })
+
+  // Guard proof: find no chain in trimClip (edit.ts), the part named a clip of its own; its end in
+  // the outro then makes that part the whole clip, and the hook's and the demo's play on twice.
+  test("trims as one, at either end, whichever part is held", () => {
+    const shorter = applied(
+      trimClip(toTwelve, "scenes/outro.html", "intro-3", "end", 500),
+      toTwelve
+    )
+    expect(intro(shorter)).toEqual([
+      ["scenes/hook.html", "intro", 0, 3000, 0, undefined],
+      ["scenes/demo.html", "intro-2", 0, 8000, 3000, "intro"],
+      ["scenes/outro.html", "intro-3", 0, 500, 11_000, "intro"],
+    ])
+    // Back within its first scene, it is one clip again.
+    const back = applied(trimClip(toTwelve, "scenes/hook.html", "intro", "end", 2000), toTwelve)
+    expect(intro(back)).toEqual([["scenes/hook.html", "intro", 0, 2000, 0, undefined]])
+
+    // A later start plays as much less of each part's file, written only where it changes.
+    const later = trimClip(toFive, "scenes/hook.html", "intro", "start", 1000)
+    expect(intro(applied(later, toFive))).toEqual([
+      ["scenes/hook.html", "intro", 1000, 2000, 1000, undefined],
+      ["scenes/demo.html", "intro-2", 0, 2000, 3000, "intro"],
+    ])
+    expect("edit" in later && later.edit.map((file) => file.path)).toEqual(["scenes/hook.html"])
+  })
+
+  // Guard proof: find no chain in removeClip (edit.ts); the demo then plays the rest of the
+  // recording on its own. Return the second half alone from splitChained, and the outro's part
+  // still goes on from the first, which ends in the demo.
+  test("goes whole, and splits into two clips that each go on as before", () => {
+    for (const part of ["intro", "intro-2", "intro-3"]) {
+      const file = {
+        intro: "scenes/hook.html",
+        "intro-2": "scenes/demo.html",
+        "intro-3": "scenes/outro.html",
+      }[part] as string
+      expect(intro(applied(removeClip(toTwelve, file, part), toTwelve))).toEqual([])
+    }
+    expect(
+      intro(
+        applied(removeClips(toTwelve, [{ file: "scenes/demo.html", clip: "intro-2" }]), toTwelve)
+      )
+    ).toEqual([])
+
+    // Split in the demo, at 5 s in the video: the second half heads what plays after it.
+    const split = splitClip(toTwelve, "scenes/demo.html", "intro-2", 2000)
+    expect("clip" in split && split.clip).toBe("intro-4")
+    expect(intro(applied(split, toTwelve))).toEqual([
+      ["scenes/hook.html", "intro", 0, 3000, 0, undefined],
+      ["scenes/demo.html", "intro-2", 0, 2000, 3000, "intro"],
+      ["scenes/demo.html", "intro-4", 2000, 6000, 5000, undefined],
+      ["scenes/outro.html", "intro-3", 0, 1000, 11_000, "intro-4"],
+    ])
+  })
+
+  // Guard proof: write the sound on the part named alone in setClipSound (edit.ts); the hook's and
+  // the outro's parts then play at full volume, and the fade out lands mid-clip. Find no chain in
+  // setClipTiming, and the parts after the head play their file as they did, out of step.
+  test("sounds, plays from, and reads as one", () => {
+    const sound = applied(
+      setClipSound(toTwelve, "scenes/demo.html", "intro-2", {
+        volume: 0.5,
+        fadeInMs: 400,
+        fadeOutMs: 800,
+      }),
+      toTwelve
+    )
+    const levels = ["scenes/hook.html", "scenes/demo.html", "scenes/outro.html"].map((file) => {
+      const clip = readSceneTimeline(sound.get(file) as string)?.clips.find((each) => each.src)
+      return [clip?.volume, clip?.fadeInMs, clip?.fadeOutMs]
+    })
+    expect(levels).toEqual([
+      [0.5, 400, undefined],
+      [0.5, undefined, undefined],
+      [0.5, undefined, 800],
+    ])
+
+    const from = applied(
+      setClipTiming(toTwelve, "scenes/hook.html", "intro", { mediaStartMs: 500 }),
+      toTwelve
+    )
+    expect(intro(from).map((part) => part[4])).toEqual([500, 3500, 11_500])
+  })
+
+  // Guard proof: find no chain in setVideoText (edit.ts); the caption's part in the demo still
+  // says what it said.
+  test("says the same in each part when its words are typed over", () => {
+    const sources = new Map(opening)
+    sources.set(
+      "scenes/hook.html",
+      scene("hook", '<p class="caption" data-start="2" data-duration="2">Hello</p>')
+    )
+    const continued = applied(trimClip(sources, "scenes/hook.html", "#0", "end", 4000), sources)
+    const files = applied(setVideoText(continued, "scenes/hook.html", "text", "Welcome"), continued)
+    expect(
+      readSceneTimeline(files.get("scenes/demo.html") as string)?.clips.map((clip) => clip.text)
+    ).toEqual(["x", "Welcome"])
+  })
+
+  // Guard proof: drop the check that a part goes on from the one before in goesOn (timeline.ts);
+  // the part the Agent rewrote plays the file from elsewhere, yet moves with the head.
+  test("a part that no longer goes on from its head, or whose head is gone, is a clip of its own", () => {
+    // The Agent played another stretch of the file in the demo's part.
+    const edited = new Map(toFive)
+    edited.set(
+      "scenes/demo.html",
+      (toFive.get("scenes/demo.html") as string).replace(
+        'data-media-start="3"',
+        'data-media-start="40"'
+      )
+    )
+    const moved = applied(moveClip(edited, "scenes/hook.html", "intro", 500), edited)
+    expect(intro(moved)).toEqual([
+      ["scenes/hook.html", "intro", 500, 2500, 0, undefined],
+      ["scenes/demo.html", "intro-2", 0, 2000, 40_000, "intro"],
+      ["scenes/demo.html", "intro-3", 0, 500, 2500, "intro"],
+    ])
+
+    // The head gone, its part moves alone, and no longer names it.
+    const orphan = new Map(toFive)
+    orphan.set("scenes/hook.html", scene("hook"))
+    const alone = applied(moveClip(orphan, "scenes/demo.html", "intro-2", 1000), orphan)
+    expect(intro(alone)).toEqual([["scenes/demo.html", "intro-2", 1000, 2000, 3000, undefined]])
+  })
+})
+
 describe("cutting by the transcript", () => {
   test("kept stretches become clips back to back, and what followed moves back", () => {
     // talk plays its file from 2 s to 7 s; keep 2–3.5 and 5–7: 1.5 s is cut at 1.5 s in the scene.
