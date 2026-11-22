@@ -14,6 +14,60 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
+type Supervisor = {
+  readonly pid: number
+  readonly exitCode: number | null
+  readonly signalCode: string | number | null
+  readonly exited: Promise<number>
+}
+
+/**
+ * Kill a supervisor and every process under it. SIGKILL to the supervisor alone orphans its
+ * services, which then run on after the suite, for good: frozen first, so it starts none while its
+ * tree is read, then every process of it. Throws when one outlives that, as a leak.
+ *
+ * Not SIGTERM: shutdown waits killTimeoutMs plus 2s for a restarting worker whose exit Bun never
+ * reports, and no test here is about shutdown.
+ */
+async function killSupervisor(supervisor: Supervisor | undefined): Promise<void> {
+  // One that exited already stopped its services; its pid may be another process's by now.
+  if (!supervisor || supervisor.exitCode !== null || supervisor.signalCode !== null) return
+  process.kill(supervisor.pid, "SIGSTOP")
+  const children = new Map<number, number[]>()
+  for (const line of Bun.spawnSync(["ps", "-A", "-o", "pid=", "-o", "ppid="])
+    .stdout.toString()
+    .split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number)
+    if (pid > 0) children.set(ppid, [...(children.get(ppid) ?? []), pid])
+  }
+  const tree: number[] = []
+  for (const queue = [supervisor.pid]; queue.length > 0; ) {
+    const pid = queue.shift() as number
+    tree.push(pid)
+    queue.push(...(children.get(pid) ?? []))
+  }
+  for (const pid of tree) {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {
+      // Exited meanwhile.
+    }
+  }
+  await supervisor.exited
+
+  const running = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  for (let attempt = 0; attempt < 200 && tree.some(running); attempt++) await Bun.sleep(10)
+  const left = tree.filter(running)
+  if (left.length > 0) throw new Error(`[test] The supervisor left processes running: ${left}`)
+}
+
 async function startSupervisor(preload?: string): Promise<{ manifestPath: string; root: string }> {
   const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-"))
   const manifest: ProcessManifest = {
@@ -29,7 +83,7 @@ async function startSupervisor(preload?: string): Promise<{ manifestPath: string
         processName: "northline-api",
         command: process.execPath,
         // Printed on an interval: Bun may hold a single write to a pipe in its buffer. It exits
-        // once orphaned, because cleanup kills the supervisor rather than waiting on its shutdown.
+        // once orphaned, should one ever outlive killSupervisor.
         args: [
           "-e",
           'const parent = process.ppid; setInterval(() => { if (process.ppid !== parent) process.exit(); console.log("listening") }, 100)',
@@ -78,10 +132,7 @@ async function startSupervisor(preload?: string): Promise<{ manifestPath: string
     }
   )
   cleanups.push(async () => {
-    // Not SIGTERM: shutdown waits killTimeoutMs plus 2s for a restarting worker whose exit Bun
-    // never reports, and no test here is about shutdown.
-    supervisor.kill("SIGKILL")
-    await supervisor.exited
+    await killSupervisor(supervisor)
     await rm(root, { recursive: true, force: true })
   })
   return { manifestPath, root }
@@ -167,8 +218,8 @@ describe("supervisor", () => {
     const previous = supervise()
     let next: ReturnType<typeof supervise> | undefined
     cleanups.push(async () => {
-      previous.kill("SIGKILL")
-      next?.kill("SIGKILL")
+      await killSupervisor(previous)
+      await killSupervisor(next)
       await rm(root, { recursive: true, force: true })
     })
 
@@ -392,8 +443,7 @@ describe("supervisor", () => {
       }
     )
     cleanups.push(async () => {
-      supervisor.kill("SIGKILL")
-      await supervisor.exited
+      await killSupervisor(supervisor)
       await rm(root, { recursive: true, force: true })
     })
 
@@ -503,8 +553,7 @@ describe("supervisor", () => {
       }
     )
     cleanups.push(async () => {
-      supervisor.kill("SIGKILL")
-      await supervisor.exited
+      await killSupervisor(supervisor)
       await rm(root, { recursive: true, force: true })
     })
 
@@ -609,8 +658,7 @@ describe("supervisor", () => {
       }
     )
     cleanups.push(async () => {
-      supervisor.kill("SIGKILL")
-      await supervisor.exited
+      await killSupervisor(supervisor)
       await rm(root, { recursive: true, force: true })
     })
 

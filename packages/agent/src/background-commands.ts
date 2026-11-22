@@ -115,6 +115,8 @@ export class BackgroundCommands {
     private readonly options: {
       /** Called as a command starts or ends: a computer reports its commands then. */
       readonly onChange?: () => void
+      /** How long a stopped command has to exit on SIGTERM before it is killed. */
+      readonly stopGraceMs?: number
     } = {}
   ) {}
 
@@ -386,7 +388,7 @@ export class BackgroundCommands {
       await Promise.race([
         entry.ended,
         new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, STOP_GRACE_MS)
+          timer = setTimeout(resolve, this.options.stopGraceMs ?? STOP_GRACE_MS)
         }),
       ])
       clearTimeout(timer)
