@@ -943,6 +943,12 @@ export const en = {
     motionApplies: (chapter: string) =>
       `“${chapter}” animates clips like it, so its animation plays on this one too.`,
     keepLooks: (count: number) => `${number(count)} clips keep their look`,
+    /** A clip moved where some of its styles, given by what held it, could not follow. */
+    lookMayDiffer: (name: string) => `“${name}” may look a little different here`,
+    looksMayDiffer: (count: number) => `${number(count)} clips may look a little different here`,
+    lookDiffers: "Some of its styles came from what held it before. Check it in the preview.",
+    looksDiffer: "Some of their styles came from what held them before. Check them in the preview.",
+    lookAlsoDiffers: "Some styles from what held it before stayed behind too.",
     animationsChange:
       "Their animations follow the chapters they are in now. Ask the agent to adjust them.",
     dismiss: "Dismiss",
@@ -1935,6 +1941,12 @@ export const fr: Translation<ArtifactMessages> = {
     motionApplies: (chapter) =>
       `« ${chapter} » anime les plans comme lui : son animation s’applique aussi à celui-ci.`,
     keepLooks: (count) => `${numberFr(count)} plans gardent leur style`,
+    lookMayDiffer: (name) => `« ${name} » peut paraître un peu différent ici`,
+    looksMayDiffer: (count) => `${numberFr(count)} plans peuvent paraître un peu différents ici`,
+    lookDiffers: "Une partie de son style venait de ce qui l’entourait. Vérifiez-le dans l’aperçu.",
+    looksDiffer:
+      "Une partie de leur style venait de ce qui les entourait. Vérifiez-les dans l’aperçu.",
+    lookAlsoDiffers: "Une partie du style venu de ce qui l’entourait est aussi restée en place.",
     animationsChange:
       "Leurs animations suivent les chapitres où ils se trouvent. Demandez à l’agent de les ajuster.",
     dismiss: "Fermer",

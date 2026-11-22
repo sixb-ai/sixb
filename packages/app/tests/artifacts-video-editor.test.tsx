@@ -1399,6 +1399,38 @@ describe("the editor", () => {
     live.destroy()
   })
 
+  // Guard proof: say nothing of the looks that may differ in tellAnimations (editor.tsx),
+  // dropping `differs`; the caption leaves a rule its place in the interview gave it, and nothing
+  // says so.
+  test("says once that a clip moved may look a little different", () => {
+    const placed = TALK.replace(
+      "  </div>\n</template>",
+      '    <style>[data-composition-id="talk"] .caption:first-of-type { margin: 0 }</style>\n  </div>\n</template>'
+    )
+    const { view, live } = openEditor(placed)
+    const drag = (from: number, to: number) => {
+      const caption = view.container.querySelector<HTMLElement>(
+        '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+      )
+      if (!caption) throw new Error("No caption on the timeline.")
+      fireEvent.pointerDown(caption, { button: 0, clientX: 112 + from / 10, pointerId: 1 })
+      fireEvent.pointerMove(caption, { clientX: 112 + to / 10, pointerId: 1, shiftKey: true })
+      fireEvent.pointerUp(caption, { clientX: 112 + to / 10, pointerId: 1, shiftKey: true })
+    }
+
+    drag(3500, 500)
+    const notice = view
+      .getByText("“Thanks for having me.” may look a little different here")
+      .closest("[role=status]")
+    expect(notice?.textContent).toContain("Check it in the preview.")
+    fireEvent.click(view.getByRole("button", { name: "Dismiss" }))
+
+    drag(500, 3500)
+    drag(3500, 500)
+    expect(view.queryByText(/may look a little different/)).toBeNull()
+    live.destroy()
+  })
+
   // Guard proof: say every animation left in tellAnimations (editor.tsx), without `told`: the
   // caption's second trip says it again.
   test("says once, kindly, that a caption's animation stayed with its chapter", () => {
