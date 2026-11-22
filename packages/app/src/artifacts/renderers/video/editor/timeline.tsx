@@ -431,7 +431,9 @@ export function Timeline({
         edits.seek(msAt(event.clientX), "commit")
         return
       case "move":
-        if (!current.moved) {
+        // A press let go, or a clip brought back where it was, as a snap or a group held at the
+        // video's start does: it is chosen, and nothing is edited.
+        if (!current.moved || current.startMs === current.clip.startMs) {
           edits.select({
             type: "clip",
             file: current.clip.file,
@@ -442,9 +444,11 @@ export function Timeline({
         if (current.group) edits.moveClips(current.group, current.startMs - current.clip.startMs)
         else edits.moveClip(current.clip, current.startMs)
         return
-      case "trim":
-        edits.trimClip(current.clip, current.edge, current.atMs)
+      case "trim": {
+        const was = current.edge === "start" ? current.clip.startMs : current.clip.endMs
+        if (current.atMs !== was) edits.trimClip(current.clip, current.edge, current.atMs)
         return
+      }
       case "scene":
         edits.sceneLength(current.scene, current.endMs - current.scene.startMs)
         return
