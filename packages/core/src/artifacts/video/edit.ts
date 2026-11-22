@@ -1980,9 +1980,11 @@ function moveFound(
  * there keeps its time. Every clip is found before any changes.
  */
 function placeFound(work: Working, placing: readonly Placing[]): Placement {
+  // Every scene read once: `partsOf` tells them apart by identity.
   const scenes = rootOf(work).scenes
   const plans = placing.map((each, index) => {
-    const own = sceneOf(work, each.file)
+    const own =
+      each.file === VIDEO_ENTRY ? undefined : scenes.find((scene) => scene.src === each.file)
     const parts = own ? partsOf(scenes, own, each.startMs, each.durationMs) : []
     return { ...each, index, own, parts }
   })
