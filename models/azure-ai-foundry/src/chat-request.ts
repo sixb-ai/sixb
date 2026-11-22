@@ -6,6 +6,8 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatInput } from "@sixb/model-protocols/chat"
+import { promptCaching } from "./caching"
+import type { AzureAIFoundryDeployment } from "./discovery"
 import { foundryStrictTool, prepareRequest } from "./request"
 import { foundryOutputSchema } from "./structured-output"
 import { PREFIX, positiveInteger } from "./util"
@@ -70,7 +72,8 @@ export function foundryChatRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: ChatRequestOptions,
-  scope: string
+  scope: string,
+  deployment?: AzureAIFoundryDeployment
 ): JsonObject {
   const { max, messages } = prepareRequest(request, definition, options, scope)
   const profile = options.profile ?? "openai"
@@ -126,6 +129,14 @@ export function foundryChatRequest(
     }),
     stream: true,
     ...(options.includeUsage === false ? {} : { stream_options: { include_usage: true } }),
+    ...promptCaching({
+      caching: request.caching,
+      messages: request.messages,
+      localTools: request.tools.length,
+      deployment,
+      request: options.request,
+      scope,
+    }),
     ...(max === undefined ? {} : { [options.maxTokensParameter ?? "max_completion_tokens"]: max }),
     ...(explicitReasoning && typeof reasoning === "string" ? { reasoning_effort: reasoning } : {}),
     ...(tools.length

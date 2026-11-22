@@ -22,6 +22,12 @@ Sixb packages are versioned independently. Each release entry names the packages
   tools; the project's own inference path refused both. A conversation that switches between
   Foundry deployments keeps working: the next model gets its text and tool calls, without the
   previous model's reasoning.
+- Foundry deployments cache what Sixb reads again, from each request's caching intent. Claude
+  caches agent steps and conversations, where it cached nothing before, and its calls are priced
+  again. GPT-5.6 and later write no cache for one-shot requests, and their cache writes are
+  priced instead of leaving the call unpriceable. Earlier OpenAI models keep a conversation's cache
+  for 24 hours at no extra price, and every OpenAI-style request names the conversation's
+  `prompt_cache_key`. See [prompt caching](models/azure-ai-foundry/README.md#prompt-caching).
 
 ### Upgrade notes
 
@@ -38,7 +44,8 @@ Sixb packages are versioned independently. Each release entry names the packages
   if a firewall lists URLs. `foundry(name)` runs OpenAI deployments on Responses; use
   `foundry.chat(name)` to keep one on Chat. A deployment from a project connection is rejected for
   every protocol. Reasoning recorded before the upgrade is not replayed to the next turn of a
-  conversation, since it was recorded for the project's path.
+  conversation, since it was recorded for the project's path. A Claude call's cost reservation
+  holds the one-hour cache write rate, twice the input price.
 
 ## 2026-11-19 — Sixb 0.2.6
 

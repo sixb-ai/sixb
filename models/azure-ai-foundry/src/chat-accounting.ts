@@ -47,7 +47,7 @@ export function foundryChatEstimator(
   const estimator = tokenEstimator(
     card,
     request,
-    ["temperature", "top_p", "metadata"],
+    ["temperature", "top_p", "metadata", "prompt_cache_key", "prompt_cache_retention"],
     tokenMeters,
     modelName,
     modelVersion,

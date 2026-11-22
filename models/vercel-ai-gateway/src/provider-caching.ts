@@ -4,10 +4,7 @@ import {
   type ModelCaching,
   type ModelMessage,
 } from "@sixb/core/models"
-
-// OpenAI GPT-5.6 and later take `prompt_cache_options`; earlier models reject it with a 400.
-const OPENAI_CACHE_OPTIONS =
-  /^openai\/gpt-(?:5\.(?:[6-9]|\d{2,})|(?:[6-9]|\d{2,})(?:\.\d+)?)(?:-|$)/
+import { billsPromptCacheWrites } from "@sixb/model-protocols/responses"
 
 /** Keeps a conversation on the upstream provider that holds its cache. */
 export const SESSION_AFFINITY_HEADER = "x-session-affinity"
@@ -84,7 +81,8 @@ export function gatewayPromptCaching(input: {
 
   const openai = providerOptions?.openai
   if (
-    !OPENAI_CACHE_OPTIONS.test(input.modelId) ||
+    !input.modelId.startsWith("openai/") ||
+    !billsPromptCacheWrites(input.modelId.slice("openai/".length)) ||
     (openai !== undefined && !isJsonObject(openai)) ||
     (isJsonObject(openai) && Object.hasOwn(openai, "promptCacheOptions"))
   ) {

@@ -20,6 +20,7 @@ import { chatEvents } from "@sixb/model-protocols/chat"
 import { isStrictToolLimitError, messagesEvents } from "@sixb/model-protocols/messages"
 import { responsesEvents } from "@sixb/model-protocols/responses"
 import { foundryEstimator, foundryUsage, type PricedEstimator } from "./accounting"
+import { refusedCaching } from "./caching"
 import {
   type AzureAIFoundryCatalogOptions,
   type CatalogModel,
@@ -455,23 +456,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
     const response =
       this.protocol === "messages"
         ? await this.postMessages(request)
-        : await this.transport.post(
-            JSON.stringify(
-              this.protocol === "chat"
-                ? foundryChatRequest(request, this.definition, this.options, this.scope)
-                : responsesRequest(
-                    request,
-                    this.definition,
-                    this.options,
-                    this.scope,
-                    this.resolution?.deployment
-                  )
-            ),
-            request.signal,
-            this.providerId,
-            this.modelId,
-            this.protocol
-          )
+        : await this.postOpenAICompatible(request)
     const id = this.transport.redactText(response, requestId(response))
     if (!response.body)
       throw new ModelProviderError(
@@ -520,6 +505,33 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
               }),
         response
       ),
+    }
+  }
+
+  /** A caching setting Azure refuses for this deployment: once more, without it. */
+  private async postOpenAICompatible(request: LanguageModelRequest): Promise<Response> {
+    const deployment = this.resolution?.deployment
+    for (let attempt = 0; ; attempt++) {
+      const body =
+        this.protocol === "chat"
+          ? foundryChatRequest(request, this.definition, this.options, this.scope, deployment)
+          : responsesRequest(request, this.definition, this.options, this.scope, deployment)
+      try {
+        return await this.transport.post(
+          JSON.stringify(body),
+          request.signal,
+          this.providerId,
+          this.modelId,
+          this.protocol
+        )
+      } catch (error) {
+        if (
+          attempt >= 3 ||
+          !(error instanceof ModelProviderError) ||
+          !refusedCaching(error, body, this.options.request, this.scope)
+        )
+          throw error
+      }
     }
   }
 
