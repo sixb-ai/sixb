@@ -32,6 +32,7 @@ import {
   trimClip,
   type VideoCut,
   type VideoEditResult,
+  type VideoPlaceResult,
   type VideoSources,
   videoTarget,
 } from "../src/artifacts/video/edit"
@@ -142,6 +143,10 @@ function inserted(result: VideoEditResult): string[] {
 
 const demoClips = (files: ReadonlyMap<string, string | null>) =>
   readSceneTimeline(files.get("scenes/demo.html") as string)?.clips ?? []
+const hookClips = (files: ReadonlyMap<string, string | null>) =>
+  readSceneTimeline(files.get("scenes/hook.html") as string)?.clips ?? []
+const outroClips = (files: ReadonlyMap<string, string | null>) =>
+  readSceneTimeline(files.get("scenes/outro.html") as string)?.clips ?? []
 
 describe("reading a composition's clips", () => {
   test("a scene's clips, tracks and texts, as its file writes them", () => {
@@ -679,7 +684,7 @@ describe("editing several clips at once", () => {
     const result = moveClips(
       SOURCES,
       [
-        { file: "scenes/demo.html", clip: "screen" },
+        { file: "scenes/demo.html", clip: "talk" },
         { file: "scenes/demo.html", clip: caption("in two taps") },
         { file: "index.html", clip: "music" },
       ],
@@ -688,8 +693,8 @@ describe("editing several clips at once", () => {
     const files = applied(result)
 
     expect(demoClips(files).map((clip) => [clip.ref, clip.startMs])).toEqual([
-      ["talk", 0],
-      ["screen", 5500],
+      ["talk", 500],
+      ["screen", 5000],
       ["#2", 500],
       ["#3", 3000],
     ])
@@ -700,43 +705,33 @@ describe("editing several clips at once", () => {
     ])
   })
 
-  // Guard proof: take `Math.round(deltaMs)` alone as the delta in moveClips; the caption goes
-  // to -2.5 s, read as 0, and the screen lands at 2 s: the group is pulled apart.
-  test("moves the whole group less when one would go before its composition's start", () => {
-    const files = applied(
-      moveClips(
-        SOURCES,
-        [
-          { file: "scenes/demo.html", clip: "screen" },
-          { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
-        ],
-        -3000
-      )
+  // Guard proof: take `Math.round(deltaMs)` alone as the delta in moveFound (edit.ts); the
+  // caption still lands at 0, and the screen at 1.5 s, half a second nearer it: the group is
+  // pulled apart.
+  test("moves the whole group less when one would go before the video's start", () => {
+    const result = moveClips(
+      SOURCES,
+      [
+        { file: "scenes/demo.html", clip: "screen" },
+        { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
+      ],
+      -3500
     )
+    const files = applied(result)
 
-    expect(demoClips(files).map((clip) => [clip.ref, clip.startMs])).toEqual([
-      ["talk", 0],
-      ["screen", 4500],
-      ["#2", 0],
-      ["#3", 2500],
+    // The caption, at 3 s in the video, goes back 3 s, to the hook's start; the screen as far.
+    expect(hookClips(files).map((clip) => [clip.text, clip.startMs])).toEqual([
+      ["Assign the nearest tech", 0],
     ])
+    expect(demoClips(files).find((clip) => clip.ref === "screen")?.startMs).toBe(2000)
   })
 
-  // Guard proof: drop the scene's growth from moveFound in edit.ts; the demo still ends at
-  // 10.5 s, and the end of the screen moved past it is never seen.
-  test("a scene grows to show whole what a move takes past its end, and the scenes after follow", () => {
-    expect(times(SOURCES)).toEqual([
-      ["hook", 0, 3000],
-      ["demo", 2500, 8000],
-      ["outro", 10_500, 4500],
-    ])
-
+  // Guard proof: never go on in the next scene in partsOf (edit.ts), `after` always undefined;
+  // the screen then runs past the demo's end, which grows to hold it, as moveFound made it, and
+  // the outro starts later.
+  test("a move never changes a scene's length but the last's", () => {
     const one = applied(moveClip(SOURCES, "scenes/demo.html", "screen", 5500))
-    expect(times(one)).toEqual([
-      ["hook", 0, 3000],
-      ["demo", 2500, 8500],
-      ["outro", 11_000, 4500],
-    ])
+    expect(times(one)).toEqual(times(SOURCES))
 
     const group = applied(
       moveClips(
@@ -748,17 +743,7 @@ describe("editing several clips at once", () => {
         1000
       )
     )
-    expect(times(group)).toEqual([
-      ["hook", 0, 3000],
-      ["demo", 2500, 9000],
-      ["outro", 11_500, 4500],
-    ])
-
-    // A move that stays inside its scene, or goes sooner, leaves the scenes as they are.
-    const inside = applied(moveClip(SOURCES, "scenes/demo.html", caption("in two taps"), 3000))
-    expect(times(inside)).toEqual(times(SOURCES))
-    const sooner = applied(moveClip(SOURCES, "scenes/demo.html", "screen", 4000))
-    expect(times(sooner)).toEqual(times(SOURCES))
+    expect(times(group)).toEqual(times(SOURCES))
   })
 
   test("refuses the whole edit when one of the clips is gone", () => {
@@ -830,6 +815,355 @@ describe("editing several clips at once", () => {
       { file: "scenes/demo.html", clip: "text-2" },
       { file: "index.html", clip: "music-2" },
     ])
+  })
+})
+
+describe("placing clips in the video", () => {
+  const caption = (words: string) => {
+    const found = demoClips(SOURCES).find((clip) => clip.text === words)
+    if (!found) throw new Error(`No caption "${words}".`)
+    return videoTarget(found)
+  }
+  const placed = (result: VideoPlaceResult) => ("edit" in result ? (result.clips ?? []) : [])
+  const left = (result: VideoPlaceResult) => ("edit" in result ? (result.animationsLeft ?? []) : [])
+  const timing = (clips: readonly { ref: string; startMs: number; durationMs?: number }[]) =>
+    clips.map((clip) => [clip.ref, clip.startMs, clip.durationMs])
+
+  /** The sources with some files written otherwise. */
+  const with_ = (files: Record<string, string>) => {
+    const sources = new Map(SOURCES)
+    for (const [path, text] of Object.entries(files)) sources.set(path, text)
+    return sources
+  }
+
+  // Guard proof: return [{ scene: own, … }] from partsOf in edit.ts, every part kept in its own
+  // scene; the caption then stays in the demo at 9.5 s, past the outro's start, and at -1 s.
+  test("a clip moved into another scene's time goes into that scene, later or earlier", () => {
+    // "in two taps" plays from 5 s in the video: 7 s later is 1.5 s into the outro.
+    const later = moveClips(
+      SOURCES,
+      [{ file: "scenes/demo.html", clip: caption("in two taps") }],
+      7000
+    )
+    const files = applied(later)
+    expect(demoClips(files).some((clip) => clip.text === "in two taps")).toBe(false)
+    expect(timing(outroClips(files))).toEqual([["#0", 1500, 2000]])
+    expect(placed(later)).toEqual([
+      { file: "scenes/outro.html", clip: { ref: "#0", tag: "p", words: "in two taps" } },
+    ])
+    expect(times(files)).toEqual(times(SOURCES))
+
+    // "Assign the nearest tech" plays from 3 s: 2 s sooner is the hook's, where only it plays.
+    const sooner = applied(
+      moveClip(SOURCES, "scenes/demo.html", caption("Assign the nearest tech"), -1500)
+    )
+    expect(timing(hookClips(sooner))).toEqual([["#0", 1000, 1500]])
+    expect(hookClips(sooner)[0]?.text).toBe("Assign the nearest tech")
+  })
+
+  // Guard proof: start the next part at the next scene's own start in partsOf (edit.ts),
+  // `at = after.startMs`; the hook's last half second then shows twice, in the hook and in the
+  // demo, whose part starts at 0 and plays the file from 3.5 s.
+  test("a clip past its scene's end goes on in the next scenes, playing on from where it stopped", () => {
+    const sources = with_({
+      "scenes/hook.html": HOOK.replace(
+        '<h1 class="title">',
+        '<video id="intro" src="../media/new.mp4" data-start="0" data-duration="3" data-media-start="1" muted></video>\n    <h1 class="title">'
+      ),
+    })
+
+    // From the video's start to 14 s: the hook, the demo from where the hook ends, and the outro.
+    const result = trimClip(sources, "scenes/hook.html", "intro", "end", 14_000)
+    const files = applied(result, sources)
+    const parts = (clips: readonly ReturnType<typeof hookClips>[number][]) =>
+      clips
+        .filter((clip) => clip.src?.endsWith("new.mp4"))
+        .map((clip) => [clip.ref, clip.startMs, clip.durationMs, clip.mediaStartMs, clip.src])
+
+    expect(parts(hookClips(files))).toEqual([["intro", 0, 3000, 1000, "../media/new.mp4"]])
+    expect(parts(demoClips(files))).toEqual([["intro-2", 500, 7500, 4000, "../media/new.mp4"]])
+    expect(parts(outroClips(files))).toEqual([["intro-3", 0, 3500, 11_500, "../media/new.mp4"]])
+    expect(times(files)).toEqual(times(sources))
+    expect(placed(result)).toEqual([{ file: "scenes/hook.html", clip: "intro" }])
+  })
+
+  // Guard proof: grow no scene in placeFound (edit.ts); the outro ends at 15 s, and the caption
+  // moved past it is never seen.
+  test("a clip past the last scene's end grows it, and the video with it", () => {
+    const files = applied(
+      moveClips(SOURCES, [{ file: "scenes/demo.html", clip: caption("in two taps") }], 11_000)
+    )
+    expect(timing(outroClips(files))).toEqual([["#0", 5500, 2000]])
+    expect(times(files)).toEqual([
+      ["hook", 0, 3000],
+      ["demo", 2500, 8000],
+      ["outro", 10_500, 7500],
+    ])
+    // The soundtrack that ran to the video's end still does.
+    expect(composition(files).durationMs).toBe(18_000)
+    expect(readRootTimeline(files.get("index.html") as string)?.clips[0]?.durationMs).toBe(18_000)
+
+    // An end pulled past it, in whole frame steps.
+    const trimmed = applied(trimClip(SOURCES, "scenes/demo.html", "talk", "end", 12_960))
+    expect(timing(outroClips(trimmed)).filter(([ref]) => ref === "talk-2")).toEqual([
+      ["talk-2", 0, 4960],
+    ])
+    expect(times(trimmed)[2]).toEqual(["outro", 10_500, 5000])
+  })
+
+  // Guard proof: take the first scene that holds the start in partsOf (`.at(0)` in onTop); the
+  // end card's title lands in the hook, under the demo that covers it there.
+  test("in a crossfade, a clip goes into the scene on top there", () => {
+    const sources = with_({
+      "scenes/outro.html": OUTRO.replace(
+        "<h2>Try it today</h2>",
+        '<h2 data-start="0" data-duration="2">Try it today</h2>'
+      ),
+    })
+    // 2.7 s is in the hook's last half second, which the demo fades in over.
+    const files = applied(moveClip(sources, "scenes/outro.html", "#0", 2700 - 10_500), sources)
+    expect(outroClips(files)).toEqual([])
+    expect(demoClips(files).find((clip) => clip.tag === "h2")).toMatchObject({
+      startMs: 200,
+      durationMs: 2000,
+    })
+
+    // A clip whose own scene still holds its start stays in it, even there.
+    const own = applied(
+      moveClip(SOURCES, "scenes/demo.html", caption("Assign the nearest tech"), 200)
+    )
+    expect(demoClips(own).find((clip) => clip.text === "Assign the nearest tech")?.startMs).toBe(
+      200
+    )
+  })
+
+  // Guard proof: keep `was.id` whenever it has one in placeFound (edit.ts); the outro then has
+  // two elements whose id is screen, which HyperFrames plays as one.
+  test("a clip that lands where its id is taken takes another", () => {
+    const sources = with_({
+      "scenes/outro.html": OUTRO.replace("<h2>", '<h2 id="screen">'),
+    })
+    const result = moveClip(sources, "scenes/demo.html", "screen", 9000)
+    const files = applied(result, sources)
+    const ids = [...(files.get("scenes/outro.html") ?? "").matchAll(/\sid="([^"]*)"/g)].map(
+      (match) => match[1]
+    )
+    expect(ids).toEqual(["screen-2", "screen"])
+    expect(placed(result)).toEqual([{ file: "scenes/outro.html", clip: "screen-2" }])
+  })
+
+  // Guard proof: drop `src` from the attributes placeFound writes (edit.ts); the copy in the
+  // end card, a file at the video's root, then plays `../media/new.mp4`, outside the video.
+  test("a recording that lands in a file of another folder plays the same file", () => {
+    const sources = with_({
+      "index.html": INDEX.replace("scenes/outro.html", "outro.html"),
+      "outro.html": OUTRO,
+      "scenes/hook.html": HOOK.replace(
+        '<h1 class="title">',
+        '<video id="intro" src="../media/new.mp4" data-start="0" data-duration="3" muted></video>\n    <h1 class="title">'
+      ),
+    })
+    sources.delete("scenes/outro.html")
+    const files = applied(moveClip(sources, "scenes/hook.html", "intro", 11_000), sources)
+    expect(files.get("outro.html")).toContain(
+      '<video id="intro" src="media/new.mp4" data-start="0.5"'
+    )
+    expect(composition(files).scenes[2]?.media.map((each) => each.value)).toContain("media/new.mp4")
+  })
+
+  // Guard proof: drop the freezeFollowers call from placeFound (edit.ts); the caption then
+  // follows a talk its scene no longer holds, and shows at 0 s.
+  test("what followed a clip that leaves keeps its time", () => {
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace(
+        '<p class="caption" data-start="2.5" data-duration="2">in two taps</p>',
+        '<p id="after" class="caption" data-start="talk + 1" data-duration="1">in two taps</p>'
+      ),
+    })
+    const files = applied(moveClip(sources, "scenes/demo.html", "talk", 9000), sources)
+    expect(demoClips(files).find((clip) => clip.ref === "after")?.startMs).toBe(6000)
+    expect(files.get("scenes/demo.html")).toContain('id="after" class="caption" data-start="6"')
+  })
+
+  // Guard proof: drop carryLooks from placeFound (edit.ts); the outro then holds no rule for
+  // the caption, which loses its colour there and its place in the export.
+  test("a clip that leaves takes its scene's rules along, rewritten for where it lands, once", () => {
+    const style = `<style>
+      @keyframes rise { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes spin { to { rotate: 1turn } }
+      [data-composition-id="demo"] .caption { color: #ffd166; animation: rise 0.4s; }
+      [data-composition-id="hook"] .caption { color: red; }
+      .caption,
+      .callout { font-weight: 700; }
+      .screen-frame video { border-radius: 24px; }
+    </style>
+    <script>`
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace("<script>", style),
+      "styles.css":
+        'h1 { font-size: 140px }\n[data-composition-id="demo"] .caption {\n  letter-spacing: -0.01em;\n}\n',
+    })
+    const there = applied(
+      moveClips(sources, [{ file: "scenes/demo.html", clip: caption("in two taps") }], 7000),
+      sources
+    )
+    const outro = there.get("scenes/outro.html") ?? ""
+    expect(outro).toContain(`  <style>
+      [data-composition-id="outro"] .caption { color: #ffd166; animation: rise 0.4s; }
+      @keyframes rise { from { opacity: 0 } to { opacity: 1 } }
+      .caption { font-weight: 700; }
+      [data-composition-id="outro"] .caption { letter-spacing: -0.01em; }
+    </style>
+  </div>`)
+    expect(outro).not.toContain("red")
+    expect(outro).not.toContain(".callout")
+    expect(outro).not.toContain("spin")
+
+    // Back and there again: nothing is written twice.
+    const outroCaption = outroClips(there).find((clip) => clip.text === "in two taps")
+    if (!outroCaption) throw new Error("The caption did not land in the outro.")
+    const back = applied(
+      moveClip(there, "scenes/outro.html", videoTarget(outroCaption), 5000 - 10_500),
+      there
+    )
+    const demoCaption = demoClips(back).find((clip) => clip.text === "in two taps")
+    if (!demoCaption) throw new Error("The caption did not come back to the demo.")
+    expect(back.get("scenes/demo.html")).toBe(sources.get("scenes/demo.html"))
+    const again = applied(
+      moveClip(back, "scenes/demo.html", videoTarget(demoCaption), 2500 + 7000),
+      back
+    )
+    expect(again.get("scenes/outro.html")).toBe(outro)
+  })
+
+  // Guard proof: return false from animates (edit.ts); the talk then leaves the demo, whose
+  // script still looks for #talk, and nothing says so.
+  test("says which clip left a scene whose script animates it", () => {
+    const talk = moveClip(SOURCES, "scenes/demo.html", "talk", -2500)
+    expect(left(talk)).toEqual([
+      { clip: { file: "scenes/hook.html", clip: "talk" }, scene: "demo" },
+    ])
+
+    // The captions' class is in no script, and a clip that stays in its scene keeps its motion.
+    expect(
+      left(moveClips(SOURCES, [{ file: "scenes/demo.html", clip: caption("in two taps") }], 7000))
+    ).toEqual([])
+    expect(left(moveClip(SOURCES, "scenes/demo.html", "talk", 500))).toEqual([])
+
+    // A class the script names as a selector counts; one it reads as a property does not.
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace(
+        '<p class="caption" data-start="0.5"',
+        '<p class="caption from" data-start="0.5"'
+      ),
+    })
+    expect(
+      left(moveClip(sources, "scenes/demo.html", caption("Assign the nearest tech"), -1500))
+    ).toEqual([])
+    const named = with_({
+      "scenes/demo.html": DEMO.replace(
+        '<p class="caption" data-start="0.5"',
+        '<p class="caption callout" data-start="0.5"'
+      ),
+    })
+    const moved = moveClip(
+      named,
+      "scenes/demo.html",
+      { ref: "#2", tag: "p", words: "Assign the nearest tech" },
+      -1500
+    )
+    expect(left(moved).map((each) => each.scene)).toEqual(["demo"])
+  })
+
+  // Guard proof: place the video's own clips as a scene's in placeFound (edit.ts), by the scene
+  // that plays at their start; the music then leaves index.html for the hook.
+  test("the video's own clips keep to index.html, and a group across scenes is one edit", () => {
+    const result = moveClips(
+      SOURCES,
+      [
+        { file: "index.html", clip: "music" },
+        { file: "scenes/demo.html", clip: "screen" },
+        { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
+      ],
+      2000
+    )
+    const files = applied(result)
+
+    expect(readRootTimeline(files.get("index.html") as string)?.clips[0]).toMatchObject({
+      ref: "music",
+      startMs: 2000,
+    })
+    for (const scene of ["scenes/hook.html", "scenes/demo.html", "scenes/outro.html"]) {
+      expect(files.get(scene)).not.toContain("music")
+    }
+    // The screen, 7.5 s to 10.5 s, then 9.5 s to 12.5 s: its last 2 s in the outro.
+    expect(timing(demoClips(files)).find(([ref]) => ref === "screen")).toEqual([
+      "screen",
+      7000,
+      1000,
+    ])
+    expect(timing(outroClips(files))).toEqual([["screen-2", 0, 2000]])
+    expect(outroClips(files)[0]?.mediaStartMs).toBe(1000)
+    expect(placed(result)).toEqual([
+      { file: "index.html", clip: "music" },
+      { file: "scenes/demo.html", clip: "screen" },
+      { file: "scenes/demo.html", clip: { ref: "#2", tag: "p", words: "Assign the nearest tech" } },
+    ])
+    expect("edit" in result && result.edit.map((file) => file.path).sort()).toEqual([
+      "index.html",
+      "scenes/demo.html",
+      "scenes/outro.html",
+    ])
+  })
+
+  // Guard proof: drop the check for clips held by the one leaving in placeFound (edit.ts); the
+  // frame then lands in the outro with the footage in it, which still counts from the demo.
+  test("refuses the whole group when one clip of it cannot be placed", () => {
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace(
+        '<video id="screen" src="media/screen.mp4" data-start="5" data-duration="3" muted playsinline></video>',
+        '<div id="frame" data-start="5" data-duration="3"><video id="screen" src="media/screen.mp4" data-start="5" data-duration="3" muted playsinline></video></div>'
+      ),
+    })
+    const result = moveClips(
+      sources,
+      [
+        { file: "scenes/demo.html", clip: caption("in two taps") },
+        { file: "scenes/demo.html", clip: "frame" },
+      ],
+      4000
+    )
+    expect("error" in result && result.error).toContain("'frame' holds other clips")
+  })
+
+  // Guard proof: drop the placeFound call from insertClip (edit.ts); the footage then plays on
+  // past the hook's end, unseen, and the demo shows none of it.
+  test("an import past its scene's end goes on in the next one", () => {
+    const result = insertClip(SOURCES, "scenes/hook.html", {
+      kind: "video",
+      src: "media/new.mp4",
+      startMs: 2000,
+      durationMs: 2000,
+    })
+    const files = applied(result)
+    expect(timing(hookClips(files))).toEqual([["new", 2000, 1000]])
+    expect(timing(demoClips(files)).find(([ref]) => ref === "new-2")).toEqual(["new-2", 500, 1000])
+    expect(times(files)).toEqual(times(SOURCES))
+  })
+
+  // Guard proof: place the end trim even with ripple in trimClip (edit.ts); the screen then goes
+  // on in the outro, and the demo keeps its length.
+  test("with ripple, an end trim stays in its scene, which grows as much", () => {
+    const files = applied(
+      trimClip(SOURCES, "scenes/demo.html", "screen", "end", 9000, { ripple: true })
+    )
+    expect(timing(demoClips(files)).find(([ref]) => ref === "screen")).toEqual([
+      "screen",
+      5000,
+      4000,
+    ])
+    expect(outroClips(files)).toEqual([])
+    expect(times(files)[1]).toEqual(["demo", 2500, 9000])
   })
 })
 

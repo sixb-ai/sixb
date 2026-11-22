@@ -7,6 +7,7 @@ import {
   type VideoRoot,
   type VideoSourceSpan,
   type VideoStart,
+  videoFilePath,
 } from "./composition"
 import {
   readRootLayers,
@@ -16,6 +17,7 @@ import {
   type VideoElementSource,
   type VideoFileTimeline,
   type VideoText,
+  type VideoTrack,
 } from "./timeline"
 
 // What an editor does to a video, as the smallest changes to the text of its files: a scene made
@@ -291,9 +293,11 @@ export function setClipTiming(
 
 /**
  * Moves a clip's edge to `toMs`, from its composition's start. Its end makes it shorter or longer;
- * its start, into its file as much, as dragging a clip's edge does. With `ripple`, what comes
- * after the edge moves with it, the scene's end included, and a start keeps its place: the clip
- * pulls the rest of the scene in.
+ * its start, into its file as much, as dragging a clip's edge does. An end pulled past its scene's
+ * end goes on in the next scene, as {@link moveClips} places a clip, or the last scene grows to
+ * hold it. A start never goes before its scene's. With `ripple`, what comes after the edge moves
+ * with it, the scene's end included, so the clip stays whole in its scene, and a start keeps its
+ * place: the clip pulls the rest of the scene in.
  */
 export function trimClip(
   sources: VideoSources,
@@ -302,8 +306,8 @@ export function trimClip(
   edge: "start" | "end",
   toMs: number,
   options: { readonly ripple?: boolean; readonly endMs?: number } = {}
-): VideoEditResult {
-  return run(sources, (work) => {
+): VideoPlaceResult {
+  return placing(sources, (work) => {
     const found = clipOf(work, file, clip)
     const end = clipEnd(found, options.endMs)
 
@@ -311,10 +315,16 @@ export function trimClip(
       const length = Math.round(toMs) - found.startMs
       if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
 
-      setAttributes(work, file, found.source, { "data-duration": seconds(length) })
-      if (options.ripple)
-        ripple(work, file, end, found.startMs + length - end, new Set([found.ref]))
-      return
+      if (options.ripple || file === VIDEO_ENTRY) {
+        setAttributes(work, file, found.source, { "data-duration": seconds(length) })
+        if (options.ripple)
+          ripple(work, file, end, found.startMs + length - end, new Set([found.ref]))
+        return undefined
+      }
+
+      return placeFound(work, [
+        { file, clip: found, startMs: videoStartOf(work, file, found), durationMs: length },
+      ])
     }
 
     // How far its start moves into its file, or back out of it: never before its file's start,
@@ -332,22 +342,24 @@ export function trimClip(
       ...(playsFile(found) ? { "data-media-start": seconds(found.mediaStartMs + moved) } : {}),
     })
     if (options.ripple) ripple(work, file, end, -moved, new Set([found.ref]))
+    return undefined
   })
 }
 
 /**
- * Moves a clip to start at `startMs` in its composition, its length kept. Moved later, it shows as
- * much as before: its scene grows to hold it, as {@link moveClips} moves several.
+ * Moves a clip to start at `startMs` from its composition's start, its length kept, never before
+ * the video's: before its scene's start, it goes into the scene it then plays in, as
+ * {@link moveClips} places several.
  */
 export function moveClip(
   sources: VideoSources,
   file: string,
   clip: VideoTarget,
   startMs: number
-): VideoEditResult {
-  return run(sources, (work) => {
+): VideoPlaceResult {
+  return placing(sources, (work) => {
     const found = clipOf(work, file, clip)
-    moveFound(work, [{ file, clip: found }], Math.max(0, Math.round(startMs)) - found.startMs)
+    return moveFound(work, [{ file, clip: found }], Math.round(startMs) - found.startMs)
   })
 }
 
@@ -462,16 +474,40 @@ export interface VideoClipTarget {
 }
 
 /**
- * Moves clips together by `deltaMs`, each in its own file, as one edit: they keep their places
- * one to another. None goes before its composition's start: the whole group moves less. Moved
- * later, each shows as much as before: a scene grows to hold its clips.
+ * A clip that left a scene whose script animates it: its look came with it, the motion the
+ * script writes could not.
+ */
+export interface VideoAnimationLeft {
+  /** Where the clip is now. */
+  readonly clip: VideoClipTarget
+  /** The scene it left, whose script still names it. */
+  readonly scene: string
+}
+
+/**
+ * An edit that places clips in the video, as a move, an end trim or an import does: a clip of a
+ * scene lives in the scene that plays where it starts, its own while that holds it, else the one
+ * on top there, and goes on past that scene's end as a copy in the next, playing on from where it
+ * stopped; the last scene grows to hold it. `clips` names each clip placed where it now starts, in
+ * the order given, and `animationsLeft` each that left a scene whose script animates it.
+ */
+export type VideoPlaceResult = VideoEditResult & {
+  readonly clips?: readonly VideoClipTarget[]
+  readonly animationsLeft?: readonly VideoAnimationLeft[]
+}
+
+/**
+ * Moves clips together by `deltaMs`, as one edit: they keep their places one to another, none
+ * before the video's start, so the whole group moves less. Each clip of a scene lands in the scene
+ * that plays where it now starts, and goes on in the next scene past that one's end; the last
+ * scene grows to hold it (see {@link VideoPlaceResult}). The video's own clips stay its own.
  */
 export function moveClips(
   sources: VideoSources,
   clips: readonly VideoClipTarget[],
   deltaMs: number
-): VideoEditResult {
-  return run(sources, (work) => moveFound(work, clipsOf(work, clips), deltaMs))
+): VideoPlaceResult {
+  return placing(sources, (work) => moveFound(work, clipsOf(work, clips), deltaMs))
 }
 
 /**
@@ -676,8 +712,9 @@ export function cutRange(sources: VideoSources, range: VideoRange): VideoEditRes
 
 /**
  * Adds a clip that plays or shows a file of the video, at `startMs` in its composition, for
- * `durationMs`: footage fills the frame under what the scene shows, a sound plays under it. A
- * scene too short for it is lengthened to hold it. Returns the clip's id with the edit.
+ * `durationMs`: footage fills the frame under what the scene shows, a sound plays under it. It is
+ * placed as {@link moveClips} places a clip: past its scene's end, it goes on in the next scene,
+ * or the last scene grows to hold it. Returns the clip's id with the edit.
  */
 export function insertClip(
   sources: VideoSources,
@@ -714,17 +751,12 @@ export function insertClip(
 
     // A picture goes over the pictures before it and under the words; a sound beside the sounds.
     const track = clip.kind === "audio" ? "sound" : "picture"
-    const after =
-      timeline.clips.filter((each) => each.track === track).at(-1) ??
-      (track === "sound"
-        ? timeline.clips.filter((each) => each.track === "picture").at(-1)
-        : undefined)
-    insertInComposition(work, file, timeline, html, after?.source)
+    insertInComposition(work, file, timeline, html, insertionPoint(timeline, track)?.source)
 
-    // A scene too short for the clip grows to hold it.
-    const scene = sceneOf(work, file)
-    const end = Math.max(0, clip.startMs) + clip.durationMs
-    if (scene && end > scene.durationMs) lengthenScene(work, scene.id, end)
+    const found = clipOf(work, file, id)
+    placeFound(work, [
+      { file, clip: found, startMs: videoStartOf(work, file, found), durationMs: clip.durationMs },
+    ])
   })
   return "edit" in result && added ? { ...result, clip: added } : result
 }
@@ -782,6 +814,12 @@ class Working {
 
   has(path: string): boolean {
     return this.files.has(path)
+  }
+
+  /** A text file's text, undefined for one that is not the video's or holds bytes. */
+  textOf(path: string): string | undefined {
+    const text = this.files.get(path)
+    return typeof text === "string" ? text : undefined
   }
 
   paths(): string[] {
@@ -931,6 +969,18 @@ function run(sources: VideoSources, operation: (work: Working) => void): VideoEd
     }
   }
   return { edit }
+}
+
+/** Runs an operation that places clips, and returns where it placed them with its edit. */
+function placing(
+  sources: VideoSources,
+  operation: (work: Working) => Placement | undefined
+): VideoPlaceResult {
+  let placement: Placement | undefined
+  const result = run(sources, (work) => {
+    placement = operation(work)
+  })
+  return "edit" in result && placement ? { ...result, ...placement } : result
 }
 
 // Scenes, inside ----------------------------------------------------------------------------------
@@ -1286,15 +1336,20 @@ function copySceneFile(text: string, from: string, to: string, taken: Set<string
 
 /** Every name an id may not take: the scenes', and every element's id in every HTML file. */
 function takenNames(work: Working): Set<string> {
-  const taken = new Set<string>()
+  return new Set(nameCounts(work).keys())
+}
+
+/** How many times each id and each scene's name is written, in every HTML file. */
+function nameCounts(work: Working): Map<string, number> {
+  const counts = new Map<string, number>()
   for (const path of work.paths()) {
     if (!/\.html?$/i.test(path)) continue
     const text = work.text(path)
     for (const match of text.matchAll(/\s(?:id|data-composition-id)\s*=\s*(["'])([^"']*)\1/g)) {
-      if (match[2]) taken.add(match[2])
+      if (match[2]) counts.set(match[2], (counts.get(match[2]) ?? 0) + 1)
     }
   }
-  return taken
+  return counts
 }
 
 /** `base`, or `base-2`, `base-3`… until one is not taken. */
@@ -1336,42 +1391,6 @@ function timelineOf(work: Working, file: string): VideoFileTimeline {
 
 function clipOf(work: Working, file: string, target: VideoTarget): VideoClip {
   return resolveTarget(timelineOf(work, file).clips, target, file, "clip")
-}
-
-/**
- * Moves clips found in their files by `deltaMs`, none before its composition's start. A clip that
- * writes its length and goes later keeps showing what its scene showed of it: the scene's end
- * goes as far as the furthest of them needs, in whole frame steps, and the scenes after follow.
- */
-function moveFound(
-  work: Working,
-  found: readonly { readonly file: string; readonly clip: VideoClip }[],
-  deltaMs: number
-): void {
-  const delta = Math.max(Math.round(deltaMs), ...found.map(({ clip }) => -clip.startMs))
-  if (delta === 0) return
-
-  for (const [file, each] of byFile(found)) {
-    rewriteClips(
-      work,
-      file,
-      new Map(each.map(({ clip }) => [clip.ref, { "data-start": seconds(clip.startMs + delta) }]))
-    )
-
-    const scene = sceneOf(work, file)
-    if (!scene || delta < 0) continue
-    const needed = Math.max(
-      ...each.map(({ clip }) =>
-        clip.durationMs === undefined
-          ? 0
-          : Math.min(clip.startMs + clip.durationMs, scene.durationMs) + delta
-      )
-    )
-    if (needed > scene.durationMs + SAME_MS) {
-      const step = frameStepMs(rootOf(work).fps)
-      lengthenScene(work, scene.id, Math.ceil(needed / step) * step)
-    }
-  }
 }
 
 /**
@@ -1884,6 +1903,664 @@ function insertInComposition(
   if (!content) throw new EditError(`${file}: its composition holds nothing a clip can join.`)
   const indent = `${lineIndent(text, timeline.composition.element.start)}  `
   work.replace(file, content.start, content.start, `\n${indent}${html}`)
+}
+
+// Placing clips ----------------------------------------------------------------------------------
+
+/** Where a placement put each clip, as {@link VideoPlaceResult} says. */
+interface Placement {
+  readonly clips: readonly VideoClipTarget[]
+  readonly animationsLeft: readonly VideoAnimationLeft[]
+}
+
+/** A clip found in its file, and where in the video it is to play. */
+interface Placing {
+  readonly file: string
+  readonly clip: VideoClip
+  /** From the video's start. */
+  readonly startMs: number
+  /** How long it plays; none for a clip that writes no length, which plays until its scene ends. */
+  readonly durationMs: number | undefined
+}
+
+type Scene = VideoRoot["scenes"][number]
+
+/** A stretch of a placed clip, in the scene that plays it, from `startMs` in the video. */
+interface Part {
+  readonly scene: Scene
+  readonly startMs: number
+  readonly durationMs: number | undefined
+  /** How far into the clip it starts: what the parts before it play. */
+  readonly intoMs: number
+}
+
+/**
+ * Marks each clip a placement writes, the first part of each wherever it lands, until the
+ * placement reads where each ended up. Added and removed within one edit, it is never in one.
+ */
+const PLACING = "data-sixb-placing"
+
+/** Where a clip of a file starts in the video: its scene's start and its own. */
+function videoStartOf(work: Working, file: string, clip: VideoClip): number {
+  return (sceneOf(work, file)?.startMs ?? 0) + clip.startMs
+}
+
+/**
+ * Moves clips found in their files by `deltaMs`, as one placement: none before the video's start,
+ * so the whole group moves less. Each keeps the length its scene shows of it: what played on past
+ * the scene's end, never seen, stays behind rather than show in the next scene.
+ */
+function moveFound(
+  work: Working,
+  found: readonly { readonly file: string; readonly clip: VideoClip }[],
+  deltaMs: number
+): Placement {
+  const starts = found.map(({ file, clip }) => videoStartOf(work, file, clip))
+  const delta = Math.max(Math.round(deltaMs), ...starts.map((start) => -start))
+
+  return placeFound(
+    work,
+    found.map(({ file, clip }, index) => {
+      const scene = sceneOf(work, file)
+      const shown =
+        scene && clip.durationMs !== undefined && clip.startMs < scene.durationMs
+          ? Math.min(clip.durationMs, scene.durationMs - clip.startMs)
+          : clip.durationMs
+      return { file, clip, startMs: (starts[index] ?? 0) + delta, durationMs: shown }
+    })
+  )
+}
+
+/**
+ * Puts clips where they are to play in the video, as one step: each clip of a scene in the scene
+ * that plays where it starts, its own while that holds it, and on past that scene's end as a copy
+ * in the next (see {@link partsOf}); the last scene grows, in whole frame steps, to hold what
+ * lands past it. The video's own clips only take their times. A clip that leaves its file takes
+ * an id no other element of the video has, its styles and its recording's path; what followed it
+ * there keeps its time. Every clip is found before any changes.
+ */
+function placeFound(work: Working, placing: readonly Placing[]): Placement {
+  const scenes = rootOf(work).scenes
+  const plans = placing.map((each, index) => {
+    const own = sceneOf(work, each.file)
+    const parts = own ? partsOf(scenes, own, each.startMs, each.durationMs) : []
+    return { ...each, index, own, parts }
+  })
+
+  // A clip leaves its file whole or not at all, and only for a file one scene plays.
+  const read = new Map<string, readonly VideoClip[]>()
+  const clipsIn = (file: string) => {
+    const known = read.get(file)
+    if (known) return known
+    const clips = timelineOf(work, file).clips
+    read.set(file, clips)
+    return clips
+  }
+  for (const { file, clip, own, parts } of plans) {
+    if (!own || parts.every((part) => part.scene.id === own.id)) continue
+
+    for (const src of new Set([file, ...parts.map((part) => part.scene.src)])) {
+      if (scenes.filter((scene) => scene.src === src).length > 1) {
+        throw new EditError(`More than one scene plays ${src}: a clip can't leave or join it.`)
+      }
+    }
+    const { start, end } = clip.source.element
+    const holds = clipsIn(file).some(
+      (other) => other.source.element.start > start && other.source.element.end <= end
+    )
+    if (holds) throw new EditError(`'${clip.ref}' holds other clips: it moves within its scene.`)
+  }
+
+  // Each clip marked, from the last in each file, so the spans read once still name what they did.
+  for (const [file, each] of byFile(plans)) {
+    const marks = new Map(each.map((plan) => [plan.clip.ref, String(plan.index)]))
+    const clips = timelineOf(work, file)
+      .clips.filter((clip) => marks.has(clip.ref))
+      .sort((a, b) => b.source.element.start - a.source.element.start)
+    for (const clip of clips) {
+      setAttributes(work, file, clip.source, { [PLACING]: marks.get(clip.ref) ?? null })
+    }
+  }
+
+  // What followed a clip that leaves, or now ends sooner in its file, keeps its time.
+  for (const [file, each] of byFile(plans)) {
+    const cut = new Set(
+      each.flatMap(({ clip, own, parts, durationMs }) => {
+        const [first] = parts
+        const whole =
+          parts.length === 1 && first?.scene.id === own?.id && first?.durationMs === durationMs
+        return own && clip.id && !whole ? [clip.id] : []
+      })
+    )
+    if (cut.size > 0)
+      freezeFollowers(work, file, (clip) => clip.id !== undefined && cut.has(clip.id))
+  }
+
+  // Each file's clips written in place or taken out, and what lands in another file kept for it.
+  const counts = nameCounts(work)
+  const taken = new Set(counts.keys())
+  const carried: Carried[] = []
+  const left: { readonly index: number; readonly scene: string }[] = []
+
+  for (const [file, each] of byFile(plans)) {
+    const text = work.text(file)
+    const clips = timelineOf(work, file).clips
+    const looks = file === VIDEO_ENTRY ? [] : sheetsOf(work, file)
+    const scripts = file === VIDEO_ENTRY ? "" : scriptsOf(text)
+    const plan = new Map<string, ClipChange>()
+
+    for (const { clip: was, own, parts, startMs, durationMs, index } of each) {
+      const clip = markedClip(text, clips, index)
+
+      if (!own) {
+        plan.set(clip.ref, {
+          ...(startMs === was.startMs ? {} : { "data-start": seconds(startMs) }),
+          ...(durationMs === undefined || durationMs === was.durationMs
+            ? {}
+            : { "data-duration": seconds(durationMs) }),
+        })
+        continue
+      }
+
+      const element = text.slice(clip.source.element.start, clip.source.element.end)
+      const classes = (attributeOf(text, clip, "class") ?? "").split(/\s+/).filter(Boolean)
+      const stays = parts[0]?.scene.id === own.id
+
+      parts.forEach((part, n) => {
+        if (n === 0 && stays) {
+          plan.set(clip.ref, {
+            ...(part.startMs === own.startMs + was.startMs
+              ? {}
+              : { "data-start": seconds(part.startMs - own.startMs) }),
+            ...(part.durationMs === undefined || part.durationMs === was.durationMs
+              ? {}
+              : { "data-duration": seconds(part.durationMs) }),
+          })
+          return
+        }
+
+        // The clip itself keeps its id unless another element has it; a copy takes a new one.
+        const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
+        const id =
+          n === 0 && !was.id
+            ? undefined
+            : n === 0 && was.id && (counts.get(was.id) ?? 0) <= 1
+              ? was.id
+              : uniqueName(base || was.kind, taken)
+        if (id) taken.add(id)
+
+        const src = attributeOf(text, clip, "src")
+        const moved = src === undefined ? undefined : rebased(work, file, part.scene.src, src)
+        const html = withAttributes(element, {
+          ...(id ? { id } : {}),
+          "data-start": seconds(part.startMs - part.scene.startMs),
+          ...(part.durationMs === undefined ? {} : { "data-duration": seconds(part.durationMs) }),
+          ...(playsFile(was) && part.intoMs > 0
+            ? { "data-media-start": seconds(was.mediaStartMs + part.intoMs) }
+            : {}),
+          ...(moved === undefined ? {} : { src: moved }),
+          ...(n === 0 ? {} : { [PLACING]: null }),
+        })
+        carried.push({
+          file: part.scene.src,
+          scene: part.scene.id,
+          track: was.track,
+          html,
+          look: { from: own.id, sheets: looks, id: was.id, renamed: id, classes },
+        })
+      })
+
+      if (!stays) {
+        plan.set(clip.ref, "remove")
+        if (animates(scripts, was.id, classes)) left.push({ index, scene: own.id })
+      }
+    }
+    rewriteClips(work, file, plan)
+  }
+
+  // What lands in a file goes after the last clip of its track there, in the order placed.
+  for (const [file, each] of groupBy(carried, (one) => one.file)) {
+    for (const track of ["picture", "text", "sound"] as const) {
+      const batch = each.filter((one) => one.track === track)
+      if (batch.length === 0) continue
+
+      const timeline = timelineOf(work, file)
+      const text = work.text(file)
+      const after = insertionPoint(timeline, track)
+      const indent = after
+        ? lineIndent(text, after.source.element.start)
+        : `${lineIndent(text, timeline.composition.element.start)}  `
+      const html = batch.map((one) => one.html).join(`\n${indent}`)
+      insertInComposition(work, file, timeline, html, after?.source)
+    }
+    carryLooks(
+      work,
+      file,
+      each[0]?.scene ?? "",
+      each.map((one) => one.look)
+    )
+  }
+
+  // The last scene grows to hold what lands past its end.
+  const needed = new Map<string, number>()
+  for (const { parts } of plans) {
+    for (const part of parts) {
+      if (part.durationMs === undefined) continue
+      const end = part.startMs + part.durationMs - part.scene.startMs
+      needed.set(part.scene.id, Math.max(needed.get(part.scene.id) ?? 0, end))
+    }
+  }
+  const step = frameStepMs(rootOf(work).fps)
+  for (const [id, end] of needed) {
+    const scene = scenes.find((each) => each.id === id)
+    if (scene && end > scene.durationMs + SAME_MS) {
+      lengthenScene(work, id, Math.ceil(end / step) * step)
+    }
+  }
+
+  // Where each clip ended up, read from its mark, which then goes.
+  const found = new Map<number, VideoClipTarget>()
+  for (const file of new Set([
+    ...plans.map((plan) => plan.file),
+    ...carried.map((one) => one.file),
+  ])) {
+    const text = work.text(file)
+    const marked = timelineOf(work, file)
+      .clips.filter((clip) => clip.source.attributes[PLACING])
+      .sort((a, b) => b.source.element.start - a.source.element.start)
+    for (const clip of marked) {
+      const at = clip.source.attributes[PLACING]
+      found.set(Number(at ? attributeValue(text, at) : Number.NaN), {
+        file,
+        clip: videoTarget(clip),
+      })
+      setAttributes(work, file, clip.source, { [PLACING]: null })
+    }
+  }
+
+  return {
+    clips: plans.flatMap((plan) => {
+      const at = found.get(plan.index)
+      return at ? [at] : []
+    }),
+    animationsLeft: left.flatMap(({ index, scene }) => {
+      const clip = found.get(index)
+      return clip ? [{ clip, scene }] : []
+    }),
+  }
+}
+
+/**
+ * Where a clip of `own` placed at `startMs` for `durationMs` plays, part by part: from the scene
+ * that holds its start, its own while that does, else the one on top there, the later in play
+ * order, as the hosts stack in a crossfade; in a gap between scenes, from the next one's start;
+ * past every scene, in the last. Past that scene's end, the rest goes on in the next scene, from
+ * where the first ends, so nothing shows twice in a crossfade, and so on; the last holds whatever
+ * is left. A clip that writes no length is never split. A part shorter than a clip may be, a few
+ * frames past a scene's edge, is left out, unless it is all there is.
+ */
+function partsOf(
+  scenes: readonly Scene[],
+  own: Scene,
+  startMs: number,
+  durationMs: number | undefined
+): Part[] {
+  const end = (scene: Scene) => scene.startMs + scene.durationMs
+  const holds = (scene: Scene, ms: number) => scene.startMs <= ms && ms < end(scene)
+  const onTop = (ms: number, except?: Scene) =>
+    scenes.filter((scene) => scene !== except && holds(scene, ms)).at(-1)
+  const from = (ms: number, except?: Scene) =>
+    scenes.find((scene) => scene !== except && scene.startMs >= ms)
+  const last = scenes.reduce((latest, scene) => (end(scene) >= end(latest) ? scene : latest), own)
+  const next = (scene: Scene) => onTop(end(scene), scene) ?? from(end(scene), scene)
+
+  let scene = (holds(own, startMs) ? own : undefined) ?? onTop(startMs) ?? from(startMs) ?? last
+  const first = Math.max(startMs, scene.startMs)
+  if (durationMs === undefined) return [{ scene, startMs: first, durationMs, intoMs: 0 }]
+
+  const clipEnd = first + durationMs
+  const pieces: Part[] = []
+  let at = first
+  for (;;) {
+    const after = clipEnd > end(scene) + SAME_MS ? next(scene) : undefined
+    const until = after ? end(scene) : clipEnd
+    pieces.push({ scene, startMs: at, durationMs: until - at, intoMs: at - first })
+    if (!after) break
+
+    at = Math.max(end(scene), after.startMs)
+    if (at >= clipEnd) break
+    scene = after
+  }
+
+  const kept = pieces.filter((piece) => (piece.durationMs ?? 0) >= MIN_CLIP_MS)
+  if (kept.length > 0) return kept
+  const longest = pieces.reduce((a, b) => ((b.durationMs ?? 0) > (a.durationMs ?? 0) ? b : a))
+  return [longest]
+}
+
+/** A clip's element written for another file, and the look it takes along. */
+interface Carried {
+  readonly file: string
+  readonly scene: string
+  readonly track: VideoTrack
+  readonly html: string
+  readonly look: Look
+}
+
+/** What styles a clip in the scene it leaves, by its id and its classes. */
+interface Look {
+  /** The scene it leaves, and the styles that reach it there. */
+  readonly from: string
+  readonly sheets: readonly Sheet[]
+  readonly id: string | undefined
+  /** Its id where it lands, when it takes another. */
+  readonly renamed: string | undefined
+  readonly classes: readonly string[]
+}
+
+/**
+ * A stylesheet whose rules reach a scene: its file's own `<style>`, every rule of which reaches the
+ * scene's segment of an export, and the sheets `index.html` links, whose rules scoped to the scene
+ * alone are its own.
+ */
+interface Sheet {
+  readonly blocks: readonly CssBlock[]
+  readonly scopedOnly: boolean
+}
+
+/** A rule or an at-rule of a stylesheet: what comes before its braces, and what they hold. */
+interface CssBlock {
+  readonly prelude: string
+  readonly body: string
+}
+
+/** The stylesheets whose rules may style a clip of a scene's file. */
+function sheetsOf(work: Working, file: string): Sheet[] {
+  const own = [...work.text(file).matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => ({
+    blocks: cssBlocks(match[1] ?? ""),
+    scopedOnly: false,
+  }))
+
+  const exists = (path: string) => work.has(path)
+  const linked = rootOf(work).links.stylesheets.flatMap((link) => {
+    const path = videoFilePath(VIDEO_ENTRY, link.value, exists)
+    const css = path === undefined ? undefined : work.textOf(path)
+    return css === undefined ? [] : [{ blocks: cssBlocks(css), scopedOnly: true }]
+  })
+  return [...own, ...linked]
+}
+
+/** What a file's inline scripts say, as one text. */
+function scriptsOf(text: string): string {
+  return [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((match) => match[1] ?? "")
+    .join("\n")
+}
+
+/** Whether a scene's script names a clip, by its id or one of its classes, as a selector does. */
+function animates(scripts: string, id: string | undefined, classes: readonly string[]): boolean {
+  if (scripts.trim() === "") return false
+  // A class is named where a selector writes it, never as a property, such as `demo.from(…)`.
+  const named = (token: string) =>
+    new RegExp(`(?<![\\w$)\\]])${escapeRegExp(token)}(?![\\w-])`).test(scripts)
+  const byId =
+    id !== undefined &&
+    (named(`#${id}`) ||
+      new RegExp(`getElementById\\(\\s*["'\`]${escapeRegExp(id)}["'\`]`).test(scripts))
+  return byId || classes.some((name) => named(`.${name}`))
+}
+
+/**
+ * Copies into a scene's file the rules that styled each clip landing there in the scene it left:
+ * those naming its id or one of its classes, each selector rewritten from that scene to this one
+ * and to the id it took, and the keyframes they animate by. A selector whose rule already reaches
+ * this scene, from its own `<style>` or a sheet `index.html` links, as after a clip goes and comes
+ * back, is not written again.
+ */
+function carryLooks(work: Working, file: string, scene: string, looks: readonly Look[]): void {
+  const reaching = new Set(sheetsOf(work, file).flatMap((sheet) => ruleKeys(sheet.blocks)))
+  const rules: string[] = []
+  const add = (prelude: string, body: string, selectors?: readonly string[]) => {
+    const fresh = (selectors ?? [prelude]).filter(
+      (each) => !reaching.has(cssKey(`${each}{${body}}`))
+    )
+    if (fresh.length === 0) return
+    for (const each of fresh) reaching.add(cssKey(`${each}{${body}}`))
+    rules.push(cssRule(selectors ? fresh.join(", ") : prelude, body))
+  }
+
+  for (const look of looks) {
+    for (const sheet of look.sheets) {
+      const keyframes = new Map(
+        sheet.blocks.flatMap((block) => {
+          const name = /^@(?:-webkit-)?keyframes\s+([\w-]+)/i.exec(block.prelude)?.[1]
+          return name ? [[name, block] as const] : []
+        })
+      )
+
+      for (const block of sheet.blocks) {
+        if (block.prelude.startsWith("@")) continue
+        const selectors = selectorsOf(block.prelude).filter(
+          (selector) => namesLook(selector, look) && scopedFor(selector, look.from, sheet)
+        )
+        if (selectors.length === 0) continue
+
+        const restyledSelectors = selectors.map((each) => restyled(each, look, scene))
+        add(restyledSelectors.join(", "), block.body, restyledSelectors)
+        for (const [name, frames] of keyframes) {
+          const animation = new RegExp(`animation(?:-name)?\\s*:[^;}]*\\b${escapeRegExp(name)}\\b`)
+          if (animation.test(block.body)) add(frames.prelude, frames.body)
+        }
+      }
+    }
+  }
+  if (rules.length > 0) writeRules(work, file, rules)
+}
+
+/** Each selector's rule of a stylesheet, and each at-rule, as {@link cssKey} reads them. */
+function ruleKeys(blocks: readonly CssBlock[]): string[] {
+  return blocks.flatMap((block) =>
+    block.prelude.startsWith("@")
+      ? [cssKey(`${block.prelude}{${block.body}}`)]
+      : selectorsOf(block.prelude).map((selector) => cssKey(`${selector}{${block.body}}`))
+  )
+}
+
+/** Rules added to a scene's file: in its first `<style>`, or one of its own before its script. */
+function writeRules(work: Working, file: string, rules: readonly string[]): void {
+  const text = work.text(file)
+  const composition = timelineOf(work, file).composition
+  const inner = `${lineIndent(text, composition.element.start)}  `
+
+  const style = /<style\b[^>]*>([\s\S]*?)<\/style>/i.exec(
+    text.slice(composition.element.start, composition.element.end)
+  )
+  if (style) {
+    const close = composition.element.start + style.index + style[0].lastIndexOf("</style>")
+    const closeIndent = lineIndent(text, close)
+    const first = /\n([ \t]*)\S/.exec(style[1] ?? "")?.[1] ?? `${closeIndent}  `
+    const lines = rules.map((rule) => `${first}${rule.replace(/\n/g, `\n${first}`)}`).join("\n")
+    if (aloneOnLine(text, close)) {
+      const lineStart = text.lastIndexOf("\n", close - 1) + 1
+      work.replace(file, lineStart, lineStart, `${lines}\n`)
+    } else {
+      work.replace(file, close, close, `\n${lines}\n${closeIndent}`)
+    }
+    return
+  }
+
+  const content = composition.content
+  if (!content) throw new EditError(`${file}: its composition holds nothing a style can join.`)
+  const body = rules.map((rule) => `${inner}  ${rule.replace(/\n/g, `\n${inner}  `)}`).join("\n")
+  const block = `${inner}<style>\n${body}\n${inner}</style>\n`
+
+  // Before its script, as the Agent writes a scene, else last in it.
+  const script = /<script\b/i.exec(text.slice(content.start, content.end))
+  const at = script ? content.start + script.index : content.end
+  if (aloneOnLine(text, at)) {
+    const lineStart = text.lastIndexOf("\n", at - 1) + 1
+    work.replace(file, lineStart, lineStart, block)
+  } else {
+    work.replace(file, at, at, `\n${block}${inner.slice(2)}`)
+  }
+}
+
+/** Whether only spaces come before `at` on its line. */
+function aloneOnLine(text: string, at: number): boolean {
+  return text.slice(text.lastIndexOf("\n", at - 1) + 1, at).trim() === ""
+}
+
+/**
+ * The top-level rules and at-rules of a stylesheet, comments aside: `@media` and its kind are
+ * blocks of their own, which no rule of theirs is taken from.
+ */
+function cssBlocks(css: string): CssBlock[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, "")
+  const blocks: CssBlock[] = []
+  let at = 0
+  while (at < text.length) {
+    const open = text.indexOf("{", at)
+    if (open < 0) break
+
+    // What a statement before it ends, as `@import …;`, is not its prelude.
+    const prelude = (text.slice(at, open).split(";").at(-1) ?? "").trim()
+    let depth = 0
+    let quote = ""
+    let close = open
+    for (; close < text.length; close += 1) {
+      const char = text[close]
+      if (quote) {
+        if (char === "\\") close += 1
+        else if (char === quote) quote = ""
+      } else if (char === '"' || char === "'") quote = char
+      else if (char === "{") depth += 1
+      else if (char === "}" && --depth === 0) break
+    }
+    blocks.push({ prelude, body: text.slice(open + 1, close) })
+    at = close + 1
+  }
+  return blocks
+}
+
+/** A selector list's selectors, split at its commas outside brackets, parentheses and quotes. */
+function selectorsOf(prelude: string): string[] {
+  const selectors: string[] = []
+  let depth = 0
+  let quote = ""
+  let start = 0
+  for (let at = 0; at < prelude.length; at += 1) {
+    const char = prelude[at]
+    if (quote) {
+      if (char === quote) quote = ""
+    } else if (char === '"' || char === "'") quote = char
+    else if (char === "(" || char === "[") depth += 1
+    else if (char === ")" || char === "]") depth -= 1
+    else if (char === "," && depth === 0) {
+      selectors.push(prelude.slice(start, at).trim())
+      start = at + 1
+    }
+  }
+  selectors.push(prelude.slice(start).trim())
+  return selectors.filter(Boolean)
+}
+
+/** Each composition a selector names by `[data-composition-id=…]`. */
+const SCOPE = /\[\s*data-composition-id\s*=\s*(["']?)([^"'\]\s]+)\1\s*\]/g
+
+/** Whether a selector names a clip's id or one of its classes. */
+function namesLook(selector: string, look: Look): boolean {
+  const names = (token: string) => new RegExp(`${escapeRegExp(token)}(?![\\w-])`).test(selector)
+  return (
+    (look.id !== undefined && names(`#${look.id}`)) ||
+    look.classes.some((name) => names(`.${name}`))
+  )
+}
+
+/**
+ * Whether a selector styles a clip of `scene` alone: scoped to it, or, in the scene's own file,
+ * to no composition.
+ */
+function scopedFor(selector: string, scene: string, sheet: Sheet): boolean {
+  const scopes = [...selector.matchAll(SCOPE)].map((match) => match[2])
+  if (scopes.length === 0) return !sheet.scopedOnly
+  return scopes.every((each) => each === scene)
+}
+
+/** A selector of the scene a clip leaves, for the scene it lands in and the id it took there. */
+function restyled(selector: string, look: Look, scene: string): string {
+  const scoped = selector.replace(SCOPE, (whole, _quote, name) =>
+    name === look.from ? `[data-composition-id="${scene}"]` : whole
+  )
+  if (!look.id || !look.renamed || look.renamed === look.id) return scoped
+  return scoped.replace(
+    new RegExp(`${escapeRegExp(`#${look.id}`)}(?![\\w-])`, "g"),
+    `#${look.renamed}`
+  )
+}
+
+/** A rule as a scene's file writes it: on one line when its body is, else one line each. */
+function cssRule(prelude: string, body: string): string {
+  const lines = body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length <= 1) return `${prelude} { ${lines[0] ?? ""} }`
+  return [`${prelude} {`, ...lines.map((line) => `  ${line}`), "}"].join("\n")
+}
+
+/** A rule's text, its spaces aside, to tell whether a file has it already. */
+function cssKey(css: string): string {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*([{};:,>])\s*/g, "$1")
+    .replace(/;}/g, "}")
+    .trim()
+}
+
+/** A file's path as a scene's file writes it, rebased for another; undefined when unchanged. */
+function rebased(work: Working, from: string, to: string, written: string): string | undefined {
+  const exists = (path: string) => work.has(path)
+  const path = videoFilePath(from, written, exists)
+  if (path === undefined || videoFilePath(to, written, exists) === path) return undefined
+
+  const up = "../".repeat(to.split("/").length - 1)
+  return [path, `${up}${path}`].find((each) => videoFilePath(to, each, exists) === path)
+}
+
+/** The clip a placement marked with `index`. */
+function markedClip(text: string, clips: readonly VideoClip[], index: number): VideoClip {
+  const found = clips.find((clip) => {
+    const at = clip.source.attributes[PLACING]
+    return at !== undefined && attributeValue(text, at) === String(index)
+  })
+  if (!found) throw new EditError("A clip changed while it was placed: try again.")
+  return found
+}
+
+/** An attribute a clip writes, as written. */
+function attributeOf(text: string, clip: VideoClip, name: string): string | undefined {
+  const at = clip.source.attributes[name]
+  return at ? attributeValue(text, at) : undefined
+}
+
+/**
+ * The clip a new one of `track` goes after: the last of its track; words and sounds go over the
+ * pictures when their track has none, and a picture first in its composition.
+ */
+function insertionPoint(timeline: VideoFileTimeline, track: VideoTrack): VideoClip | undefined {
+  const last = (each: VideoTrack) => timeline.clips.filter((clip) => clip.track === each).at(-1)
+  return last(track) ?? (track === "picture" ? undefined : last("picture"))
+}
+
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) groups.set(key(item), [...(groups.get(key(item)) ?? []), item])
+  return groups
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 // Text, inside ------------------------------------------------------------------------------------
