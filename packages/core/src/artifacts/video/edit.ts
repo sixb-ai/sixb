@@ -1441,8 +1441,8 @@ function posterAfter(before: VideoRoot, now: VideoRoot, duration: number): numbe
 }
 
 /**
- * A scene file copied under a new id: its composition's id, its timeline's name, and the ids of
- * what it plays, with every `#id` that names them.
+ * A scene file copied under a new id: its composition's id, its timeline's name, and the id of
+ * every element, with what names it.
  */
 function copySceneFile(text: string, from: string, to: string, taken: Set<string>): string {
   const quoted = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -1459,33 +1459,107 @@ function copySceneFile(text: string, from: string, to: string, taken: Set<string
   // A copy goes on from nothing: the clip a part of it went on from is the original's.
   copy = copy.replace(/\s+data-continues\s*=\s*(["'])[^"']*\1/g, "")
 
-  // Every element takes an id of its own, and whatever names it in the file follows: a `#id`, a
-  // script's `getElementById`, a start chained to it, the look carried for it.
-  const ids = new Set(
-    [...copy.matchAll(/\sid\s*=\s*(["'])([^"']+)\1/g)].flatMap((match) =>
-      match[2] ? [match[2]] : []
-    )
-  )
-  for (const id of ids) {
-    const renamed = uniqueName(id, taken)
-    taken.add(renamed)
-    const name = quoted(id)
-    copy = copy
-      .replace(
-        new RegExp(`(\\s(?:id|data-carried)\\s*=\\s*)(["'])${name}\\2`, "g"),
-        (_, attribute, quote) => `${attribute}${quote}${renamed}${quote}`
-      )
-      .replace(new RegExp(`#${name}(?![\\w-])`, "g"), `#${renamed}`)
-      .replace(
-        new RegExp(`(getElementById\\(\\s*)(["'\`])${name}\\2`, "g"),
-        (_, call, quote) => `${call}${quote}${renamed}${quote}`
-      )
-      .replace(
-        new RegExp(`(\\sdata-start\\s*=\\s*(["'])\\s*)${name}(?=\\s*(?:[+-]|\\2))`, "g"),
-        (_, start) => `${start}${renamed}`
-      )
+  // Every element takes an id of its own, and whatever names it in the file follows, each read
+  // once: the attribute, the look carried for it, a start chained to it by its whole name, and a
+  // selector naming it, `#id` or `[id=…]`, in a style's preludes and a script's selector strings,
+  // never a value, such as a colour `#fade`.
+  const renamed = new Map<string, string>()
+  for (const match of copy.matchAll(/\sid\s*=\s*(["'])([^"']+)\1/g)) {
+    const id = match[2]
+    if (!id || renamed.has(id)) continue
+    const fresh = uniqueName(id, taken)
+    taken.add(fresh)
+    renamed.set(id, fresh)
   }
+  if (renamed.size === 0) return copy
+  const name = (id: string) => renamed.get(id) ?? id
+
   return copy
+    .replace(
+      /(\s(?:id|data-carried)\s*=\s*)(["'])([^"']+)\2/g,
+      (_, attribute, quote, id) => `${attribute}${quote}${name(id)}${quote}`
+    )
+    .replace(
+      /(\sdata-start\s*=\s*(["'])\s*)([A-Za-z][\w.:-]*)(?=\s+[+-]\s|\s*\2)/g,
+      (_, start, _quote, id) => `${start}${name(id)}`
+    )
+    .replace(
+      /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
+      (_, open, css, close) => `${open}${renameInCss(css, name)}${close}`
+    )
+    .replace(
+      /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
+      (_, open, script, close) => `${open}${renameInScript(script, name)}${close}`
+    )
+}
+
+/** A selector with each id it names, `#id` or `[id=…]`, named as `to` says. */
+function renameInSelector(selector: string, to: (id: string) => string): string {
+  return selector
+    .replace(/#([A-Za-z_][\w-]*)/g, (_, id) => `#${to(id)}`)
+    .replace(
+      /(\[\s*id\s*=\s*)(["']?)([^"'\]\s]+)\2(\s*\])/g,
+      (_, open, quote, id, close) => `${open}${quote}${to(id)}${quote}${close}`
+    )
+}
+
+/**
+ * A stylesheet with the ids its selectors name renamed, and nothing else: a rule's prelude and a
+ * nested rule's are selectors; a declaration's value, an at-rule's prelude, a string and a comment
+ * are not.
+ */
+function renameInCss(css: string, to: (id: string) => string): string {
+  let out = ""
+  let segment = ""
+  for (let at = 0; at < css.length; at += 1) {
+    const char = css[at] ?? ""
+    if (char === "/" && css[at + 1] === "*") {
+      const end = css.indexOf("*/", at + 2)
+      const stop = end < 0 ? css.length : end + 2
+      segment += css.slice(at, stop)
+      at = stop - 1
+      continue
+    }
+    if (char === '"' || char === "'") {
+      let end = at + 1
+      while (end < css.length && css[end] !== char) end += css[end] === "\\" ? 2 : 1
+      segment += css.slice(at, end + 1)
+      at = end
+      continue
+    }
+    // What ends at a `{` is a prelude, a rule's or a nested one's; at a `;` or a `}`, a
+    // declaration or a statement.
+    if (char === "{") {
+      out += segment.trimStart().startsWith("@") ? segment : renameInSelector(segment, to)
+      out += char
+      segment = ""
+      continue
+    }
+    if (char === ";" || char === "}") {
+      out += segment + char
+      segment = ""
+      continue
+    }
+    segment += char
+  }
+  return out + segment
+}
+
+/**
+ * A script with the ids its selector strings name renamed, as `querySelector('#fade')` and
+ * `\`${scene} #talk\``, and `getElementById`'s; a string that is a property's value, such as a
+ * colour `{ color: "#fade" }`, is not a selector.
+ */
+function renameInScript(script: string, to: (id: string) => string): string {
+  return script.replace(
+    /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g,
+    (whole, quote, inner, offset: number) => {
+      const before = script.slice(Math.max(0, offset - 40), offset)
+      if (/:\s*$/.test(before)) return whole
+      if (/getElementById\(\s*$/.test(before)) return `${quote}${to(inner)}${quote}`
+      return `${quote}${renameInSelector(inner, to)}${quote}`
+    }
+  )
 }
 
 /** Every name an id may not take: the scenes', and every element's id in every HTML file. */
