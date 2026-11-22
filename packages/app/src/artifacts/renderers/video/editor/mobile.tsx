@@ -29,7 +29,7 @@ import { useReorder } from "./reorder"
 import { SceneThumbnail } from "./scenes"
 import { clipName, sceneName, typedText } from "./selection"
 
-// Editing on a phone: what a thumb does well. The scenes in a list, each dragged by its grip to
+// Editing on a phone: what a thumb does well. The chapters in a list, each dragged by its grip to
 // reorder, made shorter or longer half a second at a time, and opened to type over its titles or
 // delete a clip. The timeline, the transcript and imports wait for a larger screen, as a note at
 // the foot says.

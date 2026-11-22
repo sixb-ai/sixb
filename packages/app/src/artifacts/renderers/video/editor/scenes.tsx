@@ -18,11 +18,12 @@ import { useSize } from "../player"
 import { type MediaTarget, useMediaParts } from "./media"
 import { sceneFootage, sceneName } from "./selection"
 
-// A scene on the timeline's Scenes track: a picture of its middle, its name and its length, along
-// the time it plays; too short for its name, its number, the name in a tooltip. It is dragged
-// along the track to reorder, its end to make it longer or shorter, double-clicked to rename, and
-// its menu, or a right click, duplicates, moves or deletes it. The scene the Agent is changing
-// glows as a canvas's boards do; the people on the video show on the scene they have open.
+// A scene on the timeline's Chapters bar, where the person reads it as a chapter: its name and its
+// length along the time it plays, quiet beside the tracks; too short for its name, its number, the
+// name in a tooltip. The chapter under the playhead is underlined, the one selected outlined. It is
+// dragged along the bar to reorder, its end to make it longer or shorter, double-clicked to rename,
+// and its menu, or a right click, duplicates, moves or deletes it. The chapter the Agent is
+// changing glows as a canvas's boards do; the people on the video show on the one they have open.
 
 export interface SceneActions {
   readonly select: (scene: VideoScene) => void
@@ -33,25 +34,17 @@ export interface SceneActions {
 }
 
 /**
- * The narrowest a scene shows its name at, in pixels, its menu's room taken: a few letters of it.
+ * The narrowest a chapter shows its name at, in pixels, its menu's room taken: a few letters of it.
  * Narrower, it shows its number.
  */
 const NAME_FROM_PX = 72
-
-/**
- * How wide a scene shows its picture, and the narrowest it shows it at, in pixels: with room left
- * beside it, past the gap between them, for its name.
- */
-const PICTURE_PX = 72
-const PICTURE_FROM_PX = PICTURE_PX + 8 + NAME_FROM_PX
 
 export function SceneBlock({
   scene,
   index,
   count,
-  timeline,
-  target,
   open,
+  playing,
   agent,
   people,
   dragging,
@@ -64,10 +57,10 @@ export function SceneBlock({
   readonly index: number
   /** How many scenes the video has. */
   readonly count: number
-  readonly timeline: VideoFileTimeline | undefined
-  readonly target: MediaTarget
-  /** Whether it is the scene open on the timeline. */
+  /** Whether it is the chapter selected. */
   readonly open: boolean
+  /** Whether the playhead is in it. */
+  readonly playing: boolean
   readonly agent: boolean
   /** Who else has it open. */
   readonly people: readonly ArtifactLiveUser[]
@@ -85,18 +78,19 @@ export function SceneBlock({
   const [menu, setMenu] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
   const { width } = useSize(box)
-  // Until it is measured, it is laid out as a scene with room for its name.
+  // Until it is measured, it is laid out as a chapter with room for its name.
   const narrow = width > 0 && width < NAME_FROM_PX
 
   const block = (
     <button
       type="button"
       aria-pressed={open}
+      aria-current={playing ? "true" : undefined}
       aria-label={messages.sceneLabel(index + 1, name, length)}
       title={narrow ? undefined : agent ? messages.agentEditing : messages.sceneHint}
       className={cn(
-        "absolute inset-0 flex touch-none items-center gap-2 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-        narrow ? "justify-center p-0" : "p-1 pr-9"
+        "absolute inset-0 flex touch-none items-center gap-1.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        narrow ? "justify-center p-0" : "pr-8 pl-2"
       )}
       onPointerDown={(event) => {
         if (event.button !== 0 || renaming) return
@@ -122,30 +116,23 @@ export function SceneBlock({
       {narrow ? (
         <span
           aria-hidden="true"
-          className="text-[11px] font-semibold text-muted-foreground tabular-nums"
+          className="text-[10px] font-semibold text-muted-foreground tabular-nums"
         >
           {renaming ? null : index + 1}
         </span>
-      ) : (
+      ) : renaming ? null : (
         <>
-          {width >= PICTURE_FROM_PX ? (
-            <span
-              className="relative h-full shrink-0 overflow-hidden rounded-[4px]"
-              style={{ width: PICTURE_PX }}
-            >
-              <SceneThumbnail scene={scene} timeline={timeline} target={target} fill />
-            </span>
-          ) : null}
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-            {renaming ? null : (
-              <span className="truncate text-xs font-medium text-foreground">{name}</span>
+          {agent ? <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" /> : null}
+          <span
+            className={cn(
+              "min-w-0 truncate text-[11px] leading-none font-medium",
+              open || playing ? "text-foreground" : "text-muted-foreground"
             )}
-            <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground tabular-nums">
-              {agent ? (
-                <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
-              ) : null}
-              {length}
-            </span>
+          >
+            {name}
+          </span>
+          <span className="shrink-0 text-[10px] leading-none text-muted-foreground/75 tabular-nums @max-[8rem]/chapter:hidden">
+            {length}
           </span>
         </>
       )}
@@ -156,10 +143,10 @@ export function SceneBlock({
     <div
       ref={box}
       className={cn(
-        "group/sceneblock absolute inset-0 overflow-hidden rounded-md border text-left transition-opacity",
+        "group/sceneblock @container/chapter absolute inset-0 overflow-hidden rounded-[5px] text-left transition-[opacity,background-color]",
         open
-          ? "border-primary bg-[color-mix(in_oklab,var(--primary)_12%,var(--background))]"
-          : "border-border bg-muted hover:bg-[color-mix(in_oklab,var(--foreground)_7%,var(--muted))]",
+          ? "bg-[color-mix(in_oklab,var(--primary)_13%,var(--background))] ring-1 ring-primary/55 ring-inset"
+          : "bg-muted/60 hover:bg-muted",
         agent && "sixb-agent-board",
         dragging && "opacity-40"
       )}
@@ -179,11 +166,17 @@ export function SceneBlock({
         block
       )}
 
+      {/* The chapter under the playhead, underlined. */}
+      {playing ? (
+        <span
+          aria-hidden="true"
+          data-chapter-playing=""
+          className="pointer-events-none absolute inset-x-1.5 bottom-0 h-0.5 rounded-full bg-primary/70"
+        />
+      ) : null}
+
       {renaming ? (
-        <div
-          className="absolute top-1 right-9 z-10"
-          style={{ left: width >= PICTURE_FROM_PX ? PICTURE_PX + 12 : 4 }}
-        >
+        <div className="absolute inset-y-0 right-7 left-1 z-10 flex items-center">
           <RenameField
             name={scene.label ?? ""}
             placeholder={scene.id}
@@ -195,8 +188,8 @@ export function SceneBlock({
         </div>
       ) : null}
 
-      {people.length > 0 ? (
-        <span className="pointer-events-none absolute right-3 bottom-1 flex -space-x-1">
+      {people.length > 0 && !narrow ? (
+        <span className="pointer-events-none absolute top-1/2 right-7 flex -translate-y-1/2 -space-x-1">
           {people.slice(0, 3).map((person) => (
             <span
               key={person.id}
@@ -210,10 +203,10 @@ export function SceneBlock({
         </span>
       ) : null}
 
-      {/* Too narrow for its name, a scene keeps its menu for a right click: it would cover it. */}
+      {/* Too narrow for its name, a chapter keeps its menu for a right click: it would cover it. */}
       <div
         className={cn(
-          "absolute top-1 right-3 z-10 transition-opacity",
+          "absolute top-1/2 right-2 z-10 -translate-y-1/2 transition-opacity",
           menu || (open && !narrow)
             ? "opacity-100"
             : narrow
@@ -241,7 +234,7 @@ export function SceneBlock({
   )
 }
 
-/** Where a scene dragged along the track lands: a line at the edge it would take. */
+/** Where a chapter dragged along the bar lands: a line at the edge it would take. */
 export function SceneDropMark({ left }: { readonly left: number }) {
   return (
     <span
@@ -324,7 +317,7 @@ function SceneMenu({
   )
 }
 
-/** Types a scene's new name: Enter keeps it, Escape or leaving with nothing changed drops it. */
+/** Types a chapter's new name: Enter keeps it, Escape or leaving with nothing changed drops it. */
 export function RenameField({
   name,
   placeholder,
@@ -362,7 +355,7 @@ export function RenameField({
         if (event.key === "Escape") finish(null)
       }}
       onBlur={(event) => finish(event.currentTarget.value)}
-      className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="h-[1.375rem] min-w-0 flex-1 rounded-[4px] border border-input bg-background px-1.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
     />
   )
 }

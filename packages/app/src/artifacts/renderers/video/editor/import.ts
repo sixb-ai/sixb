@@ -8,10 +8,12 @@ import type { LiveVideo } from "../../../live/video"
 import { useArtifactMessages } from "../../../messages"
 import { revealDuration } from "../../../playback"
 
-// Files dropped on the editor become clips of the open scene, at the playhead, one after the
-// other. Each is uploaded first, staged when it is large, and shows where it will land with its
-// progress; once stored it joins the video's files and its clip is added, playing at once while
-// Sixb derives its proxy, filmstrip and transcript.
+// Files dropped on the tracks become clips where they are dropped, and anywhere else, or added
+// with Add media, clips of the open chapter at the playhead, one after the other, each placed as
+// any clip is: past its chapter's end, it goes on in the next. Each is uploaded first, staged when
+// it is large, and shows where it will land with its progress; once stored it joins the video's
+// files and its clip is added, playing at once while Sixb derives its proxy, filmstrip and
+// transcript.
 
 /** How long a picture shows once added. */
 const PICTURE_MS = 3_000

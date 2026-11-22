@@ -2,7 +2,6 @@ import {
   type ArtifactLiveUser,
   VIDEO_ENTRY,
   type VideoComposition,
-  type VideoFileTimeline,
   type VideoScene,
   type VideoTrack,
   videoTarget,
@@ -12,6 +11,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { AudioLines, Image as ImageIcon, TriangleAlert, Type, Video } from "lucide-react"
 import {
   Fragment,
+  memo,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type Ref,
@@ -34,6 +34,8 @@ import {
   type LaidClip,
   rulerSteps,
   SNAP_PX,
+  sceneAt,
+  sceneFor,
   sceneSpans,
   snapMove,
   snapTo,
@@ -42,18 +44,21 @@ import {
 } from "./model"
 import { useReorder } from "./reorder"
 import { FilmstripFrame, type SceneActions, SceneBlock, SceneDropMark } from "./scenes"
-import { choose, chosenIn, clipName, type EditorSelection, toggled } from "./selection"
+import { choose, chosenIn, clipName, type EditorSelection, sceneName, toggled } from "./selection"
 
-// The timeline: one axis for the whole video, its scenes along the top, each with its picture, the
-// open scene's clips under them on the picture, text and sound tracks (every scene's, when the
-// reader asks for all of them), and the video's own soundtrack at the foot. A scene is dragged
-// along its track to reorder it.
-// Clips are dragged to move and trimmed by their edges, snapping to the playhead, the marks, every
-// edge and the cuts of their footage; Shift lets them go free. Ctrl or ⌘ with the wheel, or a
-// pinch, zooms around the pointer.
+// The timeline: one axis for the whole video, as one continuous film. Its scenes are chapters on a
+// slim bar along the top, with a faint line across the tracks where each starts; every chapter's
+// clips lie under them on the picture, text and sound tracks, where they play, and the video's own
+// soundtrack at the foot. A chapter is dragged along its bar to reorder it.
+// Clips are dragged to move, anywhere along the video, and trimmed by their edges, snapping to the
+// playhead, the marks, every edge, the chapters' and the cuts of their footage; Shift lets them go
+// free. Dropped across a chapter's edge, a clip lands where the video plays it (see the core's
+// placement). Ctrl or ⌘ with the wheel, or a pinch, zooms around the pointer.
 // The command key, ⌘ on a Mac and Ctrl elsewhere, adds a clip clicked to the selection or takes it
 // out, and dragged, draws a rectangle that selects every clip it touches. A selected clip dragged
 // moves every selected clip with it.
+// A drag redraws only what it moves: each clip is a block of its own, drawn again only when what it
+// shows changes, so a video of hundreds of captions follows the pointer.
 
 /** The column of track names, which stays on the left as the timeline scrolls. */
 const LABELS_PX = 112
@@ -64,7 +69,7 @@ const KNOB_PX = 11
 
 const ROW_PX: Record<"ruler" | "scenes" | VideoTrack, number> = {
   ruler: 24,
-  scenes: 52,
+  scenes: 30,
   picture: 44,
   text: 26,
   sound: 36,
@@ -139,39 +144,50 @@ export interface TimelineEdits {
   readonly sceneLength: (scene: VideoScene, ms: number) => void
   /** Reorders, duplicates, deletes or renames a scene. */
   readonly scene: SceneActions
+  /** Files dragged over the tracks would land at this instant; null once they leave. */
+  readonly dropOver?: (ms: number | null) => void
+}
+
+/** What a clip's block does with the pointer, the same functions from one render to the next. */
+interface ClipHandlers {
+  readonly press: (event: ReactPointerEvent, laid: LaidClip) => void
+  readonly trim: (event: ReactPointerEvent, laid: LaidClip, edge: "start" | "end") => void
+  readonly select: (laid: LaidClip) => void
+  readonly onPointerMove: (event: ReactPointerEvent) => void
+  readonly onPointerUp: (event: ReactPointerEvent) => void
+  readonly onPointerCancel: () => void
 }
 
 export function Timeline({
   composition,
   clips,
-  open,
   selection,
   timeMs,
   marks,
   snapping,
+  magnetic = false,
   agentScenes,
   people,
-  timelines,
   target,
   uploads,
   toolbar,
   edits,
   dropTarget,
+  filesAt = null,
   formatLength,
 }: {
   readonly composition: VideoComposition
-  /** The open scene's clips and the video's own, laid out in its time. */
+  /** Every chapter's clips and the video's own, laid out in its time. */
   readonly clips: readonly LaidClip[]
-  readonly open: VideoScene | undefined
   readonly selection: EditorSelection
   readonly timeMs: number
   readonly marks: { readonly in?: number; readonly out?: number }
   readonly snapping: boolean
+  /** Whether a trim closes its gap: a start trimmed then keeps its place, as far into its file. */
+  readonly magnetic?: boolean
   readonly agentScenes: ReadonlySet<string>
   /** Who else has each scene open, by its id. */
   readonly people: ReadonlyMap<string, readonly ArtifactLiveUser[]>
-  /** Each file's clips and texts, which a scene's picture falls back on. */
-  readonly timelines: ReadonlyMap<string, VideoFileTimeline>
   readonly target: MediaTarget
   /** Files being uploaded, shown where they will land. */
   readonly uploads: readonly {
@@ -186,6 +202,8 @@ export function Timeline({
   readonly edits: TimelineEdits
   /** Whether files are being dragged over the editor. */
   readonly dropTarget: boolean
+  /** Where files dragged over the tracks would land, from the video's start. */
+  readonly filesAt?: number | null
   /** A scene's length, as the reader reads it. */
   readonly formatLength: (ms: number) => string
 }) {
@@ -291,16 +309,14 @@ export function Timeline({
     }
   }, [timeMs])
 
-  // What edges snap to: the playhead, the marks, every edge, and the cuts of the dragged footage.
-  const parts = useMediaParts(
-    drag && (drag.type === "move" || drag.type === "trim") ? target : null,
-    drag && (drag.type === "move" || drag.type === "trim") ? drag.clip.clip.src : undefined
-  )
+  // What edges snap to: the playhead, the marks, every edge, the chapters', and the cuts of the
+  // dragged footage. Worked out once a drag starts, not as it moves: it holds the same clips.
+  const dragged = drag && (drag.type === "move" || drag.type === "trim") ? drag.clip : null
+  const draggedGroup = drag?.type === "move" ? drag.group : undefined
+  const parts = useMediaParts(dragged ? target : null, dragged?.clip.src)
   const targets = useMemo(() => {
-    const dragged = drag && (drag.type === "move" || drag.type === "trim") ? drag.clip : null
     // Clips dragged together snap to what stays, never to each other.
-    const group = drag?.type === "move" ? (drag.group ?? []) : []
-    // The clip dragged, as the timeline lays it out now: a change that lands mid-drag lays it anew.
+    const moving = new Set([...(dragged ? [dragged] : []), ...(draggedGroup ?? [])].map(clipKey))
     const points = new Set<number>([0, timeMs])
     if (marks.in !== undefined) points.add(marks.in)
     if (marks.out !== undefined) points.add(marks.out)
@@ -308,9 +324,9 @@ export function Timeline({
       points.add(scene.startMs)
       points.add(scene.startMs + scene.durationMs)
     }
+    // The clip dragged, as the timeline lays it out now: a change that lands mid-drag lays it anew.
     for (const clip of clips) {
-      if (dragged && sameClip(clip, dragged)) continue
-      if (group.some((each) => sameClip(each, clip))) continue
+      if (moving.has(clipKey(clip))) continue
       points.add(clip.startMs)
       if (!clip.open) points.add(clip.endMs)
     }
@@ -320,14 +336,14 @@ export function Timeline({
       }
     }
     return [...points]
-  }, [composition, clips, timeMs, marks.in, marks.out, drag, parts.cuts])
+  }, [composition, clips, timeMs, marks.in, marks.out, dragged, draggedGroup, parts.cuts])
 
   const threshold = (SNAP_PX / zoom) * 1000
   const snapMs = (ms: number, free: boolean) =>
     snapping && !free ? snapTo(ms, targets, threshold) : { ms }
 
-  /** Where a clip's composition starts in the video, before which it never goes. */
-  const floorOf = (file: string) =>
+  /** Where a clip's scene starts, which its start is never trimmed before. */
+  const sceneStartOf = (file: string) =>
     file === VIDEO_ENTRY
       ? 0
       : (composition.scenes.find((scene) => scene.src === file)?.startMs ?? 0)
@@ -358,11 +374,11 @@ export function Timeline({
       const snapped =
         snapping && !free ? snapMove(raw, length, targets, threshold) : { startMs: raw }
 
-      // Together, the clips go as far as the first to reach its composition's start.
+      // Anywhere along the video: together, the clips go as far as the first to reach its start.
       const startMs = group
         ? clip.startMs +
           groupDelta(
-            group.map((each) => ({ startMs: each.startMs, floorMs: floorOf(each.file) })),
+            group.map((each) => ({ startMs: each.startMs, floorMs: 0 })),
             snapped.startMs - clip.startMs
           )
         : snapped.startMs
@@ -377,9 +393,23 @@ export function Timeline({
     }
 
     if (current.type === "trim") {
-      const from = current.edge === "start" ? current.clip.startMs : current.clip.endMs
-      const snapped = snapMs(from + delta, free)
-      setDrag({ ...current, atMs: snapped.ms, target: snapped.target } as Drag)
+      const { clip, edge } = current
+      const snapped = snapMs((edge === "start" ? clip.startMs : clip.endMs) + delta, free)
+      // As the edit will have it: a recording's start never before its file's, nor, unless it
+      // closes its gap and keeps its place, before its chapter's; any other clip's never before
+      // its chapter's; and a clip never shorter than a few frames.
+      const plays = clip.clip.kind === "video" || clip.clip.kind === "audio"
+      const floor = plays
+        ? Math.max(
+            clip.startMs - clip.clip.mediaStartMs,
+            magnetic ? Number.NEGATIVE_INFINITY : sceneStartOf(clip.file)
+          )
+        : sceneStartOf(clip.file)
+      const atMs =
+        edge === "start"
+          ? Math.min(Math.max(floor, snapped.ms), clip.endMs - 100)
+          : Math.max(clip.startMs + 100, snapped.ms)
+      setDrag({ ...current, atMs, target: atMs === snapped.ms ? snapped.target : undefined })
       return
     }
 
@@ -427,11 +457,58 @@ export function Timeline({
     onPointerCancel: () => setDrag(null),
   }
 
+  // What each clip's block calls, the same functions in every render, which reach this render's.
+  const latest = useRef<ClipHandlers | null>(null)
+  latest.current = {
+    press: (event, laid) => {
+      if (event.button !== 0) return
+      if (commandKey(event)) {
+        startSelecting(event, laid)
+        return
+      }
+      const together = chosen.length > 1 && chosenKeys.has(clipKey(laid))
+      startDrag(event, {
+        type: "move",
+        clip: laid,
+        ...(together ? { group: chosen } : {}),
+        x: event.clientX,
+        startMs: laid.startMs,
+        moved: false,
+      })
+    },
+    trim: (event, laid, edge) =>
+      startDrag(event, {
+        type: "trim",
+        clip: laid,
+        edge,
+        x: event.clientX,
+        atMs: edge === "start" ? laid.startMs : laid.endMs,
+      }),
+    select: (laid) =>
+      edits.select({ type: "clip", file: laid.file, target: videoTarget(laid.clip) }),
+    ...dragHandlers,
+  }
+  const clipHandlers = useMemo<ClipHandlers>(
+    () => ({
+      press: (event, laid) => latest.current?.press(event, laid),
+      trim: (event, laid, edge) => latest.current?.trim(event, laid, edge),
+      select: (laid) => latest.current?.select(laid),
+      onPointerMove: (event) => latest.current?.onPointerMove(event),
+      onPointerUp: (event) => latest.current?.onPointerUp(event),
+      onPointerCancel: () => latest.current?.onPointerCancel(),
+    }),
+    []
+  )
+
   // ── Layout ─────────────────────────────────────────────────────────
 
-  // The clips selected, as their files are now.
+  // The clips selected, as their files are now, and those a drag moves.
   const chosen = chosenIn(clips, selection)
-  const isChosen = (laid: LaidClip) => chosen.some((each) => sameClip(each, laid))
+  const chosenKeys = new Set(chosen.map(clipKey))
+  const movingKeys =
+    drag?.type === "move" && drag.moved
+      ? new Set([drag.clip, ...(drag.group ?? [])].map(clipKey))
+      : undefined
 
   const rows = trackRows(clips)
   const sceneClips = clips.filter((clip) => clip.file !== VIDEO_ENTRY)
@@ -547,6 +624,22 @@ export function Timeline({
     if (!current.moved && current.over) edits.select(toggled(clips, current.before, current.over))
   }
 
+  // The chapter selected, the one under the playhead, and where files dragged in would land.
+  const chosenScene = selection?.type === "scene" ? selection.scene : undefined
+  const playingScene = sceneAt(composition.scenes, timeMs)?.id
+  const filesScene = filesAt === null ? undefined : sceneFor(composition.scenes, filesAt)
+
+  /** Files dragged over the tracks: the instant they would land at, as the pointer goes. */
+  const dropping = {
+    onDragOver: (event: React.DragEvent) => {
+      if (!edits.dropOver || !event.dataTransfer.types.includes("Files")) return
+      edits.dropOver(msAt(event.clientX))
+    },
+    onDragLeave: (event: React.DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) edits.dropOver?.(null)
+    },
+  }
+
   // Each scene where it shows, its end as dragged, and what it plays with the next.
   const sceneEnd = (scene: VideoScene) =>
     drag?.type === "scene" && drag.scene.id === scene.id
@@ -586,6 +679,7 @@ export function Timeline({
           "relative min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-width:thin]",
           dropTarget && "bg-primary/5"
         )}
+        {...dropping}
       >
         <div className="relative" style={{ width: contentWidth }}>
           {/* The ruler: a click or a drag moves the playhead. */}
@@ -650,7 +744,7 @@ export function Timeline({
                   <div
                     data-timeline-scene={scene.id}
                     data-reorder-id={scene.id}
-                    className="absolute inset-y-1"
+                    className="absolute inset-y-[3px]"
                     style={{
                       left: px(span.startMs),
                       width: Math.max(4, px(span.endMs - span.startMs)),
@@ -660,9 +754,8 @@ export function Timeline({
                       scene={scene}
                       index={index}
                       count={composition.scenes.length}
-                      timeline={timelines.get(scene.src)}
-                      target={target}
-                      open={open?.id === scene.id}
+                      open={chosenScene === scene.id}
+                      playing={playingScene === scene.id}
                       agent={agentScenes.has(scene.id)}
                       people={people.get(scene.id) ?? []}
                       dragging={reorder?.id === scene.id}
@@ -703,6 +796,18 @@ export function Timeline({
               if (dragRef.current?.type === "marquee") setDrag(null)
             }}
           >
+            {/* Where each chapter starts, faint across the tracks, under the clips. */}
+            {composition.scenes.map((scene, index) =>
+              index === 0 ? null : (
+                <span
+                  key={scene.id}
+                  aria-hidden="true"
+                  data-chapter-edge={scene.id}
+                  className="pointer-events-none absolute inset-y-0 w-px bg-foreground/[0.09] dark:bg-foreground/[0.13]"
+                  style={{ left: LABELS_PX + px(scene.startMs) }}
+                />
+              )
+            )}
             {tracks.map((track) => (
               <Row
                 key={track.id}
@@ -717,23 +822,10 @@ export function Timeline({
                   edits.select(null)
                   edits.seek(msAt(event.clientX), "commit")
                 }}
-                muted={track.id !== "soundtrack" && !open}
               >
-                {track.id !== "soundtrack" && open ? (
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-y-0 bg-foreground/[0.025] dark:bg-foreground/[0.04]"
-                    style={{ left: px(open.startMs), width: px(open.durationMs) }}
-                  />
-                ) : null}
                 {track.clips.map((laid) => {
-                  const selected = isChosen(laid)
-                  const moving =
-                    drag?.type === "move" &&
-                    drag.moved &&
-                    (sameClip(drag.clip, laid) || drag.group?.some((each) => sameClip(each, laid)))
-                      ? drag
-                      : null
+                  const key = clipKey(laid)
+                  const moving = drag?.type === "move" && movingKeys?.has(key) ? drag : null
                   const trimming = drag?.type === "trim" && sameClip(drag.clip, laid) ? drag : null
                   // The clip dragged where it is dragged; the others selected with it as far.
                   const movedTo = moving
@@ -751,9 +843,9 @@ export function Timeline({
                         : laid.endMs
                   return (
                     <ClipBlock
-                      key={`${laid.file}#${laid.clip.ref}`}
+                      key={key}
                       laid={laid}
-                      selected={selected}
+                      selected={chosenKeys.has(key)}
                       dragging={!!moving || !!trimming}
                       left={px(start)}
                       width={Math.max(6, px(end - start))}
@@ -762,38 +854,7 @@ export function Timeline({
                       target={target}
                       zoom={zoom}
                       viewStartMs={start}
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return
-                        if (commandKey(event)) {
-                          startSelecting(event, laid)
-                          return
-                        }
-                        startDrag(event, {
-                          type: "move",
-                          clip: laid,
-                          ...(chosen.length > 1 && selected ? { group: chosen } : {}),
-                          x: event.clientX,
-                          startMs: laid.startMs,
-                          moved: false,
-                        })
-                      }}
-                      onTrim={(event, edge) =>
-                        startDrag(event, {
-                          type: "trim",
-                          clip: laid,
-                          edge,
-                          x: event.clientX,
-                          atMs: edge === "start" ? laid.startMs : laid.endMs,
-                        })
-                      }
-                      onSelect={() =>
-                        edits.select({
-                          type: "clip",
-                          file: laid.file,
-                          target: videoTarget(laid.clip),
-                        })
-                      }
-                      dragHandlers={dragHandlers}
+                      handlers={clipHandlers}
                     />
                   )
                 })}
@@ -853,6 +914,23 @@ export function Timeline({
             />
           ) : null}
 
+          {/* Where files dragged over the tracks would land, and in which chapter. */}
+          {filesAt !== null && filesScene ? (
+            <span
+              aria-hidden="true"
+              data-drop-at=""
+              className="pointer-events-none absolute top-0 bottom-0 z-30 w-0.5 -translate-x-1/2 bg-primary"
+              style={{ left: LABELS_PX + px(filesAt) }}
+            >
+              <span
+                className="absolute left-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium whitespace-nowrap text-primary-foreground shadow-md"
+                style={{ top: ROW_PX.ruler + ROW_PX.scenes + 6 }}
+              >
+                {messages.dropHere(sceneName(filesScene))}
+              </span>
+            </span>
+          ) : null}
+
           {/* The playhead, its knob on the ruler. */}
           <span
             aria-hidden="true"
@@ -905,6 +983,11 @@ function sameClip(a: LaidClip, b: LaidClip): boolean {
   return a.file === b.file && a.clip.ref === b.clip.ref
 }
 
+/** A clip's name on the timeline: its file and its ref, the same for the same clip laid anew. */
+function clipKey(laid: LaidClip): string {
+  return `${laid.file}#${laid.clip.ref}`
+}
+
 export interface ZoomControls {
   readonly zoomIn: () => void
   readonly zoomOut: () => void
@@ -929,7 +1012,6 @@ function Row({
   label,
   icon,
   height,
-  muted = false,
   rowRef,
   onBackground,
   children,
@@ -937,7 +1019,6 @@ function Row({
   readonly label: string
   readonly icon?: ReactNode
   readonly height: number
-  readonly muted?: boolean
   readonly rowRef?: Ref<HTMLDivElement>
   readonly onBackground: (event: ReactPointerEvent) => void
   readonly children: ReactNode
@@ -953,7 +1034,7 @@ function Row({
       </div>
       <div
         ref={rowRef}
-        className={cn("relative flex-1", muted && "opacity-50")}
+        className="relative flex-1"
         onPointerDown={(event) => {
           if (event.button === 0 && event.target === event.currentTarget) onBackground(event)
         }}
@@ -1016,8 +1097,8 @@ function rulerLabel(ms: number, step: number): string {
 }
 
 /**
- * Two scenes playing together, between them on the Scenes track: a band of their own, hatched,
- * which says how long they cross. It holds the first scene's end, which a drag moves.
+ * Two chapters playing together, between them on the Chapters bar: a light band of their own,
+ * hatched, which says how long they cross. It holds the first chapter's end, which a drag moves.
  */
 function Crossfade({
   left,
@@ -1037,12 +1118,12 @@ function Crossfade({
           role="img"
           aria-label={label}
           data-crossfade=""
-          className="group/sceneblock absolute inset-y-1 overflow-hidden rounded-[3px] border border-border bg-muted"
+          className="group/sceneblock absolute inset-y-[3px] overflow-hidden rounded-[4px] bg-muted/40"
           style={{
             left,
             width: Math.max(4, width),
             backgroundImage:
-              "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in oklab, var(--foreground) 16%, transparent) 4px 5px)",
+              "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in oklab, var(--foreground) 9%, transparent) 4px 5px)",
           }}
         >
           {children}
@@ -1080,7 +1161,11 @@ function EdgeHandle({
   )
 }
 
-function ClipBlock({
+/**
+ * A clip on its track. Drawn again only when one of its values changes: its handlers are the same
+ * from one render to the next, so a drag redraws the blocks it moves, never the others.
+ */
+const ClipBlock = memo(function ClipBlock({
   laid,
   selected,
   dragging,
@@ -1091,10 +1176,7 @@ function ClipBlock({
   target,
   zoom,
   viewStartMs,
-  onPointerDown,
-  onTrim,
-  onSelect,
-  dragHandlers,
+  handlers,
 }: {
   readonly laid: LaidClip
   readonly selected: boolean
@@ -1107,16 +1189,14 @@ function ClipBlock({
   readonly zoom: number
   /** Where the block starts now, as dragged: its art follows its file from there. */
   readonly viewStartMs: number
-  readonly onPointerDown: (event: ReactPointerEvent) => void
-  readonly onTrim: (event: ReactPointerEvent, edge: "start" | "end") => void
-  readonly onSelect: () => void
-  readonly dragHandlers: {
-    readonly onPointerMove: (event: ReactPointerEvent) => void
-    readonly onPointerUp: (event: ReactPointerEvent) => void
-    readonly onPointerCancel: () => void
-  }
+  readonly handlers: ClipHandlers
 }) {
   const messages = useArtifactMessages().videoEditor
+  const dragHandlers = {
+    onPointerMove: handlers.onPointerMove,
+    onPointerUp: handlers.onPointerUp,
+    onPointerCancel: handlers.onPointerCancel,
+  }
   const { clip } = laid
   const media = clip.kind === "video" || clip.kind === "audio" || clip.kind === "image"
   const parts = useMediaParts(media ? target : null, clip.src)
@@ -1141,6 +1221,7 @@ function ClipBlock({
       aria-pressed={selected}
       aria-label={failed ? `${kind}, ${name}, ${messages.unreadable}` : `${kind}, ${name}`}
       data-timeline-clip={clip.ref}
+      data-timeline-file={laid.file}
       data-failed={failed ? "" : undefined}
       className={cn(
         "group/clip absolute touch-none overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -1167,11 +1248,11 @@ function ClipBlock({
             }
           : {}),
       }}
-      onPointerDown={onPointerDown}
+      onPointerDown={(event) => handlers.press(event, laid)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
-          onSelect()
+          handlers.select(laid)
         }
       }}
       {...dragHandlers}
@@ -1237,15 +1318,19 @@ function ClipBlock({
 
       <TrimHandle
         edge="start"
-        onPointerDown={(event) => onTrim(event, "start")}
+        onPointerDown={(event) => handlers.trim(event, laid, "start")}
         {...dragHandlers}
       />
       {laid.open ? null : (
-        <TrimHandle edge="end" onPointerDown={(event) => onTrim(event, "end")} {...dragHandlers} />
+        <TrimHandle
+          edge="end"
+          onPointerDown={(event) => handlers.trim(event, laid, "end")}
+          {...dragHandlers}
+        />
       )}
     </div>
   )
-}
+})
 
 /**
  * What a clip plays past the end of its recording: dimmed and hatched from where the file ends,

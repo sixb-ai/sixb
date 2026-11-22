@@ -234,6 +234,21 @@ export function rulerSteps(pxPerSecond: number): {
   return { major, minor }
 }
 
+/**
+ * The scene a clip put at `ms` lands in, as the video's placement reads it: the one on top there,
+ * the later in play order; in a gap, the next to start; past every scene, the last.
+ */
+export function sceneFor<T extends { readonly startMs: number; readonly durationMs: number }>(
+  scenes: readonly T[],
+  ms: number
+): T | undefined {
+  let found: T | undefined
+  for (const scene of scenes) {
+    if (scene.startMs <= ms && ms < scene.startMs + scene.durationMs) found = scene
+  }
+  return found ?? scenes.find((scene) => scene.startMs >= ms) ?? scenes.at(-1)
+}
+
 /** The scene playing at `ms`: the last to start by then, as the later one shows over the other. */
 export function sceneAt<T extends { readonly startMs: number; readonly durationMs: number }>(
   scenes: readonly T[],
