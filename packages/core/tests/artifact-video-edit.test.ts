@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Window } from "happy-dom"
 import * as Y from "yjs"
+import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import { applyBoardEditToText } from "../src/artifacts/live/board"
 import {
   createArtifactDocument,
@@ -991,7 +992,9 @@ describe("placing clips in the video", () => {
   // (looks.ts), as carryLooks did; the outro's own caption then turns yellow, and its `rise`
   // gives way to the demo's. Name the keyframes as they were, `chosen = name`, and the outro's
   // slide fades instead. Leave a carried look where its clip left (no removeCarriedLook in
-  // placeFound, edit.ts), and the outro keeps one for a caption it no longer holds.
+  // placeFound, edit.ts), and the outro keeps one for a caption it no longer holds. Hash the look
+  // as it is written in lookKey (looks.ts), or read a carried rule's key as any selector in
+  // stylesItself, and the caption reaches the hook by another key than it reached the outro.
   test("a clip takes its look along to reach it alone, and the scene it lands in keeps its own", () => {
     const demoStyle = `<style>
       @keyframes rise { from { opacity: 0 } to { opacity: 1 } }
@@ -1023,16 +1026,19 @@ describe("placing clips in the video", () => {
       sources
     )
     const outro = there.get("scenes/outro.html") ?? ""
+    // The look's key, from what it is: every clip carrying it reaches its one style.
+    const key = /data-look="([^"]+)"/.exec(outro)?.[1] ?? "none"
+    const reach = `:is([data-look="${key}"], #sixb-look)`
     expect(outro).toBe(`<template>
   <div data-composition-id="outro" data-width="1920" data-height="1080">
     <img src="media/logo.png" alt="Logo">
     <p class="caption" data-start="0" data-duration="2">Try it today</p>
-    <p class="caption" data-start="1.5" data-duration="2" id="text">in two taps</p>
+    <p class="caption" data-start="1.5" data-duration="2" data-look="${key}">in two taps</p>
     ${outroStyle}
-    <style data-carried="text" data-from="demo">
-      [data-composition-id="outro"] #text.caption { letter-spacing: -0.01em; }
-      [data-composition-id="outro"] #text.caption { color: #ffd166; animation: rise-2 0.4s; }
-      #text.caption { font-weight: 700; }
+    <style data-look="${key}" data-from="demo">
+      [data-composition-id="outro"] ${reach}.caption { letter-spacing: -0.01em; }
+      [data-composition-id="outro"] ${reach}.caption { color: #ffd166; animation: rise-2 0.4s; }
+      ${reach}.caption { font-weight: 700; }
       @keyframes rise-2 { from { opacity: 0 } to { opacity: 1 } }
     </style>
   </div>
@@ -1050,19 +1056,196 @@ describe("placing clips in the video", () => {
     const styleOf = (text: string | null | undefined) =>
       /<style>[\s\S]*<\/style>/.exec(text ?? "")?.[0]
     expect(styleOf(back.get("scenes/demo.html"))).toBe(styleOf(sources.get("scenes/demo.html")))
-    expect(back.get("scenes/demo.html")).not.toContain("data-carried")
+    expect(back.get("scenes/demo.html")).not.toContain("data-look")
 
     // And there again: the same look, once.
-    const again = applied(moveClip(back, "scenes/demo.html", "text", 2500 + 7000), back)
+    const home = demoClips(back).find((clip) => clip.text === "in two taps")
+    if (!home) throw new Error("The caption did not come home.")
+    const again = applied(moveClip(back, "scenes/demo.html", videoTarget(home), 2500 + 7000), back)
     expect(again.get("scenes/outro.html")).toBe(outro)
 
-    // On to the hook: the look it carried goes with it, scoped anew, and leaves the outro.
-    const onward = applied(moveClip(again, "scenes/outro.html", "text", 1000 - 10_500), again)
+    // On to the hook: the look it carried goes with it, scoped anew, by the same key, and leaves
+    // the outro.
+    const there2 = outroClips(again).find((clip) => clip.text === "in two taps")
+    if (!there2) throw new Error("The caption did not land in the outro again.")
+    const onward = applied(
+      moveClip(again, "scenes/outro.html", videoTarget(there2), 1000 - 10_500),
+      again
+    )
     expect(onward.get("scenes/outro.html")).toBe(sources.get("scenes/outro.html"))
-    expect(onward.get("scenes/hook.html")).toContain(`<style data-carried="text" data-from="demo">
-      [data-composition-id="hook"] #text.caption { letter-spacing: -0.01em; }
-      [data-composition-id="hook"] #text.caption { color: #ffd166; animation: rise-2 0.4s; }
-      #text.caption { font-weight: 700; }`)
+    expect(onward.get("scenes/hook.html")).toContain(`<style data-look="${key}" data-from="demo">
+      [data-composition-id="hook"] ${reach}.caption { letter-spacing: -0.01em; }
+      [data-composition-id="hook"] ${reach}.caption { color: #ffd166; animation: rise-2 0.4s; }
+      ${reach}.caption { font-weight: 700; }`)
+  })
+
+  // Guard proof: drop the `written` check from placeFound (edit.ts), and the outro holds the look
+  // once for each caption. Count every `data-look` as a carrier in pruneLooks, and the look stays
+  // once both have gone; prune none after a ripple in rippleRemove, and it stays past the cut.
+  test("clips that look alike carry one look, until the last of them leaves", () => {
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace(
+        "<script>",
+        `<style>
+      [data-composition-id="demo"] .caption { color: #ffd166; }
+    </style>
+    <script>`
+      ),
+    })
+    const looks = (text: string | null | undefined) =>
+      text?.match(/<style data-look="/g)?.length ?? 0
+    const inOutro = (files: ReadonlyMap<string, string | null>, words: string) => {
+      const found = outroClips(files).find((clip) => clip.text === words)
+      if (!found) throw new Error(`No "${words}" in the outro.`)
+      return videoTarget(found)
+    }
+    const inDemo = (files: ReadonlyMap<string, string | null>, words: string) => {
+      const found = demoClips(files).find((clip) => clip.text === words)
+      if (!found) throw new Error(`No "${words}" in the demo.`)
+      return videoTarget(found)
+    }
+
+    // Both captions, 8 s on, into the outro together: one look, which each reaches by its key.
+    const both = applied(
+      moveClips(
+        sources,
+        [
+          { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
+          { file: "scenes/demo.html", clip: caption("in two taps") },
+        ],
+        8000
+      ),
+      sources
+    )
+    const outro = both.get("scenes/outro.html") ?? ""
+    const key = /<style data-look="([^"]+)"/.exec(outro)?.[1]
+    expect(looks(outro)).toBe(1)
+    expect(outro.match(new RegExp(`<p class="caption"[^>]* data-look="${key}"`, "g"))).toHaveLength(
+      2
+    )
+
+    // One after the other, the second finds its look there already.
+    const first = applied(
+      moveClip(sources, "scenes/demo.html", inDemo(sources, "Assign the nearest tech"), 8500),
+      sources
+    )
+    const second = applied(
+      moveClip(first, "scenes/demo.html", inDemo(first, "in two taps"), 10_500),
+      first
+    )
+    expect(second.get("scenes/outro.html")).toBe(outro)
+
+    // One home again: the other keeps the look. Both: it goes, and the outro is as it was.
+    const one = applied(
+      moveClip(both, "scenes/outro.html", inOutro(both, "in two taps"), 5000 - 10_500),
+      both
+    )
+    expect(looks(one.get("scenes/outro.html"))).toBe(1)
+    expect(one.get("scenes/demo.html")).not.toContain("data-look")
+    const none = applied(
+      moveClip(one, "scenes/outro.html", inOutro(one, "Assign the nearest tech"), 3000 - 10_500),
+      one
+    )
+    expect(none.get("scenes/outro.html")).toBe(OUTRO)
+
+    // Removed, or cut out with what plays beside it, the last leaves no look either.
+    const removed = applied(
+      removeClip(one, "scenes/outro.html", inOutro(one, "Assign the nearest tech")),
+      one
+    )
+    expect(removed.get("scenes/outro.html")).toBe(OUTRO)
+    const cut = applied(cutRange(one, { startMs: 10_800, endMs: 12_700 }), one)
+    expect(outroClips(cut).some((clip) => clip.text === "Assign the nearest tech")).toBe(false)
+    expect(cut.get("scenes/outro.html")).not.toContain("data-look")
+  })
+
+  // Guard proof: leave the classes out of lookSignature (edit.ts), and the big caption takes the
+  // other's look, worked out once for both; leave out the attributes the sheets read, and so does
+  // the subtitle.
+  test("clips that look otherwise carry looks of their own, moved together", () => {
+    const lookOfEach = (marked: string, rule: string) => {
+      const sources = with_({
+        "scenes/demo.html": DEMO.replace(
+          '<p class="caption" data-start="2.5"',
+          `<p ${marked} data-start="2.5"`
+        ).replace(
+          "<script>",
+          `<style>
+      [data-composition-id="demo"] .caption { color: #ffd166; }
+      ${rule}
+    </style>
+    <script>`
+        ),
+      })
+      const files = applied(
+        moveClips(
+          sources,
+          demoClips(sources)
+            .filter((clip) => clip.tag === "p")
+            .map((clip) => ({ file: "scenes/demo.html", clip: videoTarget(clip) })),
+          8000
+        ),
+        sources
+      )
+      const outro = files.get("scenes/outro.html") ?? ""
+      // Each caption, and the declarations of the look it carries.
+      return ["Assign the nearest tech", "in two taps"].map((words) => {
+        const key = new RegExp(`data-look="([^"]+)">${words}<`).exec(outro)?.[1]
+        const style = new RegExp(`<style data-look="${key}"[^>]*>([\\s\\S]*?)</style>`).exec(outro)
+        return (style?.[1] ?? "").match(/\{[^}]*\}/g)?.join(" ")
+      })
+    }
+
+    expect(
+      lookOfEach(
+        'class="caption big"',
+        '[data-composition-id="demo"] .caption.big { font-size: 80px; }'
+      )
+    ).toEqual(["{ color: #ffd166; }", "{ color: #ffd166; } { font-size: 80px; }"])
+    expect(
+      lookOfEach(
+        'class="caption" data-role="sub"',
+        '[data-composition-id="demo"] .caption[data-role="sub"] { letter-spacing: 3px; }'
+      )
+    ).toEqual(["{ color: #ffd166; }", "{ color: #ffd166; } { letter-spacing: 3px; }"])
+  })
+
+  // Guard proof: drop the size check from run (edit.ts); the move then writes an outro past what
+  // publishing reads. Refuse any file over the limit, `after > before` aside, and a demo already
+  // that large can no longer give its caption away.
+  test("an edit that would grow an HTML file past what publishing reads is refused", () => {
+    const limit = ARTIFACT_LIMITS.maxSceneBytes
+    const padded = (text: string, bytes: number) =>
+      text.replace("</div>\n</template>", `<!-- ${"x".repeat(bytes)} -->\n  </div>\n</template>`)
+    const style = `<style>
+      [data-composition-id="demo"] .caption { color: #ffd166; }
+    </style>
+    <script>`
+
+    // The outro, a few bytes short of the limit: the caption and its look do not fit.
+    const full = with_({
+      "scenes/demo.html": DEMO.replace("<script>", style),
+      "scenes/outro.html": padded(OUTRO, limit - OUTRO.length - 40),
+    })
+    const refused = moveClips(
+      full,
+      [{ file: "scenes/demo.html", clip: caption("in two taps") }],
+      7000
+    )
+    expect("error" in refused && refused.error).toMatch(
+      new RegExp(
+        `^'scenes/outro\\.html' would be \\d+ bytes: each of a video's HTML files holds at most ${limit}\\.$`
+      )
+    )
+
+    // A demo already past it may still give a caption away: it only shrinks.
+    const large = with_({ "scenes/demo.html": padded(DEMO.replace("<script>", style), limit) })
+    const given = moveClips(
+      large,
+      [{ file: "scenes/demo.html", clip: caption("in two taps") }],
+      7000
+    )
+    expect("edit" in given).toBe(true)
   })
 
   // Guard proof: write every carried rule as `[scene] #id`, its compound dropped, in writtenLook
@@ -1969,27 +2152,31 @@ describe("a clip that goes on in later scenes", () => {
     )
   })
 
-  // Guard proof: rename no carried look nor chained start in copySceneFile (edit.ts); the copy's
-  // look then names an element it no longer holds, and its caption follows nothing.
+  // Guard proof: rename no chained start in copySceneFile (edit.ts); the copy's caption then
+  // follows nothing. A carried look is keyed by data-look, which a copy keeps as it is.
   test("a copied scene's looks and chained starts follow its new ids", () => {
     const sources = new Map(opening)
     sources.set(
       "scenes/outro.html",
       scene(
         "outro",
-        `<p id="cap" class="caption" data-start="0" data-duration="1">Hi</p>
+        `<p id="cap" class="caption" data-look="k1" data-start="0" data-duration="1">Hi</p>
     <p id="after" data-start="cap + 0.5" data-duration="1">there</p>
-    <style data-carried="cap" data-from="demo">
-      [data-composition-id="outro"] #cap { color: yellow; }
+    <style data-look="k1" data-from="demo">
+      [data-composition-id="outro"] .caption:is([data-look="k1"], #sixb-look) { color: yellow; }
+      [data-composition-id="outro"] #cap { font-size: 30px; }
     </style>
     <script>document.getElementById("cap")</script>`
       )
     )
     const copy = applied(duplicateScene(sources, "outro"), sources).get("scenes/outro-2.html") ?? ""
-    expect(copy).toContain('<p id="cap-2" class="caption"')
+    expect(copy).toContain('<p id="cap-2" class="caption" data-look="k1"')
     expect(copy).toContain('data-start="cap-2 + 0.5"')
-    expect(copy).toContain('<style data-carried="cap-2" data-from="demo">')
-    expect(copy).toContain('[data-composition-id="outro-2"] #cap-2 { color: yellow; }')
+    expect(copy).toContain('<style data-look="k1" data-from="demo">')
+    expect(copy).toContain(
+      '[data-composition-id="outro-2"] .caption:is([data-look="k1"], #sixb-look) { color: yellow; }'
+    )
+    expect(copy).toContain('[data-composition-id="outro-2"] #cap-2 { font-size: 30px; }')
     expect(copy).toContain('getElementById("cap-2")')
   })
 
