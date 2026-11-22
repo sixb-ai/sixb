@@ -1913,7 +1913,8 @@ describe("the timeline", () => {
 
     // Guard proof: drop `narrow` from ClipBlock's classes (timeline.tsx), and start each handle at
     // its block's edge, `inset` 0; the next caption's start handle then lies over the narrow one,
-    // whose press it takes. In coveredEdges (model.ts), count no overlap, and the same.
+    // whose press it takes. In coveredEdges (model.ts), count no overlap, and the same; count only
+    // the next block's, and the last of three that overlap starts its handle under the first.
     test("a narrow clip at a chapter's edge lies over its neighbour's handle, which starts past it", () => {
       expect(
         coveredEdges([
@@ -1926,6 +1927,20 @@ describe("the timeline", () => {
           ["a", { start: 0, end: 4 }],
           ["b", { start: 4, end: 0 }],
           ["c", { start: 0, end: 0 }],
+        ])
+      )
+      // Three that overlap: the first still covers the last, past the one between them.
+      expect(
+        coveredEdges([
+          { key: "a", row: 0, left: 298, width: 10 },
+          { key: "b", row: 0, left: 300, width: 3 },
+          { key: "c", row: 0, left: 302, width: 200 },
+        ])
+      ).toEqual(
+        new Map([
+          ["a", { start: 0, end: 8 }],
+          ["b", { start: 3, end: 1 }],
+          ["c", { start: 6, end: 0 }],
         ])
       )
 
