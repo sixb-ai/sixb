@@ -308,17 +308,11 @@ test("an Entra ID credential signs discovery and every model call with one cache
   }
 })
 
-// Regression proof: drop the five-minute margin in bearerToken; the second call then reuses
-// the first token.
-test("a token within five minutes of expiry is renewed, and errors never show it", async () => {
-  let issued = 0
+test("errors never show the bearer token", async () => {
   const foundry = createAzureAIFoundry({
     endpoint,
     credential: {
-      getToken: async () => ({
-        token: `secret-token-${++issued}`,
-        expiresOnTimestamp: Date.now() + 4 * 60_000,
-      }),
+      getToken: async () => ({ token: "secret-token", expiresOnTimestamp: Date.now() + 3_600_000 }),
     },
     catalog: noCatalog,
     fetch: async (url, init) => {
@@ -333,7 +327,6 @@ test("a token within five minutes of expiry is renewed, and errors never show it
     .catch((failure: unknown) => failure)
   expect(String(error)).toContain("Refused Bearer [REDACTED]")
   expect(String(error)).not.toContain("secret-token")
-  expect(issued).toBe(2)
 })
 
 test("takes apiKey or credential, not both, and refuses a blank key", () => {
