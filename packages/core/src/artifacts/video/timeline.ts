@@ -277,6 +277,12 @@ function timelineOf(composition: Element): VideoFileTimeline {
 /** Within this, two instants are one: under a frame at 60 fps. */
 const SAME_MS = 15
 
+/**
+ * A frame at the slowest rate a video plays, 24 fps: a recording's pieces this close still go on
+ * one from the other, as a placement leaves no piece shorter than a frame at a skip.
+ */
+const FRAME_MS = 42
+
 /** A part of a clip laid in the video: its scene's file, the clip there, and when it plays. */
 export interface VideoChainPart {
   readonly file: string
@@ -408,7 +414,7 @@ function goesOn(
   if (a.tag !== b.tag || a.src !== b.src || a.text !== b.text) return false
   const recording = b.kind === "video" || b.kind === "audio"
   if (previous.file === next.file) {
-    return recording && Math.abs(next.startMs - previous.endMs) <= SAME_MS
+    return recording && Math.abs(next.startMs - previous.endMs) <= FRAME_MS
   }
 
   const before = sceneOf(previous)
@@ -420,10 +426,10 @@ function goesOn(
   if (recording) {
     // Past a gap the scene made longer, only where it plays the file on: a part elsewhere in the
     // file goes on only from one that reaches its scene's end, so a stale one never links.
-    const reaches = previous.endMs >= sceneEnd - SAME_MS
+    const reaches = previous.endMs >= sceneEnd - FRAME_MS
     return (
       (reaches || playsOn(previous, next)) &&
-      next.startMs <= Math.max(sceneEnd, after.startMs) + SAME_MS
+      next.startMs <= Math.max(sceneEnd, after.startMs) + FRAME_MS
     )
   }
   if (previous.endMs < sceneEnd - SAME_MS) return false

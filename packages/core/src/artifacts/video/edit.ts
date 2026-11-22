@@ -2717,11 +2717,15 @@ function jumpsFrom(
  */
 function placeFound(work: Working, placing: readonly Placing[]): Placement {
   // Every scene read once: `partsOf` tells them apart by identity.
-  const scenes = rootOf(work).scenes
+  const root = rootOf(work)
+  const scenes = root.scenes
+  const frameMs = 1000 / root.fps
   const plans = placing.map((each, index) => {
     const own =
       each.file === VIDEO_ENTRY ? undefined : scenes.find((scene) => scene.src === each.file)
-    const parts = own ? atJumps(partsOf(scenes, own, each.startMs, each.durationMs), each) : []
+    const parts = own
+      ? atJumps(partsOf(scenes, own, each.startMs, each.durationMs), each, frameMs)
+      : []
     return { ...each, index, own, parts }
   })
 
@@ -3181,10 +3185,10 @@ function partsOf(
 /**
  * A recording's parts cut again where it skips on in its file, so each plays one stretch of it:
  * two pieces back to back in a scene, which go on one from the other. A skip however close to a
- * part's edge cuts it there, a piece of a few frames or less if need be: what its words left out
- * is never heard again, and what they kept, never lost.
+ * part's edge cuts it there: what its words left out is never heard again. A piece shorter than a
+ * frame, a skip that close to an edge, is left out, less than a frame of what they kept.
  */
-function atJumps(parts: readonly Part[], placing: Placing): Part[] {
+function atJumps(parts: readonly Part[], placing: Placing, frameMs: number): Part[] {
   const jumps = placing.jumps ?? []
   if (jumps.length === 0) return [...parts]
 
@@ -3193,7 +3197,7 @@ function atJumps(parts: readonly Part[], placing: Placing): Part[] {
     const end = part.intoMs + part.durationMs
     const cuts = jumps.map((jump) => jump.intoMs).filter((at) => at > part.intoMs && at < end)
     const edges = [part.intoMs, ...cuts, end]
-    return edges.slice(1).map((to, at) => {
+    const pieces = edges.slice(1).map((to, at) => {
       const from = edges[at] as number
       return {
         ...part,
@@ -3202,6 +3206,8 @@ function atJumps(parts: readonly Part[], placing: Placing): Part[] {
         intoMs: from,
       }
     })
+    const whole = pieces.filter((piece) => piece.durationMs >= frameMs)
+    return whole.length > 0 ? whole : pieces
   })
 }
 

@@ -269,9 +269,10 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - A recording that goes on plays its file on from part to part, unless its words were cut there:
   it lasts as long as its parts show, and placed again (`logicalClip`), it plays on across a gap or
   a hidden end, and skips where a part starts elsewhere in its file than the one before stops
-  (`MediaJump`), cut again at each skip (`atJumps`) into pieces back to back in a scene, a piece
-  of a few frames or less where a skip falls that close to a scene's edge: what was cut is never
-  heard again, and what was kept never lost. A cut by
+  (`MediaJump`), cut again at each skip (`atJumps`) into pieces back to back in a scene: what was
+  cut is never heard again. A piece shorter than a frame, a skip that close to a scene's edge, is
+  left out, less than a frame of what was kept, and the pieces either side, under a frame apart,
+  still go on one from the other. A cut by
   words (`removeMediaRanges`, `keepClipRanges`) takes from every part what it plays of the words,
   so words across a scene's edge go whole, from either file. Whatever an operation cuts, what is
   left of each part goes on from the first piece left (`markCutChains`); a scene moved or removed
