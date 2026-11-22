@@ -1314,6 +1314,35 @@ describe("the editor", () => {
     live.destroy()
   })
 
+  // Guard proof: show the edit's own reason in `edit` (editor.tsx), as for any refusal; the reader
+  // then reads how many bytes the title would hold.
+  test("a chapter that would grow too large to publish says so in the reader's words", () => {
+    // The title, a few bytes short of what publishing reads: the caption does not fit.
+    const { view, live, text } = openEditor(TALK, (title) =>
+      title.replace(
+        "</template>",
+        `<!-- ${"x".repeat(1024 * 1024 - title.length - 30)} -->\n</template>`
+      )
+    )
+    const caption = view.container.querySelector<HTMLElement>(
+      '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+    )
+    if (!caption) throw new Error("No caption on the timeline.")
+    const xAt = (ms: number) => 112 + ms / 10
+    fireEvent.pointerDown(caption, { button: 0, clientX: xAt(3500), pointerId: 1 })
+    fireEvent.pointerMove(caption, { clientX: xAt(500), pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(caption, { clientX: xAt(500), pointerId: 1, shiftKey: true })
+
+    expect(text("scenes/talk.html")).toContain("Thanks for having me.")
+    expect(
+      view.getByText(
+        "This chapter would be too large to publish. Move fewer clips at once, or ask the agent to simplify it."
+      )
+    ).toBeDefined()
+    expect(view.queryByText(/bytes/)).toBeNull()
+    live.destroy()
+  })
+
   // Guard proof: leave the selection as it was after a move in editor.tsx (`follow` false in
   // `place`): the caption lands in the title, and nothing is selected.
   test("a caption dragged into the chapter before lands in its file, and stays selected", () => {
