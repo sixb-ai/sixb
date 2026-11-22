@@ -597,12 +597,18 @@ export interface VideoAnimationJoined {
  * on top there, and goes on past that scene's end as a copy in the next, playing on from where it
  * stopped; the last scene grows to hold it. `clips` names each clip placed where it now starts, in
  * the order given, `animationsLeft` each that left a scene whose script animates it, and
- * `animationsJoined` each that landed in one whose script animates what it is.
+ * `animationsJoined` each that landed in one whose script animates what it is, and
+ * `looksMayDiffer` each whose look could not all be taken along.
  */
 export type VideoPlaceResult = VideoEditResult & {
   readonly clips?: readonly VideoClipTarget[]
   readonly animationsLeft?: readonly VideoAnimationLeft[]
   readonly animationsJoined?: readonly VideoAnimationJoined[]
+  /**
+   * Each clip that landed in another scene where a rule may style it that its look could not take
+   * along, one through a wrapper or by its place among its siblings: it may look a little different.
+   */
+  readonly looksMayDiffer?: readonly VideoClipTarget[]
 }
 
 /**
@@ -2138,6 +2144,7 @@ interface Placement {
   readonly clips: readonly VideoClipTarget[]
   readonly animationsLeft: readonly VideoAnimationLeft[]
   readonly animationsJoined?: readonly VideoAnimationJoined[]
+  readonly looksMayDiffer?: readonly VideoClipTarget[]
 }
 
 /** A clip found in its file, and where in the video it is to play. */
@@ -2342,6 +2349,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
   const carried: Carried[] = []
   const left: { readonly index: number; readonly scene: string }[] = []
   const joined: { readonly index: number; readonly scene: string }[] = []
+  const uncertain = new Set<number>()
   const changes = new Map<string, Map<string, ClipChange>>()
   const change = (file: string, ref: string, what: ClipChange) => {
     const plan = changes.get(file) ?? new Map<string, ClipChange>()
@@ -2382,6 +2390,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         : undefined
       const look = styled ? lookOf(facts, own.id, styled.sheets) : undefined
       const home = styled?.home ?? own.id
+      if (look?.uncertain && parts.some((part) => part.scene.id !== home)) uncertain.add(index)
       const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
       const fresh = () => {
         const id = uniqueName(base || was.kind, taken)
@@ -2600,6 +2609,10 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const clip = found.get(index)
       return clip ? [{ clip, scene }] : []
     }),
+    looksMayDiffer: [...uncertain].flatMap((index) => {
+      const clip = found.get(index)
+      return clip ? [clip] : []
+    }),
   }
 }
 
@@ -2704,9 +2717,9 @@ function linkedBlocks(work: Working): CssBlock[][] {
 }
 
 /**
- * The sheets that give a clip of a scene's file its look, and the scene it is from when it came
- * with a look of its own: then that look, and the rules naming it by its id; else every rule of
- * its scene's that styles it.
+ * The sheets that give a clip of a scene's file its look, in the order the page reads them, and the
+ * scene it is from when it came with a look of its own: then that look, and the rules naming it by
+ * its id; else every rule that styles it there.
  */
 function lookSheets(
   work: Working,
@@ -2717,12 +2730,14 @@ function lookSheets(
   const styles = stylesIn(work.text(file))
   const own = id ? styles.find((style) => style.carried === id) : undefined
   const byId = own !== undefined
+  // In the order the page reads them: the linked sheets in its head, the scene's own styles,
+  // then the look carried for it, written after them.
   const sheets: LookSheet[] = [
-    ...(own ? [{ blocks: cssBlocks(own.css), scopedOnly: false }] : []),
+    ...linked.map((blocks) => ({ blocks, byId })),
     ...styles
       .filter((style) => style.carried === undefined)
-      .map((style) => ({ blocks: cssBlocks(style.css), scopedOnly: false, byId })),
-    ...linked.map((blocks) => ({ blocks, scopedOnly: true, byId })),
+      .map((style) => ({ blocks: cssBlocks(style.css), byId })),
+    ...(own ? [{ blocks: cssBlocks(own.css), carried: true }] : []),
   ]
   return { sheets, ...(own?.from ? { home: own.from } : {}) }
 }
