@@ -239,8 +239,8 @@ const KEYFRAMES = /^@(?:-webkit-)?keyframes\s+([\w-]+)/i
 /** Each composition a selector names by `[data-composition-id=…]`. */
 const SCOPE = /^\[\s*data-composition-id\s*=\s*(["']?)([^"'\]\s]+)\1\s*\]$/
 
-/** An id no element has, which gives a look's rules the weight of one. */
-const LOOK_ID = "sixb-look"
+/** An id no element has, which gives a look's rules the weight of one: no edit names one so. */
+export const LOOK_ID = "sixb-look"
 
 /** How a carried look's rule reaches its clips, as {@link writtenLook} writes it. */
 const REACH = new RegExp(`^:is\\(\\[data-look="[^"]*"\\], #${LOOK_ID}\\)$`)
