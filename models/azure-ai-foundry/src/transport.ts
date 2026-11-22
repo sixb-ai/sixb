@@ -37,11 +37,27 @@ const IMAGE_API_VERSION = "2025-04-01-preview"
  */
 const ENTRA_SCOPE = "https://ai.azure.com/.default"
 
+/**
+ * Token renewal follows Azure's own token cycler (`@azure/core-rest-pipeline`): renew in the
+ * background from the credential's refresh hint or two minutes before expiry, keep the current
+ * token while a renewal fails, and wait only for a missing or expiring one.
+ */
+const RENEW_BEFORE_EXPIRY_MS = 2 * 60_000
+const EXPIRING_MS = 1_000
+const RENEW_RETRY_MS = 3_000
+/** Bounds one getToken call, so one that never settles cannot hold every later call. */
+const TOKEN_TIMEOUT_MS = 30_000
+
 /** Entra ID sign-in, such as `DefaultAzureCredential` or `ManagedIdentityCredential` from `@azure/identity`. */
 export interface AzureAIFoundryCredential {
   getToken(
-    scopes: string | string[]
-  ): Promise<{ readonly token: string; readonly expiresOnTimestamp?: number } | null>
+    scopes: string | string[],
+    options?: { readonly abortSignal?: AbortSignal }
+  ): Promise<{
+    readonly token: string
+    readonly expiresOnTimestamp?: number
+    readonly refreshAfterTimestamp?: number
+  } | null>
 }
 
 export interface TransportOptions {
@@ -69,8 +85,8 @@ export class FoundryTransport {
   /** Every model call: the project URL's origin. */
   readonly resourceUrl: string
   private readonly options: TransportOptions
-  private token?: { readonly value: string; readonly renewAt: number }
-  private pendingToken?: Promise<string>
+  private token?: { readonly value: string; readonly expiresAt: number; readonly renewAt: number }
+  private renewal?: Promise<string>
 
   constructor(options: TransportOptions) {
     if (!URL.canParse(options.endpoint))
@@ -205,7 +221,7 @@ export class FoundryTransport {
       if (headers.has(reserved))
         throw new TypeError(`${PREFIX} Use apiKey or credential instead of '${reserved}' headers.`)
     if (this.options.credential) {
-      const token = await abortable(() => this.bearerToken(), signal)
+      const token = await this.bearerToken(signal)
       diagnostics.add(token)
       headers.set("authorization", `Bearer ${token}`)
       return headers
@@ -220,25 +236,53 @@ export class FoundryTransport {
     return headers
   }
 
-  /** One token for every call, renewed five minutes before it expires; concurrent calls share a renewal. */
-  private bearerToken(): Promise<string> {
-    if (this.token && Date.now() < this.token.renewAt) return Promise.resolve(this.token.value)
-    this.pendingToken ??= Promise.resolve()
-      .then(() => this.options.credential!.getToken(ENTRA_SCOPE))
-      .then((token) => {
+  /** One token for every call; a call waits only when there is none, or it is about to expire. */
+  private bearerToken(signal: AbortSignal): Promise<string> {
+    const token = this.token
+    const now = Date.now()
+    if (!token || now >= token.expiresAt - EXPIRING_MS)
+      return abortable(() => this.renewToken(), signal)
+    if (now >= token.renewAt)
+      this.renewToken().catch(() => {
+        // The current token still works; try again shortly, or when it expires.
+        if (this.token === token) this.token = { ...token, renewAt: Date.now() + RENEW_RETRY_MS }
+      })
+    return Promise.resolve(token.value)
+  }
+
+  /** Concurrent callers share one getToken call. */
+  private renewToken(): Promise<string> {
+    this.renewal ??= (async () => {
+      const controller = new AbortController()
+      const timer = setTimeout(
+        () => controller.abort(new Error(`${PREFIX} credential.getToken timed out.`)),
+        TOKEN_TIMEOUT_MS
+      )
+      try {
+        const signal = controller.signal
+        const token = await abortable(
+          () => this.options.credential!.getToken(ENTRA_SCOPE, { abortSignal: signal }),
+          signal
+        )
         if (typeof token?.token !== "string" || !token.token.trim())
           throw new TypeError(`${PREFIX} credential returned no token for ${ENTRA_SCOPE}.`)
-        const expires = token.expiresOnTimestamp
+        // A token without an expiry is not reused: the credential's own cache decides.
+        const expiresAt = token.expiresOnTimestamp ?? 0
         this.token = {
           value: token.token,
-          renewAt: typeof expires === "number" ? expires - 5 * 60_000 : 0,
+          expiresAt,
+          renewAt: Math.min(
+            token.refreshAfterTimestamp ?? expiresAt,
+            expiresAt - RENEW_BEFORE_EXPIRY_MS
+          ),
         }
         return token.token
-      })
-      .finally(() => {
-        this.pendingToken = undefined
-      })
-    return this.pendingToken
+      } finally {
+        clearTimeout(timer)
+        this.renewal = undefined
+      }
+    })()
+    return this.renewal
   }
 
   fetch(url: string, init: RequestInit): Promise<Response> {

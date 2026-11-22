@@ -41,7 +41,7 @@ project, `https://my-resource.services.ai.azure.com`, with the same key or token
 | --- | --- |
 | `endpoint` | The project URL. Default: `AZURE_AI_FOUNDRY_ENDPOINT` |
 | `apiKey` | A string, or a function that receives an abort signal and runs for each Azure HTTP attempt. Default, without `credential`: `AZURE_AI_FOUNDRY_API_KEY`, read for each attempt |
-| `credential` | Anything with `getToken()`, such as `@azure/identity`'s credentials. Sixb asks it for a `https://ai.azure.com` token, the one audience discovery and every model call accept, and renews it five minutes before it expires. The identity needs the Foundry User role on the resource |
+| `credential` | Anything with `getToken()`, such as `@azure/identity`'s credentials. Sixb asks it for a `https://ai.azure.com` token, the one audience discovery and every model call accept, and reuses it. It renews the token in the background at the credential's refresh time or two minutes before expiry, as Azure's SDKs do; if a renewal fails, calls keep the current token until it expires. The identity needs the Foundry User role on the resource |
 
 Language model resolution follows this sequence:
 
