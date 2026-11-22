@@ -15,8 +15,10 @@ import {
   duplicateScene,
   insertClip,
   keepClipRanges,
+  moveClips,
   moveScene,
   removeClip,
+  removeClips,
   removeMediaRanges,
   removeScene,
   setClipSound,
@@ -25,6 +27,7 @@ import {
   setSceneLength,
   setVideoText,
   splitClip,
+  splitClips,
   trimClip,
   type VideoCut,
   type VideoEditResult,
@@ -659,6 +662,134 @@ describe("editing clips", () => {
       durationMs: 1000,
     })
     expect("error" in result && result.error).toContain("media/missing.png")
+  })
+})
+
+describe("editing several clips at once", () => {
+  const caption = (words: string) => {
+    const found = demoClips(SOURCES).find((clip) => clip.text === words)
+    if (!found) throw new Error(`No caption "${words}".`)
+    return videoTarget(found)
+  }
+  const music = (files: ReadonlyMap<string, string | null>) =>
+    readRootTimeline(files.get("index.html") as string)?.clips[0]
+
+  test("moves clips of a scene and of the video's own together, each in its file", () => {
+    const result = moveClips(
+      SOURCES,
+      [
+        { file: "scenes/demo.html", clip: "screen" },
+        { file: "scenes/demo.html", clip: caption("in two taps") },
+        { file: "index.html", clip: "music" },
+      ],
+      500
+    )
+    const files = applied(result)
+
+    expect(demoClips(files).map((clip) => [clip.ref, clip.startMs])).toEqual([
+      ["talk", 0],
+      ["screen", 5500],
+      ["#2", 500],
+      ["#3", 3000],
+    ])
+    expect(music(files)?.startMs).toBe(500)
+    expect("edit" in result && result.edit.map((file) => file.path).sort()).toEqual([
+      "index.html",
+      "scenes/demo.html",
+    ])
+  })
+
+  // Guard proof: take `Math.round(deltaMs)` alone as the delta in moveClips; the caption goes
+  // to -2.5 s, read as 0, and the screen lands at 2 s: the group is pulled apart.
+  test("moves the whole group less when one would go before its composition's start", () => {
+    const files = applied(
+      moveClips(
+        SOURCES,
+        [
+          { file: "scenes/demo.html", clip: "screen" },
+          { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
+        ],
+        -3000
+      )
+    )
+
+    expect(demoClips(files).map((clip) => [clip.ref, clip.startMs])).toEqual([
+      ["talk", 0],
+      ["screen", 4500],
+      ["#2", 0],
+      ["#3", 2500],
+    ])
+  })
+
+  test("refuses the whole edit when one of the clips is gone", () => {
+    const result = moveClips(
+      SOURCES,
+      [
+        { file: "scenes/demo.html", clip: "screen" },
+        { file: "scenes/demo.html", clip: "gone" },
+      ],
+      500
+    )
+    expect("error" in result && result.error).toContain("no clip 'gone'")
+  })
+
+  // Guard proof: call rippleRemove once per clip in removeClips, each with its own stretch;
+  // the second cut then lands where the first already moved the rest, and the screen starts at
+  // 2.5 s, not 1.5 s.
+  test("removes clips in one edit, closing every gap they leave as one cut", () => {
+    const group = [
+      { file: "scenes/demo.html", clip: caption("Assign the nearest tech") },
+      { file: "scenes/demo.html", clip: caption("in two taps") },
+    ]
+
+    const closed = applied(removeClips(SOURCES, group, { ripple: true }))
+    expect(demoClips(closed).filter((clip) => clip.tag === "p")).toEqual([])
+    expect(demoClips(closed).find((clip) => clip.ref === "screen")?.startMs).toBe(1500)
+    expect(times(closed)[1]).toEqual(["demo", 2500, 4500])
+
+    const left = applied(removeClips(SOURCES, group))
+    expect(demoClips(left).map((clip) => [clip.ref, clip.startMs])).toEqual([
+      ["talk", 0],
+      ["screen", 5000],
+    ])
+    expect(times(left)[1]).toEqual(["demo", 2500, 8000])
+  })
+
+  // Guard proof: split the clips of a file from the first to the last in splitClips; once the
+  // talk is split, the caption's place `#2` names nothing, and the whole edit is refused.
+  test("splits clips in one edit, each at its own instant, and names each second part", () => {
+    const result = splitClips(SOURCES, [
+      { file: "scenes/demo.html", clip: "talk", atMs: 1000 },
+      { file: "scenes/demo.html", clip: caption("Assign the nearest tech"), atMs: 1000 },
+      { file: "index.html", clip: "music", atMs: 3500 },
+    ])
+    const files = applied(result)
+
+    expect(
+      demoClips(files).map((clip) => [clip.ref, clip.startMs, clip.durationMs, clip.text])
+    ).toEqual([
+      ["talk", 0, 1000, undefined],
+      ["talk-2", 1000, 4000, undefined],
+      ["screen", 5000, 3000, undefined],
+      ["text", 500, 500, "Assign the nearest tech"],
+      ["text-2", 1000, 1000, "Assign the nearest tech"],
+      ["#5", 2500, 2000, "in two taps"],
+    ])
+    expect(
+      readRootTimeline(files.get("index.html") as string)?.clips.map((clip) => [
+        clip.ref,
+        clip.startMs,
+        clip.durationMs,
+      ])
+    ).toEqual([
+      ["music", 0, 3500],
+      ["music-2", 3500, 11_500],
+    ])
+    expect("clips" in result && result.clips).toEqual([
+      { file: "scenes/demo.html", clip: "talk-2" },
+      { file: "scenes/demo.html", clip: "text-2" },
+      { file: "index.html", clip: "music-2" },
+    ])
   })
 })
 

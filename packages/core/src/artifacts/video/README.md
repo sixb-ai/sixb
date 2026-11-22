@@ -232,7 +232,10 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - **Operations** take the files as they are and return an edit or a refusal: a scene's length,
   label, place, copy and removal; a clip's timing, trim, move, split, removal, sound and words; an
   import; a range cut from the video, each scene it spans losing its share; stretches of a
-  recording cut wherever it plays.
+  recording cut wherever it plays. Several clips, from any files, move, split or go in one edit
+  (`moveClips`, `splitClips`, `removeClips`): each is found before any changes, a move goes no
+  further than the first clip to reach its composition's start, and a ripple closes a file's gaps
+  as one cut.
 
 How an operation works:
 

@@ -417,26 +417,7 @@ export function splitClip(
 ): VideoEditResult & { readonly clip?: string } {
   let second: string | undefined
   const result = run(sources, (work) => {
-    const found = clipOf(work, file, clip)
-    const at = Math.round(atMs)
-    const end = clipEnd(found, options.endMs)
-    if (at - found.startMs < MIN_CLIP_MS || end - at < MIN_CLIP_MS) {
-      throw new EditError(`Each part of a split clip lasts at least ${MIN_CLIP_MS} ms.`)
-    }
-
-    const parts = clipParts(work, file, found, [
-      { startMs: found.startMs, mediaStartMs: found.mediaStartMs, durationMs: at - found.startMs },
-      {
-        startMs: at,
-        mediaStartMs: found.mediaStartMs + (at - found.startMs),
-        durationMs: end - at,
-      },
-    ])
-    second = parts.refs[1]
-    replaceClip(work, file, found, parts.html)
-
-    // What followed the clip's end follows the second part's, where that end now is.
-    if (found.id && second) followInstead(work, file, found.id, second)
+    second = splitFound(work, file, clipOf(work, file, clip), atMs, options.endMs)
   })
   return "edit" in result && second ? { ...result, clip: second } : result
 }
@@ -463,6 +444,103 @@ export function removeClip(
     work.replace(file, block.start, block.end, "")
     if (options.ripple) rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }])
   })
+}
+
+// Several clips ----------------------------------------------------------------------------------
+
+/** A clip of one of the video's files, as an operation on several clips names it. */
+export interface VideoClipTarget {
+  /** Its file: a scene's, or `index.html` for the video's own. */
+  readonly file: string
+  readonly clip: VideoTarget
+}
+
+/**
+ * Moves clips together by `deltaMs`, each in its own file, as one edit: they keep their places
+ * one to another. None goes before its composition's start: the whole group moves less.
+ */
+export function moveClips(
+  sources: VideoSources,
+  clips: readonly VideoClipTarget[],
+  deltaMs: number
+): VideoEditResult {
+  return run(sources, (work) => {
+    const found = clipsOf(work, clips)
+    const delta = Math.max(Math.round(deltaMs), ...found.map(({ clip }) => -clip.startMs))
+
+    for (const [file, each] of byFile(found)) {
+      rewriteClips(
+        work,
+        file,
+        new Map(each.map(({ clip }) => [clip.ref, { "data-start": seconds(clip.startMs + delta) }]))
+      )
+    }
+  })
+}
+
+/**
+ * Removes clips at once, each from its own file, as {@link removeClip} removes one. With `ripple`,
+ * each file closes the gaps its clips leave, as one cut of all their stretches. `endMs` is where
+ * a clip that writes no length ends.
+ */
+export function removeClips(
+  sources: VideoSources,
+  clips: readonly (VideoClipTarget & { readonly endMs?: number })[],
+  options: { readonly ripple?: boolean } = {}
+): VideoEditResult {
+  return run(sources, (work) => {
+    const found = clipsOf(work, clips).map((each) => ({
+      ...each,
+      endMs: clipEnd(each.clip, clips[each.index]?.endMs),
+    }))
+
+    for (const [file, each] of byFile(found)) {
+      // What followed them keeps its time: their names will name nothing.
+      const ids = new Set(each.flatMap(({ clip }) => (clip.id ? [clip.id] : [])))
+      freezeFollowers(work, file, (clip) => clip.id !== undefined && ids.has(clip.id))
+
+      rewriteClips(work, file, new Map(each.map(({ clip }) => [clip.ref, "remove" as const])))
+      if (options.ripple) {
+        rippleRemove(
+          work,
+          file,
+          each.map(({ clip, endMs }) => ({ startMs: clip.startMs, endMs }))
+        )
+      }
+    }
+  })
+}
+
+/**
+ * Splits clips at once, each at its own `atMs` from its composition's start, as {@link splitClip}
+ * splits one. Returns the second part of each, in the order they are named.
+ */
+export function splitClips(
+  sources: VideoSources,
+  splits: readonly (VideoClipTarget & { readonly atMs: number; readonly endMs?: number })[]
+): VideoEditResult & { readonly clips?: readonly VideoClipTarget[] } {
+  const parts: (VideoClipTarget | undefined)[] = []
+  const result = run(sources, (work) => {
+    const found = clipsOf(work, splits)
+
+    for (const [file, each] of byFile(found)) {
+      // From the last in the file to the first: a part added shifts only the places after it.
+      const lastFirst = [...each].sort(
+        (a, b) => b.clip.source.element.start - a.clip.source.element.start
+      )
+      for (const { clip, index } of lastFirst) {
+        const split = splits[index]
+        if (!split) continue
+
+        const now = clipOf(work, file, clip.ref)
+        const second = splitFound(work, file, now, split.atMs, split.endMs)
+        if (second) parts[index] = { file, clip: second }
+      }
+    }
+  })
+  return "edit" in result
+    ? { ...result, clips: parts.filter((part) => part !== undefined) }
+    : result
 }
 
 /**
@@ -1262,6 +1340,72 @@ function timelineOf(work: Working, file: string): VideoFileTimeline {
 
 function clipOf(work: Working, file: string, target: VideoTarget): VideoClip {
   return resolveTarget(timelineOf(work, file).clips, target, file, "clip")
+}
+
+/**
+ * The clips a group names, each once, as the files are before any of them changes: one gone, or
+ * no longer alone like it, refuses the whole edit. `index` is its place among those named.
+ */
+function clipsOf(
+  work: Working,
+  clips: readonly VideoClipTarget[]
+): { readonly file: string; readonly clip: VideoClip; readonly index: number }[] {
+  if (clips.length === 0) throw new EditError("Choose the clips first.")
+
+  const seen = new Set<string>()
+  return clips.flatMap(({ file, clip }, index) => {
+    const found = clipOf(work, file, clip)
+    const key = `${file}\n${found.ref}`
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [{ file, clip: found, index }]
+  })
+}
+
+/**
+ * Clips by their file, `index.html` first: what an edit of the video's own moves, a scene's
+ * edit then moves with its scene, as when each is edited alone.
+ */
+function byFile<T extends { readonly file: string }>(found: readonly T[]): Map<string, T[]> {
+  const files = new Map<string, T[]>()
+  const ordered = [...found].sort(
+    (a, b) => Number(b.file === VIDEO_ENTRY) - Number(a.file === VIDEO_ENTRY)
+  )
+  for (const each of ordered) files.set(each.file, [...(files.get(each.file) ?? []), each])
+  return files
+}
+
+/**
+ * Splits a clip found in its file at `atMs` from its composition's start, and returns the second
+ * part's id: see {@link splitClip}.
+ */
+function splitFound(
+  work: Working,
+  file: string,
+  found: VideoClip,
+  atMs: number,
+  endMs: number | undefined
+): string | undefined {
+  const at = Math.round(atMs)
+  const end = clipEnd(found, endMs)
+  if (at - found.startMs < MIN_CLIP_MS || end - at < MIN_CLIP_MS) {
+    throw new EditError(`Each part of a split clip lasts at least ${MIN_CLIP_MS} ms.`)
+  }
+
+  const parts = clipParts(work, file, found, [
+    { startMs: found.startMs, mediaStartMs: found.mediaStartMs, durationMs: at - found.startMs },
+    {
+      startMs: at,
+      mediaStartMs: found.mediaStartMs + (at - found.startMs),
+      durationMs: end - at,
+    },
+  ])
+  const second = parts.refs[1]
+  replaceClip(work, file, found, parts.html)
+
+  // What followed the clip's end follows the second part's, where that end now is.
+  if (found.id && second) followInstead(work, file, found.id, second)
+  return second
 }
 
 /** The element a target names in a file, or why none is: see {@link findVideoTarget}. */
